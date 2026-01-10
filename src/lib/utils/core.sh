@@ -40,16 +40,18 @@ YES="${YES:-false}"           # Auto-confirm prompts
 INTERACTIVE="${INTERACTIVE:-false}"  # Force interactive mode
 
 # Version info - read from VERSION file if available
-_REPO_ROOT="$(dirname "$SRC_DIR")"
-if [ -f "$_REPO_ROOT/VERSION" ]; then
-  DOT_AGENTS_VERSION="$(cat "$_REPO_ROOT/VERSION" | tr -d '[:space:]')"
+# Check multiple locations based on install method:
+#   1. Homebrew: VERSION is at $SRC_DIR/VERSION (libexec/VERSION)
+#   2. Development: VERSION is at repo root (parent of src/)
+#   3. curl install: VERSION is at $SHARE_DIR/VERSION
+if [ -f "$SRC_DIR/VERSION" ]; then
+  DOT_AGENTS_VERSION="$(cat "$SRC_DIR/VERSION" | tr -d '[:space:]')"
+elif [ -f "$(dirname "$SRC_DIR")/VERSION" ]; then
+  DOT_AGENTS_VERSION="$(cat "$(dirname "$SRC_DIR")/VERSION" | tr -d '[:space:]')"
+elif [ -f "${SHARE_DIR:-}/VERSION" ]; then
+  DOT_AGENTS_VERSION="$(cat "$SHARE_DIR/VERSION" | tr -d '[:space:]')"
 else
-  # Fallback for installed version (VERSION file copied to share/)
-  if [ -f "$SHARE_DIR/VERSION" ]; then
-    DOT_AGENTS_VERSION="$(cat "$SHARE_DIR/VERSION" | tr -d '[:space:]')"
-  else
-    DOT_AGENTS_VERSION="0.1.0"  # Hardcoded fallback
-  fi
+  DOT_AGENTS_VERSION="0.1.0"  # Hardcoded fallback
 fi
 DOT_AGENTS_VERSION_DATE="$(date +%Y-%m-%d)"
 
