@@ -51,7 +51,7 @@ jobs:
         run: |
           # Remove if exists from previous run
           rm -rf ~/.agents
-          ./src/bin/dot-agents init
+          ./src/bin/dot-agents init --yes
           test -d ~/.agents
           test -f ~/.agents/config.json
 
@@ -67,7 +67,7 @@ jobs:
       - name: Test add (with test project)
         run: |
           mkdir -p /tmp/test-project
-          ./src/bin/dot-agents add /tmp/test-project --name ci-test
+          ./src/bin/dot-agents add /tmp/test-project --name ci-test --yes
           ./src/bin/dot-agents status | grep -q "ci-test"
 
       - name: Test audit

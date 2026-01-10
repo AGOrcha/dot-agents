@@ -16,7 +16,7 @@ init_steps() {
 # Display a numbered step header
 step() {
   local message="$1"
-  ((CURRENT_STEP++))
+  CURRENT_STEP=$((CURRENT_STEP + 1))
   echo ""
   echo -e "${BOLD}[$CURRENT_STEP/$TOTAL_STEPS]${NC} $message"
 }
