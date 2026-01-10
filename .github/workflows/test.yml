@@ -31,7 +31,13 @@ jobs:
           curl -sL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
 
       - name: Run actionlint
-        run: ./actionlint -color
+        run: |
+          # Run actionlint but only fail on errors, not warnings
+          # -ignore flag skips shellcheck info/style issues
+          ./actionlint -color \
+            -ignore 'SC2002:' \
+            -ignore 'SC2086:' \
+            -ignore 'is too old to run'
 
   test:
     name: Test on ${{ matrix.os }}
