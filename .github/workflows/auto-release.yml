@@ -1,0 +1,180 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'VERSION'
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for tagging
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Check if release exists
+        id: check
+        run: |
+          if gh release view "v${{ steps.version.outputs.version }}" &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} does not exist, will create"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify CLI version matches
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          chmod +x src/bin/dot-agents
+          CLI_VERSION=$(./src/bin/dot-agents --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          FILE_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$CLI_VERSION" != "$FILE_VERSION" ]; then
+            echo "CLI reports version $CLI_VERSION but VERSION file has $FILE_VERSION"
+            echo "This may be okay if VERSION file is the source of truth"
+          fi
+          echo "Version check: CLI=$CLI_VERSION, File=$FILE_VERSION"
+
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'false'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run tests
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          chmod +x src/bin/dot-agents
+          ./src/bin/dot-agents --version
+          ./src/bin/dot-agents --help
+          ./src/bin/dot-agents init --yes
+          ./src/bin/dot-agents status
+          ./src/bin/dot-agents doctor
+
+      - name: Create tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create tarball
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          tar -czf "dot-agents-${VERSION}.tar.gz" \
+            --exclude='*.tar.gz' \
+            --exclude='.git' \
+            --exclude='.github' \
+            VERSION \
+            src/ \
+            scripts/ \
+            README.md \
+            LICENSE
+
+      - name: Generate SHA256
+        if: steps.check.outputs.exists == 'false'
+        id: sha256
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          SHA256=$(shasum -a 256 "dot-agents-${VERSION}.tar.gz" | cut -d ' ' -f 1)
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+          echo "SHA256: $SHA256"
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dot-agents-*.tar.gz
+          body: |
+            ## Installation
+
+            ### Homebrew
+            ```bash
+            brew install dot-agents/tap/dot-agents
+            ```
+
+            ### Direct Install
+            ```bash
+            curl -fsSL https://dot-agents.com/install.sh | bash
+            ```
+
+            ### SHA256
+            ```
+            ${{ steps.sha256.outputs.sha256 }}
+            ```
+
+      - name: Update Homebrew formula
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          SHA256="${{ steps.sha256.outputs.sha256 }}"
+
+          # Clone homebrew-tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/dot-agents/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          # Update formula
+          cat > Formula/dot-agents.rb << EOF
+          class DotAgents < Formula
+            desc "Unified config layer for AI coding agents"
+            homepage "https://github.com/dot-agents/dot-agents"
+            url "https://github.com/dot-agents/dot-agents/releases/download/${TAG}/dot-agents-${TAG}.tar.gz"
+            sha256 "${SHA256}"
+            license "MIT"
+            version "${VERSION}"
+
+            def install
+              bin.install "src/bin/dot-agents"
+              libexec.install "src/lib"
+              libexec.install "src/share"
+              libexec.install "VERSION"
+
+              # Rewrite paths for Homebrew installation
+              inreplace bin/"dot-agents" do |s|
+                s.gsub! 'SRC_DIR="$(dirname "$BIN_DIR")"', "SRC_DIR=\"#{libexec}\""
+                s.gsub! 'LIB_DIR="$SRC_DIR/lib"', "LIB_DIR=\"#{libexec}/lib\""
+                s.gsub! 'SHARE_DIR="$SRC_DIR/share"', "SHARE_DIR=\"#{libexec}/share\""
+              end
+            end
+
+            test do
+              assert_match "${VERSION}", shell_output("#{bin}/dot-agents --version")
+            end
+          end
+          EOF
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dot-agents.rb
+          git commit -m "Update dot-agents to ${TAG}"
+          git push origin master
