@@ -145,6 +145,12 @@ install_dot_agents() {
   cp -r "$src_dir/lib/"* "$LIB_DIR/"
   cp -r "$src_dir/share/"* "$SHARE_DIR/"
 
+  # Copy VERSION file (located in repo root, parent of src_dir)
+  local repo_root="$(dirname "$src_dir")"
+  if [ -f "$repo_root/VERSION" ]; then
+    cp "$repo_root/VERSION" "$SHARE_DIR/VERSION"
+  fi
+
   # Install main script with updated paths
   local script_content
   script_content=$(cat "$src_dir/bin/dot-agents")

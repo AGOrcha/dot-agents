@@ -39,9 +39,19 @@ JSON_OUTPUT="${JSON_OUTPUT:-false}"
 YES="${YES:-false}"           # Auto-confirm prompts
 INTERACTIVE="${INTERACTIVE:-false}"  # Force interactive mode
 
-# Version info
-DOT_AGENTS_VERSION="0.1.0"
-DOT_AGENTS_VERSION_DATE="2026-01-10"
+# Version info - read from VERSION file if available
+_REPO_ROOT="$(dirname "$SRC_DIR")"
+if [ -f "$_REPO_ROOT/VERSION" ]; then
+  DOT_AGENTS_VERSION="$(cat "$_REPO_ROOT/VERSION" | tr -d '[:space:]')"
+else
+  # Fallback for installed version (VERSION file copied to share/)
+  if [ -f "$SHARE_DIR/VERSION" ]; then
+    DOT_AGENTS_VERSION="$(cat "$SHARE_DIR/VERSION" | tr -d '[:space:]')"
+  else
+    DOT_AGENTS_VERSION="0.1.0"  # Hardcoded fallback
+  fi
+fi
+DOT_AGENTS_VERSION_DATE="$(date +%Y-%m-%d)"
 
 # Export for subshells
 export DRY_RUN FORCE VERBOSE JSON_OUTPUT YES INTERACTIVE
