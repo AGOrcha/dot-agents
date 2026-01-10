@@ -11,9 +11,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint-workflows:
+    name: Lint Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate YAML syntax
+        run: |
+          for file in .github/workflows/*.yml; do
+            echo "Validating $file..."
+            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+          done
+          echo "All workflow files have valid YAML syntax"
+
+      - name: Install actionlint
+        run: |
+          curl -sL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+
+      - name: Run actionlint
+        run: |
+          # Run actionlint but only fail on errors, not warnings
+          # -ignore flag skips shellcheck info/style issues
+          ./actionlint -color \
+            -ignore 'SC2002:' \
+            -ignore 'SC2086:' \
+            -ignore 'is too old to run'
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: lint-workflows  # Only run tests if workflows are valid
     strategy:
       fail-fast: false
       matrix:
