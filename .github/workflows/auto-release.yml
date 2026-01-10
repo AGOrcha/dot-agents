@@ -142,40 +142,38 @@ jobs:
           git clone https://x-access-token:${GH_TOKEN}@github.com/dot-agents/homebrew-tap.git /tmp/homebrew-tap
           cd /tmp/homebrew-tap
 
-          # Update formula - use envsubst to substitute only specific variables
-          cat > /tmp/formula-template.rb << 'FORMULA_EOF'
-class DotAgents < Formula
-  desc "Unified config layer for AI coding agents"
-  homepage "https://github.com/dot-agents/dot-agents"
-  url "https://github.com/dot-agents/dot-agents/releases/download/__TAG__/dot-agents-__TAG__.tar.gz"
-  sha256 "__SHA256__"
-  license "MIT"
-  version "__VERSION__"
+          # Update formula
+          cat > Formula/dot-agents.rb << FORMULA_EOF
+          class DotAgents < Formula
+            desc "Unified config layer for AI coding agents"
+            homepage "https://github.com/dot-agents/dot-agents"
+            url "https://github.com/dot-agents/dot-agents/releases/download/${TAG}/dot-agents-${TAG}.tar.gz"
+            sha256 "${SHA256}"
+            license "MIT"
+            version "${VERSION}"
 
-  def install
-    bin.install "src/bin/dot-agents"
-    libexec.install "src/lib"
-    libexec.install "src/share"
-    libexec.install "VERSION"
+            def install
+              bin.install "src/bin/dot-agents"
+              libexec.install "src/lib"
+              libexec.install "src/share"
+              libexec.install "VERSION"
 
-    # Rewrite paths for Homebrew installation
-    inreplace bin/"dot-agents" do |s|
-      s.gsub! 'SRC_DIR="$(dirname "$BIN_DIR")"', "SRC_DIR=\"#{libexec}\""
-      s.gsub! 'LIB_DIR="$SRC_DIR/lib"', "LIB_DIR=\"#{libexec}/lib\""
-      s.gsub! 'SHARE_DIR="$SRC_DIR/share"', "SHARE_DIR=\"#{libexec}/share\""
-    end
-  end
+              # Rewrite paths for Homebrew installation
+              inreplace bin/"dot-agents" do |s|
+                s.gsub! 'SRC_DIR="\$(dirname "\$BIN_DIR")"', "SRC_DIR=\"#{libexec}\""
+                s.gsub! 'LIB_DIR="\$SRC_DIR/lib"', "LIB_DIR=\"#{libexec}/lib\""
+                s.gsub! 'SHARE_DIR="\$SRC_DIR/share"', "SHARE_DIR=\"#{libexec}/share\""
+              end
+            end
 
-  test do
-    assert_match "__VERSION__", shell_output("#{bin}/dot-agents --version")
-  end
-end
-FORMULA_EOF
-          # Replace placeholders with actual values
-          sed -e "s|__TAG__|${TAG}|g" \
-              -e "s|__SHA256__|${SHA256}|g" \
-              -e "s|__VERSION__|${VERSION}|g" \
-              /tmp/formula-template.rb > Formula/dot-agents.rb
+            test do
+              assert_match "${VERSION}", shell_output("#{bin}/dot-agents --version")
+            end
+          end
+          FORMULA_EOF
+          # Remove leading spaces from heredoc output (10 spaces)
+          sed 's/^          //' Formula/dot-agents.rb > /tmp/formula-clean.rb
+          mv /tmp/formula-clean.rb Formula/dot-agents.rb
 
           # Commit and push
           git config user.name "github-actions[bot]"
