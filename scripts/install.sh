@@ -3,7 +3,7 @@
 # https://github.com/dot-agents/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/master/scripts/install.sh | bash
 #
 # Options (via environment variables):
 #   DOT_AGENTS_INSTALL_DIR  - Installation directory (default: ~/.local/bin)
@@ -86,8 +86,8 @@ get_latest_version() {
     sed -E 's/.*"([^"]+)".*/\1/' || echo "")
 
   if [ -z "$version" ]; then
-    # Fallback to main branch if no releases yet
-    echo "main"
+    # Fallback to master branch if no releases yet
+    echo "master"
   else
     echo "$version"
   fi
@@ -114,8 +114,8 @@ install_dot_agents() {
     info "Installing dot-agents ${version}..."
 
     local download_url
-    if [ "$version" = "main" ]; then
-      download_url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
+    if [ "$version" = "master" ]; then
+      download_url="https://github.com/$REPO/archive/refs/heads/master.tar.gz"
     else
       download_url="https://github.com/$REPO/archive/refs/tags/${version}.tar.gz"
     fi
