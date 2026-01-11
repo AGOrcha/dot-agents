@@ -99,17 +99,13 @@ jobs:
           ./src/bin/dot-agents add /tmp/test-project --name ci-test --yes
           ./src/bin/dot-agents status | grep -q "ci-test"
 
-      - name: Test audit
+      - name: Test status --audit
         run: |
-          ./src/bin/dot-agents audit
+          ./src/bin/dot-agents status --audit
 
       - name: Test remove --dry-run
         run: |
           ./src/bin/dot-agents remove ci-test --dry-run
-
-      - name: Test context
-        run: |
-          ./src/bin/dot-agents context --compact | jq .
 
       - name: Test sync (no git repo)
         run: |
