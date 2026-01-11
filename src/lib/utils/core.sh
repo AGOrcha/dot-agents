@@ -21,6 +21,7 @@ source "$UTILS_DIR/paths.sh"
 source "$UTILS_DIR/symlink.sh"
 source "$UTILS_DIR/json.sh"
 source "$UTILS_DIR/interactive.sh"
+source "$UTILS_DIR/install-detect.sh"
 
 # Source platform modules (if they exist)
 PLATFORMS_DIR="$LIB_DIR/platforms"
@@ -54,6 +55,14 @@ else
   DOT_AGENTS_VERSION="0.1.0"  # Hardcoded fallback
 fi
 DOT_AGENTS_VERSION_DATE="$(date +%Y-%m-%d)"
+
+# Warn if multiple installations detected (silent in CI/non-interactive)
+if [ -t 1 ] && [ -z "${CI:-}" ] && [ -z "${_DOT_AGENTS_INSTALL_CHECK_DONE:-}" ]; then
+  _DOT_AGENTS_INSTALL_CHECK_DONE=1
+  if has_install_conflict; then
+    echo -e "${YELLOW}Warning: Multiple dot-agents installations detected. Run 'dot-agents doctor' for details.${NC}" >&2
+  fi
+fi
 
 # Export for subshells
 export DRY_RUN FORCE VERBOSE JSON_OUTPUT YES INTERACTIVE
