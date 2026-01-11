@@ -185,7 +185,7 @@ run_doctor_text() {
     # Validate JSON syntax
     if jq -e '.' "$global_settings" >/dev/null 2>&1; then
       local hook_count=0
-      for hook_type in PreToolUse PostToolUse PreRequest PostRequest; do
+      for hook_type in PreToolUse PostToolUse; do
         local count
         count=$(jq -r ".hooks.$hook_type | length" "$global_settings" 2>/dev/null || echo "0")
         hook_count=$((hook_count + count))
