@@ -63,7 +63,7 @@ check_existing_installs() {
 
     if [ "${DOT_AGENTS_FORCE_INSTALL:-}" != "1" ]; then
       echo -n "Continue with curl install anyway? [y/N]: "
-      read -r response
+      read -r response < /dev/tty
       case "$response" in
         [yY][eE][sS]|[yY]) ;;
         *)
