@@ -1,18 +1,11 @@
 {
-  "$schema": "https://dot-agents.dev/schemas/claude-code-settings.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [],
-    "deny": [
-      "Bash(rm:-rf:*)",
-      "Read(.env*)"
-    ]
+    "deny": []
   },
   "hooks": {
     "PreToolUse": [],
-    "PostToolUse": [],
-    "PreRequest": [],
-    "PostRequest": []
-  },
-  "model": null,
-  "outputStyle": "default"
+    "PostToolUse": []
+  }
 }

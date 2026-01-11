@@ -25,8 +25,6 @@ ${BOLD}OPTIONS${NC}
 ${BOLD}HOOK TYPES${NC}
     PreToolUse            Before executing any tool (Bash, Edit, Read, etc.)
     PostToolUse           After tool execution completes
-    PreRequest            Before sending request to Claude
-    PostRequest           After receiving response
 
 ${BOLD}ADD OPTIONS${NC}
     --command, -c <cmd>   Shell command to run (required)
@@ -121,7 +119,7 @@ cmd_hooks() {
       ;;
     add)
       if [ -z "$hook_type" ]; then
-        log_error "Hook type required. Valid types: PreToolUse, PostToolUse, PreRequest, PostRequest"
+        log_error "Hook type required. Valid types: PreToolUse, PostToolUse"
         return 1
       fi
       if [ -z "$hook_command" ]; then
@@ -215,7 +213,7 @@ hooks_display_from_file() {
   local file="$1"
   local indent="$2"
 
-  local hook_types=("PreToolUse" "PostToolUse" "PreRequest" "PostRequest")
+  local hook_types=("PreToolUse" "PostToolUse")
   local has_hooks=false
 
   for hook_type in "${hook_types[@]}"; do
@@ -300,11 +298,11 @@ hooks_add() {
 
   # Validate hook type
   case "$hook_type" in
-    PreToolUse|PostToolUse|PreRequest|PostRequest)
+    PreToolUse|PostToolUse)
       ;;
     *)
       log_error "Invalid hook type: $hook_type"
-      log_info "Valid types: PreToolUse, PostToolUse, PreRequest, PostRequest"
+      log_info "Valid types: PreToolUse, PostToolUse"
       return 1
       ;;
   esac
@@ -365,7 +363,7 @@ hooks_remove() {
 
   # Validate hook type
   case "$hook_type" in
-    PreToolUse|PostToolUse|PreRequest|PostRequest)
+    PreToolUse|PostToolUse)
       ;;
     *)
       log_error "Invalid hook type: $hook_type"
