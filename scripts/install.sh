@@ -34,6 +34,55 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 die() { error "$1"; exit 1; }
 
+# Check for existing installations that might conflict
+check_existing_installs() {
+  local homebrew_bin=""
+
+  # Check Homebrew locations
+  if [ -x "/opt/homebrew/bin/dot-agents" ]; then
+    homebrew_bin="/opt/homebrew/bin/dot-agents"
+  elif [ -x "/usr/local/bin/dot-agents" ]; then
+    homebrew_bin="/usr/local/bin/dot-agents"
+  fi
+
+  if [ -n "$homebrew_bin" ]; then
+    local hb_version
+    hb_version=$("$homebrew_bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+
+    echo ""
+    warn "Homebrew installation detected!"
+    echo ""
+    echo "  Found: $homebrew_bin (v$hb_version)"
+    echo ""
+    echo "  Installing via curl will create a second installation."
+    echo "  This can cause version confusion and PATH conflicts."
+    echo ""
+    echo "  Recommended: Use Homebrew for updates:"
+    echo "    brew upgrade dot-agents"
+    echo ""
+
+    if [ "${DOT_AGENTS_FORCE_INSTALL:-}" != "1" ]; then
+      echo -n "Continue with curl install anyway? [y/N]: "
+      read -r response
+      case "$response" in
+        [yY][eE][sS]|[yY]) ;;
+        *)
+          info "Aborted. Use 'brew upgrade dot-agents' instead."
+          exit 0
+          ;;
+      esac
+      echo ""
+    fi
+  fi
+
+  # Check for existing curl install
+  if [ -x "$HOME/.local/bin/dot-agents" ]; then
+    local curl_version
+    curl_version=$("$HOME/.local/bin/dot-agents" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    info "Existing curl installation found (v$curl_version) - will be upgraded"
+  fi
+}
+
 # Header
 echo ""
 echo -e "${BOLD}dot-agents installer${NC}"
@@ -236,6 +285,7 @@ verify_installation() {
 # Main
 main() {
   check_requirements
+  check_existing_installs
 
   local os arch version
   os=$(detect_os)

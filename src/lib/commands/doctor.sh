@@ -55,6 +55,9 @@ run_doctor_text() {
   log_header "dot-agents doctor"
   echo ""
 
+  # Installation conflicts check (first, most critical)
+  check_install_conflicts
+
   # Core checks
   log_section "Core Installation"
 
@@ -239,6 +242,54 @@ run_doctor_json() {
 
   echo '  }'
   echo "}"
+}
+
+# Check for conflicting installations
+check_install_conflicts() {
+  local curl_bin="$HOME/.local/bin/dot-agents"
+  local hb_bin=""
+
+  # Find Homebrew binary
+  if [ -x "/opt/homebrew/bin/dot-agents" ]; then
+    hb_bin="/opt/homebrew/bin/dot-agents"
+  elif [ -x "/usr/local/bin/dot-agents" ]; then
+    hb_bin="/usr/local/bin/dot-agents"
+  fi
+
+  # Check for conflict
+  if [ -x "$curl_bin" ] && [ -n "$hb_bin" ] && [ -x "$hb_bin" ]; then
+    log_section "Installation Conflict"
+    echo -e "  ${RED}✗${NC} Multiple installations detected!"
+    echo ""
+    echo "    curl:     $curl_bin"
+    echo "    homebrew: $hb_bin"
+    echo ""
+
+    local active
+    active=$(command -v dot-agents 2>/dev/null)
+    echo "    Active:   $active"
+    echo ""
+
+    if [ "$active" = "$curl_bin" ]; then
+      echo -e "    ${YELLOW}⚠${NC}  You're running the curl version, but Homebrew is also installed."
+      echo "       Homebrew upgrades won't affect the version you're actually using."
+      echo ""
+      echo "    To fix, remove the curl installation:"
+      echo "      rm $curl_bin"
+      echo "      rm -rf ~/.local/lib/dot-agents"
+      echo "      rm -rf ~/.local/share/dot-agents"
+    else
+      echo -e "    ${YELLOW}⚠${NC}  Old curl installation still exists but is not in use."
+      echo ""
+      echo "    To clean up:"
+      echo "      rm $curl_bin"
+      echo "      rm -rf ~/.local/lib/dot-agents"
+      echo "      rm -rf ~/.local/share/dot-agents"
+    fi
+
+    echo ""
+    ((checks_warned++)) || true
+  fi
 }
 
 # Helper: Run a check and output result for text mode
