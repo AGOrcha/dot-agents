@@ -37,18 +37,18 @@ ${BOLD}CORE COMMANDS${NC}
     add <project>     Add a project to dot-agents management
     remove <project>  Remove a project from dot-agents management
     status            Show managed projects and their status
+                        --audit     Detailed link/config info
     doctor            Check health of dot-agents installation
-    hooks             Manage Claude Code hooks configuration
+                        --redundancy  Check for duplicate rules
+                        --migrate     Detect deprecated formats
+
+${BOLD}SKILLS & HOOKS${NC}
     skills            Manage skills (list, new, edit, migrate)
-    link              Set up symlinks to platform locations
-    audit             Show which configs are applied where
-    redundancy        Check for duplicate/redundant rules
-    migrate           Migrate deprecated config formats
+    hooks             Manage Claude Code hooks configuration
+
+${BOLD}UTILITIES${NC}
     sync              Git sync utilities for ~/.agents/
-    context           Output configuration for AI agents (JSON)
     explain           Self-documenting system descriptions
-    internal          Inspect internal CLI state
-    features          Manage opt-in features (tasks, history, sync)
 
 ${BOLD}GLOBAL OPTIONS${NC}
     --help, -h        Show help for a command
@@ -63,7 +63,9 @@ ${BOLD}EXAMPLES${NC}
     dot-agents init                     # Set up ~/.agents/
     dot-agents add ~/Github/myproject   # Add a project
     dot-agents status                   # Show all projects
+    dot-agents status --audit           # Detailed config info
     dot-agents doctor                   # Check for issues
+    dot-agents doctor --redundancy      # Check for duplicates
 
 ${BOLD}DOCUMENTATION${NC}
     https://github.com/dot-agents/dot-agents

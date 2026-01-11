@@ -10,6 +10,9 @@ ${BOLD}USAGE${NC}
     dot-agents doctor [options]
 
 ${BOLD}OPTIONS${NC}
+    --redundancy      Check for duplicate/redundant rules across projects
+    --migrate         Detect and fix deprecated config formats
+    --fix             Auto-fix common issues (use with --migrate)
     --json            Output in JSON format
     --verbose, -v     Show detailed diagnostics
     --help, -h        Show this help
@@ -22,29 +25,73 @@ ${BOLD}DESCRIPTION${NC}
     - Validates config.json schema
     - Checks for common issues
 
+    Use --redundancy to check for duplicate rules across projects.
+    Use --migrate to detect deprecated formats (.cursorrules, .claude.json).
+
 ${BOLD}EXAMPLES${NC}
-    dot-agents doctor           # Run health check
-    dot-agents doctor --json    # Output as JSON
+    dot-agents doctor                 # Run health check
+    dot-agents doctor --redundancy    # Check for duplicate rules
+    dot-agents doctor --migrate       # Detect deprecated formats
+    dot-agents doctor --migrate --fix # Auto-fix deprecated formats
+    dot-agents doctor --json          # Output as JSON
 
 EOF
 }
 
 cmd_doctor() {
-  # Parse flags
-  parse_common_flags "$@"
-  set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
+  local redundancy_mode=false
+  local migrate_mode=false
+  local fix_mode=false
 
-  # Show help if requested
-  if [ "${SHOW_HELP:-false}" = true ]; then
-    cmd_doctor_help
-    return 0
-  fi
+  # Parse flags
+  REMAINING_ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --redundancy)
+        redundancy_mode=true
+        shift
+        ;;
+      --migrate)
+        migrate_mode=true
+        shift
+        ;;
+      --fix)
+        fix_mode=true
+        shift
+        ;;
+      --json)
+        JSON_OUTPUT=true
+        shift
+        ;;
+      --verbose|-v)
+        VERBOSE=true
+        shift
+        ;;
+      --help|-h)
+        cmd_doctor_help
+        return 0
+        ;;
+      -*)
+        log_error "Unknown option: $1"
+        return 1
+        ;;
+      *)
+        REMAINING_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
 
   local checks_passed=0
   local checks_warned=0
   local checks_failed=0
 
-  if [ "$JSON_OUTPUT" = true ]; then
+  # Route to specific mode
+  if [ "$redundancy_mode" = true ]; then
+    run_redundancy_check
+  elif [ "$migrate_mode" = true ]; then
+    run_migrate_check "$fix_mode"
+  elif [ "$JSON_OUTPUT" = true ]; then
     run_doctor_json
   else
     run_doctor_text
@@ -254,13 +301,13 @@ run_doctor_text() {
       # Use platform modules for deprecated format detection
       if cursor_has_deprecated_format "$project_path"; then
         echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .cursorrules ${DIM}(deprecated)${NC}"
-        echo -e "      ${DIM}→ dot-agents migrate cursorrules $project_path${NC}"
+        echo -e "      ${DIM}→ dot-agents doctor --migrate --fix${NC}"
         ((deprecated_count++))
       fi
 
       if claude_has_deprecated_format "$project_path"; then
         echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .claude.json ${DIM}(deprecated)${NC}"
-        echo -e "      ${DIM}→ dot-agents migrate claude-json $project_path${NC}"
+        echo -e "      ${DIM}→ dot-agents doctor --migrate --fix${NC}"
         ((deprecated_count++))
       fi
     done
@@ -435,5 +482,236 @@ detect_agent_platform() {
     ((checks_passed++)) || true
   else
     echo -e "  ${GRAY}○${NC} $name ${DIM}(not found)${NC}"
+  fi
+}
+
+# =============================================================================
+# Redundancy Check (--redundancy flag)
+# =============================================================================
+
+run_redundancy_check() {
+  log_header "dot-agents redundancy check"
+  echo ""
+
+  local config_file="$AGENTS_HOME/config.json"
+
+  if [ ! -f "$config_file" ]; then
+    log_error "Not initialized. Run 'dot-agents init' first."
+    return 1
+  fi
+
+  log_info "Scanning for duplicate rules across projects..."
+  echo ""
+
+  # Collect all rule files
+  local all_rules=()
+  local rule_contents=()
+
+  # Global rules
+  if [ -d "$AGENTS_HOME/rules/global" ]; then
+    for rule in "$AGENTS_HOME/rules/global"/*.mdc; do
+      [ -f "$rule" ] || continue
+      all_rules+=("$rule")
+    done
+  fi
+
+  # Project rules
+  if has_jq; then
+    local projects
+    projects=$(jq -r '.projects | keys[]' "$config_file" 2>/dev/null)
+
+    for project in $projects; do
+      local project_rules_dir="$AGENTS_HOME/rules/$project"
+      if [ -d "$project_rules_dir" ]; then
+        for rule in "$project_rules_dir"/*.mdc; do
+          [ -f "$rule" ] || continue
+          all_rules+=("$rule")
+        done
+      fi
+    done
+  fi
+
+  local total_rules=${#all_rules[@]}
+  log_info "Found $total_rules rule files"
+  echo ""
+
+  if [ $total_rules -lt 2 ]; then
+    log_success "Not enough rules to check for duplicates"
+    return 0
+  fi
+
+  # Check for exact duplicate paragraphs
+  local duplicates_found=0
+
+  log_section "Checking for duplicate paragraphs..."
+
+  # Create temp file for paragraph analysis
+  local temp_dir
+  temp_dir=$(mktemp -d)
+
+  for rule in "${all_rules[@]}"; do
+    local basename
+    basename=$(basename "$rule")
+    local display_path="${rule/#$AGENTS_HOME/~/.agents}"
+
+    # Extract paragraphs (blocks separated by blank lines)
+    local para_num=0
+    local current_para=""
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [ -z "$line" ]; then
+        if [ -n "$current_para" ]; then
+          # Save paragraph with source info
+          local hash
+          hash=$(echo "$current_para" | md5 2>/dev/null || echo "$current_para" | md5sum | cut -d' ' -f1)
+          echo "$display_path:$para_num" >> "$temp_dir/$hash"
+          ((para_num++))
+          current_para=""
+        fi
+      else
+        current_para="$current_para$line"$'\n'
+      fi
+    done < "$rule"
+
+    # Don't forget last paragraph
+    if [ -n "$current_para" ]; then
+      local hash
+      hash=$(echo "$current_para" | md5 2>/dev/null || echo "$current_para" | md5sum | cut -d' ' -f1)
+      echo "$display_path:$para_num" >> "$temp_dir/$hash"
+    fi
+  done
+
+  # Find duplicates (files with more than one line)
+  for hash_file in "$temp_dir"/*; do
+    [ -f "$hash_file" ] || continue
+    local count
+    count=$(wc -l < "$hash_file" | tr -d ' ')
+    if [ "$count" -gt 1 ]; then
+      ((duplicates_found++))
+      echo -e "  ${YELLOW}⚠${NC}  Duplicate paragraph found in:"
+      while IFS= read -r location; do
+        echo -e "      ${DIM}$location${NC}"
+      done < "$hash_file"
+      echo ""
+    fi
+  done
+
+  rm -rf "$temp_dir"
+
+  # Summary
+  echo "────────────────────────────────────────────────────"
+  if [ $duplicates_found -eq 0 ]; then
+    echo -e "${GREEN}✓${NC} No duplicate paragraphs found"
+  else
+    echo -e "${YELLOW}⚠${NC} Found $duplicates_found duplicate paragraph(s)"
+    echo ""
+    echo "Consider consolidating duplicate content into global rules."
+  fi
+}
+
+# =============================================================================
+# Migrate Check (--migrate flag)
+# =============================================================================
+
+run_migrate_check() {
+  local fix_mode="$1"
+
+  log_header "dot-agents migrate check"
+  echo ""
+
+  local config_file="$AGENTS_HOME/config.json"
+
+  if [ ! -f "$config_file" ]; then
+    log_error "Not initialized. Run 'dot-agents init' first."
+    return 1
+  fi
+
+  local deprecated_count=0
+  local fixed_count=0
+
+  log_section "Scanning for deprecated formats..."
+  echo ""
+
+  if has_jq; then
+    local projects
+    projects=$(jq -r '.projects | keys[]' "$config_file" 2>/dev/null)
+
+    for project in $projects; do
+      local project_path
+      project_path=$(jq -r ".projects[\"$project\"].path" "$config_file")
+      project_path=$(expand_path "$project_path")
+
+      [ -d "$project_path" ] || continue
+
+      # Check for .cursorrules
+      if [ -f "$project_path/.cursorrules" ]; then
+        ((deprecated_count++))
+        echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .cursorrules"
+        echo -e "      ${DIM}Location: $project_path/.cursorrules${NC}"
+
+        if [ "$fix_mode" = true ]; then
+          echo -e "      ${CYAN}→${NC} Migrating to .cursor/rules/..."
+
+          # Create .cursor/rules if needed
+          mkdir -p "$project_path/.cursor/rules"
+
+          # Convert to .mdc format with frontmatter
+          local new_file="$project_path/.cursor/rules/legacy-rules.mdc"
+          {
+            echo "---"
+            echo "alwaysApply: true"
+            echo "---"
+            echo ""
+            cat "$project_path/.cursorrules"
+          } > "$new_file"
+
+          # Backup and remove old file
+          mv "$project_path/.cursorrules" "$project_path/.cursorrules.backup"
+          echo -e "      ${GREEN}✓${NC} Created: .cursor/rules/legacy-rules.mdc"
+          echo -e "      ${DIM}Backup: .cursorrules.backup${NC}"
+          ((fixed_count++))
+        fi
+        echo ""
+      fi
+
+      # Check for .claude.json
+      if [ -f "$project_path/.claude.json" ]; then
+        ((deprecated_count++))
+        echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .claude.json"
+        echo -e "      ${DIM}Location: $project_path/.claude.json${NC}"
+
+        if [ "$fix_mode" = true ]; then
+          echo -e "      ${CYAN}→${NC} Migrating to .claude/settings.json..."
+
+          # Create .claude if needed
+          mkdir -p "$project_path/.claude"
+
+          # Move/merge settings
+          local new_file="$project_path/.claude/settings.json"
+          if [ -f "$new_file" ]; then
+            echo -e "      ${YELLOW}!${NC} .claude/settings.json already exists, skipping"
+          else
+            mv "$project_path/.claude.json" "$new_file"
+            echo -e "      ${GREEN}✓${NC} Moved to: .claude/settings.json"
+            ((fixed_count++))
+          fi
+        fi
+        echo ""
+      fi
+    done
+  fi
+
+  # Summary
+  echo "────────────────────────────────────────────────────"
+  if [ $deprecated_count -eq 0 ]; then
+    echo -e "${GREEN}✓${NC} No deprecated formats found"
+  else
+    if [ "$fix_mode" = true ]; then
+      echo -e "Fixed $fixed_count of $deprecated_count deprecated format(s)"
+    else
+      echo -e "${YELLOW}⚠${NC} Found $deprecated_count deprecated format(s)"
+      echo ""
+      echo "Run 'dot-agents doctor --migrate --fix' to auto-fix"
+    fi
   fi
 }

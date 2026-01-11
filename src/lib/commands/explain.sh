@@ -16,7 +16,7 @@ ${BOLD}TOPICS${NC}
     scripts         How scripts work
     settings        How settings work
     mcp             How MCP configs work
-    commands        How custom commands work
+    skills          How skills (slash commands) work
     config          What config.json fields mean
     symlinks        How symlinks and hard links work
     platforms       Supported AI agent platforms
@@ -99,8 +99,8 @@ cmd_explain() {
     mcp)
       explain_mcp
       ;;
-    commands)
-      explain_commands
+    skills|commands)
+      explain_skills
       ;;
     config|config.json)
       explain_config
@@ -114,7 +114,7 @@ cmd_explain() {
     *)
       log_error "Unknown topic: $topic"
       echo ""
-      echo "Available topics: rules, scripts, settings, mcp, commands, config, symlinks, platforms"
+      echo "Available topics: rules, scripts, settings, mcp, skills, config, symlinks, platforms"
       return 1
       ;;
   esac
@@ -140,8 +140,9 @@ DIRECTORY STRUCTURE:
   ├── scripts/             # Helper scripts
   │   ├── global/
   │   └── {project}/
-  ├── commands/            # Custom slash commands
-  │   ├── global/
+  ├── skills/              # Slash commands (directory-based)
+  │   ├── global/          # Available everywhere
+  │   │   └── {skill}/SKILL.md
   │   └── {project}/
   ├── settings/            # Native agent configs
   │   ├── global/
@@ -158,11 +159,12 @@ HOW IT WORKS:
   4. Git-track ~/.agents/ for sync across machines
 
 KEY COMMANDS:
-  dot-agents init           # Set up ~/.agents/
-  dot-agents add <path>     # Register a project
-  dot-agents status         # See all projects
-  dot-agents doctor         # Check for issues
-  dot-agents audit          # See applied configs
+  dot-agents init               # Set up ~/.agents/
+  dot-agents add <path>         # Register a project
+  dot-agents status             # See all projects
+  dot-agents status --audit     # See applied configs
+  dot-agents doctor             # Check for issues
+  dot-agents skills             # Manage skills
 
 For more details, run:
   dot-agents explain <topic>    # rules, settings, mcp, etc.
@@ -215,8 +217,8 @@ EXAMPLE:
   - Follow existing patterns
 
 COMMANDS:
-  dot-agents audit              # See which rules are applied
-  dot-agents audit --agent cursor  # Cursor rules only
+  dot-agents status --audit              # See which rules are applied
+  dot-agents status --audit --agent cursor  # Cursor rules only
 
 EOF
 }
@@ -297,7 +299,7 @@ EXAMPLE:
   }
 
 COMMANDS:
-  dot-agents audit --agent claude-code  # See Claude settings
+  dot-agents status --audit --agent claude-code  # See Claude settings
 
 EOF
 }
@@ -346,38 +348,43 @@ COMMON MCP SERVERS:
   - @anthropic/mcp-server-linear
 
 COMMANDS:
-  dot-agents audit              # Shows MCP status
+  dot-agents status --audit     # Shows MCP status
 
 EOF
 }
 
-explain_commands() {
+explain_skills() {
   cat << 'EOF'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Understanding: Custom Commands
+ Understanding: Skills (Slash Commands)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-WHAT ARE CUSTOM COMMANDS?
-  Slash commands that extend AI agent capabilities.
-  Written as Markdown files, they become available as /command.
+WHAT ARE SKILLS?
+  Directory-based slash commands that extend AI agent capabilities.
+  Each skill is a folder containing a SKILL.md file.
+  Skills become available as /skill-name in your AI agent.
 
 WHERE DO THEY LIVE?
-  ~/.agents/commands/global/    → Available to ALL projects
-  ~/.agents/commands/{project}/ → Project-specific commands
+  ~/.agents/skills/global/         → Available to ALL projects
+  ~/.agents/skills/{project}/      → Project-specific skills
 
-HOW THEY GET TO REPOS:
-  Claude Code: .claude/commands/*.md symlinks
-  Cursor:      .cursor/commands/*.md symlinks
+DIRECTORY STRUCTURE:
+  ~/.agents/skills/global/
+  ├── commit/
+  │   └── SKILL.md
+  ├── pr/
+  │   └── SKILL.md
+  └── deploy/
+      └── SKILL.md
 
-FILE NAMING:
-  The filename becomes the command name:
-    commit.md  → /commit
-    pr.md      → /pr
-    deploy.md  → /deploy
+HOW THEY GET TO REPOS (via dot-agents add):
+  Claude Code: .claude/skills/{name}/ → symlink to skill directory
+  Cursor:      .cursor/commands/{name}.md → symlink to SKILL.md
+  Codex:       .codex/skills/{name}/ → symlink to skill directory
 
 EXAMPLE:
-  ~/.agents/commands/global/commit.md
-  ────────────────────────────────────
+  ~/.agents/skills/global/commit/SKILL.md
+  ────────────────────────────────────────
   # /commit - Create a git commit
 
   Create a well-formed git commit with the following steps:
@@ -390,6 +397,12 @@ EXAMPLE:
   - fix: bug fix
   - docs: documentation
   - refactor: code cleanup
+
+COMMANDS:
+  dot-agents skills             # List all skills
+  dot-agents skills new <name>  # Create new skill
+  dot-agents skills edit <name> # Edit skill in $EDITOR
+  dot-agents skills show <name> # Show skill content
 
 USAGE IN AGENT:
   Just type /commit and the agent will follow the instructions.
@@ -406,7 +419,6 @@ explain_config() {
 WHAT IS config.json?
   The central registry for dot-agents. Contains:
   - Registered projects and their paths
-  - Feature flags
   - User preferences
 
 LOCATION:
@@ -421,10 +433,6 @@ STRUCTURE:
     },
     "agents": {
       "active": ["cursor", "claude-code"]
-    },
-    "features": {
-      "tasks": false,
-      "history": false
     }
   }
 
@@ -435,22 +443,12 @@ KEY FIELDS:
     Use ~ for home directory (portable across machines).
 
   agents.active
-    List of AI agents you use. Used for audit and doctor commands.
-
-  features.tasks
-    Enable task tracking (opt-in feature).
-
-  features.history
-    Enable activity logging (opt-in feature).
+    List of AI agents you use. Used for status and doctor commands.
 
 MODIFICATION:
   Projects are managed via CLI:
     dot-agents add ~/path/to/project
     dot-agents remove myproject
-
-  Features are managed via CLI:
-    dot-agents features enable tasks
-    dot-agents features disable history
 
   You CAN edit this file directly, but CLI commands are safer.
 
@@ -490,8 +488,8 @@ NAMING CONVENTION:
     {project}--<filename>  From ~/.agents/rules/{project}/
 
 VERIFICATION:
-  dot-agents doctor        # Checks for broken links
-  dot-agents audit         # Shows all applied links
+  dot-agents doctor            # Checks for broken links
+  dot-agents status --audit    # Shows all applied links
 
 REPAIR:
   dot-agents add <path> --force  # Recreate links
@@ -536,8 +534,8 @@ OPENCODE
     .opencode/agent/*.md   - Agent definitions
 
 DETECTION:
-  dot-agents doctor        # Shows installed agents
-  dot-agents context       # Agent info in JSON
+  dot-agents doctor            # Shows installed agents
+  dot-agents status --json     # Agent info in JSON
 
 For platform-specific details:
   dot-agents explain --agent cursor
@@ -605,7 +603,7 @@ CONFIG FILES:
 
 DEPRECATED:
   .cursorrules - Single file in project root.
-  Migrate with: dot-agents migrate cursorrules
+  Migrate with: dot-agents doctor --migrate --fix
 
 DETECTION:
   Cursor App: /Applications/Cursor.app (macOS)
