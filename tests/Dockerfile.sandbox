@@ -1,0 +1,31 @@
+FROM ubuntu:22.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    jq \
+    git \
+    ca-certificates \
+    gnupg \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20 (required for Claude Code)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Claude Code CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install dot-agents
+RUN curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/master/scripts/install.sh | bash
+ENV PATH="/root/.local/bin:$PATH"
+
+# Create workspace
+WORKDIR /workspace
+
+# Default command
+CMD ["/bin/bash"]

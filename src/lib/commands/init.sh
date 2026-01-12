@@ -29,6 +29,7 @@ ${BOLD}CREATED STRUCTURE${NC}
     │       └── rules.mdc     # Starter rules file
     ├── settings/
     │   └── global/           # Global settings
+    │       └── claude-code.json  # Hooks, permissions
     ├── mcp/
     │   └── global/           # Global MCP configs
     ├── skills/
@@ -38,6 +39,9 @@ ${BOLD}CREATED STRUCTURE${NC}
     │       └── self-review/SKILL.md
     ├── scripts/              # Utility scripts
     └── local/                # Machine-specific (gitignored)
+
+${BOLD}GLOBAL SYMLINKS${NC}
+    ~/.claude/settings.json → ~/.agents/settings/global/claude-code.json
 
 ${BOLD}EXAMPLES${NC}
     dot-agents init              # Initialize with defaults
@@ -103,6 +107,9 @@ cmd_init() {
     "~/.agents/skills/global/agent-handoff/SKILL.md (session handoff)" \
     "~/.agents/skills/global/self-review/SKILL.md (pre-commit checklist)"
 
+  preview_changes "Symlinks (global platform configs):" \
+    "~/.claude/settings.json → ~/.agents/settings/global/claude-code.json"
+
   info_box "Tip" \
     "This directory should be version controlled." \
     "Run 'dot-agents sync init' after to set up git."
@@ -159,6 +166,16 @@ cmd_init() {
   create_file_from_template_silent "$templates_dir/skills/global/agent-handoff/SKILL.md" "$agents_home/skills/global/agent-handoff/SKILL.md"
   create_file_from_template_silent "$templates_dir/skills/global/self-review/SKILL.md" "$agents_home/skills/global/self-review/SKILL.md"
   bullet "ok" "Created skill templates"
+
+  # Create global platform symlinks
+  # Claude Code: ~/.claude/settings.json -> ~/.agents/settings/global/claude-code.json
+  mkdir -p "$HOME/.claude"
+  if [ ! -e "$HOME/.claude/settings.json" ] || [ "$FORCE" = true ]; then
+    ln -sf "$agents_home/settings/global/claude-code.json" "$HOME/.claude/settings.json"
+    bullet "ok" "Created Claude Code global settings symlink"
+  else
+    bullet "skip" "~/.claude/settings.json exists (use --force to replace)"
+  fi
 
   # Create XDG state directory
   mkdir -p "$AGENTS_STATE_DIR"
