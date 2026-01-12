@@ -19,27 +19,47 @@ claude_version() {
   claude_detect
 }
 
-# Create links for Claude Code (SYMLINKS - works fine)
+# Helper to find rule file with any extension (.md, .mdc, .txt)
+# Returns empty string if not found (always returns 0 for set -e compatibility)
+_claude_find_rule_file() {
+  local base_path="$1"
+  for ext in md mdc txt; do
+    if [ -f "${base_path}.$ext" ]; then
+      echo "${base_path}.$ext"
+      return 0
+    fi
+  done
+  # Return empty string, not error code (for set -e compatibility)
+  echo ""
+  return 0
+}
+
+# Create links for Claude Code (SYMLINKS)
+# Claude Code reads rules from multiple locations:
+#   - CLAUDE.md at repo root (project-specific instructions)
+#   - .claude/rules/*.md (auto-loaded rule files)
+#
+# We use .claude/rules/ with symlinks to the 4 rule sources:
+#   1. global--rules.md        → ~/.agents/rules/global/rules.mdc (all agents, global)
+#   2. global--claude-code.md  → ~/.agents/rules/global/claude-code.mdc (Claude, global)
+#   3. project--rules.md       → ~/.agents/rules/{project}/rules.mdc (all agents, project)
+#   4. project--claude-code.md → ~/.agents/rules/{project}/claude-code.mdc (Claude, project)
+#
+# All files in .claude/rules/ are automatically loaded by Claude Code.
 claude_create_links() {
   local project="$1"
   local repo_path="$2"
 
-  # Link CLAUDE.md from global rules if it exists
-  if [ -f "$AGENTS_HOME/rules/global/claude.md" ]; then
-    ln -sf "$AGENTS_HOME/rules/global/claude.md" "$repo_path/CLAUDE.md"
-  elif [ -f "$AGENTS_HOME/rules/global/rules.md" ]; then
-    # Fall back to global rules.md if no claude-specific file
-    ln -sf "$AGENTS_HOME/rules/global/rules.md" "$repo_path/CLAUDE.md"
-  fi
+  # Create .claude directory structure
+  mkdir -p "$repo_path/.claude/rules"
 
-  # Project-specific CLAUDE.md
-  if [ -f "$AGENTS_HOME/rules/$project/claude.md" ]; then
-    # If project has its own claude.md, use it instead
-    ln -sf "$AGENTS_HOME/rules/$project/claude.md" "$repo_path/CLAUDE.md"
-  fi
+  # Create symlinks for all 4 rule sources in .claude/rules/
+  # Claude Code auto-loads all .md files in this directory
+  claude_create_rules_links "$project" "$repo_path"
 
-  # Create .claude directory for settings
-  mkdir -p "$repo_path/.claude"
+  # Also create CLAUDE.md symlink for backwards compatibility / visibility
+  # Points to the project's main rules file (or global if none exists)
+  claude_create_main_rules_link "$project" "$repo_path"
 
   # Link settings.local.json if exists
   if [ -f "$AGENTS_HOME/settings/$project/claude-code.json" ]; then
@@ -51,6 +71,79 @@ claude_create_links() {
     ln -sf "$AGENTS_HOME/mcp/$project/claude.json" "$repo_path/.mcp.json"
   elif [ -f "$AGENTS_HOME/mcp/global/claude.json" ]; then
     ln -sf "$AGENTS_HOME/mcp/global/claude.json" "$repo_path/.mcp.json"
+  fi
+}
+
+# Create symlinks in .claude/rules/ for all 4 rule sources
+claude_create_rules_links() {
+  local project="$1"
+  local repo_path="$2"
+  local rules_dir="$repo_path/.claude/rules"
+
+  # 1. Global all-agents rules
+  local global_rules
+  global_rules=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/rules")
+  if [ -n "$global_rules" ]; then
+    ln -sf "$global_rules" "$rules_dir/global--rules.md"
+  fi
+
+  # 2. Global Claude-specific rules
+  local global_claude
+  global_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/claude-code")
+  [ -z "$global_claude" ] && global_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/claude")
+  if [ -n "$global_claude" ]; then
+    ln -sf "$global_claude" "$rules_dir/global--claude-code.md"
+  fi
+
+  # 3. Project all-agents rules
+  local project_rules
+  project_rules=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/rules")
+  if [ -n "$project_rules" ]; then
+    ln -sf "$project_rules" "$rules_dir/project--rules.md"
+  fi
+
+  # 4. Project Claude-specific rules
+  local project_claude
+  project_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/claude-code")
+  [ -z "$project_claude" ] && project_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/claude")
+  if [ -n "$project_claude" ]; then
+    ln -sf "$project_claude" "$rules_dir/project--claude-code.md"
+  fi
+}
+
+# Create CLAUDE.md symlink at repo root for visibility/backwards compatibility
+claude_create_main_rules_link() {
+  local project="$1"
+  local repo_path="$2"
+
+  # Prefer project-specific rules, fall back to global
+  local target=""
+
+  # Check for project rules file
+  for ext in md mdc txt; do
+    if [ -f "$AGENTS_HOME/rules/$project/rules.$ext" ]; then
+      target="$AGENTS_HOME/rules/$project/rules.$ext"
+      break
+    fi
+    if [ -f "$AGENTS_HOME/rules/$project/claude-code.$ext" ]; then
+      target="$AGENTS_HOME/rules/$project/claude-code.$ext"
+      break
+    fi
+  done
+
+  # Fall back to global rules
+  if [ -z "$target" ]; then
+    for ext in md mdc txt; do
+      if [ -f "$AGENTS_HOME/rules/global/rules.$ext" ]; then
+        target="$AGENTS_HOME/rules/global/rules.$ext"
+        break
+      fi
+    done
+  fi
+
+  # Create symlink if we found a target
+  if [ -n "$target" ]; then
+    ln -sf "$target" "$repo_path/CLAUDE.md"
   fi
 }
 
