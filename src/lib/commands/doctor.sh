@@ -185,7 +185,15 @@ run_doctor_text() {
     # Validate JSON syntax
     if jq -e '.' "$global_settings" >/dev/null 2>&1; then
       local hook_count=0
-      for hook_type in PreToolUse PostToolUse; do
+      # All 12 Claude Code hook types
+      local hook_types=(
+        "PreToolUse" "PostToolUse" "PostToolUseFailure"
+        "Notification" "UserPromptSubmit"
+        "SessionStart" "SessionEnd" "Stop"
+        "SubagentStart" "SubagentStop"
+        "PreCompact" "PermissionRequest"
+      )
+      for hook_type in "${hook_types[@]}"; do
         local count
         count=$(jq -r ".hooks.$hook_type | length" "$global_settings" 2>/dev/null || echo "0")
         hook_count=$((hook_count + count))

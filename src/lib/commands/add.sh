@@ -27,6 +27,7 @@ ${BOLD}DESCRIPTION${NC}
     - rules/<project>/         Project-specific rules
     - settings/<project>/      Project settings
     - mcp/<project>/           Project MCP configs
+    - memory/<project>/        Project memory (Claude Code)
 
     Links created in project directory:
 
@@ -37,7 +38,9 @@ ${BOLD}DESCRIPTION${NC}
     - .cursorignore            Files to ignore
 
     ${BOLD}Claude Code${NC} (uses SYMLINKS):
-    - CLAUDE.md                Project instructions
+    - CLAUDE.md                Project instructions (rules)
+    - .claude/CLAUDE.md        Project memory
+    - .claude/rules/*.md       Rule files (global + project)
     - .claude/settings.local.json  Project settings
     - .claude/skills/          Commands as skills (global + project)
     - .mcp.json                MCP server configs
@@ -188,7 +191,9 @@ cmd_add() {
     "settings/$project_name/           (project settings)" \
     "  └── claude-code.json            (hooks, permissions)" \
     "mcp/$project_name/                (project MCP configs)" \
-    "skills/$project_name/             (project skills)"
+    "skills/$project_name/             (project skills)" \
+    "memory/$project_name/             (project memory)" \
+    "  └── CLAUDE.md                   (project instructions for Claude)"
 
   preview_section "$display_path/" \
     ".cursor/rules/global--*.mdc       (hard links to global rules)" \
@@ -197,6 +202,8 @@ cmd_add() {
     ".cursor/commands/*.md             (symlinks to skills)" \
     ".cursorignore                     (hard link to ignore patterns)" \
     "CLAUDE.md                         (symlink to rules)" \
+    ".claude/rules/*.md                (symlinks to rule files)" \
+    ".claude/CLAUDE.md                 (symlink to project memory)" \
     ".claude/settings.local.json       (symlink to settings)" \
     ".claude/skills/*/                 (symlinks to skill directories)" \
     ".mcp.json                         (symlink to MCP config)" \
@@ -318,6 +325,13 @@ cmd_add() {
     bullet "ok" "Created project settings template"
   fi
 
+  # Copy project memory template if it doesn't exist
+  local project_memory="$AGENTS_HOME/memory/$project_name/CLAUDE.md"
+  if [ ! -f "$project_memory" ]; then
+    cp "$templates_dir/memory/project/CLAUDE.md" "$project_memory" 2>/dev/null || true
+    bullet "ok" "Created project memory template"
+  fi
+
   # Step 4: Link to project
   step "Linking to project..."
 
@@ -352,10 +366,11 @@ cmd_add() {
   # Build next steps based on context
   local next_steps=()
   next_steps+=("Add project rules: edit ~/.agents/rules/$project_name/rules.md")
+  next_steps+=("Add project memory: edit ~/.agents/memory/$project_name/CLAUDE.md")
   if [ "$has_deprecated" = true ]; then
     next_steps+=("Migrate deprecated formats: dot-agents migrate detect")
   fi
-  next_steps+=("Check applied configs: dot-agents audit $project_name")
+  next_steps+=("Check applied configs: dot-agents status --audit")
 
   success_with_next_steps "Project '$project_name' added successfully!" "${next_steps[@]}"
 
@@ -373,6 +388,7 @@ create_project_dirs_silent() {
   mkdir -p "$agents_home/settings/$project"
   mkdir -p "$agents_home/mcp/$project"
   mkdir -p "$agents_home/skills/$project"
+  mkdir -p "$agents_home/memory/$project"
 }
 
 # Create project directories in ~/.agents/ (verbose version)
@@ -385,6 +401,7 @@ create_project_dirs() {
     "$agents_home/settings/$project"
     "$agents_home/mcp/$project"
     "$agents_home/skills/$project"
+    "$agents_home/memory/$project"
   )
 
   for dir in "${dirs[@]}"; do

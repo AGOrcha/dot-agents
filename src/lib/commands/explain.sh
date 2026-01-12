@@ -13,6 +13,8 @@ ${BOLD}USAGE${NC}
 ${BOLD}TOPICS${NC}
     (none)          Overview of ~/.agents structure
     rules           How rules work
+    memory          How memory (CLAUDE.md) works
+    hooks           How Claude Code hooks work
     scripts         How scripts work
     settings        How settings work
     mcp             How MCP configs work
@@ -90,6 +92,12 @@ cmd_explain() {
     rules)
       explain_rules
       ;;
+    memory)
+      explain_memory
+      ;;
+    hooks)
+      explain_hooks
+      ;;
     scripts)
       explain_scripts
       ;;
@@ -114,7 +122,7 @@ cmd_explain() {
     *)
       log_error "Unknown topic: $topic"
       echo ""
-      echo "Available topics: rules, scripts, settings, mcp, skills, config, symlinks, platforms"
+      echo "Available topics: rules, memory, hooks, scripts, settings, mcp, skills, config, symlinks, platforms"
       return 1
       ;;
   esac
@@ -137,6 +145,9 @@ DIRECTORY STRUCTURE:
   ├── rules/               # Agent instructions
   │   ├── global/          # Apply to ALL projects
   │   └── {project}/       # Project-specific rules
+  ├── memory/              # Claude Code memory files
+  │   ├── global/CLAUDE.md # User-level memory (all projects)
+  │   └── {project}/       # Project-specific memory
   ├── scripts/             # Helper scripts
   │   ├── global/
   │   └── {project}/
@@ -219,6 +230,161 @@ EXAMPLE:
 COMMANDS:
   dot-agents status --audit              # See which rules are applied
   dot-agents status --audit --agent cursor  # Cursor rules only
+
+EOF
+}
+
+explain_memory() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Understanding: Memory (Claude Code)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IS MEMORY?
+  Memory files (CLAUDE.md) store persistent instructions and context
+  that Claude Code reads automatically. Different from rules, memory
+  is meant for project knowledge and preferences that Claude should
+  remember across sessions.
+
+MEMORY HIERARCHY (highest to lowest priority):
+  1. Enterprise policy     (admin-managed, cannot override)
+  2. Project memory        (.claude/CLAUDE.md in repo)
+  3. User memory           (~/.claude/CLAUDE.md, applies everywhere)
+  4. Local memory          (CLAUDE.local.md, personal, gitignored)
+
+WHERE DO THEY LIVE?
+  ~/.agents/memory/global/CLAUDE.md      → User-level memory (all projects)
+  ~/.agents/memory/{project}/CLAUDE.md   → Project-specific memory
+
+HOW THEY GET TO REPOS:
+  dot-agents init:
+    ~/.claude/CLAUDE.md → ~/.agents/memory/global/CLAUDE.md (symlink)
+
+  dot-agents add:
+    .claude/CLAUDE.md → ~/.agents/memory/{project}/CLAUDE.md (symlink)
+
+WHAT TO PUT IN MEMORY:
+  User-level (global):
+    - Personal coding style preferences
+    - Tools and commands you always prefer
+    - Workflow patterns you use everywhere
+
+  Project-level:
+    - Project overview and architecture
+    - Key directories and their purposes
+    - Development workflow for this project
+    - Important notes Claude should know
+
+EXAMPLE:
+  ~/.agents/memory/global/CLAUDE.md
+  ─────────────────────────────────
+  # My Preferences
+
+  ## Coding Style
+  - I prefer functional programming patterns
+  - Always use TypeScript over JavaScript
+  - Use Prettier for formatting
+
+  ## Workflow
+  - Run tests before committing
+  - Use conventional commit messages
+
+COMMANDS:
+  dot-agents init                # Creates user-level memory
+  dot-agents add <path>          # Creates project memory
+  dot-agents status --audit      # Shows memory file locations
+
+EOF
+}
+
+explain_hooks() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Understanding: Hooks (Claude Code)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT ARE HOOKS?
+  Hooks are shell commands that execute in response to Claude Code
+  events. They let you customize behavior, add logging, run linters,
+  send notifications, and more.
+
+WHERE DO THEY LIVE?
+  Global:   ~/.agents/settings/global/claude-code.json
+  Project:  ~/.agents/settings/{project}/claude-code.json
+
+ALL 12 HOOK TYPES:
+
+  Tool Hooks (run around tool execution):
+    PreToolUse          Before executing any tool
+    PostToolUse         After tool execution completes
+    PostToolUseFailure  After tool execution fails
+
+  Session Hooks (run around session lifecycle):
+    SessionStart        When a new session is started
+    SessionEnd          When a session is ending
+    Stop                Right before Claude concludes its response
+
+  User Interaction Hooks:
+    UserPromptSubmit    When the user submits a prompt
+    Notification        When notifications are sent
+    PermissionRequest   When a permission dialog is displayed
+
+  Subagent Hooks (Task tool):
+    SubagentStart       When a subagent is started
+    SubagentStop        When a subagent concludes its response
+
+  Context Hooks:
+    PreCompact          Before conversation compaction
+
+ENVIRONMENT VARIABLES:
+  All hooks receive:
+    $SESSION_ID         Current Claude session ID
+    $TRANSCRIPT_PATH    Path to conversation transcript
+
+  Tool hooks (PreToolUse, PostToolUse, PostToolUseFailure):
+    $TOOL_NAME          Name of the tool being used
+    $TOOL_INPUT         The tool's input/arguments
+    $TOOL_OUTPUT        The tool's output (PostToolUse* only)
+
+  UserPromptSubmit:
+    $USER_PROMPT        The prompt text submitted
+
+  Subagent hooks:
+    $SUBAGENT_ID        The subagent identifier
+
+  PreCompact:
+    $SUMMARY_PATH       Path to the compaction summary
+
+HOOK FORMAT (in claude-code.json):
+  {
+    "hooks": {
+      "PreToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "echo \"$TOOL_INPUT\" >> log.txt"
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+MATCHERS (for tool hooks):
+  "*"               Match all tools
+  "Bash"            Match Bash tool only
+  "Edit"            Match Edit tool only
+  "Bash(git:*)"     Match git commands
+  "Bash(npm:*)"     Match npm commands
+
+COMMANDS:
+  dot-agents hooks              # List all hooks
+  dot-agents hooks add <type>   # Add a hook
+  dot-agents hooks remove       # Remove a hook
+  dot-agents hooks edit         # Edit hooks in $EDITOR
+  dot-agents hooks examples     # Show example hooks
 
 EOF
 }
@@ -629,42 +795,62 @@ ABOUT:
 
 CONFIG FILES:
 
-  CLAUDE.md
+  CLAUDE.md (repo root)
     Main instruction file in project root.
     Contains rules and guidelines for Claude.
     Can be symlink → ~/.agents/rules/
 
-  CLAUDE.local.md
-    Personal notes (gitignored).
-    Not managed by dot-agents.
+  .claude/CLAUDE.md (project memory)
+    Project-specific memory that Claude reads automatically.
+    Stores project context, architecture notes, workflow.
+    Can be symlink → ~/.agents/memory/{project}/
 
-  .claude/settings.json
-    Shared project settings.
-    Can be symlink → ~/.agents/settings/
+  .claude/rules/*.md
+    Rule files loaded automatically by Claude Code.
+    dot-agents creates symlinks for 4-layer rules:
+      global--rules.md        (all agents, global)
+      global--claude-code.md  (Claude only, global)
+      project--rules.md       (all agents, project)
+      project--claude-code.md (Claude only, project)
 
   .claude/settings.local.json
-    Personal settings (gitignored).
+    Project settings (hooks, permissions).
+    Can be symlink → ~/.agents/settings/{project}/
+
+  CLAUDE.local.md
+    Personal notes (gitignored).
     Not managed by dot-agents.
 
   .mcp.json
     MCP server configuration.
     Can be symlink → ~/.agents/mcp/
 
-  .claude/commands/*.md
-    Custom slash commands.
-    Can be symlink → ~/.agents/commands/
+  .claude/skills/*/
+    Custom slash commands (directory-based).
+    Each skill is a directory with SKILL.md.
+    Can be symlink → ~/.agents/skills/
 
 GLOBAL CONFIGS:
-  ~/.claude/settings.json - Global Claude settings
+  ~/.claude/settings.json  - Global Claude settings
+  ~/.claude/CLAUDE.md      - User-level memory (all projects)
+
+MEMORY HIERARCHY (highest to lowest priority):
+  1. Enterprise policy     (admin-managed)
+  2. Project memory        (.claude/CLAUDE.md)
+  3. User memory           (~/.claude/CLAUDE.md)
+  4. Local memory          (CLAUDE.local.md)
 
 DETECTION:
   claude --version
 
 HOW DOT-AGENTS MANAGES IT:
-  ~/.agents/rules/{project}/CLAUDE.md  → CLAUDE.md (symlink)
-  ~/.agents/settings/{project}/        → .claude/ (symlink)
-  ~/.agents/mcp/{project}/mcp.json     → .mcp.json (symlink)
-  ~/.agents/commands/{project}/        → .claude/commands/ (symlink)
+  ~/.agents/rules/global/rules.mdc        → .claude/rules/global--rules.md
+  ~/.agents/rules/{project}/rules.mdc     → .claude/rules/project--rules.md
+  ~/.agents/memory/global/CLAUDE.md       → ~/.claude/CLAUDE.md (user memory)
+  ~/.agents/memory/{project}/CLAUDE.md    → .claude/CLAUDE.md (project memory)
+  ~/.agents/settings/{project}/           → .claude/settings.local.json
+  ~/.agents/mcp/{project}/mcp.json        → .mcp.json
+  ~/.agents/skills/*/                     → .claude/skills/
 
 EOF
 }

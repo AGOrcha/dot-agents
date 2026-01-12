@@ -23,18 +23,50 @@ ${BOLD}OPTIONS${NC}
     --help, -h            Show this help
 
 ${BOLD}HOOK TYPES${NC}
-    PreToolUse            Before executing any tool (Bash, Edit, Read, etc.)
-    PostToolUse           After tool execution completes
+    Tool Hooks:
+      PreToolUse            Before executing any tool (Bash, Edit, Read, etc.)
+      PostToolUse           After tool execution completes
+      PostToolUseFailure    After tool execution fails
+
+    Session Hooks:
+      SessionStart          When a new session is started
+      SessionEnd            When a session is ending
+      Stop                  Right before Claude concludes its response
+
+    User Interaction Hooks:
+      UserPromptSubmit      When the user submits a prompt
+      Notification          When notifications are sent
+      PermissionRequest     When a permission dialog is displayed
+
+    Subagent Hooks:
+      SubagentStart         When a subagent (Task tool) is started
+      SubagentStop          When a subagent concludes its response
+
+    Context Hooks:
+      PreCompact            Before conversation compaction
 
 ${BOLD}ADD OPTIONS${NC}
     --command, -c <cmd>   Shell command to run (required)
     --matcher, -m <pat>   Tool pattern to match (default: "*")
 
 ${BOLD}ENVIRONMENT VARIABLES${NC}
-    Hooks receive these environment variables:
-    \$TOOL_INPUT          The tool's input (for tool hooks)
-    \$TOOL_OUTPUT         The tool's output (PostToolUse only)
-    \$SESSION_ID          Current Claude session ID
+    All hooks receive:
+      \$SESSION_ID          Current Claude session ID
+      \$TRANSCRIPT_PATH     Path to conversation transcript
+
+    Tool hooks (PreToolUse, PostToolUse, PostToolUseFailure):
+      \$TOOL_NAME           Name of the tool being used
+      \$TOOL_INPUT          The tool's input/arguments
+      \$TOOL_OUTPUT         The tool's output (PostToolUse* only)
+
+    Prompt hooks (UserPromptSubmit):
+      \$USER_PROMPT         The prompt text submitted
+
+    Subagent hooks (SubagentStart, SubagentStop):
+      \$SUBAGENT_ID         The subagent identifier
+
+    Compact hooks (PreCompact):
+      \$SUMMARY_PATH        Path to the compaction summary
 
 ${BOLD}EXAMPLES${NC}
     dot-agents hooks                          # List all hooks
@@ -119,7 +151,10 @@ cmd_hooks() {
       ;;
     add)
       if [ -z "$hook_type" ]; then
-        log_error "Hook type required. Valid types: PreToolUse, PostToolUse"
+        log_error "Hook type required."
+        log_info "Valid types: PreToolUse, PostToolUse, PostToolUseFailure, Notification,"
+        log_info "             UserPromptSubmit, SessionStart, SessionEnd, Stop,"
+        log_info "             SubagentStart, SubagentStop, PreCompact, PermissionRequest"
         return 1
       fi
       if [ -z "$hook_command" ]; then
@@ -213,7 +248,14 @@ hooks_display_from_file() {
   local file="$1"
   local indent="$2"
 
-  local hook_types=("PreToolUse" "PostToolUse")
+  # All 12 Claude Code hook types
+  local hook_types=(
+    "PreToolUse" "PostToolUse" "PostToolUseFailure"
+    "Notification" "UserPromptSubmit"
+    "SessionStart" "SessionEnd" "Stop"
+    "SubagentStart" "SubagentStop"
+    "PreCompact" "PermissionRequest"
+  )
   local has_hooks=false
 
   for hook_type in "${hook_types[@]}"; do
@@ -296,13 +338,19 @@ hooks_add() {
   local matcher="$4"
   local command="$5"
 
-  # Validate hook type
+  # Validate hook type - all 12 Claude Code hook types
   case "$hook_type" in
-    PreToolUse|PostToolUse)
+    PreToolUse|PostToolUse|PostToolUseFailure|\
+    Notification|UserPromptSubmit|\
+    SessionStart|SessionEnd|Stop|\
+    SubagentStart|SubagentStop|\
+    PreCompact|PermissionRequest)
       ;;
     *)
       log_error "Invalid hook type: $hook_type"
-      log_info "Valid types: PreToolUse, PostToolUse"
+      log_info "Valid types: PreToolUse, PostToolUse, PostToolUseFailure, Notification,"
+      log_info "             UserPromptSubmit, SessionStart, SessionEnd, Stop,"
+      log_info "             SubagentStart, SubagentStop, PreCompact, PermissionRequest"
       return 1
       ;;
   esac
@@ -361,12 +409,19 @@ hooks_remove() {
   local hook_type="$3"
   local index="$4"
 
-  # Validate hook type
+  # Validate hook type - all 12 Claude Code hook types
   case "$hook_type" in
-    PreToolUse|PostToolUse)
+    PreToolUse|PostToolUse|PostToolUseFailure|\
+    Notification|UserPromptSubmit|\
+    SessionStart|SessionEnd|Stop|\
+    SubagentStart|SubagentStop|\
+    PreCompact|PermissionRequest)
       ;;
     *)
       log_error "Invalid hook type: $hook_type"
+      log_info "Valid types: PreToolUse, PostToolUse, PostToolUseFailure, Notification,"
+      log_info "             UserPromptSubmit, SessionStart, SessionEnd, Stop,"
+      log_info "             SubagentStart, SubagentStop, PreCompact, PermissionRequest"
       return 1
       ;;
   esac
@@ -453,6 +508,10 @@ hooks_examples() {
 ║                           Claude Code Hook Examples                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ TOOL HOOKS (PreToolUse, PostToolUse, PostToolUseFailure)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ 1. COMMAND LOGGING                                                           │
 │    Log all Bash commands to a file                                           │
@@ -463,16 +522,7 @@ hooks_examples() {
     --command "echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] \$TOOL_INPUT\" >> ~/.claude/command-log.txt"
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 2. DESKTOP NOTIFICATIONS (macOS)                                             │
-│    Get notified when Claude completes a tool                                 │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-  dot-agents hooks add PostToolUse \
-    --matcher "*" \
-    --command "osascript -e 'display notification \"Tool completed\" with title \"Claude\"'"
-
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 3. AUTO-FORMAT ON EDIT                                                       │
+│ 2. AUTO-FORMAT ON EDIT                                                       │
 │    Run Prettier on files after Claude edits them                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 
@@ -481,36 +531,95 @@ hooks_examples() {
     --command "npx prettier --write \"\$TOOL_INPUT\" 2>/dev/null || true"
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 4. TEST BEFORE COMMIT                                                        │
-│    Run tests before git commit commands                                      │
+│ 3. ERROR REPORTING                                                           │
+│    Send notification when a tool fails                                       │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-  dot-agents hooks add PreToolUse \
-    --matcher "Bash(git:commit:*)" \
-    --command "npm test"
+  dot-agents hooks add PostToolUseFailure \
+    --matcher "*" \
+    --command "osascript -e 'display notification \"Tool failed: \$TOOL_NAME\" with title \"Claude Error\"'"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SESSION HOOKS (SessionStart, SessionEnd, Stop)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 5. LINT CHECK                                                                │
-│    Run ESLint after file edits                                               │
+│ 4. SESSION LOGGING                                                           │
+│    Log when sessions start and end                                           │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-  dot-agents hooks add PostToolUse \
-    --matcher "Edit" \
-    --command "npx eslint \"\$TOOL_INPUT\" --fix 2>/dev/null || true"
+  dot-agents hooks add SessionStart \
+    --command "echo \"Session started: \$SESSION_ID at \$(date)\" >> ~/.claude/sessions.log"
+
+  dot-agents hooks add SessionEnd \
+    --command "echo \"Session ended: \$SESSION_ID at \$(date)\" >> ~/.claude/sessions.log"
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ 6. SECURITY AUDIT                                                            │
-│    Log any commands that modify sensitive files                              │
+│ 5. AUTO-COMMIT ON STOP                                                       │
+│    Remind to commit changes when Claude finishes                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-  dot-agents hooks add PreToolUse \
-    --matcher "Edit" \
-    --command "echo \"\$TOOL_INPUT\" | grep -qE '\\.env|secrets|credentials' && \
-      echo \"[SECURITY] Edit to sensitive file: \$TOOL_INPUT\" >> ~/.claude/security.log || true"
+  dot-agents hooks add Stop \
+    --command "git status --short 2>/dev/null | head -5"
 
-────────────────────────────────────────────────────────────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ USER INTERACTION HOOKS (UserPromptSubmit, Notification, PermissionRequest)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Matchers:
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. PROMPT LOGGING                                                            │
+│    Log all user prompts for analysis                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  dot-agents hooks add UserPromptSubmit \
+    --command "echo \"\$(date): \$USER_PROMPT\" >> ~/.claude/prompts.log"
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. DESKTOP NOTIFICATIONS                                                     │
+│    Get macOS notifications from Claude                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  dot-agents hooks add Notification \
+    --command "osascript -e 'display notification \"Claude notification\" with title \"Claude\"'"
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. PERMISSION AUDIT                                                          │
+│    Log when permission dialogs are shown                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  dot-agents hooks add PermissionRequest \
+    --command "echo \"\$(date): Permission requested\" >> ~/.claude/permissions.log"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SUBAGENT HOOKS (SubagentStart, SubagentStop)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. SUBAGENT TRACKING                                                         │
+│    Monitor Task tool (subagent) execution                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  dot-agents hooks add SubagentStart \
+    --command "echo \"Subagent \$SUBAGENT_ID started at \$(date)\" >> ~/.claude/subagents.log"
+
+  dot-agents hooks add SubagentStop \
+    --command "echo \"Subagent \$SUBAGENT_ID stopped at \$(date)\" >> ~/.claude/subagents.log"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ CONTEXT HOOKS (PreCompact)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. BACKUP BEFORE COMPACT                                                    │
+│     Save conversation before compaction                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  dot-agents hooks add PreCompact \
+    --command "cp \"\$TRANSCRIPT_PATH\" ~/.claude/backups/\$(date +%Y%m%d-%H%M%S).jsonl 2>/dev/null || true"
+
+════════════════════════════════════════════════════════════════════════════════
+
+MATCHERS (for tool hooks):
   "*"                   Match all tools
   "Bash"                Match Bash tool only
   "Edit"                Match Edit tool only
@@ -518,10 +627,19 @@ Matchers:
   "Bash(npm:*)"         Match npm commands
   "Bash(rm:-rf:*)"      Match dangerous rm commands
 
-Environment variables available in hooks:
-  $TOOL_INPUT           The tool's input/arguments
-  $TOOL_OUTPUT          The tool's output (PostToolUse only)
-  $SESSION_ID           Current Claude session ID
+ALL 12 HOOK TYPES:
+  Tool:        PreToolUse, PostToolUse, PostToolUseFailure
+  Session:     SessionStart, SessionEnd, Stop
+  User:        UserPromptSubmit, Notification, PermissionRequest
+  Subagent:    SubagentStart, SubagentStop
+  Context:     PreCompact
+
+ENVIRONMENT VARIABLES BY HOOK TYPE:
+  All hooks:            $SESSION_ID, $TRANSCRIPT_PATH
+  Tool hooks:           $TOOL_NAME, $TOOL_INPUT, $TOOL_OUTPUT (PostToolUse* only)
+  UserPromptSubmit:     $USER_PROMPT
+  Subagent hooks:       $SUBAGENT_ID
+  PreCompact:           $SUMMARY_PATH
 
 EOF
 }

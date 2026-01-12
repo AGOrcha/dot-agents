@@ -6,6 +6,16 @@
   },
   "hooks": {
     "PreToolUse": [],
-    "PostToolUse": []
+    "PostToolUse": [],
+    "PostToolUseFailure": [],
+    "Notification": [],
+    "UserPromptSubmit": [],
+    "SessionStart": [],
+    "SessionEnd": [],
+    "Stop": [],
+    "SubagentStart": [],
+    "SubagentStop": [],
+    "PreCompact": [],
+    "PermissionRequest": []
   }
 }
