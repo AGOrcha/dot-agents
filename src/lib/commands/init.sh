@@ -94,7 +94,6 @@ cmd_init() {
     "~/.agents/settings/global/     (shared settings)" \
     "~/.agents/mcp/global/          (shared MCP configs)" \
     "~/.agents/skills/global/       (shared skills, directory-based)" \
-    "~/.agents/memory/global/       (user-level Claude Code memory)" \
     "~/.agents/scripts/             (utility scripts)" \
     "~/.agents/local/               (machine-specific, gitignored)"
 
@@ -106,12 +105,10 @@ cmd_init() {
     "~/.agents/settings/global/claude-code.json (hooks, permissions)" \
     "~/.agents/skills/global/agent-start/SKILL.md (session start)" \
     "~/.agents/skills/global/agent-handoff/SKILL.md (session handoff)" \
-    "~/.agents/skills/global/self-review/SKILL.md (pre-commit checklist)" \
-    "~/.agents/memory/global/CLAUDE.md (user-level memory)"
+    "~/.agents/skills/global/self-review/SKILL.md (pre-commit checklist)"
 
   preview_changes "Symlinks (global platform configs):" \
-    "~/.claude/settings.json → ~/.agents/settings/global/claude-code.json" \
-    "~/.claude/CLAUDE.md → ~/.agents/memory/global/CLAUDE.md (user memory)"
+    "~/.claude/settings.json → ~/.agents/settings/global/claude-code.json"
 
   info_box "Tip" \
     "This directory should be version controlled." \
@@ -147,7 +144,6 @@ cmd_init() {
     "$agents_home/skills/global/agent-start"
     "$agents_home/skills/global/agent-handoff"
     "$agents_home/skills/global/self-review"
-    "$agents_home/memory/global"
     "$agents_home/scripts"
     "$agents_home/local"
   )
@@ -171,10 +167,6 @@ cmd_init() {
   create_file_from_template_silent "$templates_dir/skills/global/self-review/SKILL.md" "$agents_home/skills/global/self-review/SKILL.md"
   bullet "ok" "Created skill templates"
 
-  # Copy memory templates
-  create_file_from_template_silent "$templates_dir/memory/global/CLAUDE.md" "$agents_home/memory/global/CLAUDE.md"
-  bullet "ok" "Created memory templates"
-
   # Create global platform symlinks
   mkdir -p "$HOME/.claude"
 
@@ -184,14 +176,6 @@ cmd_init() {
     bullet "ok" "Created Claude Code global settings symlink"
   else
     bullet "skip" "~/.claude/settings.json exists (use --force to replace)"
-  fi
-
-  # Claude Code: ~/.claude/CLAUDE.md -> ~/.agents/memory/global/CLAUDE.md (user-level memory)
-  if [ ! -e "$HOME/.claude/CLAUDE.md" ] || [ "$FORCE" = true ]; then
-    ln -sf "$agents_home/memory/global/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
-    bullet "ok" "Created Claude Code user memory symlink"
-  else
-    bullet "skip" "~/.claude/CLAUDE.md exists (use --force to replace)"
   fi
 
   # Create XDG state directory

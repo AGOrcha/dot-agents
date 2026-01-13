@@ -17,7 +17,7 @@ Begin each work session by understanding the current state and context.
 
 1. **Check for existing context**
    - Read any TODO comments or task lists in the codebase
-   - Check for CLAUDE.md or similar project documentation
+   - Check for .claude/rules/ or project documentation
    - Review any pinned messages or session notes
 
 2. **Understand the current state**
