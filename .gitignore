@@ -62,8 +62,12 @@ htmlcov/
 *.swp
 *~
 
-# dot-agents specific (if personal)
+# dot-agents specific (managed by dot-agents)
 .agents/
+.claude/
+.codex/
+.cursor/
+.opencode/
 .cursorrules
 CLAUDE.md
 AGENTS.md
