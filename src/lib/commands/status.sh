@@ -244,11 +244,11 @@ check_project_links() {
     issues="missing .cursor/rules/"
   fi
 
-  # Check for CLAUDE.md if claude rules exist
+  # Check for .claude/rules/ if claude rules exist
   if [ -f "$AGENTS_HOME/rules/global/claude-code.mdc" ] || [ -f "$AGENTS_HOME/rules/$name/claude-code.mdc" ]; then
-    if [ ! -e "$path/CLAUDE.md" ]; then
+    if [ ! -d "$path/.claude/rules" ]; then
       [ -n "$issues" ] && issues="$issues,"
-      issues="${issues}missing CLAUDE.md"
+      issues="${issues}missing .claude/rules/"
     fi
   fi
 
@@ -268,16 +268,12 @@ check_project_links_verbose() {
     echo ".cursor/rules/ is empty"
   fi
 
-  # Check for CLAUDE.md
+  # Check for .claude/rules/
   if [ -f "$AGENTS_HOME/rules/global/claude-code.mdc" ] || [ -f "$AGENTS_HOME/rules/$name/claude-code.mdc" ]; then
-    if [ ! -e "$path/CLAUDE.md" ]; then
-      echo "missing CLAUDE.md"
-    elif [ -L "$path/CLAUDE.md" ]; then
-      local target
-      target=$(readlink "$path/CLAUDE.md")
-      if [ ! -f "$target" ]; then
-        echo "CLAUDE.md → broken symlink"
-      fi
+    if [ ! -d "$path/.claude/rules" ]; then
+      echo "missing .claude/rules/"
+    elif [ -z "$(ls -A "$path/.claude/rules" 2>/dev/null)" ]; then
+      echo ".claude/rules/ is empty"
     fi
   fi
 
@@ -409,40 +405,36 @@ audit_claude_text() {
 
   echo -e "  ${CYAN}Claude Code${NC}"
 
-  # Check CLAUDE.md
-  local claude_md="$path/CLAUDE.md"
-  if [ -e "$claude_md" ]; then
-    if [ -L "$claude_md" ]; then
-      local target
-      target=$(readlink "$claude_md")
-      local display_target="${target/#$HOME/~}"
-      if [ -f "$target" ]; then
-        echo -e "    ${GREEN}✓${NC} CLAUDE.md ${DIM}→ $display_target${NC}"
-      else
-        echo -e "    ${RED}✗${NC} CLAUDE.md ${DIM}→ $display_target (broken)${NC}"
+  # Check .claude/rules/ directory
+  local rules_dir="$path/.claude/rules"
+  if [ -d "$rules_dir" ]; then
+    local rule_count=0
+    local broken_count=0
+    shopt -s nullglob
+    for link in "$rules_dir"/*.md; do
+      if [ -L "$link" ]; then
+        local target
+        target=$(readlink "$link")
+        if [ -f "$target" ]; then
+          ((rule_count++))
+        else
+          ((broken_count++))
+        fi
       fi
-    else
-      echo -e "    ${DIM}○${NC} CLAUDE.md ${DIM}(local file)${NC}"
+    done
+    shopt -u nullglob
+
+    if [ $rule_count -gt 0 ]; then
+      echo -e "    ${GREEN}✓${NC} .claude/rules/ ${DIM}($rule_count rule symlinks)${NC}"
+    fi
+    if [ $broken_count -gt 0 ]; then
+      echo -e "    ${RED}✗${NC} .claude/rules/ ${DIM}($broken_count broken symlinks)${NC}"
+    fi
+    if [ $rule_count -eq 0 ] && [ $broken_count -eq 0 ]; then
+      echo -e "    ${DIM}○${NC} .claude/rules/ ${DIM}(empty)${NC}"
     fi
   else
-    echo -e "    ${DIM}(no CLAUDE.md)${NC}"
-  fi
-
-  # Check .claude/ directory
-  local claude_dir="$path/.claude"
-  if [ -e "$claude_dir" ]; then
-    if [ -L "$claude_dir" ]; then
-      local target
-      target=$(readlink "$claude_dir")
-      local display_target="${target/#$HOME/~}"
-      if [ -d "$target" ]; then
-        echo -e "    ${GREEN}✓${NC} .claude/ ${DIM}→ $display_target${NC}"
-      else
-        echo -e "    ${RED}✗${NC} .claude/ ${DIM}→ $display_target (broken)${NC}"
-      fi
-    else
-      echo -e "    ${DIM}○${NC} .claude/ ${DIM}(local directory)${NC}"
-    fi
+    echo -e "    ${DIM}(no .claude/rules/)${NC}"
   fi
   echo ""
 }
@@ -524,13 +516,17 @@ output_audit_json() {
       # Claude
       if [ -z "$agent_filter" ] || [ "$agent_filter" = "claude-code" ]; then
         echo -n ', "claude-code": {'
-        echo -n '"CLAUDE.md": '
-        if [ -e "$path/CLAUDE.md" ]; then
-          echo -n 'true'
-        else
-          echo -n 'false'
+        echo -n '".claude/rules": ['
+        local rules_first=true
+        if [ -d "$path/.claude/rules" ]; then
+          shopt -s nullglob
+          for rule in "$path/.claude/rules"/*.md; do
+            [ "$rules_first" = true ] && rules_first=false || echo -n ","
+            echo -n '"'$(basename "$rule")'"'
+          done
+          shopt -u nullglob
         fi
-        echo -n '}'
+        echo -n ']}'
       fi
 
       # Codex

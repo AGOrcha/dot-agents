@@ -35,10 +35,7 @@ _claude_find_rule_file() {
 }
 
 # Create links for Claude Code (SYMLINKS)
-# Claude Code reads rules from multiple locations:
-#   - CLAUDE.md at repo root (project-specific instructions)
-#   - .claude/rules/*.md (auto-loaded rule files)
-#   - .claude/CLAUDE.md (project memory - auto-loaded)
+# Claude Code reads rules from .claude/rules/*.md (auto-loaded rule files)
 #
 # We use .claude/rules/ with symlinks to the 4 rule sources:
 #   1. global--rules.md        → ~/.agents/rules/global/rules.mdc (all agents, global)
@@ -57,13 +54,6 @@ claude_create_links() {
   # Create symlinks for all 4 rule sources in .claude/rules/
   # Claude Code auto-loads all .md files in this directory
   claude_create_rules_links "$project" "$repo_path"
-
-  # Also create CLAUDE.md symlink for backwards compatibility / visibility
-  # Points to the project's main rules file (or global if none exists)
-  claude_create_main_rules_link "$project" "$repo_path"
-
-  # Create project memory symlink (.claude/CLAUDE.md)
-  claude_create_memory_link "$project" "$repo_path"
 
   # Link settings.local.json if exists
   if [ -f "$AGENTS_HOME/settings/$project/claude-code.json" ]; then
@@ -112,60 +102,6 @@ claude_create_rules_links() {
   [ -z "$project_claude" ] && project_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/claude")
   if [ -n "$project_claude" ]; then
     ln -sf "$project_claude" "$rules_dir/project--claude-code.md"
-  fi
-}
-
-# Create CLAUDE.md symlink at repo root for visibility/backwards compatibility
-claude_create_main_rules_link() {
-  local project="$1"
-  local repo_path="$2"
-
-  # Prefer project-specific rules, fall back to global
-  local target=""
-
-  # Check for project rules file
-  for ext in md mdc txt; do
-    if [ -f "$AGENTS_HOME/rules/$project/rules.$ext" ]; then
-      target="$AGENTS_HOME/rules/$project/rules.$ext"
-      break
-    fi
-    if [ -f "$AGENTS_HOME/rules/$project/claude-code.$ext" ]; then
-      target="$AGENTS_HOME/rules/$project/claude-code.$ext"
-      break
-    fi
-  done
-
-  # Fall back to global rules
-  if [ -z "$target" ]; then
-    for ext in md mdc txt; do
-      if [ -f "$AGENTS_HOME/rules/global/rules.$ext" ]; then
-        target="$AGENTS_HOME/rules/global/rules.$ext"
-        break
-      fi
-    done
-  fi
-
-  # Create symlink if we found a target
-  if [ -n "$target" ]; then
-    ln -sf "$target" "$repo_path/CLAUDE.md"
-  fi
-}
-
-# Create project memory symlink for Claude Code
-# Links .claude/CLAUDE.md → ~/.agents/memory/{project}/CLAUDE.md
-# Claude Code auto-reads .claude/CLAUDE.md as project memory
-claude_create_memory_link() {
-  local project="$1"
-  local repo_path="$2"
-  local memory_file="$AGENTS_HOME/memory/$project/CLAUDE.md"
-  local target="$repo_path/.claude/CLAUDE.md"
-
-  # Create .claude directory if needed
-  mkdir -p "$repo_path/.claude"
-
-  # Only create link if memory file exists
-  if [ -f "$memory_file" ]; then
-    ln -sf "$memory_file" "$target"
   fi
 }
 

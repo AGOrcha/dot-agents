@@ -25,7 +25,7 @@ ${BOLD}DESCRIPTION${NC}
 
     Removes from project directory:
     - .cursor/rules/ hard links (global--, project-- prefixed files)
-    - CLAUDE.md symlink (if pointing to ~/.agents/)
+    - .claude/rules/ symlinks (global--, project-- prefixed files)
     - AGENTS.md symlink (if pointing to ~/.agents/)
 
     With --clean, also removes:
@@ -139,8 +139,9 @@ cmd_remove() {
   if [ -d "$project_path/.cursor/rules" ]; then
     cursor_links=$(ls -1 "$project_path/.cursor/rules/"*.mdc 2>/dev/null | wc -l | tr -d ' ')
   fi
-  [ -L "$project_path/CLAUDE.md" ] && ((claude_links++)) || true
-  [ -L "$project_path/.claude" ] && ((claude_links++)) || true
+  if [ -d "$project_path/.claude/rules" ]; then
+    claude_links=$(ls -1 "$project_path/.claude/rules/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  fi
   [ -L "$project_path/AGENTS.md" ] && ((codex_links++)) || true
 
   local total_links=$((cursor_links + claude_links + codex_links))
@@ -156,8 +157,8 @@ cmd_remove() {
   preview_section "From $display_path:" \
     ".cursor/rules/global--*.mdc     (hard links)" \
     ".cursor/rules/${project_name}--*.mdc (hard links)" \
-    "CLAUDE.md                       (symlink)" \
-    ".claude/                        (symlink)" \
+    ".claude/rules/global--*.md      (symlinks)" \
+    ".claude/rules/project--*.md     (symlinks)" \
     "AGENTS.md                       (symlink)"
 
   preview_section "From ~/.agents/config.json:" \
@@ -304,46 +305,41 @@ remove_cursor_links() {
   fi
 }
 
-# Remove Claude Code symlinks
+# Remove Claude Code symlinks from .claude/rules/
 remove_claude_links() {
   local project="$1"
   local repo="$2"
   local agents_home="$AGENTS_HOME"
+  local rules_dir="$repo/.claude/rules"
 
-  # Remove CLAUDE.md if it's a symlink pointing to our source
-  local claude_md="$repo/CLAUDE.md"
-  if [ -L "$claude_md" ]; then
-    local target
-    target=$(readlink "$claude_md")
+  # Remove symlinks from .claude/rules/ that point to our ~/.agents/ directory
+  if [ -d "$rules_dir" ]; then
+    local removed_count=0
+    shopt -s nullglob
+    for link in "$rules_dir"/*.md; do
+      if [ -L "$link" ]; then
+        local target
+        target=$(readlink "$link")
 
-    # Check if it points to our ~/.agents/ directory
-    if [[ "$target" == "$agents_home"* ]]; then
-      if [ "$DRY_RUN" = true ]; then
-        log_dry "remove CLAUDE.md"
-      else
-        rm "$claude_md"
-        log_info "Removed CLAUDE.md"
+        # Check if it points to our ~/.agents/ directory
+        if [[ "$target" == "$agents_home"* ]]; then
+          if [ "$DRY_RUN" = true ]; then
+            local filename
+            filename=$(basename "$link")
+            log_dry "remove .claude/rules/$filename"
+          else
+            rm "$link"
+            ((removed_count++))
+          fi
+        fi
       fi
-    else
-      [ "$VERBOSE" = true ] && log_skip "CLAUDE.md (not managed by dot-agents)"
-    fi
-  fi
+    done
+    shopt -u nullglob
 
-  # Remove .claude/ if it's a symlink pointing to our source
-  local claude_dir="$repo/.claude"
-  if [ -L "$claude_dir" ]; then
-    local target
-    target=$(readlink "$claude_dir")
-
-    if [[ "$target" == "$agents_home"* ]]; then
-      if [ "$DRY_RUN" = true ]; then
-        log_dry "remove .claude/"
-      else
-        rm "$claude_dir"
-        log_info "Removed .claude/"
-      fi
-    else
-      [ "$VERBOSE" = true ] && log_skip ".claude/ (not managed by dot-agents)"
+    if [ "$removed_count" -gt 0 ]; then
+      log_info "Removed $removed_count Claude Code rule symlinks"
+    elif [ "$VERBOSE" = true ]; then
+      log_info "No Claude Code rule symlinks to remove"
     fi
   fi
 }
