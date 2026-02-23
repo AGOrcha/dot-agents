@@ -37,6 +37,8 @@ ${BOLD}CREATED STRUCTURE${NC}
     │       ├── agent-start/SKILL.md
     │       ├── agent-handoff/SKILL.md
     │       └── self-review/SKILL.md
+    ├── agents/
+    │   └── global/           # Global subagents (directory-based)
     ├── scripts/              # Utility scripts
     └── local/                # Machine-specific (gitignored)
 
@@ -94,6 +96,7 @@ cmd_init() {
     "~/.agents/settings/global/     (shared settings)" \
     "~/.agents/mcp/global/          (shared MCP configs)" \
     "~/.agents/skills/global/       (shared skills, directory-based)" \
+    "~/.agents/agents/global/       (shared subagents, directory-based)" \
     "~/.agents/scripts/             (utility scripts)" \
     "~/.agents/local/               (machine-specific, gitignored)"
 
@@ -144,6 +147,7 @@ cmd_init() {
     "$agents_home/skills/global/agent-start"
     "$agents_home/skills/global/agent-handoff"
     "$agents_home/skills/global/self-review"
+    "$agents_home/agents/global"
     "$agents_home/scripts"
     "$agents_home/local"
   )
@@ -167,15 +171,15 @@ cmd_init() {
   create_file_from_template_silent "$templates_dir/skills/global/self-review/SKILL.md" "$agents_home/skills/global/self-review/SKILL.md"
   bullet "ok" "Created skill templates"
 
-  # Create global platform symlinks
-  mkdir -p "$HOME/.claude"
-
-  # Claude Code: ~/.claude/settings.json -> ~/.agents/settings/global/claude-code.json
-  if [ ! -e "$HOME/.claude/settings.json" ] || [ "$FORCE" = true ]; then
-    ln -sf "$agents_home/settings/global/claude-code.json" "$HOME/.claude/settings.json"
-    bullet "ok" "Created Claude Code global settings symlink"
-  else
-    bullet "skip" "~/.claude/settings.json exists (use --force to replace)"
+  # Create global platform symlinks (only for installed platforms)
+  if claude_is_installed 2>/dev/null; then
+    mkdir -p "$HOME/.claude"
+    if [ ! -e "$HOME/.claude/settings.json" ] || [ "$FORCE" = true ]; then
+      ln -sf "$agents_home/settings/global/claude-code.json" "$HOME/.claude/settings.json"
+      bullet "ok" "Created Claude Code global settings symlink"
+    else
+      bullet "skip" "~/.claude/settings.json exists (use --force to replace)"
+    fi
   fi
 
   # Create XDG state directory

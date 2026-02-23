@@ -32,7 +32,8 @@ ${BOLD}DESCRIPTION${NC}
     - ~/.agents/rules/<project>/
     - ~/.agents/settings/<project>/
     - ~/.agents/mcp/<project>/
-    - ~/.agents/commands/<project>/
+    - ~/.agents/skills/<project>/
+    - ~/.agents/agents/<project>/
 
     Note: Local .cursor/rules/ files not managed by dot-agents are preserved.
 
@@ -157,6 +158,8 @@ cmd_remove() {
   preview_section "From $display_path:" \
     ".cursor/rules/global--*.mdc     (hard links)" \
     ".cursor/rules/${project_name}--*.mdc (hard links)" \
+    ".cursor/commands/*.md           (symlinks to skills)" \
+    ".cursor/agents/*.md             (symlinks to subagents)" \
     ".claude/rules/global--*.md      (symlinks)" \
     ".claude/rules/project--*.md     (symlinks)" \
     "AGENTS.md                       (symlink)"
@@ -170,7 +173,8 @@ cmd_remove() {
       "  ~/.agents/rules/$project_name/" \
       "  ~/.agents/settings/$project_name/" \
       "  ~/.agents/mcp/$project_name/" \
-      "  ~/.agents/commands/$project_name/"
+      "  ~/.agents/skills/$project_name/" \
+      "  ~/.agents/agents/$project_name/"
   else
     info_box "Tip" \
       "Project directories in ~/.agents/ will be preserved." \
@@ -300,8 +304,48 @@ remove_cursor_links() {
   done
   shopt -u nullglob
 
+  # Remove .cursor/commands/ symlinks that point to our skills
+  local cursor_commands_dir="$repo/.cursor/commands"
+  if [ -d "$cursor_commands_dir" ]; then
+    for link in "$cursor_commands_dir"/*.md; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      local target
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .cursor/commands/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .cursor/commands/$(basename "$link")"
+        fi
+        ((removed_count++)) || true
+      fi
+    done
+  fi
+
+  # Remove .cursor/agents/ symlinks that point to our agents
+  local cursor_agents_dir="$repo/.cursor/agents"
+  if [ -d "$cursor_agents_dir" ]; then
+    for link in "$cursor_agents_dir"/*.md; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      local target
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .cursor/agents/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .cursor/agents/$(basename "$link")"
+        fi
+        ((removed_count++)) || true
+      fi
+    done
+  fi
+
   if [ $removed_count -eq 0 ]; then
-    [ "$VERBOSE" = true ] && log_info "No Cursor rules to remove"
+    [ "$VERBOSE" = true ] && log_info "No Cursor links to remove"
   fi
 }
 
@@ -342,6 +386,42 @@ remove_claude_links() {
       log_info "No Claude Code rule symlinks to remove"
     fi
   fi
+
+  # Remove .claude/agents/ symlinks that point to our agents
+  local agents_dir="$repo/.claude/agents"
+  if [ -d "$agents_dir" ]; then
+    for link in "$agents_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .claude/agents/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .claude/agents/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
+
+  # Remove .claude/skills/ symlinks that point to our skills
+  local skills_dir="$repo/.claude/skills"
+  if [ -d "$skills_dir" ]; then
+    for link in "$skills_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .claude/skills/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .claude/skills/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
 }
 
 # Remove Codex symlinks
@@ -367,6 +447,42 @@ remove_codex_links() {
       [ "$VERBOSE" = true ] && log_skip "AGENTS.md (not managed by dot-agents)"
     fi
   fi
+
+  # Remove .codex/agents/ symlinks that point to our agents
+  local agents_dir="$repo/.codex/agents"
+  if [ -d "$agents_dir" ]; then
+    for link in "$agents_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .codex/agents/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .codex/agents/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
+
+  # Remove .codex/skills/ symlinks that point to our skills
+  local skills_dir="$repo/.codex/skills"
+  if [ -d "$skills_dir" ]; then
+    for link in "$skills_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .codex/skills/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .codex/skills/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
 }
 
 # Remove project directories from ~/.agents/
@@ -378,7 +494,8 @@ remove_project_dirs() {
     "$agents_home/rules/$project"
     "$agents_home/settings/$project"
     "$agents_home/mcp/$project"
-    "$agents_home/commands/$project"
+    "$agents_home/skills/$project"
+    "$agents_home/agents/$project"
   )
 
   for dir in "${dirs[@]}"; do

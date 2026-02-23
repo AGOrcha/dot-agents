@@ -18,6 +18,7 @@ ${BOLD}TOPICS${NC}
     settings        How settings work
     mcp             How MCP configs work
     skills          How skills (slash commands) work
+    agents          How subagents work (~/.agents/agents/)
     config          What config.json fields mean
     symlinks        How symlinks and hard links work
     platforms       Supported AI agent platforms
@@ -106,19 +107,22 @@ cmd_explain() {
     skills|commands)
       explain_skills
       ;;
+    agents|subagents)
+      explain_agents
+      ;;
     config|config.json)
       explain_config
       ;;
     symlinks|links)
       explain_symlinks
       ;;
-    platforms|agents)
+    platforms)
       explain_platforms
       ;;
     *)
       log_error "Unknown topic: $topic"
       echo ""
-      echo "Available topics: rules, hooks, scripts, settings, mcp, skills, config, symlinks, platforms"
+      echo "Available topics: rules, hooks, scripts, settings, mcp, skills, agents, config, symlinks, platforms"
       return 1
       ;;
   esac
@@ -502,6 +506,46 @@ COMMANDS:
 
 USAGE IN AGENT:
   Just type /commit and the agent will follow the instructions.
+
+EOF
+}
+
+explain_agents() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Understanding: Subagents
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT ARE SUBAGENTS?
+  Directory-based agent definitions under ~/.agents/agents/.
+  Same layout as skills: global and per-project, each with AGENT.md.
+  They sync with your config when you use 'dot-agents sync' (git).
+
+WHERE DO THEY LIVE?
+  ~/.agents/agents/global/         → Available globally
+  ~/.agents/agents/{project}/       → Project-specific subagents
+
+DIRECTORY STRUCTURE:
+  ~/.agents/agents/global/
+  ├── reviewer/
+  │   ├── AGENT.md
+  │   └── scripts/
+          ├── ...
+  │       └── deep-web-research.sh
+  │  
+  └── deployer/
+      └── AGENT.md
+
+SYNC:
+  Like skills, everything under ~/.agents/ is version-controlled.
+  dot-agents sync init / status / commit / push / pull includes agents/.
+
+COMMANDS:
+  dot-agents agents               # List all subagents
+  dot-agents agents new <name>    # Create new subagent
+  dot-agents agents edit <name>   # Edit in $EDITOR
+  dot-agents agents show <name>   # Show contents
+  dot-agents agents validate <name>  # Check frontmatter
 
 EOF
 }

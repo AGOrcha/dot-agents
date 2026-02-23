@@ -27,11 +27,13 @@ ${BOLD}DESCRIPTION${NC}
     - rules/<project>/         Project-specific rules
     - settings/<project>/      Project settings
     - mcp/<project>/           Project MCP configs
+    - agents/<project>/        Project subagents
 
     Links created in project directory:
 
     ${BOLD}Cursor${NC} (uses HARD LINKS - required by IDE):
     - .cursor/rules/           Global and project rules
+    - .cursor/agents/          Project agents
     - .cursor/settings.json    IDE settings
     - .cursor/mcp.json         MCP server configs
     - .cursorignore            Files to ignore
@@ -188,13 +190,15 @@ cmd_add() {
     "settings/$project_name/           (project settings)" \
     "  └── claude-code.json            (hooks, permissions)" \
     "mcp/$project_name/                (project MCP configs)" \
-    "skills/$project_name/             (project skills)"
+    "skills/$project_name/             (project skills)" \
+    "agents/$project_name/             (project subagents)"
 
   preview_section "$display_path/" \
     ".cursor/rules/global--*.mdc       (hard links to global rules)" \
     ".cursor/settings.json             (hard link to settings)" \
     ".cursor/mcp.json                  (hard link to MCP config)" \
     ".cursor/commands/*.md             (symlinks to skills)" \
+    ".cursor/agents/*.md               (symlinks to subagents)" \
     ".cursorignore                     (hard link to ignore patterns)" \
     ".claude/rules/*.md                (symlinks to rule files)" \
     ".claude/settings.local.json       (symlink to settings)" \
@@ -318,32 +322,27 @@ cmd_add() {
     bullet "ok" "Created project settings template"
   fi
 
-  # Step 4: Link to project
+  # Step 4: Link to project (only for installed platforms)
   step "Linking to project..."
 
-  # Cursor: .cursor/ with HARD LINKS (rules, settings, MCP, ignore)
-  cursor_create_all_links "$project_name" "$project_path"
-  bullet "ok" ".cursor/ configs (hard links)"
-
-  # Claude Code: CLAUDE.md and settings symlinks
-  claude_create_links "$project_name" "$project_path"
-  bullet "ok" "Claude Code links (symlinks)"
-
-  # Claude Code: Skills symlinks (global and project skills)
-  claude_create_skills_links "$project_name" "$project_path"
-  bullet "ok" "Claude Code skills (directory symlinks)"
-
-  # Codex: AGENTS.md symlink
-  codex_create_links "$project_name" "$project_path"
-  bullet "ok" "Codex links (symlinks)"
-
-  # Codex: Skills symlinks (global and project skills)
-  codex_create_skills_links "$project_name" "$project_path"
-  bullet "ok" "Codex skills (directory symlinks)"
-
-  # OpenCode: .opencode/ symlinks
-  opencode_create_links "$project_name" "$project_path"
-  bullet "ok" "OpenCode links (symlinks)"
+  if cursor_is_installed 2>/dev/null; then
+    cursor_create_all_links "$project_name" "$project_path"
+    bullet "ok" ".cursor/ configs (hard links)"
+  fi
+  if claude_is_installed 2>/dev/null; then
+    claude_create_links "$project_name" "$project_path"
+    claude_create_skills_links "$project_name" "$project_path"
+    bullet "ok" "Claude Code links (symlinks)"
+  fi
+  if codex_is_installed 2>/dev/null; then
+    codex_create_links "$project_name" "$project_path"
+    codex_create_skills_links "$project_name" "$project_path"
+    bullet "ok" "Codex links (symlinks)"
+  fi
+  if opencode_is_installed 2>/dev/null; then
+    opencode_create_links "$project_name" "$project_path"
+    bullet "ok" "OpenCode links (symlinks)"
+  fi
 
   # Register in config.json
   config_add_project "$project_name" "$project_path"
@@ -373,6 +372,7 @@ create_project_dirs_silent() {
   mkdir -p "$agents_home/settings/$project"
   mkdir -p "$agents_home/mcp/$project"
   mkdir -p "$agents_home/skills/$project"
+  mkdir -p "$agents_home/agents/$project"
 }
 
 # Create project directories in ~/.agents/ (verbose version)
@@ -385,6 +385,7 @@ create_project_dirs() {
     "$agents_home/settings/$project"
     "$agents_home/mcp/$project"
     "$agents_home/skills/$project"
+    "$agents_home/agents/$project"
   )
 
   for dir in "${dirs[@]}"; do
@@ -408,40 +409,31 @@ setup_project_links() {
   # Check for deprecated formats and warn
   check_deprecated_formats "$repo"
 
-  # Use platform modules for linking (sourced via core.sh)
+  # Use platform modules for linking (only for installed platforms)
   if [ "$DRY_RUN" = true ]; then
-    log_dry "Create Cursor hard links in .cursor/ (rules, settings, MCP, ignore)"
-    log_dry "Create Cursor commands symlinks (.cursor/commands/)"
-    log_dry "Create Claude Code symlinks (.claude/rules/, .claude/settings.local.json, .mcp.json)"
-    log_dry "Create Claude Code skills symlinks (.claude/skills/)"
-    log_dry "Create Codex symlinks (AGENTS.md, .codex/)"
-    log_dry "Create Codex skills symlinks (.codex/skills/)"
-    log_dry "Create OpenCode symlinks (.opencode/)"
+    cursor_is_installed 2>/dev/null && log_dry "Create Cursor config (.cursor/ rules, commands, agents)"
+    claude_is_installed 2>/dev/null && log_dry "Create Claude Code config (.claude/ rules, skills, agents)"
+    codex_is_installed 2>/dev/null && log_dry "Create Codex config (AGENTS.md, .codex/ skills, agents)"
+    opencode_is_installed 2>/dev/null && log_dry "Create OpenCode config (.opencode/)"
   else
-    # Cursor: .cursor/ with HARD LINKS (Cursor doesn't follow symlinks for rules)
-    # Also creates .cursor/commands/ with symlinks (Cursor may follow symlinks for commands)
-    cursor_create_all_links "$project" "$repo"
-    log_create ".cursor/ configs (hard links + command symlinks)"
-
-    # Claude Code: CLAUDE.md and settings symlinks
-    claude_create_links "$project" "$repo"
-    log_create "Claude Code links (symlinks)"
-
-    # Claude Code: Skills symlinks (global and project skills - directory-based)
-    claude_create_skills_links "$project" "$repo"
-    log_create "Claude Code skills (directory symlinks)"
-
-    # Codex: AGENTS.md symlink
-    codex_create_links "$project" "$repo"
-    log_create "Codex links (symlinks)"
-
-    # Codex: Skills symlinks (global and project skills - directory-based)
-    codex_create_skills_links "$project" "$repo"
-    log_create "Codex skills (directory symlinks)"
-
-    # OpenCode: .opencode/ symlinks
-    opencode_create_links "$project" "$repo"
-    log_create "OpenCode links (symlinks)"
+    if cursor_is_installed 2>/dev/null; then
+      cursor_create_all_links "$project" "$repo"
+      log_create ".cursor/ configs (hard links + command/agent symlinks)"
+    fi
+    if claude_is_installed 2>/dev/null; then
+      claude_create_links "$project" "$repo"
+      claude_create_skills_links "$project" "$repo"
+      log_create "Claude Code links (symlinks)"
+    fi
+    if codex_is_installed 2>/dev/null; then
+      codex_create_links "$project" "$repo"
+      codex_create_skills_links "$project" "$repo"
+      log_create "Codex links (symlinks)"
+    fi
+    if opencode_is_installed 2>/dev/null; then
+      opencode_create_links "$project" "$repo"
+      log_create "OpenCode links (symlinks)"
+    fi
   fi
 }
 
@@ -483,14 +475,17 @@ check_existing_config_files() {
   # Root-level files that would be directly replaced
   local root_files=(
     "$project_path/.cursor/rules"
+    "$project_path/.cursor/agents"
     "$project_path/.cursor/settings.json"
     "$project_path/.cursor/mcp.json"
     "$project_path/.cursorignore"
     "$project_path/.claude/rules"
+    "$project_path/.claude/agents"
     "$project_path/.claude/settings.local.json"
     "$project_path/.mcp.json"
     "$project_path/AGENTS.md"
     "$project_path/.codex/instructions.md"
+    "$project_path/.codex/agents"
     "$project_path/.opencode/instructions.md"
     "$project_path/.opencode/config.json"
   )
@@ -529,6 +524,7 @@ scan_existing_ai_configs() {
     ".cursorrules"
     ".cursor/rules/*.mdc"
     ".cursor/rules/*.md"
+    ".cursor/agents/*.md"
     ".cursor/settings.json"
     ".cursor/mcp.json"
     ".cursorignore"
@@ -536,6 +532,8 @@ scan_existing_ai_configs() {
     "CLAUDE.md"
     ".claude/settings.json"
     ".claude/settings.local.json"
+    ".claude/agents/*.md"
+    ".claude/skills/*.md"
     ".claude.json"
     ".mcp.json"
     # Codex ecosystem
