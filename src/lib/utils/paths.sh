@@ -126,6 +126,14 @@ git_root() {
   return 1
 }
 
+# Dot-agents installation repo root (for git commit tracking)
+# Usage: dot_agents_repo_root -> /path/to/dot-agents/repo or ""
+dot_agents_repo_root() {
+  local start="${SRC_DIR:-}"
+  [ -z "$start" ] && return 1
+  git_root "$start" 2>/dev/null || echo "$(dirname "$start")"
+}
+
 # Standard paths for dot-agents
 AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
 AGENTS_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dot-agents"

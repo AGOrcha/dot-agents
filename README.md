@@ -15,6 +15,9 @@ dot-agents add ~/Github/myproject
 # Check status
 dot-agents status
 dot-agents doctor
+
+# Refresh after pulling changes
+dot-agents refresh
 ```
 
 ---
@@ -47,9 +50,17 @@ This leads to:
 │   │   └── security.mdc
 │   └── myproject/           # Project-specific rules
 │       └── api-patterns.mdc
-├── settings/
+├── skills/                  # Reusable agent skills (procedures)
+│   ├── global/
+│   │   └── deploy/SKILL.md
+│   └── myproject/
+├── agents/                  # Subagent definitions
+│   ├── global/
+│   │   └── reviewer/AGENT.md
+│   └── myproject/
+├── settings/                # Agent-specific settings
 │   └── global/
-└── mcp/
+└── mcp/                     # MCP server configurations
     └── global/
 ```
 
@@ -99,7 +110,11 @@ dot-agents add ~/Github/myproject
 #    They'll be linked to all projects automatically
 
 # 4. Check what's applied
-dot-agents audit
+dot-agents status --audit
+
+# 5. Create reusable skills and subagents
+dot-agents skills new deploy
+dot-agents agents new reviewer
 ```
 
 ## Commands
@@ -111,9 +126,21 @@ dot-agents audit
 | `init` | Initialize `~/.agents/` directory |
 | `add <path>` | Add a project to management |
 | `remove <project>` | Remove a project |
-| `status` | Show all managed projects |
+| `status` | Show all managed projects (use `--audit` for details) |
 | `doctor` | Health check and diagnostics |
-| `audit` | Show which configs are applied where |
+| `refresh [project]` | Re-apply links and config to projects |
+
+### Skills & Agents
+
+| Command | Description |
+|---------|-------------|
+| `skills` | Manage reusable skills/procedures |
+| `skills new <name>` | Create a new skill |
+| `skills edit <name>` | Edit a skill in `$EDITOR` |
+| `agents` | Manage subagent definitions |
+| `agents new <name>` | Create a new subagent |
+| `agents edit <name>` | Edit a subagent in `$EDITOR` |
+| `hooks` | Manage Claude Code hooks |
 
 ### Sync
 
@@ -129,6 +156,7 @@ dot-agents audit
 
 | Command | Description |
 |---------|-------------|
+| `explain [topic]` | Self-documenting system descriptions |
 | `context` | Output JSON for AI agents |
 | `--help` | Show help for any command |
 | `--version` | Show version |
@@ -215,6 +243,61 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 }
 ```
 
+### Skills
+
+Skills are reusable procedure documents that agents can invoke:
+
+```bash
+# Create a new skill
+dot-agents skills new deploy
+
+# List all skills
+dot-agents skills
+
+# Edit a skill
+dot-agents skills edit deploy
+```
+
+Skills live in `~/.agents/skills/` with this structure:
+- `SKILL.md` - The skill definition with frontmatter
+- `scripts/` - Optional helper scripts
+- `references/` - Optional additional context
+
+### Subagents
+
+Subagents are directory-based agent definitions:
+
+```bash
+# Create a new subagent
+dot-agents agents new reviewer
+
+# List all subagents
+dot-agents agents
+
+# Validate an agent's frontmatter
+dot-agents agents validate reviewer
+```
+
+Each subagent is a directory containing:
+- `AGENT.md` - Required agent definition with frontmatter (name, description, model)
+- `scripts/` - Optional helper scripts
+- `references/` - Optional additional context documents
+
+### Claude Code Hooks
+
+Manage Claude Code hooks for automation:
+
+```bash
+# List all hooks
+dot-agents hooks
+
+# Add a hook
+dot-agents hooks add PreToolUse -m "Bash" -c "echo \\$TOOL_INPUT >> log.txt"
+
+# Show hook examples
+dot-agents hooks examples
+```
+
 ## FAQ
 
 **Q: Why hard links for Cursor?**
@@ -232,6 +315,19 @@ Yes. Everything stays in `~/.agents/` on your machine. Git sync is optional and 
 **Q: What if I don't use all the agents?**
 
 That's fine! dot-agents only creates config files for agents it detects or that you have rules for.
+
+**Q: What is `dot-agents refresh` for?**
+
+After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config.
+
+**Q: How do skills differ from rules?**
+
+- **Rules** (`.mdc` files) are always-active guidelines applied to all projects
+- **Skills** (`SKILL.md` files) are on-demand procedures that agents invoke when needed, like deployment checklists or code review workflows
+
+**Q: Can I sync my config across machines?**
+
+Yes! `dot-agents sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `dot-agents refresh` to set up all your projects.
 
 ## Contributing
 

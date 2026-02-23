@@ -48,6 +48,7 @@ claude_create_links() {
   local project="$1"
   local repo_path="$2"
 
+  claude_ensure_user_agents
   # Create .claude directory structure
   mkdir -p "$repo_path/.claude/rules"
 
@@ -65,6 +66,32 @@ claude_create_links() {
     ln -sf "$AGENTS_HOME/mcp/$project/claude.json" "$repo_path/.mcp.json"
   elif [ -f "$AGENTS_HOME/mcp/global/claude.json" ]; then
     ln -sf "$AGENTS_HOME/mcp/global/claude.json" "$repo_path/.mcp.json"
+  fi
+
+  # Project agents (global → user-level ~/.claude/agents)
+  claude_create_agents_links "$project" "$repo_path"
+}
+
+# Create agents symlinks for Claude Code: project agents only (symlink dirs to .claude/agents/)
+claude_create_agents_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  local agents_target="$repo_path/.claude/agents"
+  local project_agents="$AGENTS_HOME/agents/$project"
+
+  mkdir -p "$agents_target"
+  rm -f "$agents_target"/* 2>/dev/null || true
+
+  if [ -d "$project_agents" ]; then
+    for agent_dir in "$project_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      local name
+      name=$(basename "$agent_dir")
+      local target="$agents_target/$name"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$agent_dir" "$target"
+    done
   fi
 }
 
@@ -105,54 +132,54 @@ claude_create_rules_links() {
   fi
 }
 
-# Create skills symlinks for Claude Code (directory-based)
-# Symlinks global and project skills to .claude/skills/ so they work as slash commands
-# Project skills override global skills with the same name (with warning)
+# User-level dirs for global agents/skills
+CLAUDE_USER_AGENTS="${CLAUDE_USER_AGENTS:-$HOME/.claude/agents}"
+CLAUDE_USER_SKILLS="${CLAUDE_USER_SKILLS:-$HOME/.claude/skills}"
+
+# Ensure user-level ~/.claude/agents has global agents (symlink dirs or AGENT.md)
+claude_ensure_user_agents() {
+  local global_agents="$AGENTS_HOME/agents/global"
+  mkdir -p "$CLAUDE_USER_AGENTS"
+  [ ! -d "$global_agents" ] && return 0
+  for agent_dir in "$global_agents"/*/; do
+    [ -d "$agent_dir" ] || continue
+    [ -f "$agent_dir/AGENT.md" ] || continue
+    local name
+    name=$(basename "$agent_dir")
+    local target="$CLAUDE_USER_AGENTS/$name"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$agent_dir" "$target"
+  done
+}
+
+# Ensure user-level ~/.claude/skills has global skills (symlink dirs)
+claude_ensure_user_skills() {
+  local global_skills="$AGENTS_HOME/skills/global"
+  mkdir -p "$CLAUDE_USER_SKILLS"
+  [ ! -d "$global_skills" ] && return 0
+  for skill_dir in "$global_skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    local name
+    name=$(basename "$skill_dir")
+    local target="$CLAUDE_USER_SKILLS/$name"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$skill_dir" "$target"
+  done
+}
+
+# Create skills symlinks for Claude Code: project skills only (global → user-level ~/.claude/skills)
 claude_create_skills_links() {
   local project="$1"
   local repo_path="$2"
 
+  claude_ensure_user_skills
   local skills_target="$repo_path/.claude/skills"
-  local global_skills="$AGENTS_HOME/skills/global"
   local project_skills="$AGENTS_HOME/skills/$project"
 
-  # Create skills directory
   mkdir -p "$skills_target"
+  rm -f "$skills_target"/* 2>/dev/null || true
 
-  # Collect project skill names (for conflict detection)
-  local project_skill_names=""
-  if [ -d "$project_skills" ]; then
-    for skill_dir in "$project_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      project_skill_names="$project_skill_names $name "
-    done
-  fi
-
-  # Symlink global skills (no prefix, skip if shadowed by project skill)
-  if [ -d "$global_skills" ]; then
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$skills_target/$name"
-
-      # Check if project has a skill with the same name
-      if [[ "$project_skill_names" == *" $name "* ]]; then
-        # Project skill shadows global - warn and skip
-        echo -e "  ${YELLOW}⚠${NC}  Skill '$name' shadows global skill (project overrides global)" >&2
-        continue
-      fi
-
-      # Only create if doesn't exist
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
-    done
-  fi
-
-  # Symlink project skills (no prefix)
   if [ -d "$project_skills" ]; then
     for skill_dir in "$project_skills"/*/; do
       [ -d "$skill_dir" ] || continue
@@ -160,7 +187,6 @@ claude_create_skills_links() {
       local name
       name=$(basename "$skill_dir")
       local target="$skills_target/$name"
-      # Only create if doesn't exist
       [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
     done
   fi

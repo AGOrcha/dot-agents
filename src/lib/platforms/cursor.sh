@@ -140,7 +140,43 @@ cursor_create_ignore_link() {
   fi
 }
 
-# Create all Cursor links (rules, settings, MCP, ignore, commands)
+# User-level dirs for global agents/skills (one place, not per-project)
+CURSOR_USER_AGENTS="${CURSOR_USER_AGENTS:-$HOME/.cursor/agents}"
+CURSOR_USER_COMMANDS="${CURSOR_USER_COMMANDS:-$HOME/.cursor/commands}"
+
+# Ensure user-level ~/.cursor/commands has global skills (SKILL.md → {name}.md)
+cursor_ensure_user_commands() {
+  local global_skills="$AGENTS_HOME/skills/global"
+  mkdir -p "$CURSOR_USER_COMMANDS"
+  [ ! -d "$global_skills" ] && return 0
+  for skill_dir in "$global_skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    local name
+    name=$(basename "$skill_dir")
+    local target="$CURSOR_USER_COMMANDS/$name.md"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$skill_dir/SKILL.md" "$target"
+  done
+}
+
+# Ensure user-level ~/.cursor/agents has global agents (AGENT.md → {name}.md)
+cursor_ensure_user_agents() {
+  local global_agents="$AGENTS_HOME/agents/global"
+  mkdir -p "$CURSOR_USER_AGENTS"
+  [ ! -d "$global_agents" ] && return 0
+  for agent_dir in "$global_agents"/*/; do
+    [ -d "$agent_dir" ] || continue
+    [ -f "$agent_dir/AGENT.md" ] || continue
+    local name
+    name=$(basename "$agent_dir")
+    local target="$CURSOR_USER_AGENTS/$name.md"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$agent_dir/AGENT.md" "$target"
+  done
+}
+
+# Create all Cursor links (rules, settings, MCP, ignore, commands, agents)
 cursor_create_all_links() {
   local project="$1"
   local repo_path="$2"
@@ -149,7 +185,10 @@ cursor_create_all_links() {
   cursor_create_settings_links "$project" "$repo_path"
   cursor_create_mcp_links "$project" "$repo_path"
   cursor_create_ignore_link "$project" "$repo_path"
+  cursor_ensure_user_commands
+  cursor_ensure_user_agents
   cursor_create_commands_links "$project" "$repo_path"
+  cursor_create_agents_links "$project" "$repo_path"
 }
 
 # Create commands symlinks for Cursor (directory-based skills → flat .md files)
@@ -160,57 +199,43 @@ cursor_create_commands_links() {
   local repo_path="$2"
 
   local commands_target="$repo_path/.cursor/commands"
-  local global_skills="$AGENTS_HOME/skills/global"
   local project_skills="$AGENTS_HOME/skills/$project"
 
   # Create commands directory
   mkdir -p "$commands_target"
+  rm -f "$commands_target"/*.md 2>/dev/null || true
 
-  # Collect project skill names (for conflict detection)
-  local project_skill_names=""
   if [ -d "$project_skills" ]; then
     for skill_dir in "$project_skills"/*/; do
       [ -d "$skill_dir" ] || continue
       [ -f "$skill_dir/SKILL.md" ] || continue
       local name
       name=$(basename "$skill_dir")
-      project_skill_names="$project_skill_names $name "
+      local target="$commands_target/$name.md"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir/SKILL.md" "$target"
     done
   fi
+}
 
-  # Symlink global skills' SKILL.md (no prefix, skip if shadowed by project skill)
-  if [ -d "$global_skills" ]; then
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
+# Create agents symlinks for Cursor: project agents only (global → user-level ~/.cursor/agents)
+cursor_create_agents_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  local agents_target="$repo_path/.cursor/agents"
+  local project_agents="$AGENTS_HOME/agents/$project"
+
+  mkdir -p "$agents_target"
+  rm -f "$agents_target"/*.md 2>/dev/null || true
+
+  if [ -d "$project_agents" ]; then
+    for agent_dir in "$project_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
       local name
-      name=$(basename "$skill_dir")
-      local skill_file="$skill_dir/SKILL.md"
-      local target="$commands_target/$name.md"
-
-      # Check if project has a skill with the same name
-      if [[ "$project_skill_names" == *" $name "* ]]; then
-        # Project skill shadows global - warn and skip
-        echo -e "  ${YELLOW}⚠${NC}  Skill '$name' shadows global skill (project overrides global)" >&2
-        continue
-      fi
-
-      # Symlink SKILL.md to {name}.md (Cursor uses flat files)
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_file" "$target"
-    done
-  fi
-
-  # Symlink project skills' SKILL.md (no prefix)
-  if [ -d "$project_skills" ]; then
-    for skill_dir in "$project_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local skill_file="$skill_dir/SKILL.md"
-      local target="$commands_target/$name.md"
-      # Symlink SKILL.md to {name}.md
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_file" "$target"
+      name=$(basename "$agent_dir")
+      local target="$agents_target/$name.md"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$agent_dir/AGENT.md" "$target"
     done
   fi
 }

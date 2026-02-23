@@ -33,17 +33,19 @@ ${BOLD}USAGE${NC}
     dot-agents <command> [options]
 
 ${BOLD}CORE COMMANDS${NC}
-    init              Initialize ~/.agents/ directory structure
-    add <project>     Add a project to dot-agents management
-    remove <project>  Remove a project from dot-agents management
-    status            Show managed projects and their status
-                        --audit     Detailed link/config info
-    doctor            Check health of dot-agents installation
-                        --redundancy  Check for duplicate rules
-                        --migrate     Detect deprecated formats
+    init                 Initialize ~/.agents/ directory structure
+    add <project>        Add a project to dot-agents management
+    remove <project>     Remove a project from dot-agents management
+    status               Show managed projects and their status
+                           --audit     Detailed link/config info
+    doctor               Check health of dot-agents installation
+                           --redundancy  Check for duplicate rules
+                           --migrate     Detect deprecated formats
+    refresh (<project>)  Refresh managed setup in project(s) from ~/.agents
 
-${BOLD}SKILLS & HOOKS${NC}
+${BOLD}SKILLS, AGENTS & HOOKS${NC}
     skills            Manage skills (list, new, edit, migrate)
+    agents            Manage subagents (list, new, edit, show)
     hooks             Manage Claude Code hooks configuration
 
 ${BOLD}UTILITIES${NC}
@@ -51,13 +53,13 @@ ${BOLD}UTILITIES${NC}
     explain           Self-documenting system descriptions
 
 ${BOLD}GLOBAL OPTIONS${NC}
-    --help, -h        Show help for a command
-    --version         Show version information
-    --verbose, -v     Show detailed output
-    --json            Output in JSON format (where supported)
-    --dry-run         Show what would be done without making changes
-    --force, -f       Force overwrite existing files
-    --yes, -y         Auto-confirm prompts (non-interactive mode)
+    --help, -h           Show help for a command
+    --version            Show version information
+    --verbose, -v        Show detailed output
+    --json               Output in JSON format (where supported)
+    --dry-run            Show what would be done without making changes
+    --force, -f          Force overwrite existing files
+    --yes, -y            Auto-confirm prompts (non-interactive mode)
 
 ${BOLD}EXAMPLES${NC}
     dot-agents init                     # Set up ~/.agents/
@@ -66,9 +68,12 @@ ${BOLD}EXAMPLES${NC}
     dot-agents status --audit           # Detailed config info
     dot-agents doctor                   # Check for issues
     dot-agents doctor --redundancy      # Check for duplicates
+    dot-agents refresh myproject        # Refresh setup for project
+    dot-agents refresh                  # Refresh all projects
 
 ${BOLD}DOCUMENTATION${NC}
     https://github.com/dot-agents/dot-agents
+    dot-agents <command> --help   Command-specific help (e.g. refresh --help)
 
 EOF
 }

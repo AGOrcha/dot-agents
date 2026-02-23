@@ -19,11 +19,48 @@ codex_version() {
   codex_detect
 }
 
+# User-level dirs for global agents/skills
+CODEX_USER_AGENTS="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
+CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.codex/skills}"
+
+# Ensure user-level ~/.codex/agents has global agents (symlink dirs)
+codex_ensure_user_agents() {
+  local global_agents="$AGENTS_HOME/agents/global"
+  mkdir -p "$CODEX_USER_AGENTS"
+  [ ! -d "$global_agents" ] && return 0
+  for agent_dir in "$global_agents"/*/; do
+    [ -d "$agent_dir" ] || continue
+    [ -f "$agent_dir/AGENT.md" ] || continue
+    local name
+    name=$(basename "$agent_dir")
+    local target="$CODEX_USER_AGENTS/$name"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$agent_dir" "$target"
+  done
+}
+
+# Ensure user-level ~/.codex/skills has global skills (symlink dirs)
+codex_ensure_user_skills() {
+  local global_skills="$AGENTS_HOME/skills/global"
+  mkdir -p "$CODEX_USER_SKILLS"
+  [ ! -d "$global_skills" ] && return 0
+  for skill_dir in "$global_skills"/*/; do
+    [ -d "$skill_dir" ] || continue
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    local name
+    name=$(basename "$skill_dir")
+    local target="$CODEX_USER_SKILLS/$name"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    ln -sf "$skill_dir" "$target"
+  done
+}
+
 # Create links for Codex (SYMLINKS - works fine)
 codex_create_links() {
   local project="$1"
   local repo_path="$2"
 
+  codex_ensure_user_agents
   # Link AGENTS.md from global rules if it exists
   if [ -f "$AGENTS_HOME/rules/global/agents.md" ]; then
     ln -sf "$AGENTS_HOME/rules/global/agents.md" "$repo_path/AGENTS.md"
@@ -47,6 +84,32 @@ codex_create_links() {
   elif [ -f "$AGENTS_HOME/settings/global/codex.toml" ]; then
     ln -sf "$AGENTS_HOME/settings/global/codex.toml" "$repo_path/.codex/config.toml"
   fi
+
+  # Project agents (global → user-level ~/.codex/agents)
+  codex_create_agents_links "$project" "$repo_path"
+}
+
+# Create agents symlinks for Codex: project agents only (symlink dirs to .codex/agents/)
+codex_create_agents_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  local agents_target="$repo_path/.codex/agents"
+  local project_agents="$AGENTS_HOME/agents/$project"
+
+  mkdir -p "$agents_target"
+  rm -f "$agents_target"/* 2>/dev/null || true
+
+  if [ -d "$project_agents" ]; then
+    for agent_dir in "$project_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      local name
+      name=$(basename "$agent_dir")
+      local target="$agents_target/$name"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$agent_dir" "$target"
+    done
+  fi
 }
 
 # Check for deprecated formats (Codex has been stable - no deprecated formats)
@@ -62,54 +125,18 @@ codex_deprecated_details() {
   echo ""
 }
 
-# Create skills symlinks for Codex CLI (directory-based)
-# Symlinks global and project skills to .codex/skills/ so they work as slash commands
-# Project skills override global skills with the same name (with warning)
+# Create project skills symlinks for Codex CLI (directory-based)
 codex_create_skills_links() {
   local project="$1"
   local repo_path="$2"
 
+  codex_ensure_user_skills
   local skills_target="$repo_path/.codex/skills"
-  local global_skills="$AGENTS_HOME/skills/global"
   local project_skills="$AGENTS_HOME/skills/$project"
 
-  # Create skills directory
   mkdir -p "$skills_target"
+  rm -f "$skills_target"/* 2>/dev/null || true
 
-  # Collect project skill names (for conflict detection)
-  local project_skill_names=""
-  if [ -d "$project_skills" ]; then
-    for skill_dir in "$project_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      project_skill_names="$project_skill_names $name "
-    done
-  fi
-
-  # Symlink global skills (no prefix, skip if shadowed by project skill)
-  if [ -d "$global_skills" ]; then
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$skills_target/$name"
-
-      # Check if project has a skill with the same name
-      if [[ "$project_skill_names" == *" $name "* ]]; then
-        # Project skill shadows global - warn and skip
-        echo -e "  ${YELLOW}⚠${NC}  Skill '$name' shadows global skill (project overrides global)" >&2
-        continue
-      fi
-
-      # Only create if doesn't exist
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
-    done
-  fi
-
-  # Symlink project skills (no prefix)
   if [ -d "$project_skills" ]; then
     for skill_dir in "$project_skills"/*/; do
       [ -d "$skill_dir" ] || continue
@@ -117,7 +144,6 @@ codex_create_skills_links() {
       local name
       name=$(basename "$skill_dir")
       local target="$skills_target/$name"
-      # Only create if doesn't exist
       [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
     done
   fi

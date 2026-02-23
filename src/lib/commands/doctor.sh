@@ -270,6 +270,137 @@ run_doctor_text() {
   fi
 
   echo ""
+  log_section "User-level platform dirs (global agents/skills)"
+
+  # Cursor: ~/.cursor/commands (skills), ~/.cursor/agents
+  local cursor_commands="${CURSOR_USER_COMMANDS:-$HOME/.cursor/commands}"
+  local cursor_agents="${CURSOR_USER_AGENTS:-$HOME/.cursor/agents}"
+  if [ -d "$cursor_commands" ]; then
+    local n=0
+    for f in "$cursor_commands"/*.md; do [ -e "$f" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Cursor ~/.cursor/commands: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Cursor ~/.cursor/commands: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Cursor ~/.cursor/commands: not found"
+  fi
+  if [ -d "$cursor_agents" ]; then
+    local n=0
+    for f in "$cursor_agents"/*.md; do [ -e "$f" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Cursor ~/.cursor/agents: $n agent(s)" || echo -e "  ${YELLOW}○${NC} Cursor ~/.cursor/agents: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Cursor ~/.cursor/agents: not found"
+  fi
+
+  # Claude: ~/.claude/skills, ~/.claude/agents
+  local claude_skills="${CLAUDE_USER_SKILLS:-$HOME/.claude/skills}"
+  local claude_agents="${CLAUDE_USER_AGENTS:-$HOME/.claude/agents}"
+  if [ -d "$claude_skills" ]; then
+    local n=0
+    for d in "$claude_skills"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Claude ~/.claude/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Claude ~/.claude/skills: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Claude ~/.claude/skills: not found"
+  fi
+  if [ -d "$claude_agents" ]; then
+    local n=0
+    for d in "$claude_agents"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Claude ~/.claude/agents: $n agent(s)" || echo -e "  ${YELLOW}○${NC} Claude ~/.claude/agents: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Claude ~/.claude/agents: not found"
+  fi
+
+  # Codex: ~/.codex/skills, ~/.codex/agents
+  local codex_skills="${CODEX_USER_SKILLS:-$HOME/.codex/skills}"
+  local codex_agents="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
+  if [ -d "$codex_skills" ]; then
+    local n=0
+    for d in "$codex_skills"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.codex/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.codex/skills: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Codex ~/.codex/skills: not found"
+  fi
+  if [ -d "$codex_agents" ]; then
+    local n=0
+    for d in "$codex_agents"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.codex/agents: $n agent(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.codex/agents: empty"
+  else
+    echo -e "  ${GRAY}○${NC} Codex ~/.codex/agents: not found"
+  fi
+
+  echo ""
+  log_section "Subagents"
+
+  source "$LIB_DIR/commands/agents.sh"
+  local global_agents="$AGENTS_HOME/agents/global"
+  local agents_valid=0
+  local agents_invalid=0
+
+  # Global agents (summary line like Skills)
+  if [ -d "$global_agents" ]; then
+    local global_count=0
+    local global_invalid=0
+    for agent_dir in "$global_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      if validate_agent_dir "$agent_dir"; then
+        ((global_count++)) || true
+        ((agents_valid++)) || true
+      else
+        ((global_invalid++)) || true
+        ((agents_invalid++)) || true
+      fi
+    done
+    if [ "$global_count" -gt 0 ] && [ "$global_invalid" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} Global agents: $global_count found"
+      ((checks_passed++)) || true
+    elif [ "$global_count" -gt 0 ] || [ "$global_invalid" -gt 0 ]; then
+      echo -e "  ${YELLOW}○${NC} Global agents: $global_count valid, $global_invalid invalid"
+    else
+      echo -e "  ${YELLOW}○${NC} Global agents: directory exists but empty"
+    fi
+  else
+    echo -e "  ${YELLOW}○${NC} Global agents: not found"
+    echo -e "      ${DIM}→ Run 'dot-agents init' to create${NC}"
+  fi
+
+  # Project agents (one line per managed project, like Skills)
+  if [ -f "$AGENTS_HOME/config.json" ] && has_jq; then
+    local projects
+    projects=$(jq -r '.projects | keys[]' "$AGENTS_HOME/config.json" 2>/dev/null)
+
+    for project in $projects; do
+      local project_agents="$AGENTS_HOME/agents/$project"
+      if [ -d "$project_agents" ]; then
+        local proj_count=0
+        local proj_invalid=0
+        for agent_dir in "$project_agents"/*/; do
+          [ -d "$agent_dir" ] || continue
+          [ -f "$agent_dir/AGENT.md" ] || continue
+          if validate_agent_dir "$agent_dir"; then
+            ((proj_count++)) || true
+            ((agents_valid++)) || true
+          else
+            ((proj_invalid++)) || true
+            ((agents_invalid++)) || true
+          fi
+        done
+        if [ "$proj_count" -gt 0 ] && [ "$proj_invalid" -eq 0 ]; then
+          echo -e "  ${GREEN}✓${NC} $project: $proj_count agent(s) valid"
+        elif [ "$proj_count" -gt 0 ] || [ "$proj_invalid" -gt 0 ]; then
+          echo -e "  ${YELLOW}○${NC} $project: $proj_count valid, $proj_invalid invalid"
+        else
+          echo -e "  ${YELLOW}○${NC} $project: no agents"
+        fi
+      else
+        echo -e "  ${GRAY}○${NC} $project: no agents/"
+      fi
+    done
+  fi
+
+  if [ "$agents_invalid" -gt 0 ]; then
+    ((checks_failed++)) || true
+  fi
+
+  echo ""
   log_section "Directory Structure"
 
   # Check key directories exist
@@ -278,6 +409,7 @@ run_doctor_text() {
     "settings/global"
     "mcp/global"
     "skills/global"
+    "agents/global"
     "scripts"
     "local"
   )
