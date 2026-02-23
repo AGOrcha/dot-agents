@@ -162,10 +162,10 @@ read_file() {
   fi
 }
 
-# Check if jq is available (for JSON operations)
+# Check if yq is available (for JSON operations)
 # Note: Full JSON utilities are in json.sh
-has_jq() {
-  command_exists jq
+has_yq() {
+  command_exists yq
 }
 
 # Confirm action with user
@@ -183,4 +183,4 @@ confirm() {
   esac
 }
 
-export -f command_exists require_command is_ci get_os read_file has_jq json_get confirm
+export -f command_exists require_command is_ci get_os read_file has_yq json_get confirm
