@@ -25,7 +25,7 @@ ${BOLD}TOPICS${NC}
 
 ${BOLD}OPTIONS${NC}
     --agent <name>  Explain config patterns for a specific agent
-                    (cursor, claude-code, codex, opencode)
+                    (cursor, claude-code, codex, opencode, github-copilot)
     --verbose, -v   Show detailed information
     --help, -h      Show this help
 
@@ -137,7 +137,8 @@ explain_overview() {
 WHAT IS DOT-AGENTS?
   A unified configuration layer for AI coding agents.
   One ~/.agents/ directory manages configs for Cursor, Claude Code,
-  Codex, and OpenCode - all from a single, git-trackable location.
+  Codex, OpenCode, and GitHub Copilot - all from a single,
+  git-trackable location.
 
 DIRECTORY STRUCTURE:
   ~/.agents/
@@ -672,6 +673,13 @@ OPENCODE
     opencode.json          - Project config
     .opencode/agent/*.md   - Agent definitions
 
+GITHUB COPILOT
+  GitHub Copilot project instructions.
+  Config locations:
+    .github/copilot-instructions.md  - Repository instructions
+    .github/skills/*/SKILL.md        - Project skills
+    .github/agents/*.agent.md        - Project custom agents
+
 DETECTION:
   dot-agents doctor            # Shows installed agents
   dot-agents status --json     # Agent info in JSON
@@ -699,10 +707,13 @@ explain_agent() {
     opencode)
       explain_agent_opencode
       ;;
+    github-copilot|copilot)
+      explain_agent_copilot
+      ;;
     *)
       log_error "Unknown agent: $agent"
       echo ""
-      echo "Available agents: cursor, claude-code, codex, opencode"
+      echo "Available agents: cursor, claude-code, codex, opencode, github-copilot"
       return 1
       ;;
   esac
@@ -888,6 +899,49 @@ DETECTION:
 HOW DOT-AGENTS MANAGES IT:
   ~/.agents/settings/{project}/opencode.json → opencode.json (symlink)
   ~/.agents/rules/{project}/                 → .opencode/agent/ (symlink)
+
+EOF
+}
+
+explain_agent_copilot() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GitHub Copilot Configuration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ABOUT:
+  GitHub Copilot supports repository-level instructions via
+  .github/copilot-instructions.md.
+
+CONFIG FILES:
+
+  .github/copilot-instructions.md
+    Project instructions that guide Copilot behavior in this repo.
+
+  .github/skills/{skill}/SKILL.md
+    Project skills loaded by Copilot when relevant.
+
+  .github/agents/{name}.agent.md
+    Custom agent definitions for VS Code Copilot chat.
+
+HOW DOT-AGENTS MANAGES IT:
+  ~/.agents/rules/{project}/copilot-instructions.md
+    → .github/copilot-instructions.md (symlink)
+
+  ~/.agents/skills/{project}/{skill}/
+    → .github/skills/{skill}/ (symlink directory)
+
+  ~/.agents/agents/{project}/{agent}/AGENT.md
+    → .github/agents/{agent}.agent.md (symlink)
+
+  Fallback order when linking:
+    1) ~/.agents/rules/{project}/copilot-instructions.md
+    2) ~/.agents/rules/global/copilot-instructions.md
+    3) ~/.agents/rules/{project}/rules.(md|mdc|txt)
+    4) ~/.agents/rules/global/rules.(md|mdc|txt)
+
+VERIFICATION:
+  dot-agents status --audit --agent github-copilot
 
 EOF
 }

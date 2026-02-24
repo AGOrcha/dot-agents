@@ -151,6 +151,7 @@ run_doctor_text() {
   detect_agent_platform "Claude Code" claude_is_installed claude_version
   detect_agent_platform "Codex CLI" codex_is_installed codex_version
   detect_agent_platform "OpenCode" opencode_is_installed opencode_version
+  detect_agent_platform "GitHub Copilot" copilot_is_installed copilot_version
 
   echo ""
   log_section "Global Settings"
@@ -324,6 +325,32 @@ run_doctor_text() {
     [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.codex/agents: $n agent(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.codex/agents: empty"
   else
     echo -e "  ${GRAY}○${NC} Codex ~/.codex/agents: not found"
+  fi
+
+  # GitHub Copilot:
+  # - Personal skills default to ~/.copilot/skills (docs)
+  # - Custom agent files are discovered via configurable chat.agentFilesLocations
+  local copilot_skills="${COPILOT_USER_SKILLS:-$HOME/.github/skills}"
+  if [ -d "$copilot_skills" ]; then
+    local n=0
+    for d in "$copilot_skills"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} GitHub Copilot ~/.github/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} GitHub Copilot ~/.github/skills: empty"
+  else
+    echo -e "  ${GRAY}○${NC} GitHub Copilot ~/.github/skills: not found"
+  fi
+
+  local copilot_agents="${COPILOT_USER_AGENTS:-$HOME/.github/agents}"
+  if [ -n "$copilot_agents" ]; then
+    if [ -d "$copilot_agents" ]; then
+      local n=0
+      for f in "$copilot_agents"/*.md; do [ -e "$f" ] && ((n++)) || true; done
+      [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} GitHub Copilot $copilot_agents: $n custom agent file(s)" || echo -e "  ${YELLOW}○${NC} GitHub Copilot $copilot_agents: empty"
+    else
+      echo -e "  ${GRAY}○${NC} GitHub Copilot ~/.github/agents: not found"
+    fi
+  else
+    echo -e "  ${GRAY}○${NC} GitHub Copilot custom agents dir: not configured"
+    echo -e "      ${DIM}→ Configure chat.agentFilesLocations (workspace/user setting)${NC}"
   fi
 
   echo ""
@@ -531,7 +558,16 @@ run_doctor_json() {
   if opencode_is_installed; then
     local opencode_ver
     opencode_ver=$(opencode_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$opencode_ver"'"}'
+    echo '{"installed": true, "version": "'"$opencode_ver"'"},'
+  else
+    echo '{"installed": false},'
+  fi
+
+  echo -n '    "github-copilot": '
+  if copilot_is_installed; then
+    local copilot_ver
+    copilot_ver=$(copilot_version || echo "unknown")
+    echo '{"installed": true, "version": "'"$copilot_ver"'"}'
   else
     echo '{"installed": false}'
   fi

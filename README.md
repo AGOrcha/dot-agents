@@ -2,7 +2,7 @@
 
 **Unified config layer for AI coding agents**
 
-One CLI to manage configurations across Cursor, Claude Code, Codex, and more.
+One CLI to manage configurations across Cursor, Claude Code, Codex, GitHub Copilot, and more.
 
 ```bash
 # Install
@@ -31,6 +31,7 @@ Every AI coding agent has its own config location and format:
 | Cursor | `.cursor/rules/*.mdc` | MDC (Markdown) |
 | Claude Code | `CLAUDE.md`, `.claude/` | Markdown, JSON |
 | Codex | `AGENTS.md` | Markdown |
+| GitHub Copilot | `.github/copilot-instructions.md`, `.github/skills/`, `.github/agents/` | Markdown |
 
 This leads to:
 - **Duplicated rules** across every repository
@@ -211,7 +212,8 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
 | **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/` |
 | **Codex** | ✅ Full | `AGENTS.md` |
-| **OpenCode** | ⚠️ Basic | Detection only |
+| **OpenCode** | ⚠️ Basic | `opencode.json`, `.opencode/agent/*.md` |
+| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md`, `.github/agents/*.agent.md` |
 
 ## Requirements
 

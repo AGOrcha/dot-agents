@@ -105,6 +105,7 @@ cmd_init() {
     "~/.agents/README.md            (documentation)" \
     "~/.agents/.gitignore           (git ignore patterns)" \
     "~/.agents/rules/global/rules.mdc (starter rules)" \
+    "~/.agents/rules/global/copilot-instructions.md (GitHub Copilot instructions)" \
     "~/.agents/settings/global/claude-code.json (hooks, permissions)" \
     "~/.agents/skills/global/agent-start/SKILL.md (session start)" \
     "~/.agents/skills/global/agent-handoff/SKILL.md (session handoff)" \
@@ -162,6 +163,7 @@ cmd_init() {
   create_file_from_template_silent "$templates_dir/README.md" "$agents_home/README.md"
   create_file_from_template_silent "$templates_dir/.gitignore" "$agents_home/.gitignore"
   create_file_from_template_silent "$templates_dir/rules/global/rules.mdc" "$agents_home/rules/global/rules.mdc"
+  create_file_from_template_silent "$templates_dir/rules/global/copilot-instructions.md" "$agents_home/rules/global/copilot-instructions.md"
   create_file_from_template_silent "$templates_dir/settings/global/claude-code.json" "$agents_home/settings/global/claude-code.json"
   bullet "ok" "Created template files"
 

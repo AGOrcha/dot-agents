@@ -50,6 +50,11 @@ ${BOLD}DESCRIPTION${NC}
     ${BOLD}OpenCode${NC} (uses SYMLINKS):
     - .opencode/               Config directory
 
+    ${BOLD}GitHub Copilot${NC} (uses SYMLINKS):
+    - .github/copilot-instructions.md   Project instructions
+    - .github/skills/*/                 Project skills
+    - .github/agents/*.agent.md         Project custom agents
+
 ${BOLD}EXAMPLES${NC}
     dot-agents add ~/Github/myproject
     dot-agents add . --name my-api
@@ -206,7 +211,10 @@ cmd_add() {
     ".mcp.json                         (symlink to MCP config)" \
     "AGENTS.md                         (symlink to rules)" \
     ".codex/skills/*/                  (symlinks to skill directories)" \
-    ".opencode/                        (symlinks to configs)"
+    ".opencode/                        (symlinks to configs)" \
+    ".github/copilot-instructions.md   (symlink to instructions)" \
+    ".github/skills/*/                 (symlinks to skill directories)" \
+    ".github/agents/*.agent.md         (symlinks to custom agents)"
 
   info_box "About Link Types" \
     "Cursor uses HARD LINKS (required by IDE)." \
@@ -343,6 +351,8 @@ cmd_add() {
     opencode_create_links "$project_name" "$project_path"
     bullet "ok" "OpenCode links (symlinks)"
   fi
+  copilot_create_links "$project_name" "$project_path"
+  bullet "ok" "GitHub Copilot links (symlinks)"
 
   # Register in config.json
   config_add_project "$project_name" "$project_path"
@@ -415,6 +425,7 @@ setup_project_links() {
     claude_is_installed 2>/dev/null && log_dry "Create Claude Code config (.claude/ rules, skills, agents)"
     codex_is_installed 2>/dev/null && log_dry "Create Codex config (AGENTS.md, .codex/ skills, agents)"
     opencode_is_installed 2>/dev/null && log_dry "Create OpenCode config (.opencode/)"
+    log_dry "Create GitHub Copilot config (.github/copilot-instructions.md, .github/skills, .github/agents)"
   else
     if cursor_is_installed 2>/dev/null; then
       cursor_create_all_links "$project" "$repo"
@@ -434,6 +445,8 @@ setup_project_links() {
       opencode_create_links "$project" "$repo"
       log_create "OpenCode links (symlinks)"
     fi
+    copilot_create_links "$project" "$repo"
+    log_create "GitHub Copilot links (symlinks)"
   fi
 }
 
@@ -464,6 +477,7 @@ check_deprecated_formats() {
 #   claude_create_links() from platforms/claude-code.sh
 #   codex_create_links() from platforms/codex.sh
 #   opencode_create_links() from platforms/opencode.sh
+#   copilot_create_links() from platforms/github-copilot.sh
 
 # Check for existing config files that would be replaced by linking
 # Sets global _CHECK_EXISTING_FILES array with results
@@ -488,6 +502,9 @@ check_existing_config_files() {
     "$project_path/.codex/agents"
     "$project_path/.opencode/instructions.md"
     "$project_path/.opencode/config.json"
+    "$project_path/.github/copilot-instructions.md"
+    "$project_path/.github/skills"
+    "$project_path/.github/agents"
   )
 
   for file in "${root_files[@]}"; do
@@ -553,6 +570,8 @@ scan_existing_ai_configs() {
     ".windsurfrules"
     # GitHub Copilot
     ".github/copilot-instructions.md"
+    ".github/skills/*/SKILL.md"
+    ".github/agents/*.agent.md"
     "copilot-instructions.md"
     # Generic AI rules
     ".ai-rules"

@@ -15,7 +15,7 @@ ${BOLD}ARGUMENTS${NC}
 
 ${BOLD}OPTIONS${NC}
     --audit           Show detailed config/link info for each agent
-    --agent <name>    Filter by agent (cursor, claude-code, codex)
+    --agent <name>    Filter by agent (cursor, claude-code, codex, github-copilot)
     --json            Output in JSON format
     --verbose, -v     Show detailed information
     --help, -h        Show this help
@@ -252,6 +252,36 @@ check_project_links() {
     fi
   fi
 
+  # Check for AGENTS.md (Codex)
+  if [ -f "$AGENTS_HOME/rules/global/agents.md" ] || [ -f "$AGENTS_HOME/rules/$name/agents.md" ]; then
+    if [ ! -e "$path/AGENTS.md" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing AGENTS.md"
+    fi
+  fi
+
+  # Check for .github/copilot-instructions.md
+  if [ -f "$AGENTS_HOME/rules/global/copilot-instructions.md" ] || [ -f "$AGENTS_HOME/rules/$name/copilot-instructions.md" ]; then
+    if [ ! -e "$path/.github/copilot-instructions.md" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .github/copilot-instructions.md"
+    fi
+  fi
+
+  # Check for Copilot skills/agents in repo (project-level)
+  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.github/skills" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .github/skills/"
+    fi
+  fi
+  if [ -d "$AGENTS_HOME/agents/$name" ] && find "$AGENTS_HOME/agents/$name" -mindepth 2 -maxdepth 2 -name AGENT.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.github/agents" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .github/agents/"
+    fi
+  fi
+
   echo "$issues"
 }
 
@@ -281,6 +311,25 @@ check_project_links_verbose() {
   if [ -f "$AGENTS_HOME/rules/global/agents.md" ] || [ -f "$AGENTS_HOME/rules/$name/agents.md" ]; then
     if [ ! -e "$path/AGENTS.md" ]; then
       echo "missing AGENTS.md"
+    fi
+  fi
+
+  # Check for .github/copilot-instructions.md
+  if [ -f "$AGENTS_HOME/rules/global/copilot-instructions.md" ] || [ -f "$AGENTS_HOME/rules/$name/copilot-instructions.md" ]; then
+    if [ ! -e "$path/.github/copilot-instructions.md" ]; then
+      echo "missing .github/copilot-instructions.md"
+    fi
+  fi
+
+  # Check for Copilot skills/agents in repo (project-level)
+  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.github/skills" ]; then
+      echo "missing .github/skills/"
+    fi
+  fi
+  if [ -d "$AGENTS_HOME/agents/$name" ] && find "$AGENTS_HOME/agents/$name" -mindepth 2 -maxdepth 2 -name AGENT.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.github/agents" ]; then
+      echo "missing .github/agents/"
     fi
   fi
 }
@@ -335,6 +384,11 @@ output_audit_text() {
     # Audit Codex configs
     if [ -z "$agent_filter" ] || [ "$agent_filter" = "codex" ]; then
       audit_codex_text "$name" "$path"
+    fi
+
+    # Audit GitHub Copilot configs
+    if [ -z "$agent_filter" ] || [ "$agent_filter" = "github-copilot" ] || [ "$agent_filter" = "copilot" ]; then
+      audit_copilot_text "$name" "$path"
     fi
 
   done <<< "$projects"
@@ -472,6 +526,50 @@ audit_codex_text() {
   echo ""
 }
 
+audit_copilot_text() {
+  local name="$1"
+  local path="$2"
+
+  echo -e "  ${CYAN}GitHub Copilot${NC}"
+
+  local copilot_instructions="$path/.github/copilot-instructions.md"
+  if [ -e "$copilot_instructions" ]; then
+    if [ -L "$copilot_instructions" ]; then
+      local target
+      target=$(readlink "$copilot_instructions")
+      local display_target="${target/#$HOME/~}"
+      if [ -f "$target" ]; then
+        echo -e "    ${GREEN}✓${NC} .github/copilot-instructions.md ${DIM}→ $display_target${NC}"
+      else
+        echo -e "    ${RED}✗${NC} .github/copilot-instructions.md ${DIM}→ $display_target (broken)${NC}"
+      fi
+    else
+      echo -e "    ${DIM}○${NC} .github/copilot-instructions.md ${DIM}(local file)${NC}"
+    fi
+  else
+    echo -e "    ${DIM}(no .github/copilot-instructions.md)${NC}"
+  fi
+
+  local skills_dir="$path/.github/skills"
+  if [ -d "$skills_dir" ]; then
+    local n=0
+    for d in "$skills_dir"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "    ${GREEN}✓${NC} .github/skills/ ${DIM}($n skill dir link(s))${NC}" || echo -e "    ${DIM}○${NC} .github/skills/ ${DIM}(empty)${NC}"
+  else
+    echo -e "    ${DIM}(no .github/skills/)${NC}"
+  fi
+
+  local agents_dir="$path/.github/agents"
+  if [ -d "$agents_dir" ]; then
+    local n=0
+    for f in "$agents_dir"/*.agent.md; do [ -e "$f" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "    ${GREEN}✓${NC} .github/agents/ ${DIM}($n agent file link(s))${NC}" || echo -e "    ${DIM}○${NC} .github/agents/ ${DIM}(empty)${NC}"
+  else
+    echo -e "    ${DIM}(no .github/agents/)${NC}"
+  fi
+  echo ""
+}
+
 output_audit_json() {
   local projects="$1"
   local agent_filter="$2"
@@ -534,6 +632,30 @@ output_audit_json() {
         echo -n ', "codex": {'
         echo -n '"AGENTS.md": '
         if [ -e "$path/AGENTS.md" ]; then
+          echo -n 'true'
+        else
+          echo -n 'false'
+        fi
+        echo -n '}'
+      fi
+
+      # GitHub Copilot
+      if [ -z "$agent_filter" ] || [ "$agent_filter" = "github-copilot" ] || [ "$agent_filter" = "copilot" ]; then
+        echo -n ', "github-copilot": {'
+        echo -n '".github/copilot-instructions.md": '
+        if [ -e "$path/.github/copilot-instructions.md" ]; then
+          echo -n 'true'
+        else
+          echo -n 'false'
+        fi
+        echo -n ', ".github/skills": '
+        if [ -d "$path/.github/skills" ]; then
+          echo -n 'true'
+        else
+          echo -n 'false'
+        fi
+        echo -n ', ".github/agents": '
+        if [ -d "$path/.github/agents" ]; then
           echo -n 'true'
         else
           echo -n 'false'
