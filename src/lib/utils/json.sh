@@ -1,10 +1,10 @@
 #!/bin/bash
 # dot-agents/lib/utils/json.sh
-# JSON manipulation utilities (yq wrappers with fallbacks)
+# JSON manipulation utilities (jq wrappers with fallbacks)
 
-# Check if yq is available
-_json_has_yq() {
-  command -v yq &>/dev/null
+# Check if jq is available
+_json_has_jq() {
+  command -v jq &>/dev/null
 }
 
 # Read a JSON file
@@ -25,8 +25,8 @@ json_get() {
   local json="$1"
   local path="$2"
 
-  if _json_has_yq; then
-    echo "$json" | yq -r "$path // empty" 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq -r "$path // empty" 2>/dev/null
   else
     # Basic fallback for simple cases like .version or .projects
     local key="${path#.}"
@@ -46,8 +46,8 @@ json_has() {
   local json="$1"
   local path="$2"
 
-  if _json_has_yq; then
-    echo "$json" | yq -e "$path" &>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq -e "$path" &>/dev/null
   else
     local key="${path#.}"
     echo "$json" | grep -q "\"$key\""
@@ -60,8 +60,8 @@ json_array_length() {
   local json="$1"
   local path="${2:-.}"
 
-  if _json_has_yq; then
-    echo "$json" | yq -r "$path | length" 2>/dev/null || echo "0"
+  if _json_has_jq; then
+    echo "$json" | jq -r "$path | length" 2>/dev/null || echo "0"
   else
     # Basic fallback - count commas + 1 for non-empty arrays
     echo "0"
@@ -74,8 +74,8 @@ json_keys() {
   local json="$1"
   local path="${2:-.}"
 
-  if _json_has_yq; then
-    echo "$json" | yq -r "$path | keys[]" 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq -r "$path | keys[]" 2>/dev/null
   else
     echo ""
   fi
@@ -88,10 +88,10 @@ json_set() {
   local path="$2"
   local value="$3"
 
-  if _json_has_yq; then
-    echo "$json" | yq "$path = $value" 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq "$path = $value" 2>/dev/null
   else
-    log_error "yq is required for JSON modification"
+    log_error "jq is required for JSON modification"
     echo "$json"
   fi
 }
@@ -103,10 +103,10 @@ json_set_object() {
   local path="$2"
   local object="$3"
 
-  if _json_has_yq; then
-    echo "$json" | yq "$path = $object" 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq "$path = $object" 2>/dev/null
   else
-    log_error "yq is required for JSON modification"
+    log_error "jq is required for JSON modification"
     echo "$json"
   fi
 }
@@ -117,10 +117,10 @@ json_delete() {
   local json="$1"
   local path="$2"
 
-  if _json_has_yq; then
-    echo "$json" | yq "del($path)" 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq "del($path)" 2>/dev/null
   else
-    log_error "yq is required for JSON modification"
+    log_error "jq is required for JSON modification"
     echo "$json"
   fi
 }
@@ -130,8 +130,8 @@ json_delete() {
 json_pretty() {
   local json="$1"
 
-  if _json_has_yq; then
-    echo "$json" | yq '.' 2>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq '.' 2>/dev/null
   else
     echo "$json"
   fi
@@ -142,8 +142,8 @@ json_pretty() {
 json_valid() {
   local json="$1"
 
-  if _json_has_yq; then
-    echo "$json" | yq -e '.' &>/dev/null
+  if _json_has_jq; then
+    echo "$json" | jq -e '.' &>/dev/null
   else
     # Basic check - has matching braces
     local open_braces close_braces
@@ -159,8 +159,8 @@ json_write_file() {
   local file="$1"
   local json="$2"
 
-  if _json_has_yq; then
-    echo "$json" | yq '.' > "$file"
+  if _json_has_jq; then
+    echo "$json" | jq '.' > "$file"
   else
     echo "$json" > "$file"
   fi
@@ -180,8 +180,8 @@ config_add_project() {
   local path="$2"
   local config_file="$AGENTS_HOME/config.json"
 
-  if ! _json_has_yq; then
-    log_error "yq is required to modify config.json"
+  if ! _json_has_jq; then
+    log_error "jq is required to modify config.json"
     return 1
   fi
 
@@ -190,13 +190,13 @@ config_add_project() {
 
   # Create project object
   local project_json
-  project_json=$(yq -n --arg path "$path" '{
+  project_json=$(jq -n --arg path "$path" '{
     path: $path,
     added: now | strftime("%Y-%m-%dT%H:%M:%SZ")
   }')
 
   # Add to projects
-  json=$(echo "$json" | yq --arg name "$name" --argjson proj "$project_json" '.projects[$name] = $proj')
+  json=$(echo "$json" | jq --arg name "$name" --argjson proj "$project_json" '.projects[$name] = $proj')
 
   if [ "$DRY_RUN" = true ]; then
     log_dry "add project '$name' to config.json"
@@ -211,14 +211,14 @@ config_remove_project() {
   local name="$1"
   local config_file="$AGENTS_HOME/config.json"
 
-  if ! _json_has_yq; then
-    log_error "yq is required to modify config.json"
+  if ! _json_has_jq; then
+    log_error "jq is required to modify config.json"
     return 1
   fi
 
   local json
   json=$(json_read "$config_file")
-  json=$(echo "$json" | yq --arg name "$name" 'del(.projects[$name])')
+  json=$(echo "$json" | jq --arg name "$name" 'del(.projects[$name])')
 
   if [ "$DRY_RUN" = true ]; then
     log_dry "remove project '$name' from config.json"

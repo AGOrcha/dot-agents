@@ -60,18 +60,7 @@ jobs:
       - name: Install dependencies
         if: steps.check.outputs.exists == 'false'
         run: |
-         platform=$(uname -s | tr '[:upper:]' '[:lower:]')
-         arch=$(uname -m)
-          if [ "$arch" = "x86_64" ]; then
-            arch="amd64"
-          elif [ "$arch" = "aarch64" ]; then
-            arch="arm64"
-          else
-            echo "Unsupported architecture: $arch"
-            exit 1
-          fi
-         wget https://github.com/mikefarah/yq/releases/download/${VERSION}/yq_${platform}_${arch} -O /usr/local/bin/yq && \
-          chmod +x /usr/local/bin/yq
+         sudo apt-get update && sudo apt-get install -y jq
 
       - name: Run tests
         if: steps.check.outputs.exists == 'false'

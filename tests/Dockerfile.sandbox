@@ -1,14 +1,13 @@
-FROM mikefarah/yq as yq
-
 FROM ubuntu:22.04
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
-COPY --from=yq /usr/bin/yq /usr/bin/yq
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     git \
+    jq \
     ca-certificates \
     gnupg \
     vim \
