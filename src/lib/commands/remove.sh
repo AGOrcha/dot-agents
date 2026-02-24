@@ -27,6 +27,9 @@ ${BOLD}DESCRIPTION${NC}
     - .cursor/rules/ hard links (global--, project-- prefixed files)
     - .claude/rules/ symlinks (global--, project-- prefixed files)
     - AGENTS.md symlink (if pointing to ~/.agents/)
+    - opencode.json and .opencode/agent/* symlinks (if pointing to ~/.agents/)
+    - .github/copilot-instructions.md symlink (if pointing to ~/.agents/)
+    - .github/skills/* and .github/agents/*.agent.md symlinks (if pointing to ~/.agents/)
 
     With --clean, also removes:
     - ~/.agents/rules/<project>/
@@ -135,7 +138,7 @@ cmd_remove() {
   fi
 
   # Count links that will be removed
-  local cursor_links=0 claude_links=0 codex_links=0
+  local cursor_links=0 claude_links=0 codex_links=0 opencode_links=0 copilot_links=0
 
   if [ -d "$project_path/.cursor/rules" ]; then
     cursor_links=$(ls -1 "$project_path/.cursor/rules/"*.mdc 2>/dev/null | wc -l | tr -d ' ')
@@ -144,8 +147,16 @@ cmd_remove() {
     claude_links=$(ls -1 "$project_path/.claude/rules/"*.md 2>/dev/null | wc -l | tr -d ' ')
   fi
   [ -L "$project_path/AGENTS.md" ] && ((codex_links++)) || true
+  [ -L "$project_path/opencode.json" ] && ((opencode_links++)) || true
+  [ -L "$project_path/.github/copilot-instructions.md" ] && ((copilot_links++)) || true
+  if [ -d "$project_path/.github/skills" ]; then
+    copilot_links=$((copilot_links + $(find "$project_path/.github/skills" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')))
+  fi
+  if [ -d "$project_path/.github/agents" ]; then
+    copilot_links=$((copilot_links + $(find "$project_path/.github/agents" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')))
+  fi
 
-  local total_links=$((cursor_links + claude_links + codex_links))
+  local total_links=$((cursor_links + claude_links + codex_links + opencode_links + copilot_links))
   if [ "$total_links" -gt 0 ]; then
     bullet "found" "$total_links managed links found"
   else
@@ -162,7 +173,10 @@ cmd_remove() {
     ".cursor/agents/*.md             (symlinks to subagents)" \
     ".claude/rules/global--*.md      (symlinks)" \
     ".claude/rules/project--*.md     (symlinks)" \
-    "AGENTS.md                       (symlink)"
+    "AGENTS.md                       (symlink)" \
+    "opencode.json and .opencode/agent/* (symlinks)" \
+    ".github/copilot-instructions.md (symlink)" \
+    ".github/skills/* and .github/agents/*.agent.md (symlinks)"
 
   preview_section "From ~/.agents/config.json:" \
     "Project registration for '$project_name'"
@@ -244,6 +258,12 @@ remove_project_links() {
 
   # Remove Codex symlinks
   remove_codex_links "$project" "$repo"
+
+  # Remove OpenCode symlinks
+  remove_opencode_links "$project" "$repo"
+
+  # Remove GitHub Copilot symlink
+  remove_copilot_links "$project" "$repo"
 }
 
 # Remove Cursor hard links from .cursor/rules/
@@ -479,6 +499,103 @@ remove_codex_links() {
         else
           rm "$link"
           log_info "Removed .codex/skills/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
+}
+
+# Remove OpenCode symlinks
+remove_opencode_links() {
+  local project="$1"
+  local repo="$2"
+  local agents_home="$AGENTS_HOME"
+
+  # Remove opencode.json if it's a symlink pointing to our source
+  local opencode_json="$repo/opencode.json"
+  if [ -L "$opencode_json" ]; then
+    local target
+    target=$(readlink "$opencode_json")
+    if [[ "$target" == "$agents_home"* ]]; then
+      if [ "$DRY_RUN" = true ]; then
+        log_dry "remove opencode.json"
+      else
+        rm "$opencode_json"
+        log_info "Removed opencode.json"
+      fi
+    fi
+  fi
+
+  # Remove .opencode/agent symlinks that point to our rules
+  local agent_dir="$repo/.opencode/agent"
+  if [ -d "$agent_dir" ]; then
+    for link in "$agent_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .opencode/agent/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .opencode/agent/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
+}
+
+# Remove GitHub Copilot symlink
+remove_copilot_links() {
+  local project="$1"
+  local repo="$2"
+  local agents_home="$AGENTS_HOME"
+
+  local copilot_file="$repo/.github/copilot-instructions.md"
+  if [ -L "$copilot_file" ]; then
+    local target
+    target=$(readlink "$copilot_file")
+    if [[ "$target" == "$agents_home"* ]]; then
+      if [ "$DRY_RUN" = true ]; then
+        log_dry "remove .github/copilot-instructions.md"
+      else
+        rm "$copilot_file"
+        log_info "Removed .github/copilot-instructions.md"
+      fi
+    fi
+  fi
+
+  # Remove .github/skills symlinks that point to our skills
+  local skills_dir="$repo/.github/skills"
+  if [ -d "$skills_dir" ]; then
+    for link in "$skills_dir"/*; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .github/skills/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .github/skills/$(basename "$link")"
+        fi
+      fi
+    done
+  fi
+
+  # Remove .github/agents symlinks that point to our agents
+  local agents_dir="$repo/.github/agents"
+  if [ -d "$agents_dir" ]; then
+    for link in "$agents_dir"/*.agent.md; do
+      [ -e "$link" ] || continue
+      [ -L "$link" ] || continue
+      target=$(readlink "$link")
+      if [[ "$target" == "$agents_home"* ]]; then
+        if [ "$DRY_RUN" = true ]; then
+          log_dry "remove .github/agents/$(basename "$link")"
+        else
+          rm "$link"
+          log_info "Removed .github/agents/$(basename "$link")"
         fi
       fi
     done

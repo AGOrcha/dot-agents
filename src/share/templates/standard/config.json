@@ -1,13 +1,10 @@
 {
   "$schema": "https://dot-agents.dev/schemas/config.json",
   "version": 1,
-
   "defaults": {
     "agent": "cursor"
   },
-
   "projects": {},
-
   "agents": {
     "cursor": {
       "enabled": true,
@@ -24,20 +21,21 @@
     "opencode": {
       "enabled": false,
       "version_detected": null
+    },
+    "github-copilot": {
+      "enabled": true,
+      "version_detected": null
     }
   },
-
   "features": {
     "tasks": false,
     "history": false,
     "sync": false
   },
-
   "history": {
     "format": "jsonl",
     "retention_days": 90
   },
-
   "notifications": {
     "on_migration": true,
     "on_conflict": true

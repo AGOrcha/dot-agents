@@ -30,6 +30,7 @@ if [ -d "$PLATFORMS_DIR" ]; then
   [ -f "$PLATFORMS_DIR/claude-code.sh" ] && source "$PLATFORMS_DIR/claude-code.sh"
   [ -f "$PLATFORMS_DIR/codex.sh" ] && source "$PLATFORMS_DIR/codex.sh"
   [ -f "$PLATFORMS_DIR/opencode.sh" ] && source "$PLATFORMS_DIR/opencode.sh"
+  [ -f "$PLATFORMS_DIR/github-copilot.sh" ] && source "$PLATFORMS_DIR/github-copilot.sh"
 fi
 
 # Global flags (can be overridden by CLI)
