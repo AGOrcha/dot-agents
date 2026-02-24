@@ -54,10 +54,10 @@ jobs:
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y yq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Verify yq installed
-        run: yq --version
+      - name: Verify jq installed
+        run: jq --version
 
       - name: Make CLI executable
         run: chmod +x src/bin/dot-agents
@@ -87,7 +87,7 @@ jobs:
       - name: Test status
         run: |
           ./src/bin/dot-agents status
-          ./src/bin/dot-agents status --json | yq .
+          ./src/bin/dot-agents status --json | jq .
 
       - name: Test doctor
         run: |

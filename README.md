@@ -219,7 +219,7 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 
 - **macOS** or **Linux**
 - **Bash** 3.2+ (ships with macOS)
-- **yq** (recommended, for JSON features)
+- **jq** (recommended, for JSON features)
 - **git** (for sync features)
 
 ## Configuration

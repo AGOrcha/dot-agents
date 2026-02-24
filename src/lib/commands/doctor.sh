@@ -20,7 +20,7 @@ ${BOLD}OPTIONS${NC}
 ${BOLD}DESCRIPTION${NC}
     Runs health checks on your dot-agents installation:
     - Verifies ~/.agents/ structure
-    - Checks for required dependencies (yq)
+    - Checks for required dependencies (jq)
     - Detects installed AI coding agents
     - Validates config.json schema
     - Checks for common issues
@@ -121,7 +121,7 @@ run_doctor_text() {
   # Check config.json is valid JSON
   if [ -f "$AGENTS_HOME/config.json" ]; then
     check_text "config.json is valid JSON" \
-      "yq -e '.' '$AGENTS_HOME/config.json' >/dev/null 2>&1" \
+      "jq -e '.' '$AGENTS_HOME/config.json' >/dev/null 2>&1" \
       "Fix JSON syntax in config.json"
   fi
 
@@ -133,10 +133,10 @@ run_doctor_text() {
   echo ""
   log_section "Dependencies"
 
-  # Check yq
-  check_text "yq (JSON processor)" \
-    "command -v yq >/dev/null" \
-    "Install: brew install yq"
+  # Check jq
+  check_text "jq (JSON processor)" \
+    "command -v jq >/dev/null" \
+    "Install: brew install jq"
 
   # Check git
   check_text "git" \
@@ -184,7 +184,7 @@ run_doctor_text() {
   local global_settings="$AGENTS_HOME/settings/global/claude-code.json"
   if [ -f "$global_settings" ]; then
     # Validate JSON syntax
-    if yq -e '.' "$global_settings" >/dev/null 2>&1; then
+    if jq -e '.' "$global_settings" >/dev/null 2>&1; then
       local hook_count=0
       # All 12 Claude Code hook types
       local hook_types=(
@@ -196,7 +196,7 @@ run_doctor_text() {
       )
       for hook_type in "${hook_types[@]}"; do
         local count
-        count=$(yq -r ".hooks.$hook_type | length" "$global_settings" 2>/dev/null || echo "0")
+        count=$(jq -r ".hooks.$hook_type | length" "$global_settings" 2>/dev/null || echo "0")
         hook_count=$((hook_count + count))
       done
 
@@ -241,13 +241,13 @@ run_doctor_text() {
   fi
 
   # Check project skills symlinks
-  if [ -f "$AGENTS_HOME/config.json" ] && has_yq; then
+  if [ -f "$AGENTS_HOME/config.json" ] && has_jq; then
     local projects
-    projects=$(yq -r '.projects | keys[]' "$AGENTS_HOME/config.json" 2>/dev/null)
+    projects=$(jq -r '.projects | keys[]' "$AGENTS_HOME/config.json" 2>/dev/null)
 
     for project in $projects; do
       local project_path
-      project_path=$(yq -r ".projects[\"$project\"].path" "$AGENTS_HOME/config.json")
+      project_path=$(jq -r ".projects[\"$project\"].path" "$AGENTS_HOME/config.json")
       project_path=$(expand_path "$project_path")
 
       [ -d "$project_path" ] || continue
@@ -390,9 +390,9 @@ run_doctor_text() {
   fi
 
   # Project agents (one line per managed project, like Skills)
-  if [ -f "$AGENTS_HOME/config.json" ] && has_yq; then
+  if [ -f "$AGENTS_HOME/config.json" ] && has_jq; then
     local projects
-    projects=$(yq -r '.projects | keys[]' "$AGENTS_HOME/config.json" 2>/dev/null)
+    projects=$(jq -r '.projects | keys[]' "$AGENTS_HOME/config.json" 2>/dev/null)
 
     for project in $projects; do
       local project_agents="$AGENTS_HOME/agents/$project"
@@ -454,13 +454,13 @@ run_doctor_text() {
   local deprecated_count=0
   local config_file="$AGENTS_HOME/config.json"
 
-  if [ -f "$config_file" ] && has_yq; then
+  if [ -f "$config_file" ] && has_jq; then
     local projects
-    projects=$(yq -r '.projects | keys[]' "$config_file" 2>/dev/null)
+    projects=$(jq -r '.projects | keys[]' "$config_file" 2>/dev/null)
 
     for project in $projects; do
       local project_path
-      project_path=$(yq -r ".projects[\"$project\"].path" "$config_file")
+      project_path=$(jq -r ".projects[\"$project\"].path" "$config_file")
       project_path=$(expand_path "$project_path")
 
       [ -d "$project_path" ] || continue
@@ -483,7 +483,7 @@ run_doctor_text() {
       echo -e "  ${GREEN}✓${NC} No deprecated formats found"
     fi
   else
-    echo -e "  ${DIM}○${NC} Skipped (no config or yq)"
+    echo -e "  ${DIM}○${NC} Skipped (no config or jq)"
   fi
 
   # Summary
@@ -513,13 +513,13 @@ run_doctor_json() {
   echo -n '    "config_json": '
   [ -f "$AGENTS_HOME/config.json" ] && echo '"ok",' || echo '"missing",'
   echo -n '    "config_valid": '
-  yq -e '.' "$AGENTS_HOME/config.json" >/dev/null 2>&1 && echo '"ok"' || echo '"invalid"'
+  jq -e '.' "$AGENTS_HOME/config.json" >/dev/null 2>&1 && echo '"ok"' || echo '"invalid"'
   echo '  },'
 
   # Dependencies
   echo '  "dependencies": {'
-  echo -n '    "yq": '
-  command -v yq >/dev/null && echo '"installed",' || echo '"missing",'
+  echo -n '    "jq": '
+  command -v jq >/dev/null && echo '"installed",' || echo '"missing",'
   echo -n '    "git": '
   command -v git >/dev/null && echo '"installed"' || echo '"missing"'
   echo '  },'
@@ -692,9 +692,9 @@ run_redundancy_check() {
   fi
 
   # Project rules
-  if has_yq; then
+  if has_jq; then
     local projects
-    projects=$(yq -r '.projects | keys[]' "$config_file" 2>/dev/null)
+    projects=$(jq -r '.projects | keys[]' "$config_file" 2>/dev/null)
 
     for project in $projects; do
       local project_rules_dir="$AGENTS_HOME/rules/$project"
@@ -808,13 +808,13 @@ run_migrate_check() {
   log_section "Scanning for deprecated formats..."
   echo ""
 
-  if has_yq; then
+  if has_jq; then
     local projects
-    projects=$(yq -r '.projects | keys[]' "$config_file" 2>/dev/null)
+    projects=$(jq -r '.projects | keys[]' "$config_file" 2>/dev/null)
 
     for project in $projects; do
       local project_path
-      project_path=$(yq -r ".projects[\"$project\"].path" "$config_file")
+      project_path=$(jq -r ".projects[\"$project\"].path" "$config_file")
       project_path=$(expand_path "$project_path")
 
       [ -d "$project_path" ] || continue

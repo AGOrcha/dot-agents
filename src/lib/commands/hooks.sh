@@ -260,9 +260,9 @@ hooks_display_from_file() {
 
   for hook_type in "${hook_types[@]}"; do
     local hooks
-    hooks=$(yq -r ".hooks.$hook_type // []" "$file" 2>/dev/null)
+    hooks=$(jq -r ".hooks.$hook_type // []" "$file" 2>/dev/null)
     local count
-    count=$(echo "$hooks" | yq 'length' 2>/dev/null || echo "0")
+    count=$(echo "$hooks" | jq 'length' 2>/dev/null || echo "0")
 
     if [ "$count" -gt 0 ]; then
       has_hooks=true
@@ -272,8 +272,8 @@ hooks_display_from_file() {
       while [ $i -lt "$count" ]; do
         local matcher
         local command
-        matcher=$(echo "$hooks" | yq -r ".[$i].matcher // \"*\"" 2>/dev/null)
-        command=$(echo "$hooks" | yq -r ".[$i].hooks[0].command // \"(no command)\"" 2>/dev/null)
+        matcher=$(echo "$hooks" | jq -r ".[$i].matcher // \"*\"" 2>/dev/null)
+        command=$(echo "$hooks" | jq -r ".[$i].hooks[0].command // \"(no command)\"" 2>/dev/null)
 
         # Truncate long commands
         if [ ${#command} -gt 50 ]; then
@@ -303,7 +303,7 @@ hooks_list_json() {
 
   if [ -f "$global_settings" ]; then
     local global_hooks
-    global_hooks=$(yq '.hooks // {}' "$global_settings" 2>/dev/null || echo "{}")
+    global_hooks=$(jq '.hooks // {}' "$global_settings" 2>/dev/null || echo "{}")
     echo "    \"file\": \"$global_settings\","
     echo "    \"hooks\": $global_hooks"
   else
@@ -316,7 +316,7 @@ hooks_list_json() {
 
   if [ -n "$project_name" ] && [ -f "$project_settings" ]; then
     local project_hooks
-    project_hooks=$(yq '.hooks // {}' "$project_settings" 2>/dev/null || echo "{}")
+    project_hooks=$(jq '.hooks // {}' "$project_settings" 2>/dev/null || echo "{}")
     echo "    \"name\": \"$project_name\","
     echo "    \"file\": \"$project_settings\","
     echo "    \"hooks\": $project_hooks"
@@ -373,7 +373,7 @@ hooks_add() {
 
   # Build the new hook entry
   local new_hook
-  new_hook=$(yq -n \
+  new_hook=$(jq -n \
     --arg matcher "$matcher" \
     --arg command "$command" \
     '{
@@ -388,7 +388,7 @@ hooks_add() {
 
   # Add to existing hooks
   local updated
-  updated=$(yq \
+  updated=$(jq \
     --arg type "$hook_type" \
     --argjson hook "$new_hook" \
     '.hooks[$type] = ((.hooks[$type] // []) + [$hook])' \
@@ -448,7 +448,7 @@ hooks_remove() {
 
   # Check if index exists
   local count
-  count=$(yq -r ".hooks.$hook_type | length" "$target_file" 2>/dev/null || echo "0")
+  count=$(jq -r ".hooks.$hook_type | length" "$target_file" 2>/dev/null || echo "0")
 
   if [ "$index" -ge "$count" ]; then
     log_error "Invalid index: $index (only $count hooks exist)"
@@ -457,14 +457,14 @@ hooks_remove() {
 
   # Remove the hook at index
   local updated
-  updated=$(yq \
+  updated=$(jq \
     --arg type "$hook_type" \
     --argjson idx "$index" \
     '.hooks[$type] = [.hooks[$type][] | select(. != .hooks[$type][$idx])] | .hooks[$type] |= del(.[$idx])' \
     "$target_file")
 
   # Simpler approach: rebuild array without the index
-  updated=$(yq \
+  updated=$(jq \
     --arg type "$hook_type" \
     --argjson idx "$index" \
     '.hooks[$type] = ([.hooks[$type] | to_entries[] | select(.key != $idx) | .value])' \
@@ -652,7 +652,7 @@ detect_current_project() {
   # Check if we're in a registered project
   if [ -f "$AGENTS_HOME/config.json" ]; then
     local projects
-    projects=$(yq -r '.projects | to_entries[] | "\(.key):\(.value.path)"' "$AGENTS_HOME/config.json" 2>/dev/null)
+    projects=$(jq -r '.projects | to_entries[] | "\(.key):\(.value.path)"' "$AGENTS_HOME/config.json" 2>/dev/null)
 
     while IFS=: read -r name path; do
       path=$(expand_path "$path")

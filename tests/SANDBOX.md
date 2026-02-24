@@ -36,7 +36,7 @@ docker stop sandbox
 - Node.js 20
 - Claude Code CLI
 - dot-agents CLI
-- git, yq, vim
+- git, jq, vim
 
 ## Run Tests
 
