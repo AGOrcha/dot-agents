@@ -139,32 +139,42 @@ CLAUDE_USER_SKILLS="${CLAUDE_USER_SKILLS:-$HOME/.claude/skills}"
 # Ensure user-level ~/.claude/agents has global agents (symlink dirs or AGENT.md)
 claude_ensure_user_agents() {
   local global_agents="$AGENTS_HOME/agents/global"
-  mkdir -p "$CLAUDE_USER_AGENTS"
   [ ! -d "$global_agents" ] && return 0
-  for agent_dir in "$global_agents"/*/; do
-    [ -d "$agent_dir" ] || continue
-    [ -f "$agent_dir/AGENT.md" ] || continue
-    local name
-    name=$(basename "$agent_dir")
-    local target="$CLAUDE_USER_AGENTS/$name"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$agent_dir" "$target"
-  done
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_agents_dir="$home_root/.claude/agents"
+    mkdir -p "$user_agents_dir"
+    for agent_dir in "$global_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      local name
+      name=$(basename "$agent_dir")
+      local target="$user_agents_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$agent_dir" "$target"
+    done
+  done < <(dot_agents_user_home_roots)
 }
 
 # Ensure user-level ~/.claude/skills has global skills (symlink dirs)
 claude_ensure_user_skills() {
   local global_skills="$AGENTS_HOME/skills/global"
-  mkdir -p "$CLAUDE_USER_SKILLS"
   [ ! -d "$global_skills" ] && return 0
-  for skill_dir in "$global_skills"/*/; do
-    [ -d "$skill_dir" ] || continue
-    [ -f "$skill_dir/SKILL.md" ] || continue
-    local name
-    name=$(basename "$skill_dir")
-    local target="$CLAUDE_USER_SKILLS/$name"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$skill_dir" "$target"
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_skills_dir="$home_root/.claude/skills"
+    mkdir -p "$user_skills_dir"
+    for skill_dir in "$global_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$user_skills_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$skill_dir" "$target"
+    done
   done
 }
 

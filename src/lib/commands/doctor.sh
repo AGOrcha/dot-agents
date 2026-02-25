@@ -328,7 +328,7 @@ run_doctor_text() {
   fi
 
   # GitHub Copilot:
-  # - Personal skills default to ~/.copilot/skills (docs)
+  # - Personal skills default to ~/.github/skills
   # - Custom agent files are discovered via configurable chat.agentFilesLocations
   local copilot_skills="${COPILOT_USER_SKILLS:-$HOME/.github/skills}"
   if [ -d "$copilot_skills" ]; then

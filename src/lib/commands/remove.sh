@@ -30,6 +30,7 @@ ${BOLD}DESCRIPTION${NC}
     - opencode.json and .opencode/agent/* symlinks (if pointing to ~/.agents/)
     - .github/copilot-instructions.md symlink (if pointing to ~/.agents/)
     - .github/skills/* and .github/agents/*.agent.md symlinks (if pointing to ~/.agents/)
+    - .vscode/mcp.json and .claude/settings.local.json symlinks (if pointing to ~/.agents/)
 
     With --clean, also removes:
     - ~/.agents/rules/<project>/
@@ -149,6 +150,8 @@ cmd_remove() {
   [ -L "$project_path/AGENTS.md" ] && ((codex_links++)) || true
   [ -L "$project_path/opencode.json" ] && ((opencode_links++)) || true
   [ -L "$project_path/.github/copilot-instructions.md" ] && ((copilot_links++)) || true
+  [ -L "$project_path/.vscode/mcp.json" ] && ((copilot_links++)) || true
+  [ -L "$project_path/.claude/settings.local.json" ] && ((copilot_links++)) || true
   if [ -d "$project_path/.github/skills" ]; then
     copilot_links=$((copilot_links + $(find "$project_path/.github/skills" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')))
   fi
@@ -176,7 +179,8 @@ cmd_remove() {
     "AGENTS.md                       (symlink)" \
     "opencode.json and .opencode/agent/* (symlinks)" \
     ".github/copilot-instructions.md (symlink)" \
-    ".github/skills/* and .github/agents/*.agent.md (symlinks)"
+    ".github/skills/* and .github/agents/*.agent.md (symlinks)" \
+    ".vscode/mcp.json and .claude/settings.local.json (symlinks)"
 
   preview_section "From ~/.agents/config.json:" \
     "Project registration for '$project_name'"
@@ -599,6 +603,36 @@ remove_copilot_links() {
         fi
       fi
     done
+  fi
+
+  # Remove .vscode/mcp.json if it points to our mcp config
+  local copilot_mcp="$repo/.vscode/mcp.json"
+  if [ -L "$copilot_mcp" ]; then
+    local target
+    target=$(readlink "$copilot_mcp")
+    if [[ "$target" == "$agents_home"* ]]; then
+      if [ "$DRY_RUN" = true ]; then
+        log_dry "remove .vscode/mcp.json"
+      else
+        rm "$copilot_mcp"
+        log_info "Removed .vscode/mcp.json"
+      fi
+    fi
+  fi
+
+  # Remove hooks-compatible settings symlink for Copilot
+  local copilot_hooks="$repo/.claude/settings.local.json"
+  if [ -L "$copilot_hooks" ]; then
+    local target
+    target=$(readlink "$copilot_hooks")
+    if [[ "$target" == "$agents_home"* ]]; then
+      if [ "$DRY_RUN" = true ]; then
+        log_dry "remove .claude/settings.local.json"
+      else
+        rm "$copilot_hooks"
+        log_info "Removed .claude/settings.local.json"
+      fi
+    fi
   fi
 }
 

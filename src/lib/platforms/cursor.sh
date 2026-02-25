@@ -147,32 +147,42 @@ CURSOR_USER_COMMANDS="${CURSOR_USER_COMMANDS:-$HOME/.cursor/commands}"
 # Ensure user-level ~/.cursor/commands has global skills (SKILL.md → {name}.md)
 cursor_ensure_user_commands() {
   local global_skills="$AGENTS_HOME/skills/global"
-  mkdir -p "$CURSOR_USER_COMMANDS"
   [ ! -d "$global_skills" ] && return 0
-  for skill_dir in "$global_skills"/*/; do
-    [ -d "$skill_dir" ] || continue
-    [ -f "$skill_dir/SKILL.md" ] || continue
-    local name
-    name=$(basename "$skill_dir")
-    local target="$CURSOR_USER_COMMANDS/$name.md"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$skill_dir/SKILL.md" "$target"
-  done
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_commands_dir="$home_root/.cursor/commands"
+    mkdir -p "$user_commands_dir"
+    for skill_dir in "$global_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$user_commands_dir/$name.md"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$skill_dir/SKILL.md" "$target"
+    done
+  done < <(dot_agents_user_home_roots)
 }
 
 # Ensure user-level ~/.cursor/agents has global agents (AGENT.md → {name}.md)
 cursor_ensure_user_agents() {
   local global_agents="$AGENTS_HOME/agents/global"
-  mkdir -p "$CURSOR_USER_AGENTS"
   [ ! -d "$global_agents" ] && return 0
-  for agent_dir in "$global_agents"/*/; do
-    [ -d "$agent_dir" ] || continue
-    [ -f "$agent_dir/AGENT.md" ] || continue
-    local name
-    name=$(basename "$agent_dir")
-    local target="$CURSOR_USER_AGENTS/$name.md"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$agent_dir/AGENT.md" "$target"
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_agents_dir="$home_root/.cursor/agents"
+    mkdir -p "$user_agents_dir"
+    for agent_dir in "$global_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      local name
+      name=$(basename "$agent_dir")
+      local target="$user_agents_dir/$name.md"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$agent_dir/AGENT.md" "$target"
+    done
   done
 }
 

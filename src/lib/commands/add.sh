@@ -54,6 +54,8 @@ ${BOLD}DESCRIPTION${NC}
     - .github/copilot-instructions.md   Project instructions
     - .github/skills/*/                 Project skills
     - .github/agents/*.agent.md         Project custom agents
+    - .vscode/mcp.json                  MCP server configs
+    - .claude/settings.local.json       Hooks-compatible settings
 
 ${BOLD}EXAMPLES${NC}
     dot-agents add ~/Github/myproject
@@ -214,7 +216,9 @@ cmd_add() {
     ".opencode/                        (symlinks to configs)" \
     ".github/copilot-instructions.md   (symlink to instructions)" \
     ".github/skills/*/                 (symlinks to skill directories)" \
-    ".github/agents/*.agent.md         (symlinks to custom agents)"
+    ".github/agents/*.agent.md         (symlinks to custom agents)" \
+    ".vscode/mcp.json                  (symlink to MCP config)" \
+    ".claude/settings.local.json       (symlink to hooks-compatible settings)"
 
   info_box "About Link Types" \
     "Cursor uses HARD LINKS (required by IDE)." \
@@ -333,6 +337,9 @@ cmd_add() {
   # Step 4: Link to project (only for installed platforms)
   step "Linking to project..."
 
+  # Enable Windows user-home mirroring when project lives under /mnt/c/Users/<user>/...
+  dot_agents_set_windows_mirror_context "$project_path"
+
   if cursor_is_installed 2>/dev/null; then
     cursor_create_all_links "$project_name" "$project_path"
     bullet "ok" ".cursor/ configs (hard links)"
@@ -416,6 +423,9 @@ setup_project_links() {
   local project="$1"
   local repo="$2"
 
+  # Enable Windows user-home mirroring when project lives under /mnt/c/Users/<user>/...
+  dot_agents_set_windows_mirror_context "$repo"
+
   # Check for deprecated formats and warn
   check_deprecated_formats "$repo"
 
@@ -425,7 +435,7 @@ setup_project_links() {
     claude_is_installed 2>/dev/null && log_dry "Create Claude Code config (.claude/ rules, skills, agents)"
     codex_is_installed 2>/dev/null && log_dry "Create Codex config (AGENTS.md, .codex/ skills, agents)"
     opencode_is_installed 2>/dev/null && log_dry "Create OpenCode config (.opencode/)"
-    log_dry "Create GitHub Copilot config (.github/copilot-instructions.md, .github/skills, .github/agents)"
+    copilot_is_installed 2>/dev/null && log_dry "Create GitHub Copilot config (.github/copilot-instructions.md, .github/skills, .github/agents, .vscode/mcp.json, .claude/settings.local.json)"
   else
     if cursor_is_installed 2>/dev/null; then
       cursor_create_all_links "$project" "$repo"
@@ -445,8 +455,10 @@ setup_project_links() {
       opencode_create_links "$project" "$repo"
       log_create "OpenCode links (symlinks)"
     fi
-    copilot_create_links "$project" "$repo"
-    log_create "GitHub Copilot links (symlinks)"
+    if copilot_is_installed 2>/dev/null; then
+      copilot_create_links "$project" "$repo"
+      log_create "GitHub Copilot links (symlinks)"
+    fi
   fi
 }
 
@@ -505,6 +517,7 @@ check_existing_config_files() {
     "$project_path/.github/copilot-instructions.md"
     "$project_path/.github/skills"
     "$project_path/.github/agents"
+    "$project_path/.vscode/mcp.json"
   )
 
   for file in "${root_files[@]}"; do
@@ -572,6 +585,8 @@ scan_existing_ai_configs() {
     ".github/copilot-instructions.md"
     ".github/skills/*/SKILL.md"
     ".github/agents/*.agent.md"
+    ".vscode/mcp.json"
+    ".github/hooks/*.json"
     "copilot-instructions.md"
     # Generic AI rules
     ".ai-rules"

@@ -26,32 +26,42 @@ CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.codex/skills}"
 # Ensure user-level ~/.codex/agents has global agents (symlink dirs)
 codex_ensure_user_agents() {
   local global_agents="$AGENTS_HOME/agents/global"
-  mkdir -p "$CODEX_USER_AGENTS"
   [ ! -d "$global_agents" ] && return 0
-  for agent_dir in "$global_agents"/*/; do
-    [ -d "$agent_dir" ] || continue
-    [ -f "$agent_dir/AGENT.md" ] || continue
-    local name
-    name=$(basename "$agent_dir")
-    local target="$CODEX_USER_AGENTS/$name"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$agent_dir" "$target"
-  done
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_agents_dir="$home_root/.codex/agents"
+    mkdir -p "$user_agents_dir"
+    for agent_dir in "$global_agents"/*/; do
+      [ -d "$agent_dir" ] || continue
+      [ -f "$agent_dir/AGENT.md" ] || continue
+      local name
+      name=$(basename "$agent_dir")
+      local target="$user_agents_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$agent_dir" "$target"
+    done
+  done < <(dot_agents_user_home_roots)
 }
 
 # Ensure user-level ~/.codex/skills has global skills (symlink dirs)
 codex_ensure_user_skills() {
   local global_skills="$AGENTS_HOME/skills/global"
-  mkdir -p "$CODEX_USER_SKILLS"
   [ ! -d "$global_skills" ] && return 0
-  for skill_dir in "$global_skills"/*/; do
-    [ -d "$skill_dir" ] || continue
-    [ -f "$skill_dir/SKILL.md" ] || continue
-    local name
-    name=$(basename "$skill_dir")
-    local target="$CODEX_USER_SKILLS/$name"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$skill_dir" "$target"
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_skills_dir="$home_root/.codex/skills"
+    mkdir -p "$user_skills_dir"
+    for skill_dir in "$global_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$user_skills_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$skill_dir" "$target"
+    done
   done
 }
 
@@ -61,6 +71,7 @@ codex_create_links() {
   local repo_path="$2"
 
   codex_ensure_user_agents
+  codex_ensure_user_skills
   # Link AGENTS.md from global rules if it exists
   if [ -f "$AGENTS_HOME/rules/global/agents.md" ]; then
     ln -sf "$AGENTS_HOME/rules/global/agents.md" "$repo_path/AGENTS.md"
@@ -87,6 +98,8 @@ codex_create_links() {
 
   # Project agents (global → user-level ~/.codex/agents)
   codex_create_agents_links "$project" "$repo_path"
+  # Project skills (global → user-level ~/.codex/skills)
+  codex_create_skills_links "$project" "$repo_path"
 }
 
 # Create agents symlinks for Codex: project agents only (symlink dirs to .codex/agents/)
@@ -130,7 +143,6 @@ codex_create_skills_links() {
   local project="$1"
   local repo_path="$2"
 
-  codex_ensure_user_skills
   local skills_target="$repo_path/.codex/skills"
   local project_skills="$AGENTS_HOME/skills/$project"
 

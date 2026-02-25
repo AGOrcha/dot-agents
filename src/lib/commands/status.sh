@@ -282,6 +282,22 @@ check_project_links() {
     fi
   fi
 
+  # Check for Copilot MCP config in workspace
+  if [ -f "$AGENTS_HOME/mcp/$name/copilot.json" ] || [ -f "$AGENTS_HOME/mcp/$name/mcp.json" ] || [ -f "$AGENTS_HOME/mcp/global/copilot.json" ] || [ -f "$AGENTS_HOME/mcp/global/mcp.json" ]; then
+    if [ ! -e "$path/.vscode/mcp.json" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .vscode/mcp.json"
+    fi
+  fi
+
+  # Check for hooks-compatible settings file used by Copilot
+  if [ -f "$AGENTS_HOME/settings/$name/claude-code.json" ] || [ -f "$AGENTS_HOME/settings/global/claude-code.json" ]; then
+    if [ ! -e "$path/.claude/settings.local.json" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .claude/settings.local.json"
+    fi
+  fi
+
   echo "$issues"
 }
 
@@ -330,6 +346,20 @@ check_project_links_verbose() {
   if [ -d "$AGENTS_HOME/agents/$name" ] && find "$AGENTS_HOME/agents/$name" -mindepth 2 -maxdepth 2 -name AGENT.md -type f 2>/dev/null | grep -q .; then
     if [ ! -d "$path/.github/agents" ]; then
       echo "missing .github/agents/"
+    fi
+  fi
+
+  # Check for Copilot MCP config in workspace
+  if [ -f "$AGENTS_HOME/mcp/$name/copilot.json" ] || [ -f "$AGENTS_HOME/mcp/$name/mcp.json" ] || [ -f "$AGENTS_HOME/mcp/global/copilot.json" ] || [ -f "$AGENTS_HOME/mcp/global/mcp.json" ]; then
+    if [ ! -e "$path/.vscode/mcp.json" ]; then
+      echo "missing .vscode/mcp.json"
+    fi
+  fi
+
+  # Check for hooks-compatible settings file used by Copilot
+  if [ -f "$AGENTS_HOME/settings/$name/claude-code.json" ] || [ -f "$AGENTS_HOME/settings/global/claude-code.json" ]; then
+    if [ ! -e "$path/.claude/settings.local.json" ]; then
+      echo "missing .claude/settings.local.json"
     fi
   fi
 }
@@ -567,6 +597,42 @@ audit_copilot_text() {
   else
     echo -e "    ${DIM}(no .github/agents/)${NC}"
   fi
+
+  local copilot_mcp="$path/.vscode/mcp.json"
+  if [ -e "$copilot_mcp" ]; then
+    if [ -L "$copilot_mcp" ]; then
+      local target
+      target=$(readlink "$copilot_mcp")
+      local display_target="${target/#$HOME/~}"
+      if [ -f "$target" ]; then
+        echo -e "    ${GREEN}✓${NC} .vscode/mcp.json ${DIM}→ $display_target${NC}"
+      else
+        echo -e "    ${RED}✗${NC} .vscode/mcp.json ${DIM}→ $display_target (broken)${NC}"
+      fi
+    else
+      echo -e "    ${DIM}○${NC} .vscode/mcp.json ${DIM}(local file)${NC}"
+    fi
+  else
+    echo -e "    ${DIM}(no .vscode/mcp.json)${NC}"
+  fi
+
+  local copilot_hooks="$path/.claude/settings.local.json"
+  if [ -e "$copilot_hooks" ]; then
+    if [ -L "$copilot_hooks" ]; then
+      local target
+      target=$(readlink "$copilot_hooks")
+      local display_target="${target/#$HOME/~}"
+      if [ -f "$target" ]; then
+        echo -e "    ${GREEN}✓${NC} .claude/settings.local.json ${DIM}→ $display_target${NC}"
+      else
+        echo -e "    ${RED}✗${NC} .claude/settings.local.json ${DIM}→ $display_target (broken)${NC}"
+      fi
+    else
+      echo -e "    ${DIM}○${NC} .claude/settings.local.json ${DIM}(local file)${NC}"
+    fi
+  else
+    echo -e "    ${DIM}(no .claude/settings.local.json)${NC}"
+  fi
   echo ""
 }
 
@@ -656,6 +722,18 @@ output_audit_json() {
         fi
         echo -n ', ".github/agents": '
         if [ -d "$path/.github/agents" ]; then
+          echo -n 'true'
+        else
+          echo -n 'false'
+        fi
+        echo -n ', ".vscode/mcp.json": '
+        if [ -e "$path/.vscode/mcp.json" ]; then
+          echo -n 'true'
+        else
+          echo -n 'false'
+        fi
+        echo -n ', ".claude/settings.local.json": '
+        if [ -e "$path/.claude/settings.local.json" ]; then
           echo -n 'true'
         else
           echo -n 'false'

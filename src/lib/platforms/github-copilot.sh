@@ -1,25 +1,72 @@
 #!/bin/bash
 # dot-agents/lib/platforms/github-copilot.sh
-# GitHub Copilot support:
-# - .github/copilot-instructions.md
-# - .github/skills/*/SKILL.md
-# - .github/agents/*.agent.md
+# GitHub Copilot detection, version, and linking
 
-# Copilot instructions are file-based, not CLI-based.
+copilot_detect_extension() {
+    get_version (){
+        if [ -d "$1" ]; then
+           basename $1 | rev | cut -d'-' -f2- | rev
+        else
+           echo ""
+        fi
+    }
+    if [ -d "$HOME/.vscode/extensions" ]; then
+       get_version $(find "$HOME/.vscode/extensions" -maxdepth 1 -type d -name "*copilot*" 2>/dev/null | head -n 1)
+    elif [ -d "$HOME/.vscode-insiders/extensions" ]; then
+       get_version $(find "$HOME/.vscode-insiders/extensions" -maxdepth 1 -type d -name "*copilot*" 2>/dev/null | head -n 1)
+    elif [ -d "$HOME/.vscode-server/extensions" ]; then
+       get_version $(find "$HOME/.vscode-server/extensions" -maxdepth 1 -type d -name "*copilot*" 2>/dev/null | head -n 1)
+    elif [ -d "$HOME/.vscode-server-insiders/extensions" ]; then
+       get_version $(find "$HOME/.vscode-server-insiders/extensions" -maxdepth 1 -type d -name "*copilot*" 2>/dev/null | head -n 1)
+    fi
+}
+
+copilot_detect_cli() {
+  if command -v copilot >/dev/null 2>&1; then
+    copilot --version 2>/dev/null | head -1
+  fi
+}
+
+# Check if GitHub Copilot is available.
 copilot_is_installed() {
-  return 0
+  local ext
+  ext=$(copilot_detect_extension)
+  [ -n "$ext" ] || command -v copilot >/dev/null 2>&1
 }
 
 # Version/info string for doctor output.
 copilot_version() {
-  echo "file-based"
+  local ext_version cli_version
+
+  ext_version=$(copilot_detect_extension)
+  cli_version=$(copilot_detect_cli)
+
+  if [ -n "$ext_version" ] && [ -n "$cli_version" ]; then
+    echo "$ext_version, CLI: $cli_version"
+  elif [ -n "$ext_version" ]; then
+    echo "$ext_version (Extension)"
+  elif [ -n "$cli_version" ]; then
+    echo "CLI: $cli_version"
+  fi
+
 }
 
-# User-level skills dir used by VS Code Copilot docs for personal skills.
+# Check for deprecated formats (none currently)
+copilot_has_deprecated_format() {
+  local repo_path="$1"
+  return 1
+}
+
+# Get deprecated format details
+copilot_deprecated_details() {
+  local repo_path="$1"
+  echo ""
+}
+
+# User-level dirs for global skills (one place, not per-project)
 COPILOT_USER_SKILLS="${COPILOT_USER_SKILLS:-$HOME/.github/skills}"
 
-# Helper to find rule file with any extension (.md, .mdc, .txt)
-# Returns empty string if not found.
+# Helper to find the first matching rules file with supported extension.
 _copilot_find_rule_file() {
   local base_path="$1"
   for ext in md mdc txt; do
@@ -29,52 +76,118 @@ _copilot_find_rule_file() {
     fi
   done
   echo ""
-  return 0
 }
 
-# Create .github/copilot-instructions.md symlink.
+# Resolve source for .github/copilot-instructions.md
 # Priority:
 # 1. ~/.agents/rules/{project}/copilot-instructions.md
 # 2. ~/.agents/rules/global/copilot-instructions.md
 # 3. ~/.agents/rules/{project}/rules.(md|mdc|txt)
 # 4. ~/.agents/rules/global/rules.(md|mdc|txt)
-copilot_create_links() {
+copilot_resolve_instructions_source() {
   local project="$1"
-  local repo_path="$2"
 
-  local source=""
   if [ -f "$AGENTS_HOME/rules/$project/copilot-instructions.md" ]; then
-    source="$AGENTS_HOME/rules/$project/copilot-instructions.md"
-  elif [ -f "$AGENTS_HOME/rules/global/copilot-instructions.md" ]; then
-    source="$AGENTS_HOME/rules/global/copilot-instructions.md"
-  else
-    source=$(_copilot_find_rule_file "$AGENTS_HOME/rules/$project/rules")
-    [ -z "$source" ] && source=$(_copilot_find_rule_file "$AGENTS_HOME/rules/global/rules")
+    echo "$AGENTS_HOME/rules/$project/copilot-instructions.md"
+    return 0
   fi
 
-  [ -z "$source" ] && return 0
+  if [ -f "$AGENTS_HOME/rules/global/copilot-instructions.md" ]; then
+    echo "$AGENTS_HOME/rules/global/copilot-instructions.md"
+    return 0
+  fi
 
-  mkdir -p "$repo_path/.github"
-  ln -sf "$source" "$repo_path/.github/copilot-instructions.md"
+  local source
+  source=$(_copilot_find_rule_file "$AGENTS_HOME/rules/$project/rules")
+  if [ -n "$source" ]; then
+    echo "$source"
+    return 0
+  fi
 
-  copilot_create_skills_links "$project" "$repo_path"
-  copilot_create_agents_links "$project" "$repo_path"
+  source=$(_copilot_find_rule_file "$AGENTS_HOME/rules/global/rules")
+  echo "$source"
+}
+
+# Resolve source for workspace MCP config used by Copilot.
+# Priority:
+# 1. ~/.agents/mcp/{project}/copilot.json
+# 2. ~/.agents/mcp/{project}/mcp.json
+# 3. ~/.agents/mcp/global/copilot.json
+# 4. ~/.agents/mcp/global/mcp.json
+copilot_resolve_mcp_source() {
+  local project="$1"
+
+  if [ -f "$AGENTS_HOME/mcp/$project/copilot.json" ]; then
+    echo "$AGENTS_HOME/mcp/$project/copilot.json"
+    return 0
+  fi
+  if [ -f "$AGENTS_HOME/mcp/$project/mcp.json" ]; then
+    echo "$AGENTS_HOME/mcp/$project/mcp.json"
+    return 0
+  fi
+  if [ -f "$AGENTS_HOME/mcp/global/copilot.json" ]; then
+    echo "$AGENTS_HOME/mcp/global/copilot.json"
+    return 0
+  fi
+  if [ -f "$AGENTS_HOME/mcp/global/mcp.json" ]; then
+    echo "$AGENTS_HOME/mcp/global/mcp.json"
+    return 0
+  fi
+
+  echo ""
+}
+
+# Resolve source for hooks config that Copilot can load via Claude-compatible settings.
+# Priority:
+# 1. ~/.agents/settings/{project}/claude-code.json
+# 2. ~/.agents/settings/global/claude-code.json
+copilot_resolve_hooks_source() {
+  local project="$1"
+
+  if [ -f "$AGENTS_HOME/settings/$project/claude-code.json" ]; then
+    echo "$AGENTS_HOME/settings/$project/claude-code.json"
+    return 0
+  fi
+  if [ -f "$AGENTS_HOME/settings/global/claude-code.json" ]; then
+    echo "$AGENTS_HOME/settings/global/claude-code.json"
+    return 0
+  fi
+
+  echo ""
 }
 
 # Ensure user-level ~/.github/skills has global skills (symlink dirs)
 copilot_ensure_user_skills() {
   local global_skills="$AGENTS_HOME/skills/global"
-  mkdir -p "$COPILOT_USER_SKILLS"
   [ ! -d "$global_skills" ] && return 0
-  for skill_dir in "$global_skills"/*/; do
-    [ -d "$skill_dir" ] || continue
-    [ -f "$skill_dir/SKILL.md" ] || continue
-    local name
-    name=$(basename "$skill_dir")
-    local target="$COPILOT_USER_SKILLS/$name"
-    [ -e "$target" ] && [ -L "$target" ] && continue
-    ln -sf "$skill_dir" "$target"
+
+  local home_root
+  while IFS= read -r home_root; do
+    local user_skills_dir="$home_root/.github/skills"
+    mkdir -p "$user_skills_dir"
+    for skill_dir in "$global_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$user_skills_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$skill_dir" "$target"
+    done
   done
+}
+
+# Create instructions link for Copilot
+copilot_create_instructions_link() {
+  local project="$1"
+  local repo_path="$2"
+  local source
+  source=$(copilot_resolve_instructions_source "$project")
+
+  [ -z "$source" ] && return 0
+
+  mkdir -p "$repo_path/.github"
+  ln -sf "$source" "$repo_path/.github/copilot-instructions.md"
 }
 
 # Create project skills symlinks for Copilot (.github/skills/{name}/ -> skill dir)
@@ -91,7 +204,7 @@ copilot_create_skills_links() {
 
   if [ -d "$project_skills" ]; then
     for skill_dir in "$project_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
+      [ -d "$skill_dir" ] || continue``
       [ -f "$skill_dir/SKILL.md" ] || continue
       local name
       name=$(basename "$skill_dir")
@@ -124,14 +237,40 @@ copilot_create_agents_links() {
   fi
 }
 
-# Check for deprecated formats (none currently)
-copilot_has_deprecated_format() {
-  local repo_path="$1"
-  return 1
+# Create workspace MCP link for Copilot (.vscode/mcp.json)
+copilot_create_mcp_links() {
+  local project="$1"
+  local repo_path="$2"
+  local source
+  source=$(copilot_resolve_mcp_source "$project")
+
+  [ -z "$source" ] && return 0
+
+  mkdir -p "$repo_path/.vscode"
+  ln -sf "$source" "$repo_path/.vscode/mcp.json"
 }
 
-# Get deprecated format details
-copilot_deprecated_details() {
-  local repo_path="$1"
-  echo ""
+# Create hooks-compatible settings link for Copilot (.claude/settings.local.json)
+copilot_create_hooks_links() {
+  local project="$1"
+  local repo_path="$2"
+  local source
+  source=$(copilot_resolve_hooks_source "$project")
+
+  [ -z "$source" ] && return 0
+
+  mkdir -p "$repo_path/.claude"
+  ln -sf "$source" "$repo_path/.claude/settings.local.json"
+}
+
+# Create all Copilot links (instructions, skills, agents)
+copilot_create_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  copilot_create_instructions_link "$project" "$repo_path"
+  copilot_create_skills_links "$project" "$repo_path"
+  copilot_create_agents_links "$project" "$repo_path"
+  copilot_create_mcp_links "$project" "$repo_path"
+  copilot_create_hooks_links "$project" "$repo_path"
 }

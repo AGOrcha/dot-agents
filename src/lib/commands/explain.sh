@@ -924,6 +924,12 @@ CONFIG FILES:
   .github/agents/{name}.agent.md
     Custom agent definitions for VS Code Copilot chat.
 
+  .vscode/mcp.json
+    Workspace MCP server configuration for Copilot tools.
+
+  .claude/settings.local.json
+    Hooks-compatible settings file recognized by VS Code Copilot.
+
 HOW DOT-AGENTS MANAGES IT:
   ~/.agents/rules/{project}/copilot-instructions.md
     → .github/copilot-instructions.md (symlink)
@@ -933,6 +939,12 @@ HOW DOT-AGENTS MANAGES IT:
 
   ~/.agents/agents/{project}/{agent}/AGENT.md
     → .github/agents/{agent}.agent.md (symlink)
+
+  ~/.agents/mcp/{project}/(copilot.json|mcp.json)
+    → .vscode/mcp.json (symlink)
+
+  ~/.agents/settings/{project}/claude-code.json
+    → .claude/settings.local.json (symlink)
 
   Fallback order when linking:
     1) ~/.agents/rules/{project}/copilot-instructions.md

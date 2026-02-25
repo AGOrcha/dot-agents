@@ -134,6 +134,34 @@ dot_agents_repo_root() {
   git_root "$start" 2>/dev/null || echo "$(dirname "$start")"
 }
 
+# Windows mirror context for WSL-managed repos under /mnt/c/Users/<user>/...
+DOT_AGENTS_WINDOWS_MIRROR="${DOT_AGENTS_WINDOWS_MIRROR:-false}"
+DOT_AGENTS_WINDOWS_HOME="${DOT_AGENTS_WINDOWS_HOME:-}"
+
+# Set Windows mirror context from a repo path.
+# Enables user-level config mirroring to /mnt/c/Users/<user> when applicable.
+dot_agents_set_windows_mirror_context() {
+  local repo_path="$1"
+  DOT_AGENTS_WINDOWS_MIRROR=false
+  DOT_AGENTS_WINDOWS_HOME=""
+
+  if [[ "$repo_path" =~ ^/mnt/c/Users/([^/]+)(/|$) ]]; then
+    DOT_AGENTS_WINDOWS_MIRROR=true
+    DOT_AGENTS_WINDOWS_HOME="/mnt/c/Users/${BASH_REMATCH[1]}"
+  fi
+
+  export DOT_AGENTS_WINDOWS_MIRROR DOT_AGENTS_WINDOWS_HOME
+}
+
+# Print applicable user home roots, one per line.
+# Always includes Linux $HOME, and includes Windows mirror home when enabled.
+dot_agents_user_home_roots() {
+  echo "$HOME"
+  if [ "${DOT_AGENTS_WINDOWS_MIRROR:-false}" = true ] && [ -n "${DOT_AGENTS_WINDOWS_HOME:-}" ] && [ "${DOT_AGENTS_WINDOWS_HOME}" != "$HOME" ]; then
+    echo "$DOT_AGENTS_WINDOWS_HOME"
+  fi
+}
+
 # Standard paths for dot-agents
 AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
 AGENTS_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dot-agents"
