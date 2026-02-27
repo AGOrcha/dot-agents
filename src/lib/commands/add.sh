@@ -2,6 +2,11 @@
 # dot-agents/lib/commands/add.sh
 # Add a project to dot-agents management
 
+# Ensure shared restore mapper is available when this file is sourced in long-lived shells.
+if ! declare -F dot_agents_map_resource_rel_to_agents_dest >/dev/null 2>&1; then
+  [ -n "${LIB_DIR:-}" ] && [ -f "$LIB_DIR/utils/resource-restore-map.sh" ] && source "$LIB_DIR/utils/resource-restore-map.sh"
+fi
+
 cmd_add_help() {
   cat << EOF
 ${BOLD}dot-agents add${NC} - Add a project to dot-agents management
@@ -26,33 +31,36 @@ ${BOLD}DESCRIPTION${NC}
     Creates in ~/.agents/:
     - rules/<project>/         Project-specific rules
     - settings/<project>/      Project settings
+    - skills/<project>/        Project skills
     - mcp/<project>/           Project MCP configs
     - agents/<project>/        Project subagents
 
     Links created in project directory:
 
     ${BOLD}Cursor${NC} (uses HARD LINKS - required by IDE):
-    - .cursor/rules/           Global and project rules
+    - .cursor/rules/           Project rules
+    - .agents/skills/          Project skills
     - .cursor/agents/          Project agents
     - .cursor/settings.json    IDE settings
     - .cursor/mcp.json         MCP server configs
     - .cursorignore            Files to ignore
 
     ${BOLD}Claude Code${NC} (uses SYMLINKS):
-    - .claude/rules/*.md       Rule files (global + project)
+    - .claude/rules/*.md       Rule files (project)
     - .claude/settings.local.json  Project settings
-    - .claude/skills/          Commands as skills (global + project)
+    - .claude/skills/          Commands as skills (project)
     - .mcp.json                MCP server configs
 
     ${BOLD}Codex CLI${NC} (uses SYMLINKS):
     - AGENTS.md                Project instructions
+    - .agents/skills/*/        Project skills
 
     ${BOLD}OpenCode${NC} (uses SYMLINKS):
     - .opencode/               Config directory
 
     ${BOLD}GitHub Copilot${NC} (uses SYMLINKS):
     - .github/copilot-instructions.md   Project instructions
-    - .github/skills/*/                 Project skills
+    - .agents/skills/*/                 Project skills
     - .github/agents/*.agent.md         Project custom agents
     - .vscode/mcp.json                  MCP server configs
     - .claude/settings.local.json       Hooks-compatible settings
@@ -173,14 +181,13 @@ cmd_add() {
 
   # Check for deprecated formats
   local has_deprecated=false
-  if cursor_has_deprecated_format "$project_path"; then
-    bullet "warn" "Found deprecated .cursorrules file"
-    has_deprecated=true
-  fi
-  if claude_has_deprecated_format "$project_path"; then
-    bullet "warn" "Found deprecated .claude.json file"
-    has_deprecated=true
-  fi
+  local platform
+  while IFS= read -r platform; do
+    if platform_has_deprecated_format "$platform" "$project_path"; then
+      bullet "warn" "Found deprecated $(platform_display_name "$platform") config"
+      has_deprecated=true
+    fi
+  done < <(platform_ids)
 
   if [ "$has_deprecated" = true ]; then
     warn_box "Deprecated Formats Found" \
@@ -204,7 +211,6 @@ cmd_add() {
     ".cursor/rules/global--*.mdc       (hard links to global rules)" \
     ".cursor/settings.json             (hard link to settings)" \
     ".cursor/mcp.json                  (hard link to MCP config)" \
-    ".cursor/commands/*.md             (symlinks to skills)" \
     ".cursor/agents/*.md               (symlinks to subagents)" \
     ".cursorignore                     (hard link to ignore patterns)" \
     ".claude/rules/*.md                (symlinks to rule files)" \
@@ -212,10 +218,9 @@ cmd_add() {
     ".claude/skills/*/                 (symlinks to skill directories)" \
     ".mcp.json                         (symlink to MCP config)" \
     "AGENTS.md                         (symlink to rules)" \
-    ".codex/skills/*/                  (symlinks to skill directories)" \
+    ".agents/skills/*/                 (symlinks to project skills)" \
     ".opencode/                        (symlinks to configs)" \
     ".github/copilot-instructions.md   (symlink to instructions)" \
-    ".github/skills/*/                 (symlinks to skill directories)" \
     ".github/agents/*.agent.md         (symlinks to custom agents)" \
     ".vscode/mcp.json                  (symlink to MCP config)" \
     ".claude/settings.local.json       (symlink to hooks-compatible settings)"
@@ -310,21 +315,33 @@ cmd_add() {
   fi
 
   # Backup existing files before replacing
+  local backup_timestamp=""
   if [ ${#existing_files[@]} -gt 0 ]; then
+    backup_timestamp=$(date +%Y%m%d-%H%M%S)
     for file in "${existing_files[@]}"; do
       if [ -e "$file" ] && [ ! -L "$file" ]; then
-        mv "$file" "$file.dot-agents-backup"
+        mirror_project_backup_to_resources "$project_name" "$project_path" "$file" "$backup_timestamp"
+        local backup_file="$file.dot-agents-backup"
+        mv "$file" "$backup_file"
       elif [ -L "$file" ]; then
         rm "$file"  # Remove existing symlinks without backup
       fi
     done
     bullet "ok" "Backed up ${#existing_files[@]} existing file(s)"
+    bullet "ok" "Stored backups in ~/.agents/resources/$project_name/backups/$backup_timestamp/"
   fi
 
   # Step 3: Create project structure
   step "Creating project structure..."
   create_project_dirs_silent "$project_name"
   bullet "ok" "Created ~/.agents/ directories"
+
+  # Restore from active (non-timestamped) resources first, when available
+  local restored_count
+  restored_count=$(restore_project_from_active_resources "$project_name")
+  if [ "$restored_count" -gt 0 ]; then
+    bullet "ok" "Restored $restored_count item(s) from ~/.agents/resources/$project_name/"
+  fi
 
   # Copy project settings template if it doesn't exist
   local templates_dir="$SHARE_DIR/templates/standard"
@@ -340,26 +357,19 @@ cmd_add() {
   # Enable Windows user-home mirroring when project lives under /mnt/c/Users/<user>/...
   dot_agents_set_windows_mirror_context "$project_path"
 
-  if cursor_is_installed 2>/dev/null; then
-    cursor_create_all_links "$project_name" "$project_path"
-    bullet "ok" ".cursor/ configs (hard links)"
-  fi
-  if claude_is_installed 2>/dev/null; then
-    claude_create_links "$project_name" "$project_path"
-    claude_create_skills_links "$project_name" "$project_path"
-    bullet "ok" "Claude Code links (symlinks)"
-  fi
-  if codex_is_installed 2>/dev/null; then
-    codex_create_links "$project_name" "$project_path"
-    codex_create_skills_links "$project_name" "$project_path"
-    bullet "ok" "Codex links (symlinks)"
-  fi
-  if opencode_is_installed 2>/dev/null; then
-    opencode_create_links "$project_name" "$project_path"
-    bullet "ok" "OpenCode links (symlinks)"
-  fi
-  copilot_create_links "$project_name" "$project_path"
-  bullet "ok" "GitHub Copilot links (symlinks)"
+  local platform
+  while IFS= read -r platform; do
+    if dot_agents_platform_has_active_backup "$project_name" "$platform" && [ "$VERBOSE" = true ]; then
+      bullet "found" "Found active $(platform_display_name "$platform") backup in ~/.agents/resources/$project_name/"
+    fi
+
+    if platform_is_installed "$platform"; then
+      platform_create_links "$platform" "$project_name" "$project_path"
+      bullet "ok" "$(platform_success_message "$platform")"
+    elif [ "$VERBOSE" = true ]; then
+      bullet "skip" "$(platform_display_name "$platform") not installed"
+    fi
+  done < <(platform_ids)
 
   # Register in config.json
   config_add_project "$project_name" "$project_path"
@@ -378,6 +388,84 @@ cmd_add() {
   show_test_commands \
     "dot-agents status" \
     "ls -la $display_path/.cursor/rules/"
+}
+
+# Mirror a project backup file into AGENTS_HOME/resources/<project-slug>/...
+mirror_project_backup_to_resources() {
+  local project_slug="$1"
+  local project_path="$2"
+  local source_file="$3"
+  local backup_timestamp="$4"
+
+  [ -f "$source_file" ] || return 0
+
+  local rel_path
+  rel_path="${source_file#$project_path/}"
+  if [ "$rel_path" = "$source_file" ]; then
+    # Fallback to basename if backup file is not under project path
+    rel_path=$(basename "$source_file")
+  fi
+
+  local backup_rel_path="$rel_path.dot-agents-backup"
+
+  local active_target="$AGENTS_HOME/resources/$project_slug/$backup_rel_path"
+  mkdir -p "$(dirname "$active_target")"
+
+  if ! cp -a "$source_file" "$active_target" 2>/dev/null; then
+    log_warn "Could not mirror active backup to ~/.agents/resources/$project_slug/"
+  fi
+
+  # Also store canonical active copy for generic restore.
+  local active_canonical_target="$AGENTS_HOME/resources/$project_slug/$rel_path"
+  mkdir -p "$(dirname "$active_canonical_target")"
+  cp -a "$source_file" "$active_canonical_target" 2>/dev/null || true
+
+  if [ -n "$backup_timestamp" ]; then
+    local ts_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$backup_rel_path"
+    mkdir -p "$(dirname "$ts_target")"
+    if ! cp -a "$source_file" "$ts_target" 2>/dev/null; then
+      log_warn "Could not mirror timestamped backup to ~/.agents/resources/$project_slug/backups/$backup_timestamp/"
+    fi
+
+    local ts_canonical_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$rel_path"
+    mkdir -p "$(dirname "$ts_canonical_target")"
+    cp -a "$source_file" "$ts_canonical_target" 2>/dev/null || true
+  fi
+}
+
+# Restore project sources from active (non-timestamped) resources.
+# Returns number of restored items on stdout.
+restore_project_from_active_resources() {
+  local project="$1"
+  local root="$AGENTS_HOME/resources/$project"
+  local restored=0
+
+  [ -d "$root" ] || { echo 0; return 0; }
+
+  local file
+  while IFS= read -r -d '' file; do
+    local rel="${file#$root/}"
+
+    # Active restore only: skip timestamped backup snapshots
+    [[ "$rel" == backups/* ]] && continue
+
+    # Prefer canonical file if both canonical and backup-suffixed copies exist
+    if [[ "$rel" == *.dot-agents-backup ]]; then
+      local canonical_rel="${rel%.dot-agents-backup}"
+      [ -f "$root/$canonical_rel" ] && continue
+      rel="$canonical_rel"
+    fi
+
+    local dest_rel
+    dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel")
+    [ -n "$dest_rel" ] || continue
+
+    local dest="$AGENTS_HOME/$dest_rel"
+    mkdir -p "$(dirname "$dest")"
+    cp -a "$file" "$dest" 2>/dev/null && ((restored++)) || true
+  done < <(find "$root" -type f -print0 2>/dev/null)
+
+  echo "$restored"
 }
 
 # Create project directories in ~/.agents/ (silent version for bulk)
@@ -429,37 +517,20 @@ setup_project_links() {
   # Check for deprecated formats and warn
   check_deprecated_formats "$repo"
 
-  # Use platform modules for linking (only for installed platforms)
-  if [ "$DRY_RUN" = true ]; then
-    cursor_is_installed 2>/dev/null && log_dry "Create Cursor config (.cursor/ rules, commands, agents)"
-    claude_is_installed 2>/dev/null && log_dry "Create Claude Code config (.claude/ rules, skills, agents)"
-    codex_is_installed 2>/dev/null && log_dry "Create Codex config (AGENTS.md, .codex/ skills, agents)"
-    opencode_is_installed 2>/dev/null && log_dry "Create OpenCode config (.opencode/)"
-    copilot_is_installed 2>/dev/null && log_dry "Create GitHub Copilot config (.github/copilot-instructions.md, .github/skills, .github/agents, .vscode/mcp.json, .claude/settings.local.json)"
-  else
-    if cursor_is_installed 2>/dev/null; then
-      cursor_create_all_links "$project" "$repo"
-      log_create ".cursor/ configs (hard links + command/agent symlinks)"
+  # Use generic platform dispatcher for linking (installed platforms only)
+  local platform
+  while IFS= read -r platform; do
+    if ! platform_is_installed "$platform"; then
+      continue
     fi
-    if claude_is_installed 2>/dev/null; then
-      claude_create_links "$project" "$repo"
-      claude_create_skills_links "$project" "$repo"
-      log_create "Claude Code links (symlinks)"
+
+    if [ "$DRY_RUN" = true ]; then
+      log_dry "$(platform_dry_run_message "$platform")"
+    else
+      platform_create_links "$platform" "$project" "$repo"
+      log_create "$(platform_success_message "$platform")"
     fi
-    if codex_is_installed 2>/dev/null; then
-      codex_create_links "$project" "$repo"
-      codex_create_skills_links "$project" "$repo"
-      log_create "Codex links (symlinks)"
-    fi
-    if opencode_is_installed 2>/dev/null; then
-      opencode_create_links "$project" "$repo"
-      log_create "OpenCode links (symlinks)"
-    fi
-    if copilot_is_installed 2>/dev/null; then
-      copilot_create_links "$project" "$repo"
-      log_create "GitHub Copilot links (symlinks)"
-    fi
-  fi
+  done < <(platform_ids)
 }
 
 # Check for deprecated config formats and warn
@@ -467,17 +538,16 @@ check_deprecated_formats() {
   local repo="$1"
   local found_deprecated=false
 
-  if cursor_has_deprecated_format "$repo"; then
-    log_warn "Found deprecated .cursorrules file"
-    log_info "  → Run: dot-agents migrate cursorrules $repo"
-    found_deprecated=true
-  fi
-
-  if claude_has_deprecated_format "$repo"; then
-    log_warn "Found deprecated .claude.json file"
-    log_info "  → Run: dot-agents migrate claude-json $repo"
-    found_deprecated=true
-  fi
+  local platform
+  while IFS= read -r platform; do
+    if platform_has_deprecated_format "$platform" "$repo"; then
+      log_warn "Found deprecated $(platform_display_name "$platform") config"
+      local details
+      details=$(platform_deprecated_details "$platform" "$repo")
+      [ -n "$details" ] && log_info "  → $details"
+      found_deprecated=true
+    fi
+  done < <(platform_ids)
 
   if [ "$found_deprecated" = true ]; then
     echo ""
@@ -509,13 +579,13 @@ check_existing_config_files() {
     "$project_path/.claude/agents"
     "$project_path/.claude/settings.local.json"
     "$project_path/.mcp.json"
+    "$project_path/.agents/skills"
     "$project_path/AGENTS.md"
     "$project_path/.codex/instructions.md"
     "$project_path/.codex/agents"
     "$project_path/.opencode/instructions.md"
     "$project_path/.opencode/config.json"
     "$project_path/.github/copilot-instructions.md"
-    "$project_path/.github/skills"
     "$project_path/.github/agents"
     "$project_path/.vscode/mcp.json"
   )
@@ -582,6 +652,7 @@ scan_existing_ai_configs() {
     ".continue/*"
     ".windsurfrules"
     # GitHub Copilot
+    ".agents/skills/*/SKILL.md"
     ".github/copilot-instructions.md"
     ".github/skills/*/SKILL.md"
     ".github/agents/*.agent.md"

@@ -268,17 +268,19 @@ check_project_links() {
     fi
   fi
 
-  # Check for Copilot skills/agents in repo (project-level)
-  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
-    if [ ! -d "$path/.github/skills" ]; then
-      [ -n "$issues" ] && issues="$issues,"
-      issues="${issues}missing .github/skills/"
-    fi
-  fi
+  # Check for Copilot agents in repo (project-level)
   if [ -d "$AGENTS_HOME/agents/$name" ] && find "$AGENTS_HOME/agents/$name" -mindepth 2 -maxdepth 2 -name AGENT.md -type f 2>/dev/null | grep -q .; then
     if [ ! -d "$path/.github/agents" ]; then
       [ -n "$issues" ] && issues="$issues,"
       issues="${issues}missing .github/agents/"
+    fi
+  fi
+
+  # Shared skills mirror for Codex/Copilot
+  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.agents/skills" ]; then
+      [ -n "$issues" ] && issues="$issues,"
+      issues="${issues}missing .agents/skills/"
     fi
   fi
 
@@ -337,15 +339,17 @@ check_project_links_verbose() {
     fi
   fi
 
-  # Check for Copilot skills/agents in repo (project-level)
-  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
-    if [ ! -d "$path/.github/skills" ]; then
-      echo "missing .github/skills/"
-    fi
-  fi
+  # Check for Copilot agents in repo (project-level)
   if [ -d "$AGENTS_HOME/agents/$name" ] && find "$AGENTS_HOME/agents/$name" -mindepth 2 -maxdepth 2 -name AGENT.md -type f 2>/dev/null | grep -q .; then
     if [ ! -d "$path/.github/agents" ]; then
       echo "missing .github/agents/"
+    fi
+  fi
+
+  # Shared skills mirror for Codex/Copilot
+  if [ -d "$AGENTS_HOME/skills/$name" ] && find "$AGENTS_HOME/skills/$name" -mindepth 2 -maxdepth 2 -name SKILL.md -type f 2>/dev/null | grep -q .; then
+    if [ ! -d "$path/.agents/skills" ]; then
+      echo "missing .agents/skills/"
     fi
   fi
 
@@ -553,6 +557,15 @@ audit_codex_text() {
   if [ -d "$codex_dir" ]; then
     echo -e "    ${DIM}○${NC} .codex/ ${DIM}(local directory)${NC}"
   fi
+
+  local shared_skills_dir="$path/.agents/skills"
+  if [ -d "$shared_skills_dir" ]; then
+    local n=0
+    for d in "$shared_skills_dir"/*/; do [ -e "$d" ] && ((n++)) || true; done
+    [ "$n" -gt 0 ] && echo -e "    ${GREEN}✓${NC} .agents/skills/ ${DIM}($n skill dir link(s))${NC}" || echo -e "    ${DIM}○${NC} .agents/skills/ ${DIM}(empty)${NC}"
+  else
+    echo -e "    ${DIM}(no .agents/skills/)${NC}"
+  fi
   echo ""
 }
 
@@ -580,13 +593,13 @@ audit_copilot_text() {
     echo -e "    ${DIM}(no .github/copilot-instructions.md)${NC}"
   fi
 
-  local skills_dir="$path/.github/skills"
+  local skills_dir="$path/.agents/skills"
   if [ -d "$skills_dir" ]; then
     local n=0
     for d in "$skills_dir"/*/; do [ -e "$d" ] && ((n++)) || true; done
-    [ "$n" -gt 0 ] && echo -e "    ${GREEN}✓${NC} .github/skills/ ${DIM}($n skill dir link(s))${NC}" || echo -e "    ${DIM}○${NC} .github/skills/ ${DIM}(empty)${NC}"
+    [ "$n" -gt 0 ] && echo -e "    ${GREEN}✓${NC} .agents/skills/ ${DIM}($n skill dir link(s))${NC}" || echo -e "    ${DIM}○${NC} .agents/skills/ ${DIM}(empty)${NC}"
   else
-    echo -e "    ${DIM}(no .github/skills/)${NC}"
+    echo -e "    ${DIM}(no .agents/skills/)${NC}"
   fi
 
   local agents_dir="$path/.github/agents"
@@ -714,14 +727,14 @@ output_audit_json() {
         else
           echo -n 'false'
         fi
-        echo -n ', ".github/skills": '
-        if [ -d "$path/.github/skills" ]; then
+        echo -n ', ".github/agents": '
+        if [ -d "$path/.github/agents" ]; then
           echo -n 'true'
         else
           echo -n 'false'
         fi
-        echo -n ', ".github/agents": '
-        if [ -d "$path/.github/agents" ]; then
+        echo -n ', ".agents/skills": '
+        if [ -d "$path/.agents/skills" ]; then
           echo -n 'true'
         else
           echo -n 'false'

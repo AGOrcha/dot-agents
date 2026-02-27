@@ -40,6 +40,71 @@ EOF
 
 REFRESH_MARKER_BASENAME=".agents-refresh"
 
+# Check enabled platforms from config and refresh their detected versions.
+# Outputs enabled platform ids (one per line) to stdout.
+refresh_enabled_platforms_and_versions() {
+  local config_file="$AGENTS_HOME/config.json"
+  [ -f "$config_file" ] || return 0
+
+  local enabled_platforms=()
+  local platform
+  while IFS= read -r platform; do
+    local enabled
+    enabled=$(config_get_platform_enabled "$platform" 2>/dev/null || true)
+    if [ -z "$enabled" ]; then
+      # Default to enabled when key is absent
+      enabled=true
+    fi
+
+    if [ "$enabled" = "true" ]; then
+      enabled_platforms+=("$platform")
+
+      local version=""
+      if platform_is_installed "$platform"; then
+        version=$(platform_version "$platform" || true)
+      fi
+
+      config_set_platform_state "$platform" true "$version"
+
+      if [ -n "$version" ]; then
+        echo -e "  ${GREEN}✓${NC} $(platform_display_name "$platform") ${DIM}($version)${NC}" >&2
+      else
+        echo -e "  ${YELLOW}○${NC} $(platform_display_name "$platform") ${DIM}(enabled, not detected)${NC}" >&2
+      fi
+    fi
+  done < <(platform_ids)
+
+  if [ ${#enabled_platforms[@]} -gt 0 ]; then
+    printf '%s\n' "${enabled_platforms[@]}"
+  fi
+}
+
+# Re-apply platform links for a single project, limited to enabled platforms.
+refresh_project_links_enabled() {
+  local project="$1"
+  local repo="$2"
+  shift 2
+  local enabled_platforms=("$@")
+
+  # Keep Windows mirror behavior consistent with add/refresh workflows
+  dot_agents_set_windows_mirror_context "$repo"
+
+  local platform
+  for platform in "${enabled_platforms[@]}"; do
+    if ! platform_is_installed "$platform"; then
+      [ "$VERBOSE" = true ] && log_skip "$(platform_display_name "$platform") not installed"
+      continue
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+      log_dry "$(platform_dry_run_message "$platform")"
+    else
+      platform_create_links "$platform" "$project" "$repo"
+      log_create "$(platform_success_message "$platform")"
+    fi
+  done
+}
+
 # Write .agents-refresh in project with commit/version that performed refresh
 write_refresh_marker() {
   local project_path="$1"
@@ -97,9 +162,6 @@ cmd_refresh() {
     return 1
   fi
 
-  # Load add.sh to use setup_project_links (re-apply links only)
-  source "$LIB_DIR/commands/add.sh"
-
   local project_filter=""
   [ ${#REMAINING_ARGS[@]} -gt 0 ] && project_filter="${REMAINING_ARGS[0]}"
 
@@ -131,6 +193,18 @@ cmd_refresh() {
   fi
 
   log_header "dot-agents refresh"
+
+  log_section "Enabled Platforms"
+  local enabled_platforms=()
+  while IFS= read -r p; do
+    [ -n "$p" ] && enabled_platforms+=("$p")
+  done < <(refresh_enabled_platforms_and_versions)
+
+  if [ ${#enabled_platforms[@]} -eq 0 ]; then
+    log_warn "No enabled platforms in config.json. Nothing to refresh."
+    return 0
+  fi
+
   local count=0
   while read -r name; do
     [ -z "$name" ] && continue
@@ -143,7 +217,7 @@ cmd_refresh() {
     echo ""
     echo -e "${BOLD}Refreshing: $name${NC}"
     echo -e "  ${DIM}$path${NC}"
-    setup_project_links "$name" "$path"
+    refresh_project_links_enabled "$name" "$path" "${enabled_platforms[@]}"
     if [ "$DRY_RUN" != true ]; then
       write_refresh_marker "$path" "$refresh_commit" "$refresh_describe"
     else

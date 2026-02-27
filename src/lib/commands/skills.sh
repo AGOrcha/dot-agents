@@ -33,7 +33,7 @@ ${BOLD}DESCRIPTION${NC}
     - references/      Optional - additional context documents
 
     Skills integrate with Claude Code, Cursor, and Codex CLI:
-    - Global skills: ~/.agents/skills/global/{skill-name}/SKILL.md
+    - User-scope skills: ~/.agents/skills/global/{skill-name}/SKILL.md
     - Project skills: ~/.agents/skills/{project}/{skill-name}/SKILL.md
 
     When a project is added with 'dot-agents add', skills are symlinked
@@ -157,7 +157,7 @@ skills_list() {
 
       if [ "$has_skills" = true ]; then
         echo ""
-        log_section "Global Skills (~/.agents/skills/global/)"
+        log_section "User-scope Skills (~/.agents/skills/global/)"
         for skill_dir in "$global_dir"/*/; do
           [ -d "$skill_dir" ] || continue
           [ -f "$skill_dir/SKILL.md" ] || continue
@@ -405,7 +405,7 @@ Description of this skill.
 - Important consideration
 - Edge case to handle
 EOF
-
+  ls -l "$target_file"
   log_success "Created skill: $target_dir"
   echo ""
   echo "Edit with: dot-agents skills edit $name"
@@ -543,7 +543,7 @@ skills_validate() {
 find_skill_dir() {
   local name="$1"
 
-  # Check global first
+  # Check user scope (global) first
   local global_dir="$AGENTS_HOME/skills/global/$name"
   if [ -d "$global_dir" ] && [ -f "$global_dir/SKILL.md" ]; then
     echo "$global_dir"

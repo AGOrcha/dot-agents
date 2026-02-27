@@ -21,7 +21,7 @@ codex_version() {
 
 # User-level dirs for global agents/skills
 CODEX_USER_AGENTS="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
-CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.codex/skills}"
+CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.agents/skills}"
 
 # Ensure user-level ~/.codex/agents has global agents (symlink dirs)
 codex_ensure_user_agents() {
@@ -44,23 +44,29 @@ codex_ensure_user_agents() {
   done < <(dot_agents_user_home_roots)
 }
 
-# Ensure user-level ~/.codex/skills has global skills (symlink dirs)
+# Ensure user-level ~/.agents/skills has global skills (symlink dirs)
 codex_ensure_user_skills() {
-  local global_skills="$AGENTS_HOME/skills/global"
-  [ ! -d "$global_skills" ] && return 0
+  local skills_root="$AGENTS_HOME/skills"
+  local legacy_global="$AGENTS_HOME/skills/global"
+  [ ! -d "$skills_root" ] && [ ! -d "$legacy_global" ] && return 0
 
   local home_root
   while IFS= read -r home_root; do
-    local user_skills_dir="$home_root/.codex/skills"
+    local user_skills_dir="$home_root/.agents/skills"
     mkdir -p "$user_skills_dir"
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$user_skills_dir/$name"
-      [ -e "$target" ] && [ -L "$target" ] && continue
-      ln -sf "$skill_dir" "$target"
+
+    local source_root
+    for source_root in "$skills_root" "$legacy_global"; do
+      [ -d "$source_root" ] || continue
+      for skill_dir in "$source_root"/*/; do
+        [ -d "$skill_dir" ] || continue
+        [ -f "$skill_dir/SKILL.md" ] || continue
+        local name
+        name=$(basename "$skill_dir")
+        local target="$user_skills_dir/$name"
+        [ -e "$target" ] && [ -L "$target" ] && continue
+        ln -sf "$skill_dir" "$target"
+      done
     done
   done
 }
@@ -98,7 +104,7 @@ codex_create_links() {
 
   # Project agents (global → user-level ~/.codex/agents)
   codex_create_agents_links "$project" "$repo_path"
-  # Project skills (global → user-level ~/.codex/skills)
+  # Project skills mirror in repo (.agents/skills)
   codex_create_skills_links "$project" "$repo_path"
 }
 
@@ -138,12 +144,12 @@ codex_deprecated_details() {
   echo ""
 }
 
-# Create project skills symlinks for Codex CLI (directory-based)
+# Create project skills symlinks for Codex CLI (directory-based, .agents/skills)
 codex_create_skills_links() {
   local project="$1"
   local repo_path="$2"
 
-  local skills_target="$repo_path/.codex/skills"
+  local skills_target="$repo_path/.agents/skills"
   local project_skills="$AGENTS_HOME/skills/$project"
 
   mkdir -p "$skills_target"

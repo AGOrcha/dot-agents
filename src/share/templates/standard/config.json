@@ -8,23 +8,23 @@
   "agents": {
     "cursor": {
       "enabled": true,
-      "version_detected": null
+      "version": null
     },
-    "claude-code": {
+    "claude": {
       "enabled": true,
-      "version_detected": null
+      "version": null
     },
     "codex": {
       "enabled": true,
-      "version_detected": null
+      "version": null
     },
     "opencode": {
       "enabled": false,
-      "version_detected": null
+      "version": null
     },
-    "github-copilot": {
+    "copilot": {
       "enabled": true,
-      "version_detected": null
+      "version": null
     }
   },
   "features": {

@@ -92,6 +92,7 @@ cmd_init() {
 
   preview_changes "Directories:" \
     "~/.agents/                     (main config directory)" \
+    "~/.agents/resources/           (mirrored backup resources)" \
     "~/.agents/rules/global/        (shared rules for all agents)" \
     "~/.agents/settings/global/     (shared settings)" \
     "~/.agents/mcp/global/          (shared MCP configs)" \
@@ -141,6 +142,7 @@ cmd_init() {
   # Create directories
   local dirs=(
     "$agents_home"
+    "$agents_home/resources"
     "$agents_home/rules/global"
     "$agents_home/settings/global"
     "$agents_home/mcp/global"
@@ -163,6 +165,19 @@ cmd_init() {
   create_file_from_template_silent "$templates_dir/.gitignore" "$agents_home/.gitignore"
   create_file_from_template_silent "$templates_dir/rules/global/rules.mdc" "$agents_home/rules/global/rules.mdc"
   create_file_from_template_silent "$templates_dir/settings/global/claude-code.json" "$agents_home/settings/global/claude-code.json"
+
+  # Record available platforms and detected versions in config.json
+  local platform
+  while IFS= read -r platform; do
+    local enabled=false
+    local version=""
+    if platform_is_installed "$platform"; then
+      enabled=true
+      version=$(platform_version "$platform" || true)
+    fi
+    config_set_platform_state "$platform" "$enabled" "$version"
+  done < <(platform_ids)
+
   bullet "ok" "Created template files"
 
   # Copy skill templates (directory-based)
@@ -172,7 +187,7 @@ cmd_init() {
   bullet "ok" "Created skill templates"
 
   # Create global platform symlinks (only for installed platforms)
-  if claude_is_installed 2>/dev/null; then
+  if platform_is_installed claude; then
     mkdir -p "$HOME/.claude"
     if [ ! -e "$HOME/.claude/settings.json" ] || [ "$FORCE" = true ]; then
       ln -sf "$agents_home/settings/global/claude-code.json" "$HOME/.claude/settings.json"
@@ -236,9 +251,34 @@ backup_existing() {
   # Copy current ~/.agents/ to backup
   if cp -a "$agents_home" "$backup_path"; then
     log_success "Backup created: $backup_path"
+    mirror_user_backup_to_resources "$agents_home" "$backup_path"
   else
     log_error "Failed to create backup"
     die "Aborting init to protect your data. Please backup ~/.agents/ manually."
+  fi
+}
+
+# Mirror a user-level backup snapshot into ~/.agents/resources/user-global/backups/
+mirror_user_backup_to_resources() {
+  local agents_home="$1"
+  local backup_path="$2"
+
+  [ -d "$backup_path" ] || return 0
+
+  local resources_dir="$agents_home/resources/user-global/backups"
+  mkdir -p "$resources_dir"
+
+  local backup_name
+  backup_name=$(basename "$backup_path")
+  local target="$resources_dir/$backup_name"
+
+  # Keep first copy of a given backup name; avoid clobbering
+  if [ -e "$target" ]; then
+    return 0
+  fi
+
+  if ! cp -a "$backup_path" "$target" 2>/dev/null; then
+    log_warn "Could not mirror backup into ~/.agents/resources/user-global/backups/"
   fi
 }
 

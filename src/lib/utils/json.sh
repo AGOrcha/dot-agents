@@ -242,6 +242,75 @@ config_get_project_path() {
   json_get_file "$config_file" ".projects.\"$name\".path"
 }
 
+# Get whether a platform is enabled in config.json.
+# Supports legacy keys: claude-code -> claude, github-copilot -> copilot.
+# Returns: true | false | (empty if not set)
+config_get_platform_enabled() {
+  local platform="$1"
+  local config_file="$AGENTS_HOME/config.json"
+
+  if ! _json_has_jq; then
+    return 1
+  fi
+
+  jq -r --arg p "$platform" '
+    if $p == "claude" then
+      if ((.agents[$p] // null) | type) == "object" and (.agents[$p] | has("enabled")) then
+        .agents[$p].enabled
+      elif ((.agents["claude-code"] // null) | type) == "object" and (.agents["claude-code"] | has("enabled")) then
+        .agents["claude-code"].enabled
+      else
+        empty
+      end
+    elif $p == "copilot" then
+      if ((.agents[$p] // null) | type) == "object" and (.agents[$p] | has("enabled")) then
+        .agents[$p].enabled
+      elif ((.agents["github-copilot"] // null) | type) == "object" and (.agents["github-copilot"] | has("enabled")) then
+        .agents["github-copilot"].enabled
+      else
+        empty
+      end
+    else
+      if ((.agents[$p] // null) | type) == "object" and (.agents[$p] | has("enabled")) then
+        .agents[$p].enabled
+      else
+        empty
+      end
+    end
+  ' "$config_file" 2>/dev/null
+}
+
+# Set platform enabled/version in config.json.
+# Usage: config_set_platform_state <platform> <enabled:true|false> [version]
+config_set_platform_state() {
+  local platform="$1"
+  local enabled="$2"
+  local version="${3:-}"
+  local config_file="$AGENTS_HOME/config.json"
+
+  if ! _json_has_jq; then
+    log_error "jq is required to modify config.json"
+    return 1
+  fi
+
+  local json
+  json=$(json_read "$config_file")
+
+  json=$(echo "$json" | jq \
+    --arg p "$platform" \
+    --argjson enabled "$enabled" \
+    --arg version "$version" \
+    '.agents = (.agents // {})
+     | .agents[$p] = ((.agents[$p] // {}) + {enabled: $enabled, version: (if $version == "" then null else $version end)})')
+
+  if [ "$DRY_RUN" = true ]; then
+    log_dry "update platform '$platform' in config.json (enabled=$enabled, version=${version:-null})"
+  else
+    json_write_file "$config_file" "$json"
+  fi
+}
+
 export -f json_read json_get json_get_file json_has json_array_length json_keys
 export -f json_set json_set_object json_delete json_pretty json_valid json_write_file
 export -f config_get_projects config_add_project config_remove_project config_list_projects config_get_project_path
+export -f config_get_platform_enabled config_set_platform_state

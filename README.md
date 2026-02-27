@@ -260,7 +260,7 @@ dot-agents skills
 dot-agents skills edit deploy
 ```
 
-Skills live in `~/.agents/skills/` with this structure:
+Skills live in `~/.agents/skills/global/` with this structure:
 - `SKILL.md` - The skill definition with frontmatter
 - `scripts/` - Optional helper scripts
 - `references/` - Optional additional context

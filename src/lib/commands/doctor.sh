@@ -146,12 +146,14 @@ run_doctor_text() {
   echo ""
   log_section "Detected Agents"
 
-  # Use platform modules for detection (sourced via core.sh)
-  detect_agent_platform "Cursor" cursor_is_installed cursor_version
-  detect_agent_platform "Claude Code" claude_is_installed claude_version
-  detect_agent_platform "Codex CLI" codex_is_installed codex_version
-  detect_agent_platform "OpenCode" opencode_is_installed opencode_version
-  detect_agent_platform "GitHub Copilot" copilot_is_installed copilot_version
+  # Use generic platform registry for detection
+  local platform
+  while IFS= read -r platform; do
+    detect_agent_platform \
+      "$(platform_display_name "$platform")" \
+      "platform_is_installed $platform" \
+      "platform_version $platform"
+  done < <(platform_ids)
 
   echo ""
   log_section "Global Settings"
@@ -220,7 +222,8 @@ run_doctor_text() {
   log_section "Skills"
 
   # Check global skills (directory-based)
-  local global_skills="$AGENTS_HOME/skills/global"
+  local agent_skills_base="$AGENTS_HOME/skills"
+  local global_skills="$agent_skills_base/global"
   if [ -d "$global_skills" ]; then
     local skill_count=0
     for skill_dir in "$global_skills"/*/; do
@@ -229,14 +232,20 @@ run_doctor_text() {
     done
 
     if [ "$skill_count" -gt 0 ]; then
-      echo -e "  ${GREEN}✓${NC} Global skills: $skill_count found"
-      ((checks_passed++)) || true
+      echo -e "  ${GREEN}✓${NC} User-scope skills: $skill_count found"
+      link_count=$(find $agent_skills_base -maxdepth 1 -type l | wc -l)
+      if [ "$link_count" -eq "$skill_count" ]; then
+        ((checks_passed++)) || true
+      else
+        echo -e "  ${YELLOW}○${NC} User-scope skills: $link_count linked, $skill_count total"
+        echo -e "      ${DIM}→ Run 'dot-agents link' to refresh project links${NC}"
+      fi
     else
-      echo -e "  ${YELLOW}○${NC} Global skills: directory exists but empty"
+      echo -e "  ${YELLOW}○${NC} User-scope skills: directory exists but empty"
       echo -e "      ${DIM}→ Run 'dot-agents init --force' to create templates${NC}"
     fi
   else
-    echo -e "  ${YELLOW}○${NC} Global skills: not found"
+    echo -e "  ${YELLOW}○${NC} User-scope skills: not found"
     echo -e "      ${DIM}→ Run 'dot-agents init' to create${NC}"
   fi
 
@@ -273,15 +282,15 @@ run_doctor_text() {
   echo ""
   log_section "User-level platform dirs (global agents/skills)"
 
-  # Cursor: ~/.cursor/commands (skills), ~/.cursor/agents
-  local cursor_commands="${CURSOR_USER_COMMANDS:-$HOME/.cursor/commands}"
+  # Cursor: ~/.cursor/skills, ~/.cursor/agents
+  local cursor_commands="${CURSOR_USER_SKILLS:-$HOME/.cursor/skills}"
   local cursor_agents="${CURSOR_USER_AGENTS:-$HOME/.cursor/agents}"
   if [ -d "$cursor_commands" ]; then
     local n=0
     for f in "$cursor_commands"/*.md; do [ -e "$f" ] && ((n++)) || true; done
-    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Cursor ~/.cursor/commands: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Cursor ~/.cursor/commands: empty"
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Cursor ~/.cursor/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Cursor ~/.cursor/skills: empty"
   else
-    echo -e "  ${GRAY}○${NC} Cursor ~/.cursor/commands: not found"
+    echo -e "  ${GRAY}○${NC} Cursor ~/.cursor/skills: not found"
   fi
   if [ -d "$cursor_agents" ]; then
     local n=0
@@ -309,15 +318,15 @@ run_doctor_text() {
     echo -e "  ${GRAY}○${NC} Claude ~/.claude/agents: not found"
   fi
 
-  # Codex: ~/.codex/skills, ~/.codex/agents
-  local codex_skills="${CODEX_USER_SKILLS:-$HOME/.codex/skills}"
+  # Codex: ~/.agents/skills, ~/.codex/agents
+  local codex_skills="${CODEX_USER_SKILLS:-$agent_skills_base}"
   local codex_agents="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
   if [ -d "$codex_skills" ]; then
     local n=0
     for d in "$codex_skills"/*/; do [ -e "$d" ] && ((n++)) || true; done
-    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.codex/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.codex/skills: empty"
+    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.agents/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.agents/skills: empty"
   else
-    echo -e "  ${GRAY}○${NC} Codex ~/.codex/skills: not found"
+    echo -e "  ${GRAY}○${NC} Codex ~/.agents/skills: not found"
   fi
   if [ -d "$codex_agents" ]; then
     local n=0
@@ -327,18 +336,7 @@ run_doctor_text() {
     echo -e "  ${GRAY}○${NC} Codex ~/.codex/agents: not found"
   fi
 
-  # GitHub Copilot:
-  # - Personal skills default to ~/.github/skills
-  # - Custom agent files are discovered via configurable chat.agentFilesLocations
-  local copilot_skills="${COPILOT_USER_SKILLS:-$HOME/.github/skills}"
-  if [ -d "$copilot_skills" ]; then
-    local n=0
-    for d in "$copilot_skills"/*/; do [ -e "$d" ] && ((n++)) || true; done
-    [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} GitHub Copilot ~/.github/skills: $n skill(s)" || echo -e "  ${YELLOW}○${NC} GitHub Copilot ~/.github/skills: empty"
-  else
-    echo -e "  ${GRAY}○${NC} GitHub Copilot ~/.github/skills: not found"
-  fi
-
+  # GitHub Copilot custom agent files are discovered via configurable chat.agentFilesLocations
   local copilot_agents="${COPILOT_USER_AGENTS:-$HOME/.github/agents}"
   if [ -n "$copilot_agents" ]; then
     if [ -d "$copilot_agents" ]; then
@@ -465,18 +463,14 @@ run_doctor_text() {
 
       [ -d "$project_path" ] || continue
 
-      # Use platform modules for deprecated format detection
-      if cursor_has_deprecated_format "$project_path"; then
-        echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .cursorrules ${DIM}(deprecated)${NC}"
-        echo -e "      ${DIM}→ dot-agents doctor --migrate --fix${NC}"
-        ((deprecated_count++))
-      fi
-
-      if claude_has_deprecated_format "$project_path"; then
-        echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: .claude.json ${DIM}(deprecated)${NC}"
-        echo -e "      ${DIM}→ dot-agents doctor --migrate --fix${NC}"
-        ((deprecated_count++))
-      fi
+      local platform
+      while IFS= read -r platform; do
+        if platform_has_deprecated_format "$platform" "$project_path"; then
+          echo -e "  ${YELLOW}⚠${NC}  ${BOLD}$project${NC}: $(platform_display_name "$platform") ${DIM}(deprecated config)${NC}"
+          echo -e "      ${DIM}→ dot-agents doctor --migrate --fix${NC}"
+          ((deprecated_count++))
+        fi
+      done < <(platform_ids)
     done
 
     if [ $deprecated_count -eq 0 ]; then
@@ -524,53 +518,33 @@ run_doctor_json() {
   command -v git >/dev/null && echo '"installed"' || echo '"missing"'
   echo '  },'
 
-  # Agents - use platform module functions
+  # Agents - use generic platform registry
   echo '  "agents": {'
 
-  echo -n '    "cursor": '
-  if cursor_is_installed; then
-    local cursor_ver
-    cursor_ver=$(cursor_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$cursor_ver"'"},'
-  else
-    echo '{"installed": false},'
-  fi
+  local platform json_name version entry first=true
+  while IFS= read -r platform; do
+    case "$platform" in
+      claude) json_name="claude-code" ;;
+      copilot) json_name="github-copilot" ;;
+      *) json_name="$platform" ;;
+    esac
 
-  echo -n '    "claude-code": '
-  if claude_is_installed; then
-    local claude_ver
-    claude_ver=$(claude_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$claude_ver"'"},'
-  else
-    echo '{"installed": false},'
-  fi
+    if [ "$first" = true ]; then
+      first=false
+    else
+      echo ','
+    fi
 
-  echo -n '    "codex": '
-  if codex_is_installed; then
-    local codex_ver
-    codex_ver=$(codex_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$codex_ver"'"},'
-  else
-    echo '{"installed": false},'
-  fi
+    if platform_is_installed "$platform"; then
+      version=$(platform_version "$platform" || echo "unknown")
+      entry='{"installed": true, "version": "'"$version"'"}'
+    else
+      entry='{"installed": false}'
+    fi
 
-  echo -n '    "opencode": '
-  if opencode_is_installed; then
-    local opencode_ver
-    opencode_ver=$(opencode_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$opencode_ver"'"},'
-  else
-    echo '{"installed": false},'
-  fi
-
-  echo -n '    "github-copilot": '
-  if copilot_is_installed; then
-    local copilot_ver
-    copilot_ver=$(copilot_version || echo "unknown")
-    echo '{"installed": true, "version": "'"$copilot_ver"'"}'
-  else
-    echo '{"installed": false}'
-  fi
+    echo -n '    "'"$json_name"'": '
+    echo -n "$entry"
+  done < <(platform_ids)
 
   echo '  }'
   echo "}"

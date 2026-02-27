@@ -63,9 +63,6 @@ copilot_deprecated_details() {
   echo ""
 }
 
-# User-level dirs for global skills (one place, not per-project)
-COPILOT_USER_SKILLS="${COPILOT_USER_SKILLS:-$HOME/.github/skills}"
-
 # Helper to find the first matching rules file with supported extension.
 _copilot_find_rule_file() {
   local base_path="$1"
@@ -156,27 +153,6 @@ copilot_resolve_hooks_source() {
   echo ""
 }
 
-# Ensure user-level ~/.github/skills has global skills (symlink dirs)
-copilot_ensure_user_skills() {
-  local global_skills="$AGENTS_HOME/skills/global"
-  [ ! -d "$global_skills" ] && return 0
-
-  local home_root
-  while IFS= read -r home_root; do
-    local user_skills_dir="$home_root/.github/skills"
-    mkdir -p "$user_skills_dir"
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$user_skills_dir/$name"
-      [ -e "$target" ] && [ -L "$target" ] && continue
-      ln -sf "$skill_dir" "$target"
-    done
-  done
-}
-
 # Create instructions link for Copilot
 copilot_create_instructions_link() {
   local project="$1"
@@ -184,34 +160,14 @@ copilot_create_instructions_link() {
   local source
   source=$(copilot_resolve_instructions_source "$project")
 
-  [ -z "$source" ] && return 0
+  if [ -z "$source" ]; then
+    log_debug "copilot: no instructions source for project '$project'"
+    return 0
+  fi
 
   mkdir -p "$repo_path/.github"
+  log_debug "copilot: linking instructions $repo_path/.github/copilot-instructions.md -> $source"
   ln -sf "$source" "$repo_path/.github/copilot-instructions.md"
-}
-
-# Create project skills symlinks for Copilot (.github/skills/{name}/ -> skill dir)
-copilot_create_skills_links() {
-  local project="$1"
-  local repo_path="$2"
-
-  copilot_ensure_user_skills
-  local skills_target="$repo_path/.github/skills"
-  local project_skills="$AGENTS_HOME/skills/$project"
-
-  mkdir -p "$skills_target"
-  rm -f "$skills_target"/* 2>/dev/null || true
-
-  if [ -d "$project_skills" ]; then
-    for skill_dir in "$project_skills"/*/; do
-      [ -d "$skill_dir" ] || continue``
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$skills_target/$name"
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
-    done
-  fi
 }
 
 # Create project agent symlinks for Copilot (.github/agents/{name}.agent.md -> AGENT.md)
@@ -222,7 +178,10 @@ copilot_create_agents_links() {
   local agents_target="$repo_path/.github/agents"
   local project_agents="$AGENTS_HOME/agents/$project"
 
+  log_debug "copilot: creating project agent links for '$project' in $agents_target"
+
   mkdir -p "$agents_target"
+  log_debug "copilot: removing existing .agent.md entries in $agents_target"
   rm -f "$agents_target"/*.agent.md 2>/dev/null || true
 
   if [ -d "$project_agents" ]; then
@@ -232,7 +191,37 @@ copilot_create_agents_links() {
       local name
       name=$(basename "$agent_dir")
       local target="$agents_target/$name.agent.md"
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "${agent_dir%/}/AGENT.md" "$target"
+      if [ -e "$target" ] || [ -L "$target" ]; then
+        log_debug "copilot: project agent target already exists, leaving as-is: $target"
+      else
+        log_debug "copilot: linking project agent $target -> ${agent_dir%/}/AGENT.md"
+        ln -sf "${agent_dir%/}/AGENT.md" "$target"
+      fi
+    done
+  else
+    log_debug "copilot: no project agents directory at $project_agents"
+  fi
+}
+
+# Create shared project skills mirror for agent ecosystems (.agents/skills/{name} -> skill dir)
+copilot_create_shared_skills_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  local skills_target="$repo_path/.agents/skills"
+  local project_skills="$AGENTS_HOME/skills/$project"
+
+  mkdir -p "$skills_target"
+  rm -f "$skills_target"/* 2>/dev/null || true
+
+  if [ -d "$project_skills" ]; then
+    for skill_dir in "$project_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$skills_target/$name"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
     done
   fi
 }
@@ -244,9 +233,13 @@ copilot_create_mcp_links() {
   local source
   source=$(copilot_resolve_mcp_source "$project")
 
-  [ -z "$source" ] && return 0
+  if [ -z "$source" ]; then
+    log_debug "copilot: no MCP source for project '$project'"
+    return 0
+  fi
 
   mkdir -p "$repo_path/.vscode"
+  log_debug "copilot: linking MCP $repo_path/.vscode/mcp.json -> $source"
   ln -sf "$source" "$repo_path/.vscode/mcp.json"
 }
 
@@ -257,9 +250,13 @@ copilot_create_hooks_links() {
   local source
   source=$(copilot_resolve_hooks_source "$project")
 
-  [ -z "$source" ] && return 0
+  if [ -z "$source" ]; then
+    log_debug "copilot: no hooks source for project '$project'"
+    return 0
+  fi
 
   mkdir -p "$repo_path/.claude"
+  log_debug "copilot: linking hooks $repo_path/.claude/settings.local.json -> $source"
   ln -sf "$source" "$repo_path/.claude/settings.local.json"
 }
 
@@ -268,9 +265,13 @@ copilot_create_links() {
   local project="$1"
   local repo_path="$2"
 
+  log_debug "copilot: start linking for project '$project' repo '$repo_path'"
+
   copilot_create_instructions_link "$project" "$repo_path"
-  copilot_create_skills_links "$project" "$repo_path"
+  copilot_create_shared_skills_links "$project" "$repo_path"
   copilot_create_agents_links "$project" "$repo_path"
   copilot_create_mcp_links "$project" "$repo_path"
   copilot_create_hooks_links "$project" "$repo_path"
+
+  log_debug "copilot: finished linking for project '$project'"
 }

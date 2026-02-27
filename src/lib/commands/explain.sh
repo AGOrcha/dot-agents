@@ -466,22 +466,30 @@ WHAT ARE SKILLS?
   Skills become available as /skill-name in your AI agent.
 
 WHERE DO THEY LIVE?
-  ~/.agents/skills/global/         → Available to ALL projects
-  ~/.agents/skills/{project}/      → Project-specific skills
+  ~/.agents/skills/global         → Available to ALL projects
+  ~/.agents/skills/{project}/     → Project-specific skills
 
 DIRECTORY STRUCTURE:
-  ~/.agents/skills/global/
-  ├── commit/
-  │   └── SKILL.md
-  ├── pr/
-  │   └── SKILL.md
-  └── deploy/
-      └── SKILL.md
+  ~/.agents/skills
+  ├── <project-slug>/
+  │   └── <skill-name>/
+  │       └── SKILL.md
+  ├── commit -> ./global/commit/  (symlink to global skill)
+  ├── pr -> ./global/pr/          (symlink to global skill)
+  ├── deploy -> ./global/deploy/  (symlink to global skill)
+  └── global/
+      ├── commit/
+      │   └── SKILL.md
+      ├── pr/
+      │   └── SKILL.md
+      └── deploy/
+          └── SKILL.md
 
 HOW THEY GET TO REPOS (via dot-agents add):
   Claude Code: .claude/skills/{name}/ → symlink to skill directory
-  Cursor:      .cursor/commands/{name}.md → symlink to SKILL.md
-  Codex:       .codex/skills/{name}/ → symlink to skill directory
+  Cursor:      .agents/skills/{name}/ → project-level source (no extra mirror)
+  Codex:       .agents/skills/{name}/ → symlink to project skill directory
+  Copilot:     .agents/skills/{name}/ → symlink to project skill directory
 
 EXAMPLE:
   ~/.agents/skills/global/commit/SKILL.md
@@ -677,7 +685,8 @@ GITHUB COPILOT
   GitHub Copilot project instructions.
   Config locations:
     .github/copilot-instructions.md  - Repository instructions
-    .github/skills/*/SKILL.md        - Project skills
+    AGENTS.md                        - Agent instructions (shared/LCD path)
+    .agents/skills/*/                - Shared project skills mirror
     .github/agents/*.agent.md        - Project custom agents
 
 DETECTION:
@@ -762,6 +771,7 @@ DETECTION:
 HOW DOT-AGENTS MANAGES IT:
   ~/.agents/rules/global/*.mdc      → .cursor/rules/global--*.mdc (hard link)
   ~/.agents/rules/{project}/*.mdc   → .cursor/rules/{project}--*.mdc (hard link)
+  ~/.agents/skills/global/{skill}/           → ~/.cursor/skills/{skill}/ (user-level compatibility)
   ~/.agents/mcp/{project}/          → .cursor/mcp.json (symlink)
 
 EOF
@@ -845,6 +855,12 @@ CONFIG FILES:
   .codex/config.toml
     Project configuration in TOML format.
 
+  .codex/agents/
+    Project-specific agent directories.
+
+  .agents/skills/
+    Shared project skills mirror used across agent ecosystems.
+
   ~/.codex/config.toml
     Global Codex configuration.
 
@@ -860,8 +876,10 @@ DETECTION:
   codex --version
 
 HOW DOT-AGENTS MANAGES IT:
-  ~/.agents/rules/{project}/AGENTS.md  → AGENTS.md (symlink)
-  ~/.agents/settings/{project}/        → .codex/ (symlink)
+  ~/.agents/rules/{project}/agents.md      → AGENTS.md (symlink)
+  ~/.agents/settings/{project}/codex.toml  → .codex/config.toml (symlink)
+  ~/.agents/agents/{project}/{agent}/      → .codex/agents/{agent} (symlink)
+  ~/.agents/skills/{project}/{skill}/      → .agents/skills/{skill} (symlink)
 
 EOF
 }
@@ -918,8 +936,11 @@ CONFIG FILES:
   .github/copilot-instructions.md
     Project instructions that guide Copilot behavior in this repo.
 
-  .github/skills/{skill}/SKILL.md
-    Project skills loaded by Copilot when relevant.
+  AGENTS.md
+    Agent instructions shared with coding-agent workflows.
+
+  .agents/skills/{skill}/
+    Shared project skills mirror used by Codex/Copilot workflows.
 
   .github/agents/{name}.agent.md
     Custom agent definitions for VS Code Copilot chat.
@@ -935,7 +956,7 @@ HOW DOT-AGENTS MANAGES IT:
     → .github/copilot-instructions.md (symlink)
 
   ~/.agents/skills/{project}/{skill}/
-    → .github/skills/{skill}/ (symlink directory)
+    → .agents/skills/{skill}/ (symlink)
 
   ~/.agents/agents/{project}/{agent}/AGENT.md
     → .github/agents/{agent}.agent.md (symlink)
