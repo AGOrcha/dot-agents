@@ -56,6 +56,24 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Check user-level config in home directory
+	ui.Section("User Config")
+	userBroken := collectBrokenUserLinks(agentsHome)
+	if len(userBroken) == 0 {
+		ui.Bullet("ok", "User-level config healthy")
+	} else {
+		ui.Bullet("warn", fmt.Sprintf("User-level config has %d broken link(s)", len(userBroken)))
+	}
+
+	if Flags.Verbose {
+		// Show full user-level detail (healthy + broken)
+		printUserConfigStatus(agentsHome)
+	} else if len(userBroken) > 0 {
+		for _, bl := range userBroken {
+			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s%s\n", ui.Red, ui.Reset, bl.linkPath, ui.Dim, bl.dest, ui.Reset)
+		}
+	}
+
 	// Check projects
 	cfg, err := config.Load()
 	if err != nil {
@@ -320,6 +338,127 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	return broken
 }
 
+// collectBrokenUserLinks returns all broken managed user-level links in the home directory.
+func collectBrokenUserLinks(agentsHome string) []brokenLink {
+	var broken []brokenLink
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return broken
+	}
+	displayBase := homeDir + string(os.PathSeparator)
+	rel := func(p string) string {
+		return strings.TrimPrefix(p, displayBase)
+	}
+
+	// Claude: ~/.claude/CLAUDE.md
+	claudeHome := filepath.Join(homeDir, ".claude")
+	claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
+	if info, err := os.Lstat(claudeMD); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if dest, err := os.Readlink(claudeMD); err == nil {
+			if _, err := os.Stat(dest); err != nil {
+				broken = append(broken, brokenLink{
+					platformID: "claude",
+					linkPath:   rel(claudeMD),
+					dest:       config.DisplayPath(dest),
+				})
+			}
+		}
+	}
+
+	// Claude: ~/.claude/settings.json
+	claudeSettings := filepath.Join(claudeHome, "settings.json")
+	if info, err := os.Lstat(claudeSettings); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if dest, err := os.Readlink(claudeSettings); err == nil {
+			if _, err := os.Stat(dest); err != nil {
+				broken = append(broken, brokenLink{
+					platformID: "claude",
+					linkPath:   rel(claudeSettings),
+					dest:       config.DisplayPath(dest),
+				})
+			}
+		}
+	}
+
+	// Claude: ~/.claude/agents/*
+	claudeAgentsDir := filepath.Join(claudeHome, "agents")
+	if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(claudeAgentsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					if _, err := os.Stat(dest); err != nil {
+						broken = append(broken, brokenLink{
+							platformID: "claude",
+							linkPath:   rel(linkPath),
+							dest:       config.DisplayPath(dest),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Claude: ~/.claude/skills/*
+	claudeSkillsDir := filepath.Join(claudeHome, "skills")
+	if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(claudeSkillsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					if _, err := os.Stat(dest); err != nil {
+						broken = append(broken, brokenLink{
+							platformID: "claude",
+							linkPath:   rel(linkPath),
+							dest:       config.DisplayPath(dest),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Codex: ~/.codex/agents/*
+	codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
+	if entries, err := os.ReadDir(codexAgentsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(codexAgentsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					if _, err := os.Stat(dest); err != nil {
+						broken = append(broken, brokenLink{
+							platformID: "codex",
+							linkPath:   rel(linkPath),
+							dest:       config.DisplayPath(dest),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// OpenCode: ~/.opencode/agent/*
+	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(opencodeAgentDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					if _, err := os.Stat(dest); err != nil {
+						broken = append(broken, brokenLink{
+							platformID: "opencode",
+							linkPath:   rel(linkPath),
+							dest:       config.DisplayPath(dest),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return broken
+}
+
 // countProjectLinks returns (ok, broken) counts for all managed links in a project.
 func countProjectLinks(name, path, agentsHome string) (int, int) {
 	brokenLinks := collectBrokenLinks(name, path, agentsHome)
@@ -376,4 +515,120 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 		}
 	}
 	return ok, brokenCount
+}
+
+// printUserConfigStatus prints detailed user-level config status (healthy + broken).
+func printUserConfigStatus(agentsHome string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	displayBase := homeDir + string(os.PathSeparator)
+	rel := func(p string) string {
+		return strings.TrimPrefix(p, displayBase)
+	}
+
+	// Claude
+	claudeHome := filepath.Join(homeDir, ".claude")
+	claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
+	if info, err := os.Lstat(claudeMD); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if dest, err := os.Readlink(claudeMD); err == nil {
+				displayDest := config.DisplayPath(dest)
+				if _, err := os.Stat(dest); err == nil {
+					fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
+				} else {
+					fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeMD), ui.Dim, ui.Reset)
+		}
+	}
+
+	claudeSettings := filepath.Join(claudeHome, "settings.json")
+	if info, err := os.Lstat(claudeSettings); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if dest, err := os.Readlink(claudeSettings); err == nil {
+				displayDest := config.DisplayPath(dest)
+				if _, err := os.Stat(dest); err == nil {
+					fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
+				} else {
+					fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeSettings), ui.Dim, ui.Reset)
+		}
+	}
+
+	claudeAgentsDir := filepath.Join(claudeHome, "agents")
+	if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(claudeAgentsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					displayDest := config.DisplayPath(dest)
+					if _, err := os.Stat(dest); err == nil {
+						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					} else {
+						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					}
+				}
+			}
+		}
+	}
+
+	claudeSkillsDir := filepath.Join(claudeHome, "skills")
+	if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(claudeSkillsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					displayDest := config.DisplayPath(dest)
+					if _, err := os.Stat(dest); err == nil {
+						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					} else {
+						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					}
+				}
+			}
+		}
+	}
+
+	// Codex
+	codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
+	if entries, err := os.ReadDir(codexAgentsDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(codexAgentsDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					displayDest := config.DisplayPath(dest)
+					if _, err := os.Stat(dest); err == nil {
+						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					} else {
+						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					}
+				}
+			}
+		}
+	}
+
+	// OpenCode
+	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(opencodeAgentDir, e.Name())
+			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(linkPath); err == nil {
+					displayDest := config.DisplayPath(dest)
+					if _, err := os.Stat(dest); err == nil {
+						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					} else {
+						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+					}
+				}
+			}
+		}
+	}
 }
