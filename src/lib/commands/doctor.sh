@@ -179,6 +179,27 @@ run_doctor_text() {
       ;;
   esac
 
+  # Check Claude Code global rules (CLAUDE.md)
+  local claude_rules="$HOME/.claude/CLAUDE.md"
+  if [ -e "$claude_rules" ]; then
+    if [ -L "$claude_rules" ]; then
+      local target
+      target=$(readlink "$claude_rules" 2>/dev/null)
+      local display_target="${target/#$HOME/~}"
+      if [ -f "$target" ]; then
+        echo -e "  ${GREEN}✓${NC} Claude Code: ~/.claude/CLAUDE.md ${DIM}→ $display_target${NC}"
+        ((checks_passed++)) || true
+      else
+        echo -e "  ${RED}✗${NC} Claude Code: ~/.claude/CLAUDE.md ${DIM}→ $display_target (broken)${NC}"
+        ((checks_failed++)) || true
+      fi
+    else
+      echo -e "  ${YELLOW}○${NC} Claude Code: ~/.claude/CLAUDE.md ${DIM}(local file)${NC}"
+    fi
+  else
+    echo -e "  ${GRAY}○${NC} Claude Code: ~/.claude/CLAUDE.md ${DIM}(not found)${NC}"
+  fi
+
   echo ""
   log_section "Hooks Configuration"
 
@@ -334,6 +355,36 @@ run_doctor_text() {
     [ "$n" -gt 0 ] && echo -e "  ${GREEN}✓${NC} Codex ~/.codex/agents: $n agent(s)" || echo -e "  ${YELLOW}○${NC} Codex ~/.codex/agents: empty"
   else
     echo -e "  ${GRAY}○${NC} Codex ~/.codex/agents: not found"
+  fi
+
+  # OpenCode: ~/.opencode/agent
+  local opencode_agent_dir="${OPEN_CODE_USER_AGENT:-$HOME/.opencode/agent}"
+  if [ -d "$opencode_agent_dir" ]; then
+    local n=0
+    local broken=0
+    for f in "$opencode_agent_dir"/*; do
+      [ -e "$f" ] || continue
+      if [ -L "$f" ]; then
+        local target
+        target=$(readlink "$f" 2>/dev/null)
+        if [ -n "$target" ] && [ -f "$target" ]; then
+          ((n++)) || true
+        else
+          ((broken++)) || true
+        fi
+      else
+        ((n++)) || true
+      fi
+    done
+    if [ "$n" -gt 0 ] && [ "$broken" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} OpenCode ~/.opencode/agent: $n agent file(s)"
+    elif [ "$n" -gt 0 ] || [ "$broken" -gt 0 ]; then
+      echo -e "  ${YELLOW}○${NC} OpenCode ~/.opencode/agent: $n ok, $broken broken"
+    else
+      echo -e "  ${YELLOW}○${NC} OpenCode ~/.opencode/agent: empty"
+    fi
+  else
+    echo -e "  ${GRAY}○${NC} OpenCode ~/.opencode/agent: not found"
   fi
 
   # GitHub Copilot custom agent files are discovered via configurable chat.agentFilesLocations
