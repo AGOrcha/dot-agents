@@ -62,6 +62,16 @@ jobs:
         run: |
          sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Set up Go
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - name: Run Go tests
+        if: steps.check.outputs.exists == 'false'
+        run: go test ./...
+
       - name: Run tests
         if: steps.check.outputs.exists == 'false'
         run: |
@@ -72,113 +82,26 @@ jobs:
           ./src/bin/dot-agents status
           ./src/bin/dot-agents doctor
 
-      - name: Create tag
+      - name: Install GoReleaser
         if: steps.check.outputs.exists == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
-          git push origin "${{ steps.version.outputs.tag }}"
-
-      - name: Create tarball
-        if: steps.check.outputs.exists == 'false'
-        run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          tar -czf "dot-agents-${VERSION}.tar.gz" \
-            --exclude='*.tar.gz' \
-            --exclude='.git' \
-            --exclude='.github' \
-            VERSION \
-            src/ \
-            scripts/ \
-            README.md \
-            LICENSE
-
-      - name: Generate SHA256
-        if: steps.check.outputs.exists == 'false'
-        id: sha256
-        run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          SHA256=$(shasum -a 256 "dot-agents-${VERSION}.tar.gz" | cut -d ' ' -f 1)
-          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
-          echo "SHA256: $SHA256"
-
-      - name: Create GitHub Release
-        if: steps.check.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v1
+        uses: goreleaser/goreleaser-action@v6
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
-          files: |
-            dot-agents-*.tar.gz
-          body: |
-            ## Installation
+          distribution: goreleaser
+          version: latest
+          install-only: true
 
-            ### Homebrew
-            ```bash
-            brew install dot-agents/tap/dot-agents
-            ```
-
-            ### Direct Install
-            ```bash
-            curl -fsSL https://dot-agents.com/install.sh | bash
-            ```
-
-            ### SHA256
-            ```
-            ${{ steps.sha256.outputs.sha256 }}
-            ```
-
-      - name: Update Homebrew formula
+      - name: Run GoReleaser
         if: steps.check.outputs.exists == 'false'
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="${{ steps.version.outputs.tag }}"
-          SHA256="${{ steps.sha256.outputs.sha256 }}"
-
-          # Clone homebrew-tap repo
-          git clone https://x-access-token:${GH_TOKEN}@github.com/dot-agents/homebrew-tap.git /tmp/homebrew-tap
-          cd /tmp/homebrew-tap
-
-          # Update formula
-          cat > Formula/dot-agents.rb << FORMULA_EOF
-          class DotAgents < Formula
-            desc "Unified config layer for AI coding agents"
-            homepage "https://github.com/dot-agents/dot-agents"
-            url "https://github.com/dot-agents/dot-agents/releases/download/${TAG}/dot-agents-${TAG}.tar.gz"
-            sha256 "${SHA256}"
-            license "MIT"
-            version "${VERSION}"
-
-            def install
-              bin.install "src/bin/dot-agents"
-              libexec.install "src/lib"
-              libexec.install "src/share"
-              libexec.install "VERSION"
-
-              # Rewrite paths for Homebrew installation
-              inreplace bin/"dot-agents" do |s|
-                s.gsub! 'SRC_DIR="\$(dirname "\$BIN_DIR")"', "SRC_DIR=\"#{libexec}\""
-                s.gsub! 'LIB_DIR="\$SRC_DIR/lib"', "LIB_DIR=\"#{libexec}/lib\""
-                s.gsub! 'SHARE_DIR="\$SRC_DIR/share"', "SHARE_DIR=\"#{libexec}/share\""
-              end
-            end
-
-            test do
-              assert_match "${VERSION}", shell_output("#{bin}/dot-agents --version")
-            end
-          end
-          FORMULA_EOF
-          # Remove leading spaces from heredoc output (10 spaces)
-          sed 's/^          //' Formula/dot-agents.rb > /tmp/formula-clean.rb
-          mv /tmp/formula-clean.rb Formula/dot-agents.rb
-
-          # Commit and push
+          # Ensure an annotated tag for this version exists
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/dot-agents.rb
-          git commit -m "Update dot-agents to ${TAG}"
-          git push origin master
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+          # Let GoReleaser handle GitHub release + archives + Homebrew
+          goreleaser release --clean --verbose

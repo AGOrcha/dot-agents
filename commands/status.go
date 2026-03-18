@@ -36,7 +36,6 @@ func runStatus(audit bool, agentFilter string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-
 	agentsHome := config.AgentsHome()
 	displayHome := config.DisplayPath(agentsHome)
 
@@ -58,6 +57,9 @@ func runStatus(audit bool, agentFilter string) error {
 	} else {
 		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: dot-agents sync init%s\n", ui.Yellow, ui.Reset)
 	}
+
+	// User-level config summary (home directory)
+	printUserConfigSection(agentsHome, audit, agentFilter)
 
 	names := cfg.ListProjects()
 	sort.Strings(names)
@@ -277,6 +279,280 @@ func printAudit(name, path, agentsHome, agentFilter string) {
 	if agentFilter == "" || agentFilter == "copilot" {
 		printCopilotAudit(name, path)
 	}
+}
+
+// printUserConfigSection reports on user-level (home directory) config links.
+func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout, "  User Config")
+
+	type platformBadge struct {
+		name    string
+		present bool
+		broken  bool
+	}
+
+	var badges []platformBadge
+
+	// Claude user-level config
+	if agentFilter == "" || agentFilter == "claude" {
+		claudeOK, claudeWarn := 0, 0
+		claudeHome := filepath.Join(homeDir, ".claude")
+
+		// CLAUDE.md
+		claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
+		if info, err := os.Lstat(claudeMD); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(claudeMD); err == nil {
+					if _, err := os.Stat(dest); err == nil {
+						claudeOK++
+					} else {
+						claudeWarn++
+					}
+				}
+			} else {
+				claudeOK++
+			}
+		}
+
+		// settings.json
+		claudeSettings := filepath.Join(claudeHome, "settings.json")
+		if info, err := os.Lstat(claudeSettings); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				if dest, err := os.Readlink(claudeSettings); err == nil {
+					if _, err := os.Stat(dest); err == nil {
+						claudeOK++
+					} else {
+						claudeWarn++
+					}
+				}
+			} else {
+				claudeOK++
+			}
+		}
+
+		// agents/
+		claudeAgentsDir := filepath.Join(claudeHome, "agents")
+		if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
+			for _, e := range entries {
+				linkPath := filepath.Join(claudeAgentsDir, e.Name())
+				if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(linkPath); err == nil {
+						if _, err := os.Stat(dest); err == nil {
+							claudeOK++
+						} else {
+							claudeWarn++
+						}
+					}
+				}
+			}
+		}
+
+		// skills/
+		claudeSkillsDir := filepath.Join(claudeHome, "skills")
+		if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
+			for _, e := range entries {
+				linkPath := filepath.Join(claudeSkillsDir, e.Name())
+				if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(linkPath); err == nil {
+						if _, err := os.Stat(dest); err == nil {
+							claudeOK++
+						} else {
+							claudeWarn++
+						}
+					}
+				}
+			}
+		}
+
+		if claudeOK+claudeWarn > 0 {
+			badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
+		}
+
+		if audit {
+			displayBase := homeDir + string(os.PathSeparator)
+			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
+
+			// Detailed listing
+			if info, err := os.Lstat(claudeMD); err == nil {
+				if info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(claudeMD); err == nil {
+						displayDest := config.DisplayPath(dest)
+						if _, err := os.Stat(dest); err == nil {
+							fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
+						} else {
+							fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
+						}
+					}
+				} else {
+					fmt.Fprintf(os.Stdout, "    %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeMD), ui.Dim, ui.Reset)
+				}
+			}
+
+			if info, err := os.Lstat(claudeSettings); err == nil {
+				if info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(claudeSettings); err == nil {
+						displayDest := config.DisplayPath(dest)
+						if _, err := os.Stat(dest); err == nil {
+							fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
+						} else {
+							fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
+						}
+					}
+				} else {
+					fmt.Fprintf(os.Stdout, "    %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeSettings), ui.Dim, ui.Reset)
+				}
+			}
+
+			if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
+				for _, e := range entries {
+					linkPath := filepath.Join(claudeAgentsDir, e.Name())
+					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						if dest, err := os.Readlink(linkPath); err == nil {
+							displayDest := config.DisplayPath(dest)
+							if _, err := os.Stat(dest); err == nil {
+								fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							} else {
+								fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							}
+						}
+					}
+				}
+			}
+
+			if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
+				for _, e := range entries {
+					linkPath := filepath.Join(claudeSkillsDir, e.Name())
+					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						if dest, err := os.Readlink(linkPath); err == nil {
+							displayDest := config.DisplayPath(dest)
+							if _, err := os.Stat(dest); err == nil {
+								fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							} else {
+								fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Codex user-level config
+	if agentFilter == "" || agentFilter == "codex" {
+		codexOK, codexWarn := 0, 0
+		codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
+		if entries, err := os.ReadDir(codexAgentsDir); err == nil {
+			for _, e := range entries {
+				linkPath := filepath.Join(codexAgentsDir, e.Name())
+				if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(linkPath); err == nil {
+						if _, err := os.Stat(dest); err == nil {
+							codexOK++
+						} else {
+							codexWarn++
+						}
+					}
+				}
+			}
+		}
+		if codexOK+codexWarn > 0 {
+			badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
+		}
+
+		if audit {
+			displayBase := homeDir + string(os.PathSeparator)
+			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
+
+			if entries, err := os.ReadDir(codexAgentsDir); err == nil {
+				for _, e := range entries {
+					linkPath := filepath.Join(codexAgentsDir, e.Name())
+					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						if dest, err := os.Readlink(linkPath); err == nil {
+							displayDest := config.DisplayPath(dest)
+							if _, err := os.Stat(dest); err == nil {
+								fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							} else {
+								fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// OpenCode user-level config
+	if agentFilter == "" || agentFilter == "opencode" {
+		opencodeOK, opencodeWarn := 0, 0
+		opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+		if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
+			for _, e := range entries {
+				linkPath := filepath.Join(opencodeAgentDir, e.Name())
+				if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(linkPath); err == nil {
+						if _, err := os.Stat(dest); err == nil {
+							opencodeOK++
+						} else {
+							opencodeWarn++
+						}
+					}
+				}
+			}
+		}
+		if opencodeOK+opencodeWarn > 0 {
+			badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
+		}
+
+		if audit {
+			displayBase := homeDir + string(os.PathSeparator)
+			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
+
+			if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
+				for _, e := range entries {
+					linkPath := filepath.Join(opencodeAgentDir, e.Name())
+					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						if dest, err := os.Readlink(linkPath); err == nil {
+							displayDest := config.DisplayPath(dest)
+							if _, err := os.Stat(dest); err == nil {
+								fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							} else {
+								fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Badge row
+	if len(badges) == 0 {
+		fmt.Fprintf(os.Stdout, "  %s-%s %s(no managed user-level config detected)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		fmt.Fprintln(os.Stdout)
+		return
+	}
+
+	fmt.Fprintf(os.Stdout, "  ")
+	for i, b := range badges {
+		if i > 0 {
+			fmt.Fprintf(os.Stdout, "  ")
+		}
+		if b.broken {
+			fmt.Fprintf(os.Stdout, "%s!%s %s", ui.Yellow, ui.Reset, b.name)
+		} else if b.present {
+			fmt.Fprintf(os.Stdout, "%s✓%s %s", ui.Green, ui.Reset, b.name)
+		} else {
+			fmt.Fprintf(os.Stdout, "%s-%s %s%s%s", ui.Dim, ui.Reset, ui.Dim, b.name, ui.Reset)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout)
 }
 
 func printCursorAudit(name, path, agentsHome string) {

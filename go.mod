@@ -1,6 +1,6 @@
 module github.com/dot-agents/dot-agents
 
-go 1.21
+go 1.26
 
 require github.com/spf13/cobra v1.10.2
 
