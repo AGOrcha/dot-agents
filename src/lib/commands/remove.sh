@@ -24,9 +24,9 @@ ${BOLD}DESCRIPTION${NC}
     Unregisters a project from dot-agents and removes config symlinks.
 
     Removes from project directory:
-    - .cursor/rules/ hard links (global--, project-- prefixed files)
+    - .cursor/rules/ hard links (global--, {project}-- prefixed files)
     - .cursor/skills/* symlinks (legacy cleanup, if pointing to ~/.agents/)
-    - .claude/rules/ symlinks (global--, project-- prefixed files)
+    - .claude/rules/ symlinks ({project}-- prefixed files)
     - AGENTS.md symlink (if pointing to ~/.agents/)
     - opencode.json and .opencode/agent/* symlinks (if pointing to ~/.agents/)
     - .github/copilot-instructions.md symlink (if pointing to ~/.agents/)
@@ -143,10 +143,10 @@ cmd_remove() {
   local cursor_links=0 claude_links=0 codex_links=0 opencode_links=0 copilot_links=0
 
   if [ -d "$project_path/.cursor/rules" ]; then
-    cursor_links=$(ls -1 "$project_path/.cursor/rules/"*.mdc 2>/dev/null | wc -l | tr -d ' ')
+    cursor_links=$(find "$project_path/.cursor/rules" -maxdepth 1 -name "*.mdc" 2>/dev/null | wc -l | tr -d ' ') || cursor_links=0
   fi
   if [ -d "$project_path/.claude/rules" ]; then
-    claude_links=$(ls -1 "$project_path/.claude/rules/"*.md 2>/dev/null | wc -l | tr -d ' ')
+    claude_links=$(find "$project_path/.claude/rules" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ') || claude_links=0
   fi
   [ -L "$project_path/AGENTS.md" ] && ((codex_links++)) || true
   [ -L "$project_path/opencode.json" ] && ((opencode_links++)) || true
@@ -154,10 +154,10 @@ cmd_remove() {
   [ -L "$project_path/.vscode/mcp.json" ] && ((copilot_links++)) || true
   [ -L "$project_path/.claude/settings.local.json" ] && ((copilot_links++)) || true
   if [ -d "$project_path/.agents/skills" ]; then
-    copilot_links=$((copilot_links + $(find "$project_path/.agents/skills" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')))
+    copilot_links=$((copilot_links + $(find "$project_path/.agents/skills" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '))) || copilot_links=0
   fi
   if [ -d "$project_path/.github/agents" ]; then
-    copilot_links=$((copilot_links + $(find "$project_path/.github/agents" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')))
+    copilot_links=$((copilot_links + $(find "$project_path/.github/agents" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '))) || copilot_links=0
   fi
 
   local total_links=$((cursor_links + claude_links + codex_links + opencode_links + copilot_links))
@@ -174,8 +174,7 @@ cmd_remove() {
     ".cursor/rules/global--*.mdc     (hard links)" \
     ".cursor/rules/${project_name}--*.mdc (hard links)" \
     ".cursor/agents/*.md             (symlinks to subagents)" \
-    ".claude/rules/global--*.md      (symlinks)" \
-    ".claude/rules/project--*.md     (symlinks)" \
+    ".claude/rules/${project_name}--*.md      (symlinks)" \
     "AGENTS.md                       (symlink)" \
     "opencode.json and .opencode/agent/* (symlinks)" \
     ".github/copilot-instructions.md (symlink)" \

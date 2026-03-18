@@ -24,6 +24,7 @@ CODEX_USER_AGENTS="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
 CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.agents/skills}"
 
 # Ensure user-level ~/.codex/agents has global agents (symlink dirs)
+# ~/.codex/agents/ is Codex-native and also read by Cursor via codex compat path.
 codex_ensure_user_agents() {
   local global_agents="$AGENTS_HOME/agents/global"
   [ ! -d "$global_agents" ] && return 0
@@ -44,31 +45,27 @@ codex_ensure_user_agents() {
   done < <(dot_agents_user_home_roots)
 }
 
-# Ensure user-level ~/.agents/skills has global skills (symlink dirs)
+# Ensure user-level $HOME/.agents/skills has global skills (symlink dirs)
+# $HOME/.agents/skills is the official Codex user-scope skills location per docs.
+# Also read by OpenCode as an agent compat path.
 codex_ensure_user_skills() {
-  local skills_root="$AGENTS_HOME/skills"
-  local legacy_global="$AGENTS_HOME/skills/global"
-  [ ! -d "$skills_root" ] && [ ! -d "$legacy_global" ] && return 0
+  local global_skills="$AGENTS_HOME/skills/global"
+  [ ! -d "$global_skills" ] && return 0
 
   local home_root
   while IFS= read -r home_root; do
     local user_skills_dir="$home_root/.agents/skills"
     mkdir -p "$user_skills_dir"
-
-    local source_root
-    for source_root in "$skills_root" "$legacy_global"; do
-      [ -d "$source_root" ] || continue
-      for skill_dir in "$source_root"/*/; do
-        [ -d "$skill_dir" ] || continue
-        [ -f "$skill_dir/SKILL.md" ] || continue
-        local name
-        name=$(basename "$skill_dir")
-        local target="$user_skills_dir/$name"
-        [ -e "$target" ] && [ -L "$target" ] && continue
-        ln -sf "$skill_dir" "$target"
-      done
+    for skill_dir in "$global_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$user_skills_dir/$name"
+      [ -e "$target" ] && [ -L "$target" ] && continue
+      ln -sf "$skill_dir" "$target"
     done
-  done
+  done < <(dot_agents_user_home_roots)
 }
 
 # Create links for Codex (SYMLINKS - works fine)
@@ -78,19 +75,31 @@ codex_create_links() {
 
   codex_ensure_user_agents
   codex_ensure_user_skills
-  # Link AGENTS.md from global rules if it exists
-  if [ -f "$AGENTS_HOME/rules/global/agents.md" ]; then
-    ln -sf "$AGENTS_HOME/rules/global/agents.md" "$repo_path/AGENTS.md"
-  elif [ -f "$AGENTS_HOME/rules/global/rules.md" ]; then
-    # Fall back to global rules.md if no agents-specific file
-    ln -sf "$AGENTS_HOME/rules/global/rules.md" "$repo_path/AGENTS.md"
-  fi
 
-  # Project-specific AGENTS.md
-  if [ -f "$AGENTS_HOME/rules/$project/agents.md" ]; then
-    # If project has its own agents.md, use it instead
-    ln -sf "$AGENTS_HOME/rules/$project/agents.md" "$repo_path/AGENTS.md"
+  # Find primary global rules file (agents.* preferred, then rules.*)
+  local _codex_src=""
+  for _f in \
+    "$AGENTS_HOME/rules/global/agents.md" \
+    "$AGENTS_HOME/rules/global/agents.mdc" \
+    "$AGENTS_HOME/rules/global/rules.md" \
+    "$AGENTS_HOME/rules/global/rules.mdc"; do
+    if [ -f "$_f" ]; then _codex_src="$_f"; break; fi
+  done
+  if [ -n "$_codex_src" ]; then
+    ln -sf "$_codex_src" "$repo_path/AGENTS.md"
   fi
+  unset _codex_src _f
+
+  # Project-specific override
+  for _f in \
+    "$AGENTS_HOME/rules/$project/agents.md" \
+    "$AGENTS_HOME/rules/$project/agents.mdc"; do
+    if [ -f "$_f" ]; then
+      ln -sf "$_f" "$repo_path/AGENTS.md"
+      break
+    fi
+  done
+  unset _f
 
   # Create .codex directory for config
   mkdir -p "$repo_path/.codex"
@@ -108,12 +117,14 @@ codex_create_links() {
   codex_create_skills_links "$project" "$repo_path"
 }
 
-# Create agents symlinks for Codex: project agents only (symlink dirs to .codex/agents/)
+# Create agents symlinks for Codex: project agents → .claude/agents/ (GCD)
+# .claude/agents/ is read by Claude Code (primary), Cursor (compat), and
+# GitHub Copilot (compat), making it the most broadly supported location.
 codex_create_agents_links() {
   local project="$1"
   local repo_path="$2"
 
-  local agents_target="$repo_path/.codex/agents"
+  local agents_target="$repo_path/.claude/agents"
   local project_agents="$AGENTS_HOME/agents/$project"
 
   mkdir -p "$agents_target"
