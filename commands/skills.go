@@ -73,6 +73,32 @@ func listSkills(scope string) error {
 
 // readFrontmatterDescription parses the YAML frontmatter of a markdown file
 // and returns the value of the "description:" field.
+// ensureUserSkillLinks creates symlinks for a single global skill into all
+// user-level skill directories so the skill is immediately available without
+// requiring a full refresh.
+//
+//   - ~/.agents/skills/<name>  → agentsHome/skills/global/<name>   (Codex)
+//   - ~/.claude/skills/<name>  → agentsHome/skills/global/<name>   (Claude Code)
+func ensureUserSkillLinks(agentsHome, name, skillDir string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	targets := []string{
+		filepath.Join(homeDir, ".agents", "skills", name),
+		filepath.Join(homeDir, ".claude", "skills", name),
+	}
+	for _, target := range targets {
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			continue
+		}
+		if _, err := os.Lstat(target); err == nil {
+			continue // already exists
+		}
+		_ = os.Symlink(skillDir, target)
+	}
+}
+
 func readFrontmatterDescription(mdPath string) string {
 	f, err := os.Open(mdPath)
 	if err != nil {
@@ -139,6 +165,12 @@ func createSkill(name, scope string) error {
 		if err := os.WriteFile(skillMD, []byte(content), 0644); err != nil {
 			return fmt.Errorf("creating SKILL.md: %w", err)
 		}
+	}
+
+	// Create user-level symlinks immediately so the skill is live without needing a refresh.
+	// Only global-scope skills get user-level links.
+	if scope == "global" {
+		ensureUserSkillLinks(agentsHome, name, skillDir)
 	}
 
 	ui.SuccessBox(fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/", name, scope, name),
