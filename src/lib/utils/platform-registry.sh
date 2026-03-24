@@ -24,10 +24,10 @@ platform_display_name() {
 platform_dry_run_message() {
   local platform="$1"
   case "$platform" in
-    cursor) echo "Create Cursor config (.cursor/ rules, agents)" ;;
-    claude) echo "Create Claude Code config (.claude/ rules, skills, agents)" ;;
-    codex) echo "Create Codex config (AGENTS.md, .agents/skills, .codex/agents, .codex/config.toml)" ;;
-    opencode) echo "Create OpenCode config (.opencode/)" ;;
+    cursor) echo "Create Cursor config (.cursor/ rules, .claude/agents)" ;;
+    claude) echo "Create Claude Code config (.claude/ rules, skills, agents; .agents/skills)" ;;
+    codex) echo "Create Codex config (AGENTS.md, .agents/skills, .claude/agents, .codex/config.toml)" ;;
+    opencode) echo "Create OpenCode config (.opencode/, .agents/skills)" ;;
     copilot) echo "Create GitHub Copilot config (.github/copilot-instructions.md, .agents/skills, .github/agents, .vscode/mcp.json, .claude/settings.local.json)" ;;
     *) echo "Create $platform config" ;;
   esac
@@ -36,9 +36,9 @@ platform_dry_run_message() {
 platform_success_message() {
   local platform="$1"
   case "$platform" in
-    cursor) echo ".cursor/ configs (hard links + command/agent symlinks)" ;;
-    claude) echo "Claude Code links (symlinks)" ;;
-    codex) echo "Codex links (symlinks)" ;;
+    cursor) echo ".cursor/ configs (hard links) + .claude/agents/ symlinks" ;;
+    claude) echo "Claude Code links (.claude/ + .agents/skills/)" ;;
+    codex) echo "Codex links (.agents/skills/, .claude/agents/)" ;;
     opencode) echo "OpenCode links (symlinks)" ;;
     copilot) echo "GitHub Copilot links (symlinks)" ;;
     *) echo "$platform links" ;;

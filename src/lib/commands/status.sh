@@ -184,6 +184,9 @@ output_status_text() {
   log_info "Home: $AGENTS_HOME"
   echo ""
 
+  # User-level config summary
+  status_print_user_config_summary
+
   # Count projects
   local count=0
   while IFS= read -r name; do
@@ -230,6 +233,153 @@ output_status_text() {
     fi
     echo ""
   done <<< "$projects"
+}
+
+status_print_user_config_summary() {
+  echo "User Config"
+
+  local claude_ok=0
+  local claude_warn=0
+  local codex_ok=0
+  local codex_warn=0
+  local opencode_ok=0
+  local opencode_warn=0
+
+  # Claude: ~/.claude/CLAUDE.md and settings.json, agents/, skills/
+  local claude_home="$HOME/.claude"
+  local claude_md="$claude_home/CLAUDE.md"
+  if [ -e "$claude_md" ]; then
+    if [ -L "$claude_md" ]; then
+      local target
+      target=$(readlink "$claude_md" 2>/dev/null || true)
+      if [ -n "$target" ] && [ -f "$target" ]; then
+        ((claude_ok++)) || true
+      else
+        ((claude_warn++)) || true
+      fi
+    else
+      ((claude_ok++)) || true
+    fi
+  fi
+
+  local claude_settings="$claude_home/settings.json"
+  if [ -e "$claude_settings" ]; then
+    if [ -L "$claude_settings" ]; then
+      local target
+      target=$(readlink "$claude_settings" 2>/dev/null || true)
+      if [ -n "$target" ] && [ -f "$target" ]; then
+        ((claude_ok++)) || true
+      else
+        ((claude_warn++)) || true
+      fi
+    else
+      ((claude_ok++)) || true
+    fi
+  fi
+
+  local claude_agents_dir="$claude_home/agents"
+  if [ -d "$claude_agents_dir" ]; then
+    for d in "$claude_agents_dir"/*; do
+      [ -e "$d" ] || continue
+      if [ -L "$d" ]; then
+        local target
+        target=$(readlink "$d" 2>/dev/null || true)
+        if [ -n "$target" ] && [ -e "$target" ]; then
+          ((claude_ok++)) || true
+        else
+          ((claude_warn++)) || true
+        fi
+      else
+        ((claude_ok++)) || true
+      fi
+    done
+  fi
+
+  local claude_skills_dir="$claude_home/skills"
+  if [ -d "$claude_skills_dir" ]; then
+    for d in "$claude_skills_dir"/*; do
+      [ -e "$d" ] || continue
+      if [ -L "$d" ]; then
+        local target
+        target=$(readlink "$d" 2>/dev/null || true)
+        if [ -n "$target" ] && [ -e "$target" ]; then
+          ((claude_ok++)) || true
+        else
+          ((claude_warn++)) || true
+        fi
+      else
+        ((claude_ok++)) || true
+      fi
+    done
+  fi
+
+  # Codex: ~/.codex/agents/*
+  local codex_agents_dir="$HOME/.codex/agents"
+  if [ -d "$codex_agents_dir" ]; then
+    for d in "$codex_agents_dir"/*; do
+      [ -e "$d" ] || continue
+      if [ -L "$d" ]; then
+        local target
+        target=$(readlink "$d" 2>/dev/null || true)
+        if [ -n "$target" ] && [ -e "$target" ]; then
+          ((codex_ok++)) || true
+        else
+          ((codex_warn++)) || true
+        fi
+      else
+        ((codex_ok++)) || true
+      fi
+    done
+  fi
+
+  # OpenCode: ~/.opencode/agent/*
+  local opencode_agent_dir="$HOME/.opencode/agent"
+  if [ -d "$opencode_agent_dir" ]; then
+    for f in "$opencode_agent_dir"/*; do
+      [ -e "$f" ] || continue
+      if [ -L "$f" ]; then
+        local target
+        target=$(readlink "$f" 2>/dev/null || true)
+        if [ -n "$target" ] && [ -f "$target" ]; then
+          ((opencode_ok++)) || true
+        else
+          ((opencode_warn++)) || true
+        fi
+      else
+        ((opencode_ok++)) || true
+      fi
+    done
+  fi
+
+  # Build badges
+  local claude_badge codex_badge opencode_badge
+
+  if [ $((claude_ok + claude_warn)) -eq 0 ]; then
+    claude_badge="${DIM}-${NC} ${DIM}Claude${NC}"
+  elif [ "$claude_warn" -gt 0 ]; then
+    claude_badge="${YELLOW}!${NC} Claude"
+  else
+    claude_badge="${GREEN}✓${NC} Claude"
+  fi
+
+  if [ $((codex_ok + codex_warn)) -eq 0 ]; then
+    codex_badge="${DIM}-${NC} ${DIM}Codex${NC}"
+  elif [ "$codex_warn" -gt 0 ]; then
+    codex_badge="${YELLOW}!${NC} Codex"
+  else
+    codex_badge="${GREEN}✓${NC} Codex"
+  fi
+
+  if [ $((opencode_ok + opencode_warn)) -eq 0 ]; then
+    opencode_badge="${DIM}-${NC} ${DIM}OpenCode${NC}"
+  elif [ "$opencode_warn" -gt 0 ]; then
+    opencode_badge="${YELLOW}!${NC} OpenCode"
+  else
+    opencode_badge="${GREEN}✓${NC} OpenCode"
+  fi
+
+  echo -e "  $claude_badge  $codex_badge  $opencode_badge"
+  echo ""
 }
 
 # Check project links and return comma-separated issues

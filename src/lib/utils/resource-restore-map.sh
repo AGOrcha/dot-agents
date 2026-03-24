@@ -11,19 +11,18 @@ dot_agents_map_resource_rel_to_agents_dest() {
 
   case "$rel" in
     ".cursor/settings.json") echo "settings/$project/cursor.json" ;;
-    ".cursor/mcp.json") echo "mcp/$project/cursor.json" ;;
+    ".cursor/mcp.json") echo "mcp/$project/mcp.json" ;;
     ".cursorignore") echo "settings/$project/cursorignore" ;;
     ".claude/settings.local.json") echo "settings/$project/claude-code.json" ;;
-    ".mcp.json") echo "mcp/$project/claude.json" ;;
-    ".vscode/mcp.json") echo "mcp/$project/copilot.json" ;;
+    ".mcp.json") echo "mcp/$project/mcp.json" ;;
+    ".vscode/mcp.json") echo "mcp/$project/mcp.json" ;;
     "opencode.json") echo "settings/$project/opencode.json" ;;
     "AGENTS.md") echo "rules/$project/agents.md" ;;
     ".codex/instructions.md") echo "rules/$project/agents.md" ;;
     ".codex/rules.md") echo "rules/$project/agents.md" ;;
     ".codex/config.toml") echo "settings/$project/codex.toml" ;;
     ".github/copilot-instructions.md") echo "rules/$project/copilot-instructions.md" ;;
-    ".claude/rules/project--rules.md") echo "rules/$project/rules.md" ;;
-    ".claude/rules/project--claude-code.md") echo "rules/$project/claude-code.md" ;;
+    ".claude/rules/"*) echo "" ;;
     ".opencode/agent/"*.md)
       local name
       name=$(basename "$rel")
@@ -55,8 +54,12 @@ dot_agents_map_resource_rel_to_agents_dest() {
     ".cursor/rules/"*)
       local name
       name=$(basename "$rel")
-      if [[ "$name" == "${project}--"* ]]; then
+      if [[ "$name" == "global--"* ]]; then
+        echo "rules/global/${name#global--}"
+      elif [[ "$name" == "${project}--"* ]]; then
         echo "rules/$project/${name#${project}--}"
+      elif [[ "$name" == *.mdc ]] || [[ "$name" == *.md ]]; then
+        echo "rules/$project/$name"
       else
         echo ""
       fi

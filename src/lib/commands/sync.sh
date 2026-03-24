@@ -457,6 +457,7 @@ sync_pull() {
 
   if [ "$DRY_RUN" = true ]; then
     log_dry "git pull"
+    log_dry "Prompt: Refresh managed projects with pulled changes?"
     return 0
   fi
 
@@ -466,6 +467,16 @@ sync_pull() {
   else
     log_error "Pull failed"
     return 1
+  fi
+
+  # Offer to refresh managed projects so pulled MCP/rule changes take effect.
+  echo ""
+  if [ "$YES" = true ] || confirm_action "Refresh managed projects with pulled changes?"; then
+    echo ""
+    cmd_refresh
+  else
+    echo ""
+    log_info "Run 'dot-agents refresh' to apply changes to managed projects."
   fi
 }
 

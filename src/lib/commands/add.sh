@@ -40,13 +40,14 @@ ${BOLD}DESCRIPTION${NC}
     ${BOLD}Cursor${NC} (uses HARD LINKS - required by IDE):
     - .cursor/rules/           Project rules
     - .agents/skills/          Project skills
-    - .cursor/agents/          Project agents
+    - .claude/agents/          Project agents (GCD path, read by Cursor)
     - .cursor/settings.json    IDE settings
     - .cursor/mcp.json         MCP server configs
     - .cursorignore            Files to ignore
 
     ${BOLD}Claude Code${NC} (uses SYMLINKS):
-    - .claude/rules/*.md       Rule files (project)
+    - .claude/CLAUDE.md (user-level, via claude_ensure_user_rules)
+    - .claude/rules/{project}--*.md  Rule files (project-scope)
     - .claude/settings.local.json  Project settings
     - .claude/skills/          Commands as skills (project)
     - .mcp.json                MCP server configs
@@ -209,11 +210,12 @@ cmd_add() {
 
   preview_section "$display_path/" \
     ".cursor/rules/global--*.mdc       (hard links to global rules)" \
+    ".cursor/rules/${project_name}--*.mdc  (hard links to project rules)" \
     ".cursor/settings.json             (hard link to settings)" \
     ".cursor/mcp.json                  (hard link to MCP config)" \
-    ".cursor/agents/*.md               (symlinks to subagents)" \
+    ".claude/agents/*.md               (symlinks to subagents)" \
     ".cursorignore                     (hard link to ignore patterns)" \
-    ".claude/rules/*.md                (symlinks to rule files)" \
+    ".claude/rules/${project_name}--*.md  (symlinks to project rules)" \
     ".claude/settings.local.json       (symlink to settings)" \
     ".claude/skills/*/                 (symlinks to skill directories)" \
     ".mcp.json                         (symlink to MCP config)" \
@@ -222,8 +224,7 @@ cmd_add() {
     ".opencode/                        (symlinks to configs)" \
     ".github/copilot-instructions.md   (symlink to instructions)" \
     ".github/agents/*.agent.md         (symlinks to custom agents)" \
-    ".vscode/mcp.json                  (symlink to MCP config)" \
-    ".claude/settings.local.json       (symlink to hooks-compatible settings)"
+    ".vscode/mcp.json                  (symlink to MCP config)"
 
   info_box "About Link Types" \
     "Cursor uses HARD LINKS (required by IDE)." \
@@ -272,7 +273,7 @@ cmd_add() {
 
     if [ "$FORCE" != true ]; then
       echo ""
-      echo -e "  ${DIM}Backups will be created as *.dot-agents-backup${NC}"
+      echo -e "  ${DIM}Backups stored in ~/.agents/resources/$project_name/backups/<timestamp>/${NC}"
     fi
   fi
 
@@ -319,10 +320,12 @@ cmd_add() {
   if [ ${#existing_files[@]} -gt 0 ]; then
     backup_timestamp=$(date +%Y%m%d-%H%M%S)
     for file in "${existing_files[@]}"; do
+      # Skip backup artifacts (never back up a backup)
+      [[ "$(basename "$file")" == *.dot-agents-backup ]] && continue
       if [ -e "$file" ] && [ ! -L "$file" ]; then
+        # Copy into ~/.agents/resources then delete original — no *.dot-agents-backup in project
         mirror_project_backup_to_resources "$project_name" "$project_path" "$file" "$backup_timestamp"
-        local backup_file="$file.dot-agents-backup"
-        mv "$file" "$backup_file"
+        rm "$file"
       elif [ -L "$file" ]; then
         rm "$file"  # Remove existing symlinks without backup
       fi
@@ -402,34 +405,24 @@ mirror_project_backup_to_resources() {
   local rel_path
   rel_path="${source_file#$project_path/}"
   if [ "$rel_path" = "$source_file" ]; then
-    # Fallback to basename if backup file is not under project path
+    # Fallback to basename if source file is not under project path
     rel_path=$(basename "$source_file")
   fi
 
-  local backup_rel_path="$rel_path.dot-agents-backup"
-
-  local active_target="$AGENTS_HOME/resources/$project_slug/$backup_rel_path"
+  # Active (latest) copy — stored under original filename, no .dot-agents-backup suffix
+  local active_target="$AGENTS_HOME/resources/$project_slug/$rel_path"
   mkdir -p "$(dirname "$active_target")"
-
   if ! cp -a "$source_file" "$active_target" 2>/dev/null; then
     log_warn "Could not mirror active backup to ~/.agents/resources/$project_slug/"
   fi
 
-  # Also store canonical active copy for generic restore.
-  local active_canonical_target="$AGENTS_HOME/resources/$project_slug/$rel_path"
-  mkdir -p "$(dirname "$active_canonical_target")"
-  cp -a "$source_file" "$active_canonical_target" 2>/dev/null || true
-
+  # Timestamped immutable copy
   if [ -n "$backup_timestamp" ]; then
-    local ts_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$backup_rel_path"
+    local ts_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$rel_path"
     mkdir -p "$(dirname "$ts_target")"
     if ! cp -a "$source_file" "$ts_target" 2>/dev/null; then
       log_warn "Could not mirror timestamped backup to ~/.agents/resources/$project_slug/backups/$backup_timestamp/"
     fi
-
-    local ts_canonical_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$rel_path"
-    mkdir -p "$(dirname "$ts_canonical_target")"
-    cp -a "$source_file" "$ts_canonical_target" 2>/dev/null || true
   fi
 }
 
@@ -449,10 +442,12 @@ restore_project_from_active_resources() {
     # Active restore only: skip timestamped backup snapshots
     [[ "$rel" == backups/* ]] && continue
 
-    # Prefer canonical file if both canonical and backup-suffixed copies exist
+    # Legacy: if a *.dot-agents-backup-suffixed copy exists alongside a canonical copy,
+    # skip the suffixed one (canonical takes priority). New backups won't have the suffix.
     if [[ "$rel" == *.dot-agents-backup ]]; then
       local canonical_rel="${rel%.dot-agents-backup}"
       [ -f "$root/$canonical_rel" ] && continue
+      # No canonical copy present — use the legacy backup as the source, mapped without suffix
       rel="$canonical_rel"
     fi
 
@@ -595,6 +590,8 @@ check_existing_config_files() {
       if [ -d "$file" ]; then
         # Check for files inside directories
         for subfile in "$file"/*; do
+          # Skip files that are already backups to prevent cascading backups
+          [[ "$subfile" == *.dot-agents-backup ]] && continue
           [ -e "$subfile" ] && _CHECK_EXISTING_FILES+=("$subfile")
         done
       else

@@ -11,7 +11,7 @@ claude_detect() {
 
 # Check if Claude Code is installed
 claude_is_installed() {
-  command -v claude >/dev/null 2>&1
+  command -v claude >/dev/null 2>&1 || [ -d "$HOME/.claude" ]
 }
 
 # Get Claude Code version string
@@ -37,11 +37,8 @@ _claude_find_rule_file() {
 # Create links for Claude Code (SYMLINKS)
 # Claude Code reads rules from .claude/rules/*.md (auto-loaded rule files)
 #
-# We use .claude/rules/ with symlinks to the 4 rule sources:
-#   1. global--rules.md        → ~/.agents/rules/global/rules.mdc (all agents, global)
-#   2. global--claude-code.md  → ~/.agents/rules/global/claude-code.mdc (Claude, global)
-#   3. project--rules.md       → ~/.agents/rules/{project}/rules.mdc (all agents, project)
-#   4. project--claude-code.md → ~/.agents/rules/{project}/claude-code.mdc (Claude, project)
+# Global rules: ~/.claude/CLAUDE.md → ~/.agents/rules/global/rules.mdc (user-scope)
+# Project rules: .claude/rules/{project}--{stem}.md (project-scope)
 #
 # All files in .claude/rules/ are automatically loaded by Claude Code.
 claude_create_links() {
@@ -49,6 +46,7 @@ claude_create_links() {
   local repo_path="$2"
 
   claude_ensure_user_agents
+  claude_ensure_user_rules
   # Create .claude directory structure
   mkdir -p "$repo_path/.claude/rules"
 
@@ -62,11 +60,18 @@ claude_create_links() {
   fi
 
   # Link MCP config if exists
-  if [ -f "$AGENTS_HOME/mcp/$project/claude.json" ]; then
-    ln -sf "$AGENTS_HOME/mcp/$project/claude.json" "$repo_path/.mcp.json"
-  elif [ -f "$AGENTS_HOME/mcp/global/claude.json" ]; then
-    ln -sf "$AGENTS_HOME/mcp/global/claude.json" "$repo_path/.mcp.json"
-  fi
+  # Priority: project claude.json, project mcp.json, global claude.json, global mcp.json
+  local _mcp_linked=false
+  for _scope in "$project" "global"; do
+    for _name in "claude.json" "mcp.json"; do
+      if [ -f "$AGENTS_HOME/mcp/$_scope/$_name" ]; then
+        ln -sf "$AGENTS_HOME/mcp/$_scope/$_name" "$repo_path/.mcp.json"
+        _mcp_linked=true
+        break 2
+      fi
+    done
+  done
+  unset _mcp_linked _scope _name
 
   # Project agents (global → user-level ~/.claude/agents)
   claude_create_agents_links "$project" "$repo_path"
@@ -95,41 +100,25 @@ claude_create_agents_links() {
   fi
 }
 
-# Create symlinks in .claude/rules/ for all 4 rule sources
+# Create symlinks in .claude/rules/ for project rule files only.
+# Global rules are handled user-level via claude_ensure_user_rules().
 claude_create_rules_links() {
   local project="$1"
   local repo_path="$2"
   local rules_dir="$repo_path/.claude/rules"
 
-  # 1. Global all-agents rules
-  local global_rules
-  global_rules=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/rules")
-  if [ -n "$global_rules" ]; then
-    ln -sf "$global_rules" "$rules_dir/global--rules.md"
+  shopt -s nullglob
+  # Project rules
+  local project_rules_dir="$AGENTS_HOME/rules/$project"
+  if [ -d "$project_rules_dir" ]; then
+    for rule_file in "$project_rules_dir"/*.{md,mdc,txt}; do
+      [ -f "$rule_file" ] || continue
+      local stem
+      stem=$(basename "${rule_file%.*}")
+      ln -sf "$rule_file" "$rules_dir/${project}--${stem}.md"
+    done
   fi
-
-  # 2. Global Claude-specific rules
-  local global_claude
-  global_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/claude-code")
-  [ -z "$global_claude" ] && global_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/global/claude")
-  if [ -n "$global_claude" ]; then
-    ln -sf "$global_claude" "$rules_dir/global--claude-code.md"
-  fi
-
-  # 3. Project all-agents rules
-  local project_rules
-  project_rules=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/rules")
-  if [ -n "$project_rules" ]; then
-    ln -sf "$project_rules" "$rules_dir/project--rules.md"
-  fi
-
-  # 4. Project Claude-specific rules
-  local project_claude
-  project_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/claude-code")
-  [ -z "$project_claude" ] && project_claude=$(_claude_find_rule_file "$AGENTS_HOME/rules/$project/claude")
-  if [ -n "$project_claude" ]; then
-    ln -sf "$project_claude" "$rules_dir/project--claude-code.md"
-  fi
+  shopt -u nullglob
 }
 
 # User-level dirs for global agents/skills
@@ -175,20 +164,45 @@ claude_ensure_user_skills() {
       [ -e "$target" ] && [ -L "$target" ] && continue
       ln -sf "$skill_dir" "$target"
     done
-  done
+  done < <(dot_agents_user_home_roots)
 }
 
-# Create skills symlinks for Claude Code: project skills only (global → user-level ~/.claude/skills)
+# Ensure user-level ~/.claude/CLAUDE.md points to the primary global rules file.
+# Claude Code auto-loads ~/.claude/CLAUDE.md at user scope.
+claude_ensure_user_rules() {
+  local home_root
+  while IFS= read -r home_root; do
+    local target="$home_root/.claude/CLAUDE.md"
+    [ -e "$target" ] && [ -L "$target" ] && continue
+    for _f in \
+      "$AGENTS_HOME/rules/global/claude-code.mdc" \
+      "$AGENTS_HOME/rules/global/claude-code.md" \
+      "$AGENTS_HOME/rules/global/rules.mdc" \
+      "$AGENTS_HOME/rules/global/rules.md" \
+      "$AGENTS_HOME/rules/global/rules.txt"; do
+      if [ -f "$_f" ]; then
+        ln -sf "$_f" "$target"
+        break
+      fi
+    done
+  done < <(dot_agents_user_home_roots)
+}
+
+# Create skills symlinks for Claude Code: project skills in .claude/skills/ (Claude-native)
+# and .agents/skills/ (GCD — also read by Cursor, Codex, OpenCode, Copilot).
 claude_create_skills_links() {
   local project="$1"
   local repo_path="$2"
 
   claude_ensure_user_skills
   local skills_target="$repo_path/.claude/skills"
+  local agents_skills_target="$repo_path/.agents/skills"
   local project_skills="$AGENTS_HOME/skills/$project"
 
   mkdir -p "$skills_target"
+  mkdir -p "$agents_skills_target"
   rm -f "$skills_target"/* 2>/dev/null || true
+  rm -f "$agents_skills_target"/* 2>/dev/null || true
 
   if [ -d "$project_skills" ]; then
     for skill_dir in "$project_skills"/*/; do
@@ -196,8 +210,10 @@ claude_create_skills_links() {
       [ -f "$skill_dir/SKILL.md" ] || continue
       local name
       name=$(basename "$skill_dir")
-      local target="$skills_target/$name"
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
+      local claude_target="$skills_target/$name"
+      [ -e "$claude_target" ] || [ -L "$claude_target" ] || ln -sf "$skill_dir" "$claude_target"
+      local agents_target="$agents_skills_target/$name"
+      [ -e "$agents_target" ] || [ -L "$agents_target" ] || ln -sf "$skill_dir" "$agents_target"
     done
   fi
 }

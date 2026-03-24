@@ -44,12 +44,37 @@ opencode_ensure_user_agents() {
   done < <(dot_agents_user_home_roots)
 }
 
+# Create skills symlinks for OpenCode: project skills → .agents/skills/ (GCD)
+# OpenCode reads .agents/skills/ via agent compat path, alongside .opencode/skills/.
+opencode_create_skills_links() {
+  local project="$1"
+  local repo_path="$2"
+
+  local skills_target="$repo_path/.agents/skills"
+  local project_skills="$AGENTS_HOME/skills/$project"
+
+  mkdir -p "$skills_target"
+  rm -f "$skills_target"/* 2>/dev/null || true
+
+  if [ -d "$project_skills" ]; then
+    for skill_dir in "$project_skills"/*/; do
+      [ -d "$skill_dir" ] || continue
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      local target="$skills_target/$name"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$skill_dir" "$target"
+    done
+  fi
+}
+
 # Create links for OpenCode (SYMLINKS - works fine)
 opencode_create_links() {
   local project="$1"
   local repo_path="$2"
 
   opencode_ensure_user_agents
+  opencode_create_skills_links "$project" "$repo_path"
 
   # Link opencode.json config if exists
   if [ -f "$AGENTS_HOME/settings/$project/opencode.json" ]; then
@@ -73,18 +98,6 @@ opencode_create_links() {
     done
   fi
 
-  # Also link global agent definitions
-  if [ -d "$AGENTS_HOME/rules/global" ]; then
-    for agent_file in "$AGENTS_HOME/rules/global"/opencode-*.md; do
-      [ -f "$agent_file" ] || continue
-      local basename
-      basename=$(basename "$agent_file")
-      local target_name="${basename#opencode-}"
-      # Only link if doesn't exist from project
-      [ -f "$repo_path/.opencode/agent/$target_name" ] || \
-        ln -sf "$agent_file" "$repo_path/.opencode/agent/$target_name"
-    done
-  fi
 }
 
 # Check for deprecated formats (OpenCode has been stable - no deprecated formats)

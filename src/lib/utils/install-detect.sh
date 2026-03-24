@@ -25,7 +25,7 @@ detect_installations() {
     installs+=("linuxbrew:$HOME/.linuxbrew/bin/dot-agents")
   fi
 
-  echo "${installs[*]}"
+  echo "${installs[*]+"${installs[*]}"}"
 }
 
 # Check if there are multiple installations (conflict)
