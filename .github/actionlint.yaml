@@ -1,3 +1,4 @@
 self-hosted-runner:
-  - 'arc-linux'
-  - 'arc-mac'
+  labels:
+    - 'arc-linux'
+    - 'arc-mac'
