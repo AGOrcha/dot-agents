@@ -2,6 +2,11 @@
 # dot-agents/lib/commands/refresh.sh
 # Refresh managed setup in projects from ~/.agents/
 
+# Source add.sh for shared helpers (create_project_dirs_silent, restore_project_from_active_resources)
+_REFRESH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=add.sh
+source "$_REFRESH_DIR/add.sh"
+
 cmd_refresh_help() {
   cat << EOF
 ${BOLD}dot-agents refresh${NC} - Refresh managed setup in projects from ~/.agents/
@@ -217,6 +222,14 @@ cmd_refresh() {
     echo ""
     echo -e "${BOLD}Refreshing: $name${NC}"
     echo -e "  ${DIM}$path${NC}"
+    if [ "$DRY_RUN" != true ]; then
+      create_project_dirs_silent "$name"
+      local restored_count
+      restored_count=$(restore_project_from_active_resources "$name")
+      if [ "$restored_count" -gt 0 ]; then
+        [ "$VERBOSE" = true ] && log_info "Restored $restored_count item(s) from ~/.agents/resources/$name/"
+      fi
+    fi
     refresh_project_links_enabled "$name" "$path" "${enabled_platforms[@]}"
     if [ "$DRY_RUN" != true ]; then
       write_refresh_marker "$path" "$refresh_commit" "$refresh_describe"

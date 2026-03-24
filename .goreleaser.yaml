@@ -1,0 +1,81 @@
+version: 2
+
+project_name: dot-agents
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dot-agents-unix
+    main: ./cmd/dot-agents
+    binary: dot-agents
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/dot-agents/dot-agents/commands.Version={{.Version}}
+      - -X github.com/dot-agents/dot-agents/commands.Commit={{.Commit}}
+      - -X github.com/dot-agents/dot-agents/commands.Describe={{.Tag}}
+
+  - id: dot-agents-windows
+    main: ./cmd/dot-agents
+    binary: dot-agents
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/dot-agents/dot-agents/commands.Version={{.Version}}
+      - -X github.com/dot-agents/dot-agents/commands.Commit={{.Commit}}
+      - -X github.com/dot-agents/dot-agents/commands.Describe={{.Tag}}
+
+archives:
+  - id: unix
+    builds:
+      - dot-agents-unix
+    name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - README.md
+      - LICENSE
+
+  - id: windows
+    builds:
+      - dot-agents-windows
+    name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: NikashPrakash
+    name: dot-agents
+
+brews:
+  - name: dot-agents
+    repository:
+      owner: NikashPrakash
+      name: homebrew-tap
+    description: "Manage AI agent configurations across projects"
+    homepage: "https://github.com/NikashPrakash/dot-agents"
+    license: "MIT"
+    install: |
+      bin.install "dot-agents"
+    test: |
+      system "#{bin}/dot-agents", "--version"

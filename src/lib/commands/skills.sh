@@ -406,6 +406,15 @@ Description of this skill.
 - Edge case to handle
 EOF
   ls -l "$target_file"
+
+  # Create user-level symlinks immediately so the skill is live without needing a refresh
+  if declare -f claude_ensure_user_skills >/dev/null 2>&1; then
+    claude_ensure_user_skills
+  fi
+  if declare -f codex_ensure_user_skills >/dev/null 2>&1; then
+    codex_ensure_user_skills
+  fi
+
   log_success "Created skill: $target_dir"
   echo ""
   echo "Edit with: dot-agents skills edit $name"

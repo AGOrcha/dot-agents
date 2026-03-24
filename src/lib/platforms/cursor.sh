@@ -105,22 +105,21 @@ cursor_create_settings_links() {
 }
 
 # Create links for Cursor MCP config (HARD LINKS)
+# Priority: project cursor.json, project mcp.json, global cursor.json, global mcp.json
 cursor_create_mcp_links() {
   local project="$1"
   local repo_path="$2"
 
   mkdir -p "$repo_path/.cursor"
 
-  # Project-specific MCP config takes priority
-  if [ -f "$AGENTS_HOME/mcp/$project/cursor.json" ]; then
-    ln -f "$AGENTS_HOME/mcp/$project/cursor.json" "$repo_path/.cursor/mcp.json" 2>/dev/null || true
-    return 0
-  fi
-
-  # Fall back to global MCP config
-  if [ -f "$AGENTS_HOME/mcp/global/cursor.json" ]; then
-    ln -f "$AGENTS_HOME/mcp/global/cursor.json" "$repo_path/.cursor/mcp.json" 2>/dev/null || true
-  fi
+  for scope in "$project" "global"; do
+    for name in "cursor.json" "mcp.json"; do
+      if [ -f "$AGENTS_HOME/mcp/$scope/$name" ]; then
+        ln -f "$AGENTS_HOME/mcp/$scope/$name" "$repo_path/.cursor/mcp.json" 2>/dev/null || true
+        return 0
+      fi
+    done
+  done
 }
 
 # Create .cursorignore link (HARD LINK)
@@ -140,53 +139,9 @@ cursor_create_ignore_link() {
   fi
 }
 
-# User-level dirs for global agents/skills (one place, not per-project)
-CURSOR_USER_AGENTS="${CURSOR_USER_AGENTS:-$HOME/.cursor/agents}"
-CURSOR_USER_SKILLS="${CURSOR_USER_SKILLS:-$HOME/.cursor/skills}"
-
-# Ensure user-level ~/.cursor/skills has global skills (symlink dirs)
-cursor_ensure_user_skills() {
-  local global_skills="$AGENTS_HOME/skills/global"
-  [ ! -d "$global_skills" ] && return 0
-
-  local home_root
-  while IFS= read -r home_root; do
-    local user_skills_dir="$home_root/.cursor/skills"
-    mkdir -p "$user_skills_dir"
-    for skill_dir in "$global_skills"/*/; do
-      [ -d "$skill_dir" ] || continue
-      [ -f "$skill_dir/SKILL.md" ] || continue
-      local name
-      name=$(basename "$skill_dir")
-      local target="$user_skills_dir/$name"
-      [ -e "$target" ] && [ -L "$target" ] && continue
-      ln -sf "$skill_dir" "$target"
-    done
-  done < <(dot_agents_user_home_roots)
-}
-
-# Ensure user-level ~/.cursor/agents has global agents (AGENT.md → {name}.md)
-cursor_ensure_user_agents() {
-  local global_agents="$AGENTS_HOME/agents/global"
-  [ ! -d "$global_agents" ] && return 0
-
-  local home_root
-  while IFS= read -r home_root; do
-    local user_agents_dir="$home_root/.cursor/agents"
-    mkdir -p "$user_agents_dir"
-    for agent_dir in "$global_agents"/*/; do
-      [ -d "$agent_dir" ] || continue
-      [ -f "$agent_dir/AGENT.md" ] || continue
-      local name
-      name=$(basename "$agent_dir")
-      local target="$user_agents_dir/$name.md"
-      [ -e "$target" ] && [ -L "$target" ] && continue
-      ln -sf "$agent_dir/AGENT.md" "$target"
-    done
-  done
-}
-
-# Create all Cursor links (rules, settings, MCP, ignore, agents, skills - in common .agents)
+# Create all Cursor links (rules, settings, MCP, ignore, agents)
+# Note: user-level skills/agents are covered by claude_ensure_user_skills/agents
+# via ~/.claude/ compat paths that Cursor reads automatically.
 cursor_create_all_links() {
   local project="$1"
   local repo_path="$2"
@@ -195,21 +150,21 @@ cursor_create_all_links() {
   cursor_create_settings_links "$project" "$repo_path"
   cursor_create_mcp_links "$project" "$repo_path"
   cursor_create_ignore_link "$project" "$repo_path"
-  cursor_ensure_user_skills
-  cursor_ensure_user_agents
   cursor_create_agents_links "$project" "$repo_path"
 }
 
-# Create agents symlinks for Cursor: project agents only (global → user-level ~/.cursor/agents)
+# Create agents symlinks for Cursor: project agents → .claude/agents/ (GCD)
+# Cursor reads .claude/agents/ via Claude compatibility, so this serves
+# Claude Code, Cursor, and GitHub Copilot from a single location.
 cursor_create_agents_links() {
   local project="$1"
   local repo_path="$2"
 
-  local agents_target="$repo_path/.cursor/agents"
+  local agents_target="$repo_path/.claude/agents"
   local project_agents="$AGENTS_HOME/agents/$project"
 
   mkdir -p "$agents_target"
-  rm -f "$agents_target"/*.md 2>/dev/null || true
+  rm -f "$agents_target"/* 2>/dev/null || true
 
   if [ -d "$project_agents" ]; then
     for agent_dir in "$project_agents"/*/; do
@@ -217,8 +172,8 @@ cursor_create_agents_links() {
       [ -f "$agent_dir/AGENT.md" ] || continue
       local name
       name=$(basename "$agent_dir")
-      local target="$agents_target/$name.md"
-      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$agent_dir/AGENT.md" "$target"
+      local target="$agents_target/$name"
+      [ -e "$target" ] || [ -L "$target" ] || ln -sf "$agent_dir" "$target"
     done
   fi
 }

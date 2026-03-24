@@ -92,3 +92,5 @@ pip-delete-this-directory.txt
 *.zip
 *.tar.gz
 *.rar
+dot-agents-go
+.agents-refresh

@@ -46,11 +46,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [arc-mac, arc-linux]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -58,6 +63,9 @@ jobs:
 
       - name: Verify jq installed
         run: jq --version
+
+      - name: Go test
+        run: go test ./...
 
       - name: Make CLI executable
         run: chmod +x src/bin/dot-agents
