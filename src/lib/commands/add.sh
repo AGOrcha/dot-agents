@@ -385,6 +385,7 @@ cmd_add() {
     next_steps+=("Migrate deprecated formats: dot-agents migrate detect")
   fi
   next_steps+=("Check applied configs: dot-agents status --audit")
+  next_steps+=("Make it git-portable: dot-agents install --generate")
 
   success_with_next_steps "Project '$project_name' added successfully!" "${next_steps[@]}"
 

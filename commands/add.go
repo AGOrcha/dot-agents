@@ -446,6 +446,7 @@ func runAdd(pathArg, nameArg string) error {
 	nextSteps := []string{
 		"Add project rules: edit ~/.agents/rules/" + projectName + "/rules.md",
 		"Check applied configs: dot-agents status --audit",
+		"Make it git-portable: dot-agents install --generate",
 	}
 	if hasDeprecated {
 		nextSteps = append(nextSteps, "Migrate deprecated formats: dot-agents migrate detect")
