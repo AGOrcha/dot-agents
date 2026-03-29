@@ -91,7 +91,12 @@ func (c *copilot) CreateLinks(project, repoPath string) error {
 	}
 
 	// .claude/settings.local.json (hooks compat)
-	if err := c.createHooksLinks(project, repoPath, agentsHome); err != nil {
+	if err := c.createClaudeCompatLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+
+	// .github/hooks/{name}.json
+	if err := c.createProjectHookFiles(project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
@@ -205,16 +210,44 @@ func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func (c *copilot) createHooksLinks(project, repoPath, agentsHome string) error {
+func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) error {
 	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
-		if _, err := os.Stat(src); err == nil {
-			if err := os.MkdirAll(filepath.Join(repoPath, ".claude"), 0755); err != nil {
-				return err
+		// hooks/ takes priority over settings/
+		for _, dir := range []string{"hooks", "settings"} {
+			src := filepath.Join(agentsHome, dir, scope, "claude-code.json")
+			if _, err := os.Stat(src); err == nil {
+				if err := os.MkdirAll(filepath.Join(repoPath, ".claude"), 0755); err != nil {
+					return err
+				}
+				links.Symlink(src, filepath.Join(repoPath, ".claude", "settings.local.json"))
+				return nil
 			}
-			links.Symlink(src, filepath.Join(repoPath, ".claude", "settings.local.json"))
-			return nil
 		}
+	}
+	return nil
+}
+
+func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) error {
+	hooksDir := filepath.Join(agentsHome, "hooks", project)
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		return nil // no project hooks configured
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".json")
+		// Skip reserved platform files
+		if name == "cursor" || name == "claude-code" {
+			continue
+		}
+		src := filepath.Join(hooksDir, e.Name())
+		dstDir := filepath.Join(repoPath, ".github", "hooks")
+		if err := os.MkdirAll(dstDir, 0755); err != nil {
+			return err
+		}
+		links.Symlink(src, filepath.Join(dstDir, name+".json"))
 	}
 	return nil
 }
@@ -240,6 +273,16 @@ func (c *copilot) RemoveLinks(project, repoPath string) error {
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".agent.md") {
 				links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
+			}
+		}
+	}
+
+	// .github/hooks/*.json
+	hooksDir := filepath.Join(repoPath, ".github", "hooks")
+	if entries, err := os.ReadDir(hooksDir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".json") {
+				links.RemoveIfSymlinkUnder(filepath.Join(hooksDir, e.Name()), agentsHome)
 			}
 		}
 	}

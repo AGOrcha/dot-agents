@@ -12,6 +12,7 @@ dot_agents_map_resource_rel_to_agents_dest() {
   case "$rel" in
     ".cursor/settings.json") echo "settings/$project/cursor.json" ;;
     ".cursor/mcp.json") echo "mcp/$project/mcp.json" ;;
+    ".cursor/hooks.json") echo "hooks/$project/cursor.json" ;;
     ".cursorignore") echo "settings/$project/cursorignore" ;;
     ".claude/settings.local.json") echo "settings/$project/claude-code.json" ;;
     ".mcp.json") echo "mcp/$project/mcp.json" ;;
@@ -51,6 +52,11 @@ dot_agents_map_resource_rel_to_agents_dest() {
       local skill_path="${rest#*/}"
       echo "skills/$project/$skill_name/$skill_path"
       ;;
+    ".github/hooks/"*.json)
+      local name
+      name=$(basename "$rel")
+      echo "hooks/$project/$name"
+      ;;
     ".cursor/rules/"*)
       local name
       name=$(basename "$rel")
@@ -68,6 +74,22 @@ dot_agents_map_resource_rel_to_agents_dest() {
       echo ""
       ;;
   esac
+}
+
+# Map a global/home-relative path to an ~/.agents-relative destination path.
+# Usage: map_global_rel_to_agents_dest <global-relative-path>
+map_global_rel_to_agents_dest() {
+  local rel="$1"
+  case "$rel" in
+    ".claude/settings.json") echo "settings/global/claude-code.json" ;;
+    ".cursor/settings.json") echo "settings/global/cursor.json" ;;
+    ".cursor/mcp.json") echo "mcp/global/mcp.json" ;;
+    ".cursor/hooks.json") echo "hooks/global/cursor.json" ;;
+    ".claude/CLAUDE.md") echo "rules/global/agents.md" ;;
+    ".codex/config.toml") echo "settings/global/codex.toml" ;;
+    *) echo "" ;;
+  esac
+  return 0
 }
 
 # Check whether a platform has an active (non-timestamped) backup in resources.
@@ -102,4 +124,5 @@ dot_agents_platform_has_active_backup() {
 }
 
 export -f dot_agents_map_resource_rel_to_agents_dest
+export -f map_global_rel_to_agents_dest
 export -f dot_agents_platform_has_active_backup
