@@ -1,4 +1,4 @@
-# Platfrom file locations for resources
+# Platform file locations for resources
 
 ## Cursor:
 
@@ -147,6 +147,32 @@ Discovery: Walks from git root down to CWD, merging files root-to-leaf. One file
 | `.codex/config.toml` (`[mcp_servers]` section) | Project-level |
 | `~/.codex/config.toml` (`[mcp_servers]` section) | User-level |
 
+### Hooks
+
+| Location | Scope |
+|----------|-------|
+| `.codex/hooks.json` | Project-level |
+| `~/.codex/hooks.json` | User-level |
+
+Notes:
+
+- Hooks are behind a feature flag in `config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+- Codex discovers `hooks.json` next to active config layers and loads all matching files; higher-precedence config layers do not replace lower-precedence hooks.
+- Current matcher-aware events are `SessionStart`, `PreToolUse`, and `PostToolUse`.
+- `PreToolUse` and `PostToolUse` currently only intercept the `Bash` tool in Codex.
+- `UserPromptSubmit` and `Stop` exist, but their `matcher` field is currently ignored.
+- Hooks are currently disabled on Windows.
+
+Implementation note for this repo:
+
+- The local Codex hooks docs describe `.codex/hooks.json`, but `dot-agents` does not currently wire Codex hooks automatically in either the Go or bash platform implementation.
+
 ---
 
 ## OpenCode:
@@ -251,3 +277,17 @@ Note: Agent files use `.agent.md` extension with YAML frontmatter. Must be on de
 |----------|-------|
 | `.github/hooks/<name>.json` | Project-level |
 | `.github/hooks/<name>/hooks.json` | Project-level (folder-based) |
+
+---
+
+## dot-agents hook wiring audit
+
+Validated from the current repo implementation:
+
+| Platform | Native hook/config location | Go implementation | Bash implementation | Notes |
+|----------|------------------------------|-------------------|---------------------|-------|
+| Claude Code | `.claude/settings*.json` | Yes | Yes | Both wire Claude-compatible hook settings, but the CLI management commands target `~/.agents/settings/*/claude-code.json`, not `~/.agents/hooks/*`. |
+| Cursor | `.cursor/hooks.json` | Yes | No | Go wires `~/.agents/hooks/{scope}/cursor.json` to project and user `hooks.json`; bash has no Cursor hook creation path. |
+| Codex | `.codex/hooks.json` | No | No | Both implementations link `AGENTS.md`, `.codex/config.toml`, skills, and agents, but neither creates `.codex/hooks.json`. |
+| GitHub Copilot | `.github/hooks/*.json` and Claude-compatible settings | Partial | Partial | Go links `.claude/settings.local.json` and project `.github/hooks/*.json`; bash only links Claude-compatible settings and does not create `.github/hooks/*.json`. |
+| OpenCode | No hook wiring in this repo | No | No | No OpenCode-specific hook handling is implemented here. |
