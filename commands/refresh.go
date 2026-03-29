@@ -16,6 +16,7 @@ import (
 var Version = "dev"
 var Commit = ""
 var Describe = ""
+var refreshImport bool
 
 func NewRefreshCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,10 +33,17 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			return runRefresh(filter)
 		},
 	}
+	cmd.Flags().BoolVar(&refreshImport, "import", false, "Import project/global configs into ~/.agents before relinking")
 	return cmd
 }
 
 func runRefresh(projectFilter string) error {
+	if refreshImport {
+		if err := runImportFromRefresh(projectFilter, "all"); err != nil {
+			return fmt.Errorf("import before refresh: %w", err)
+		}
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
@@ -178,6 +186,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return "settings/" + project + "/cursor.json"
 	case ".cursor/mcp.json":
 		return "mcp/" + project + "/mcp.json"
+	case ".cursor/hooks.json":
+		return "hooks/" + project + "/cursor.json"
 	case ".cursorignore":
 		return "settings/" + project + "/cursorignore"
 	case ".claude/settings.local.json":
@@ -234,8 +244,14 @@ func mapResourceRelToDest(project, relPath string) string {
 		return "agents/" + project + "/" + rest
 	}
 
+	// .github/hooks/<name>.json → hooks/<project>/<name>.json
+	if strings.HasPrefix(relPath, ".github/hooks/") && strings.HasSuffix(relPath, ".json") {
+		name := filepath.Base(relPath)
+		return "hooks/" + project + "/" + name
+	}
+
 	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/"} {
+	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", "hooks/"} {
 		if strings.HasPrefix(relPath, prefix) {
 			return relPath
 		}

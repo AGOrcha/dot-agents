@@ -82,6 +82,9 @@ func (c *cursor) CreateLinks(project, repoPath string) error {
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
+	if err := c.createHooksLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -175,6 +178,36 @@ func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 	return nil
 }
 
+func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
+	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+		return err
+	}
+	// Project-level: project scope takes priority over global
+	for _, scope := range []string{project, "global"} {
+		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
+		if _, err := os.Stat(src); err == nil {
+			links.Hardlink(src, filepath.Join(repoPath, ".cursor", "hooks.json"))
+			break
+		}
+	}
+	// User-level: global scope only
+	src := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
+	if _, err := os.Stat(src); err == nil {
+		for _, homeRoot := range config.UserHomeRoots() {
+			cursorDir := filepath.Join(homeRoot, ".cursor")
+			if err := os.MkdirAll(cursorDir, 0755); err != nil {
+				continue
+			}
+			dst := filepath.Join(cursorDir, "hooks.json")
+			if already, _ := links.AreHardlinked(src, dst); already {
+				continue
+			}
+			links.Hardlink(src, dst)
+		}
+	}
+	return nil
+}
+
 func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {
 	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
 	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
@@ -239,16 +272,14 @@ func (c *cursor) RemoveLinks(project, repoPath string) error {
 		}
 	}
 
-	// Remove cursor settings/mcp if hard-linked
-	for _, f := range []struct{ dst, settingsScope, filename string }{
-		{filepath.Join(repoPath, ".cursor", "settings.json"), project, "cursor.json"},
-		{filepath.Join(repoPath, ".cursor", "mcp.json"), project, "cursor.json"},
-		{filepath.Join(repoPath, ".cursorignore"), project, "cursorignore"},
-	} {
-		for _, scope := range []string{project, "global"} {
-			_ = scope
+	// Remove .cursor/hooks.json if hard-linked to our source
+	hooksFilePath := filepath.Join(repoPath, ".cursor", "hooks.json")
+	for _, scope := range []string{project, "global"} {
+		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
+		if linked, _ := links.AreHardlinked(hooksFilePath, src); linked {
+			os.Remove(hooksFilePath)
+			break
 		}
-		_ = f
 	}
 
 	// Remove agent symlinks

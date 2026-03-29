@@ -42,6 +42,7 @@ It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.`,
 	root.AddCommand(commands.NewAddCmd())
 	root.AddCommand(commands.NewRemoveCmd())
 	root.AddCommand(commands.NewRefreshCmd())
+	root.AddCommand(commands.NewImportCmd())
 	root.AddCommand(commands.NewStatusCmd())
 	root.AddCommand(commands.NewDoctorCmd())
 	root.AddCommand(commands.NewSkillsCmd())

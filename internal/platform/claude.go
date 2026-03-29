@@ -55,6 +55,9 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 	if err := c.ensureUserRules(agentsHome); err != nil {
 		return err
 	}
+	if err := c.ensureUserSettings(agentsHome); err != nil {
+		return err
+	}
 
 	if err := os.MkdirAll(filepath.Join(repoPath, ".claude", "rules"), 0755); err != nil {
 		return err
@@ -65,8 +68,11 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 		return err
 	}
 
-	// Settings
-	settingsSrc := filepath.Join(agentsHome, "settings", project, "claude-code.json")
+	// Settings — hooks/ takes priority over settings/ for backwards compat
+	settingsSrc := filepath.Join(agentsHome, "hooks", project, "claude-code.json")
+	if _, err := os.Stat(settingsSrc); err != nil {
+		settingsSrc = filepath.Join(agentsHome, "settings", project, "claude-code.json")
+	}
 	if _, err := os.Stat(settingsSrc); err == nil {
 		links.Symlink(settingsSrc, filepath.Join(repoPath, ".claude", "settings.local.json"))
 	}
@@ -185,6 +191,29 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 			continue // already a symlink
 		}
 		os.MkdirAll(filepath.Join(homeRoot, ".claude"), 0755)
+		links.Symlink(src, target)
+	}
+	return nil
+}
+
+func (c *claude) ensureUserSettings(agentsHome string) error {
+	// hooks/ takes priority over settings/ for backwards compat
+	src := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+	if _, err := os.Stat(src); err != nil {
+		src = filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+		if _, err := os.Stat(src); err != nil {
+			return nil
+		}
+	}
+	for _, homeRoot := range config.UserHomeRoots() {
+		claudeDir := filepath.Join(homeRoot, ".claude")
+		if err := os.MkdirAll(claudeDir, 0755); err != nil {
+			continue
+		}
+		target := filepath.Join(claudeDir, "settings.json")
+		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			continue // already a symlink, leave it
+		}
 		links.Symlink(src, target)
 	}
 	return nil

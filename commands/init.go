@@ -67,6 +67,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		filepath.Join(agentsHome, "skills", "global", "agent-handoff"),
 		filepath.Join(agentsHome, "skills", "global", "self-review"),
 		filepath.Join(agentsHome, "agents", "global"),
+		filepath.Join(agentsHome, "hooks", "global"),
 		filepath.Join(agentsHome, "scripts"),
 		filepath.Join(agentsHome, "local"),
 	}
@@ -135,7 +136,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	ui.Bullet("ok", "Created template files")
 
-	// Global Claude Code settings symlink
+	// Global Claude Code settings symlink — hooks/ takes priority over settings/
+	claudeHooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+	if _, err := os.Stat(claudeHooksSrc); err == nil {
+		claudeSettingsPath = claudeHooksSrc
+	}
 	claudePlatform := platform.ByID("claude")
 	if claudePlatform != nil && claudePlatform.IsInstalled() {
 		home := config.UserHome()
@@ -147,6 +152,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 			ui.Bullet("ok", "Created Claude Code global settings symlink")
 		} else {
 			ui.Bullet("skip", "~/.claude/settings.json exists (use --force to replace)")
+		}
+	}
+
+	// Global Cursor hooks hardlink
+	cursorPlatform := platform.ByID("cursor")
+	if cursorPlatform != nil && cursorPlatform.IsInstalled() {
+		cursorHooksSrc := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
+		if _, err := os.Stat(cursorHooksSrc); err == nil {
+			home := config.UserHome()
+			cursorDir := filepath.Join(home, ".cursor")
+			os.MkdirAll(cursorDir, 0755)
+			cursorHooksDst := filepath.Join(cursorDir, "hooks.json")
+			if _, err := os.Lstat(cursorHooksDst); os.IsNotExist(err) || Flags.Force {
+				links.Hardlink(cursorHooksSrc, cursorHooksDst)
+				ui.Bullet("ok", "Created Cursor global hooks hardlink")
+			} else {
+				ui.Bullet("skip", "~/.cursor/hooks.json exists (use --force to replace)")
+			}
 		}
 	}
 
