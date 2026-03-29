@@ -188,10 +188,10 @@ func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {
 	}
 
 	for _, e := range entries {
-		if !e.IsDir() {
+		agentDir := filepath.Join(projectAgents, e.Name())
+		if !links.IsDirEntry(agentDir) {
 			continue
 		}
-		agentDir := filepath.Join(projectAgents, e.Name())
 		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
 			continue
 		}

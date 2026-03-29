@@ -144,10 +144,10 @@ func (c *copilot) createSkillsLinks(project, repoPath, agentsHome string) error 
 		return nil
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		skillDir := filepath.Join(projectSkills, e.Name())
+		if !links.IsDirEntry(skillDir) {
 			continue
 		}
-		skillDir := filepath.Join(projectSkills, e.Name())
 		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 			continue
 		}
@@ -171,10 +171,10 @@ func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error 
 		return nil
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		agentDir := filepath.Join(projectAgents, e.Name())
+		if !links.IsDirEntry(agentDir) {
 			continue
 		}
-		agentDir := filepath.Join(projectAgents, e.Name())
 		agentMD := filepath.Join(agentDir, "AGENT.md")
 		if _, err := os.Stat(agentMD); err != nil {
 			continue

@@ -94,3 +94,10 @@ func RemoveIfSymlinkUnder(linkPath, prefix string) error {
 	}
 	return nil
 }
+
+// IsDirEntry reports whether the entry at path is a directory, following symlinks.
+// Use this instead of e.IsDir() when entries may be symlinks to directories.
+func IsDirEntry(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}

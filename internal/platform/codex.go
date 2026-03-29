@@ -102,10 +102,10 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 		}
 		entries, _ := os.ReadDir(globalAgents)
 		for _, e := range entries {
-			if !e.IsDir() {
+			agentDir := filepath.Join(globalAgents, e.Name())
+			if !links.IsDirEntry(agentDir) {
 				continue
 			}
-			agentDir := filepath.Join(globalAgents, e.Name())
 			if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
 				continue
 			}
@@ -131,10 +131,10 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 		}
 		entries, _ := os.ReadDir(globalSkills)
 		for _, e := range entries {
-			if !e.IsDir() {
+			skillDir := filepath.Join(globalSkills, e.Name())
+			if !links.IsDirEntry(skillDir) {
 				continue
 			}
-			skillDir := filepath.Join(globalSkills, e.Name())
 			if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 				continue
 			}
@@ -159,10 +159,10 @@ func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
 		return nil
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		agentDir := filepath.Join(projectAgents, e.Name())
+		if !links.IsDirEntry(agentDir) {
 			continue
 		}
-		agentDir := filepath.Join(projectAgents, e.Name())
 		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
 			continue
 		}
@@ -186,10 +186,10 @@ func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
 		return nil
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		skillDir := filepath.Join(projectSkills, e.Name())
+		if !links.IsDirEntry(skillDir) {
 			continue
 		}
-		skillDir := filepath.Join(projectSkills, e.Name())
 		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 			continue
 		}

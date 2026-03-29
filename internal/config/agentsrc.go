@@ -8,6 +8,12 @@ import (
 	"path/filepath"
 )
 
+// isDirEntry reports whether the path is a directory, following symlinks.
+func isDirEntry(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
 type AgentsRC struct {
 	Schema   string   `json:"$schema,omitempty"`
@@ -99,10 +105,11 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() {
+			entryPath := filepath.Join(dir, e.Name())
+			if !isDirEntry(entryPath) {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); err == nil {
+			if _, err := os.Stat(filepath.Join(entryPath, "SKILL.md")); err == nil {
 				rc.Skills = append(rc.Skills, e.Name())
 			}
 		}
@@ -116,10 +123,11 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() {
+			entryPath := filepath.Join(dir, e.Name())
+			if !isDirEntry(entryPath) {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(dir, e.Name(), "AGENT.md")); err == nil {
+			if _, err := os.Stat(filepath.Join(entryPath, "AGENT.md")); err == nil {
 				rc.Agents = append(rc.Agents, e.Name())
 			}
 		}

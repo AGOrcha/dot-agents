@@ -121,10 +121,10 @@ func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error
 		return nil
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
+		skillDir := filepath.Join(projectSkills, e.Name())
+		if !links.IsDirEntry(skillDir) {
 			continue
 		}
-		skillDir := filepath.Join(projectSkills, e.Name())
 		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
 			continue
 		}
