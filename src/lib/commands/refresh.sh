@@ -6,6 +6,8 @@
 _REFRESH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=add.sh
 source "$_REFRESH_DIR/add.sh"
+# shellcheck source=import.sh
+source "$_REFRESH_DIR/import.sh"
 
 cmd_refresh_help() {
   cat << EOF
@@ -20,6 +22,7 @@ ${BOLD}ARGUMENTS${NC}
 
 ${BOLD}OPTIONS${NC}
     --dry-run         Show what would be done without making changes
+    --import          Import project/global configs into ~/.agents/ before relinking
     --force, -f       Recreate links even if they already exist
     --yes, -y         Auto-confirm (no prompts)
     --verbose, -v     Show detailed output
@@ -128,11 +131,16 @@ write_refresh_marker() {
 }
 
 cmd_refresh() {
+  local do_import=false
   REMAINING_ARGS=()
   while [[ $# -gt 0 ]]; do
     case $1 in
       --dry-run)
         DRY_RUN=true
+        shift
+        ;;
+      --import)
+        do_import=true
         shift
         ;;
       --force|-f)
@@ -198,6 +206,11 @@ cmd_refresh() {
   fi
 
   log_header "dot-agents refresh"
+
+  if [[ "$do_import" == true ]]; then
+    echo ""
+    cmd_import "$project_filter" --scope all || return 1
+  fi
 
   log_section "Enabled Platforms"
   local enabled_platforms=()

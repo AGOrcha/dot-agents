@@ -462,6 +462,7 @@ func createProjectDirs(project string) error {
 		filepath.Join(agentsHome, "mcp", project),
 		filepath.Join(agentsHome, "skills", project),
 		filepath.Join(agentsHome, "agents", project),
+		filepath.Join(agentsHome, "hooks", project),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
