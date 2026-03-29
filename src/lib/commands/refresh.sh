@@ -207,7 +207,7 @@ cmd_refresh() {
 
   log_header "dot-agents refresh"
 
-  if [ "$do_import" = true ]; then
+  if [[ "$do_import" == true ]]; then
     echo ""
     cmd_import "$project_filter" --scope all || return 1
   fi

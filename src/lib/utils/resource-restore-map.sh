@@ -89,6 +89,7 @@ map_global_rel_to_agents_dest() {
     ".codex/config.toml") echo "settings/global/codex.toml" ;;
     *) echo "" ;;
   esac
+  return 0
 }
 
 # Check whether a platform has an active (non-timestamped) backup in resources.

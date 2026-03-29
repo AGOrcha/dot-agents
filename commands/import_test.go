@@ -28,15 +28,15 @@ func TestMapGlobalRelToDest(t *testing.T) {
 	}
 }
 
-func TestMapResourceRelToDest_Hooks(t *testing.T) {
+func TestMapResourceRelToDestHooks(t *testing.T) {
 	project := "my-project"
 	cases := []struct {
 		rel  string
 		want string
 	}{
-		{".cursor/hooks.json", "hooks/" + project + "/cursor.json"},
-		{".github/hooks/pre-tool.json", "hooks/" + project + "/pre-tool.json"},
-		{".github/hooks/post-save.json", "hooks/" + project + "/post-save.json"},
+		{relCursorHooksJSON, agentsHooksPrefix + project + "/cursor.json"},
+		{".github/hooks/pre-tool.json", agentsHooksPrefix + project + "/pre-tool.json"},
+		{".github/hooks/post-save.json", agentsHooksPrefix + project + "/post-save.json"},
 	}
 
 	for _, c := range cases {

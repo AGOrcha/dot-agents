@@ -12,6 +12,8 @@ import (
 
 type cursor struct{}
 
+const cursorHooksFile = "hooks.json"
+
 func NewCursor() Platform { return &cursor{} }
 
 func (c *cursor) ID() string          { return "cursor" }
@@ -186,7 +188,7 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 	for _, scope := range []string{project, "global"} {
 		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
 		if _, err := os.Stat(src); err == nil {
-			links.Hardlink(src, filepath.Join(repoPath, ".cursor", "hooks.json"))
+			links.Hardlink(src, filepath.Join(repoPath, ".cursor", cursorHooksFile))
 			break
 		}
 	}
@@ -198,7 +200,7 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 			if err := os.MkdirAll(cursorDir, 0755); err != nil {
 				continue
 			}
-			dst := filepath.Join(cursorDir, "hooks.json")
+			dst := filepath.Join(cursorDir, cursorHooksFile)
 			if already, _ := links.AreHardlinked(src, dst); already {
 				continue
 			}
@@ -273,7 +275,7 @@ func (c *cursor) RemoveLinks(project, repoPath string) error {
 	}
 
 	// Remove .cursor/hooks.json if hard-linked to our source
-	hooksFilePath := filepath.Join(repoPath, ".cursor", "hooks.json")
+	hooksFilePath := filepath.Join(repoPath, ".cursor", cursorHooksFile)
 	for _, scope := range []string{project, "global"} {
 		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
 		if linked, _ := links.AreHardlinked(hooksFilePath, src); linked {

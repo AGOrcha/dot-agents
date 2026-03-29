@@ -25,6 +25,76 @@ func (c importCandidate) destPath(agentsHome string) string {
 	return filepath.Join(agentsHome, c.destRel)
 }
 
+type importResult struct {
+	imported int
+	skipped  int
+}
+
+const (
+	importScopeProject = "project"
+	importScopeGlobal  = "global"
+	importScopeAll     = "all"
+
+	relClaudeSettingsJSON    = ".claude/settings.json"
+	relCursorSettingsJSON    = ".cursor/settings.json"
+	relCursorMCPJSON         = ".cursor/mcp.json"
+	relCursorHooksJSON       = ".cursor/hooks.json"
+	relCursorIgnore          = ".cursorignore"
+	relClaudeSettingsLocal   = ".claude/settings.local.json"
+	relMCPJSON               = ".mcp.json"
+	relVSCodeMCPJSON         = ".vscode/mcp.json"
+	relOpenCodeJSON          = "opencode.json"
+	relAgentsMD              = "AGENTS.md"
+	relCodexInstructionsMD   = ".codex/instructions.md"
+	relCodexRulesMD          = ".codex/rules.md"
+	relCodexConfigTOML       = ".codex/config.toml"
+	relCopilotInstructionsMD = ".github/copilot-instructions.md"
+	relClaudeREADME          = ".claude/CLAUDE.md"
+	relCursorRulesDir        = ".cursor/rules/"
+	relAgentsSkillsDir       = ".agents/skills/"
+	relClaudeSkillsDir       = ".claude/skills/"
+	relGitHubAgentsDir       = ".github/agents/"
+	relCodexAgentsDir        = ".codex/agents/"
+	relGitHubHooksDir        = ".github/hooks/"
+	relAgentMarkdownSuffix   = ".agent.md"
+	relJSONSuffix            = ".json"
+	agentsHooksPrefix        = "hooks/"
+)
+
+var projectImportSingles = []string{
+	relCursorSettingsJSON,
+	relCursorMCPJSON,
+	relCursorHooksJSON,
+	relCursorIgnore,
+	relClaudeSettingsLocal,
+	relMCPJSON,
+	relVSCodeMCPJSON,
+	relOpenCodeJSON,
+	relAgentsMD,
+	relCodexInstructionsMD,
+	relCodexRulesMD,
+	relCodexConfigTOML,
+	relCopilotInstructionsMD,
+}
+
+var projectImportWalkDirs = []string{
+	".cursor/rules",
+	".agents/skills",
+	".claude/skills",
+	".github/agents",
+	".codex/agents",
+	".github/hooks",
+}
+
+var globalImportSingles = []string{
+	relClaudeSettingsJSON,
+	relCursorSettingsJSON,
+	relCursorMCPJSON,
+	relCursorHooksJSON,
+	relClaudeREADME,
+	relCodexConfigTOML,
+}
+
 func NewImportCmd() *cobra.Command {
 	scope := "all"
 	cmd := &cobra.Command{
@@ -52,9 +122,9 @@ func runImport(projectFilter, scope string) error {
 }
 
 func runImportInternal(projectFilter, scope string, skipRelink bool) error {
-	scope = strings.ToLower(strings.TrimSpace(scope))
-	if scope != "project" && scope != "global" && scope != "all" {
-		return fmt.Errorf("invalid scope %q (expected: project|global|all)", scope)
+	scope, err := normalizeImportScope(scope)
+	if err != nil {
+		return err
 	}
 
 	cfg, err := config.Load()
@@ -65,118 +135,149 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 
 	ui.Header("dot-agents import")
 
-	var candidates []importCandidate
+	candidates, projectSet, err := collectImportCandidates(cfg, projectFilter, scope)
+	if err != nil {
+		return err
+	}
+	if len(candidates) == 0 {
+		ui.Info("No import candidates found.")
+		return nil
+	}
+
+	sortImportCandidates(candidates)
+
+	timestamp := time.Now().Format("20060102-150405")
+	result := importResult{}
+	for _, c := range candidates {
+		delta := processImportCandidate(c, agentsHome, timestamp)
+		result.imported += delta.imported
+		result.skipped += delta.skipped
+	}
+
+	if !skipRelink && scope != importScopeGlobal {
+		relinkImportedProjects(cfg, projectSet)
+	}
+
+	ui.Success(fmt.Sprintf("Import complete: %d imported, %d skipped.", result.imported, result.skipped))
+	return nil
+}
+
+func normalizeImportScope(scope string) (string, error) {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	switch scope {
+	case importScopeProject, importScopeGlobal, importScopeAll:
+		return scope, nil
+	default:
+		return "", fmt.Errorf("invalid scope %q (expected: project|global|all)", scope)
+	}
+}
+
+func collectImportCandidates(cfg *config.Config, projectFilter, scope string) ([]importCandidate, map[string]bool, error) {
+	candidates := []importCandidate{}
 	projectSet := map[string]bool{}
-	if scope == "project" || scope == "all" {
+	if scope == importScopeProject || scope == importScopeAll {
 		projectCandidates, err := scanProjectImportCandidates(cfg, projectFilter)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		candidates = append(candidates, projectCandidates...)
 		for _, c := range projectCandidates {
 			projectSet[c.project] = true
 		}
 	}
-	if scope == "global" || scope == "all" {
+	if scope == importScopeGlobal || scope == importScopeAll {
 		candidates = append(candidates, scanGlobalImportCandidates()...)
 	}
+	return candidates, projectSet, nil
+}
 
-	if len(candidates) == 0 {
-		ui.Info("No import candidates found.")
-		return nil
-	}
-
+func sortImportCandidates(candidates []importCandidate) {
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].project == candidates[j].project {
 			return candidates[i].sourcePath < candidates[j].sourcePath
 		}
 		return candidates[i].project < candidates[j].project
 	})
+}
 
-	timestamp := time.Now().Format("20060102-150405")
-	imported := 0
-	skipped := 0
-	for _, c := range candidates {
-		dest := c.destPath(agentsHome)
-		if isManagedSymlink(c.sourcePath, agentsHome) {
-			continue
-		}
-
-		srcInfo, srcErr := os.Stat(c.sourcePath)
-		if srcErr != nil || srcInfo.IsDir() {
-			continue
-		}
-
-		destInfo, destErr := os.Stat(dest)
-		if os.IsNotExist(destErr) {
-			if Flags.DryRun {
-				ui.DryRun(fmt.Sprintf("Import %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
-				imported++
-				continue
-			}
-			mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-			_ = os.MkdirAll(filepath.Dir(dest), 0755)
-			if err := copyFile(c.sourcePath, dest); err != nil {
-				ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
-				skipped++
-				continue
-			}
-			ui.Bullet("ok", fmt.Sprintf("Imported %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
-			imported++
-			continue
-		}
-		if destErr != nil {
-			ui.Bullet("warn", fmt.Sprintf("Failed to inspect %s: %v", c.destRel, destErr))
-			skipped++
-			continue
-		}
-
-		different, err := filesDifferent(c.sourcePath, dest)
-		if err != nil {
-			ui.Bullet("warn", fmt.Sprintf("Failed to compare %s and %s: %v", config.DisplayPath(c.sourcePath), c.destRel, err))
-			skipped++
-			continue
-		}
-		if !different {
-			continue
-		}
-
-		sourceNewer := srcInfo.ModTime().After(destInfo.ModTime())
-		msg := fmt.Sprintf("Import newer=%s into %s? (src=%s, dest=%s)",
-			map[bool]string{true: "source", false: "destination"}[sourceNewer],
-			c.destRel,
-			srcInfo.ModTime().Format(time.RFC3339),
-			destInfo.ModTime().Format(time.RFC3339),
-		)
-		if !ui.Confirm(msg, Flags.Yes) {
-			skipped++
-			continue
-		}
-		if Flags.DryRun {
-			ui.DryRun(fmt.Sprintf("Replace %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
-			imported++
-			continue
-		}
-
-		// Preserve current ~/.agents value before overwrite.
-		mirrorBackup(c.project, agentsHome, dest, timestamp)
-		// Preserve imported source in resources snapshot as well.
-		mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-		if err := copyFile(c.sourcePath, dest); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
-			skipped++
-			continue
-		}
-		ui.Bullet("ok", fmt.Sprintf("Updated %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
-		imported++
+func processImportCandidate(c importCandidate, agentsHome, timestamp string) importResult {
+	if isManagedSymlink(c.sourcePath, agentsHome) {
+		return importResult{}
 	}
 
-	if !skipRelink && scope != "global" {
-		relinkImportedProjects(cfg, projectSet)
+	srcInfo, err := os.Stat(c.sourcePath)
+	if err != nil || srcInfo.IsDir() {
+		return importResult{}
 	}
 
-	ui.Success(fmt.Sprintf("Import complete: %d imported, %d skipped.", imported, skipped))
-	return nil
+	dest := c.destPath(agentsHome)
+	destInfo, err := os.Stat(dest)
+	if os.IsNotExist(err) {
+		return importMissingCandidate(c, dest, timestamp)
+	}
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to inspect %s: %v", c.destRel, err))
+		return importResult{skipped: 1}
+	}
+
+	different, err := filesDifferent(c.sourcePath, dest)
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to compare %s and %s: %v", config.DisplayPath(c.sourcePath), c.destRel, err))
+		return importResult{skipped: 1}
+	}
+	if !different {
+		return importResult{}
+	}
+
+	return replaceImportCandidate(c, agentsHome, dest, timestamp, srcInfo, destInfo)
+}
+
+func importMissingCandidate(c importCandidate, dest, timestamp string) importResult {
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("Import %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
+		return importResult{imported: 1}
+	}
+
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
+	_ = os.MkdirAll(filepath.Dir(dest), 0755)
+	if err := copyFile(c.sourcePath, dest); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}
+	}
+
+	ui.Bullet("ok", fmt.Sprintf("Imported %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
+	return importResult{imported: 1}
+}
+
+func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp string, srcInfo, destInfo os.FileInfo) importResult {
+	if !ui.Confirm(importReplaceMessage(c, srcInfo, destInfo), Flags.Yes) {
+		return importResult{skipped: 1}
+	}
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("Replace %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
+		return importResult{imported: 1}
+	}
+
+	mirrorBackup(c.project, agentsHome, dest, timestamp)
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
+	if err := copyFile(c.sourcePath, dest); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}
+	}
+
+	ui.Bullet("ok", fmt.Sprintf("Updated %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
+	return importResult{imported: 1}
+}
+
+func importReplaceMessage(c importCandidate, srcInfo, destInfo os.FileInfo) string {
+	sourceNewer := srcInfo.ModTime().After(destInfo.ModTime())
+	newer := map[bool]string{true: "source", false: "destination"}[sourceNewer]
+	return fmt.Sprintf("Import newer=%s into %s? (src=%s, dest=%s)",
+		newer,
+		c.destRel,
+		srcInfo.ModTime().Format(time.RFC3339),
+		destInfo.ModTime().Format(time.RFC3339),
+	)
 }
 
 func scanProjectImportCandidates(cfg *config.Config, projectFilter string) ([]importCandidate, error) {
@@ -202,69 +303,70 @@ func scanProjectImportCandidates(cfg *config.Config, projectFilter string) ([]im
 }
 
 func gatherProjectCandidates(project, projectPath string) []importCandidate {
-	var out []importCandidate
-	addIfMapped := func(rel string) {
-		src := filepath.Join(projectPath, rel)
-		if isBackupArtifact(filepath.Base(rel)) {
-			return
+	out := []importCandidate{}
+	for _, rel := range projectImportSingles {
+		if candidate, ok := projectImportCandidate(project, projectPath, rel); ok {
+			out = append(out, candidate)
 		}
-		if _, err := os.Lstat(src); err != nil {
-			return
-		}
-		destRel := mapResourceRelToDest(project, rel)
-		if destRel == "" {
-			return
-		}
-		out = append(out, importCandidate{
-			project:    project,
-			sourceRoot: projectPath,
-			sourcePath: src,
-			destRel:    destRel,
-		})
 	}
-
-	single := []string{
-		".cursor/settings.json", ".cursor/mcp.json", ".cursor/hooks.json", ".cursorignore",
-		".claude/settings.local.json", ".mcp.json", ".vscode/mcp.json",
-		"opencode.json", "AGENTS.md", ".codex/instructions.md", ".codex/rules.md",
-		".codex/config.toml", ".github/copilot-instructions.md",
-	}
-	for _, rel := range single {
-		addIfMapped(rel)
-	}
-
-	walkDirs := []string{
-		".cursor/rules", ".agents/skills", ".claude/skills", ".github/agents", ".codex/agents",
-		".github/hooks",
-	}
-	for _, relDir := range walkDirs {
-		root := filepath.Join(projectPath, relDir)
-		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if isBackupArtifact(d.Name()) {
-				return nil
-			}
-			rel, err := filepath.Rel(projectPath, path)
-			if err != nil {
-				return nil
-			}
-			rel = filepath.ToSlash(rel)
-			destRel := mapResourceRelToDest(project, rel)
-			if destRel == "" {
-				return nil
-			}
-			out = append(out, importCandidate{
-				project:    project,
-				sourceRoot: projectPath,
-				sourcePath: path,
-				destRel:    destRel,
-			})
-			return nil
-		})
+	for _, relDir := range projectImportWalkDirs {
+		out = append(out, walkProjectImportCandidates(project, projectPath, relDir)...)
 	}
 	return out
+}
+
+func projectImportCandidate(project, projectPath, rel string) (importCandidate, bool) {
+	src := filepath.Join(projectPath, rel)
+	if isBackupArtifact(filepath.Base(rel)) {
+		return importCandidate{}, false
+	}
+	if _, err := os.Lstat(src); err != nil {
+		return importCandidate{}, false
+	}
+	destRel := mapResourceRelToDest(project, rel)
+	if destRel == "" {
+		return importCandidate{}, false
+	}
+	return importCandidate{
+		project:    project,
+		sourceRoot: projectPath,
+		sourcePath: src,
+		destRel:    destRel,
+	}, true
+}
+
+func walkProjectImportCandidates(project, projectPath, relDir string) []importCandidate {
+	root := filepath.Join(projectPath, relDir)
+	out := []importCandidate{}
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		candidate, ok := walkedImportCandidate(project, projectPath, path, d, err)
+		if ok {
+			out = append(out, candidate)
+		}
+		return nil
+	})
+	return out
+}
+
+func walkedImportCandidate(project, projectPath, path string, d os.DirEntry, err error) (importCandidate, bool) {
+	if err != nil || d.IsDir() || isBackupArtifact(d.Name()) {
+		return importCandidate{}, false
+	}
+	rel, err := filepath.Rel(projectPath, path)
+	if err != nil {
+		return importCandidate{}, false
+	}
+	rel = filepath.ToSlash(rel)
+	destRel := mapResourceRelToDest(project, rel)
+	if destRel == "" {
+		return importCandidate{}, false
+	}
+	return importCandidate{
+		project:    project,
+		sourceRoot: projectPath,
+		sourcePath: path,
+		destRel:    destRel,
+	}, true
 }
 
 func scanGlobalImportCandidates() []importCandidate {
@@ -272,16 +374,8 @@ func scanGlobalImportCandidates() []importCandidate {
 	if err != nil {
 		return nil
 	}
-	cases := []string{
-		".claude/settings.json",
-		".cursor/settings.json",
-		".cursor/mcp.json",
-		".cursor/hooks.json",
-		".claude/CLAUDE.md",
-		".codex/config.toml",
-	}
 	var out []importCandidate
-	for _, rel := range cases {
+	for _, rel := range globalImportSingles {
 		src := filepath.Join(home, rel)
 		if _, err := os.Lstat(src); err != nil {
 			continue
@@ -302,17 +396,17 @@ func scanGlobalImportCandidates() []importCandidate {
 
 func mapGlobalRelToDest(rel string) string {
 	switch rel {
-	case ".claude/settings.json":
+	case relClaudeSettingsJSON:
 		return "settings/global/claude-code.json"
-	case ".cursor/settings.json":
+	case relCursorSettingsJSON:
 		return "settings/global/cursor.json"
-	case ".cursor/mcp.json":
+	case relCursorMCPJSON:
 		return "mcp/global/mcp.json"
-	case ".cursor/hooks.json":
+	case relCursorHooksJSON:
 		return "hooks/global/cursor.json"
-	case ".claude/CLAUDE.md":
+	case relClaudeREADME:
 		return "rules/global/agents.md"
-	case ".codex/config.toml":
+	case relCodexConfigTOML:
 		return "settings/global/codex.toml"
 	default:
 		return ""

@@ -20,6 +20,7 @@ ${BOLD}OPTIONS${NC}
     --verbose, -v                    Show detailed output
     --help, -h                       Show this help
 EOF
+  return 0
 }
 
 _import_project_candidates() {
@@ -32,43 +33,48 @@ _import_project_candidates() {
     ".claude/settings.local.json" ".mcp.json" ".vscode/mcp.json" \
     "opencode.json" "AGENTS.md" ".codex/instructions.md" ".codex/rules.md" \
     ".codex/config.toml" ".github/copilot-instructions.md"; do
-    [ -e "$repo/$rel" ] || [ -L "$repo/$rel" ] || continue
+    [[ -e "$repo/$rel" || -L "$repo/$rel" ]] || continue
     local dest_rel
     dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel")
-    [ -n "$dest_rel" ] || continue
+    [[ -n "$dest_rel" ]] || continue
     echo "$project|$repo|$repo/$rel|$dest_rel"
   done
 
   local dir path dest_rel rel_path
   for dir in ".cursor/rules" ".agents/skills" ".claude/skills" ".github/agents" ".codex/agents"; do
-    [ -d "$repo/$dir" ] || continue
+    [[ -d "$repo/$dir" ]] || continue
     while IFS= read -r -d '' path; do
       rel_path="${path#$repo/}"
       dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel_path")
-      [ -n "$dest_rel" ] || continue
+      [[ -n "$dest_rel" ]] || continue
       echo "$project|$repo|$path|$dest_rel"
     done < <(find "$repo/$dir" -type f -print0 2>/dev/null)
   done
+  return 0
 }
 
 scan_global_import_candidates() {
   local rel src dest_rel
   for rel in ".claude/settings.json" ".cursor/settings.json" ".cursor/mcp.json" ".claude/CLAUDE.md" ".codex/config.toml"; do
     src="$HOME/$rel"
-    [ -e "$src" ] || [ -L "$src" ] || continue
+    [[ -e "$src" || -L "$src" ]] || continue
     dest_rel=$(map_global_rel_to_agents_dest "$rel")
-    [ -n "$dest_rel" ] || continue
+    [[ -n "$dest_rel" ]] || continue
     echo "global|$HOME|$src|$dest_rel"
   done
+  return 0
 }
 
 cmd_import() {
   local scope="all"
+  local arg next_arg
   REMAINING_ARGS=()
   while [[ $# -gt 0 ]]; do
-    case $1 in
+    arg="$1"
+    next_arg="${2:-}"
+    case "$arg" in
       --scope)
-        scope="$2"
+        scope="$next_arg"
         shift 2
         ;;
       --dry-run)
@@ -88,11 +94,11 @@ cmd_import() {
         return 0
         ;;
       -*)
-        log_error "Unknown option: $1"
+        log_error "Unknown option: $arg"
         return 1
         ;;
       *)
-        REMAINING_ARGS+=("$1")
+        REMAINING_ARGS+=("$arg")
         shift
         ;;
     esac
@@ -109,31 +115,31 @@ cmd_import() {
   local project path line
   if [[ "$scope" == "project" || "$scope" == "all" ]]; then
     local projects
-    if [ -n "$project_filter" ]; then
+    if [[ -n "$project_filter" ]]; then
       path=$(config_get_project_path "$project_filter")
-      [ -n "$path" ] || { log_error "Project not found: $project_filter"; return 1; }
+      [[ -n "$path" ]] || { log_error "Project not found: $project_filter"; return 1; }
       projects="$project_filter"
     else
       projects=$(config_list_projects)
     fi
 
     while read -r project; do
-      [ -n "$project" ] || continue
+      [[ -n "$project" ]] || continue
       path=$(config_get_project_path "$project")
-      [ -d "$path" ] || continue
+      [[ -d "$path" ]] || continue
       while IFS= read -r line; do
-        [ -n "$line" ] && candidates+=("$line")
+        [[ -n "$line" ]] && candidates+=("$line")
       done < <(_import_project_candidates "$project" "$path")
     done <<< "$projects"
   fi
 
   if [[ "$scope" == "global" || "$scope" == "all" ]]; then
     while IFS= read -r line; do
-      [ -n "$line" ] && candidates+=("$line")
+      [[ -n "$line" ]] && candidates+=("$line")
     done < <(scan_global_import_candidates)
   fi
 
-  if [ ${#candidates[@]} -eq 0 ]; then
+  if [[ ${#candidates[@]} -eq 0 ]]; then
     log_info "No import candidates found."
     return 0
   fi
@@ -145,10 +151,10 @@ cmd_import() {
   for line in "${candidates[@]}"; do
     IFS='|' read -r project path src dest_rel <<< "$line"
     local dest="$AGENTS_HOME/$dest_rel"
-    [ -f "$src" ] || continue
+    [[ -f "$src" ]] || continue
 
-    if [ ! -e "$dest" ]; then
-      if [ "$DRY_RUN" = true ]; then
+    if [[ ! -e "$dest" ]]; then
+      if [[ "$DRY_RUN" == true ]]; then
         log_dry "Import ${src#$path/} -> $dest_rel"
         ((imported++)) || true
         continue
@@ -168,13 +174,13 @@ cmd_import() {
     src_mtime=$(stat -f "%m" "$src" 2>/dev/null || echo 0)
     dest_mtime=$(stat -f "%m" "$dest" 2>/dev/null || echo 0)
     local newer="destination"
-    [ "$src_mtime" -gt "$dest_mtime" ] && newer="source"
-    if [ "$YES" != true ] && ! confirm_action "Import conflict for $dest_rel (newer=$newer). Overwrite ~/.agents copy?"; then
+    [[ "$src_mtime" -gt "$dest_mtime" ]] && newer="source"
+    if [[ "$YES" != true ]] && ! confirm_action "Import conflict for $dest_rel (newer=$newer). Overwrite ~/.agents copy?"; then
       ((skipped++)) || true
       continue
     fi
 
-    if [ "$DRY_RUN" = true ]; then
+    if [[ "$DRY_RUN" == true ]]; then
       log_dry "Replace $dest_rel from $src"
       ((imported++)) || true
       continue
@@ -188,4 +194,5 @@ cmd_import() {
   done
 
   log_success "Import complete: $imported imported, $skipped skipped."
+  return 0
 }

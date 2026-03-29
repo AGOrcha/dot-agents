@@ -182,34 +182,34 @@ func mapResourceRelToDest(project, relPath string) string {
 	// Explicit repo-relative → ~/.agents-relative mappings.
 	// All platform MCP sources normalize into the same canonical mcp.json.
 	switch relPath {
-	case ".cursor/settings.json":
+	case relCursorSettingsJSON:
 		return "settings/" + project + "/cursor.json"
-	case ".cursor/mcp.json":
+	case relCursorMCPJSON:
 		return "mcp/" + project + "/mcp.json"
-	case ".cursor/hooks.json":
-		return "hooks/" + project + "/cursor.json"
-	case ".cursorignore":
+	case relCursorHooksJSON:
+		return agentsHooksPrefix + project + "/cursor.json"
+	case relCursorIgnore:
 		return "settings/" + project + "/cursorignore"
-	case ".claude/settings.local.json":
+	case relClaudeSettingsLocal:
 		return "settings/" + project + "/claude-code.json"
-	case ".mcp.json":
+	case relMCPJSON:
 		return "mcp/" + project + "/mcp.json"
-	case ".vscode/mcp.json":
+	case relVSCodeMCPJSON:
 		return "mcp/" + project + "/mcp.json"
-	case "opencode.json":
+	case relOpenCodeJSON:
 		return "settings/" + project + "/opencode.json"
-	case "AGENTS.md":
+	case relAgentsMD:
 		return "rules/" + project + "/agents.md"
-	case ".codex/instructions.md", ".codex/rules.md":
+	case relCodexInstructionsMD, relCodexRulesMD:
 		return "rules/" + project + "/agents.md"
-	case ".codex/config.toml":
+	case relCodexConfigTOML:
 		return "settings/" + project + "/codex.toml"
-	case ".github/copilot-instructions.md":
+	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
 	}
 
 	// .cursor/rules/ → rules/
-	if strings.HasPrefix(relPath, ".cursor/rules/") {
+	if strings.HasPrefix(relPath, relCursorRulesDir) {
 		name := filepath.Base(relPath)
 		if strings.HasPrefix(name, "global--") {
 			return "rules/global/" + strings.TrimPrefix(name, "global--")
@@ -222,36 +222,36 @@ func mapResourceRelToDest(project, relPath string) string {
 	}
 
 	// .agents/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, ".agents/skills/") {
-		rest := strings.TrimPrefix(relPath, ".agents/skills/")
+	if strings.HasPrefix(relPath, relAgentsSkillsDir) {
+		rest := strings.TrimPrefix(relPath, relAgentsSkillsDir)
 		return "skills/" + project + "/" + rest
 	}
 	// .claude/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, ".claude/skills/") {
-		rest := strings.TrimPrefix(relPath, ".claude/skills/")
+	if strings.HasPrefix(relPath, relClaudeSkillsDir) {
+		rest := strings.TrimPrefix(relPath, relClaudeSkillsDir)
 		return "skills/" + project + "/" + rest
 	}
 
 	// .github/agents/<name>.agent.md → agents/<project>/<name>/AGENT.md
-	if strings.HasPrefix(relPath, ".github/agents/") && strings.HasSuffix(relPath, ".agent.md") {
-		name := strings.TrimSuffix(filepath.Base(relPath), ".agent.md")
+	if strings.HasPrefix(relPath, relGitHubAgentsDir) && strings.HasSuffix(relPath, relAgentMarkdownSuffix) {
+		name := strings.TrimSuffix(filepath.Base(relPath), relAgentMarkdownSuffix)
 		return "agents/" + project + "/" + name + "/AGENT.md"
 	}
 
 	// .codex/agents/<name>/<path> → agents/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, ".codex/agents/") {
-		rest := strings.TrimPrefix(relPath, ".codex/agents/")
+	if strings.HasPrefix(relPath, relCodexAgentsDir) {
+		rest := strings.TrimPrefix(relPath, relCodexAgentsDir)
 		return "agents/" + project + "/" + rest
 	}
 
 	// .github/hooks/<name>.json → hooks/<project>/<name>.json
-	if strings.HasPrefix(relPath, ".github/hooks/") && strings.HasSuffix(relPath, ".json") {
+	if strings.HasPrefix(relPath, relGitHubHooksDir) && strings.HasSuffix(relPath, relJSONSuffix) {
 		name := filepath.Base(relPath)
-		return "hooks/" + project + "/" + name
+		return agentsHooksPrefix + project + "/" + name
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", "hooks/"} {
+	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
 		if strings.HasPrefix(relPath, prefix) {
 			return relPath
 		}

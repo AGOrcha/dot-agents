@@ -12,6 +12,8 @@ import (
 
 type claude struct{}
 
+const claudeCodeJSON = "claude-code.json"
+
 func NewClaude() Platform { return &claude{} }
 
 func (c *claude) ID() string          { return "claude" }
@@ -49,6 +51,24 @@ func (c *claude) DeprecatedDetails(repoPath string) string {
 func (c *claude) CreateLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
+	if err := c.prepareLinks(repoPath, agentsHome); err != nil {
+		return err
+	}
+
+	if err := c.createRulesLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+	c.linkProjectSettings(project, repoPath, agentsHome)
+	c.linkProjectMCP(project, repoPath, agentsHome)
+
+	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+
+	return c.createSkillsLinks(project, repoPath, agentsHome)
+}
+
+func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	if err := c.ensureUserAgents(agentsHome); err != nil {
 		return err
 	}
@@ -58,52 +78,37 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 	if err := c.ensureUserSettings(agentsHome); err != nil {
 		return err
 	}
+	return os.MkdirAll(filepath.Join(repoPath, ".claude", "rules"), 0755)
+}
 
-	if err := os.MkdirAll(filepath.Join(repoPath, ".claude", "rules"), 0755); err != nil {
-		return err
+func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
+	settingsSrc := findClaudeSettingsSource(agentsHome, project)
+	if settingsSrc == "" {
+		return
 	}
+	links.Symlink(settingsSrc, filepath.Join(repoPath, ".claude", "settings.local.json"))
+}
 
-	// Project rules → .claude/rules/{project}--{stem}.md
-	if err := c.createRulesLinks(project, repoPath, agentsHome); err != nil {
-		return err
-	}
-
-	// Settings — hooks/ takes priority over settings/ for backwards compat
-	settingsSrc := filepath.Join(agentsHome, "hooks", project, "claude-code.json")
-	if _, err := os.Stat(settingsSrc); err != nil {
-		settingsSrc = filepath.Join(agentsHome, "settings", project, "claude-code.json")
-	}
-	if _, err := os.Stat(settingsSrc); err == nil {
-		links.Symlink(settingsSrc, filepath.Join(repoPath, ".claude", "settings.local.json"))
-	}
-
-	// MCP config: project/claude.json, project/mcp.json, global/claude.json, global/mcp.json
+func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
 	for _, scope := range []string{project, "global"} {
-		found := false
 		for _, name := range []string{"claude.json", "mcp.json"} {
 			src := filepath.Join(agentsHome, "mcp", scope, name)
 			if _, err := os.Stat(src); err == nil {
 				links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
-				found = true
-				break
+				return
 			}
 		}
-		if found {
-			break
+	}
+}
+
+func findClaudeSettingsSource(agentsHome, scope string) string {
+	for _, dir := range []string{"hooks", "settings"} {
+		src := filepath.Join(agentsHome, dir, scope, claudeCodeJSON)
+		if _, err := os.Stat(src); err == nil {
+			return src
 		}
 	}
-
-	// Project agents
-	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
-		return err
-	}
-
-	// Project skills
-	if err := c.createSkillsLinks(project, repoPath, agentsHome); err != nil {
-		return err
-	}
-
-	return nil
+	return ""
 }
 
 func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
@@ -197,13 +202,9 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 }
 
 func (c *claude) ensureUserSettings(agentsHome string) error {
-	// hooks/ takes priority over settings/ for backwards compat
-	src := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
-	if _, err := os.Stat(src); err != nil {
-		src = filepath.Join(agentsHome, "settings", "global", "claude-code.json")
-		if _, err := os.Stat(src); err != nil {
-			return nil
-		}
+	src := findClaudeSettingsSource(agentsHome, "global")
+	if src == "" {
+		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		claudeDir := filepath.Join(homeRoot, ".claude")
