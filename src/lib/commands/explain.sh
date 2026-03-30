@@ -182,6 +182,7 @@ FLAGS
   --force     Re-fetch git sources even if recently cached
 
 EOF
+  return 0
 }
 
 explain_overview() {
