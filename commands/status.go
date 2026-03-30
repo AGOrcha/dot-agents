@@ -23,6 +23,7 @@ const (
 	statusGitHubDir           = ".github"
 	statusLocalFileFmt        = "    %s○%s %s %s(local file)%s\n"
 	statusCursorDir           = ".cursor"
+	statusAgentsMarkdown      = "AGENTS.md"
 	statusCopilotInstructions = "copilot-instructions.md"
 )
 
@@ -116,7 +117,7 @@ func runStatus(audit bool, agentFilter string) error {
 
 		// Cursor
 		cursorOK, cursorWarn := 0, 0
-		cursorRulesDir := filepath.Join(path, ".cursor", "rules")
+		cursorRulesDir := filepath.Join(path, statusCursorDir, "rules")
 		if entries, err := os.ReadDir(cursorRulesDir); err == nil {
 			for _, e := range entries {
 				if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
@@ -141,9 +142,9 @@ func runStatus(audit bool, agentFilter string) error {
 			}
 		}
 		// Cursor MCP link
-		cursorMCP := filepath.Join(path, ".cursor", "mcp.json")
+		cursorMCP := filepath.Join(path, statusCursorDir, "mcp.json")
 		cursorOK += countManagedFileOK(cursorMCP, &cursorWarn)
-		cursorOK += countManagedFileOK(filepath.Join(path, ".cursor", "settings.json"), &cursorWarn)
+		cursorOK += countManagedFileOK(filepath.Join(path, statusCursorDir, "settings.json"), &cursorWarn)
 		cursorOK += countManagedFileOK(filepath.Join(path, statusCursorDir, statusHooksJSON), &cursorWarn)
 		cursorOK += countManagedFileOK(filepath.Join(path, ".cursorignore"), &cursorWarn)
 		healthOK += cursorOK
@@ -174,7 +175,7 @@ func runStatus(audit bool, agentFilter string) error {
 		badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
 
 		// Codex (AGENTS.md)
-		agentsMD := filepath.Join(path, "AGENTS.md")
+		agentsMD := filepath.Join(path, statusAgentsMarkdown)
 		codexOK, codexWarn := 0, 0
 		codexOK += countManagedFileOK(agentsMD, &codexWarn)
 		codexOK += countManagedFileOK(filepath.Join(path, statusCodexDir, "config.toml"), &codexWarn)
@@ -727,7 +728,7 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 
 func printCursorAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sCursor%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, ".cursor", "rules")
+	rulesDir := filepath.Join(path, statusCursorDir, "rules")
 	entries, err := os.ReadDir(rulesDir)
 	if err != nil {
 		fmt.Fprintf(os.Stdout, "      %s(no .cursor/rules/)%s\n", ui.Dim, ui.Reset)
@@ -769,7 +770,7 @@ func printCursorAudit(name, path, agentsHome string) {
 		fmt.Fprintf(os.Stdout, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
 	}
 	// Cursor MCP link (.cursor/mcp.json)
-	cursorMCPPath := filepath.Join(path, ".cursor", "mcp.json")
+	cursorMCPPath := filepath.Join(path, statusCursorDir, "mcp.json")
 	if info, err := os.Lstat(cursorMCPPath); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			dest, _ := os.Readlink(cursorMCPPath)
@@ -833,7 +834,7 @@ func printClaudeAudit(name, path, agentsHome string) {
 
 func printCodexAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sCodex%s\n", ui.Cyan, ui.Reset)
-	printCodexAgentsMD(filepath.Join(path, "AGENTS.md"))
+	printCodexAgentsMD(filepath.Join(path, statusAgentsMarkdown))
 	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, "config.toml"), ".codex/config.toml")
 	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusHooksJSON), ".codex/hooks.json")
 	printCodexSkillsAudit(filepath.Join(path, statusAgentsDir, "skills"))
@@ -844,13 +845,13 @@ func printCodexAudit(name, path, agentsHome string) {
 func printCodexAgentsMD(path string) {
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			printLinkedStatusLine("AGENTS.md", path)
+			printLinkedStatusLine(statusAgentsMarkdown, path)
 			return
 		}
-		fmt.Fprintf(os.Stdout, "      %s○%s AGENTS.md %s(local file)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, statusAgentsMarkdown, ui.Dim, ui.Reset)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "      %s(no AGENTS.md)%s\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "      %s(no %s)%s\n", ui.Dim, statusAgentsMarkdown, ui.Reset)
 }
 
 func printCodexSymlinkAudit(path, label string) {
