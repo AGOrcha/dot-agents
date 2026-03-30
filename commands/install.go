@@ -418,7 +418,7 @@ func linkResourceFromSources(resourceType, name, project string, sources []strin
 		ui.DryRun(fmt.Sprintf("link %s/%s → %s", resourceType, name, config.DisplayPath(candidate)))
 		return nil
 	}
-	if skip := shouldSkipLinkDestination(destDir); skip {
+	if shouldSkipLinkDestination(destDir) {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
