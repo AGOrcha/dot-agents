@@ -13,6 +13,7 @@ import (
 type cursor struct{}
 
 const cursorHooksFile = "hooks.json"
+const cursorJSON = "cursor.json"
 
 func NewCursor() Platform { return &cursor{} }
 
@@ -138,7 +139,7 @@ func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error
 	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 		return err
 	}
-	if src := resolveScopedFile(agentsHome, "settings", project, "cursor.json"); src != "" {
+	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
 		dst := filepath.Join(repoPath, ".cursor", "settings.json")
 		links.Hardlink(src, dst) // best-effort
 	}
@@ -149,7 +150,7 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 		return err
 	}
-	if src := resolveScopedFile(agentsHome, "mcp", project, "cursor.json", "mcp.json"); src != "" {
+	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
 		dst := filepath.Join(repoPath, ".cursor", "mcp.json")
 		links.Hardlink(src, dst) // best-effort
 	}
@@ -165,6 +166,13 @@ func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 }
 
 func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
+	if err := c.writeRepoHooks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+	return c.writeUserHomeHooks(project, agentsHome)
+}
+
+func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	repoTarget := filepath.Join(repoPath, ".cursor", cursorHooksFile)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
@@ -178,7 +186,7 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 		if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 			return err
 		}
-		repoSpec := resolveHookSpec(agentsHome, []string{"hooks"}, project, "cursor.json")
+		repoSpec := resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON)
 		if repoSpec != nil {
 			if err := emitHookSpec(repoSpec, repoTarget, HookEmissionMode{
 				Shape:     HookShapeDirect,
@@ -190,7 +198,10 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 			_ = removeManagedFileIf(repoTarget, isLikelyRenderedCursorHookConfig)
 		}
 	}
+	return nil
+}
 
+func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 	if err != nil {
 		return err
@@ -199,7 +210,7 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".cursor", cursorHooksFile), renderCursorHookConfig)
 	}
 
-	globalSpec := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", "cursor.json")
+	globalSpec := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON)
 	if globalSpec != nil {
 		if err := emitHookSpecToUserHomes(globalSpec, filepath.Join(".cursor", cursorHooksFile), HookEmissionMode{
 			Shape:     HookShapeDirect,
@@ -286,7 +297,7 @@ func (c *cursor) RemoveLinks(project, repoPath string) error {
 		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
 	}
 	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
+		src := filepath.Join(agentsHome, "hooks", scope, cursorJSON)
 		if linked, _ := links.AreHardlinked(hooksFilePath, src); linked {
 			os.Remove(hooksFilePath)
 			break

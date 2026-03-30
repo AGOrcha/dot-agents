@@ -68,17 +68,15 @@ func TestCodexCreateLinksWritesNativeAgentTomlAndCleansCompat(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(globalAgentDir, codexAgentMarkdownFile), []byte(`---
+	mustWriteCodexFixtureFile(t, filepath.Join(globalAgentDir, codexAgentMarkdownFile), `---
 name: reviewer
 description: global reviewer
 model: gpt-5.1-codex
 ---
 
 # Reviewer
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectAgentDir, codexAgentMarkdownFile), []byte(`---
+`)
+	mustWriteCodexFixtureFile(t, filepath.Join(projectAgentDir, codexAgentMarkdownFile), `---
 name: implementer
 description: project implementer
 is_background: false
@@ -87,9 +85,7 @@ is_background: false
 # Implementer
 
 Build the feature and keep tests green.
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
+`)
 
 	if err := os.MkdirAll(repo, 0755); err != nil {
 		t.Fatal(err)
@@ -100,48 +96,54 @@ Build the feature and keep tests green.
 	}
 
 	projectToml := filepath.Join(repo, ".codex", "agents", "implementer.toml")
-	projectOut, err := os.ReadFile(projectToml)
-	if err != nil {
-		t.Fatalf("expected project toml at %s: %v", projectToml, err)
-	}
-	for _, want := range []string{
+	assertCodexFileContains(t, "project toml", projectToml, []string{
 		`name = "implementer"`,
 		`description = "project implementer"`,
 		`is_background = false`,
 		`Build the feature and keep tests green.`,
-	} {
-		if !strings.Contains(string(projectOut), want) {
-			t.Fatalf("project toml missing %q:\n%s", want, string(projectOut))
-		}
-	}
+	})
 
 	userToml := filepath.Join(home, ".codex", "agents", "reviewer.toml")
-	userOut, err := os.ReadFile(userToml)
-	if err != nil {
-		t.Fatalf("expected user toml at %s: %v", userToml, err)
-	}
-	for _, want := range []string{
+	assertCodexFileContains(t, "user toml", userToml, []string{
 		`name = "reviewer"`,
 		`description = "global reviewer"`,
 		`model = "gpt-5.1-codex"`,
-	} {
-		if !strings.Contains(string(userOut), want) {
-			t.Fatalf("user toml missing %q:\n%s", want, string(userOut))
-		}
-	}
+	})
 
-	if _, err := os.Stat(filepath.Join(repo, ".claude", "agents")); !os.IsNotExist(err) {
-		t.Fatalf("legacy compat path should be cleaned up")
-	}
+	assertCodexPathNotExists(t, filepath.Join(repo, ".claude", "agents"), "legacy compat path should be cleaned up")
 
 	if err := NewCodex().RemoveLinks("proj", repo); err != nil {
 		t.Fatalf("RemoveLinks failed: %v", err)
 	}
 
-	if _, err := os.Stat(projectToml); !os.IsNotExist(err) {
-		t.Fatalf("project native agent should be removed, got %v", err)
+	assertCodexPathNotExists(t, projectToml, "project native agent should be removed")
+	assertCodexPathNotExists(t, filepath.Join(repo, ".claude", "agents"), "legacy compat path should stay removed")
+}
+
+func mustWriteCodexFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".claude", "agents")); !os.IsNotExist(err) {
-		t.Fatalf("legacy compat path should stay removed")
+}
+
+func assertCodexFileContains(t *testing.T, label, path string, want []string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected %s at %s: %v", label, path, err)
+	}
+	got := string(content)
+	for _, snippet := range want {
+		if !strings.Contains(got, snippet) {
+			t.Fatalf("%s missing %q:\n%s", label, snippet, got)
+		}
+	}
+}
+
+func assertCodexPathNotExists(t *testing.T, path, message string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s, got %v", message, err)
 	}
 }

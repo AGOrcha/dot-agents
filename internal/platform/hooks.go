@@ -164,30 +164,17 @@ func listHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
 
 	byName := map[string]HookSpec{}
 	for _, entry := range entries {
-		if entry.IsDir() {
-			spec, ok, err := loadHookBundleSpec(root, scope, entry.Name())
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				byName[spec.Name] = spec
-			}
+		spec, ok, loadErr := loadHookSpecEntry(root, scope, entry)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if !ok {
 			continue
 		}
-		if !strings.HasSuffix(entry.Name(), ".json") {
+		if _, exists := byName[spec.Name]; exists {
 			continue
 		}
-		name := strings.TrimSuffix(entry.Name(), ".json")
-		if _, exists := byName[name]; exists {
-			continue
-		}
-		byName[name] = HookSpec{
-			Name:         name,
-			Scope:        scope,
-			SourcePath:   filepath.Join(root, entry.Name()),
-			SourceBucket: "hooks",
-			SourceKind:   HookSourceLegacyFile,
-		}
+		byName[spec.Name] = spec
 	}
 
 	names := make([]string, 0, len(byName))
@@ -201,6 +188,27 @@ func listHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
 		out = append(out, byName[name])
 	}
 	return out, nil
+}
+
+func loadHookSpecEntry(root, scope string, entry os.DirEntry) (HookSpec, bool, error) {
+	if entry.IsDir() {
+		spec, ok, err := loadHookBundleSpec(root, scope, entry.Name())
+		if err != nil {
+			return HookSpec{}, false, err
+		}
+		return spec, ok, nil
+	}
+	if !strings.HasSuffix(entry.Name(), ".json") {
+		return HookSpec{}, false, nil
+	}
+	name := strings.TrimSuffix(entry.Name(), ".json")
+	return HookSpec{
+		Name:         name,
+		Scope:        scope,
+		SourcePath:   filepath.Join(root, entry.Name()),
+		SourceBucket: "hooks",
+		SourceKind:   HookSourceLegacyFile,
+	}, true, nil
 }
 
 func listCanonicalHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
@@ -657,33 +665,44 @@ func renderCursorHookConfig(specs []HookSpec) ([]byte, error) {
 		Hooks:   map[string][]cursorRenderedEntry{},
 	}
 	for _, spec := range specs {
-		event, ok := cursorEventName(spec)
-		if !ok {
-			if hookRequiredOnPlatform(spec, "cursor") {
-				return nil, fmt.Errorf("hook %q is not representable for cursor event %q", spec.Name, spec.When)
-			}
+		event, entry, include, err := renderCursorHookEntry(spec)
+		if err != nil {
+			return nil, err
+		}
+		if !include {
 			continue
-		}
-		command := resolveHookCommand(spec)
-		if command == "" {
-			if hookRequiredOnPlatform(spec, "cursor") {
-				return nil, fmt.Errorf("hook %q has no command for cursor", spec.Name)
-			}
-			continue
-		}
-		entry := cursorRenderedEntry{
-			Command: command,
-			Matcher: matcherForSpec(spec, "cursor", ""),
-		}
-		if spec.TimeoutMS > 0 {
-			entry.Timeout = spec.TimeoutMS / 1000
-			if entry.Timeout == 0 {
-				entry.Timeout = 1
-			}
 		}
 		out.Hooks[event] = append(out.Hooks[event], entry)
 	}
 	return marshalJSON(out)
+}
+
+func renderCursorHookEntry(spec HookSpec) (string, cursorRenderedEntry, bool, error) {
+	event, ok := cursorEventName(spec)
+	if !ok {
+		if hookRequiredOnPlatform(spec, "cursor") {
+			return "", cursorRenderedEntry{}, false, fmt.Errorf("hook %q is not representable for cursor event %q", spec.Name, spec.When)
+		}
+		return "", cursorRenderedEntry{}, false, nil
+	}
+	command := resolveHookCommand(spec)
+	if command == "" {
+		if hookRequiredOnPlatform(spec, "cursor") {
+			return "", cursorRenderedEntry{}, false, fmt.Errorf("hook %q has no command for cursor", spec.Name)
+		}
+		return "", cursorRenderedEntry{}, false, nil
+	}
+	entry := cursorRenderedEntry{
+		Command: command,
+		Matcher: matcherForSpec(spec, "cursor", ""),
+	}
+	if spec.TimeoutMS > 0 {
+		entry.Timeout = spec.TimeoutMS / 1000
+		if entry.Timeout == 0 {
+			entry.Timeout = 1
+		}
+	}
+	return event, entry, true, nil
 }
 
 func renderCopilotHookFile(spec HookSpec) (string, []byte, bool, error) {

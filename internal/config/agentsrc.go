@@ -97,76 +97,74 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 		Sources:  []Source{{Type: "local"}},
 	}
 
-	// Collect skills from global and project scopes
-	for _, scope := range []string{"global", projectName} {
-		dir := filepath.Join(agentsHome, "skills", scope)
+	scopes := []string{"global", projectName}
+	rc.Skills = collectScopedResourceNames(agentsHome, "skills", scopes, "SKILL.md")
+	rc.Agents = collectScopedResourceNames(agentsHome, "agents", scopes, "AGENT.md")
+	rc.Rules = detectRuleScopes(agentsHome, projectName)
+	rc.Hooks = hasProjectClaudeHooks(agentsHome, projectName)
+	rc.MCP = hasScopedMCPConfigs(agentsHome, projectName)
+	rc.Settings = hasScopedCursorSettings(agentsHome, projectName)
+
+	return rc, nil
+}
+
+func collectScopedResourceNames(agentsHome, resourceType string, scopes []string, markerFile string) []string {
+	names := []string{}
+	for _, scope := range scopes {
+		dir := filepath.Join(agentsHome, resourceType, scope)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			entryPath := filepath.Join(dir, e.Name())
+		for _, entry := range entries {
+			entryPath := filepath.Join(dir, entry.Name())
 			if !isDirEntry(entryPath) {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(entryPath, "SKILL.md")); err == nil {
-				rc.Skills = append(rc.Skills, e.Name())
+			if _, err := os.Stat(filepath.Join(entryPath, markerFile)); err == nil {
+				names = append(names, entry.Name())
 			}
 		}
 	}
+	return names
+}
 
-	// Collect agents from global and project scopes
-	for _, scope := range []string{"global", projectName} {
-		dir := filepath.Join(agentsHome, "agents", scope)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			entryPath := filepath.Join(dir, e.Name())
-			if !isDirEntry(entryPath) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(entryPath, "AGENT.md")); err == nil {
-				rc.Agents = append(rc.Agents, e.Name())
-			}
-		}
-	}
-
-	// Determine rule scopes
-	rc.Rules = []string{"global"}
+func detectRuleScopes(agentsHome, projectName string) []string {
+	scopes := []string{"global"}
 	projectRulesDir := filepath.Join(agentsHome, "rules", projectName)
-	if entries, err := os.ReadDir(projectRulesDir); err == nil {
-		for _, e := range entries {
-			ext := filepath.Ext(e.Name())
-			if ext == ".md" || ext == ".mdc" || ext == ".txt" {
-				rc.Rules = append(rc.Rules, "project")
-				break
-			}
+	entries, err := os.ReadDir(projectRulesDir)
+	if err != nil {
+		return scopes
+	}
+	for _, entry := range entries {
+		ext := filepath.Ext(entry.Name())
+		if ext == ".md" || ext == ".mdc" || ext == ".txt" {
+			return append(scopes, "project")
 		}
 	}
+	return scopes
+}
 
-	// Detect hooks
-	if _, err := os.Stat(filepath.Join(agentsHome, "settings", projectName, "claude-code.json")); err == nil {
-		rc.Hooks = true
-	}
+func hasProjectClaudeHooks(agentsHome, projectName string) bool {
+	_, err := os.Stat(filepath.Join(agentsHome, "settings", projectName, "claude-code.json"))
+	return err == nil
+}
 
-	// Detect MCP configs
+func hasScopedMCPConfigs(agentsHome, projectName string) bool {
 	for _, scope := range []string{projectName, "global"} {
 		dir := filepath.Join(agentsHome, "mcp", scope)
 		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-			rc.MCP = true
-			break
+			return true
 		}
 	}
+	return false
+}
 
-	// Detect platform settings (cursor.json as proxy)
+func hasScopedCursorSettings(agentsHome, projectName string) bool {
 	for _, scope := range []string{projectName, "global"} {
 		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
-			rc.Settings = true
-			break
+			return true
 		}
 	}
-
-	return rc, nil
+	return false
 }

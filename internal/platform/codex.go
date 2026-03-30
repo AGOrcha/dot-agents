@@ -14,6 +14,8 @@ import (
 
 type codex struct{}
 
+const codexHooksJSON = "hooks.json"
+
 func NewCodex() Platform { return &codex{} }
 
 func (c *codex) ID() string          { return "codex" }
@@ -155,7 +157,7 @@ func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
-	repoTarget := filepath.Join(repoPath, ".codex", "hooks.json")
+	repoTarget := filepath.Join(repoPath, ".codex", codexHooksJSON)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
 		return err
@@ -189,17 +191,17 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 		return err
 	}
 	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".codex", "hooks.json"), renderCodexHookConfig)
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".codex", codexHooksJSON), renderCodexHookConfig)
 	}
 
 	spec := resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json")
 	if spec == nil {
 		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, ".codex", "hooks.json"), isLikelyRenderedCodexHookConfig)
+			_ = removeManagedFileIf(filepath.Join(homeRoot, ".codex", codexHooksJSON), isLikelyRenderedCodexHookConfig)
 		}
 		return nil
 	}
-	return emitHookSpecToUserHomes(spec, filepath.Join(".codex", "hooks.json"), HookEmissionMode{
+	return emitHookSpecToUserHomes(spec, filepath.Join(".codex", codexHooksJSON), HookEmissionMode{
 		Shape:     HookShapeDirect,
 		Transport: HookTransportSymlink,
 	})
@@ -212,9 +214,9 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "config.toml"), agentsHome)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
-		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, ".codex", "hooks.json"), renderCodexHookConfig)
+		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, ".codex", codexHooksJSON), renderCodexHookConfig)
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "hooks.json"), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", codexHooksJSON), agentsHome)
 
 	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, ".codex", "agents"))
 

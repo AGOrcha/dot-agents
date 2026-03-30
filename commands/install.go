@@ -50,92 +50,137 @@ func runInstall(strict bool) error {
 
 	ui.Header("dot-agents install")
 
-	// 1. Read manifest
-	rc, err := config.LoadAgentsRC(projectPath)
+	rc, err := loadInstallManifest(projectPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			ui.Error(config.AgentsRCFile + " not found in current directory")
-			fmt.Fprintln(os.Stdout, "  Run 'dot-agents install --generate' to create one, or")
-			fmt.Fprintln(os.Stdout, "  run 'dot-agents add .' to register this project first.")
-			return fmt.Errorf("manifest not found")
-		}
-		return fmt.Errorf("reading %s: %w", config.AgentsRCFile, err)
+		return err
 	}
-
-	// 2. Verify ~/.agents/ initialized
-	agentsHome := config.AgentsHome()
-	if _, err := os.Stat(filepath.Join(agentsHome, "config.json")); err != nil {
-		return fmt.Errorf("~/.agents/ not initialized — run 'dot-agents init' first")
-	}
-
-	// Resolve project name
-	projectName := rc.Project
-	if projectName == "" {
-		projectName = filepath.Base(projectPath)
-	}
-
-	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
-	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
-
-	// 3. Resolve sources and populate ~/.agents/ with remote resources
-	ui.Section("Resolving sources")
-	resolvedSources, err := resolveSources(rc.Sources)
-	if err != nil && strict {
+	if err := ensureAgentsHomeInitialized(); err != nil {
 		return err
 	}
 
-	// 4. Link skills and agents from sources into ~/.agents/{type}/{project}/
-	if len(resolvedSources) > 0 {
-		for _, skillName := range rc.Skills {
-			if err := linkResourceFromSources("skills", skillName, projectName, resolvedSources); err != nil {
-				msg := fmt.Sprintf("skill '%s' not found in any source", skillName)
-				if strict {
-					return fmt.Errorf("%s (--strict mode)", msg)
-				}
-				ui.Bullet("warn", msg+" — skipping")
-			}
-		}
-		for _, agentName := range rc.Agents {
-			if err := linkResourceFromSources("agents", agentName, projectName, resolvedSources); err != nil {
-				msg := fmt.Sprintf("agent '%s' not found in any source", agentName)
-				if strict {
-					return fmt.Errorf("%s (--strict mode)", msg)
-				}
-				ui.Bullet("warn", msg+" — skipping")
-			}
-		}
+	projectName := installProjectName(rc.Project, projectPath)
+	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
+	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
+
+	resolvedSources, err := resolveInstallSources(rc.Sources, strict)
+	if err != nil {
+		return err
+	}
+	if err := linkInstallResources(projectName, rc, resolvedSources, strict); err != nil {
+		return err
+	}
+	if err := ensureInstallProjectDirs(projectName); err != nil {
+		return err
+	}
+	if err := registerInstallProject(projectName, projectPath); err != nil {
+		return err
 	}
 
-	// 5. Ensure project dirs in ~/.agents/
-	if !Flags.DryRun {
-		if err := createProjectDirs(projectName); err != nil {
-			return err
+	createInstallPlatformLinks(projectName, projectPath)
+	finalizeInstall(projectPath)
+
+	ui.SuccessBox(
+		fmt.Sprintf("Project '%s' installed successfully!", projectName),
+		"Check links: dot-agents status --audit",
+		"Update manifest: dot-agents install --generate",
+	)
+	return nil
+}
+
+func loadInstallManifest(projectPath string) (*config.AgentsRC, error) {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err == nil {
+		return rc, nil
+	}
+	if os.IsNotExist(err) {
+		ui.Error(config.AgentsRCFile + " not found in current directory")
+		fmt.Fprintln(os.Stdout, "  Run 'dot-agents install --generate' to create one, or")
+		fmt.Fprintln(os.Stdout, "  run 'dot-agents add .' to register this project first.")
+		return nil, fmt.Errorf("manifest not found")
+	}
+	return nil, fmt.Errorf("reading %s: %w", config.AgentsRCFile, err)
+}
+
+func ensureAgentsHomeInitialized() error {
+	if _, err := os.Stat(filepath.Join(config.AgentsHome(), "config.json")); err != nil {
+		return fmt.Errorf("~/.agents/ not initialized — run 'dot-agents init' first")
+	}
+	return nil
+}
+
+func installProjectName(manifestProject, projectPath string) string {
+	if manifestProject != "" {
+		return manifestProject
+	}
+	return filepath.Base(projectPath)
+}
+
+func resolveInstallSources(sources []config.Source, strict bool) ([]string, error) {
+	ui.Section("Resolving sources")
+	resolvedSources, err := resolveSources(sources)
+	if err != nil && strict {
+		return nil, err
+	}
+	return resolvedSources, nil
+}
+
+func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool) error {
+	if len(resolvedSources) == 0 {
+		return nil
+	}
+	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, resolvedSources, strict); err != nil {
+		return err
+	}
+	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, resolvedSources, strict)
+}
+
+func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool) error {
+	for _, name := range names {
+		if err := linkResourceFromSources(resourceType, name, projectName, sources); err != nil {
+			msg := fmt.Sprintf("%s '%s' not found in any source", label, name)
+			if strict {
+				return fmt.Errorf("%s (--strict mode)", msg)
+			}
+			ui.Bullet("warn", msg+" — skipping")
 		}
-		ui.Bullet("ok", "Ensured ~/.agents/ project directories")
-	} else {
+	}
+	return nil
+}
+
+func ensureInstallProjectDirs(projectName string) error {
+	if Flags.DryRun {
 		ui.DryRun("create ~/.agents/ directories for '" + projectName + "'")
+		return nil
 	}
+	if err := createProjectDirs(projectName); err != nil {
+		return err
+	}
+	ui.Bullet("ok", "Ensured ~/.agents/ project directories")
+	return nil
+}
 
-	// 6. Register project in config.json
+func registerInstallProject(projectName, projectPath string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	if cfg.GetProjectPath(projectName) == "" {
-		if !Flags.DryRun {
-			cfg.AddProject(projectName, projectPath)
-			if err := cfg.Save(); err != nil {
-				return fmt.Errorf("saving config: %w", err)
-			}
-			ui.Bullet("ok", "Registered '"+projectName+"' in config.json")
-		} else {
-			ui.DryRun("register '" + projectName + "' in config.json")
-		}
-	} else {
+	if cfg.GetProjectPath(projectName) != "" {
 		ui.Bullet("skip", "Already registered in config.json")
+		return nil
 	}
+	if Flags.DryRun {
+		ui.DryRun("register '" + projectName + "' in config.json")
+		return nil
+	}
+	cfg.AddProject(projectName, projectPath)
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+	ui.Bullet("ok", "Registered '"+projectName+"' in config.json")
+	return nil
+}
 
-	// 7. Create platform links (handles rules, hooks, mcp, settings, skills, agents)
+func createInstallPlatformLinks(projectName, projectPath string) {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
@@ -156,20 +201,15 @@ func runInstall(strict bool) error {
 			ui.Bullet("ok", p.DisplayName()+" links created")
 		}
 	}
+}
 
-	// 8. Write .agents-refresh marker
-	if !Flags.DryRun {
-		writeRefreshMarker(projectPath, Commit, Describe)
-		ensureGitignoreEntry(projectPath, ".agents-refresh")
-		ui.Bullet("ok", "Wrote .agents-refresh marker")
+func finalizeInstall(projectPath string) {
+	if Flags.DryRun {
+		return
 	}
-
-	ui.SuccessBox(
-		fmt.Sprintf("Project '%s' installed successfully!", projectName),
-		"Check links: dot-agents status --audit",
-		"Update manifest: dot-agents install --generate",
-	)
-	return nil
+	writeRefreshMarker(projectPath, Commit, Describe)
+	ensureGitignoreEntry(projectPath, ".agents-refresh")
+	ui.Bullet("ok", "Wrote .agents-refresh marker")
 }
 
 // ─── runInstallGenerate ──────────────────────────────────────────────────────
@@ -229,36 +269,46 @@ func resolveSources(sources []config.Source) ([]string, error) {
 	var firstErr error
 
 	for _, src := range sources {
-		switch src.Type {
-		case "local":
-			root := config.AgentsHome()
-			if src.Path != "" {
-				root = config.ExpandPath(src.Path)
+		root, err := resolveSourceRoot(src)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
 			}
-			resolved = append(resolved, root)
-			ui.Bullet("ok", "Local source: "+config.DisplayPath(root))
-
-		case "git":
-			if src.URL == "" {
-				ui.Bullet("warn", "Git source missing 'url' — skipping")
-				continue
-			}
-			cacheDir, err := fetchGitSource(src.URL, src.Ref)
-			if err != nil {
-				ui.Bullet("warn", fmt.Sprintf("Failed to fetch %s — skipping", src.URL))
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
-			}
-			resolved = append(resolved, cacheDir)
-			ui.Bullet("ok", "Git source: "+src.URL)
-
-		default:
-			ui.Bullet("warn", fmt.Sprintf("Unknown source type '%s' — skipping", src.Type))
+			continue
 		}
+		if root == "" {
+			continue
+		}
+		resolved = append(resolved, root)
 	}
 	return resolved, firstErr
+}
+
+func resolveSourceRoot(src config.Source) (string, error) {
+	switch src.Type {
+	case "local":
+		root := config.AgentsHome()
+		if src.Path != "" {
+			root = config.ExpandPath(src.Path)
+		}
+		ui.Bullet("ok", "Local source: "+config.DisplayPath(root))
+		return root, nil
+	case "git":
+		if src.URL == "" {
+			ui.Bullet("warn", "Git source missing 'url' — skipping")
+			return "", nil
+		}
+		cacheDir, err := fetchGitSource(src.URL, src.Ref)
+		if err != nil {
+			ui.Bullet("warn", fmt.Sprintf("Failed to fetch %s — skipping", src.URL))
+			return "", err
+		}
+		ui.Bullet("ok", "Git source: "+src.URL)
+		return cacheDir, nil
+	default:
+		ui.Bullet("warn", fmt.Sprintf("Unknown source type '%s' — skipping", src.Type))
+		return "", nil
+	}
 }
 
 // fetchGitSource clones or updates a git repository to the cache.
@@ -269,50 +319,66 @@ func fetchGitSource(url, ref string) (string, error) {
 	}
 
 	cacheDir := config.GitSourceCacheDir(url)
-
-	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); err == nil {
-		// Already cloned — check whether to update
-		doUpdate := Flags.Force
-		if !doUpdate {
-			lastFetch := filepath.Join(cacheDir, ".last-fetch")
-			if info, err := os.Stat(lastFetch); err == nil {
-				if time.Since(info.ModTime()) < time.Hour {
-					if Flags.Verbose {
-						ui.Info("Using cached source (< 1h old): " + url)
-					}
-					return cacheDir, nil
-				}
-			}
-			doUpdate = true
+	if hasCachedGitSource(cacheDir) {
+		if shouldUseCachedGitSource(cacheDir, url) {
+			return cacheDir, nil
 		}
-		if doUpdate {
-			if Flags.DryRun {
-				ui.DryRun("git -C " + cacheDir + " pull")
-				return cacheDir, nil
-			}
-			if Flags.Verbose {
-				ui.Info("Updating cached source: " + url)
-			}
-			cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q")
-			if err := cmd.Run(); err != nil {
-				ui.Bullet("warn", "Could not update cached source — using existing copy")
-			} else {
-				touchLastFetch(cacheDir)
-			}
+		if Flags.DryRun {
+			ui.DryRun("git -C " + cacheDir + " pull")
+			return cacheDir, nil
 		}
+		updateCachedGitSource(gitBin, cacheDir, url)
 		return cacheDir, nil
 	}
 
-	// First clone
 	if Flags.DryRun {
-		args := "git clone --depth 1"
-		if ref != "" {
-			args += " --branch " + ref
-		}
-		ui.DryRun(args + " " + url + " " + cacheDir)
+		ui.DryRun(gitCloneDryRunCommand(url, ref, cacheDir))
 		return cacheDir, nil
 	}
+	return cloneGitSource(gitBin, url, ref, cacheDir)
+}
 
+func hasCachedGitSource(cacheDir string) bool {
+	_, err := os.Stat(filepath.Join(cacheDir, ".git"))
+	return err == nil
+}
+
+func shouldUseCachedGitSource(cacheDir, url string) bool {
+	if Flags.Force {
+		return false
+	}
+	lastFetch := filepath.Join(cacheDir, ".last-fetch")
+	info, err := os.Stat(lastFetch)
+	if err != nil || time.Since(info.ModTime()) >= time.Hour {
+		return false
+	}
+	if Flags.Verbose {
+		ui.Info("Using cached source (< 1h old): " + url)
+	}
+	return true
+}
+
+func updateCachedGitSource(gitBin, cacheDir, url string) {
+	if Flags.Verbose {
+		ui.Info("Updating cached source: " + url)
+	}
+	cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q")
+	if err := cmd.Run(); err != nil {
+		ui.Bullet("warn", "Could not update cached source — using existing copy")
+		return
+	}
+	touchLastFetch(cacheDir)
+}
+
+func gitCloneDryRunCommand(url, ref, cacheDir string) string {
+	args := "git clone --depth 1"
+	if ref != "" {
+		args += " --branch " + ref
+	}
+	return args + " " + url + " " + cacheDir
+}
+
+func cloneGitSource(gitBin, url, ref, cacheDir string) (string, error) {
 	if Flags.Verbose {
 		ui.Info("Cloning source: " + url)
 	}
@@ -341,52 +407,75 @@ func touchLastFetch(cacheDir string) {
 // linkResourceFromSources symlinks a resource from the first matching source
 // into ~/.agents/{resourceType}/{project}/{name}/.
 func linkResourceFromSources(resourceType, name, project string, sources []string) error {
-	var markerFile string
-	switch resourceType {
-	case "skills":
-		markerFile = "SKILL.md"
-	case "agents":
-		markerFile = "AGENT.md"
+	destDir := filepath.Join(config.AgentsHome(), resourceType, project, name)
+	markerFile := resourceMarkerFile(resourceType)
+	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, sources)
+	if !found {
+		return fmt.Errorf("not found in any source")
 	}
 
-	destDir := filepath.Join(config.AgentsHome(), resourceType, project, name)
-
-	for _, srcRoot := range sources {
-		candidate := filepath.Join(srcRoot, resourceType, "global", name)
-		if info, err := os.Stat(candidate); err != nil || !info.IsDir() {
-			continue
-		}
-		if markerFile != "" {
-			if _, err := os.Stat(filepath.Join(candidate, markerFile)); err != nil {
-				continue
-			}
-		}
-
-		if Flags.DryRun {
-			ui.DryRun(fmt.Sprintf("link %s/%s → %s", resourceType, name, config.DisplayPath(candidate)))
-			return nil
-		}
-
-		// Remove stale entry if --force
-		if _, err := os.Lstat(destDir); err == nil {
-			if !Flags.Force {
-				return nil // already present
-			}
-			os.RemoveAll(destDir)
-		}
-
-		if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
-			return err
-		}
-		if err := os.Symlink(candidate, destDir); err != nil {
-			return fmt.Errorf("symlinking %s: %w", name, err)
-		}
-		if Flags.Verbose {
-			ui.Bullet("ok", fmt.Sprintf("Linked %s/%s from %s", resourceType, name, config.DisplayPath(srcRoot)))
-		}
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("link %s/%s → %s", resourceType, name, config.DisplayPath(candidate)))
 		return nil
 	}
-	return fmt.Errorf("not found in any source")
+	if skip := shouldSkipLinkDestination(destDir); skip {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+		return err
+	}
+	if err := os.Symlink(candidate, destDir); err != nil {
+		return fmt.Errorf("symlinking %s: %w", name, err)
+	}
+	if Flags.Verbose {
+		ui.Bullet("ok", fmt.Sprintf("Linked %s/%s from %s", resourceType, name, config.DisplayPath(srcRoot)))
+	}
+	return nil
+}
+
+func resourceMarkerFile(resourceType string) string {
+	switch resourceType {
+	case "skills":
+		return "SKILL.md"
+	case "agents":
+		return "AGENT.md"
+	default:
+		return ""
+	}
+}
+
+func firstResourceCandidate(resourceType, name, markerFile string, sources []string) (string, string, bool) {
+	for _, srcRoot := range sources {
+		candidate := filepath.Join(srcRoot, resourceType, "global", name)
+		if !resourceCandidateIsValid(candidate, markerFile) {
+			continue
+		}
+		return candidate, srcRoot, true
+	}
+	return "", "", false
+}
+
+func resourceCandidateIsValid(candidate, markerFile string) bool {
+	info, err := os.Stat(candidate)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	if markerFile == "" {
+		return true
+	}
+	_, err = os.Stat(filepath.Join(candidate, markerFile))
+	return err == nil
+}
+
+func shouldSkipLinkDestination(destDir string) bool {
+	if _, err := os.Lstat(destDir); err != nil {
+		return false
+	}
+	if !Flags.Force {
+		return true
+	}
+	_ = os.RemoveAll(destDir)
+	return false
 }
 
 // findProjectByPath looks up the registered project name for a given path.

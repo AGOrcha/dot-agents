@@ -103,6 +103,7 @@ const (
 	importScopeProject = "project"
 	importScopeGlobal  = "global"
 	importScopeAll     = "all"
+	importFailedFmt    = "Failed to import %s: %v"
 
 	relClaudeSettingsJSON    = ".claude/settings.json"
 	relCursorSettingsJSON    = ".cursor/settings.json"
@@ -319,7 +320,7 @@ func importMissingCandidate(c importCandidate, dest, timestamp string) importRes
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	_ = os.MkdirAll(filepath.Dir(dest), 0755)
 	if err := copyFile(c.sourcePath, dest); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -339,7 +340,7 @@ func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp strin
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	if err := copyFile(c.sourcePath, dest); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -547,7 +548,7 @@ func importMissingContentCandidate(c importCandidate, dest string, content []byt
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	_ = os.MkdirAll(filepath.Dir(dest), 0755)
 	if err := os.WriteFile(dest, content, 0644); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -567,7 +568,7 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	if err := os.WriteFile(dest, content, 0644); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -728,26 +729,9 @@ func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput
 	if len(payload.Hooks) == 0 {
 		return nil, false, nil
 	}
-	specs := make([]importedHookSpec, 0)
-	for event, entries := range payload.Hooks {
-		when, ok := canonicalHookWhenFromCodexEvent(event)
-		if !ok {
-			return nil, false, nil
-		}
-		for _, entry := range entries {
-			for _, action := range entry.Hooks {
-				if action.Type != "command" || strings.TrimSpace(action.Command) == "" {
-					return nil, false, nil
-				}
-				specs = append(specs, importedHookSpec{
-					when:      when,
-					matcher:   strings.TrimSpace(entry.Matcher),
-					command:   strings.TrimSpace(action.Command),
-					enabledOn: []string{"codex"},
-					platform:  "codex",
-				})
-			}
-		}
+	specs, ok := collectImportedCommandHookSpecs(payload, canonicalHookWhenFromCodexEvent, []string{"codex"}, "codex")
+	if !ok {
+		return nil, false, nil
 	}
 	outputs := buildCanonicalHookOutputs(scope, specs)
 	if len(outputs) == 0 {
@@ -765,10 +749,8 @@ func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]impor
 	if err := json.Unmarshal(content, &top); err != nil {
 		return nil, false, nil
 	}
-	for key := range top {
-		if key != "hooks" && key != "$schema" {
-			return nil, false, nil
-		}
+	if !hasOnlyClaudeCompatKeys(top) {
+		return nil, false, nil
 	}
 	var payload importedClaudeHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
@@ -777,32 +759,56 @@ func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]impor
 	if len(payload.Hooks) == 0 {
 		return nil, false, nil
 	}
-	specs := make([]importedHookSpec, 0)
-	for event, entries := range payload.Hooks {
-		when, ok := canonicalHookWhenFromClaudeEvent(event)
-		if !ok {
-			return nil, false, nil
-		}
-		for _, entry := range entries {
-			for _, action := range entry.Hooks {
-				if action.Type != "command" || strings.TrimSpace(action.Command) == "" {
-					return nil, false, nil
-				}
-				specs = append(specs, importedHookSpec{
-					when:      when,
-					matcher:   strings.TrimSpace(entry.Matcher),
-					command:   strings.TrimSpace(action.Command),
-					enabledOn: []string{"claude", "copilot"},
-					platform:  "claude",
-				})
-			}
-		}
+	specs, ok := collectImportedCommandHookSpecs(payload, canonicalHookWhenFromClaudeEvent, []string{"claude", "copilot"}, "claude")
+	if !ok {
+		return nil, false, nil
 	}
 	outputs := buildCanonicalHookOutputs(scope, specs)
 	if len(outputs) == 0 {
 		return nil, false, nil
 	}
 	return outputs, true, nil
+}
+
+func hasOnlyClaudeCompatKeys(top map[string]json.RawMessage) bool {
+	for key := range top {
+		if key != "hooks" && key != "$schema" {
+			return false
+		}
+	}
+	return true
+}
+
+func collectImportedCommandHookSpecs(
+	payload importedClaudeHooksFile,
+	eventWhen func(string) (string, bool),
+	enabledOn []string,
+	platformID string,
+) ([]importedHookSpec, bool) {
+	specs := make([]importedHookSpec, 0)
+	for event, entries := range payload.Hooks {
+		when, ok := eventWhen(event)
+		if !ok {
+			return nil, false
+		}
+		for _, entry := range entries {
+			matcher := strings.TrimSpace(entry.Matcher)
+			for _, action := range entry.Hooks {
+				command := strings.TrimSpace(action.Command)
+				if action.Type != "command" || command == "" {
+					return nil, false
+				}
+				specs = append(specs, importedHookSpec{
+					when:      when,
+					matcher:   matcher,
+					command:   command,
+					enabledOn: enabledOn,
+					platform:  platformID,
+				})
+			}
+		}
+	}
+	return specs, true
 }
 
 func buildCanonicalHookOutputs(scope string, specs []importedHookSpec) []importOutput {

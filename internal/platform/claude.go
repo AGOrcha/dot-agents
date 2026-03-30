@@ -12,7 +12,11 @@ import (
 
 type claude struct{}
 
-const claudeCodeJSON = "claude-code.json"
+const (
+	claudeCodeJSON          = "claude-code.json"
+	claudeSettingsJSON      = "settings.json"
+	claudeSettingsLocalJSON = "settings.local.json"
+)
 
 func NewClaude() Platform { return &claude{} }
 
@@ -82,7 +86,7 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
-	target := filepath.Join(repoPath, ".claude", "settings.local.json")
+	target := filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON)
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
 		_ = emitRenderedHookFile(projectBundles, target, renderClaudeHookSettings)
@@ -210,18 +214,18 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		return err
 	}
 	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".claude", "settings.json"), renderClaudeHookSettings)
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".claude", claudeSettingsJSON), renderClaudeHookSettings)
 	}
 
 	spec := findClaudeSettingsHookSpec(agentsHome, "global")
 	if spec == nil {
 		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, ".claude", "settings.json"), isLikelyRenderedClaudeHookSettings)
+			_ = removeManagedFileIf(filepath.Join(homeRoot, ".claude", claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
 		}
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		target := filepath.Join(homeRoot, ".claude", "settings.json")
+		target := filepath.Join(homeRoot, ".claude", claudeSettingsJSON)
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink, leave it
 		}
@@ -304,7 +308,16 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 func (c *claude) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	// Remove .claude/rules/{project}--*.md symlinks
+	c.removeProjectRuleLinks(project, repoPath, agentsHome)
+	c.removeProjectSettingsLink(project, repoPath, agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, ".claude", "agents"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, ".claude", "skills"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, ".agents", "skills"), agentsHome)
+	return nil
+}
+
+func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
 	rulesDir := filepath.Join(repoPath, ".claude", "rules")
 	if entries, err := os.ReadDir(rulesDir); err == nil {
 		prefix := project + "--"
@@ -315,45 +328,25 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 			}
 		}
 	}
+}
 
-	// Remove .claude/settings.local.json
+func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
-		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, ".claude", "settings.local.json"), renderClaudeHookSettings)
+		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), renderClaudeHookSettings)
 	} else {
 		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 		if globalErr == nil && len(globalBundles) > 0 {
-			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, ".claude", "settings.local.json"), renderClaudeHookSettings)
+			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".claude", "settings.local.json"), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), agentsHome)
+}
 
-	// Remove .mcp.json
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
-
-	// Remove .claude/agents/ symlinks
-	agentsDir := filepath.Join(repoPath, ".claude", "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
+func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
+	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
+			links.RemoveIfSymlinkUnder(filepath.Join(dir, e.Name()), agentsHome)
 		}
 	}
-
-	// Remove .claude/skills/ symlinks
-	skillsDir := filepath.Join(repoPath, ".claude", "skills")
-	if entries, err := os.ReadDir(skillsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
-		}
-	}
-
-	// Remove .agents/skills/ symlinks
-	agentsSkillsDir := filepath.Join(repoPath, ".agents", "skills")
-	if entries, err := os.ReadDir(agentsSkillsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsSkillsDir, e.Name()), agentsHome)
-		}
-	}
-
-	return nil
 }

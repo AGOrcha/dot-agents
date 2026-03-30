@@ -12,6 +12,8 @@ import (
 
 type opencode struct{}
 
+const opencodeJSON = "opencode.json"
+
 func NewOpenCode() Platform { return &opencode{} }
 
 func (o *opencode) ID() string          { return "opencode" }
@@ -41,8 +43,8 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 	}
 
 	// opencode.json config
-	if src := resolveScopedFile(agentsHome, "settings", project, "opencode.json"); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, "opencode.json"))
+	if src := resolveScopedFile(agentsHome, "settings", project, opencodeJSON); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, opencodeJSON))
 	}
 
 	// .opencode/agent/ definitions from canonical agents/{scope}/{name}/AGENT.md
@@ -95,7 +97,7 @@ func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, "opencode.json"), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, opencodeJSON), agentsHome)
 
 	agentDir := filepath.Join(repoPath, ".opencode", "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {

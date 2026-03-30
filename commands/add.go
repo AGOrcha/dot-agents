@@ -515,43 +515,59 @@ func restoreFromResourcesCounted(project, projectPath string) int {
 	}
 	count := 0
 	_ = filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		relPath := strings.TrimPrefix(path, resourcesDir+"/")
-		if strings.HasPrefix(relPath, "backups/") {
-			return nil
-		}
-		candidate := importCandidate{
-			project:    project,
-			sourceRoot: resourcesDir,
-			sourcePath: path,
-		}
-		if outputs, ok, canonErr := canonicalImportOutputs(candidate); ok {
-			if canonErr != nil {
-				return nil
-			}
-			for _, output := range outputs {
-				destPath := filepath.Join(agentsHome, output.destRel)
-				os.MkdirAll(filepath.Dir(destPath), 0755)
-				if err := os.WriteFile(destPath, output.content, 0644); err == nil {
-					count++
-				}
-			}
-			return nil
-		}
-		destRel := mapResourceRelToDest(project, relPath)
-		if destRel == "" {
-			return nil
-		}
-		destPath := filepath.Join(agentsHome, destRel)
-		os.MkdirAll(filepath.Dir(destPath), 0755)
-		if err := copyFile(path, destPath); err == nil {
-			count++
-		}
+		count += restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
 		return nil
 	})
 	return count
+}
+
+func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) int {
+	if walkErr != nil || d.IsDir() {
+		return 0
+	}
+	relPath := strings.TrimPrefix(path, resourcesDir+"/")
+	if strings.HasPrefix(relPath, "backups/") {
+		return 0
+	}
+	canonicalCount, handled := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
+	if handled {
+		return canonicalCount
+	}
+	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
+}
+
+func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool) {
+	candidate := importCandidate{
+		project:    project,
+		sourceRoot: resourcesDir,
+		sourcePath: path,
+	}
+	outputs, ok, canonErr := canonicalImportOutputs(candidate)
+	if !ok || canonErr != nil {
+		return 0, ok
+	}
+	count := 0
+	for _, output := range outputs {
+		destPath := filepath.Join(agentsHome, output.destRel)
+		_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+		if err := os.WriteFile(destPath, output.content, 0644); err == nil {
+			count++
+		}
+	}
+	return count, true
+}
+
+func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
+	destRel := mapResourceRelToDest(project, relPath)
+	if destRel == "" {
+		return 0
+	}
+	destPath := filepath.Join(agentsHome, destRel)
+	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+	if err := copyFile(path, destPath); err == nil {
+		return 1
+	}
+	return 0
 }
 
 // mirrorBackup copies srcFile (original path, before deletion) into the
