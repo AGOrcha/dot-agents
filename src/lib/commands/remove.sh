@@ -112,7 +112,7 @@ cmd_remove() {
   local project_path
   project_path=$(config_get_project_path "$project_name")
 
-  if [ -z "$project_path" ]; then
+  if [[ -z "$project_path" ]]; then
     log_error "Project not found: $project_name"
     echo ""
     echo "Run 'dot-agents status' to see registered projects."
@@ -126,10 +126,10 @@ cmd_remove() {
   echo -e "Path: ${DIM}$display_path${NC}"
 
   # Warn about git source cache if manifest has git sources
-  if [ -f "$project_path/.agentsrc.json" ] && command -v jq >/dev/null 2>&1; then
+  if [[ -f "$project_path/.agentsrc.json" ]] && command -v jq >/dev/null 2>&1; then
     local git_url
     git_url=$(jq -r '.sources[]? | select(.type=="git") | .url' "$project_path/.agentsrc.json" 2>/dev/null | head -1)
-    if [ -n "$git_url" ]; then
+    if [[ -n "$git_url" ]]; then
       echo -e "  ${YELLOW}⚠${NC}  Git source cache not cleaned automatically"
       echo -e "     Cache: ${DIM}~/.cache/dot-agents/sources/${NC}"
       echo -e "     To clean: ${DIM}rm -rf ~/.cache/dot-agents/sources/${NC}"

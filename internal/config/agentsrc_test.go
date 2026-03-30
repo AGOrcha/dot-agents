@@ -15,11 +15,24 @@ const (
 	testHookPreToolUse  = "PreToolUse"
 	testHookPostToolUse = "PostToolUse"
 	errFmtGenerateRC    = "GenerateAgentsRC: %v"
+	testSkillMarkerFile = "SKILL" + ".md"
+	testRealSkillName   = "real" + "-skill"
 )
 
 // ── StringsOrBool ────────────────────────────────────────────────────────────
 
-func TestStringsOrBool_MarshalJSON(t *testing.T) {
+func assertStringsOrBoolMarshalJSON(t *testing.T, input StringsOrBool, want string) {
+	t.Helper()
+	got, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+func TestStringsOrBoolMarshalJSON(t *testing.T) {
 	cases := []struct {
 		name  string
 		input StringsOrBool
@@ -34,18 +47,33 @@ func TestStringsOrBool_MarshalJSON(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := json.Marshal(tc.input)
-			if err != nil {
-				t.Fatalf("MarshalJSON: %v", err)
-			}
-			if string(got) != tc.want {
-				t.Errorf("got %s, want %s", got, tc.want)
-			}
+			assertStringsOrBoolMarshalJSON(t, tc.input, tc.want)
 		})
 	}
 }
 
-func TestStringsOrBool_UnmarshalJSON(t *testing.T) {
+func assertUnmarshalStringsOrBool(t *testing.T, input string, wantAll bool, wantN []string, wantErr bool) {
+	t.Helper()
+	var s StringsOrBool
+	err := json.Unmarshal([]byte(input), &s)
+	if wantErr {
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if s.All != wantAll {
+		t.Errorf("All: got %v, want %v", s.All, wantAll)
+	}
+	if !reflect.DeepEqual(s.Names, wantN) {
+		t.Errorf("Names: got %v, want %v", s.Names, wantN)
+	}
+}
+
+func TestStringsOrBoolUnmarshalJSON(t *testing.T) {
 	cases := []struct {
 		name    string
 		input   string
@@ -63,28 +91,12 @@ func TestStringsOrBool_UnmarshalJSON(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var s StringsOrBool
-			err := json.Unmarshal([]byte(tc.input), &s)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("UnmarshalJSON: %v", err)
-			}
-			if s.All != tc.wantAll {
-				t.Errorf("All: got %v, want %v", s.All, tc.wantAll)
-			}
-			if !reflect.DeepEqual(s.Names, tc.wantN) {
-				t.Errorf("Names: got %v, want %v", s.Names, tc.wantN)
-			}
+			assertUnmarshalStringsOrBool(t, tc.input, tc.wantAll, tc.wantN, tc.wantErr)
 		})
 	}
 }
 
-func TestStringsOrBool_Roundtrip(t *testing.T) {
+func TestStringsOrBoolRoundtrip(t *testing.T) {
 	originals := []StringsOrBool{
 		{All: true},
 		{All: false},
@@ -105,7 +117,7 @@ func TestStringsOrBool_Roundtrip(t *testing.T) {
 	}
 }
 
-func TestStringsOrBool_IsEnabled(t *testing.T) {
+func TestStringsOrBoolIsEnabled(t *testing.T) {
 	cases := []struct {
 		s    StringsOrBool
 		want bool
@@ -123,7 +135,7 @@ func TestStringsOrBool_IsEnabled(t *testing.T) {
 	}
 }
 
-func TestStringsOrBool_Contains(t *testing.T) {
+func TestStringsOrBoolContains(t *testing.T) {
 	allTrue := StringsOrBool{All: true}
 	if !allTrue.Contains("anything") {
 		t.Error("All=true should contain everything")
@@ -143,7 +155,7 @@ func TestStringsOrBool_Contains(t *testing.T) {
 	}
 }
 
-func TestStringsOrBool_Add(t *testing.T) {
+func TestStringsOrBoolAdd(t *testing.T) {
 	var s StringsOrBool
 
 	s.Add("alpha")
@@ -170,7 +182,7 @@ func TestStringsOrBool_Add(t *testing.T) {
 	}
 }
 
-func TestStringsOrBool_Remove(t *testing.T) {
+func TestStringsOrBoolRemove(t *testing.T) {
 	s := StringsOrBool{Names: []string{"a", "b", "c"}}
 
 	s.Remove("b")
@@ -228,7 +240,7 @@ func TestGitSourceCacheDir(t *testing.T) {
 
 // ── LoadAgentsRC / Save ───────────────────────────────────────────────────────
 
-func TestLoadAgentsRC_Missing(t *testing.T) {
+func TestLoadAgentsRCMissing(t *testing.T) {
 	tmp := t.TempDir()
 	_, err := LoadAgentsRC(tmp)
 	if err == nil {
@@ -236,7 +248,7 @@ func TestLoadAgentsRC_Missing(t *testing.T) {
 	}
 }
 
-func TestLoadAgentsRC_CorruptJSON(t *testing.T) {
+func TestLoadAgentsRCCorruptJSON(t *testing.T) {
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte("{bad json"), 0644); err != nil {
 		t.Fatal(err)
@@ -247,7 +259,7 @@ func TestLoadAgentsRC_CorruptJSON(t *testing.T) {
 	}
 }
 
-func TestLoadAgentsRC_DefaultSources(t *testing.T) {
+func TestLoadAgentsRCDefaultSources(t *testing.T) {
 	tmp := t.TempDir()
 	// Write a manifest with no sources field
 	payload := `{"version":1,"project":"p"}`
@@ -262,7 +274,7 @@ func TestLoadAgentsRC_DefaultSources(t *testing.T) {
 	}
 }
 
-func TestAgentsRC_SaveLoad_Roundtrip(t *testing.T) {
+func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
 
 	orig := &AgentsRC{
@@ -316,7 +328,7 @@ func TestAgentsRC_SaveLoad_Roundtrip(t *testing.T) {
 	}
 }
 
-func TestAgentsRC_Save_TrailingNewline(t *testing.T) {
+func TestAgentsRCSaveTrailingNewline(t *testing.T) {
 	tmp := t.TempDir()
 	rc := &AgentsRC{Version: 1, Project: "p", Sources: []Source{{Type: testSourceTypeLocal}}}
 	if err := rc.Save(tmp); err != nil {
@@ -352,8 +364,8 @@ func agentsHomeFixture(t *testing.T) string {
 	}
 
 	// Skills: global/skill-global, myproject/skill-proj
-	writeFile(filepath.Join(mkdirAll("skills", "global", "skill-global"), "SKILL.md"), "# skill")
-	writeFile(filepath.Join(mkdirAll("skills", testProject, "skill-proj"), "SKILL.md"), "# skill")
+	writeFile(filepath.Join(mkdirAll("skills", "global", "skill-global"), testSkillMarkerFile), "# skill")
+	writeFile(filepath.Join(mkdirAll("skills", testProject, "skill-proj"), testSkillMarkerFile), "# skill")
 	// File (not dir) in skills — should be ignored
 	writeFile(filepath.Join(home, "skills", "global", "not-a-skill.txt"), "ignore me")
 
@@ -387,7 +399,7 @@ func agentsHomeFixture(t *testing.T) string {
 	return home
 }
 
-func TestGenerateAgentsRC_Skills(t *testing.T) {
+func TestGenerateAgentsRCSkills(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -403,7 +415,7 @@ func TestGenerateAgentsRC_Skills(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Agents(t *testing.T) {
+func TestGenerateAgentsRCAgents(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -417,7 +429,7 @@ func TestGenerateAgentsRC_Agents(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Rules(t *testing.T) {
+func TestGenerateAgentsRCRules(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -433,7 +445,7 @@ func TestGenerateAgentsRC_Rules(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Rules_GlobalOnly(t *testing.T) {
+func TestGenerateAgentsRCRulesGlobalOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 	// No project-scoped rules created
@@ -448,7 +460,7 @@ func TestGenerateAgentsRC_Rules_GlobalOnly(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Hooks_NamedEvents(t *testing.T) {
+func TestGenerateAgentsRCHooksNamedEvents(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -469,7 +481,7 @@ func TestGenerateAgentsRC_Hooks_NamedEvents(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Hooks_NoSettings(t *testing.T) {
+func TestGenerateAgentsRCHooksNoSettings(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -483,7 +495,7 @@ func TestGenerateAgentsRC_Hooks_NoSettings(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_MCP_NamedServers(t *testing.T) {
+func TestGenerateAgentsRCMCPNamedServers(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -503,7 +515,7 @@ func TestGenerateAgentsRC_MCP_NamedServers(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_MCP_FallsBackToGlobal(t *testing.T) {
+func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -522,7 +534,7 @@ func TestGenerateAgentsRC_MCP_FallsBackToGlobal(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_MCP_NoConfig(t *testing.T) {
+func TestGenerateAgentsRCMCPNoConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -536,7 +548,7 @@ func TestGenerateAgentsRC_MCP_NoConfig(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Settings(t *testing.T) {
+func TestGenerateAgentsRCSettings(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
@@ -550,7 +562,7 @@ func TestGenerateAgentsRC_Settings(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_Settings_False(t *testing.T) {
+func TestGenerateAgentsRCSettingsFalse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -564,7 +576,7 @@ func TestGenerateAgentsRC_Settings_False(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_DefaultFields(t *testing.T) {
+func TestGenerateAgentsRCDefaultFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -584,7 +596,7 @@ func TestGenerateAgentsRC_DefaultFields(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRC_IgnoresNonDirectorySkills(t *testing.T) {
+func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -593,26 +605,26 @@ func TestGenerateAgentsRC_IgnoresNonDirectorySkills(t *testing.T) {
 	os.MkdirAll(skillsDir, 0755)
 	os.WriteFile(filepath.Join(skillsDir, "not-a-skill"), []byte("text"), 0644)
 
-	// Valid skill dir without SKILL.md — should be ignored
+	// Valid skill dir without the marker file should be ignored
 	os.MkdirAll(filepath.Join(skillsDir, "no-marker"), 0755)
 
-	// Valid skill dir WITH SKILL.md
-	os.MkdirAll(filepath.Join(skillsDir, "real-skill"), 0755)
-	os.WriteFile(filepath.Join(skillsDir, "real-skill", "SKILL.md"), []byte("# s"), 0644)
+	// Valid skill dir WITH the marker file
+	os.MkdirAll(filepath.Join(skillsDir, testRealSkillName), 0755)
+	os.WriteFile(filepath.Join(skillsDir, testRealSkillName, testSkillMarkerFile), []byte("# s"), 0644)
 
 	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.Skills, []string{"real-skill"}) {
-		t.Errorf("Skills: got %v, want [real-skill]", rc.Skills)
+	if !reflect.DeepEqual(rc.Skills, []string{testRealSkillName}) {
+		t.Errorf("Skills: got %v, want [%s]", rc.Skills, testRealSkillName)
 	}
 }
 
 // ── JSON shape produced by Save ───────────────────────────────────────────────
 
-func TestAgentsRC_JSONShape(t *testing.T) {
+func TestAgentsRCJSONShape(t *testing.T) {
 	tmp := t.TempDir()
 	rc := &AgentsRC{
 		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",

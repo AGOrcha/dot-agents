@@ -184,136 +184,122 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 		Sources: []Source{{Type: "local"}},
 	}
 
-	// Collect skills from global and project scopes
-	for _, scope := range []string{"global", projectName} {
-		dir := filepath.Join(agentsHome, "skills", scope)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			entryPath := filepath.Join(dir, e.Name())
-			if !isDirEntry(entryPath) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(entryPath, "SKILL.md")); err == nil {
-				rc.Skills = AppendUnique(rc.Skills, e.Name())
-			}
-		}
-	}
-
-	// Collect agents from global and project scopes
-	for _, scope := range []string{"global", projectName} {
-		dir := filepath.Join(agentsHome, "agents", scope)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			entryPath := filepath.Join(dir, e.Name())
-			if !isDirEntry(entryPath) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(entryPath, "AGENT.md")); err == nil {
-				rc.Agents = AppendUnique(rc.Agents, e.Name())
-			}
-		}
-	}
-
-	// Determine rule scopes
-	rc.Rules = []string{"global"}
-	projectRulesDir := filepath.Join(agentsHome, "rules", projectName)
-	if entries, err := os.ReadDir(projectRulesDir); err == nil {
-		for _, e := range entries {
-			ext := filepath.Ext(e.Name())
-			if ext == ".md" || ext == ".mdc" || ext == ".txt" {
-				rc.Rules = AppendUnique(rc.Rules, "project")
-				break
-			}
-		}
-	}
-
-	// Detect hooks — list which event types have non-empty entries
-	settingsPath := filepath.Join(agentsHome, "settings", projectName, "claude-code.json")
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		var settings map[string]any
-		if json.Unmarshal(data, &settings) == nil {
-			if hooksVal, ok := settings["hooks"]; ok {
-				if hooksMap, ok := hooksVal.(map[string]any); ok {
-					var hookEvents []string
-					for event, val := range hooksMap {
-						if list, ok := val.([]any); ok && len(list) > 0 {
-							hookEvents = append(hookEvents, event)
-						}
-					}
-					if len(hookEvents) > 0 {
-						sort.Strings(hookEvents)
-						rc.Hooks = StringsOrBool{Names: hookEvents}
-					}
-				}
-			}
-		}
-	}
-
-	// Detect MCP configs — list named servers
-	for _, scope := range []string{projectName, "global"} {
-		for _, fname := range []string{"claude.json", "mcp.json"} {
-			mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
-			data, err := os.ReadFile(mcpPath)
-			if err != nil {
-				continue
-			}
-			var mcpConfig map[string]any
-			if json.Unmarshal(data, &mcpConfig) != nil {
-				continue
-			}
-			if servers, ok := mcpConfig["servers"].(map[string]any); ok {
-				var names []string
-				for name := range servers {
-					names = append(names, name)
-				}
-				if len(names) > 0 {
-					sort.Strings(names)
-					rc.MCP = StringsOrBool{Names: names}
-				}
-			}
-			break // found a file, stop trying filenames
-		}
-		if rc.MCP.IsEnabled() {
-			break // found servers, stop trying scopes
-		}
-	}
-
-	// Detect platform settings (cursor.json as proxy)
-	for _, scope := range []string{projectName, "global"} {
-		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
-			rc.Settings = true
-			break
-		}
-	}
+	scopes := []string{"global", projectName}
+	rc.Skills = collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
+	rc.Agents = collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
+	rc.Rules = detectRuleScopes(agentsHome, projectName)
+	rc.Hooks = detectHookEvents(agentsHome, projectName)
+	rc.MCP = detectMCPServers(agentsHome, projectName)
+	rc.Settings = detectPlatformSettings(agentsHome, projectName)
 
 	return rc, nil
 }
 
-func collectScopedResourceNames(agentsHome, resourceType string, scopes []string, markerFile string) []string {
-	names := []string{}
+// collectScopedDirs returns unique entry names from resource subdirs that contain markerFile.
+func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) []string {
+	var names []string
 	for _, scope := range scopes {
 		dir := filepath.Join(agentsHome, resourceType, scope)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		for _, entry := range entries {
-			entryPath := filepath.Join(dir, entry.Name())
+		for _, e := range entries {
+			entryPath := filepath.Join(dir, e.Name())
 			if !isDirEntry(entryPath) {
 				continue
 			}
 			if _, err := os.Stat(filepath.Join(entryPath, markerFile)); err == nil {
-				names = append(names, entry.Name())
+				names = AppendUnique(names, e.Name())
 			}
 		}
 	}
 	return names
+}
+
+// detectHookEvents reads the project claude-code.json and returns a StringsOrBool
+// listing hook event names that have at least one entry.
+func detectHookEvents(agentsHome, projectName string) StringsOrBool {
+	settingsPath := filepath.Join(agentsHome, "settings", projectName, "claude-code.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return StringsOrBool{}
+	}
+	var settings map[string]any
+	if json.Unmarshal(data, &settings) != nil {
+		return StringsOrBool{}
+	}
+	hooksVal, ok := settings["hooks"]
+	if !ok {
+		return StringsOrBool{}
+	}
+	hooksMap, ok := hooksVal.(map[string]any)
+	if !ok {
+		return StringsOrBool{}
+	}
+	var hookEvents []string
+	for event, val := range hooksMap {
+		if list, ok := val.([]any); ok && len(list) > 0 {
+			hookEvents = append(hookEvents, event)
+		}
+	}
+	if len(hookEvents) == 0 {
+		return StringsOrBool{}
+	}
+	sort.Strings(hookEvents)
+	return StringsOrBool{Names: hookEvents}
+}
+
+// detectMCPServers scans MCP config files for the project and global scopes
+// and returns a StringsOrBool listing named server entries.
+func detectMCPServers(agentsHome, projectName string) StringsOrBool {
+	for _, scope := range []string{projectName, "global"} {
+		if result := readMCPScope(agentsHome, scope); result.IsEnabled() {
+			return result
+		}
+	}
+	return StringsOrBool{}
+}
+
+// readMCPScope tries claude.json then mcp.json for a single scope directory
+// and returns the server list from the first readable file.
+func readMCPScope(agentsHome, scope string) StringsOrBool {
+	for _, fname := range []string{"claude.json", "mcp.json"} {
+		mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
+		data, err := os.ReadFile(mcpPath)
+		if err != nil {
+			continue
+		}
+		var mcpConfig map[string]any
+		if json.Unmarshal(data, &mcpConfig) != nil {
+			continue
+		}
+		servers, ok := mcpConfig["servers"].(map[string]any)
+		if !ok {
+			break
+		}
+		var names []string
+		for name := range servers {
+			names = append(names, name)
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			return StringsOrBool{Names: names}
+		}
+		break // found a file, stop trying filenames
+	}
+	return StringsOrBool{}
+}
+
+// detectPlatformSettings returns true if a cursor.json settings file exists
+// for the project or global scope.
+func detectPlatformSettings(agentsHome, projectName string) bool {
+	for _, scope := range []string{projectName, "global"} {
+		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func detectRuleScopes(agentsHome, projectName string) []string {
@@ -330,28 +316,4 @@ func detectRuleScopes(agentsHome, projectName string) []string {
 		}
 	}
 	return scopes
-}
-
-func hasProjectClaudeHooks(agentsHome, projectName string) bool {
-	_, err := os.Stat(filepath.Join(agentsHome, "settings", projectName, "claude-code.json"))
-	return err == nil
-}
-
-func hasScopedMCPConfigs(agentsHome, projectName string) bool {
-	for _, scope := range []string{projectName, "global"} {
-		dir := filepath.Join(agentsHome, "mcp", scope)
-		if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func hasScopedCursorSettings(agentsHome, projectName string) bool {
-	for _, scope := range []string{projectName, "global"} {
-		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
-			return true
-		}
-	}
-	return false
 }

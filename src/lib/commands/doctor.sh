@@ -522,7 +522,7 @@ run_doctor_text() {
         # Check every declared git source — all must be fetched before reporting healthy.
         local missing_git=() present_git=()
         while IFS= read -r git_url; do
-          [ -z "$git_url" ] && continue
+          [[ -z "$git_url" ]] && continue
           # SHA-256 hash consistent with GitSourceCacheDir in Go (first 12 hex chars)
           local cache_hash
           cache_hash=$(echo -n "$git_url" | shasum -a 256 2>/dev/null | cut -c1-12 || \
@@ -548,7 +548,7 @@ run_doctor_text() {
         fi
       fi
     done <<< "$manifest_projects"
-    if [ "$any_manifest_issue" = false ]; then
+    if [[ "$any_manifest_issue" = false ]]; then
       echo -e "  ${DIM}Tip: run with -v to see per-project manifest details${NC}"
     fi
   else

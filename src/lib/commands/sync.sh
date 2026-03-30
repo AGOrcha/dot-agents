@@ -483,18 +483,18 @@ sync_pull() {
   if command -v jq >/dev/null 2>&1; then
     local manifest_projects=()
     while read -r name; do
-      [ -z "$name" ] && continue
+      [[ -z "$name" ]] && continue
       local proj_path
       proj_path=$(config_get_project_path "$name")
-      if [ -n "$proj_path" ] && [ -f "$proj_path/.agentsrc.json" ]; then
+      if [[ -n "$proj_path" ]] && [[ -f "$proj_path/.agentsrc.json" ]]; then
         local has_git
         has_git=$(jq -r '.sources[]? | select(.type=="git") | .url' "$proj_path/.agentsrc.json" 2>/dev/null | head -1)
-        if [ -n "$has_git" ]; then
+        if [[ -n "$has_git" ]]; then
           manifest_projects+=("$name")
         fi
       fi
     done <<< "$(config_list_projects)"
-    if [ ${#manifest_projects[@]} -gt 0 ]; then
+    if [[ ${#manifest_projects[@]} -gt 0 ]]; then
       echo ""
       log_info "Projects with git-source manifests — run 'dot-agents install' in each to pick up new resources:"
       for p in "${manifest_projects[@]}"; do

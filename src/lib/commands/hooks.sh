@@ -402,7 +402,7 @@ hooks_add() {
   echo -e "  Command: ${DIM}$command${NC}"
 
   # Auto-update .agentsrc.json manifest if at project scope
-  if [ "$global_only" != "true" ] && [ -n "$project_name" ]; then
+  if [[ "$global_only" != "true" ]] && [[ -n "$project_name" ]]; then
     _HOOKS_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if ! declare -F _agentsrc_add_to_field >/dev/null 2>&1; then
       # shellcheck source=install.sh
@@ -412,7 +412,7 @@ hooks_add() {
       local manifest
       manifest=$(config_get_project_path "$project_name" 2>/dev/null)
       manifest="${manifest:-$PWD}/$AGENTSRC_FILE"
-      if [ -f "$manifest" ]; then
+      if [[ -f "$manifest" ]]; then
         _agentsrc_add_to_field "hooks" "$hook_type" "$manifest"
         log_info "Updated .agentsrc.json: added hook event '$hook_type'"
       fi
@@ -494,7 +494,7 @@ hooks_remove() {
   log_success "Removed $hook_type hook at index $index"
 
   # Auto-update .agentsrc.json: remove event type if no hooks remain at project scope
-  if [ "$global_only" != "true" ] && [ -n "$project_name" ]; then
+  if [[ "$global_only" != "true" ]] && [[ -n "$project_name" ]]; then
     _HOOKS_INSTALL_DIR2="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if ! declare -F _agentsrc_remove_from_field >/dev/null 2>&1; then
       # shellcheck source=install.sh
@@ -504,11 +504,11 @@ hooks_remove() {
       local manifest
       manifest=$(config_get_project_path "$project_name" 2>/dev/null)
       manifest="${manifest:-$PWD}/$AGENTSRC_FILE"
-      if [ -f "$manifest" ]; then
+      if [[ -f "$manifest" ]]; then
         # Only remove event type from manifest if no hooks remain for it
         local remaining
         remaining=$(jq -r ".hooks.$hook_type | length" "$target_file" 2>/dev/null || echo "0")
-        if [ "$remaining" = "0" ]; then
+        if [[ "$remaining" = "0" ]]; then
           _agentsrc_remove_from_field "hooks" "$hook_type" "$manifest"
           log_info "Updated .agentsrc.json: removed hook event '$hook_type'"
         fi

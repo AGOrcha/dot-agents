@@ -309,13 +309,13 @@ install_generate() {
   # Detect hooks — list which event types have non-empty entries
   local hooks_val=false
   local hooks_settings="$AGENTS_HOME/settings/$project_name/claude-code.json"
-  if [ -f "$hooks_settings" ]; then
+  if [[ -f "$hooks_settings" ]]; then
     local hook_events=()
     while IFS= read -r evt; do
       hook_events+=("$evt")
     done < <(jq -r '.hooks | to_entries[] | select(.value | length > 0) | .key' \
                "$hooks_settings" 2>/dev/null | sort)
-    if [ ${#hook_events[@]} -gt 0 ]; then
+    if [[ ${#hook_events[@]} -gt 0 ]]; then
       hooks_val=$(printf '%s\n' "${hook_events[@]}" | jq -R . | jq -s .)
     fi
   fi
@@ -326,24 +326,24 @@ install_generate() {
   for scope in "$project_name" "global"; do
     for fname in "claude.json" "mcp.json"; do
       local candidate="$AGENTS_HOME/mcp/$scope/$fname"
-      [ -f "$candidate" ] && mcp_file="$candidate" && break
+      [[ -f "$candidate" ]] && mcp_file="$candidate" && break
     done
-    [ -n "$mcp_file" ] && break
+    [[ -n "$mcp_file" ]] && break
   done
-  if [ -n "$mcp_file" ]; then
+  if [[ -n "$mcp_file" ]]; then
     local server_names=()
     while IFS= read -r srv; do
       server_names+=("$srv")
     done < <(jq -r '.servers | keys[]' "$mcp_file" 2>/dev/null | sort)
-    if [ ${#server_names[@]} -gt 0 ]; then
+    if [[ ${#server_names[@]} -gt 0 ]]; then
       mcp_val=$(printf '%s\n' "${server_names[@]}" | jq -R . | jq -s .)
     fi
   fi
 
   # Detect settings
   local settings_val=false
-  if [ -f "$AGENTS_HOME/settings/$project_name/cursor.json" ] || \
-     [ -f "$AGENTS_HOME/settings/global/cursor.json" ]; then
+  if [[ -f "$AGENTS_HOME/settings/$project_name/cursor.json" ]] || \
+     [[ -f "$AGENTS_HOME/settings/global/cursor.json" ]]; then
     settings_val=true
   fi
 
@@ -416,19 +416,19 @@ install_generate() {
 # Usage: _agentsrc_add_to_field <field> <name> [manifest]
 _agentsrc_add_to_field() {
   local field="$1" name="$2" manifest="${3:-$PWD/$AGENTSRC_FILE}"
-  [ -f "$manifest" ] || return 0
+  [[ -f "$manifest" ]] || return 0
   _json_has_jq || return 0
 
   local current
   current=$(jq -r ".$field" "$manifest" 2>/dev/null)
 
   # If already `true`, everything is included — nothing to do
-  [ "$current" = "true" ] && return 0
+  [[ "$current" == "true" ]] && return 0
 
   # If false/null, start with just this name
   # If array, append if not already present
   local updated
-  if [ "$current" = "false" ] || [ "$current" = "null" ]; then
+  if [[ "$current" == "false" || "$current" == "null" ]]; then
     updated=$(jq --arg field "$field" --arg name "$name" \
       '.[$field] = [$name]' "$manifest")
   else
@@ -448,17 +448,17 @@ _agentsrc_add_to_field() {
 # Usage: _agentsrc_remove_from_field <field> <name> [manifest]
 _agentsrc_remove_from_field() {
   local field="$1" name="$2" manifest="${3:-$PWD/$AGENTSRC_FILE}"
-  [ -f "$manifest" ] || return 0
+  [[ -f "$manifest" ]] || return 0
   _json_has_jq || return 0
 
   local current
   current=$(jq -r ".$field" "$manifest" 2>/dev/null)
-  [ "$current" = "true" ] && return 0  # can't selectively remove from "all"
+  [[ "$current" == "true" ]] && return 0  # can't selectively remove from "all"
 
   local updated
   updated=$(jq --arg field "$field" --arg name "$name" \
     '.[$field] = [.[$field][] | select(. != $name)]' "$manifest" 2>/dev/null)
-  [ -n "$updated" ] && echo "$updated" > "$manifest"
+  [[ -n "$updated" ]] && echo "$updated" > "$manifest"
 }
 
 # ─── internal helpers ─────────────────────────────────────────────────────────

@@ -384,14 +384,14 @@ EOF
   echo "Or open directly: \$EDITOR $target_file"
 
   # Auto-update .agentsrc.json in the registered project repo, not CWD.
-  if [ "$scope" != "global" ] && command -v jq >/dev/null 2>&1; then
+  if [[ "$scope" != "global" ]] && command -v jq >/dev/null 2>&1; then
     local proj_path
     proj_path=$(config_get_project_path "$scope" 2>/dev/null)
-    if [ -n "$proj_path" ] && [ -f "$proj_path/$AGENTSRC_FILE" ]; then
+    if [[ -n "$proj_path" ]] && [[ -f "$proj_path/$AGENTSRC_FILE" ]]; then
       local manifest="$proj_path/$AGENTSRC_FILE"
       local already
       already=$(jq -r --arg n "$name" '(.agents // []) | index($n)' "$manifest" 2>/dev/null)
-      if [ "$already" = "null" ]; then
+      if [[ "$already" = "null" ]]; then
         local updated
         updated=$(jq --arg n "$name" '.agents = ((.agents // []) + [$n])' "$manifest")
         echo "$updated" > "$manifest"

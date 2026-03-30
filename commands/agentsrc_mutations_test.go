@@ -14,6 +14,7 @@ const (
 	testSkillName       = "new-skill"
 	testSourceTypeLocal = "local"
 	testSourceTypeGit   = "git"
+	errFmtChdir         = "chdir: %v"
 )
 
 // helpers ────────────────────────────────────────────────────────────────────
@@ -65,12 +66,12 @@ func setupEnv(t *testing.T, projectName string) (agentsHome, projectPath string)
 // TestCreateSkill_UpdatesRegisteredProjectManifest verifies that creating a
 // project-scoped skill writes to the registered repo's .agentsrc.json even
 // when the caller's CWD is a completely different directory.
-func TestCreateSkill_UpdatesRegisteredProjectManifest(t *testing.T) {
+func TestCreateSkillUpdatesRegisteredProjectManifest(t *testing.T) {
 	agentsHome, projectPath := setupEnv(t, testProjectName)
 
 	// CWD is a completely unrelated directory (the agentsHome itself).
 	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf("chdir: %v", err)
+		t.Fatalf(errFmtChdir, err)
 	}
 
 	if err := createSkill(testSkillName, testProjectName); err != nil {
@@ -97,7 +98,7 @@ func TestCreateSkill_UpdatesRegisteredProjectManifest(t *testing.T) {
 // TestCreateSkill_DoesNotMutateUnrelatedCWDManifest verifies that creating a
 // project-scoped skill does NOT touch a .agentsrc.json that happens to exist
 // in the current directory.
-func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
+func TestCreateSkillDoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 	agentsHome, _ := setupEnv(t, testProjectName)
 
 	// Write a second, unrelated manifest in agentsHome (which is our CWD).
@@ -110,7 +111,7 @@ func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 		t.Fatalf("save cwd manifest: %v", err)
 	}
 	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf("chdir: %v", err)
+		t.Fatalf(errFmtChdir, err)
 	}
 
 	if err := createSkill(testSkillName, testProjectName); err != nil {
@@ -131,11 +132,11 @@ func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 
 // TestCreateAgent_UpdatesRegisteredProjectManifest mirrors the skill test for
 // agents.
-func TestCreateAgent_UpdatesRegisteredProjectManifest(t *testing.T) {
+func TestCreateAgentUpdatesRegisteredProjectManifest(t *testing.T) {
 	agentsHome, projectPath := setupEnv(t, testProjectName)
 
 	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf("chdir: %v", err)
+		t.Fatalf(errFmtChdir, err)
 	}
 
 	if err := createAgent("new-agent", testProjectName); err != nil {
@@ -161,7 +162,7 @@ func TestCreateAgent_UpdatesRegisteredProjectManifest(t *testing.T) {
 // TestCreateSkill_UnregisteredProjectSkipsManifest verifies that creating a
 // skill for a project name that is NOT registered in config silently skips the
 // manifest update instead of panicking or writing to an arbitrary path.
-func TestCreateSkill_UnregisteredProjectSkipsManifest(t *testing.T) {
+func TestCreateSkillUnregisteredProjectSkipsManifest(t *testing.T) {
 	agentsHome, _ := setupEnv(t, testProjectName)
 	_ = agentsHome
 
@@ -216,7 +217,7 @@ func manifestGitSourcesStatus(t *testing.T, manifestPath string) (missing, prese
 
 // TestDoctorManifest_AllSourcesPresent verifies that a manifest with two git
 // sources where both caches exist is reported healthy.
-func TestDoctorManifest_AllSourcesPresent(t *testing.T) {
+func TestDoctorManifestAllSourcesPresent(t *testing.T) {
 	tmp := t.TempDir()
 	url1 := "https://github.com/example/repo1.git"
 	url2 := "https://github.com/example/repo2.git"
@@ -246,7 +247,7 @@ func TestDoctorManifest_AllSourcesPresent(t *testing.T) {
 // TestDoctorManifest_FirstPresentSecondMissing verifies that a manifest where
 // the first git source is cached but the second is not is NOT reported as
 // healthy — the old goto logic would have incorrectly returned "ok".
-func TestDoctorManifest_FirstPresentSecondMissing(t *testing.T) {
+func TestDoctorManifestFirstPresentSecondMissing(t *testing.T) {
 	tmp := t.TempDir()
 	url1 := "https://github.com/example/present.git"
 	url2 := "https://github.com/example/missing.git"
@@ -271,7 +272,7 @@ func TestDoctorManifest_FirstPresentSecondMissing(t *testing.T) {
 }
 
 // TestDoctorManifest_AllMissing verifies all-absent sources are all reported.
-func TestDoctorManifest_AllMissing(t *testing.T) {
+func TestDoctorManifestAllMissing(t *testing.T) {
 	tmp := t.TempDir()
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
@@ -291,7 +292,7 @@ func TestDoctorManifest_AllMissing(t *testing.T) {
 
 // TestDoctorManifest_LocalOnlyNoGitSources verifies that a local-only manifest
 // has no git sources to check.
-func TestDoctorManifest_LocalOnlyNoGitSources(t *testing.T) {
+func TestDoctorManifestLocalOnlyNoGitSources(t *testing.T) {
 	tmp := t.TempDir()
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
