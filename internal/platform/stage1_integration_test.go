@@ -12,9 +12,31 @@ import (
 )
 
 const (
-	fixtureProject      = "proj"
-	hookManifestName    = "HOOK.yaml"
-	fixtureNoopScriptSh = "#!/bin/sh\nexit 0\n"
+	fixtureProject            = "proj"
+	hookManifestName          = "HOOK.yaml"
+	fixtureNoopScriptSh       = "#!/bin/sh\nexit 0\n"
+	dirAgents                 = ".agents"
+	dirClaude                 = ".claude"
+	dirCursor                 = ".cursor"
+	dirCodex                  = ".codex"
+	dirGithub                 = ".github"
+	fileSettingsJSON          = "settings.json"
+	fileSettingsLocalJSON     = "settings.local.json"
+	fileHooksJSON             = "hooks.json"
+	fileCursorJSON            = "cursor.json"
+	fileMCPJSON               = "mcp.json"
+	fileClaudeCodeJSON        = "claude-code.json"
+	filePreToolJSON           = "pre-tool.json"
+	filePostSaveJSON          = "post-save.json"
+	fileCopilotInstructionsMD = "copilot-instructions.md"
+	filePromptLogJSON         = "prompt-log.json"
+	hookNameFormatWrite       = "format-write"
+	hookNameSessionBanner     = "session-banner"
+	hookNameBashGuard         = "bash-guard"
+	hookNamePromptLog         = "prompt-log"
+	cmdBannerScript           = "./banner.sh"
+	cmdGuardScript            = "./guard.sh"
+	cmdPromptLogScript        = "./prompt-log.sh"
 )
 
 type hookBundleFixture struct {
@@ -32,43 +54,33 @@ type platformTestPaths struct {
 	repo       string
 }
 
-func TestClaudeCreateLinks_DualSkillOutputs(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
-
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
+func TestClaudeCreateLinksDualSkillOutputs(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
 
 	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
 	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: review changes\n---\n")
 	mkdirAll(t, repo)
 
-	if err := NewClaude().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "skills", "review"), skillDir)
-	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), skillDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "skills", "review"), skillDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
 }
 
-func TestCursorCreateLinks_HardlinksAndMCPSelection(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
-
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
+func TestCursorCreateLinksHardlinksAndMCPSelection(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
 
 	globalRule := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
 	projectRule := filepath.Join(agentsHome, "rules", "proj", "lint.mdc")
-	cursorSettings := filepath.Join(agentsHome, "settings", "proj", "cursor.json")
-	cursorMCP := filepath.Join(agentsHome, "mcp", "proj", "cursor.json")
-	fallbackMCP := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
+	cursorSettings := filepath.Join(agentsHome, "settings", "proj", fileCursorJSON)
+	cursorMCP := filepath.Join(agentsHome, "mcp", "proj", fileCursorJSON)
+	fallbackMCP := filepath.Join(agentsHome, "mcp", "proj", fileMCPJSON)
 	cursorIgnore := filepath.Join(agentsHome, "settings", "proj", "cursorignore")
-	cursorHooks := filepath.Join(agentsHome, "hooks", "proj", "cursor.json")
+	cursorHooks := filepath.Join(agentsHome, "hooks", "proj", fileCursorJSON)
 
 	writeTextFile(t, globalRule, "---\ndescription: global rules\n---\n")
 	writeTextFile(t, projectRule, "---\ndescription: lint\n---\n")
@@ -79,89 +91,72 @@ func TestCursorCreateLinks_HardlinksAndMCPSelection(t *testing.T) {
 	writeTextFile(t, cursorHooks, "{\"hooks\":[]}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCursor().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "rules", "global--rules.mdc"), globalRule)
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "rules", "proj--lint.mdc"), projectRule)
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "settings.json"), cursorSettings)
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "mcp.json"), cursorMCP)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, "rules", "global--rules.mdc"), globalRule)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, "rules", "proj--lint.mdc"), projectRule)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileSettingsJSON), cursorSettings)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileMCPJSON), cursorMCP)
 	assertHardlinked(t, filepath.Join(repo, ".cursorignore"), cursorIgnore)
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "hooks.json"), cursorHooks)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileHooksJSON), cursorHooks)
 }
 
-func TestCursorCreateLinks_MCPFallsBackToProjectGenericBeforeGlobalPlatformFile(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
+func TestCursorCreateLinksMCPFallsBackToProjectGenericBeforeGlobalPlatformFile(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
 
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
-
-	projectGenericMCP := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
-	globalCursorMCP := filepath.Join(agentsHome, "mcp", "global", "cursor.json")
+	projectGenericMCP := filepath.Join(agentsHome, "mcp", "proj", fileMCPJSON)
+	globalCursorMCP := filepath.Join(agentsHome, "mcp", "global", fileCursorJSON)
 
 	writeTextFile(t, projectGenericMCP, "{\"source\":\"project-generic\"}\n")
 	writeTextFile(t, globalCursorMCP, "{\"source\":\"global-cursor\"}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCursor().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "mcp.json"), projectGenericMCP)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileMCPJSON), projectGenericMCP)
 }
 
-func TestCopilotCreateLinks_MCPSelectionAndHookFanout(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
-
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
+func TestCopilotCreateLinksMCPSelectionAndHookFanout(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
 
 	copilotMCP := filepath.Join(agentsHome, "mcp", "proj", "copilot.json")
-	fallbackMCP := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
+	fallbackMCP := filepath.Join(agentsHome, "mcp", "proj", fileMCPJSON)
 	hooksDir := filepath.Join(agentsHome, "hooks", "proj")
-	settingsCompat := filepath.Join(agentsHome, "settings", "proj", "claude-code.json")
+	settingsCompat := filepath.Join(agentsHome, "settings", "proj", fileClaudeCodeJSON)
 
 	writeTextFile(t, copilotMCP, "{\"copilot\":true}\n")
 	writeTextFile(t, fallbackMCP, "{\"mcp\":true}\n")
-	writeTextFile(t, filepath.Join(hooksDir, "claude-code.json"), "{\"hooks\":[]}\n")
-	writeTextFile(t, filepath.Join(hooksDir, "pre-tool.json"), "{\"name\":\"pre-tool\"}\n")
-	writeTextFile(t, filepath.Join(hooksDir, "post-save.json"), "{\"name\":\"post-save\"}\n")
-	writeTextFile(t, filepath.Join(hooksDir, "cursor.json"), "{\"name\":\"cursor\"}\n")
+	writeTextFile(t, filepath.Join(hooksDir, fileClaudeCodeJSON), "{\"hooks\":[]}\n")
+	writeTextFile(t, filepath.Join(hooksDir, filePreToolJSON), "{\"name\":\"pre-tool\"}\n")
+	writeTextFile(t, filepath.Join(hooksDir, filePostSaveJSON), "{\"name\":\"post-save\"}\n")
+	writeTextFile(t, filepath.Join(hooksDir, fileCursorJSON), "{\"name\":\"cursor\"}\n")
 	writeTextFile(t, settingsCompat, "{\"settings\":true}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".vscode", "mcp.json"), copilotMCP)
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "settings.local.json"), filepath.Join(hooksDir, "claude-code.json"))
-	assertSymlinkTarget(t, filepath.Join(repo, ".github", "hooks", "pre-tool.json"), filepath.Join(hooksDir, "pre-tool.json"))
-	assertSymlinkTarget(t, filepath.Join(repo, ".github", "hooks", "post-save.json"), filepath.Join(hooksDir, "post-save.json"))
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "cursor.json"))
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "claude-code.json"))
+	assertSymlinkTarget(t, filepath.Join(repo, ".vscode", fileMCPJSON), copilotMCP)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), filepath.Join(hooksDir, fileClaudeCodeJSON))
+	assertSymlinkTarget(t, filepath.Join(repo, dirGithub, "hooks", filePreToolJSON), filepath.Join(hooksDir, filePreToolJSON))
+	assertSymlinkTarget(t, filepath.Join(repo, dirGithub, "hooks", filePostSaveJSON), filepath.Join(hooksDir, filePostSaveJSON))
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", fileCursorJSON))
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", fileClaudeCodeJSON))
 }
 
-func TestClaudeCreateLinks_PrefersHooksOverSettingsAndUsesGlobalCompatForUser(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
+func TestClaudeCreateLinksPrefersHooksOverSettingsAndUsesGlobalCompatForUser(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	home := paths.home
+	repo := paths.repo
 
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
-
-	projectHook := filepath.Join(agentsHome, "hooks", "proj", "claude-code.json")
-	projectSettings := filepath.Join(agentsHome, "settings", "proj", "claude-code.json")
-	globalHook := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
-	globalSettings := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	projectHook := filepath.Join(agentsHome, "hooks", "proj", fileClaudeCodeJSON)
+	projectSettings := filepath.Join(agentsHome, "settings", "proj", fileClaudeCodeJSON)
+	globalHook := filepath.Join(agentsHome, "hooks", "global", fileClaudeCodeJSON)
+	globalSettings := filepath.Join(agentsHome, "settings", "global", fileClaudeCodeJSON)
 
 	writeTextFile(t, projectHook, "{\"source\":\"project-hook\"}\n")
 	writeTextFile(t, projectSettings, "{\"source\":\"project-settings\"}\n")
@@ -169,62 +164,53 @@ func TestClaudeCreateLinks_PrefersHooksOverSettingsAndUsesGlobalCompatForUser(t 
 	writeTextFile(t, globalSettings, "{\"source\":\"global-settings\"}\n")
 	mkdirAll(t, repo)
 
-	if err := NewClaude().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "settings.local.json"), projectHook)
-	assertSymlinkTarget(t, filepath.Join(home, ".claude", "settings.json"), globalHook)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), projectHook)
+	assertSymlinkTarget(t, filepath.Join(home, dirClaude, fileSettingsJSON), globalHook)
 }
 
-func TestCursorCreateLinks_PrefersProjectHooksForRepoAndGlobalForUser(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	home := filepath.Join(tmp, "home")
-	repo := filepath.Join(tmp, "repo")
+func TestCursorCreateLinksPrefersProjectHooksForRepoAndGlobalForUser(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	home := paths.home
+	repo := paths.repo
 
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("HOME", home)
-
-	globalHook := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
-	projectHook := filepath.Join(agentsHome, "hooks", "proj", "cursor.json")
+	globalHook := filepath.Join(agentsHome, "hooks", "global", fileCursorJSON)
+	projectHook := filepath.Join(agentsHome, "hooks", "proj", fileCursorJSON)
 	writeTextFile(t, globalHook, "{\"scope\":\"global\"}\n")
 	writeTextFile(t, projectHook, "{\"scope\":\"project\"}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCursor().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "hooks.json"), projectHook)
-	assertHardlinked(t, filepath.Join(home, ".cursor", "hooks.json"), globalHook)
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileHooksJSON), projectHook)
+	assertHardlinked(t, filepath.Join(home, dirCursor, fileHooksJSON), globalHook)
 }
 
-func TestCopilotCreateLinks_ClaudeCompatFallsBackToProjectSettingsBeforeGlobalHooks(t *testing.T) {
+func TestCopilotCreateLinksClaudeCompatFallsBackToProjectSettingsBeforeGlobalHooks(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, dirAgents)
 	home := filepath.Join(tmp, "home")
 	repo := filepath.Join(tmp, "repo")
 
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Setenv("HOME", home)
 
-	projectSettings := filepath.Join(agentsHome, "settings", "proj", "claude-code.json")
-	globalHook := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+	projectSettings := filepath.Join(agentsHome, "settings", "proj", fileClaudeCodeJSON)
+	globalHook := filepath.Join(agentsHome, "hooks", "global", fileClaudeCodeJSON)
 	writeTextFile(t, projectSettings, "{\"source\":\"project-settings\"}\n")
 	writeTextFile(t, globalHook, "{\"source\":\"global-hook\"}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "settings.local.json"), projectSettings)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), projectSettings)
 }
 
-func TestCodexCreateLinks_PrefersProjectFallbackHookOverGlobalPrimary(t *testing.T) {
+func TestCodexCreateLinksPrefersProjectFallbackHookOverGlobalPrimary(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, dirAgents)
 	home := filepath.Join(tmp, "home")
 	repo := filepath.Join(tmp, "repo")
 
@@ -237,17 +223,15 @@ func TestCodexCreateLinks_PrefersProjectFallbackHookOverGlobalPrimary(t *testing
 	writeTextFile(t, projectFallback, "{\"source\":\"project-fallback\"}\n")
 	mkdirAll(t, repo)
 
-	if err := NewCodex().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Codex", NewCodex(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".codex", "hooks.json"), projectFallback)
-	assertSymlinkTarget(t, filepath.Join(home, ".codex", "hooks.json"), projectFallback)
+	assertSymlinkTarget(t, filepath.Join(repo, dirCodex, fileHooksJSON), projectFallback)
+	assertSymlinkTarget(t, filepath.Join(home, dirCodex, fileHooksJSON), projectFallback)
 }
 
-func TestCopilotCreateLinks_PrefersProjectInstructions(t *testing.T) {
+func TestCopilotCreateLinksPrefersProjectInstructions(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, dirAgents)
 	home := filepath.Join(tmp, "home")
 	repo := filepath.Join(tmp, "repo")
 
@@ -255,34 +239,32 @@ func TestCopilotCreateLinks_PrefersProjectInstructions(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	globalFallbackRules := filepath.Join(agentsHome, "rules", "global", "rules.md")
-	globalInstructions := filepath.Join(agentsHome, "rules", "global", "copilot-instructions.md")
-	projectInstructions := filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md")
+	globalInstructions := filepath.Join(agentsHome, "rules", "global", fileCopilotInstructionsMD)
+	projectInstructions := filepath.Join(agentsHome, "rules", "proj", fileCopilotInstructionsMD)
 
 	writeTextFile(t, globalFallbackRules, "# Global Rules\n")
 	writeTextFile(t, globalInstructions, "# Global Copilot Instructions\n")
 	writeTextFile(t, projectInstructions, "# Project Copilot Instructions\n")
 	mkdirAll(t, repo)
 
-	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("CreateLinks failed: %v", err)
-	}
+	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".github", "copilot-instructions.md"), projectInstructions)
+	assertSymlinkTarget(t, filepath.Join(repo, dirGithub, fileCopilotInstructionsMD), projectInstructions)
 }
 
-func TestHookTranslationAcrossPlatforms_UsesProjectHookSources(t *testing.T) {
+func TestHookTranslationAcrossPlatformsUsesProjectHookSources(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, dirAgents)
 	home := filepath.Join(tmp, "home")
 	repo := filepath.Join(tmp, "repo")
 
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Setenv("HOME", home)
 
-	cursorHook := filepath.Join(agentsHome, "hooks", "proj", "cursor.json")
+	cursorHook := filepath.Join(agentsHome, "hooks", "proj", fileCursorJSON)
 	codexHook := filepath.Join(agentsHome, "hooks", "proj", "codex.json")
-	claudeCompatHook := filepath.Join(agentsHome, "hooks", "proj", "claude-code.json")
-	copilotProjectHook := filepath.Join(agentsHome, "hooks", "proj", "pre-tool.json")
+	claudeCompatHook := filepath.Join(agentsHome, "hooks", "proj", fileClaudeCodeJSON)
+	copilotProjectHook := filepath.Join(agentsHome, "hooks", "proj", filePreToolJSON)
 
 	writeTextFile(t, cursorHook, "{\"hooks\":[\"cursor\"]}\n")
 	writeTextFile(t, codexHook, "{\"hooks\":[\"codex\"]}\n")
@@ -303,27 +285,27 @@ func TestHookTranslationAcrossPlatforms_UsesProjectHookSources(t *testing.T) {
 		t.Fatalf("Copilot CreateLinks failed: %v", err)
 	}
 
-	assertHardlinked(t, filepath.Join(repo, ".cursor", "hooks.json"), cursorHook)
-	assertSymlinkTarget(t, filepath.Join(repo, ".codex", "hooks.json"), codexHook)
-	assertSymlinkTarget(t, filepath.Join(home, ".codex", "hooks.json"), codexHook)
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "settings.local.json"), claudeCompatHook)
-	assertNoFile(t, filepath.Join(home, ".claude", "settings.json"))
-	assertSymlinkTarget(t, filepath.Join(repo, ".github", "hooks", "pre-tool.json"), copilotProjectHook)
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "cursor.json"))
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "claude-code.json"))
+	assertHardlinked(t, filepath.Join(repo, dirCursor, fileHooksJSON), cursorHook)
+	assertSymlinkTarget(t, filepath.Join(repo, dirCodex, fileHooksJSON), codexHook)
+	assertSymlinkTarget(t, filepath.Join(home, dirCodex, fileHooksJSON), codexHook)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), claudeCompatHook)
+	assertNoFile(t, filepath.Join(home, dirClaude, fileSettingsJSON))
+	assertSymlinkTarget(t, filepath.Join(repo, dirGithub, "hooks", filePreToolJSON), copilotProjectHook)
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", fileCursorJSON))
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", fileClaudeCodeJSON))
 }
 
 func TestClaudeCompatTranslationFallsBackToSettingsBucket(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, dirAgents)
 	home := filepath.Join(tmp, "home")
 	repo := filepath.Join(tmp, "repo")
 
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Setenv("HOME", home)
 
-	projectSettings := filepath.Join(agentsHome, "settings", "proj", "claude-code.json")
-	globalSettings := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	projectSettings := filepath.Join(agentsHome, "settings", "proj", fileClaudeCodeJSON)
+	globalSettings := filepath.Join(agentsHome, "settings", "global", fileClaudeCodeJSON)
 	writeTextFile(t, projectSettings, "{\"scope\":\"project-settings\"}\n")
 	writeTextFile(t, globalSettings, "{\"scope\":\"global-settings\"}\n")
 	mkdirAll(t, repo)
@@ -335,20 +317,20 @@ func TestClaudeCompatTranslationFallsBackToSettingsBucket(t *testing.T) {
 		t.Fatalf("Copilot CreateLinks failed: %v", err)
 	}
 
-	assertSymlinkTarget(t, filepath.Join(repo, ".claude", "settings.local.json"), projectSettings)
-	assertSymlinkTarget(t, filepath.Join(home, ".claude", "settings.json"), globalSettings)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), projectSettings)
+	assertSymlinkTarget(t, filepath.Join(home, dirClaude, fileSettingsJSON), globalSettings)
 }
 
-func TestClaudeCreateLinks_RendersCanonicalHookBundles(t *testing.T) {
+func TestClaudeCreateLinksRendersCanonicalHookBundles(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	home := paths.home
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "format-write")
-	globalHookDir := filepath.Join(agentsHome, "hooks", "global", "session-banner")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNameFormatWrite)
+	globalHookDir := filepath.Join(agentsHome, "hooks", "global", hookNameSessionBanner)
 	projectRunScript := writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:            "format-write",
+		Name:            hookNameFormatWrite,
 		When:            "pre_tool_use",
 		MatchTools:      []string{"Write", "Edit"},
 		MatchExpression: "Write | Edit",
@@ -356,17 +338,17 @@ func TestClaudeCreateLinks_RendersCanonicalHookBundles(t *testing.T) {
 		EnabledOn:       []string{"claude"},
 	})
 	globalBannerScript := writeHookBundleFixture(t, globalHookDir, hookBundleFixture{
-		Name:      "session-banner",
+		Name:      hookNameSessionBanner,
 		When:      "session_start",
-		Command:   "./banner.sh",
+		Command:   cmdBannerScript,
 		EnabledOn: []string{"claude"},
 	})
 	mkdirAll(t, repo)
 
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
-	projectJSON := readJSONFile(t, filepath.Join(repo, ".claude", "settings.local.json"))
-	userJSON := readJSONFile(t, filepath.Join(home, ".claude", "settings.json"))
+	projectJSON := readJSONFile(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON))
+	userJSON := readJSONFile(t, filepath.Join(home, dirClaude, fileSettingsJSON))
 
 	assertJSONPathEquals(t, projectJSON, "hooks.PreToolUse.0.matcher", "Write | Edit")
 	assertJSONPathEquals(t, projectJSON, "hooks.PreToolUse.0.hooks.0.type", "command")
@@ -374,14 +356,14 @@ func TestClaudeCreateLinks_RendersCanonicalHookBundles(t *testing.T) {
 	assertJSONPathEquals(t, userJSON, "hooks.SessionStart.0.hooks.0.command", globalBannerScript)
 }
 
-func TestClaudeRemoveLinks_RemovesRenderedCanonicalHookSettings(t *testing.T) {
+func TestClaudeRemoveLinksRemovesRenderedCanonicalHookSettings(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "format-write")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNameFormatWrite)
 	writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:      "format-write",
+		Name:      hookNameFormatWrite,
 		When:      "pre_tool_use",
 		Command:   "./run.sh",
 		EnabledOn: []string{"claude"},
@@ -391,21 +373,21 @@ func TestClaudeRemoveLinks_RemovesRenderedCanonicalHookSettings(t *testing.T) {
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 	mustRemoveLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(repo, ".claude", "settings.local.json"))
+	assertNoFile(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON))
 }
 
-func TestClaudeCreateLinks_PrunesGlobalRenderedUserSettingsWhenCanonicalHooksDisappear(t *testing.T) {
+func TestClaudeCreateLinksPrunesGlobalRenderedUserSettingsWhenCanonicalHooksDisappear(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	home := paths.home
 	repo := paths.repo
 
-	globalHookDir := filepath.Join(agentsHome, "hooks", "global", "session-banner")
+	globalHookDir := filepath.Join(agentsHome, "hooks", "global", hookNameSessionBanner)
 	manifestPath := filepath.Join(globalHookDir, hookManifestName)
 	writeHookBundleFixture(t, globalHookDir, hookBundleFixture{
-		Name:      "session-banner",
+		Name:      hookNameSessionBanner,
 		When:      "session_start",
-		Command:   "./banner.sh",
+		Command:   cmdBannerScript,
 		EnabledOn: []string{"claude"},
 	})
 	mkdirAll(t, repo)
@@ -416,29 +398,29 @@ func TestClaudeCreateLinks_PrunesGlobalRenderedUserSettingsWhenCanonicalHooksDis
 	}
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(home, ".claude", "settings.json"))
-	assertNoFile(t, filepath.Join(repo, ".claude", "settings.local.json"))
+	assertNoFile(t, filepath.Join(home, dirClaude, fileSettingsJSON))
+	assertNoFile(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON))
 }
 
-func TestCursorAndCodexCreateLinks_RenderCanonicalHookBundles(t *testing.T) {
+func TestCursorAndCodexCreateLinksRenderCanonicalHookBundles(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	home := paths.home
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "bash-guard")
-	globalHookDir := filepath.Join(agentsHome, "hooks", "global", "session-banner")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNameBashGuard)
+	globalHookDir := filepath.Join(agentsHome, "hooks", "global", hookNameSessionBanner)
 	projectGuardScript := writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:       "bash-guard",
+		Name:       hookNameBashGuard,
 		When:       "pre_tool_use",
 		MatchTools: []string{"Bash"},
-		Command:    "./guard.sh",
+		Command:    cmdGuardScript,
 		EnabledOn:  []string{"cursor", "codex"},
 	})
 	globalBannerScript := writeHookBundleFixture(t, globalHookDir, hookBundleFixture{
-		Name:      "session-banner",
+		Name:      hookNameSessionBanner,
 		When:      "session_start",
-		Command:   "./banner.sh",
+		Command:   cmdBannerScript,
 		EnabledOn: []string{"cursor", "codex"},
 	})
 	mkdirAll(t, repo)
@@ -446,10 +428,10 @@ func TestCursorAndCodexCreateLinks_RenderCanonicalHookBundles(t *testing.T) {
 	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 	mustCreateLinks(t, "Codex", NewCodex(), fixtureProject, repo)
 
-	cursorProject := readJSONFile(t, filepath.Join(repo, ".cursor", "hooks.json"))
-	cursorUser := readJSONFile(t, filepath.Join(home, ".cursor", "hooks.json"))
-	codexProject := readJSONFile(t, filepath.Join(repo, ".codex", "hooks.json"))
-	codexUser := readJSONFile(t, filepath.Join(home, ".codex", "hooks.json"))
+	cursorProject := readJSONFile(t, filepath.Join(repo, dirCursor, fileHooksJSON))
+	cursorUser := readJSONFile(t, filepath.Join(home, dirCursor, fileHooksJSON))
+	codexProject := readJSONFile(t, filepath.Join(repo, dirCodex, fileHooksJSON))
+	codexUser := readJSONFile(t, filepath.Join(home, dirCodex, fileHooksJSON))
 
 	assertJSONPathEquals(t, cursorProject, "version", float64(1))
 	assertJSONPathEquals(t, cursorProject, "hooks.preToolUse.0.command", projectGuardScript)
@@ -461,17 +443,17 @@ func TestCursorAndCodexCreateLinks_RenderCanonicalHookBundles(t *testing.T) {
 	assertJSONPathEquals(t, codexUser, "hooks.SessionStart.0.hooks.0.command", globalBannerScript)
 }
 
-func TestCursorAndCodexRemoveLinks_RemoveRenderedCanonicalHookFiles(t *testing.T) {
+func TestCursorAndCodexRemoveLinksRemoveRenderedCanonicalHookFiles(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "bash-guard")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNameBashGuard)
 	writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:       "bash-guard",
+		Name:       hookNameBashGuard,
 		When:       "pre_tool_use",
 		MatchTools: []string{"Bash"},
-		Command:    "./guard.sh",
+		Command:    cmdGuardScript,
 		EnabledOn:  []string{"cursor", "codex"},
 	})
 	mkdirAll(t, repo)
@@ -481,22 +463,22 @@ func TestCursorAndCodexRemoveLinks_RemoveRenderedCanonicalHookFiles(t *testing.T
 	mustRemoveLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 	mustRemoveLinks(t, "Codex", NewCodex(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(repo, ".cursor", "hooks.json"))
-	assertNoFile(t, filepath.Join(repo, ".codex", "hooks.json"))
+	assertNoFile(t, filepath.Join(repo, dirCursor, fileHooksJSON))
+	assertNoFile(t, filepath.Join(repo, dirCodex, fileHooksJSON))
 }
 
-func TestCursorAndCodexCreateLinks_PruneRenderedFilesWhenCanonicalHooksDisappear(t *testing.T) {
+func TestCursorAndCodexCreateLinksPruneRenderedFilesWhenCanonicalHooksDisappear(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "bash-guard")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNameBashGuard)
 	manifestPath := filepath.Join(projectHookDir, hookManifestName)
 	writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:       "bash-guard",
+		Name:       hookNameBashGuard,
 		When:       "pre_tool_use",
 		MatchTools: []string{"Bash"},
-		Command:    "./guard.sh",
+		Command:    cmdGuardScript,
 		EnabledOn:  []string{"cursor", "codex"},
 	})
 	mkdirAll(t, repo)
@@ -509,36 +491,36 @@ func TestCursorAndCodexCreateLinks_PruneRenderedFilesWhenCanonicalHooksDisappear
 	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
 	mustCreateLinks(t, "Codex", NewCodex(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(repo, ".cursor", "hooks.json"))
-	assertNoFile(t, filepath.Join(repo, ".codex", "hooks.json"))
+	assertNoFile(t, filepath.Join(repo, dirCursor, fileHooksJSON))
+	assertNoFile(t, filepath.Join(repo, dirCodex, fileHooksJSON))
 }
 
-func TestCopilotCreateLinks_RendersCanonicalHookBundles(t *testing.T) {
+func TestCopilotCreateLinksRendersCanonicalHookBundles(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "prompt-log")
-	globalHookDir := filepath.Join(agentsHome, "hooks", "global", "session-banner")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNamePromptLog)
+	globalHookDir := filepath.Join(agentsHome, "hooks", "global", hookNameSessionBanner)
 	projectPromptScript := writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:      "prompt-log",
+		Name:      hookNamePromptLog,
 		When:      "user_prompt_submit",
-		Command:   "./prompt-log.sh",
+		Command:   cmdPromptLogScript,
 		EnabledOn: []string{"copilot"},
 	})
 	globalBannerScript := writeHookBundleFixture(t, globalHookDir, hookBundleFixture{
-		Name:      "session-banner",
+		Name:      hookNameSessionBanner,
 		When:      "session_start",
-		Command:   "./banner.sh",
+		Command:   cmdBannerScript,
 		EnabledOn: []string{"copilot"},
 	})
 	mkdirAll(t, repo)
 
 	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	sessionFile := readJSONFile(t, filepath.Join(repo, ".github", "hooks", "session-banner.json"))
-	promptFile := readJSONFile(t, filepath.Join(repo, ".github", "hooks", "prompt-log.json"))
-	compatFile := readJSONFile(t, filepath.Join(repo, ".claude", "settings.local.json"))
+	sessionFile := readJSONFile(t, filepath.Join(repo, dirGithub, "hooks", hookNameSessionBanner+".json"))
+	promptFile := readJSONFile(t, filepath.Join(repo, dirGithub, "hooks", filePromptLogJSON))
+	compatFile := readJSONFile(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON))
 
 	assertJSONPathEquals(t, sessionFile, "version", float64(1))
 	assertJSONPathEquals(t, sessionFile, "hooks.sessionStart.0.type", "command")
@@ -547,16 +529,16 @@ func TestCopilotCreateLinks_RendersCanonicalHookBundles(t *testing.T) {
 	assertJSONPathEquals(t, compatFile, "hooks.UserPromptSubmit.0.hooks.0.command", projectPromptScript)
 }
 
-func TestCopilotRemoveLinks_RemovesRenderedCanonicalHookFiles(t *testing.T) {
+func TestCopilotRemoveLinksRemovesRenderedCanonicalHookFiles(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "prompt-log")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNamePromptLog)
 	writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:      "prompt-log",
+		Name:      hookNamePromptLog,
 		When:      "user_prompt_submit",
-		Command:   "./prompt-log.sh",
+		Command:   cmdPromptLogScript,
 		EnabledOn: []string{"copilot"},
 	})
 	mkdirAll(t, repo)
@@ -564,23 +546,23 @@ func TestCopilotRemoveLinks_RemovesRenderedCanonicalHookFiles(t *testing.T) {
 	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 	mustRemoveLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(repo, ".claude", "settings.local.json"))
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "prompt-log.json"))
+	assertNoFile(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON))
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", filePromptLogJSON))
 }
 
-func TestCopilotCreateLinks_PrunesStaleRenderedHookFanout(t *testing.T) {
+func TestCopilotCreateLinksPrunesStaleRenderedHookFanout(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
 	repo := paths.repo
 
-	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", "prompt-log")
+	projectHookDir := filepath.Join(agentsHome, "hooks", "proj", hookNamePromptLog)
 	projectPromptScript := writeHookBundleFixture(t, projectHookDir, hookBundleFixture{
-		Name:      "prompt-log",
+		Name:      hookNamePromptLog,
 		When:      "user_prompt_submit",
-		Command:   "./prompt-log.sh",
+		Command:   cmdPromptLogScript,
 		EnabledOn: []string{"copilot"},
 	})
-	writeTextFile(t, filepath.Join(repo, ".github", "hooks", "stale.json"), `{
+	writeTextFile(t, filepath.Join(repo, dirGithub, "hooks", "stale.json"), `{
   "version": 1,
   "hooks": {
     "sessionStart": [
@@ -596,15 +578,15 @@ func TestCopilotCreateLinks_PrunesStaleRenderedHookFanout(t *testing.T) {
 
 	mustCreateLinks(t, "Copilot", NewCopilot(), fixtureProject, repo)
 
-	assertNoFile(t, filepath.Join(repo, ".github", "hooks", "stale.json"))
-	assertJSONPathEquals(t, readJSONFile(t, filepath.Join(repo, ".github", "hooks", "prompt-log.json")), "hooks.userPromptSubmitted.0.bash", projectPromptScript)
+	assertNoFile(t, filepath.Join(repo, dirGithub, "hooks", "stale.json"))
+	assertJSONPathEquals(t, readJSONFile(t, filepath.Join(repo, dirGithub, "hooks", filePromptLogJSON)), "hooks.userPromptSubmitted.0.bash", projectPromptScript)
 }
 
 func newPlatformTestPaths(t *testing.T) platformTestPaths {
 	t.Helper()
 	tmp := t.TempDir()
 	paths := platformTestPaths{
-		agentsHome: filepath.Join(tmp, ".agents"),
+		agentsHome: filepath.Join(tmp, dirAgents),
 		home:       filepath.Join(tmp, "home"),
 		repo:       filepath.Join(tmp, "repo"),
 	}

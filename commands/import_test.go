@@ -8,7 +8,11 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const canonicalImportProject = "proj"
+const (
+	canonicalImportProject = "proj"
+	promptLogJSON          = "prompt-log.json"
+	yamlUnmarshalFailedFmt = "yaml.Unmarshal failed: %v\n%s"
+)
 
 func TestMapGlobalRelToDest(t *testing.T) {
 	cases := []struct {
@@ -55,7 +59,7 @@ func TestMapResourceRelToDestHooks(t *testing.T) {
 
 func TestCanonicalHookBundleContentFromCopilotFile(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "prompt-log.json")
+	src := filepath.Join(dir, promptLogJSON)
 	if err := os.WriteFile(src, []byte(`{
   "version": 1,
   "hooks": {
@@ -79,7 +83,7 @@ func TestCanonicalHookBundleContentFromCopilotFile(t *testing.T) {
 
 	var manifest map[string]any
 	if err := yaml.Unmarshal(content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(content))
+		t.Fatalf(yamlUnmarshalFailedFmt, err, string(content))
 	}
 
 	if got := manifest["name"]; got != "prompt-log" {
@@ -100,7 +104,7 @@ func TestCanonicalHookBundleContentFromCopilotFile(t *testing.T) {
 	}
 }
 
-func TestCanonicalImportOutputs_FromCursorHooksJSON(t *testing.T) {
+func TestCanonicalImportOutputsFromCursorHooksJSON(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
@@ -129,7 +133,7 @@ func TestCanonicalImportOutputs_FromCursorHooksJSON(t *testing.T) {
 	}
 }
 
-func TestCanonicalImportOutputs_FromCodexHooksJSON(t *testing.T) {
+func TestCanonicalImportOutputsFromCodexHooksJSON(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relCodexHooksJSON, `{
   "hooks": {
     "SessionStart": [
@@ -149,7 +153,7 @@ func TestCanonicalImportOutputs_FromCodexHooksJSON(t *testing.T) {
 	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/session-start-banner/HOOK.yaml")
 }
 
-func TestCanonicalImportOutputs_FromClaudeCompatSettings(t *testing.T) {
+func TestCanonicalImportOutputsFromClaudeCompatSettings(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relClaudeSettingsLocal, `{
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
@@ -173,12 +177,12 @@ func TestCanonicalImportOutputs_FromClaudeCompatSettings(t *testing.T) {
 	if got := manifest["when"]; got != "session_start" {
 		t.Fatalf("when = %#v, want session_start", got)
 	}
-	if got := manifest["enabled_on"]; got == nil {
+	if manifest["enabled_on"] == nil {
 		t.Fatalf("expected enabled_on in manifest")
 	}
 }
 
-func TestCanonicalImportOutputs_AssignsDistinctNamesForGenericCommandsUsingMatchers(t *testing.T) {
+func TestCanonicalImportOutputsAssignsDistinctNamesForGenericCommandsUsingMatchers(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
@@ -201,7 +205,7 @@ func TestCanonicalImportOutputs_AssignsDistinctNamesForGenericCommandsUsingMatch
 	)
 }
 
-func TestCanonicalImportOutputs_AppendsStableSuffixForDuplicateIdentity(t *testing.T) {
+func TestCanonicalImportOutputsAppendsStableSuffixForDuplicateIdentity(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relCodexHooksJSON, `{
   "hooks": {
     "PreToolUse": [
@@ -233,7 +237,7 @@ func TestCanonicalImportOutputs_AppendsStableSuffixForDuplicateIdentity(t *testi
 	)
 }
 
-func TestCanonicalImportOutputs_SplitsMultipleActionsIntoDistinctCanonicalHooks(t *testing.T) {
+func TestCanonicalImportOutputsSplitsMultipleActionsIntoDistinctCanonicalHooks(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relClaudeSettingsLocal, `{
   "hooks": {
     "PreToolUse": [
@@ -260,9 +264,9 @@ func TestCanonicalImportOutputs_SplitsMultipleActionsIntoDistinctCanonicalHooks(
 	)
 }
 
-func TestCanonicalImportOutputs_CanonicalizesMultiActionCopilotFanoutUsingFilenameHint(t *testing.T) {
+func TestCanonicalImportOutputsCanonicalizesMultiActionCopilotFanoutUsingFilenameHint(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, relGitHubHooksDir, "prompt-log.json")
+	src := filepath.Join(dir, relGitHubHooksDir, promptLogJSON)
 	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -292,9 +296,9 @@ func TestCanonicalImportOutputs_CanonicalizesMultiActionCopilotFanoutUsingFilena
 	)
 }
 
-func TestCanonicalImportOutputs_FallsBackToLegacyWhenCopilotEventIsUnknown(t *testing.T) {
+func TestCanonicalImportOutputsFallsBackToLegacyWhenCopilotEventIsUnknown(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, relGitHubHooksDir, "prompt-log.json")
+	src := filepath.Join(dir, relGitHubHooksDir, promptLogJSON)
 	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +330,7 @@ func TestCanonicalImportOutputs_FallsBackToLegacyWhenCopilotEventIsUnknown(t *te
 	}
 }
 
-func TestCanonicalImportOutputs_UsesMatcherHintForGenericCommandName(t *testing.T) {
+func TestCanonicalImportOutputsUsesMatcherHintForGenericCommandName(t *testing.T) {
 	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
@@ -342,7 +346,7 @@ func TestCanonicalImportOutputs_UsesMatcherHintForGenericCommandName(t *testing.
 	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/pre-tool-use-bash-run/HOOK.yaml")
 }
 
-func TestCanonicalImportOutputs_PreservesRawMatcherOverrideWhenNormalized(t *testing.T) {
+func TestCanonicalImportOutputsPreservesRawMatcherOverrideWhenNormalized(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, relClaudeSettingsLocal)
 	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
@@ -386,7 +390,7 @@ func TestCanonicalImportOutputs_PreservesRawMatcherOverrideWhenNormalized(t *tes
 	}
 }
 
-func TestRestoreFromResourcesCounted_CanonicalizesGitHubHooks(t *testing.T) {
+func TestRestoreFromResourcesCountedCanonicalizesGitHubHooks(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -422,7 +426,7 @@ func TestRestoreFromResourcesCounted_CanonicalizesGitHubHooks(t *testing.T) {
 	}
 	var manifest map[string]any
 	if err := yaml.Unmarshal(content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(content))
+		t.Fatalf(yamlUnmarshalFailedFmt, err, string(content))
 	}
 	if got := manifest["name"]; got != "pre-tool" {
 		t.Fatalf("name = %#v, want pre-tool", got)
@@ -432,7 +436,7 @@ func TestRestoreFromResourcesCounted_CanonicalizesGitHubHooks(t *testing.T) {
 	}
 }
 
-func TestRestoreFromResourcesCounted_CanonicalizesCursorHooks(t *testing.T) {
+func TestRestoreFromResourcesCountedCanonicalizesCursorHooks(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -552,7 +556,7 @@ func mustUnmarshalYAMLMap(t *testing.T, content []byte) map[string]any {
 	t.Helper()
 	var manifest map[string]any
 	if err := yaml.Unmarshal(content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(content))
+		t.Fatalf(yamlUnmarshalFailedFmt, err, string(content))
 	}
 	return manifest
 }

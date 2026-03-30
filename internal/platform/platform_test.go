@@ -6,7 +6,12 @@ import (
 	"testing"
 )
 
-func TestOpenCodeCreateLinks_UsesCanonicalAgents(t *testing.T) {
+const (
+	platformTestExpectedSymlinkFmt       = "expected %s to be a symlink: %v"
+	platformTestExpectedSymlinkTargetFmt = "expected %s to point to %s, got %s"
+)
+
+func TestOpenCodeCreateLinksUsesCanonicalAgents(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	home := filepath.Join(tmp, "home")
@@ -43,20 +48,20 @@ func TestOpenCodeCreateLinks_UsesCanonicalAgents(t *testing.T) {
 
 	gotAgent := filepath.Join(repo, ".opencode", "agent", "reviewer.md")
 	if dest, err := os.Readlink(gotAgent); err != nil {
-		t.Fatalf("expected %s to be a symlink: %v", gotAgent, err)
+		t.Fatalf(platformTestExpectedSymlinkFmt, gotAgent, err)
 	} else if dest != agentMD {
-		t.Fatalf("expected %s to point to %s, got %s", gotAgent, agentMD, dest)
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotAgent, agentMD, dest)
 	}
 
 	gotConfig := filepath.Join(repo, "opencode.json")
 	if dest, err := os.Readlink(gotConfig); err != nil {
-		t.Fatalf("expected %s to be a symlink: %v", gotConfig, err)
+		t.Fatalf(platformTestExpectedSymlinkFmt, gotConfig, err)
 	} else if dest != opencodeJSON {
-		t.Fatalf("expected %s to point to %s, got %s", gotConfig, opencodeJSON, dest)
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotConfig, opencodeJSON, dest)
 	}
 }
 
-func TestCodexCreateLinks_EmitsProjectAndUserHooks(t *testing.T) {
+func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	home := filepath.Join(tmp, "home")
@@ -84,15 +89,15 @@ func TestCodexCreateLinks_EmitsProjectAndUserHooks(t *testing.T) {
 
 	projectHooks := filepath.Join(repo, ".codex", "hooks.json")
 	if dest, err := os.Readlink(projectHooks); err != nil {
-		t.Fatalf("expected %s to be a symlink: %v", projectHooks, err)
+		t.Fatalf(platformTestExpectedSymlinkFmt, projectHooks, err)
 	} else if dest != hooksJSON {
-		t.Fatalf("expected %s to point to %s, got %s", projectHooks, hooksJSON, dest)
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, projectHooks, hooksJSON, dest)
 	}
 
 	userHooks := filepath.Join(home, ".codex", "hooks.json")
 	if dest, err := os.Readlink(userHooks); err != nil {
-		t.Fatalf("expected %s to be a symlink: %v", userHooks, err)
+		t.Fatalf(platformTestExpectedSymlinkFmt, userHooks, err)
 	} else if dest != hooksJSON {
-		t.Fatalf("expected %s to point to %s, got %s", userHooks, hooksJSON, dest)
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, userHooks, hooksJSON, dest)
 	}
 }

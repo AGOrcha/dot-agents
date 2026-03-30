@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
+
 // ---------- mapResourceRelToDest ----------
 
 func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
@@ -43,9 +45,9 @@ func TestMapResourceRelToDest_SkillsAndAgents(t *testing.T) {
 	}{
 		{".agents/skills/my-skill/SKILL.md", "skills/proj/my-skill/SKILL.md"},
 		{".claude/skills/my-skill/SKILL.md", "skills/proj/my-skill/SKILL.md"},
-		{".github/agents/my-agent.agent.md", "agents/proj/my-agent/AGENT.md"},
-		{".codex/agents/my-agent/AGENT.md", "agents/proj/my-agent/AGENT.md"},
-		{".opencode/agent/my-agent.md", "agents/proj/my-agent/AGENT.md"},
+		{".github/agents/my-agent.agent.md", refreshCanonicalAgentPath},
+		{".codex/agents/my-agent/AGENT.md", refreshCanonicalAgentPath},
+		{".opencode/agent/my-agent.md", refreshCanonicalAgentPath},
 	}
 	for _, c := range cases {
 		got := mapResourceRelToDest("proj", c.relPath)

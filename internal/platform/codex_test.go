@@ -7,13 +7,15 @@ import (
 	"testing"
 )
 
-func TestRenderCodexAgentToml_UsesFrontmatterAndBody(t *testing.T) {
+const codexAgentMarkdownFile = "AGENT.md"
+
+func TestRenderCodexAgentTomlUsesFrontmatterAndBody(t *testing.T) {
 	tmp := t.TempDir()
 	agentDir := filepath.Join(tmp, "agents", "global", "reviewer")
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	agentMD := filepath.Join(agentDir, "AGENT.md")
+	agentMD := filepath.Join(agentDir, codexAgentMarkdownFile)
 	content := `---
 name: reviewer
 description: reviews changes
@@ -50,7 +52,7 @@ Use "safe" defaults and avoid shell footguns.
 	}
 }
 
-func TestCodexCreateLinks_WritesNativeAgentTomlAndCleansCompat(t *testing.T) {
+func TestCodexCreateLinksWritesNativeAgentTomlAndCleansCompat(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	home := filepath.Join(tmp, "home")
@@ -66,7 +68,7 @@ func TestCodexCreateLinks_WritesNativeAgentTomlAndCleansCompat(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(globalAgentDir, "AGENT.md"), []byte(`---
+	if err := os.WriteFile(filepath.Join(globalAgentDir, codexAgentMarkdownFile), []byte(`---
 name: reviewer
 description: global reviewer
 model: gpt-5.1-codex
@@ -76,7 +78,7 @@ model: gpt-5.1-codex
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectAgentDir, "AGENT.md"), []byte(`---
+	if err := os.WriteFile(filepath.Join(projectAgentDir, codexAgentMarkdownFile), []byte(`---
 name: implementer
 description: project implementer
 is_background: false

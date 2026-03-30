@@ -7,19 +7,27 @@ import (
 	"testing"
 )
 
-func TestResolveHookSpec_PrefersProjectHooksOverSettingsAndGlobal(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+const (
+	hooksTestAgentsDir            = ".agents"
+	hooksTestClaudeCompatFile     = "claude-code.json"
+	hooksTestCanonicalHookName    = "format-write"
+	hooksTestCanonicalMatcherExpr = "Write | Edit"
+	hooksTestCanonicalRunCommand  = "/tmp/run.sh"
+)
 
-	projectHook := filepath.Join(agentsHome, "hooks", "proj", "claude-code.json")
-	projectSettings := filepath.Join(agentsHome, "settings", "proj", "claude-code.json")
-	globalHook := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+func TestResolveHookSpecPrefersProjectHooksOverSettingsAndGlobal(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
+
+	projectHook := filepath.Join(agentsHome, "hooks", "proj", hooksTestClaudeCompatFile)
+	projectSettings := filepath.Join(agentsHome, "settings", "proj", hooksTestClaudeCompatFile)
+	globalHook := filepath.Join(agentsHome, "hooks", "global", hooksTestClaudeCompatFile)
 
 	writeTextFile(t, projectHook, "{\"source\":\"project-hook\"}\n")
 	writeTextFile(t, projectSettings, "{\"source\":\"project-settings\"}\n")
 	writeTextFile(t, globalHook, "{\"source\":\"global-hook\"}\n")
 
-	spec := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, "proj", "claude-code.json")
+	spec := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, "proj", hooksTestClaudeCompatFile)
 	if spec == nil {
 		t.Fatal("expected hook spec")
 	}
@@ -34,9 +42,9 @@ func TestResolveHookSpec_PrefersProjectHooksOverSettingsAndGlobal(t *testing.T) 
 	}
 }
 
-func TestEmitHookFanout_SymlinksSelectedHookFiles(t *testing.T) {
+func TestEmitHookFanoutSymlinksSelectedHookFiles(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
 	dstRoot := filepath.Join(tmp, "repo", ".github", "hooks")
 
 	preTool := filepath.Join(agentsHome, "hooks", "proj", "pre-tool.json")
@@ -69,11 +77,11 @@ func TestEmitHookFanout_SymlinksSelectedHookFiles(t *testing.T) {
 	}
 }
 
-func TestListHookSpecs_LoadsCanonicalBundleAndPreservesLegacyFiles(t *testing.T) {
+func TestListHookSpecsLoadsCanonicalBundleAndPreservesLegacyFiles(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
 
-	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", "format-write", "HOOK.yaml"), `name: format-write
+	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "HOOK.yaml"), `name: format-write
 when: pre_tool_use
 match:
   tools: [Write, Edit]
@@ -83,7 +91,7 @@ run:
   timeout_ms: 15000
 enabled_on: [claude, cursor]
 `)
-	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", "format-write", "run.sh"), "#!/bin/sh\nexit 0\n")
+	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"), "#!/bin/sh\nexit 0\n")
 	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", "copilot-cli-policy.json"), "{\"version\":1}\n")
 
 	specs, err := listHookSpecs(agentsHome, "proj")
@@ -97,7 +105,7 @@ enabled_on: [claude, cursor]
 	if specs[0].Name != "copilot-cli-policy" || specs[0].SourceKind != HookSourceLegacyFile {
 		t.Fatalf("expected first spec to be legacy copilot hook, got %#v", specs[0])
 	}
-	if specs[1].Name != "format-write" || specs[1].SourceKind != HookSourceCanonicalBundle {
+	if specs[1].Name != hooksTestCanonicalHookName || specs[1].SourceKind != HookSourceCanonicalBundle {
 		t.Fatalf("expected second spec to be canonical bundle, got %#v", specs[1])
 	}
 	if specs[1].When != "pre_tool_use" {
@@ -106,21 +114,21 @@ enabled_on: [claude, cursor]
 	if specs[1].Command != "./run.sh" {
 		t.Fatalf("expected canonical command ./run.sh, got %q", specs[1].Command)
 	}
-	if specs[1].MatchExpression != "Write | Edit" {
-		t.Fatalf("expected canonical match expression %q, got %q", "Write | Edit", specs[1].MatchExpression)
+	if specs[1].MatchExpression != hooksTestCanonicalMatcherExpr {
+		t.Fatalf("expected canonical match expression %q, got %q", hooksTestCanonicalMatcherExpr, specs[1].MatchExpression)
 	}
-	if got, want := resolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", "format-write", "run.sh"); got != want {
+	if got, want := resolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"); got != want {
 		t.Fatalf("resolved command = %q, want %q", got, want)
 	}
 }
 
-func TestRenderClaudeHookSettings_PrefersCanonicalMatchExpression(t *testing.T) {
+func TestRenderClaudeHookSettingsPrefersCanonicalMatchExpression(t *testing.T) {
 	specs := []HookSpec{{
-		Name:            "format-write",
+		Name:            hooksTestCanonicalHookName,
 		When:            "pre_tool_use",
 		MatchTools:      []string{"Write", "Edit"},
-		MatchExpression: "Write | Edit",
-		Command:         "/tmp/run.sh",
+		MatchExpression: hooksTestCanonicalMatcherExpr,
+		Command:         hooksTestCanonicalRunCommand,
 	}}
 
 	content, err := renderClaudeHookSettings(specs)
@@ -132,13 +140,13 @@ func TestRenderClaudeHookSettings_PrefersCanonicalMatchExpression(t *testing.T) 
 	}
 }
 
-func TestRenderCursorHookConfig_PrefersCanonicalMatchExpression(t *testing.T) {
+func TestRenderCursorHookConfigPrefersCanonicalMatchExpression(t *testing.T) {
 	specs := []HookSpec{{
-		Name:            "format-write",
+		Name:            hooksTestCanonicalHookName,
 		When:            "pre_tool_use",
 		MatchTools:      []string{"Write", "Edit"},
-		MatchExpression: "Write | Edit",
-		Command:         "/tmp/run.sh",
+		MatchExpression: hooksTestCanonicalMatcherExpr,
+		Command:         hooksTestCanonicalRunCommand,
 	}}
 
 	content, err := renderCursorHookConfig(specs)
@@ -150,12 +158,12 @@ func TestRenderCursorHookConfig_PrefersCanonicalMatchExpression(t *testing.T) {
 	}
 }
 
-func TestRenderCopilotHookFile_SkipsWhenCanonicalMatchExpressionPresent(t *testing.T) {
+func TestRenderCopilotHookFileSkipsWhenCanonicalMatchExpressionPresent(t *testing.T) {
 	_, _, ok, err := renderCopilotHookFile(HookSpec{
 		Name:            "prompt-log",
 		When:            "user_prompt_submit",
-		MatchExpression: "Write | Edit",
-		Command:         "/tmp/run.sh",
+		MatchExpression: hooksTestCanonicalMatcherExpr,
+		Command:         hooksTestCanonicalRunCommand,
 	})
 	if err != nil {
 		t.Fatalf("renderCopilotHookFile returned error: %v", err)
