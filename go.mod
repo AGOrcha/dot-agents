@@ -1,4 +1,4 @@
-module github.com/dot-agents/dot-agents
+module github.com/NikashPrakash/dot-agents
 
 go 1.24
 

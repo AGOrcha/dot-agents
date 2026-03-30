@@ -43,7 +43,7 @@ dot-agents/
 │   ├── hooks.go                    # dot-agents hooks list
 │   ├── sync.go                     # dot-agents sync init/pull/push/status
 │   └── explain.go                  # dot-agents explain [topic]
-├── go.mod                          # Module: github.com/dot-agents/dot-agents
+├── go.mod                          # Module: github.com/NikashPrakash/dot-agents
 ├── go.sum
 ├── .goreleaser.yaml                # Cross-platform release automation
 └── scripts/install-go.sh          # Binary installer from GitHub releases
