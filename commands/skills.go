@@ -181,7 +181,7 @@ func createSkill(name, scope string) error {
 			if projPath := cfg.GetProjectPath(scope); projPath != "" {
 				if rc, err := config.LoadAgentsRC(projPath); err == nil {
 					rc.Skills = config.AppendUnique(rc.Skills, name)
-					if saveErr := rc.Save(projPath); saveErr == nil {
+					if err := rc.Save(projPath); err == nil {
 						nextSteps = append(nextSteps, "Updated .agentsrc.json with skill '"+name+"'")
 					}
 				}

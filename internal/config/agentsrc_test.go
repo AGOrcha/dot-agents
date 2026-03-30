@@ -9,6 +9,14 @@ import (
 	"testing"
 )
 
+const (
+	testProject         = "myproject"
+	testSourceTypeLocal = "local"
+	testHookPreToolUse  = "PreToolUse"
+	testHookPostToolUse = "PostToolUse"
+	errFmtGenerateRC    = "GenerateAgentsRC: %v"
+)
+
 // ── StringsOrBool ────────────────────────────────────────────────────────────
 
 func TestStringsOrBool_MarshalJSON(t *testing.T) {
@@ -22,7 +30,7 @@ func TestStringsOrBool_MarshalJSON(t *testing.T) {
 		{"All false, empty names → false", StringsOrBool{All: false, Names: []string{}}, "false"},
 		{"names take priority over All=false", StringsOrBool{Names: []string{"a", "b"}}, `["a","b"]`},
 		{"names with All=true still emit array", StringsOrBool{All: true, Names: []string{"x"}}, `["x"]`},
-		{"single name", StringsOrBool{Names: []string{"PreToolUse"}}, `["PreToolUse"]`},
+		{"single name", StringsOrBool{Names: []string{testHookPreToolUse}}, `["PreToolUse"]`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,7 +56,7 @@ func TestStringsOrBool_UnmarshalJSON(t *testing.T) {
 		{"true", "true", true, nil, false},
 		{"false", "false", false, nil, false},
 		{"empty array", "[]", false, []string{}, false},
-		{"string array", `["PreToolUse","PostToolUse"]`, false, []string{"PreToolUse", "PostToolUse"}, false},
+		{"string array", `["PreToolUse","PostToolUse"]`, false, []string{testHookPreToolUse, testHookPostToolUse}, false},
 		{"single element", `["SessionStart"]`, false, []string{"SessionStart"}, false},
 		{"number → error", "42", false, nil, true},
 		{"object → error", "{}", false, nil, true},
@@ -249,7 +257,7 @@ func TestLoadAgentsRC_DefaultSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentsRC: %v", err)
 	}
-	if len(rc.Sources) != 1 || rc.Sources[0].Type != "local" {
+	if len(rc.Sources) != 1 || rc.Sources[0].Type != testSourceTypeLocal {
 		t.Errorf("expected default local source, got %+v", rc.Sources)
 	}
 }
@@ -260,15 +268,15 @@ func TestAgentsRC_SaveLoad_Roundtrip(t *testing.T) {
 	orig := &AgentsRC{
 		Schema:   "https://dot-agents.dev/schemas/agentsrc.json",
 		Version:  1,
-		Project:  "myproject",
+		Project:  testProject,
 		Skills:   []string{"skill-a", "skill-b"},
 		Agents:   []string{"agent-x"},
 		Rules:    []string{"global", "project"},
-		Hooks:    StringsOrBool{Names: []string{"PreToolUse", "PostToolUse"}},
+		Hooks:    StringsOrBool{Names: []string{testHookPreToolUse, testHookPostToolUse}},
 		MCP:      StringsOrBool{All: true},
 		Settings: true,
 		Sources: []Source{
-			{Type: "local"},
+			{Type: testSourceTypeLocal},
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
 		},
 	}
@@ -310,7 +318,7 @@ func TestAgentsRC_SaveLoad_Roundtrip(t *testing.T) {
 
 func TestAgentsRC_Save_TrailingNewline(t *testing.T) {
 	tmp := t.TempDir()
-	rc := &AgentsRC{Version: 1, Project: "p", Sources: []Source{{Type: "local"}}}
+	rc := &AgentsRC{Version: 1, Project: "p", Sources: []Source{{Type: testSourceTypeLocal}}}
 	if err := rc.Save(tmp); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +353,7 @@ func agentsHomeFixture(t *testing.T) string {
 
 	// Skills: global/skill-global, myproject/skill-proj
 	writeFile(filepath.Join(mkdirAll("skills", "global", "skill-global"), "SKILL.md"), "# skill")
-	writeFile(filepath.Join(mkdirAll("skills", "myproject", "skill-proj"), "SKILL.md"), "# skill")
+	writeFile(filepath.Join(mkdirAll("skills", testProject, "skill-proj"), "SKILL.md"), "# skill")
 	// File (not dir) in skills — should be ignored
 	writeFile(filepath.Join(home, "skills", "global", "not-a-skill.txt"), "ignore me")
 
@@ -354,10 +362,10 @@ func agentsHomeFixture(t *testing.T) string {
 
 	// Rules: global file + project file
 	writeFile(filepath.Join(home, "rules", "global", "base.md"), "# rule")
-	writeFile(filepath.Join(home, "rules", "myproject", "custom.md"), "# rule")
+	writeFile(filepath.Join(home, "rules", testProject, "custom.md"), "# rule")
 
 	// Hooks: claude-code.json with two non-empty event types
-	writeFile(filepath.Join(home, "settings", "myproject", "claude-code.json"), `{
+	writeFile(filepath.Join(home, "settings", testProject, "claude-code.json"), `{
 		"hooks": {
 			"PreToolUse":  [{"command":"echo pre"}],
 			"PostToolUse": [{"command":"echo post"}],
@@ -366,7 +374,7 @@ func agentsHomeFixture(t *testing.T) string {
 	}`)
 
 	// MCP: project-scoped mcp.json with two servers
-	writeFile(filepath.Join(home, "mcp", "myproject", "mcp.json"), `{
+	writeFile(filepath.Join(home, "mcp", testProject, "mcp.json"), `{
 		"servers": {
 			"server-a": {},
 			"server-b": {}
@@ -383,9 +391,9 @@ func TestGenerateAgentsRC_Skills(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	sort.Strings(rc.Skills)
@@ -399,9 +407,9 @@ func TestGenerateAgentsRC_Agents(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if !reflect.DeepEqual(rc.Agents, []string{"agent-global"}) {
@@ -413,9 +421,9 @@ func TestGenerateAgentsRC_Rules(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	sort.Strings(rc.Rules)
@@ -430,9 +438,9 @@ func TestGenerateAgentsRC_Rules_GlobalOnly(t *testing.T) {
 	t.Setenv("AGENTS_HOME", home)
 	// No project-scoped rules created
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if !reflect.DeepEqual(rc.Rules, []string{"global"}) {
@@ -444,15 +452,15 @@ func TestGenerateAgentsRC_Hooks_NamedEvents(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	// Only non-empty event arrays should appear; Notification is empty → excluded
 	got := rc.Hooks.Names
 	sort.Strings(got)
-	want := []string{"PostToolUse", "PreToolUse"}
+	want := []string{testHookPostToolUse, testHookPreToolUse}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Hooks.Names: got %v, want %v", got, want)
 	}
@@ -465,9 +473,9 @@ func TestGenerateAgentsRC_Hooks_NoSettings(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if rc.Hooks.IsEnabled() {
@@ -479,9 +487,9 @@ func TestGenerateAgentsRC_MCP_NamedServers(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	got := rc.MCP.Names
@@ -504,9 +512,9 @@ func TestGenerateAgentsRC_MCP_FallsBackToGlobal(t *testing.T) {
 	os.MkdirAll(filepath.Dir(mcpPath), 0755)
 	os.WriteFile(mcpPath, []byte(`{"servers":{"global-srv":{}}}`), 0644)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
@@ -518,9 +526,9 @@ func TestGenerateAgentsRC_MCP_NoConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if rc.MCP.IsEnabled() {
@@ -532,9 +540,9 @@ func TestGenerateAgentsRC_Settings(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if !rc.Settings {
@@ -546,9 +554,9 @@ func TestGenerateAgentsRC_Settings_False(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if rc.Settings {
@@ -560,18 +568,18 @@ func TestGenerateAgentsRC_DefaultFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if rc.Version != 1 {
 		t.Errorf("Version: got %d, want 1", rc.Version)
 	}
-	if rc.Project != "myproject" {
+	if rc.Project != testProject {
 		t.Errorf("Project: got %q, want myproject", rc.Project)
 	}
-	if len(rc.Sources) != 1 || rc.Sources[0].Type != "local" {
+	if len(rc.Sources) != 1 || rc.Sources[0].Type != testSourceTypeLocal {
 		t.Errorf("Sources: got %+v, want [{Type:local}]", rc.Sources)
 	}
 }
@@ -592,9 +600,9 @@ func TestGenerateAgentsRC_IgnoresNonDirectorySkills(t *testing.T) {
 	os.MkdirAll(filepath.Join(skillsDir, "real-skill"), 0755)
 	os.WriteFile(filepath.Join(skillsDir, "real-skill", "SKILL.md"), []byte("# s"), 0644)
 
-	rc, err := GenerateAgentsRC("myproject", t.TempDir())
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
-		t.Fatalf("GenerateAgentsRC: %v", err)
+		t.Fatalf(errFmtGenerateRC, err)
 	}
 
 	if !reflect.DeepEqual(rc.Skills, []string{"real-skill"}) {
@@ -611,9 +619,9 @@ func TestAgentsRC_JSONShape(t *testing.T) {
 		Version: 1,
 		Project: "proj",
 		Skills:  []string{"s1"},
-		Hooks:   StringsOrBool{Names: []string{"PreToolUse"}},
+		Hooks:   StringsOrBool{Names: []string{testHookPreToolUse}},
 		MCP:     StringsOrBool{All: false},
-		Sources: []Source{{Type: "local"}},
+		Sources: []Source{{Type: testSourceTypeLocal}},
 	}
 	if err := rc.Save(tmp); err != nil {
 		t.Fatal(err)
