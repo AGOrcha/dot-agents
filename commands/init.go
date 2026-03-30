@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
-	"github.com/dot-agents/dot-agents/internal/platform"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -130,7 +130,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Create README.md
 	readmePath := filepath.Join(agentsHome, "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
-		content := "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/dot-agents/dot-agents).\n"
+		content := "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n"
 		os.WriteFile(readmePath, []byte(content), 0644)
 	}
 

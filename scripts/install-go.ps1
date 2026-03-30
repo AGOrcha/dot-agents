@@ -1,5 +1,5 @@
 # dot-agents Windows installer (PowerShell)
-# https://github.com/dot-agents/dot-agents
+# https://github.com/NikashPrakash/dot-agents
 #
 # Usage (run in PowerShell as Administrator, or with Developer Mode enabled):
 #   irm https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/install-go.ps1 | iex

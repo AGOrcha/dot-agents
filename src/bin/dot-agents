@@ -1,6 +1,6 @@
 #!/bin/bash
 # dot-agents - Unified config layer for AI coding agents
-# https://github.com/dot-agents/dot-agents
+# https://github.com/NikashPrakash/dot-agents
 #
 # Usage: dot-agents <command> [options]
 
@@ -74,7 +74,7 @@ ${BOLD}EXAMPLES${NC}
     dot-agents refresh                  # Refresh all projects
 
 ${BOLD}DOCUMENTATION${NC}
-    https://github.com/dot-agents/dot-agents
+    https://github.com/NikashPrakash/dot-agents
     dot-agents <command> --help   Command-specific help (e.g. refresh --help)
 
 EOF

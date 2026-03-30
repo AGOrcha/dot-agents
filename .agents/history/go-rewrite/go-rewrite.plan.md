@@ -134,7 +134,7 @@ Use simple ANSI escape codes (no heavy TUI library). Matches existing output exa
 ### 5. Distribution
 
 - **Homebrew**: Formula in `dot-agents/homebrew-tap` (or update existing)
-- **go install**: `go install github.com/dot-agents/dot-agents/cmd/dot-agents@latest`
+- **go install**: `go install github.com/NikashPrakash/dot-agents/cmd/dot-agents@latest`
 - **GitHub Releases**: `goreleaser` for automated cross-platform binaries
 - **install.sh**: Updated to download from GitHub releases (no longer needs the whole repo)
 

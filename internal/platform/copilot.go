@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 type copilot struct{}

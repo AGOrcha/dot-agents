@@ -2,7 +2,7 @@
 
 Your unified config layer for AI coding agents.
 
-Managed by [dot-agents](https://github.com/dot-agents/dot-agents).
+Managed by [dot-agents](https://github.com/NikashPrakash/dot-agents).
 
 ## Structure
 
@@ -18,8 +18,17 @@ Managed by [dot-agents](https://github.com/dot-agents/dot-agents).
 ├── mcp/                  # MCP server configurations
 │   ├── global/
 │   └── {project}/
-├── commands/             # Custom commands
+├── skills/               # Shared skills
+│   ├── global/
+│   └── {project}/
+├── agents/               # Shared agents
+│   ├── global/
+│   └── {project}/
+├── hooks/                # Hook configurations
+│   ├── global/
+│   └── {project}/
 ├── scripts/              # Utility scripts
+├── resources/            # Backups and restored files
 └── local/                # Machine-specific (gitignored)
 ```
 
@@ -41,5 +50,5 @@ dot-agents audit
 
 ## Documentation
 
-- [Specification](https://github.com/dot-agents/dot-agents/blob/main/SPEC.md)
-- [Getting Started](https://github.com/dot-agents/dot-agents#readme)
+- [Specification](https://github.com/NikashPrakash/dot-agents/blob/main/SPEC.md)
+- [Getting Started](https://github.com/NikashPrakash/dot-agents#readme)

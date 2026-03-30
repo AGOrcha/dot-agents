@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/platform"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 

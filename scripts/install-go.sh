@@ -1,6 +1,6 @@
 #!/bin/bash
 # dot-agents Go binary installer
-# https://github.com/dot-agents/dot-agents
+# https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/install-go.sh | bash
