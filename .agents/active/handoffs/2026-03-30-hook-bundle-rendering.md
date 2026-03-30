@@ -1,3 +1,36 @@
+# Handoff: Hook Bundle Rendering
+
+**Created:** 2026-03-30
+**Author:** Claude Code session
+**For:** AI Agent
+**Status:** Ready to execute
+
+---
+
+## Summary
+
+This session moved hooks from a design-only concept into a working Go implementation for canonical `HOOK.yaml` bundles under `~/.agents/hooks/<scope>/<name>/`. The current code now loads canonical bundles, resolves bundle-local commands, renders native hook JSON for Claude, Cursor, Codex, and Copilot, and falls back to legacy flat hook files when no applicable bundles exist.
+
+The next agent should treat the active plan as the source of truth for rollout status and focus on the remaining Stage 1 gaps around write-rendered hook cleanup/removal and import/refresh support for canonical hook bundles. Bash parity is still intentionally deferred.
+
+## Project Context
+
+This repo is `dot-agents`, a Go rewrite of a tool that keeps canonical resources under `~/.agents` and wires them into project and user-level platform paths for Cursor, Claude Code, Codex, OpenCode, and GitHub Copilot.
+
+Current design direction:
+
+- one canonical source per resource type in `~/.agents`
+- compatibility outputs first where useful
+- native outputs when formats diverge
+- Go-first rollout, bash parity later
+
+This handoff is specifically about the hook portion of that rollout.
+
+## The Plan
+
+Source of truth: `.agents/active/platform-dir-unification.plan.md`
+
+```markdown
 # Canonical `~/.agents` Rollout Plan
 
 ## Summary
@@ -164,48 +197,9 @@ Completed in this session:
   - `HOOK.yaml` bundle discovery
   - absolute command resolution from bundle-local scripts
   - native JSON rendering for Claude, Cursor, Codex, and Copilot hook outputs
-- Added safe cleanup helpers in `internal/platform/hooks.go` for write-rendered hook outputs by removing only files whose bytes still match the canonical renderer output.
-- Updated `RemoveLinks` in `internal/platform/claude.go`, `internal/platform/cursor.go`, `internal/platform/codex.go`, and `internal/platform/copilot.go` so canonical hook bundles clean up their rendered repo outputs instead of relying on symlink-only removal.
-- Added integration coverage in `internal/platform/stage1_integration_test.go` for rendered-hook cleanup during `RemoveLinks` across Claude, Cursor, Codex, and Copilot.
-- Started command-layer canonical bundle round-tripping for native Copilot hook fanout:
-  - `.github/hooks/<name>.json` now normalizes to `hooks/<project>/<name>/HOOK.yaml`
-  - `commands/import.go` can translate representable Copilot hook files into canonical `HOOK.yaml` bundles
-  - `commands/add.go` restore-from-resources now rehydrates those backed-up Copilot hook files into canonical bundles
-- Expanded command-layer canonical hook import beyond Copilot fanout:
-  - `commands/import.go` now parses representable aggregate hook outputs from `.cursor/hooks.json`, `.codex/hooks.json`, and Claude-compatible settings files into multiple canonical `HOOK.yaml` bundles
-  - unsupported aggregate hook files still fall back to the legacy raw-import path instead of losing data
-  - `commands/add.go` restore-from-resources now rehydrates representable aggregate hook backups into canonical bundles too
-  - Copilot native hook fanout import now uses the source filename as a stronger identity hint and can split multi-action files into multiple canonical hook bundles before resorting to legacy fallback
-- Added transition cleanup during create/refresh for hook outputs:
-  - `internal/platform/copilot.go` now prunes stale rendered `.github/hooks/*.json` files that are no longer part of the current canonical hook set
-  - `internal/platform/claude.go`, `internal/platform/cursor.go`, and `internal/platform/codex.go` now remove stale rendered single-file hook outputs when canonical bundles disappear and no legacy fallback remains
-- Improved reverse-import heuristics for aggregate hook files:
-  - generated canonical hook bundle names now use event plus smarter command/matcher hints instead of only event plus command stem
-  - normalized matcher strings can now populate both canonical `match.tools` and canonical `match.expression` when whitespace or richer syntax would otherwise be lost
-- Expanded the canonical hook schema itself to capture richer matcher semantics:
-  - `HOOK.yaml` now supports `match.expression` alongside `match.tools`
-  - shared hook loading/rendering in `internal/platform/hooks.go` now treats matcher precedence as `platform_overrides.<platform>.matcher` → `match.expression` → `match.tools`
-  - Copilot representability checks now treat canonical `match.expression` as a real matcher constraint instead of only looking at `match.tools`
-- Closed the remaining Claude user-settings cleanup gap:
-  - `internal/platform/claude.go` now removes stale rendered `~/.claude/settings.json` files when global canonical hooks disappear and no legacy compat file exists
-- Added regression coverage in `commands/import_test.go` and `commands/refresh_test.go` for canonical Copilot hook mapping and resource restore into `HOOK.yaml` bundles.
-- Added regression coverage in `commands/import_test.go` for aggregate native hook import from Cursor, Codex, and Claude-compatible settings files.
-- Added regression coverage in `commands/import_test.go` for smarter imported hook naming and canonical `match.expression` preservation.
-- Added regression coverage in `commands/import_test.go` for the hardest aggregate native imports:
-  - generic shared commands distinguished by matcher hints
-  - duplicate identity collisions getting stable suffixes
-  - multi-action aggregate inputs splitting into distinct canonical hook bundles
-  - Copilot multi-action fanout canonicalization versus fallback only on truly unsupported events
-- Expanded `internal/platform/stage1_integration_test.go` with transition coverage for stale rendered hook cleanup during repeated `CreateLinks` runs.
-- Expanded `internal/platform/stage1_integration_test.go` with coverage for stale global Claude user settings cleanup when canonical hook bundles disappear.
-- Added hook-schema coverage in `internal/platform/hooks_test.go` and `internal/platform/stage1_integration_test.go` for:
-  - loading `match.expression` from `HOOK.yaml`
-  - rendering canonical matcher expressions through Claude and Cursor outputs
-  - treating canonical matcher expressions as non-representable for Copilot fanout
-- Re-ran `env GOCACHE=/tmp/go-build go test ./internal/platform`, `env GOCACHE=/tmp/go-build go test ./commands`, and `env GOCACHE=/tmp/go-build go test ./...`.
 
 Still open in this phase:
-- Additional coverage is now optional rather than required. The main remaining opportunities are deeper transition cleanup edge cases for more complex multi-hook renames and deletions, better naming heuristics for highly ambiguous aggregate imports that still lack stable logical names, and any future bash-parity validation once Phase 4 starts.
+- Additional coverage is now optional rather than required. The main remaining opportunities are cleanup/removal edge cases, command/import support for canonical hook bundles, and any future bash-parity validation once Phase 4 starts.
 
 ### Phase 4: Bash parity wave
 Status: Not started
@@ -243,44 +237,96 @@ Parallel worker split:
 - Worker B: OpenCode resource additions
 - Worker C: Copilot resource additions
 - Codex likely has no new standalone bucket unless docs or product behavior change
+```
 
-## Interfaces and Ownership Rules
+## Key Files
 
-Internal interface changes:
-- Add a shared internal resource descriptor layer that defines:
-  - canonical source bucket
-  - project/global scope resolution
-  - output target path(s)
-  - emission mode
-  - precedence order
-- `Platform.CreateLinks` remains the public internal entrypoint, but platform implementations become thin emitters over the shared descriptor logic.
+| File | Why It Matters |
+|------|----------------|
+| `.agents/active/platform-dir-unification.plan.md` | Current source of truth for rollout phase status and remaining work |
+| `docs/CANONICAL_HOOKS_DESIGN.md` | Canonical hook storage and renderer design, including `HOOK.yaml` schema and migration stages |
+| `internal/platform/hooks.go` | Shared hook contract, bundle loader, native renderers, and canonical-first fallback logic |
+| `internal/platform/claude.go` | Claude-compatible hook rendering into `.claude/settings*.json` |
+| `internal/platform/cursor.go` | Cursor canonical-first hook rendering into `.cursor/hooks.json` |
+| `internal/platform/codex.go` | Codex canonical-first hook rendering into `.codex/hooks.json` |
+| `internal/platform/copilot.go` | Copilot canonical-first `.github/hooks/*.json` fanout and Claude-compatible settings rendering |
+| `internal/platform/hooks_test.go` | Unit coverage for bundle loading and shared hook helper behavior |
+| `internal/platform/stage1_integration_test.go` | Integration coverage for translated native hook outputs from canonical bundles |
+| `commands/import.go` | Still legacy-hook oriented; not yet able to normalize native outputs back into canonical `HOOK.yaml` bundles |
+| `commands/refresh.go` | Current repo-relative mapping still points hook outputs back to legacy flat JSON destinations |
 
-Ownership rules for parallel work:
-- Only the coordinator edits shared schema, normalization, command UX, and shared tests.
-- Platform workers own only their assigned platform files.
-- Do not split one platform across multiple workers.
-- Do not mix Go and bash edits in the same worker until the bash parity phase.
-- Merge order is fixed: Phase 1 base, then Phase 2 workers in any order, then Phase 3 integration.
+## Current State
 
-## Test Plan
+**Done:**
+- Added `HOOK.yaml` bundle loading under `~/.agents/hooks/<scope>/<name>/HOOK.yaml`.
+- Added bundle-local command resolution so `./script.sh` resolves relative to the hook bundle directory.
+- Added native write-based JSON renderers for:
+  - Claude settings-backed hooks
+  - Cursor hooks
+  - Codex hooks
+  - Copilot per-file hook fanout
+- Switched Go hook emitters to prefer canonical bundles and fall back to legacy flat files when no applicable bundles exist.
+- Added integration tests for canonical bundle rendering and content-level assertions across platform outputs.
+- Added `go.yaml.in/yaml/v3` to module metadata.
 
-- Update mapping tests around `mapResourceRelToDest` for every stage-1 canonical resource.
-- Add tests for canonical-source precedence across `global` vs project scope.
-- Add tempdir platform tests covering:
-  - skills emitted to both required compat targets from one canonical source
-  - agent transform outputs for Copilot and any Codex/OpenCode native formats
-  - MCP target selection for Cursor, Claude, Codex, OpenCode, and Copilot
-  - Cursor hardlink creation for rules and ignore files
-  - hook emission and reserved-name handling
-- Run `go test ./...` at the end of Phases 1, 3, and 5.
-- Run bash-path verification only in Phase 4 and Phase 5 after shell parity work lands.
+**In Progress:**
+- Phase 3 remains in progress overall because hook cleanup/removal and command-layer import/refresh support for canonical hook bundles are not finished.
+- The active plan is accurate and already updated through this hook bundle milestone.
 
-## Assumptions
+**Not Started:**
+- Bash parity for hook bundles and write-rendered native hook outputs.
+- Canonical hook bundle import support in `commands/import.go` / `commands/refresh.go`.
+- Cleanup/removal rules for write-rendered hook files beyond current link-oriented removal paths.
 
-- Chosen defaults:
-  - `Go-first, bash later`
-  - `Two-stage rollout`
-- No new CLI commands or flags are required for Stage 1.
-- Stage 1 covers only resources already implemented in some form today.
-- `docs/PLATFORM_DIRS_DOCS.md` is the target architecture source of truth when resolving path-precedence disputes.
-- If Codex/OpenCode native agent formats require lossy transforms, Stage 1 may keep compat outputs first and defer full native transform completeness to the Stage 3 integration pass, but the shared emitter hook points must exist in Phase 1.
+## Decisions Made
+
+- **Canonical hook bundles are the target source of truth** — `HOOK.yaml` bundles now represent the normalized future model; legacy flat files remain only as migration fallback.
+- **Canonical-first, legacy fallback** — platform emitters now try canonical bundle rendering first and only use linked flat JSON files when no applicable canonical bundles exist.
+- **Use explicit platform allowlists** — `enabled_on` and `required_on` are honored at load/render time so unsupported hooks can be skipped or failed intentionally.
+- **Keep the initial bundle schema small and renderable** — current implementation supports event, tool matcher, command, timeout, and platform overrides rather than trying to model every possible hook feature up front.
+- **Write native files instead of linking rendered output** — once a hook comes from `HOOK.yaml`, its destination is a managed rendered file, not a symlink or hardlink.
+- **Do not block on bash parity** — Go behavior is the priority; bash remains a later phase.
+- **Use `/tmp` GOCACHE in this environment when needed** — `go test` and module metadata updates worked with `env GOCACHE=/tmp/go-build ...` because the default user cache path hit sandbox restrictions.
+
+## Important Context
+
+- `git diff --stat` currently prints nothing even though `git status --short` shows multiple tracked modifications and new files. Treat `git status` as authoritative here.
+- Current worktree modifications at handoff:
+  - `.agents/active/platform-dir-unification.plan.md`
+  - `docs/CANONICAL_HOOKS_DESIGN.md`
+  - `docs/PLATFORM_DIRS_DOCS.md`
+  - `go.mod`
+  - `go.sum`
+  - `internal/platform/claude.go`
+  - `internal/platform/codex.go`
+  - `internal/platform/copilot.go`
+  - `internal/platform/cursor.go`
+  - `internal/platform/hooks.go`
+  - `internal/platform/hooks_test.go`
+  - `internal/platform/stage1_integration_test.go`
+- There is an older handoff at `.agents/active/handoffs/2026-03-29-platform-dir-unification.md`, but it predates the canonical bundle loader/renderers and is now stale for hook work.
+- The current implementation does not yet update `commands/import.go` or `commands/refresh.go` to reconstruct canonical `HOOK.yaml` bundles from rendered native hook files. Those commands still normalize hook outputs back into legacy flat JSON destinations.
+- Removal logic is still mostly link-oriented. Write-rendered files are created by `writeManagedFile(...)` in `internal/platform/hooks.go`, but there is no corresponding unified removal path for those rendered outputs yet.
+- The rendered platform shapes were based on a conservative, locally supported subset:
+  - Claude: settings-style `"hooks"` object with matcher and command arrays
+  - Codex: same broad structure for supported event subset
+  - Cursor: `version: 1` and lower-camel event keys with simple command entries
+  - Copilot: one JSON file per logical hook with `version: 1` and event-keyed command arrays
+- OpenCode still has no dedicated hook surface and was intentionally not included in this milestone.
+
+## Next Steps
+
+1. **Implement cleanup/removal for rendered hook files** — update platform `RemoveLinks` paths or add shared helpers so write-rendered `.claude/settings*.json`, `.cursor/hooks.json`, `.codex/hooks.json`, and `.github/hooks/*.json` are cleaned up safely when they were generated from canonical bundles.
+2. **Teach `import` / `refresh` about canonical hook bundles** — define how native rendered hook outputs should normalize back into `~/.agents/hooks/<scope>/<name>/HOOK.yaml` instead of legacy flat JSON files. Acceptance: command-layer mapping and tests no longer assume only `hooks/<scope>/*.json`.
+3. **Decide whether to support mixed canonical-and-legacy merge behavior** — current canonical-first behavior chooses rendered canonical outputs over legacy ones. If mixed merging is desired, implement it deliberately with tests rather than accreting it implicitly.
+4. **Decide whether `commands/hooks` should start authoring canonical bundles** — the shell hook management command is still Claude-settings-centric. If the repo wants a true single-SOT workflow, that command or its Go replacement will eventually need canonical bundle authoring support.
+5. **Only after Go hook behavior is stable, start bash parity** — mirror the canonical-first hook logic into the bash platform scripts without changing the established Go behavior.
+
+## Constraints
+
+- Do not revert unrelated user changes.
+- Keep the active plan file in `.agents/active/` accurate if you move the work forward.
+- Preserve current externally visible behavior for legacy flat hook files unless you are intentionally migrating a platform and have tests for the change.
+- Prefer canonical bundle loading plus native rendering over inventing new platform-specific flat source files.
+- When running Go commands in this environment, prefer `env GOCACHE=/tmp/go-build ...` if the default cache path hits sandbox permission errors.
+- Bash parity is not part of this handoff’s immediate next step unless the user explicitly redirects there.

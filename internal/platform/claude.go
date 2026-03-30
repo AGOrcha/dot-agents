@@ -82,11 +82,26 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
-	settingsSrc := findClaudeSettingsSource(agentsHome, project)
-	if settingsSrc == "" {
+	target := filepath.Join(repoPath, ".claude", "settings.local.json")
+	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
+	if err == nil && len(projectBundles) > 0 {
+		_ = emitRenderedHookFile(projectBundles, target, renderClaudeHookSettings)
 		return
 	}
-	links.Symlink(settingsSrc, filepath.Join(repoPath, ".claude", "settings.local.json"))
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err == nil && len(globalBundles) > 0 {
+		_ = emitRenderedHookFile(globalBundles, target, renderClaudeHookSettings)
+		return
+	}
+	spec := findClaudeSettingsHookSpec(agentsHome, project)
+	if spec == nil {
+		_ = removeManagedFileIf(target, isLikelyRenderedClaudeHookSettings)
+		return
+	}
+	_ = emitHookSpec(spec, target, HookEmissionMode{
+		Shape:     HookShapeDirect,
+		Transport: HookTransportSymlink,
+	})
 }
 
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
@@ -95,8 +110,8 @@ func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
 	}
 }
 
-func findClaudeSettingsSource(agentsHome, scope string) string {
-	return resolveScopedFileFromBuckets(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
+func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
+	return resolveHookSpecInScope(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
 }
 
 func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
@@ -190,20 +205,30 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 }
 
 func (c *claude) ensureUserSettings(agentsHome string) error {
-	src := findClaudeSettingsSource(agentsHome, "global")
-	if src == "" {
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, "global", c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	if len(globalBundles) > 0 {
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".claude", "settings.json"), renderClaudeHookSettings)
+	}
+
+	spec := findClaudeSettingsHookSpec(agentsHome, "global")
+	if spec == nil {
+		for _, homeRoot := range config.UserHomeRoots() {
+			_ = removeManagedFileIf(filepath.Join(homeRoot, ".claude", "settings.json"), isLikelyRenderedClaudeHookSettings)
+		}
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		claudeDir := filepath.Join(homeRoot, ".claude")
-		if err := os.MkdirAll(claudeDir, 0755); err != nil {
-			continue
-		}
-		target := filepath.Join(claudeDir, "settings.json")
+		target := filepath.Join(homeRoot, ".claude", "settings.json")
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink, leave it
 		}
-		links.Symlink(src, target)
+		_ = emitHookSpec(spec, target, HookEmissionMode{
+			Shape:     HookShapeDirect,
+			Transport: HookTransportSymlink,
+		})
 	}
 	return nil
 }
@@ -292,6 +317,15 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 	}
 
 	// Remove .claude/settings.local.json
+	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
+	if err == nil && len(projectBundles) > 0 {
+		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, ".claude", "settings.local.json"), renderClaudeHookSettings)
+	} else {
+		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+		if globalErr == nil && len(globalBundles) > 0 {
+			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, ".claude", "settings.local.json"), renderClaudeHookSettings)
+		}
+	}
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".claude", "settings.local.json"), agentsHome)
 
 	// Remove .mcp.json

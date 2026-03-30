@@ -522,6 +522,24 @@ func restoreFromResourcesCounted(project, projectPath string) int {
 		if strings.HasPrefix(relPath, "backups/") {
 			return nil
 		}
+		candidate := importCandidate{
+			project:    project,
+			sourceRoot: resourcesDir,
+			sourcePath: path,
+		}
+		if outputs, ok, canonErr := canonicalImportOutputs(candidate); ok {
+			if canonErr != nil {
+				return nil
+			}
+			for _, output := range outputs {
+				destPath := filepath.Join(agentsHome, output.destRel)
+				os.MkdirAll(filepath.Dir(destPath), 0755)
+				if err := os.WriteFile(destPath, output.content, 0644); err == nil {
+					count++
+				}
+			}
+			return nil
+		}
 		destRel := mapResourceRelToDest(project, relPath)
 		if destRel == "" {
 			return nil

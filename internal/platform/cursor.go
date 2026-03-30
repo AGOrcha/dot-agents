@@ -156,7 +156,7 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {	
+func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "settings", project, "cursorignore"); src != "" {
 		dst := filepath.Join(repoPath, ".cursorignore")
 		links.Hardlink(src, dst) // best-effort
@@ -165,26 +165,51 @@ func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 }
 
 func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+	repoTarget := filepath.Join(repoPath, ".cursor", cursorHooksFile)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
+	if err != nil {
 		return err
 	}
-	src := resolveScopedFile(agentsHome, "hooks", project, "cursor.json")
-	if src != "" {
-		links.Hardlink(src, filepath.Join(repoPath, ".cursor", cursorHooksFile))
+	if len(repoBundles) > 0 {
+		if err := emitRenderedHookFile(repoBundles, repoTarget, renderCursorHookConfig); err != nil {
+			return err
+		}
+	} else {
+		if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+			return err
+		}
+		repoSpec := resolveHookSpec(agentsHome, []string{"hooks"}, project, "cursor.json")
+		if repoSpec != nil {
+			if err := emitHookSpec(repoSpec, repoTarget, HookEmissionMode{
+				Shape:     HookShapeDirect,
+				Transport: HookTransportHardlink,
+			}); err != nil {
+				return err
+			}
+		} else {
+			_ = removeManagedFileIf(repoTarget, isLikelyRenderedCursorHookConfig)
+		}
 	}
-	// User-level: global scope only
-	src = filepath.Join(agentsHome, "hooks", "global", "cursor.json")
-	if _, err := os.Stat(src); err == nil {
+
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	if len(globalBundles) > 0 {
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".cursor", cursorHooksFile), renderCursorHookConfig)
+	}
+
+	globalSpec := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", "cursor.json")
+	if globalSpec != nil {
+		if err := emitHookSpecToUserHomes(globalSpec, filepath.Join(".cursor", cursorHooksFile), HookEmissionMode{
+			Shape:     HookShapeDirect,
+			Transport: HookTransportHardlink,
+		}); err != nil {
+			return err
+		}
+	} else {
 		for _, homeRoot := range config.UserHomeRoots() {
-			cursorDir := filepath.Join(homeRoot, ".cursor")
-			if err := os.MkdirAll(cursorDir, 0755); err != nil {
-				continue
-			}
-			dst := filepath.Join(cursorDir, cursorHooksFile)
-			if already, _ := links.AreHardlinked(src, dst); already {
-				continue
-			}
-			links.Hardlink(src, dst)
+			_ = removeManagedFileIf(filepath.Join(homeRoot, ".cursor", cursorHooksFile), isLikelyRenderedCursorHookConfig)
 		}
 	}
 	return nil
@@ -256,6 +281,10 @@ func (c *cursor) RemoveLinks(project, repoPath string) error {
 
 	// Remove .cursor/hooks.json if hard-linked to our source
 	hooksFilePath := filepath.Join(repoPath, ".cursor", cursorHooksFile)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
+	if err == nil && len(repoBundles) > 0 {
+		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
+	}
 	for _, scope := range []string{project, "global"} {
 		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
 		if linked, _ := links.AreHardlinked(hooksFilePath, src); linked {
