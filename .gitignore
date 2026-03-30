@@ -15,6 +15,7 @@ build/
 *.egg
 *.so
 *.dylib
+dot-agents-go
 
 # IDE
 .idea/
@@ -25,7 +26,7 @@ build/
 .project
 .classpath
 .settings/
-
+*.code-workspace
 # OS
 .DS_Store
 .DS_Store?
@@ -63,7 +64,7 @@ htmlcov/
 *~
 
 # dot-agents specific (managed by dot-agents)
-.agents/
+.github/copilot-instructions.md
 .claude/
 .codex/
 .cursor/
@@ -71,6 +72,8 @@ htmlcov/
 .cursorrules
 CLAUDE.md
 AGENTS.md
+.agents-refresh
+.mcp.json
 
 # macOS
 .AppleDouble
@@ -92,5 +95,3 @@ pip-delete-this-directory.txt
 *.zip
 *.tar.gz
 *.rar
-dot-agents-go
-.agents-refresh
