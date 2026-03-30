@@ -76,6 +76,23 @@ func syncScopedDirSymlinks(agentsHome, bucket, scope, marker, dstRoot string) er
 	if err != nil {
 		return nil
 	}
+	return syncResourceDirEntries(entries, dstRoot)
+}
+
+func syncScopedDirSymlinksTargets(agentsHome, bucket, scope, marker string, dstRoots ...string) error {
+	entries, err := listScopedResourceDirs(agentsHome, bucket, scope, marker)
+	if err != nil {
+		return nil
+	}
+	for _, dstRoot := range dstRoots {
+		if err := syncResourceDirEntries(entries, dstRoot); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncResourceDirEntries(entries []resourceDir, dstRoot string) error {
 	if err := os.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}

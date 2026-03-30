@@ -178,27 +178,17 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if len(repoBundles) > 0 {
-		if err := emitRenderedHookFile(repoBundles, repoTarget, renderCursorHookConfig); err != nil {
-			return err
-		}
-	} else {
-		if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
-			return err
-		}
-		repoSpec := resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON)
-		if repoSpec != nil {
-			if err := emitHookSpec(repoSpec, repoTarget, HookEmissionMode{
-				Shape:     HookShapeDirect,
-				Transport: HookTransportHardlink,
-			}); err != nil {
-				return err
-			}
-		} else {
-			_ = removeManagedFileIf(repoTarget, isLikelyRenderedCursorHookConfig)
-		}
+	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+		return err
 	}
-	return nil
+	return emitPreferredHookFile(
+		repoTarget,
+		renderCursorHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportHardlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCursorHookConfig) },
+		repoBundles,
+	)
 }
 
 func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
@@ -206,24 +196,14 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".cursor", cursorHooksFile), renderCursorHookConfig)
-	}
-
-	globalSpec := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON)
-	if globalSpec != nil {
-		if err := emitHookSpecToUserHomes(globalSpec, filepath.Join(".cursor", cursorHooksFile), HookEmissionMode{
-			Shape:     HookShapeDirect,
-			Transport: HookTransportHardlink,
-		}); err != nil {
-			return err
-		}
-	} else {
-		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, ".cursor", cursorHooksFile), isLikelyRenderedCursorHookConfig)
-		}
-	}
-	return nil
+	return emitPreferredHookFileToUserHomes(
+		filepath.Join(".cursor", cursorHooksFile),
+		renderCursorHookConfig,
+		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportHardlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCursorHookConfig) },
+		globalBundles,
+	)
 }
 
 func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {

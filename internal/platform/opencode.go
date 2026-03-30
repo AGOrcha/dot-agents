@@ -76,22 +76,7 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 }
 
 func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error {
-	skillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
-		return err
-	}
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		target := filepath.Join(skillsTarget, e.Name)
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(e.Dir, target)
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
 }
 
 func (o *opencode) RemoveLinks(project, repoPath string) error {
