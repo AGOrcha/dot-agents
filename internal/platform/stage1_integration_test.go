@@ -69,6 +69,21 @@ func TestClaudeCreateLinksDualSkillOutputs(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
 }
 
+func TestClaudeCreateLinksSymlinksGlobalAgentsIntoUserHome(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	home := paths.home
+	repo := paths.repo
+
+	globalAgentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	writeTextFile(t, filepath.Join(globalAgentDir, "AGENT.md"), "# Reviewer\n")
+	mkdirAll(t, repo)
+
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertSymlinkTarget(t, filepath.Join(home, dirClaude, "agents", "reviewer"), globalAgentDir)
+}
+
 func TestCursorCreateLinksHardlinksAndMCPSelection(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
@@ -99,6 +114,24 @@ func TestCursorCreateLinksHardlinksAndMCPSelection(t *testing.T) {
 	assertHardlinked(t, filepath.Join(repo, dirCursor, fileMCPJSON), cursorMCP)
 	assertHardlinked(t, filepath.Join(repo, ".cursorignore"), cursorIgnore)
 	assertHardlinked(t, filepath.Join(repo, dirCursor, fileHooksJSON), cursorHooks)
+}
+
+func TestCursorRemoveLinksRemovesManagedRuleHardlinks(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	globalRule := filepath.Join(agentsHome, "rules", "global", "rules.md")
+	projectRule := filepath.Join(agentsHome, "rules", "proj", "lint.mdc")
+	writeTextFile(t, globalRule, "---\ndescription: global rules\n---\n")
+	writeTextFile(t, projectRule, "---\ndescription: lint\n---\n")
+	mkdirAll(t, repo)
+
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
+	mustRemoveLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
+
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "global--rules.mdc"))
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "proj--lint.mdc"))
 }
 
 func TestCursorCreateLinksMCPFallsBackToProjectGenericBeforeGlobalPlatformFile(t *testing.T) {

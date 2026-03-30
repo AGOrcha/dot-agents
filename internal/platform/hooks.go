@@ -42,6 +42,11 @@ type HookEmissionMode struct {
 	Transport HookTransport
 }
 
+var (
+	directSymlinkHookMode  = HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink}
+	directHardlinkHookMode = HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportHardlink}
+)
+
 type HookPlatformOverride struct {
 	Event   string `yaml:"event"`
 	Matcher string `yaml:"matcher"`
@@ -373,6 +378,18 @@ func emitPreferredHookFileToUserHomes(
 		}
 	}
 	return nil
+}
+
+func removeRenderedClaudeHookSettings(path string) error {
+	return removeManagedFileIf(path, isLikelyRenderedClaudeHookSettings)
+}
+
+func removeRenderedCodexHookConfig(path string) error {
+	return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig)
+}
+
+func removeRenderedCursorHookConfig(path string) error {
+	return removeManagedFileIf(path, isLikelyRenderedCursorHookConfig)
 }
 
 func removeManagedRenderedHookFile(specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {

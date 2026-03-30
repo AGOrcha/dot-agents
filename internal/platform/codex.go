@@ -14,7 +14,12 @@ import (
 
 type codex struct{}
 
-const codexHooksJSON = "hooks.json"
+const (
+	codexAgentsDir = ".agents"
+	codexDir = ".codex"
+	codexHooksJSON = "hooks.json"
+	codexAgentsMarkdown = "AGENTS.md"
+)
 
 func NewCodex() Platform { return &codex{} }
 
@@ -56,7 +61,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 	for _, src := range globalCandidates {
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, "AGENTS.md"))
+			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
 			break
 		}
 	}
@@ -64,17 +69,17 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	for _, name := range []string{"agents.md", "agents.mdc"} {
 		src := filepath.Join(agentsHome, "rules", project, name)
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, "AGENTS.md"))
+			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
 			break
 		}
 	}
 
 	// .codex/config.toml
-	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, ".codex", "config.toml"))
+		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
 	}
 
 	// Project agents → .codex/agents/*.toml
@@ -101,7 +106,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".codex", "agents")
+		userAgentsDir := filepath.Join(homeRoot, codexDir, "agents")
 		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
@@ -114,7 +119,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 
 func (c *codex) ensureUserSkills(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
-		userSkillsDir := filepath.Join(homeRoot, ".agents", "skills")
+		userSkillsDir := filepath.Join(homeRoot, codexAgentsDir, "skills")
 		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
 			return err
 		}
@@ -123,7 +128,7 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".codex", "agents")
+	agentsTarget := filepath.Join(repoPath, codexDir, "agents")
 	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
 		return err
 	}
@@ -131,7 +136,7 @@ func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
+	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, codexAgentsDir, "skills"))
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
@@ -142,20 +147,20 @@ func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
-	repoTarget := filepath.Join(repoPath, ".codex", codexHooksJSON)
+	repoTarget := filepath.Join(repoPath, codexDir, codexHooksJSON)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
 		repoTarget,
 		renderCodexHookConfig,
 		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
-		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
-		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig) },
+		directSymlinkHookMode,
+		removeRenderedCodexHookConfig,
 		repoBundles,
 	)
 }
@@ -166,11 +171,11 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 		return err
 	}
 	return emitPreferredHookFileToUserHomes(
-		filepath.Join(".codex", codexHooksJSON),
+		filepath.Join(codexDir, codexHooksJSON),
 		renderCodexHookConfig,
 		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
-		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
-		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig) },
+		directSymlinkHookMode,
+		removeRenderedCodexHookConfig,
 		globalBundles,
 	)
 }
@@ -178,17 +183,17 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 func (c *codex) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, "AGENTS.md"), agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "config.toml"), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
-		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, ".codex", codexHooksJSON), renderCodexHookConfig)
+		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", codexHooksJSON), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome)
 
-	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, ".codex", "agents"))
+	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents"))
 
-	skillsDir := filepath.Join(repoPath, ".agents", "skills")
+	skillsDir := filepath.Join(repoPath, codexAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
 			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)

@@ -16,6 +16,7 @@ const (
 	claudeCodeJSON          = "claude-code.json"
 	claudeSettingsJSON      = "settings.json"
 	claudeSettingsLocalJSON = "settings.local.json"
+	claudeDir               = ".claude"
 )
 
 func NewClaude() Platform { return &claude{} }
@@ -28,7 +29,7 @@ func (c *claude) IsInstalled() bool {
 		return true
 	}
 	home, _ := os.UserHomeDir()
-	_, err := os.Stat(filepath.Join(home, ".claude"))
+	_, err := os.Stat(filepath.Join(home, claudeDir))
 	return err == nil
 }
 
@@ -82,11 +83,11 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	if err := c.ensureUserSettings(agentsHome); err != nil {
 		return err
 	}
-	return os.MkdirAll(filepath.Join(repoPath, ".claude", "rules"), 0755)
+	return os.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
-	target := filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON)
+	target := filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON)
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err != nil {
 		return
@@ -99,8 +100,8 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 		target,
 		renderClaudeHookSettings,
 		findClaudeSettingsHookSpec(agentsHome, project),
-		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
-		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedClaudeHookSettings) },
+		directSymlinkHookMode,
+		removeRenderedClaudeHookSettings,
 		projectBundles,
 		globalBundles,
 	)
@@ -117,7 +118,7 @@ func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
 }
 
 func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
-	rulesDir := filepath.Join(repoPath, ".claude", "rules")
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	projectRulesDir := filepath.Join(agentsHome, "rules", project)
 
 	entries, err := os.ReadDir(projectRulesDir)
@@ -143,35 +144,40 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 
 func (c *claude) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
-	if _, err := os.Stat(globalAgents); err != nil {
+	entries, err := os.ReadDir(globalAgents)
+	if err != nil {
 		return nil
 	}
 
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".claude", "agents")
-		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		if err := c.ensureUserAgentsInHome(homeRoot, globalAgents, entries); err != nil {
 			continue
-		}
-		entries, err := os.ReadDir(globalAgents)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			agentDir := filepath.Join(globalAgents, e.Name())
-			if !links.IsDirEntry(agentDir) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userAgentsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue // already a symlink
-			}
-			links.Symlink(agentDir, target)
 		}
 	}
 	return nil
+}
+
+func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries []os.DirEntry) error {
+	userAgentsDir := filepath.Join(homeRoot, claudeDir, "agents")
+	if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		c.linkUserAgent(globalAgents, userAgentsDir, entry)
+	}
+	return nil
+}
+
+func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirEntry) {
+	agentDir := filepath.Join(globalAgents, entry.Name())
+	if !isClaudeAgentDir(agentDir) {
+		return
+	}
+	target := filepath.Join(userAgentsDir, entry.Name())
+	if isSymlink(target) {
+		return
+	}
+	links.Symlink(agentDir, target)
 }
 
 func (c *claude) ensureUserRules(agentsHome string) error {
@@ -196,11 +202,11 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 	}
 
 	for _, homeRoot := range config.UserHomeRoots() {
-		target := filepath.Join(homeRoot, ".claude", "CLAUDE.md")
+		target := filepath.Join(homeRoot, claudeDir, "CLAUDE.md")
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink
 		}
-		os.MkdirAll(filepath.Join(homeRoot, ".claude"), 0755)
+		os.MkdirAll(filepath.Join(homeRoot, claudeDir), 0755)
 		links.Symlink(src, target)
 	}
 	return nil
@@ -212,18 +218,18 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		return err
 	}
 	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".claude", claudeSettingsJSON), renderClaudeHookSettings)
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
 	}
 
 	spec := findClaudeSettingsHookSpec(agentsHome, "global")
 	if spec == nil {
 		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, ".claude", claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
+			_ = removeManagedFileIf(filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
 		}
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		target := filepath.Join(homeRoot, ".claude", claudeSettingsJSON)
+		target := filepath.Join(homeRoot, claudeDir, claudeSettingsJSON)
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink, leave it
 		}
@@ -237,7 +243,7 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 
 func (c *claude) ensureUserSkills(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
-		userSkillsDir := filepath.Join(homeRoot, ".claude", "skills")
+		userSkillsDir := filepath.Join(homeRoot, claudeDir, "skills")
 		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
 			return err
 		}
@@ -246,31 +252,7 @@ func (c *claude) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if !links.IsDirEntry(agentDir) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentDir, target)
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, claudeDir, "agents"))
 }
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
@@ -280,7 +262,7 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 		"skills",
 		project,
 		"SKILL.md",
-		filepath.Join(repoPath, ".claude", "skills"),
+		filepath.Join(repoPath, claudeDir, "skills"),
 		filepath.Join(repoPath, ".agents", "skills"),
 	)
 }
@@ -291,14 +273,14 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 	c.removeProjectRuleLinks(project, repoPath, agentsHome)
 	c.removeProjectSettingsLink(project, repoPath, agentsHome)
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
-	c.removeScopedDirLinks(filepath.Join(repoPath, ".claude", "agents"), agentsHome)
-	c.removeScopedDirLinks(filepath.Join(repoPath, ".claude", "skills"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome)
 	c.removeScopedDirLinks(filepath.Join(repoPath, ".agents", "skills"), agentsHome)
 	return nil
 }
 
 func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
-	rulesDir := filepath.Join(repoPath, ".claude", "rules")
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	if entries, err := os.ReadDir(rulesDir); err == nil {
 		prefix := project + "--"
 		for _, e := range entries {
@@ -313,14 +295,14 @@ func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
 func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
-		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), renderClaudeHookSettings)
+		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 	} else {
 		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 		if globalErr == nil && len(globalBundles) > 0 {
-			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), renderClaudeHookSettings)
+			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), agentsHome)
 }
 
 func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
@@ -329,4 +311,17 @@ func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
 			links.RemoveIfSymlinkUnder(filepath.Join(dir, e.Name()), agentsHome)
 		}
 	}
+}
+
+func isClaudeAgentDir(path string) bool {
+	if !links.IsDirEntry(path) {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(path, "AGENT.md"))
+	return err == nil
+}
+
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
