@@ -9,6 +9,13 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
+const (
+	testProjectName     = "myproj"
+	testSkillName       = "new-skill"
+	testSourceTypeLocal = "local"
+	testSourceTypeGit   = "git"
+)
+
 // helpers ────────────────────────────────────────────────────────────────────
 
 // setupEnv wires AGENTS_HOME to a temp dir with a registered project and
@@ -44,7 +51,7 @@ func setupEnv(t *testing.T, projectName string) (agentsHome, projectPath string)
 	rc := &config.AgentsRC{
 		Version: 1,
 		Project: projectName,
-		Sources: []config.Source{{Type: "local"}},
+		Sources: []config.Source{{Type: testSourceTypeLocal}},
 	}
 	if err := rc.Save(projectPath); err != nil {
 		t.Fatalf("rc.Save: %v", err)
@@ -59,14 +66,14 @@ func setupEnv(t *testing.T, projectName string) (agentsHome, projectPath string)
 // project-scoped skill writes to the registered repo's .agentsrc.json even
 // when the caller's CWD is a completely different directory.
 func TestCreateSkill_UpdatesRegisteredProjectManifest(t *testing.T) {
-	agentsHome, projectPath := setupEnv(t, "myproj")
+	agentsHome, projectPath := setupEnv(t, testProjectName)
 
 	// CWD is a completely unrelated directory (the agentsHome itself).
 	if err := os.Chdir(agentsHome); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	if err := createSkill("new-skill", "myproj"); err != nil {
+	if err := createSkill(testSkillName, testProjectName); err != nil {
 		t.Fatalf("createSkill: %v", err)
 	}
 
@@ -77,7 +84,7 @@ func TestCreateSkill_UpdatesRegisteredProjectManifest(t *testing.T) {
 	}
 	found := false
 	for _, s := range rc.Skills {
-		if s == "new-skill" {
+		if s == testSkillName {
 			found = true
 			break
 		}
@@ -91,13 +98,13 @@ func TestCreateSkill_UpdatesRegisteredProjectManifest(t *testing.T) {
 // project-scoped skill does NOT touch a .agentsrc.json that happens to exist
 // in the current directory.
 func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
-	agentsHome, _ := setupEnv(t, "myproj")
+	agentsHome, _ := setupEnv(t, testProjectName)
 
 	// Write a second, unrelated manifest in agentsHome (which is our CWD).
 	cwdManifest := &config.AgentsRC{
 		Version: 1,
 		Project: "other",
-		Sources: []config.Source{{Type: "local"}},
+		Sources: []config.Source{{Type: testSourceTypeLocal}},
 	}
 	if err := cwdManifest.Save(agentsHome); err != nil {
 		t.Fatalf("save cwd manifest: %v", err)
@@ -106,7 +113,7 @@ func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	if err := createSkill("new-skill", "myproj"); err != nil {
+	if err := createSkill(testSkillName, testProjectName); err != nil {
 		t.Fatalf("createSkill: %v", err)
 	}
 
@@ -116,7 +123,7 @@ func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 		t.Fatalf("reload cwd manifest: %v", err)
 	}
 	for _, s := range rc.Skills {
-		if s == "new-skill" {
+		if s == testSkillName {
 			t.Error("cwd manifest was incorrectly mutated by project-scoped skill creation")
 		}
 	}
@@ -125,13 +132,13 @@ func TestCreateSkill_DoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 // TestCreateAgent_UpdatesRegisteredProjectManifest mirrors the skill test for
 // agents.
 func TestCreateAgent_UpdatesRegisteredProjectManifest(t *testing.T) {
-	agentsHome, projectPath := setupEnv(t, "myproj")
+	agentsHome, projectPath := setupEnv(t, testProjectName)
 
 	if err := os.Chdir(agentsHome); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	if err := createAgent("new-agent", "myproj"); err != nil {
+	if err := createAgent("new-agent", testProjectName); err != nil {
 		t.Fatalf("createAgent: %v", err)
 	}
 
@@ -155,7 +162,7 @@ func TestCreateAgent_UpdatesRegisteredProjectManifest(t *testing.T) {
 // skill for a project name that is NOT registered in config silently skips the
 // manifest update instead of panicking or writing to an arbitrary path.
 func TestCreateSkill_UnregisteredProjectSkipsManifest(t *testing.T) {
-	agentsHome, _ := setupEnv(t, "myproj")
+	agentsHome, _ := setupEnv(t, testProjectName)
 	_ = agentsHome
 
 	// "ghost" is not registered — no crash, no manifest written anywhere.
@@ -194,7 +201,7 @@ func manifestGitSourcesStatus(t *testing.T, manifestPath string) (missing, prese
 		t.Fatalf("parse manifest: %v", err)
 	}
 	for _, src := range rc.Sources {
-		if src.Type != "git" || src.URL == "" {
+		if src.Type != testSourceTypeGit || src.URL == "" {
 			continue
 		}
 		cacheDir := config.GitSourceCacheDir(src.URL)
@@ -222,9 +229,9 @@ func TestDoctorManifest_AllSourcesPresent(t *testing.T) {
 	}
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
-		{Type: "local"},
-		{Type: "git", URL: url1},
-		{Type: "git", URL: url2},
+		{Type: testSourceTypeLocal},
+		{Type: testSourceTypeGit, URL: url1},
+		{Type: testSourceTypeGit, URL: url2},
 	})
 
 	missing, present := manifestGitSourcesStatus(t, mf)
@@ -250,8 +257,8 @@ func TestDoctorManifest_FirstPresentSecondMissing(t *testing.T) {
 	}
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
-		{Type: "git", URL: url1},
-		{Type: "git", URL: url2},
+		{Type: testSourceTypeGit, URL: url1},
+		{Type: testSourceTypeGit, URL: url2},
 	})
 
 	missing, present := manifestGitSourcesStatus(t, mf)
@@ -268,9 +275,9 @@ func TestDoctorManifest_AllMissing(t *testing.T) {
 	tmp := t.TempDir()
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
-		{Type: "git", URL: "https://github.com/example/a.git"},
-		{Type: "git", URL: "https://github.com/example/b.git"},
-		{Type: "git", URL: "https://github.com/example/c.git"},
+		{Type: testSourceTypeGit, URL: "https://github.com/example/a.git"},
+		{Type: testSourceTypeGit, URL: "https://github.com/example/b.git"},
+		{Type: testSourceTypeGit, URL: "https://github.com/example/c.git"},
 	})
 
 	missing, present := manifestGitSourcesStatus(t, mf)
@@ -288,7 +295,7 @@ func TestDoctorManifest_LocalOnlyNoGitSources(t *testing.T) {
 	tmp := t.TempDir()
 
 	mf := buildManifestWithSources(t, tmp, []config.Source{
-		{Type: "local"},
+		{Type: testSourceTypeLocal},
 	})
 
 	missing, present := manifestGitSourcesStatus(t, mf)
