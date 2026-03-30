@@ -25,6 +25,11 @@ const (
 	statusCursorDir           = ".cursor"
 	statusAgentsMarkdown      = "AGENTS.md"
 	statusCopilotInstructions = "copilot-instructions.md"
+	statusCopilotMCPJSON     = "mcp.json"
+	statusClaudeDir          = ".claude"
+	statusClaudeSettingsLocalJSON = "settings.local.json"
+	statusClaudeSettingsJSON = "settings.json"
+	globalRulesPrefix = "global--"
 )
 
 func NewStatusCmd() *cobra.Command {
@@ -124,8 +129,8 @@ func runStatus(audit bool, agentFilter string) error {
 					continue
 				}
 				f := filepath.Join(cursorRulesDir, e.Name())
-				if strings.HasPrefix(e.Name(), "global--") {
-					srcName := strings.TrimPrefix(e.Name(), "global--")
+				if strings.HasPrefix(e.Name(), globalRulesPrefix) {
+					srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
 					src := filepath.Join(agentsHome, "rules", "global", srcName)
 					if linked, _ := links.AreHardlinked(f, src); linked {
 						cursorOK++
@@ -142,9 +147,9 @@ func runStatus(audit bool, agentFilter string) error {
 			}
 		}
 		// Cursor MCP link
-		cursorMCP := filepath.Join(path, statusCursorDir, "mcp.json")
+		cursorMCP := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
 		cursorOK += countManagedFileOK(cursorMCP, &cursorWarn)
-		cursorOK += countManagedFileOK(filepath.Join(path, statusCursorDir, "settings.json"), &cursorWarn)
+		cursorOK += countManagedFileOK(filepath.Join(path, statusCursorDir, statusClaudeSettingsJSON), &cursorWarn)
 		cursorOK += countManagedFileOK(filepath.Join(path, statusCursorDir, statusHooksJSON), &cursorWarn)
 		cursorOK += countManagedFileOK(filepath.Join(path, ".cursorignore"), &cursorWarn)
 		healthOK += cursorOK
@@ -153,7 +158,7 @@ func runStatus(audit bool, agentFilter string) error {
 
 		// Claude
 		claudeOK, claudeWarn := 0, 0
-		claudeRulesDir := filepath.Join(path, ".claude", "rules")
+		claudeRulesDir := filepath.Join(path, statusClaudeDir, "rules")
 		if entries, err := os.ReadDir(claudeRulesDir); err == nil {
 			for _, e := range entries {
 				linkPath := filepath.Join(claudeRulesDir, e.Name())
@@ -167,9 +172,9 @@ func runStatus(audit bool, agentFilter string) error {
 			}
 		}
 		claudeOK += countManagedFileOK(filepath.Join(path, ".mcp.json"), &claudeWarn)
-		claudeOK += countManagedFileOK(filepath.Join(path, ".claude", "settings.local.json"), &claudeWarn)
-		claudeOK += countManagedDirEntries(filepath.Join(path, ".claude", "agents"), &claudeWarn)
-		claudeOK += countManagedDirEntries(filepath.Join(path, ".claude", "skills"), &claudeWarn)
+		claudeOK += countManagedFileOK(filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON), &claudeWarn)
+		claudeOK += countManagedDirEntries(filepath.Join(path, statusClaudeDir, "agents"), &claudeWarn)
+		claudeOK += countManagedDirEntries(filepath.Join(path, statusClaudeDir, "skills"), &claudeWarn)
 		healthOK += claudeOK
 		healthWarn += claudeWarn
 		badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
@@ -198,8 +203,8 @@ func runStatus(audit bool, agentFilter string) error {
 		// Copilot
 		copilotOK, copilotWarn := 0, 0
 		copilotOK += countManagedFileOK(filepath.Join(path, statusGitHubDir, statusCopilotInstructions), &copilotWarn)
-		copilotOK += countManagedFileOK(filepath.Join(path, ".vscode", "mcp.json"), &copilotWarn)
-		copilotOK += countManagedFileOK(filepath.Join(path, ".claude", "settings.local.json"), &copilotWarn)
+		copilotOK += countManagedFileOK(filepath.Join(path, ".vscode", statusCopilotMCPJSON), &copilotWarn)
+		copilotOK += countManagedFileOK(filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON), &copilotWarn)
 		copilotOK += countManagedDirEntries(filepath.Join(path, statusGitHubDir, "agents"), &copilotWarn)
 		copilotOK += countManagedDirEntries(filepath.Join(path, statusGitHubDir, "hooks"), &copilotWarn)
 		copilotOK += countManagedDirEntries(filepath.Join(path, statusAgentsDir, "skills"), &copilotWarn)
@@ -438,7 +443,7 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 	// Claude user-level config
 	if agentFilter == "" || agentFilter == "claude" {
 		claudeOK, claudeWarn := 0, 0
-		claudeHome := filepath.Join(homeDir, ".claude")
+		claudeHome := filepath.Join(homeDir, statusClaudeDir)
 
 		// CLAUDE.md
 		claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
@@ -457,7 +462,7 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 		}
 
 		// settings.json
-		claudeSettings := filepath.Join(claudeHome, "settings.json")
+		claudeSettings := filepath.Join(claudeHome, statusClaudeSettingsJSON)
 		if info, err := os.Lstat(claudeSettings); err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
 				if dest, err := os.Readlink(claudeSettings); err == nil {
@@ -741,9 +746,9 @@ func printCursorAudit(name, path, agentsHome string) {
 		}
 		f := filepath.Join(rulesDir, e.Name())
 		var srcType, linkedTo string
-		if strings.HasPrefix(e.Name(), "global--") {
+		if strings.HasPrefix(e.Name(), globalRulesPrefix) {
 			srcType = "global"
-			srcName := strings.TrimPrefix(e.Name(), "global--")
+			srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
 			linkedTo = "~/.agents/rules/global/" + srcName
 		} else if strings.HasPrefix(e.Name(), name+"--") {
 			srcType = "project"
@@ -770,7 +775,7 @@ func printCursorAudit(name, path, agentsHome string) {
 		fmt.Fprintf(os.Stdout, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
 	}
 	// Cursor MCP link (.cursor/mcp.json)
-	cursorMCPPath := filepath.Join(path, statusCursorDir, "mcp.json")
+	cursorMCPPath := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
 	if info, err := os.Lstat(cursorMCPPath); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			dest, _ := os.Readlink(cursorMCPPath)
@@ -791,10 +796,10 @@ func printCursorAudit(name, path, agentsHome string) {
 
 func printClaudeAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, ".claude", "rules")
+	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
 	entries, err := os.ReadDir(rulesDir)
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no .claude/rules/)%s\n", ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s(no %s/rules/)%s\n", ui.Dim, statusClaudeDir, ui.Reset)
 		fmt.Fprintln(os.Stdout)
 		return
 	}
@@ -815,7 +820,7 @@ func printClaudeAudit(name, path, agentsHome string) {
 		}
 	}
 	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s .claude/rules/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s○%s %s/rules/ %s(empty)%s\n", ui.Dim, ui.Reset, statusClaudeDir, ui.Dim, ui.Reset)
 	}
 	// Claude MCP link (.mcp.json)
 	claudeMCPPath := filepath.Join(path, ".mcp.json")
@@ -980,7 +985,7 @@ func printCopilotAudit(name, path string) {
 		fmt.Fprintf(os.Stdout, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
 	}
 	// Copilot MCP link (.vscode/mcp.json)
-	vscodeMCPPath := filepath.Join(path, ".vscode", "mcp.json")
+	vscodeMCPPath := filepath.Join(path, ".vscode", statusCopilotMCPJSON)
 	if dest, err := os.Readlink(vscodeMCPPath); err == nil {
 		displayDest := config.DisplayPath(dest)
 		if _, err := os.Stat(dest); err == nil {
