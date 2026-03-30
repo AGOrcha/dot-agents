@@ -324,6 +324,57 @@ func emitRenderedHookFileToUserHomes(specs []HookSpec, relativePath string, rend
 	return nil
 }
 
+func emitPreferredHookFile(
+	dst string,
+	render func([]HookSpec) ([]byte, error),
+	legacy *HookSpec,
+	mode HookEmissionMode,
+	removeRendered func(string) error,
+	canonicalSets ...[]HookSpec,
+) error {
+	for _, specs := range canonicalSets {
+		if len(specs) == 0 {
+			continue
+		}
+		return emitRenderedHookFile(specs, dst, render)
+	}
+	if legacy != nil {
+		return emitHookSpec(legacy, dst, mode)
+	}
+	if removeRendered != nil {
+		return removeRendered(dst)
+	}
+	return nil
+}
+
+func emitPreferredHookFileToUserHomes(
+	relativePath string,
+	render func([]HookSpec) ([]byte, error),
+	legacy *HookSpec,
+	mode HookEmissionMode,
+	removeRendered func(string) error,
+	canonicalSets ...[]HookSpec,
+) error {
+	for _, specs := range canonicalSets {
+		if len(specs) == 0 {
+			continue
+		}
+		return emitRenderedHookFileToUserHomes(specs, relativePath, render)
+	}
+	if legacy != nil {
+		return emitHookSpecToUserHomes(legacy, relativePath, mode)
+	}
+	if removeRendered == nil {
+		return nil
+	}
+	for _, homeRoot := range config.UserHomeRoots() {
+		if err := removeRendered(filepath.Join(homeRoot, relativePath)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func removeManagedRenderedHookFile(specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {
 	if len(specs) == 0 {
 		return nil

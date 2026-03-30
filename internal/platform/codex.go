@@ -131,22 +131,7 @@ func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
-	skillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
-		return err
-	}
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		target := filepath.Join(skillsTarget, e.Name)
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(e.Dir, target)
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
@@ -162,27 +147,17 @@ func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if len(repoBundles) > 0 {
-		if err := emitRenderedHookFile(repoBundles, repoTarget, renderCodexHookConfig); err != nil {
-			return err
-		}
-	} else {
-		spec := resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json")
-		if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
-			return err
-		}
-		if spec != nil {
-			if err := emitHookSpec(spec, repoTarget, HookEmissionMode{
-				Shape:     HookShapeDirect,
-				Transport: HookTransportSymlink,
-			}); err != nil {
-				return err
-			}
-		} else {
-			_ = removeManagedFileIf(repoTarget, isLikelyRenderedCodexHookConfig)
-		}
+	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
+		return err
 	}
-	return nil
+	return emitPreferredHookFile(
+		repoTarget,
+		renderCodexHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig) },
+		repoBundles,
+	)
 }
 
 func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
@@ -190,21 +165,14 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(".codex", codexHooksJSON), renderCodexHookConfig)
-	}
-
-	spec := resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json")
-	if spec == nil {
-		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, ".codex", codexHooksJSON), isLikelyRenderedCodexHookConfig)
-		}
-		return nil
-	}
-	return emitHookSpecToUserHomes(spec, filepath.Join(".codex", codexHooksJSON), HookEmissionMode{
-		Shape:     HookShapeDirect,
-		Transport: HookTransportSymlink,
-	})
+	return emitPreferredHookFileToUserHomes(
+		filepath.Join(".codex", codexHooksJSON),
+		renderCodexHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig) },
+		globalBundles,
+	)
 }
 
 func (c *codex) RemoveLinks(project, repoPath string) error {

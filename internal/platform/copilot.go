@@ -145,22 +145,7 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 }
 
 func (c *copilot) createSkillsLinks(project, repoPath, agentsHome string) error {
-	skillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
-		return err
-	}
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		target := filepath.Join(skillsTarget, e.Name)
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(e.Dir, target)
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
 }
 
 func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error {
@@ -207,33 +192,22 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 	if err != nil {
 		return err
 	}
-	if len(projectBundles) > 0 {
-		return emitRenderedHookFile(projectBundles, target, renderClaudeHookSettings)
-	}
-
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 	if err != nil {
 		return err
 	}
-	if len(globalBundles) > 0 {
-		return emitRenderedHookFile(globalBundles, target, renderClaudeHookSettings)
+	if err := os.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
+		return err
 	}
-
-	spec := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json")
-	if spec != nil {
-		if err := os.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
-			return err
-		}
-		if err := emitHookSpec(spec, target, HookEmissionMode{
-			Shape:     HookShapeDirect,
-			Transport: HookTransportSymlink,
-		}); err != nil {
-			return err
-		}
-	} else {
-		_ = removeManagedFileIf(target, isLikelyRenderedClaudeHookSettings)
-	}
-	return nil
+	return emitPreferredHookFile(
+		target,
+		renderClaudeHookSettings,
+		resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json"),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedClaudeHookSettings) },
+		projectBundles,
+		globalBundles,
+	)
 }
 
 func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) error {

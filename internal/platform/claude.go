@@ -88,24 +88,22 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 	target := filepath.Join(repoPath, ".claude", claudeSettingsLocalJSON)
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
-	if err == nil && len(projectBundles) > 0 {
-		_ = emitRenderedHookFile(projectBundles, target, renderClaudeHookSettings)
+	if err != nil {
 		return
 	}
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
-	if err == nil && len(globalBundles) > 0 {
-		_ = emitRenderedHookFile(globalBundles, target, renderClaudeHookSettings)
+	if err != nil {
 		return
 	}
-	spec := findClaudeSettingsHookSpec(agentsHome, project)
-	if spec == nil {
-		_ = removeManagedFileIf(target, isLikelyRenderedClaudeHookSettings)
-		return
-	}
-	_ = emitHookSpec(spec, target, HookEmissionMode{
-		Shape:     HookShapeDirect,
-		Transport: HookTransportSymlink,
-	})
+	_ = emitPreferredHookFile(
+		target,
+		renderClaudeHookSettings,
+		findClaudeSettingsHookSpec(agentsHome, project),
+		HookEmissionMode{Shape: HookShapeDirect, Transport: HookTransportSymlink},
+		func(path string) error { return removeManagedFileIf(path, isLikelyRenderedClaudeHookSettings) },
+		projectBundles,
+		globalBundles,
+	)
 }
 
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
@@ -277,32 +275,14 @@ func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 	c.ensureUserSkills(agentsHome)
-
-	skillsTarget := filepath.Join(repoPath, ".claude", "skills")
-	agentsSkillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(agentsSkillsTarget, 0755); err != nil {
-		return err
-	}
-
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		name := e.Name
-		claudeTarget := filepath.Join(skillsTarget, name)
-		if _, err := os.Lstat(claudeTarget); err != nil {
-			links.Symlink(e.Dir, claudeTarget)
-		}
-		agentsTarget := filepath.Join(agentsSkillsTarget, name)
-		if _, err := os.Lstat(agentsTarget); err != nil {
-			links.Symlink(e.Dir, agentsTarget)
-		}
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(
+		agentsHome,
+		"skills",
+		project,
+		"SKILL.md",
+		filepath.Join(repoPath, ".claude", "skills"),
+		filepath.Join(repoPath, ".agents", "skills"),
+	)
 }
 
 func (c *claude) RemoveLinks(project, repoPath string) error {
