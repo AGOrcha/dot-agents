@@ -117,6 +117,17 @@ func runRefresh(projectFilter string) error {
 		}
 		fmt.Fprintf(os.Stdout, "  %s\n", ui.DimText(config.DisplayPath(path)))
 
+		// Note if manifest exists — git sources need `install` to re-resolve
+		if rc, err := config.LoadAgentsRC(path); err == nil {
+			for _, src := range rc.Sources {
+				if src.Type == "git" {
+					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'dot-agents install' to re-resolve%s\n", ui.Dim, ui.Reset)
+					break
+				}
+			}
+			_ = rc
+		}
+
 		if !Flags.DryRun {
 			createProjectDirs(name)
 			restoreFromResources(name, path)

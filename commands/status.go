@@ -228,6 +228,46 @@ func runStatus(audit bool, agentFilter string) error {
 
 		printBadgeRow(badges)
 
+		// Manifest badge
+		rc, rcErr := config.LoadAgentsRC(path)
+		if rcErr != nil {
+			fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: dot-agents install --generate%s\n",
+				ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
+		} else {
+			sourceDesc := "local"
+			for _, src := range rc.Sources {
+				if src.Type == "git" && src.URL != "" {
+					// Shorten to host/org/repo
+					u := src.URL
+					for _, prefix := range []string{"https://", "http://", "git@"} {
+						u = strings.TrimPrefix(u, prefix)
+					}
+					u = strings.TrimSuffix(u, ".git")
+					sourceDesc = "git: " + u
+					break
+				}
+			}
+			parts := []string{}
+			if len(rc.Skills) > 0 {
+				parts = append(parts, fmt.Sprintf("%d skill(s)", len(rc.Skills)))
+			}
+			if len(rc.Agents) > 0 {
+				parts = append(parts, fmt.Sprintf("%d agent(s)", len(rc.Agents)))
+			}
+			if rc.Hooks.IsEnabled() {
+				parts = append(parts, "hooks")
+			}
+			if rc.MCP.IsEnabled() {
+				parts = append(parts, "mcp")
+			}
+			detail := sourceDesc
+			if len(parts) > 0 {
+				detail += "  •  " + strings.Join(parts, "  ")
+			}
+			fmt.Fprintf(os.Stdout, "  %s✓%s manifest  %s%s%s\n",
+				ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
+		}
+
 		// Last refreshed
 		if ts := readRefreshTimestamp(path); ts != "" {
 			fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)

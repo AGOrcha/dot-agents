@@ -146,6 +146,133 @@ func newSyncCommitCmd() *cobra.Command {
 	return cmd
 }
 
+func syncHasGitManifests() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	for _, name := range cfg.ListProjects() {
+		path := cfg.GetProjectPath(name)
+		if path == "" {
+			continue
+		}
+		rc, err := config.LoadAgentsRC(path)
+		if err != nil {
+			continue
+		}
+		for _, src := range rc.Sources {
+			if src.Type == "git" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func syncPrintGitSourcesHint() {
+	fmt.Fprintf(os.Stdout, "  %sProjects with git sources: run 'dot-agents install' in each to re-resolve resources.%s\n", ui.Dim, ui.Reset)
+}
+
+func syncPostPullRefresh(hasManifests bool) error {
+	if Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", true) {
+		fmt.Fprintln(os.Stdout)
+		if err := runRefresh(""); err != nil {
+			return err
+		}
+		if hasManifests {
+			fmt.Fprintln(os.Stdout)
+			syncPrintGitSourcesHint()
+		}
+		return nil
+	}
+	fmt.Fprintf(os.Stdout, "\n  %sRun 'dot-agents refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
+	if hasManifests {
+		syncPrintGitSourcesHint()
+	}
+	return nil
+}
+
+func syncPrintBranchStatus(agentsHome string) {
+	branch, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branchStr := strings.TrimSpace(string(branch))
+	if branchStr != "" {
+		fmt.Fprintf(os.Stdout, "  Branch:  %s%s%s\n", ui.Bold, branchStr, ui.Reset)
+	}
+}
+
+func syncPrintRemoteStatus(agentsHome string) bool {
+	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
+	remoteStr := strings.TrimSpace(string(remoteOut))
+	hasRemote := remoteStr != ""
+	if hasRemote {
+		fmt.Fprintf(os.Stdout, "  Remote:  %s%s%s\n", ui.Dim, remoteStr, ui.Reset)
+	} else {
+		fmt.Fprintf(os.Stdout, "  Remote:  %s(none)%s\n", ui.Dim, ui.Reset)
+	}
+	return hasRemote
+}
+
+func syncPrintAheadBehind(agentsHome string, hasRemote bool) {
+	if !hasRemote {
+		return
+	}
+	aheadBehind, _ := exec.Command("git", "-C", agentsHome, "rev-list", "--count", "--left-right", "origin/HEAD...HEAD").Output()
+	ab := strings.Fields(strings.TrimSpace(string(aheadBehind)))
+	if len(ab) != 2 {
+		return
+	}
+	behind, ahead := ab[0], ab[1]
+	aheadStr := ahead
+	if ahead != "0" {
+		aheadStr = ui.Green + ahead + ui.Reset
+	}
+	fmt.Fprintf(os.Stdout, "  Ahead:   %s  Behind: %s\n", aheadStr, behind)
+}
+
+func syncCountPorcelainStatus(agentsHome string) (int, int, int) {
+	porcelain, _ := exec.Command("git", "-C", agentsHome, "status", "--porcelain").Output()
+	staged, unstaged, untracked := 0, 0, 0
+	for _, line := range strings.Split(string(porcelain), "\n") {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		if x != ' ' && x != '?' {
+			staged++
+		}
+		if y == 'M' || y == 'D' {
+			unstaged++
+		}
+		if x == '?' && y == '?' {
+			untracked++
+		}
+	}
+	return staged, unstaged, untracked
+}
+
+func syncPrintStatusSummary(staged, unstaged, untracked int) {
+	fmt.Fprintln(os.Stdout)
+
+	stagedStr := fmt.Sprintf("%d", staged)
+	if staged > 0 {
+		stagedStr = ui.Yellow + stagedStr + ui.Reset
+	}
+	untrackedStr := fmt.Sprintf("%s%d%s", ui.Dim, untracked, ui.Reset)
+
+	fmt.Fprintf(os.Stdout, "  Staged:    %s\n", stagedStr)
+	fmt.Fprintf(os.Stdout, "  Unstaged:  %d\n", unstaged)
+	fmt.Fprintf(os.Stdout, "  Untracked: %s\n", untrackedStr)
+	fmt.Fprintln(os.Stdout)
+
+	totalChanges := staged + unstaged + untracked
+	if totalChanges == 0 {
+		ui.Success("No changes — working tree clean")
+	} else {
+		ui.Warn(fmt.Sprintf("%d change(s) pending commit", totalChanges))
+	}
+	fmt.Fprintln(os.Stdout)
+}
+
 func newSyncPullCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull",
@@ -157,14 +284,7 @@ func newSyncPullCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("git pull: %w", err)
 			}
-
-			// Offer to refresh managed projects so pulled MCP/rule changes take effect.
-			if Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", true) {
-				fmt.Fprintln(os.Stdout)
-				return runRefresh("")
-			}
-			fmt.Fprintf(os.Stdout, "\n  %sRun 'dot-agents refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
-			return nil
+			return syncPostPullRefresh(syncHasGitManifests())
 		},
 	}
 }
@@ -232,78 +352,11 @@ func newSyncStatusCmd() *cobra.Command {
 			agentsHome := config.AgentsHome()
 
 			ui.Header("dot-agents sync status")
-
-			// Branch
-			branch, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
-			branchStr := strings.TrimSpace(string(branch))
-			if branchStr != "" {
-				fmt.Fprintf(os.Stdout, "  Branch:  %s%s%s\n", ui.Bold, branchStr, ui.Reset)
-			}
-
-			// Remote
-			remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
-			remoteStr := strings.TrimSpace(string(remoteOut))
-			hasRemote := remoteStr != ""
-			if hasRemote {
-				fmt.Fprintf(os.Stdout, "  Remote:  %s%s%s\n", ui.Dim, remoteStr, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "  Remote:  %s(none)%s\n", ui.Dim, ui.Reset)
-			}
-
-			// Ahead/behind — only when remote exists
-			if hasRemote {
-				aheadBehind, _ := exec.Command("git", "-C", agentsHome, "rev-list", "--count", "--left-right", "origin/HEAD...HEAD").Output()
-				ab := strings.Fields(strings.TrimSpace(string(aheadBehind)))
-				if len(ab) == 2 {
-					behind, ahead := ab[0], ab[1]
-					aheadStr := ahead
-					if ahead != "0" {
-						aheadStr = ui.Green + ahead + ui.Reset
-					}
-					fmt.Fprintf(os.Stdout, "  Ahead:   %s  Behind: %s\n", aheadStr, behind)
-				}
-			}
-
-			// Porcelain counts
-			porcelain, _ := exec.Command("git", "-C", agentsHome, "status", "--porcelain").Output()
-			staged, unstaged, untracked := 0, 0, 0
-			for _, line := range strings.Split(string(porcelain), "\n") {
-				if len(line) < 2 {
-					continue
-				}
-				x, y := line[0], line[1]
-				if x != ' ' && x != '?' {
-					staged++
-				}
-				if y == 'M' || y == 'D' {
-					unstaged++
-				}
-				if x == '?' && y == '?' {
-					untracked++
-				}
-			}
-			fmt.Fprintln(os.Stdout)
-
-			stagedStr := fmt.Sprintf("%d", staged)
-			if staged > 0 {
-				stagedStr = ui.Yellow + stagedStr + ui.Reset
-			}
-			untrackedStr := fmt.Sprintf("%s%d%s", ui.Dim, untracked, ui.Reset)
-
-			fmt.Fprintf(os.Stdout, "  Staged:    %s\n", stagedStr)
-			fmt.Fprintf(os.Stdout, "  Unstaged:  %d\n", unstaged)
-			fmt.Fprintf(os.Stdout, "  Untracked: %s\n", untrackedStr)
-			fmt.Fprintln(os.Stdout)
-
-			// Summary line
-			totalChanges := staged + unstaged + untracked
-			if totalChanges == 0 {
-				ui.Success("No changes — working tree clean")
-			} else {
-				ui.Warn(fmt.Sprintf("%d change(s) pending commit", totalChanges))
-			}
-			fmt.Fprintln(os.Stdout)
-
+			syncPrintBranchStatus(agentsHome)
+			hasRemote := syncPrintRemoteStatus(agentsHome)
+			syncPrintAheadBehind(agentsHome, hasRemote)
+			staged, unstaged, untracked := syncCountPorcelainStatus(agentsHome)
+			syncPrintStatusSummary(staged, unstaged, untracked)
 			return nil
 		},
 	}

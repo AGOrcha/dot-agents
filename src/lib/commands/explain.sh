@@ -119,13 +119,70 @@ cmd_explain() {
     platforms)
       explain_platforms
       ;;
+    manifest|agentsrc|install)
+      explain_manifest
+      ;;
     *)
       log_error "Unknown topic: $topic"
       echo ""
-      echo "Available topics: rules, hooks, scripts, settings, mcp, skills, agents, config, symlinks, platforms"
+      echo "Available topics: manifest, rules, hooks, scripts, settings, mcp, skills, agents, config, symlinks, platforms"
       return 1
       ;;
   esac
+}
+
+explain_manifest() {
+  cat << 'EOF'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Manifest (.agentsrc.json)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Commit .agentsrc.json to git so any clone can run
+  dot-agents install
+to set up fully — no manual steps needed.
+
+SCHEMA FIELDS
+  skills    Names of skills to link from sources
+  agents    Names of subagents to link from sources
+  rules     Scopes: "global", "project"
+  hooks     true (all), false, or ["PreToolUse", "PostToolUse", ...]
+  mcp       true (all), false, or ["github", "filesystem", ...]
+  settings  true/false — link platform settings (Cursor, etc.)
+  sources   [{"type":"local"} | {"type":"git","url":"...","ref":"..."}]
+
+SOURCES
+  local   Search ~/.agents/ (default, no network)
+    {"type": "local"}
+
+  git     Clone/pull a remote repo into cache
+    {"type": "git", "url": "https://github.com/org/agents.git", "ref": "main"}
+
+  Cache: ~/.cache/dot-agents/sources/<hash>/
+
+WORKFLOW
+  Owner (once):
+    dot-agents add .               Register the project
+    dot-agents install --generate  Create .agentsrc.json from current state
+    git add .agentsrc.json && git commit -m 'Add dot-agents manifest'
+
+  Team member (after clone):
+    dot-agents init                (one-time per machine)
+    dot-agents install             Apply manifest — all links created
+
+  Keeping it up to date:
+    dot-agents skills new <n>   → manifest updated automatically (if present)
+    dot-agents agents new <n>   → manifest updated automatically (if present)
+    dot-agents hooks add <Evt>  → manifest updated automatically (if present)
+    dot-agents install --generate → regenerate from current state
+
+FLAGS
+  --generate  Create/overwrite .agentsrc.json from current ~/.agents/ state
+  --strict    Fail if any declared resource is not found
+  --dry-run   Preview changes without applying
+  --force     Re-fetch git sources even if recently cached
+
+EOF
+  return 0
 }
 
 explain_overview() {

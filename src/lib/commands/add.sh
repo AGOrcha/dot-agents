@@ -130,7 +130,7 @@ cmd_add() {
   # Expand and validate path
   project_path=$(expand_path "$project_path")
 
-  if [ ! -d "$project_path" ]; then
+  if [[ ! -d "$project_path" ]]; then
     log_error "Directory not found: $project_path"
     return 1
   fi
@@ -152,6 +152,11 @@ cmd_add() {
   log_header "dot-agents add"
   echo -e "Adding project: ${BOLD}$project_name${NC}"
   echo -e "Path: ${DIM}$display_path${NC}"
+
+  # Note if manifest already exists
+  if [[ -f "$project_path/.agentsrc.json" ]]; then
+    log_info ".agentsrc.json found — you can also use 'dot-agents install' to apply the manifest directly"
+  fi
 
   # Step 1: Scan project
   init_steps 4
@@ -190,7 +195,7 @@ cmd_add() {
     fi
   done < <(platform_ids)
 
-  if [ "$has_deprecated" = true ]; then
+  if [[ "$has_deprecated" = true ]]; then
     warn_box "Deprecated Formats Found" \
       "After adding this project, run:" \
       "  dot-agents migrate cursorrules $display_path" \
@@ -385,7 +390,11 @@ cmd_add() {
     next_steps+=("Migrate deprecated formats: dot-agents migrate detect")
   fi
   next_steps+=("Check applied configs: dot-agents status --audit")
-  next_steps+=("Make it git-portable: dot-agents install --generate")
+  if [[ -f "$project_path/.agentsrc.json" ]]; then
+    next_steps+=("Manifest found — apply it: dot-agents install")
+  else
+    next_steps+=("Make it git-portable: dot-agents install --generate")
+  fi
 
   success_with_next_steps "Project '$project_name' added successfully!" "${next_steps[@]}"
 

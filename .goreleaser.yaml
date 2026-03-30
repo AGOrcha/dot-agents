@@ -71,7 +71,7 @@ brews:
   - name: dot-agents
     repository:
       owner: NikashPrakash
-      name: homebrew-tap
+      name: dot-agents
     description: "Manage AI agent configurations across projects"
     homepage: "https://github.com/NikashPrakash/dot-agents"
     license: "MIT"

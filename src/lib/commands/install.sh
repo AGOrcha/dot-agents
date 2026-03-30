@@ -306,14 +306,42 @@ install_generate() {
     [[ "$has_project_rules" == true ]] && rules+=("project")
   fi
 
-  # Detect hooks, mcp, settings
-  local hooks_val=false mcp_val=false settings_val=false
-  [[ -f "$AGENTS_HOME/settings/$project_name/claude-code.json" ]] && hooks_val=true
-  if [[ -d "$AGENTS_HOME/mcp/$project_name" ]] || [[ -d "$AGENTS_HOME/mcp/global" ]]; then
-    for f in "$AGENTS_HOME/mcp/$project_name"/*.json "$AGENTS_HOME/mcp/global"/*.json; do
-      [[ -f "$f" ]] && mcp_val=true && break
-    done
+  # Detect hooks — list which event types have non-empty entries
+  local hooks_val=false
+  local hooks_settings="$AGENTS_HOME/settings/$project_name/claude-code.json"
+  if [[ -f "$hooks_settings" ]]; then
+    local hook_events=()
+    while IFS= read -r evt; do
+      hook_events+=("$evt")
+    done < <(jq -r '.hooks | to_entries[] | select(.value | length > 0) | .key' \
+               "$hooks_settings" 2>/dev/null | sort)
+    if [[ ${#hook_events[@]} -gt 0 ]]; then
+      hooks_val=$(printf '%s\n' "${hook_events[@]}" | jq -R . | jq -s .)
+    fi
   fi
+
+  # Detect MCP — list named servers from first MCP config found
+  local mcp_val=false
+  local mcp_file=""
+  for scope in "$project_name" "global"; do
+    for fname in "claude.json" "mcp.json"; do
+      local candidate="$AGENTS_HOME/mcp/$scope/$fname"
+      [[ -f "$candidate" ]] && mcp_file="$candidate" && break
+    done
+    [[ -n "$mcp_file" ]] && break
+  done
+  if [[ -n "$mcp_file" ]]; then
+    local server_names=()
+    while IFS= read -r srv; do
+      server_names+=("$srv")
+    done < <(jq -r '.servers | keys[]' "$mcp_file" 2>/dev/null | sort)
+    if [[ ${#server_names[@]} -gt 0 ]]; then
+      mcp_val=$(printf '%s\n' "${server_names[@]}" | jq -R . | jq -s .)
+    fi
+  fi
+
+  # Detect settings
+  local settings_val=false
   if [[ -f "$AGENTS_HOME/settings/$project_name/cursor.json" ]] || \
      [[ -f "$AGENTS_HOME/settings/global/cursor.json" ]]; then
     settings_val=true
@@ -378,6 +406,59 @@ install_generate() {
   echo "  1. Review: cat $AGENTSRC_FILE"
   echo "  2. Commit: git add $AGENTSRC_FILE && git commit -m 'Add dot-agents manifest'"
   echo "  3. Others: dot-agents install   (after cloning)"
+}
+
+# ─── manifest mutation helpers ───────────────────────────────────────────────
+
+# Add a name to a hooks or mcp field in .agentsrc.json.
+# If the field is already `true` (all), do nothing.
+# If false or missing, start a named list.
+# Usage: _agentsrc_add_to_field <field> <name> [manifest]
+_agentsrc_add_to_field() {
+  local field="$1" name="$2" manifest="${3:-$PWD/$AGENTSRC_FILE}"
+  [[ -f "$manifest" ]] || return 0
+  _json_has_jq || return 0
+
+  local current
+  current=$(jq -r ".$field" "$manifest" 2>/dev/null)
+
+  # If already `true`, everything is included — nothing to do
+  [[ "$current" == "true" ]] && return 0
+
+  # If false/null, start with just this name
+  # If array, append if not already present
+  local updated
+  if [[ "$current" == "false" || "$current" == "null" ]]; then
+    updated=$(jq --arg field "$field" --arg name "$name" \
+      '.[$field] = [$name]' "$manifest")
+  else
+    # Check if already in array
+    if jq -e --arg field "$field" --arg name "$name" \
+        '.[$field] | arrays | index($name) != null' "$manifest" >/dev/null 2>&1; then
+      return 0
+    fi
+    updated=$(jq --arg field "$field" --arg name "$name" \
+      '.[$field] = (.[$field] + [$name])' "$manifest")
+  fi
+  echo "$updated" > "$manifest"
+}
+
+# Remove a name from a hooks or mcp field in .agentsrc.json.
+# If the field is `true`, do nothing (can't selectively remove from "all").
+# Usage: _agentsrc_remove_from_field <field> <name> [manifest]
+_agentsrc_remove_from_field() {
+  local field="$1" name="$2" manifest="${3:-$PWD/$AGENTSRC_FILE}"
+  [[ -f "$manifest" ]] || return 0
+  _json_has_jq || return 0
+
+  local current
+  current=$(jq -r ".$field" "$manifest" 2>/dev/null)
+  [[ "$current" == "true" ]] && return 0  # can't selectively remove from "all"
+
+  local updated
+  updated=$(jq --arg field "$field" --arg name "$name" \
+    '.[$field] = [.[$field][] | select(. != $name)]' "$manifest" 2>/dev/null)
+  [[ -n "$updated" ]] && echo "$updated" > "$manifest"
 }
 
 # ─── internal helpers ─────────────────────────────────────────────────────────

@@ -175,6 +175,53 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Manifest checks
+	ui.Section("Manifests (.agentsrc.json)")
+	anyManifestIssue := false
+	for _, name := range names {
+		path := cfg.GetProjectPath(name)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		rc, err := config.LoadAgentsRC(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: dot-agents install --generate", name))
+			} else {
+				ui.Bullet("error", fmt.Sprintf("%s — corrupt manifest: %v", name, err))
+			}
+			anyManifestIssue = true
+			continue
+		}
+		// Check every declared git source — all must be fetched before reporting healthy.
+		var missingGit []string
+		var presentGit []string
+		for _, src := range rc.Sources {
+			if src.Type != "git" || src.URL == "" {
+				continue
+			}
+			cacheDir := config.GitSourceCacheDir(src.URL)
+			if _, err := os.Stat(cacheDir); err != nil {
+				missingGit = append(missingGit, src.URL)
+			} else {
+				presentGit = append(presentGit, src.URL)
+			}
+		}
+		if len(missingGit) > 0 {
+			for _, url := range missingGit {
+				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: dot-agents install", name, url))
+			}
+			anyManifestIssue = true
+		} else if len(presentGit) > 0 {
+			ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (%d git source(s))", name, len(presentGit)))
+		} else {
+			ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
+		}
+	}
+	if !anyManifestIssue {
+		fmt.Fprintf(os.Stdout, "  %sTip: run with -v to see per-project manifest details%s\n", ui.Dim, ui.Reset)
+	}
+
 	fmt.Fprintln(os.Stdout)
 	if !anyBroken {
 		if !Flags.Verbose {

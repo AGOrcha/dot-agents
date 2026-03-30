@@ -203,6 +203,7 @@ cmd_init() {
 
   success_with_next_steps "Initialization complete!" \
     "Add your first project: dot-agents add ~/path/to/project" \
+    "Team member with manifest: dot-agents install  (instead of add)" \
     "Set up git sync: dot-agents sync init" \
     "Check health: dot-agents doctor"
 

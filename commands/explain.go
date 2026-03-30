@@ -30,6 +30,8 @@ func runExplain(cmd *cobra.Command, args []string) error {
 		printPlatformsExplanation()
 	case "structure", "layout":
 		printStructureExplanation()
+	case "manifest", "agentsrc", "install":
+		printManifestExplanation()
 	default:
 		printOverviewExplanation()
 	}
@@ -58,11 +60,70 @@ func printOverviewExplanation() {
 		fmt.Fprintf(os.Stdout, "  %s%-10s%s  %s%s%s\n", ui.Cyan, c[0], ui.Reset, ui.Dim, c[1], ui.Reset)
 	}
 
+	ui.Section("Workflow")
+	fmt.Fprintf(os.Stdout, "  %sOwner (once):%s\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "    dot-agents add .               Register project\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents install --generate  Create .agentsrc.json\n")
+	fmt.Fprintf(os.Stdout, "    git add .agentsrc.json && git commit\n")
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "  %sTeam member (after clone):%s\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "    dot-agents install             Apply manifest, done\n")
+	fmt.Fprintln(os.Stdout)
+
 	ui.Section("Topics")
-	fmt.Fprintf(os.Stdout, "  %sdot-agents explain links%s      Link types (symlinks vs hard links)\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sdot-agents explain manifest%s    .agentsrc.json schema and workflow\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sdot-agents explain links%s       Link types (symlinks vs hard links)\n", ui.Dim, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %sdot-agents explain platforms%s   Supported AI platforms\n", ui.Dim, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %sdot-agents explain structure%s   ~/.agents/ directory structure\n", ui.Dim, ui.Reset)
 	fmt.Fprintln(os.Stdout)
+}
+
+func printManifestExplanation() {
+	ui.Header("Manifest (.agentsrc.json)")
+	fmt.Fprintf(os.Stdout, "  Commit .agentsrc.json to git so any clone can run\n")
+	fmt.Fprintf(os.Stdout, "  %sdot-agents install%s to set up fully — no manual steps.\n\n", ui.Bold, ui.Reset)
+
+	ui.Section("Schema")
+	fields := [][2]string{
+		{"skills", "Names of skills to link from sources"},
+		{"agents", "Names of subagents to link from sources"},
+		{"rules", `Scopes: "global", "project"`},
+		{"hooks", `true (all), false, or ["PreToolUse", "PostToolUse", ...]`},
+		{"mcp", `true (all), false, or ["github", "filesystem", ...]`},
+		{"settings", "true/false — link platform settings (Cursor, etc.)"},
+		{"sources", `[{"type":"local"} | {"type":"git","url":"...","ref":"..."}]`},
+	}
+	for _, f := range fields {
+		fmt.Fprintf(os.Stdout, "  %s%-10s%s  %s%s%s\n", ui.Cyan, f[0], ui.Reset, ui.Dim, f[1], ui.Reset)
+	}
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Sources")
+	fmt.Fprintf(os.Stdout, "  %slocal%s   Search ~/.agents/ (default, no network)\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, `  %s{"type":"local"}%s`+"\n\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sgit%s     Clone/pull a remote repo into cache\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, `  %s{"type":"git","url":"https://github.com/org/agents.git","ref":"main"}%s`+"\n\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  Cache: %s~/.cache/dot-agents/sources/<hash>/%s\n\n", ui.Dim, ui.Reset)
+
+	ui.Section("Workflow")
+	fmt.Fprintf(os.Stdout, "  %sOwner (once):%s\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "    dot-agents add .               Register the project\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents install --generate  Create .agentsrc.json from current state\n")
+	fmt.Fprintf(os.Stdout, "    git add .agentsrc.json && git commit -m 'Add dot-agents manifest'\n\n")
+	fmt.Fprintf(os.Stdout, "  %sTeam member (after clone):%s\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "    dot-agents init                (one-time per machine)\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents install             Apply manifest — all links created\n\n")
+	fmt.Fprintf(os.Stdout, "  %sKeeping it up to date:%s\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "    dot-agents skills new <n> --project <p>  → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents agents new <n> --project <p>  → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents hooks add <Event> ...         → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents install --generate            → regenerate from current state\n\n")
+
+	ui.Section("Flags")
+	fmt.Fprintf(os.Stdout, "  %s--generate%s  Create/overwrite .agentsrc.json from current ~/.agents/ state\n", ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s--strict%s    Fail if any declared resource is not found\n", ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s--dry-run%s   Preview changes without applying\n", ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s--force%s     Re-fetch git sources even if recently cached\n\n", ui.Cyan, ui.Reset)
 }
 
 func printLinkTypesExplanation() {
