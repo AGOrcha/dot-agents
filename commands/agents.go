@@ -103,13 +103,15 @@ func createAgent(name, scope string) error {
 
 	nextSteps := []string{"Edit the agent: " + config.DisplayPath(agentMD)}
 
-	// Auto-update .agentsrc.json if at project scope and manifest exists in CWD.
+	// Auto-update .agentsrc.json in the registered project repo, not CWD.
 	if scope != "global" {
-		if cwd, err := os.Getwd(); err == nil {
-			if rc, err := config.LoadAgentsRC(cwd); err == nil {
-				rc.Agents = config.AppendUnique(rc.Agents, name)
-				if saveErr := rc.Save(cwd); saveErr == nil {
-					nextSteps = append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'")
+		if cfg, err := config.Load(); err == nil {
+			if projPath := cfg.GetProjectPath(scope); projPath != "" {
+				if rc, err := config.LoadAgentsRC(projPath); err == nil {
+					rc.Agents = config.AppendUnique(rc.Agents, name)
+					if saveErr := rc.Save(projPath); saveErr == nil {
+						nextSteps = append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'")
+					}
 				}
 			}
 		}

@@ -519,20 +519,30 @@ run_doctor_text() {
         echo -e "  ${RED}✗${NC}  $pname — corrupt manifest: $mf"
         any_manifest_issue=true
       else
-        local git_url
-        git_url=$(jq -r '.sources[]? | select(.type=="git") | .url' "$mf" 2>/dev/null | head -1)
-        if [ -n "$git_url" ]; then
+        # Check every declared git source — all must be fetched before reporting healthy.
+        local missing_git=() present_git=()
+        while IFS= read -r git_url; do
+          [ -z "$git_url" ] && continue
+          # SHA-256 hash consistent with GitSourceCacheDir in Go (first 12 hex chars)
           local cache_hash
-          cache_hash=$(echo -n "$git_url" | md5sum 2>/dev/null | cut -c1-12 || \
-                       echo -n "$git_url" | md5 2>/dev/null | cut -c1-12 || echo "unknown")
+          cache_hash=$(echo -n "$git_url" | shasum -a 256 2>/dev/null | cut -c1-12 || \
+                       echo -n "$git_url" | sha256sum 2>/dev/null | cut -c1-12 || echo "unknown")
           local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/dot-agents/sources/$cache_hash"
           if [ ! -d "$cache_dir" ]; then
-            echo -e "  ${YELLOW}⚠${NC}  $pname — git source not yet fetched"
-            echo -e "       hint: dot-agents install (in $ppath)"
-            any_manifest_issue=true
+            missing_git+=("$git_url")
           else
-            echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (git: $git_url)"
+            present_git+=("$git_url")
           fi
+        done < <(jq -r '.sources[]? | select(.type=="git") | .url' "$mf" 2>/dev/null)
+
+        if [ ${#missing_git[@]} -gt 0 ]; then
+          for git_url in "${missing_git[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC}  $pname — git source not yet fetched: $git_url"
+            echo -e "       hint: dot-agents install (in $ppath)"
+          done
+          any_manifest_issue=true
+        elif [ ${#present_git[@]} -gt 0 ]; then
+          echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (${#present_git[@]} git source(s))"
         else
           echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (local)"
         fi

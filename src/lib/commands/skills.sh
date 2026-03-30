@@ -420,14 +420,12 @@ EOF
   echo "Edit with: dot-agents skills edit $name"
   echo "Or open directly: \$EDITOR $target_file"
 
-  # Auto-update .agentsrc.json if it exists in CWD
-  if [ -f "$PWD/$AGENTSRC_FILE" ] 2>/dev/null; then
-    _SKILLS_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if ! declare -F _agentsrc_add_to_field >/dev/null 2>&1; then
-      source "$_SKILLS_INSTALL_DIR/install.sh" 2>/dev/null || true
-    fi
-    if command -v jq >/dev/null 2>&1; then
-      local manifest="$PWD/$AGENTSRC_FILE"
+  # Auto-update .agentsrc.json in the registered project repo, not CWD.
+  if [ "$scope" != "global" ] && command -v jq >/dev/null 2>&1; then
+    local proj_path
+    proj_path=$(config_get_project_path "$scope" 2>/dev/null)
+    if [ -n "$proj_path" ] && [ -f "$proj_path/$AGENTSRC_FILE" ]; then
+      local manifest="$proj_path/$AGENTSRC_FILE"
       local already
       already=$(jq -r --arg n "$name" '(.skills // []) | index($n)' "$manifest" 2>/dev/null)
       if [ "$already" = "null" ]; then

@@ -175,13 +175,15 @@ func createSkill(name, scope string) error {
 
 	nextSteps := []string{"Edit the skill: " + config.DisplayPath(skillMD)}
 
-	// Auto-update .agentsrc.json if at project scope and manifest exists in CWD.
+	// Auto-update .agentsrc.json in the registered project repo, not CWD.
 	if scope != "global" {
-		if cwd, err := os.Getwd(); err == nil {
-			if rc, err := config.LoadAgentsRC(cwd); err == nil {
-				rc.Skills = config.AppendUnique(rc.Skills, name)
-				if saveErr := rc.Save(cwd); saveErr == nil {
-					nextSteps = append(nextSteps, "Updated .agentsrc.json with skill '"+name+"'")
+		if cfg, err := config.Load(); err == nil {
+			if projPath := cfg.GetProjectPath(scope); projPath != "" {
+				if rc, err := config.LoadAgentsRC(projPath); err == nil {
+					rc.Skills = config.AppendUnique(rc.Skills, name)
+					if saveErr := rc.Save(projPath); saveErr == nil {
+						nextSteps = append(nextSteps, "Updated .agentsrc.json with skill '"+name+"'")
+					}
 				}
 			}
 		}
