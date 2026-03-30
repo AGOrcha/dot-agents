@@ -151,6 +151,48 @@ func newSkillsNewCmd() *cobra.Command {
 	}
 }
 
+// appendSkillToAgentsRC adds name to the .agentsrc.json Skills list for the
+// project registered under scope. Returns a status message on success, "" otherwise.
+func appendSkillToAgentsRC(name, scope string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	projPath := cfg.GetProjectPath(scope)
+	if projPath == "" {
+		return ""
+	}
+	rc, err := config.LoadAgentsRC(projPath)
+	if err != nil {
+		return ""
+	}
+	rc.Skills = config.AppendUnique(rc.Skills, name)
+	if err := rc.Save(projPath); err != nil {
+		return ""
+	}
+	return "Updated .agentsrc.json with skill '" + name + "'"
+}
+
+func ensureSkillMarkdown(skillMD, name string) error {
+	if _, err := os.Stat(skillMD); os.IsNotExist(err) {
+		content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\n## When to Use\n\n- \n\n## Steps\n\n1. \n", name, name)
+		if err := os.WriteFile(skillMD, []byte(content), 0644); err != nil {
+			return fmt.Errorf("creating SKILL.md: %w", err)
+		}
+	}
+	return nil
+}
+
+func skillCreationNextSteps(name, scope, skillMD string) []string {
+	nextSteps := []string{"Edit the skill: " + config.DisplayPath(skillMD)}
+	if scope != "global" {
+		if msg := appendSkillToAgentsRC(name, scope); msg != "" {
+			nextSteps = append(nextSteps, msg)
+		}
+	}
+	return nextSteps
+}
+
 func createSkill(name, scope string) error {
 	agentsHome := config.AgentsHome()
 	skillDir := filepath.Join(agentsHome, "skills", scope, name)
@@ -160,11 +202,8 @@ func createSkill(name, scope string) error {
 	}
 
 	skillMD := filepath.Join(skillDir, "SKILL.md")
-	if _, err := os.Stat(skillMD); os.IsNotExist(err) {
-		content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\n## When to Use\n\n- \n\n## Steps\n\n1. \n", name, name)
-		if err := os.WriteFile(skillMD, []byte(content), 0644); err != nil {
-			return fmt.Errorf("creating SKILL.md: %w", err)
-		}
+	if err := ensureSkillMarkdown(skillMD, name); err != nil {
+		return err
 	}
 
 	// Create user-level symlinks immediately so the skill is live without needing a refresh.
@@ -173,8 +212,6 @@ func createSkill(name, scope string) error {
 		ensureUserSkillLinks(agentsHome, name, skillDir)
 	}
 
-	ui.SuccessBox(fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/", name, scope, name),
-		"Edit the skill: "+config.DisplayPath(skillMD),
-	)
+	ui.SuccessBox(fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/", name, scope, name), skillCreationNextSteps(name, scope, skillMD)...)
 	return nil
 }

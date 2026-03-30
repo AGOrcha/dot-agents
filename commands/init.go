@@ -188,6 +188,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	ui.SuccessBox("Initialization complete!",
 		"Add your first project: dot-agents add ~/path/to/project",
 		"See the canonical layout: dot-agents explain structure",
+		"Team member with manifest: dot-agents install  (instead of add)",
 		"Set up git sync: dot-agents sync init",
 		"Check health: dot-agents doctor",
 	)

@@ -26,11 +26,7 @@ func newAgentsListCmd() *cobra.Command {
 		Short: "List agents",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			scope := "global"
-			if len(args) > 0 {
-				scope = args[0]
-			}
-			return listAgents(scope)
+			return listAgents(scopeFromArgs(args))
 		},
 	}
 }
@@ -75,12 +71,7 @@ func newAgentsNewCmd() *cobra.Command {
 		Short: "Create a new agent",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			scope := "global"
-			if len(args) > 1 {
-				scope = args[1]
-			}
-			return createAgent(name, scope)
+			return createAgent(args[0], scopeFromArgs(args[1:]))
 		},
 	}
 }
@@ -94,15 +85,62 @@ func createAgent(name, scope string) error {
 	}
 
 	agentMD := filepath.Join(agentDir, "AGENT.md")
-	if _, err := os.Stat(agentMD); os.IsNotExist(err) {
-		content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\nAgent instructions here.\n", name, name)
-		if err := os.WriteFile(agentMD, []byte(content), 0644); err != nil {
-			return fmt.Errorf("creating AGENT.md: %w", err)
-		}
+	if err := writeAgentMDIfAbsent(agentMD, name); err != nil {
+		return err
 	}
 
-	ui.SuccessBox(fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/", name, scope, name),
-		"Edit the agent: "+config.DisplayPath(agentMD),
+	ui.SuccessBox(
+		fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/", name, scope, name),
+		createAgentNextSteps(agentMD, name, scope)...,
 	)
 	return nil
+}
+
+func scopeFromArgs(args []string) string {
+	if len(args) == 0 {
+		return "global"
+	}
+	return args[0]
+}
+
+func createAgentNextSteps(agentMD, name, scope string) []string {
+	nextSteps := []string{"Edit the agent: " + config.DisplayPath(agentMD)}
+	return appendAgentsRCStep(nextSteps, name, scope)
+}
+
+// writeAgentMDIfAbsent creates AGENT.md with default content when it does not yet exist.
+func writeAgentMDIfAbsent(agentMD, name string) error {
+	if _, err := os.Stat(agentMD); !os.IsNotExist(err) {
+		return nil
+	}
+	content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\nAgent instructions here.\n", name, name)
+	if err := os.WriteFile(agentMD, []byte(content), 0644); err != nil {
+		return fmt.Errorf("creating AGENT.md: %w", err)
+	}
+	return nil
+}
+
+// appendAgentsRCStep auto-updates .agentsrc.json for project-scoped agents and
+// returns nextSteps with an optional confirmation message appended.
+func appendAgentsRCStep(nextSteps []string, name, scope string) []string {
+	if scope == "global" {
+		return nextSteps
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return nextSteps
+	}
+	projPath := cfg.GetProjectPath(scope)
+	if projPath == "" {
+		return nextSteps
+	}
+	rc, err := config.LoadAgentsRC(projPath)
+	if err != nil {
+		return nextSteps
+	}
+	rc.Agents = config.AppendUnique(rc.Agents, name)
+	if err := rc.Save(projPath); err == nil {
+		nextSteps = append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'")
+	}
+	return nextSteps
 }

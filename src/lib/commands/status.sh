@@ -230,9 +230,31 @@ output_status_text() {
           echo -e "         ${YELLOW}↳${NC} $issue"
         done <<< "$issues_output"
       fi
+
+      # Manifest badge
+      local manifest="$path/.agentsrc.json"
+      if [[ -f "$manifest" ]] && command -v jq >/dev/null 2>&1; then
+        local source_desc="local"
+        local git_url
+        git_url=$(jq -r '.sources[]? | select(.type=="git") | .url' "$manifest" 2>/dev/null | head -1)
+        if [[ -n "$git_url" ]]; then
+          source_desc="git: $(echo "$git_url" | sed 's|https://||;s|http://||;s|git@||;s|\.git$||')"
+        fi
+        local skill_count agent_count
+        skill_count=$(jq -r '(.skills // []) | length' "$manifest" 2>/dev/null || echo 0)
+        agent_count=$(jq -r '(.agents // []) | length' "$manifest" 2>/dev/null || echo 0)
+        local parts=""
+        [[ "$skill_count" -gt 0 ]] && parts="${skill_count} skill(s)"
+        [[ "$agent_count" -gt 0 ]] && parts="${parts:+$parts  }${agent_count} agent(s)"
+        local detail="$source_desc${parts:+  •  $parts}"
+        echo -e "         ${GREEN}✓${NC} manifest  ${DIM}$detail${NC}"
+      else
+        echo -e "         ${YELLOW}○${NC} manifest  ${DIM}not found — run: dot-agents install --generate${NC}"
+      fi
     fi
     echo ""
   done <<< "$projects"
+  return 0
 }
 
 status_print_user_config_summary() {
@@ -248,11 +270,11 @@ status_print_user_config_summary() {
   # Claude: ~/.claude/CLAUDE.md and settings.json, agents/, skills/
   local claude_home="$HOME/.claude"
   local claude_md="$claude_home/CLAUDE.md"
-  if [ -e "$claude_md" ]; then
-    if [ -L "$claude_md" ]; then
+  if [[ -e "$claude_md" ]]; then
+    if [[ -L "$claude_md" ]]; then
       local target
       target=$(readlink "$claude_md" 2>/dev/null || true)
-      if [ -n "$target" ] && [ -f "$target" ]; then
+      if [[ -n "$target" ]] && [[ -f "$target" ]]; then
         ((claude_ok++)) || true
       else
         ((claude_warn++)) || true
@@ -263,11 +285,11 @@ status_print_user_config_summary() {
   fi
 
   local claude_settings="$claude_home/settings.json"
-  if [ -e "$claude_settings" ]; then
-    if [ -L "$claude_settings" ]; then
+  if [[ -e "$claude_settings" ]]; then
+    if [[ -L "$claude_settings" ]]; then
       local target
       target=$(readlink "$claude_settings" 2>/dev/null || true)
-      if [ -n "$target" ] && [ -f "$target" ]; then
+      if [[ -n "$target" ]] && [[ -f "$target" ]]; then
         ((claude_ok++)) || true
       else
         ((claude_warn++)) || true
@@ -278,13 +300,13 @@ status_print_user_config_summary() {
   fi
 
   local claude_agents_dir="$claude_home/agents"
-  if [ -d "$claude_agents_dir" ]; then
+  if [[ -d "$claude_agents_dir" ]]; then
     for d in "$claude_agents_dir"/*; do
-      [ -e "$d" ] || continue
-      if [ -L "$d" ]; then
+      [[ -e "$d" ]] || continue
+      if [[ -L "$d" ]]; then
         local target
         target=$(readlink "$d" 2>/dev/null || true)
-        if [ -n "$target" ] && [ -e "$target" ]; then
+        if [[ -n "$target" ]] && [[ -e "$target" ]]; then
           ((claude_ok++)) || true
         else
           ((claude_warn++)) || true
@@ -296,13 +318,13 @@ status_print_user_config_summary() {
   fi
 
   local claude_skills_dir="$claude_home/skills"
-  if [ -d "$claude_skills_dir" ]; then
+  if [[ -d "$claude_skills_dir" ]]; then
     for d in "$claude_skills_dir"/*; do
-      [ -e "$d" ] || continue
-      if [ -L "$d" ]; then
+      [[ -e "$d" ]] || continue
+      if [[ -L "$d" ]]; then
         local target
         target=$(readlink "$d" 2>/dev/null || true)
-        if [ -n "$target" ] && [ -e "$target" ]; then
+        if [[ -n "$target" ]] && [[ -e "$target" ]]; then
           ((claude_ok++)) || true
         else
           ((claude_warn++)) || true
@@ -315,13 +337,13 @@ status_print_user_config_summary() {
 
   # Codex: ~/.codex/agents/*
   local codex_agents_dir="$HOME/.codex/agents"
-  if [ -d "$codex_agents_dir" ]; then
+  if [[ -d "$codex_agents_dir" ]]; then
     for d in "$codex_agents_dir"/*; do
-      [ -e "$d" ] || continue
-      if [ -L "$d" ]; then
+      [[ -e "$d" ]] || continue
+      if [[ -L "$d" ]]; then
         local target
         target=$(readlink "$d" 2>/dev/null || true)
-        if [ -n "$target" ] && [ -e "$target" ]; then
+        if [[ -n "$target" ]] && [[ -e "$target" ]]; then
           ((codex_ok++)) || true
         else
           ((codex_warn++)) || true
@@ -334,13 +356,13 @@ status_print_user_config_summary() {
 
   # OpenCode: ~/.opencode/agent/*
   local opencode_agent_dir="$HOME/.opencode/agent"
-  if [ -d "$opencode_agent_dir" ]; then
+  if [[ -d "$opencode_agent_dir" ]]; then
     for f in "$opencode_agent_dir"/*; do
-      [ -e "$f" ] || continue
-      if [ -L "$f" ]; then
+      [[ -e "$f" ]] || continue
+      if [[ -L "$f" ]]; then
         local target
         target=$(readlink "$f" 2>/dev/null || true)
-        if [ -n "$target" ] && [ -f "$target" ]; then
+        if [[ -n "$target" ]] && [[ -f "$target" ]]; then
           ((opencode_ok++)) || true
         else
           ((opencode_warn++)) || true
@@ -354,25 +376,25 @@ status_print_user_config_summary() {
   # Build badges
   local claude_badge codex_badge opencode_badge
 
-  if [ $((claude_ok + claude_warn)) -eq 0 ]; then
+  if [[ $((claude_ok + claude_warn)) -eq 0 ]]; then
     claude_badge="${DIM}-${NC} ${DIM}Claude${NC}"
-  elif [ "$claude_warn" -gt 0 ]; then
+  elif [[ "$claude_warn" -gt 0 ]]; then
     claude_badge="${YELLOW}!${NC} Claude"
   else
     claude_badge="${GREEN}✓${NC} Claude"
   fi
 
-  if [ $((codex_ok + codex_warn)) -eq 0 ]; then
+  if [[ $((codex_ok + codex_warn)) -eq 0 ]]; then
     codex_badge="${DIM}-${NC} ${DIM}Codex${NC}"
-  elif [ "$codex_warn" -gt 0 ]; then
+  elif [[ "$codex_warn" -gt 0 ]]; then
     codex_badge="${YELLOW}!${NC} Codex"
   else
     codex_badge="${GREEN}✓${NC} Codex"
   fi
 
-  if [ $((opencode_ok + opencode_warn)) -eq 0 ]; then
+  if [[ $((opencode_ok + opencode_warn)) -eq 0 ]]; then
     opencode_badge="${DIM}-${NC} ${DIM}OpenCode${NC}"
-  elif [ "$opencode_warn" -gt 0 ]; then
+  elif [[ "$opencode_warn" -gt 0 ]]; then
     opencode_badge="${YELLOW}!${NC} OpenCode"
   else
     opencode_badge="${GREEN}✓${NC} OpenCode"

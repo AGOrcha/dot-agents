@@ -181,12 +181,12 @@ run_doctor_text() {
 
   # Check Claude Code global rules (CLAUDE.md)
   local claude_rules="$HOME/.claude/CLAUDE.md"
-  if [ -e "$claude_rules" ]; then
-    if [ -L "$claude_rules" ]; then
+  if [[ -e "$claude_rules" ]]; then
+    if [[ -L "$claude_rules" ]]; then
       local target
       target=$(readlink "$claude_rules" 2>/dev/null)
       local display_target="${target/#$HOME/~}"
-      if [ -f "$target" ]; then
+      if [[ -f "$target" ]]; then
         echo -e "  ${GREEN}✓${NC} Claude Code: ~/.claude/CLAUDE.md ${DIM}→ $display_target${NC}"
         ((checks_passed++)) || true
       else
@@ -359,15 +359,15 @@ run_doctor_text() {
 
   # OpenCode: ~/.opencode/agent
   local opencode_agent_dir="${OPEN_CODE_USER_AGENT:-$HOME/.opencode/agent}"
-  if [ -d "$opencode_agent_dir" ]; then
+  if [[ -d "$opencode_agent_dir" ]]; then
     local n=0
     local broken=0
     for f in "$opencode_agent_dir"/*; do
-      [ -e "$f" ] || continue
-      if [ -L "$f" ]; then
+      [[ -e "$f" ]] || continue
+      if [[ -L "$f" ]]; then
         local target
         target=$(readlink "$f" 2>/dev/null)
-        if [ -n "$target" ] && [ -f "$target" ]; then
+        if [[ -n "$target" ]] && [[ -f "$target" ]]; then
           ((n++)) || true
         else
           ((broken++)) || true
@@ -376,9 +376,9 @@ run_doctor_text() {
         ((n++)) || true
       fi
     done
-    if [ "$n" -gt 0 ] && [ "$broken" -eq 0 ]; then
+    if [[ "$n" -gt 0 ]] && [[ "$broken" -eq 0 ]]; then
       echo -e "  ${GREEN}✓${NC} OpenCode ~/.opencode/agent: $n agent file(s)"
-    elif [ "$n" -gt 0 ] || [ "$broken" -gt 0 ]; then
+    elif [[ "$n" -gt 0 ]] || [[ "$broken" -gt 0 ]]; then
       echo -e "  ${YELLOW}○${NC} OpenCode ~/.opencode/agent: $n ok, $broken broken"
     else
       echo -e "  ${YELLOW}○${NC} OpenCode ~/.opencode/agent: empty"
@@ -495,6 +495,65 @@ run_doctor_text() {
       "[ -d '$AGENTS_HOME/$dir' ]" \
       "mkdir -p ~/.agents/$dir"
   done
+
+  # Check manifests in registered projects
+  echo ""
+  log_section "Manifests (.agentsrc.json)"
+
+  local manifest_config_file="$AGENTS_HOME/config.json"
+  if [[ -f "$manifest_config_file" ]] && has_jq; then
+    local manifest_projects
+    manifest_projects=$(jq -r '.projects | keys[]' "$manifest_config_file" 2>/dev/null)
+    local any_manifest_issue=false
+    while IFS= read -r pname; do
+      [[ -z "$pname" ]] && continue
+      local ppath
+      ppath=$(jq -r --arg p "$pname" '.projects[$p].path // empty' "$manifest_config_file" 2>/dev/null)
+      [[ -z "$ppath" ]] && continue
+      local mf="$ppath/.agentsrc.json"
+      if [[ ! -f "$mf" ]]; then
+        echo -e "  ${YELLOW}⚠${NC}  $pname — no manifest (not git-portable)"
+        echo -e "       hint: dot-agents install --generate"
+        any_manifest_issue=true
+      elif ! jq -e '.' "$mf" >/dev/null 2>&1; then
+        echo -e "  ${RED}✗${NC}  $pname — corrupt manifest: $mf"
+        any_manifest_issue=true
+      else
+        # Check every declared git source — all must be fetched before reporting healthy.
+        local missing_git=() present_git=()
+        while IFS= read -r git_url; do
+          [[ -z "$git_url" ]] && continue
+          # SHA-256 hash consistent with GitSourceCacheDir in Go (first 12 hex chars)
+          local cache_hash
+          cache_hash=$(echo -n "$git_url" | shasum -a 256 2>/dev/null | cut -c1-12 || \
+                       echo -n "$git_url" | sha256sum 2>/dev/null | cut -c1-12 || echo "unknown")
+          local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/dot-agents/sources/$cache_hash"
+          if [[ ! -d "$cache_dir" ]]; then
+            missing_git+=("$git_url")
+          else
+            present_git+=("$git_url")
+          fi
+        done < <(jq -r '.sources[]? | select(.type=="git") | .url' "$mf" 2>/dev/null)
+
+        if [[ ${#missing_git[@]} -gt 0 ]]; then
+          for git_url in "${missing_git[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC}  $pname — git source not yet fetched: $git_url"
+            echo -e "       hint: dot-agents install (in $ppath)"
+          done
+          any_manifest_issue=true
+        elif [[ ${#present_git[@]} -gt 0 ]]; then
+          echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (${#present_git[@]} git source(s))"
+        else
+          echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (local)"
+        fi
+      fi
+    done <<< "$manifest_projects"
+    if [[ "$any_manifest_issue" = false ]]; then
+      echo -e "  ${DIM}Tip: run with -v to see per-project manifest details${NC}"
+    fi
+  else
+    echo -e "  ${DIM}No projects registered or jq unavailable${NC}"
+  fi
 
   # Check for deprecated formats in registered projects
   echo ""
