@@ -263,7 +263,8 @@ func resolveSources(sources []config.Source) ([]string, error) {
 
 // fetchGitSource clones or updates a git repository to the cache.
 func fetchGitSource(url, ref string) (string, error) {
-	if _, err := exec.LookPath("git"); err != nil {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
 		return "", fmt.Errorf("git not installed")
 	}
 
@@ -292,7 +293,7 @@ func fetchGitSource(url, ref string) (string, error) {
 			if Flags.Verbose {
 				ui.Info("Updating cached source: " + url)
 			}
-			cmd := exec.Command("git", "-C", cacheDir, "pull", "-q")
+			cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q")
 			if err := cmd.Run(); err != nil {
 				ui.Bullet("warn", "Could not update cached source — using existing copy")
 			} else {
@@ -323,7 +324,7 @@ func fetchGitSource(url, ref string) (string, error) {
 		args = append(args, "--branch", ref)
 	}
 	args = append(args, url, cacheDir)
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(gitBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(cacheDir)
 		return "", fmt.Errorf("git clone failed: %s", string(out))

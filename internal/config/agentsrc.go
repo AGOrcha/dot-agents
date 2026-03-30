@@ -1,7 +1,7 @@
 package config
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,7 +30,7 @@ type AgentsRC struct {
 
 // Source describes where to find agent resources.
 type Source struct {
-	Type string `json:"type"`          // "local" | "git"
+	Type string `json:"type"`           // "local" | "git"
 	Path string `json:"path,omitempty"` // override path for "local"
 	URL  string `json:"url,omitempty"`  // repository URL for "git"
 	Ref  string `json:"ref,omitempty"`  // branch/tag for "git"
@@ -79,7 +79,7 @@ func AgentsCacheDir() string {
 
 // GitSourceCacheDir returns the cache directory for a given git URL.
 func GitSourceCacheDir(url string) string {
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(url)))[:12]
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))[:12]
 	return filepath.Join(AgentsCacheDir(), "sources", hash)
 }
 
@@ -88,13 +88,13 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
-		Version: 1,
-		Project: projectName,
-		Hooks:   false,
-		MCP:     false,
+		Schema:   "https://dot-agents.dev/schemas/agentsrc.json",
+		Version:  1,
+		Project:  projectName,
+		Hooks:    false,
+		MCP:      false,
 		Settings: false,
-		Sources: []Source{{Type: "local"}},
+		Sources:  []Source{{Type: "local"}},
 	}
 
 	// Collect skills from global and project scopes

@@ -839,26 +839,31 @@ func importedHookName(nameHint string, total int, when, matcher, command string,
 	cmdPart := sanitizeHookNamePart(commandStem(command))
 	matcherPart := sanitizeHookNamePart(matcherNameHint(matcher))
 	hintPart := sanitizeHookNamePart(nameHint)
+
 	if hintPart != "" {
-		if total == 1 {
-			return uniqueImportedHookName(hintPart, used)
-		}
-		if shouldPreferMatcherInImportedHookName(cmdPart) && matcherPart != "" {
-			cmdPart = matcherPart + "-" + cmdPart
-		}
-		cmdPart = trimRedundantPrefix(cmdPart, hintPart)
-		if cmdPart == "" && matcherPart != "" {
-			cmdPart = trimRedundantPrefix(matcherPart, hintPart)
-		}
-		base := hintPart
-		if cmdPart != "" {
-			base = base + "-" + cmdPart
-		}
-		return uniqueImportedHookName(base, used)
+		return importedHookNameWithHint(hintPart, total, cmdPart, matcherPart, used)
 	}
-	if shouldPreferMatcherInImportedHookName(cmdPart) && matcherPart != "" {
-		cmdPart = matcherPart + "-" + cmdPart
+	return importedHookNameWithoutHint(eventPart, cmdPart, matcherPart, used)
+}
+
+func importedHookNameWithHint(hintPart string, total int, cmdPart, matcherPart string, used map[string]int) string {
+	if total == 1 {
+		return uniqueImportedHookName(hintPart, used)
 	}
+	cmdPart = importedHookCommandPart(cmdPart, matcherPart)
+	cmdPart = trimRedundantPrefix(cmdPart, hintPart)
+	if cmdPart == "" && matcherPart != "" {
+		cmdPart = trimRedundantPrefix(matcherPart, hintPart)
+	}
+	base := hintPart
+	if cmdPart != "" {
+		base = base + "-" + cmdPart
+	}
+	return uniqueImportedHookName(base, used)
+}
+
+func importedHookNameWithoutHint(eventPart, cmdPart, matcherPart string, used map[string]int) string {
+	cmdPart = importedHookCommandPart(cmdPart, matcherPart)
 	cmdPart = trimRedundantPrefix(cmdPart, eventPart)
 	if cmdPart == "" {
 		if matcherPart != "" {
@@ -872,6 +877,13 @@ func importedHookName(nameHint string, total int, when, matcher, command string,
 		base = "hook"
 	}
 	return uniqueImportedHookName(base, used)
+}
+
+func importedHookCommandPart(commandPart, matcherPart string) string {
+	if shouldPreferMatcherInImportedHookName(commandPart) && matcherPart != "" {
+		return matcherPart + "-" + commandPart
+	}
+	return commandPart
 }
 
 func uniqueImportedHookName(base string, used map[string]int) string {

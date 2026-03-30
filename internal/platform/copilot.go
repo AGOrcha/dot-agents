@@ -237,22 +237,24 @@ func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) e
 		return err
 	}
 	if len(canonicalSpecs) > 0 {
-		if err := emitRenderedHookFanout(canonicalSpecs, hooksDir, renderCopilotHookFile); err != nil {
-			return err
-		}
-		wanted := map[string]bool{}
-		for _, spec := range canonicalSpecs {
-			name, _, ok, renderErr := renderCopilotHookFile(spec)
-			if renderErr != nil {
-				return renderErr
-			}
-			if ok {
-				wanted[name] = true
-			}
-		}
-		return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+		return c.emitCanonicalProjectHookFiles(canonicalSpecs, hooksDir)
 	}
 
+	return c.emitLegacyProjectHookFiles(agentsHome, project, hooksDir)
+}
+
+func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir string) error {
+	if err := emitRenderedHookFanout(specs, hooksDir, renderCopilotHookFile); err != nil {
+		return err
+	}
+	wanted, err := renderedCopilotHookNames(specs)
+	if err != nil {
+		return err
+	}
+	return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+}
+
+func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
 	specs, err := listHookSpecs(agentsHome, project)
 	if err != nil {
 		return pruneManagedRenderedFanoutExtras(hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
@@ -268,6 +270,25 @@ func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) e
 	}); err != nil {
 		return err
 	}
+	wanted := legacyCopilotHookNames(specs)
+	return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+}
+
+func renderedCopilotHookNames(specs []HookSpec) (map[string]bool, error) {
+	wanted := map[string]bool{}
+	for _, spec := range specs {
+		name, _, ok, renderErr := renderCopilotHookFile(spec)
+		if renderErr != nil {
+			return nil, renderErr
+		}
+		if ok {
+			wanted[name] = true
+		}
+	}
+	return wanted, nil
+}
+
+func legacyCopilotHookNames(specs []HookSpec) map[string]bool {
 	wanted := map[string]bool{}
 	for _, spec := range specs {
 		if spec.Name == "cursor" || spec.Name == "claude-code" {
@@ -275,7 +296,7 @@ func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) e
 		}
 		wanted[spec.Name+".json"] = true
 	}
-	return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+	return wanted
 }
 
 func (c *copilot) RemoveLinks(project, repoPath string) error {

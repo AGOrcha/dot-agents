@@ -8,6 +8,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const canonicalImportProject = "proj"
+
 func TestMapGlobalRelToDest(t *testing.T) {
 	cases := []struct {
 		rel  string
@@ -99,12 +101,7 @@ func TestCanonicalHookBundleContentFromCopilotFile(t *testing.T) {
 }
 
 func TestCanonicalImportOutputs_FromCursorHooksJSON(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relCursorHooksJSON)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
     "preToolUse": [
@@ -116,29 +113,10 @@ func TestCanonicalImportOutputs_FromCursorHooksJSON(t *testing.T) {
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	`)
+	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/pre-tool-use-guard/HOOK.yaml")
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/pre-tool-use-guard/HOOK.yaml"; got != want {
-		t.Fatalf("destRel = %q, want %q", got, want)
-	}
-
-	var manifest map[string]any
-	if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(outputs[0].content))
-	}
+	manifest := mustUnmarshalYAMLMap(t, outputs[0].content)
 	if got := manifest["when"]; got != "pre_tool_use" {
 		t.Fatalf("when = %#v, want pre_tool_use", got)
 	}
@@ -152,12 +130,7 @@ func TestCanonicalImportOutputs_FromCursorHooksJSON(t *testing.T) {
 }
 
 func TestCanonicalImportOutputs_FromCodexHooksJSON(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relCodexHooksJSON)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relCodexHooksJSON, `{
   "hooks": {
     "SessionStart": [
       {
@@ -172,33 +145,12 @@ func TestCanonicalImportOutputs_FromCodexHooksJSON(t *testing.T) {
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/session-start-banner/HOOK.yaml"; got != want {
-		t.Fatalf("destRel = %q, want %q", got, want)
-	}
+	`)
+	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/session-start-banner/HOOK.yaml")
 }
 
 func TestCanonicalImportOutputs_FromClaudeCompatSettings(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relClaudeSettingsLocal)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relClaudeSettingsLocal, `{
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
     "SessionStart": [
@@ -214,26 +166,10 @@ func TestCanonicalImportOutputs_FromClaudeCompatSettings(t *testing.T) {
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	`)
+	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/session-start-banner/HOOK.yaml")
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
-
-	var manifest map[string]any
-	if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(outputs[0].content))
-	}
+	manifest := mustUnmarshalYAMLMap(t, outputs[0].content)
 	if got := manifest["when"]; got != "session_start" {
 		t.Fatalf("when = %#v, want session_start", got)
 	}
@@ -243,12 +179,7 @@ func TestCanonicalImportOutputs_FromClaudeCompatSettings(t *testing.T) {
 }
 
 func TestCanonicalImportOutputs_AssignsDistinctNamesForGenericCommandsUsingMatchers(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relCursorHooksJSON)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
     "preToolUse": [
@@ -263,36 +194,15 @@ func TestCanonicalImportOutputs_AssignsDistinctNamesForGenericCommandsUsingMatch
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 2 {
-		t.Fatalf("expected two canonical outputs, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/pre-tool-use-write-edit-run/HOOK.yaml"; got != want {
-		t.Fatalf("first destRel = %q, want %q", got, want)
-	}
-	if got, want := outputs[1].destRel, "hooks/proj/pre-tool-use-bash-run/HOOK.yaml"; got != want {
-		t.Fatalf("second destRel = %q, want %q", got, want)
-	}
+	`)
+	assertTwoCanonicalOutputs(t, outputs, ok,
+		"hooks/proj/pre-tool-use-write-edit-run/HOOK.yaml",
+		"hooks/proj/pre-tool-use-bash-run/HOOK.yaml",
+	)
 }
 
 func TestCanonicalImportOutputs_AppendsStableSuffixForDuplicateIdentity(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relCodexHooksJSON)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relCodexHooksJSON, `{
   "hooks": {
     "PreToolUse": [
       {
@@ -316,36 +226,15 @@ func TestCanonicalImportOutputs_AppendsStableSuffixForDuplicateIdentity(t *testi
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 2 {
-		t.Fatalf("expected two canonical outputs, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/pre-tool-use-guard/HOOK.yaml"; got != want {
-		t.Fatalf("first destRel = %q, want %q", got, want)
-	}
-	if got, want := outputs[1].destRel, "hooks/proj/pre-tool-use-guard-2/HOOK.yaml"; got != want {
-		t.Fatalf("second destRel = %q, want %q", got, want)
-	}
+	`)
+	assertTwoCanonicalOutputs(t, outputs, ok,
+		"hooks/proj/pre-tool-use-guard/HOOK.yaml",
+		"hooks/proj/pre-tool-use-guard-2/HOOK.yaml",
+	)
 }
 
 func TestCanonicalImportOutputs_SplitsMultipleActionsIntoDistinctCanonicalHooks(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relClaudeSettingsLocal)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relClaudeSettingsLocal, `{
   "hooks": {
     "PreToolUse": [
       {
@@ -364,27 +253,11 @@ func TestCanonicalImportOutputs_SplitsMultipleActionsIntoDistinctCanonicalHooks(
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 2 {
-		t.Fatalf("expected two canonical outputs, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/pre-tool-use-lint/HOOK.yaml"; got != want {
-		t.Fatalf("first destRel = %q, want %q", got, want)
-	}
-	if got, want := outputs[1].destRel, "hooks/proj/pre-tool-use-format/HOOK.yaml"; got != want {
-		t.Fatalf("second destRel = %q, want %q", got, want)
-	}
+	`)
+	assertTwoCanonicalOutputs(t, outputs, ok,
+		"hooks/proj/pre-tool-use-lint/HOOK.yaml",
+		"hooks/proj/pre-tool-use-format/HOOK.yaml",
+	)
 }
 
 func TestCanonicalImportOutputs_CanonicalizesMultiActionCopilotFanoutUsingFilenameHint(t *testing.T) {
@@ -412,23 +285,11 @@ func TestCanonicalImportOutputs_CanonicalizesMultiActionCopilotFanoutUsingFilena
 		t.Fatal(err)
 	}
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 2 {
-		t.Fatalf("expected two canonical outputs, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/prompt-log/HOOK.yaml"; got != want {
-		t.Fatalf("first destRel = %q, want %q", got, want)
-	}
-	if got, want := outputs[1].destRel, "hooks/proj/prompt-log-second/HOOK.yaml"; got != want {
-		t.Fatalf("second destRel = %q, want %q", got, want)
-	}
+	outputs, ok := canonicalImportFromPath(t, dir, src)
+	assertTwoCanonicalOutputs(t, outputs, ok,
+		"hooks/proj/prompt-log/HOOK.yaml",
+		"hooks/proj/prompt-log-second/HOOK.yaml",
+	)
 }
 
 func TestCanonicalImportOutputs_FallsBackToLegacyWhenCopilotEventIsUnknown(t *testing.T) {
@@ -453,14 +314,7 @@ func TestCanonicalImportOutputs_FallsBackToLegacyWhenCopilotEventIsUnknown(t *te
 		t.Fatal(err)
 	}
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
+	outputs, ok := canonicalImportFromPath(t, dir, src)
 	if !ok || len(outputs) != 1 {
 		t.Fatalf("expected one fallback output, ok=%v len=%d", ok, len(outputs))
 	}
@@ -473,12 +327,7 @@ func TestCanonicalImportOutputs_FallsBackToLegacyWhenCopilotEventIsUnknown(t *te
 }
 
 func TestCanonicalImportOutputs_UsesMatcherHintForGenericCommandName(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, relCursorHooksJSON)
-	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(src, []byte(`{
+	outputs, ok := canonicalImportFromJSON(t, relCursorHooksJSON, `{
   "version": 1,
   "hooks": {
     "preToolUse": [
@@ -489,24 +338,8 @@ func TestCanonicalImportOutputs_UsesMatcherHintForGenericCommandName(t *testing.
     ]
   }
 }
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
-	if got, want := outputs[0].destRel, "hooks/proj/pre-tool-use-bash-run/HOOK.yaml"; got != want {
-		t.Fatalf("destRel = %q, want %q", got, want)
-	}
+	`)
+	assertSingleCanonicalOutput(t, outputs, ok, "hooks/proj/pre-tool-use-bash-run/HOOK.yaml")
 }
 
 func TestCanonicalImportOutputs_PreservesRawMatcherOverrideWhenNormalized(t *testing.T) {
@@ -534,22 +367,12 @@ func TestCanonicalImportOutputs_PreservesRawMatcherOverrideWhenNormalized(t *tes
 		t.Fatal(err)
 	}
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    "proj",
-		sourceRoot: dir,
-		sourcePath: src,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs failed: %v", err)
-	}
+	outputs, ok := canonicalImportFromPath(t, dir, src)
 	if !ok || len(outputs) != 1 {
 		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
 	}
 
-	var manifest map[string]any
-	if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(outputs[0].content))
-	}
+	manifest := mustUnmarshalYAMLMap(t, outputs[0].content)
 	match, ok := manifest["match"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected match section in manifest: %#v", manifest)
@@ -674,4 +497,62 @@ func TestFilesDifferent(t *testing.T) {
 	if !diff {
 		t.Fatalf("expected different files")
 	}
+}
+
+func canonicalImportFromJSON(t *testing.T, relPath, content string) ([]importOutput, bool) {
+	t.Helper()
+	sourceRoot := t.TempDir()
+	sourcePath := filepath.Join(sourceRoot, relPath)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return canonicalImportFromPath(t, sourceRoot, sourcePath)
+}
+
+func canonicalImportFromPath(t *testing.T, sourceRoot, sourcePath string) ([]importOutput, bool) {
+	t.Helper()
+	outputs, ok, err := canonicalImportOutputs(importCandidate{
+		project:    canonicalImportProject,
+		sourceRoot: sourceRoot,
+		sourcePath: sourcePath,
+	})
+	if err != nil {
+		t.Fatalf("canonicalImportOutputs failed: %v", err)
+	}
+	return outputs, ok
+}
+
+func assertSingleCanonicalOutput(t *testing.T, outputs []importOutput, ok bool, wantDest string) {
+	t.Helper()
+	if !ok || len(outputs) != 1 {
+		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
+	}
+	if got := outputs[0].destRel; got != wantDest {
+		t.Fatalf("destRel = %q, want %q", got, wantDest)
+	}
+}
+
+func assertTwoCanonicalOutputs(t *testing.T, outputs []importOutput, ok bool, wantFirst, wantSecond string) {
+	t.Helper()
+	if !ok || len(outputs) != 2 {
+		t.Fatalf("expected two canonical outputs, ok=%v len=%d", ok, len(outputs))
+	}
+	if got := outputs[0].destRel; got != wantFirst {
+		t.Fatalf("first destRel = %q, want %q", got, wantFirst)
+	}
+	if got := outputs[1].destRel; got != wantSecond {
+		t.Fatalf("second destRel = %q, want %q", got, wantSecond)
+	}
+}
+
+func mustUnmarshalYAMLMap(t *testing.T, content []byte) map[string]any {
+	t.Helper()
+	var manifest map[string]any
+	if err := yaml.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("yaml.Unmarshal failed: %v\n%s", err, string(content))
+	}
+	return manifest
 }

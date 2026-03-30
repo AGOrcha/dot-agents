@@ -68,6 +68,7 @@ ${BOLD}EXAMPLES${NC}
     dot-agents install --force           # Re-fetch remote sources
 
 EOF
+  return 0
 }
 
 cmd_install() {
@@ -77,13 +78,14 @@ cmd_install() {
   parse_common_flags "$@"
   set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
 
-  if [ "${SHOW_HELP:-false}" = true ]; then
+  if [[ "${SHOW_HELP:-false}" == true ]]; then
     cmd_install_help
     return 0
   fi
 
   while [[ $# -gt 0 ]]; do
-    case $1 in
+    local arg="$1"
+    case "$arg" in
       --generate)
         do_generate=true
         shift
@@ -93,7 +95,7 @@ cmd_install() {
         shift
         ;;
       -*)
-        log_error "Unknown option: $1"
+        log_error "Unknown option: $arg"
         return 1
         ;;
       *)
@@ -102,7 +104,7 @@ cmd_install() {
     esac
   done
 
-  if [ "$do_generate" = true ]; then
+  if [[ "$do_generate" == true ]]; then
     install_generate
   else
     install_run "$strict"
@@ -119,7 +121,7 @@ install_run() {
   log_header "dot-agents install"
 
   # 1. Verify manifest exists
-  if [ ! -f "$manifest" ]; then
+  if [[ ! -f "$manifest" ]]; then
     log_error "$AGENTSRC_FILE not found in current directory"
     echo ""
     echo "  Run 'dot-agents install --generate' to create one, or"
@@ -128,13 +130,12 @@ install_run() {
   fi
 
   # 2. Verify ~/.agents/ is initialized
-  if [ ! -f "${AGENTS_HOME:-}/config.json" ]; then
+  if [[ ! -f "${AGENTS_HOME:-}/config.json" ]]; then
     log_error "~/.agents/ not initialized. Run 'dot-agents init' first."
     return 1
   fi
 
   # 3. Read manifest
-  local project_name skills_json rules_json agents_json hooks_val mcp_val settings_val sources_json
   if ! _agentsrc_read "$manifest"; then
     log_error "Failed to read $AGENTSRC_FILE — check it is valid JSON"
     return 1
@@ -145,7 +146,7 @@ install_run() {
   #   AGENTSRC_SETTINGS, AGENTSRC_SOURCES_JSON
 
   local project_name="${AGENTSRC_PROJECT:-}"
-  if [ -z "$project_name" ]; then
+  if [[ -z "$project_name" ]]; then
     project_name=$(basename "$project_path")
   fi
 
@@ -162,13 +163,13 @@ install_run() {
   fi
 
   # 5. Populate ~/.agents/skills/{project}/ and agents/{project}/ from sources
-  if [ ${#resolved_sources[@]} -gt 0 ]; then
+  if [[ ${#resolved_sources[@]} -gt 0 ]]; then
     local skill_name
     for skill_name in $AGENTSRC_SKILLS; do
       _agentsrc_link_resource_from_sources "skills" "$skill_name" "$project_name" "${resolved_sources[@]}"
       local rc=$?
-      if [ $rc -ne 0 ]; then
-        if [ "$strict" = true ]; then
+      if [[ $rc -ne 0 ]]; then
+        if [[ "$strict" == true ]]; then
           log_error "Skill '$skill_name' not found in any source (--strict mode)"
           return 1
         else
@@ -181,8 +182,8 @@ install_run() {
     for agent_name in $AGENTSRC_AGENTS; do
       _agentsrc_link_resource_from_sources "agents" "$agent_name" "$project_name" "${resolved_sources[@]}"
       local rc=$?
-      if [ $rc -ne 0 ]; then
-        if [ "$strict" = true ]; then
+      if [[ $rc -ne 0 ]]; then
+        if [[ "$strict" == true ]]; then
           log_error "Agent '$agent_name' not found in any source (--strict mode)"
           return 1
         else
@@ -193,7 +194,7 @@ install_run() {
   fi
 
   # 6. Create project dirs in ~/.agents/
-  if [ "$DRY_RUN" != true ]; then
+  if [[ "$DRY_RUN" != true ]]; then
     create_project_dirs_silent "$project_name"
     bullet "ok" "Ensured ~/.agents/ project directories"
   else
@@ -203,8 +204,8 @@ install_run() {
   # 7. Register in config.json
   local existing_path
   existing_path=$(config_get_project_path "$project_name")
-  if [ -z "$existing_path" ]; then
-    if [ "$DRY_RUN" != true ]; then
+  if [[ -z "$existing_path" ]]; then
+    if [[ "$DRY_RUN" != true ]]; then
       config_add_project "$project_name" "$project_path"
       bullet "ok" "Registered '$project_name' in config.json"
     else
@@ -221,25 +222,25 @@ install_run() {
   local platform
   while IFS= read -r platform; do
     if platform_is_installed "$platform"; then
-      if [ "$DRY_RUN" = true ]; then
+      if [[ "$DRY_RUN" == true ]]; then
         log_dry "$(platform_dry_run_message "$platform")"
       else
         platform_create_links "$platform" "$project_name" "$project_path"
         bullet "ok" "$(platform_success_message "$platform")"
       fi
-    elif [ "$VERBOSE" = true ]; then
+    elif [[ "$VERBOSE" == true ]]; then
       bullet "skip" "$(platform_display_name "$platform") not installed"
     fi
   done < <(platform_ids)
 
   # 9. Write .agents-refresh marker
-  if [ "$DRY_RUN" != true ]; then
+  if [[ "$DRY_RUN" != true ]]; then
     local refresh_commit="" refresh_describe=""
     local repo_root
     repo_root=$(dot_agents_repo_root 2>/dev/null) || true
-    if [ -n "$repo_root" ] && [ -d "$repo_root/.git" ]; then
+    if [[ -n "$repo_root" ]] && [[ -d "$repo_root/.git" ]]; then
       refresh_commit=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null) || true
-      [ -n "$refresh_commit" ] && refresh_describe=$(git -C "$repo_root" describe --always --tags 2>/dev/null) || true
+      [[ -n "$refresh_commit" ]] && refresh_describe=$(git -C "$repo_root" describe --always --tags 2>/dev/null) || true
     fi
     write_refresh_marker "$project_path" "$refresh_commit" "$refresh_describe"
     bullet "ok" "Wrote .agents-refresh marker"
@@ -266,7 +267,7 @@ install_generate() {
   # Derive project name
   local project_name
   project_name=$(_agentsrc_find_project_by_path "$project_path")
-  if [ -z "$project_name" ]; then
+  if [[ -z "$project_name" ]]; then
     project_name=$(basename "$project_path")
     log_info "Project not registered — using directory name: $project_name"
   fi
@@ -275,11 +276,11 @@ install_generate() {
   local skills=()
   local skill_dir
   for skill_dir in "$AGENTS_HOME/skills/global"/*/; do
-    [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ] || continue
+    [[ -d "$skill_dir" ]] && [[ -f "$skill_dir/SKILL.md" ]] || continue
     skills+=("$(basename "$skill_dir")")
   done
   for skill_dir in "$AGENTS_HOME/skills/$project_name"/*/; do
-    [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ] || continue
+    [[ -d "$skill_dir" ]] && [[ -f "$skill_dir/SKILL.md" ]] || continue
     skills+=("$(basename "$skill_dir")")
   done
 
@@ -287,38 +288,38 @@ install_generate() {
   local agents=()
   local agent_dir
   for agent_dir in "$AGENTS_HOME/agents/global"/*/; do
-    [ -d "$agent_dir" ] && [ -f "$agent_dir/AGENT.md" ] || continue
+    [[ -d "$agent_dir" ]] && [[ -f "$agent_dir/AGENT.md" ]] || continue
     agents+=("$(basename "$agent_dir")")
   done
   for agent_dir in "$AGENTS_HOME/agents/$project_name"/*/; do
-    [ -d "$agent_dir" ] && [ -f "$agent_dir/AGENT.md" ] || continue
+    [[ -d "$agent_dir" ]] && [[ -f "$agent_dir/AGENT.md" ]] || continue
     agents+=("$(basename "$agent_dir")")
   done
 
   # Determine rule scopes
   local rules=("global")
-  if [ -d "$AGENTS_HOME/rules/$project_name" ]; then
+  if [[ -d "$AGENTS_HOME/rules/$project_name" ]]; then
     local has_project_rules=false
     for f in "$AGENTS_HOME/rules/$project_name"/*.{md,mdc,txt}; do
-      [ -f "$f" ] && has_project_rules=true && break
+      [[ -f "$f" ]] && has_project_rules=true && break
     done
-    [ "$has_project_rules" = true ] && rules+=("project")
+    [[ "$has_project_rules" == true ]] && rules+=("project")
   fi
 
   # Detect hooks, mcp, settings
   local hooks_val=false mcp_val=false settings_val=false
-  [ -f "$AGENTS_HOME/settings/$project_name/claude-code.json" ] && hooks_val=true
-  if [ -d "$AGENTS_HOME/mcp/$project_name" ] || [ -d "$AGENTS_HOME/mcp/global" ]; then
+  [[ -f "$AGENTS_HOME/settings/$project_name/claude-code.json" ]] && hooks_val=true
+  if [[ -d "$AGENTS_HOME/mcp/$project_name" ]] || [[ -d "$AGENTS_HOME/mcp/global" ]]; then
     for f in "$AGENTS_HOME/mcp/$project_name"/*.json "$AGENTS_HOME/mcp/global"/*.json; do
-      [ -f "$f" ] && mcp_val=true && break
+      [[ -f "$f" ]] && mcp_val=true && break
     done
   fi
-  if [ -f "$AGENTS_HOME/settings/$project_name/cursor.json" ] || \
-     [ -f "$AGENTS_HOME/settings/global/cursor.json" ]; then
+  if [[ -f "$AGENTS_HOME/settings/$project_name/cursor.json" ]] || \
+     [[ -f "$AGENTS_HOME/settings/global/cursor.json" ]]; then
     settings_val=true
   fi
 
-  if [ "$DRY_RUN" = true ]; then
+  if [[ "$DRY_RUN" == true ]]; then
     log_dry "Would write $AGENTSRC_FILE with:"
     log_dry "  project:  $project_name"
     log_dry "  skills:   ${skills[*]:-<none>}"
@@ -332,7 +333,7 @@ install_generate() {
 
   # Build skills JSON array
   local skills_json="[]"
-  if [ ${#skills[@]} -gt 0 ]; then
+  if [[ ${#skills[@]} -gt 0 ]]; then
     skills_json=$(printf '%s\n' "${skills[@]}" | jq -R . | jq -s .)
   fi
 
@@ -342,7 +343,7 @@ install_generate() {
 
   # Build agents JSON array
   local agents_json="[]"
-  if [ ${#agents[@]} -gt 0 ]; then
+  if [[ ${#agents[@]} -gt 0 ]]; then
     agents_json=$(printf '%s\n' "${agents[@]}" | jq -R . | jq -s .)
   fi
 
@@ -411,7 +412,6 @@ _agentsrc_read() {
 
   export AGENTSRC_PROJECT AGENTSRC_SKILLS AGENTSRC_RULES AGENTSRC_AGENTS
   export AGENTSRC_HOOKS AGENTSRC_MCP AGENTSRC_SETTINGS AGENTSRC_SOURCES_JSON
-  return 0
 }
 
 # Resolve all sources to local directories.
@@ -426,7 +426,7 @@ _agentsrc_resolve_sources() {
   local i=0
   local had_error=false
 
-  while [ "$i" -lt "$source_count" ]; do
+  while [[ "$i" -lt "$source_count" ]]; do
     local src_type src_url src_ref
     src_type=$(echo "$AGENTSRC_SOURCES_JSON" | jq -r ".[$i].type // \"local\"")
     src_url=$(echo "$AGENTSRC_SOURCES_JSON"  | jq -r ".[$i].url  // empty")
@@ -436,7 +436,7 @@ _agentsrc_resolve_sources() {
       local)
         local local_path
         local_path=$(echo "$AGENTSRC_SOURCES_JSON" | jq -r ".[$i].path // empty")
-        if [ -n "$local_path" ]; then
+        if [[ -n "$local_path" ]]; then
           local_path=$(expand_path "$local_path")
         else
           local_path="$AGENTS_HOME"
@@ -445,7 +445,7 @@ _agentsrc_resolve_sources() {
         bullet "ok" "Local source: ${local_path/#$HOME/~}"
         ;;
       git)
-        if [ -z "$src_url" ]; then
+        if [[ -z "$src_url" ]]; then
           log_warn "Git source #$i missing 'url' — skipping"
           had_error=true
           i=$((i+1))
@@ -469,7 +469,25 @@ _agentsrc_resolve_sources() {
     i=$((i+1))
   done
 
-  [ "$had_error" = true ] && return 1 || return 0
+  [[ "$had_error" == true ]] && return 1 || return 0
+}
+
+# Remove a path only when it is under an allowed prefix.
+_agentsrc_safe_remove_path() {
+  local target="$1"
+  local allowed_prefix="$2"
+  if [[ -z "$target" ]] || [[ -z "$allowed_prefix" ]]; then
+    log_warn "Refusing to remove path with empty target/prefix"
+    return 1
+  fi
+  case "$target" in
+    "$allowed_prefix"/*) ;;
+    *)
+      log_warn "Refusing to remove path outside managed prefix: $target"
+      return 1
+      ;;
+  esac
+  rm -rf -- "$target"
 }
 
 # Clone or update a git source to the cache directory.
@@ -486,18 +504,18 @@ _agentsrc_fetch_git_source() {
   local cache_dir
   cache_dir=$(_agentsrc_git_cache_dir "$url")
 
-  if [ -d "$cache_dir/.git" ]; then
+  if [[ -d "$cache_dir/.git" ]]; then
     # Already cloned — update unless recently fetched and not forced
     local last_fetch="$cache_dir/.last-fetch"
     local do_update=true
-    if [ "$FORCE" != true ] && [ -f "$last_fetch" ]; then
+    if [[ "$FORCE" != true ]] && [[ -f "$last_fetch" ]]; then
       local age=$(( $(date +%s) - $(date -r "$last_fetch" +%s 2>/dev/null || echo 0) ))
-      [ "$age" -lt 3600 ] && do_update=false
+      [[ "$age" -lt 3600 ]] && do_update=false
     fi
 
-    if [ "$do_update" = true ]; then
-      [ "$VERBOSE" = true ] && log_info "Updating cached source: $url"
-      if [ "$DRY_RUN" = true ]; then
+    if [[ "$do_update" == true ]]; then
+      [[ "$VERBOSE" == true ]] && log_info "Updating cached source: $url"
+      if [[ "$DRY_RUN" == true ]]; then
         log_dry "git -C $cache_dir pull"
       else
         git -C "$cache_dir" pull -q 2>/dev/null || \
@@ -505,14 +523,14 @@ _agentsrc_fetch_git_source() {
         touch "$last_fetch"
       fi
     else
-      [ "$VERBOSE" = true ] && log_info "Using cached source (< 1h old): $url"
+      [[ "$VERBOSE" == true ]] && log_info "Using cached source (< 1h old): $url"
     fi
   else
     # First clone
-    [ "$VERBOSE" = true ] && log_info "Cloning source: $url"
-    if [ "$DRY_RUN" = true ]; then
+    [[ "$VERBOSE" == true ]] && log_info "Cloning source: $url"
+    if [[ "$DRY_RUN" == true ]]; then
       local clone_cmd="git clone --depth 1"
-      [ -n "$ref" ] && clone_cmd="$clone_cmd --branch $ref"
+      [[ -n "$ref" ]] && clone_cmd="$clone_cmd --branch $ref"
       log_dry "$clone_cmd $url $cache_dir"
       echo "$cache_dir"
       return 0
@@ -520,9 +538,9 @@ _agentsrc_fetch_git_source() {
 
     mkdir -p "$cache_dir"
     local clone_args=(--depth 1)
-    [ -n "$ref" ] && clone_args+=(--branch "$ref")
+    [[ -n "$ref" ]] && clone_args+=(--branch "$ref")
     if ! git clone "${clone_args[@]}" "$url" "$cache_dir" -q 2>/dev/null; then
-      rm -rf "$cache_dir"
+      _agentsrc_safe_remove_path "$cache_dir" "$AGENTS_CACHE_DIR/sources" >/dev/null 2>&1 || true
       return 1
     fi
     touch "$cache_dir/.last-fetch"
@@ -545,6 +563,7 @@ _agentsrc_git_cache_dir() {
     hash=$(echo -n "$url" | cksum | cut -d' ' -f1)
   fi
   echo "$AGENTS_CACHE_DIR/sources/$hash"
+  return 0
 }
 
 # Link a resource from the first source that provides it into ~/.agents/{type}/{project}/.
@@ -567,21 +586,25 @@ _agentsrc_link_resource_from_sources() {
 
   for src_root in "${sources[@]}"; do
     local candidate="$src_root/$resource_type/global/$resource_name"
-    if [ -d "$candidate" ]; then
-      if [ -z "$marker_file" ] || [ -f "$candidate/$marker_file" ]; then
-        if [ "$DRY_RUN" = true ]; then
-          log_dry "link $resource_type/$resource_name → ${candidate/#$HOME/~}"
-          return 0
-        fi
-        # Symlink source directory into ~/.agents/{type}/{project}/
-        if [ -e "$dest_dir" ] || [ -L "$dest_dir" ]; then
-          # Already exists (own copy or link) — don't overwrite unless --force
-          [ "$FORCE" = true ] && rm -rf "$dest_dir" || return 0
-        fi
-        ln -sf "$candidate" "$dest_dir"
-        [ "$VERBOSE" = true ] && bullet "ok" "Linked $resource_type/$resource_name from ${src_root/#$HOME/~}"
+    if [[ -d "$candidate" && ( -z "$marker_file" || -f "$candidate/$marker_file" ) ]]; then
+      if [[ "$DRY_RUN" == true ]]; then
+        log_dry "link $resource_type/$resource_name → ${candidate/#$HOME/~}"
         return 0
       fi
+      # Symlink source directory into ~/.agents/{type}/{project}/
+      if [[ -e "$dest_dir" ]] || [[ -L "$dest_dir" ]]; then
+        # Already exists (own copy or link) — don't overwrite unless --force
+        if [[ "$FORCE" == true ]]; then
+          if ! _agentsrc_safe_remove_path "$dest_dir" "$AGENTS_HOME/$resource_type/$project_name"; then
+            return 1
+          fi
+        else
+          return 0
+        fi
+      fi
+      ln -sf "$candidate" "$dest_dir"
+      [[ "$VERBOSE" == true ]] && bullet "ok" "Linked $resource_type/$resource_name from ${src_root/#$HOME/~}"
+      return 0
     fi
   done
   return 1
@@ -594,7 +617,7 @@ _agentsrc_find_project_by_path() {
     return 1
   fi
   local config_file="$AGENTS_HOME/config.json"
-  [ -f "$config_file" ] || return 1
+  [[ -f "$config_file" ]] || return 1
   jq -r --arg p "$target_path" \
     '.projects | to_entries[] | select(.value.path == $p) | .key' \
     "$config_file" 2>/dev/null | head -1

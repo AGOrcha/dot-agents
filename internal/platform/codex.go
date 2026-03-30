@@ -148,6 +148,13 @@ func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
+	if err := c.writeRepoHooks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+	return c.writeUserHomeHooks(project, agentsHome)
+}
+
+func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	repoTarget := filepath.Join(repoPath, ".codex", "hooks.json")
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
@@ -173,7 +180,10 @@ func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
 			_ = removeManagedFileIf(repoTarget, isLikelyRenderedCodexHookConfig)
 		}
 	}
+	return nil
+}
 
+func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 	if err != nil {
 		return err
