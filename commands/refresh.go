@@ -254,8 +254,8 @@ func mapResourceRelToDest(project, relPath string) string {
 
 	// .github/hooks/<name>.json → hooks/<project>/<name>.json
 	if strings.HasPrefix(relPath, relGitHubHooksDir) && strings.HasSuffix(relPath, relJSONSuffix) {
-		name := filepath.Base(relPath)
-		return agentsHooksPrefix + project + "/" + name
+		name := strings.TrimSuffix(filepath.Base(relPath), relJSONSuffix)
+		return agentsHooksPrefix + project + "/" + name + "/HOOK.yaml"
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs

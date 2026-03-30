@@ -26,6 +26,7 @@ func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
 		{".codex/config.toml", "settings/proj/codex.toml"},
 		{".codex/hooks.json", "hooks/proj/codex.json"},
 		{".github/copilot-instructions.md", "rules/proj/copilot-instructions.md"},
+		{".github/hooks/pre-tool.json", "hooks/proj/pre-tool/HOOK.yaml"},
 	}
 	for _, c := range cases {
 		got := mapResourceRelToDest("proj", c.relPath)
