@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [arc-mac, arc-linux]
+        os: [macos-latest, ubuntu-latest]
 
     steps:
       - name: Checkout
