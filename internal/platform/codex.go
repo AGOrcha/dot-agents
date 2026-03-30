@@ -1,9 +1,11 @@
 package platform
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -73,7 +75,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		links.Symlink(src, filepath.Join(repoPath, ".codex", "config.toml"))
 	}
 
-	// Project agents → .claude/agents/ (GCD compat)
+	// Project agents → .codex/agents/*.toml
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
@@ -101,20 +103,8 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
-		entries, _ := os.ReadDir(globalAgents)
-		for _, e := range entries {
-			agentDir := filepath.Join(globalAgents, e.Name())
-			if !links.IsDirEntry(agentDir) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userAgentsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(agentDir, target)
+		if err := c.writeCodexAgents(agentsHome, "global", userAgentsDir); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -131,30 +121,11 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
+	agentsTarget := filepath.Join(repoPath, ".codex", "agents")
 	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
 		return err
 	}
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if !links.IsDirEntry(agentDir) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentDir, target)
-	}
-	return nil
+	return c.writeCodexAgents(agentsHome, project, agentsTarget)
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
@@ -204,12 +175,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "config.toml"), agentsHome)
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "hooks.json"), agentsHome)
 
-	agentsDir := filepath.Join(repoPath, ".claude", "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
-		}
-	}
+	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, ".codex", "agents"))
 
 	skillsDir := filepath.Join(repoPath, ".agents", "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
@@ -219,4 +185,114 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	}
 
 	return nil
+}
+
+func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+	wanted := map[string]bool{}
+	for _, entry := range entries {
+		wanted[entry.Name+".toml"] = true
+		dst := filepath.Join(dstRoot, entry.Name+".toml")
+		if err := c.writeCodexAgentToml(dst, entry.File); err != nil {
+			return err
+		}
+	}
+	if existing, err := os.ReadDir(dstRoot); err == nil {
+		for _, e := range existing {
+			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+		}
+	}
+	return nil
+}
+
+func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+	content, err := renderCodexAgentToml(agentMD)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(dst, content, 0644)
+}
+
+func renderCodexAgentToml(agentMD string) ([]byte, error) {
+	meta := readFrontmatter(agentMD)
+	body, err := readAgentBody(agentMD)
+	if err != nil {
+		return nil, err
+	}
+
+	name := strings.TrimSpace(meta["name"])
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(filepath.Dir(agentMD)), string(filepath.Ext(agentMD)))
+	}
+	description := strings.TrimSpace(meta["description"])
+	model := strings.TrimSpace(meta["model"])
+	background := strings.TrimSpace(meta["is_background"])
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "name = %s\n", strconv.Quote(name))
+	fmt.Fprintf(&b, "description = %s\n", strconv.Quote(description))
+	if model != "" {
+		fmt.Fprintf(&b, "model = %s\n", strconv.Quote(model))
+	}
+	if background != "" {
+		fmt.Fprintf(&b, "is_background = %s\n", background)
+	}
+	if strings.TrimSpace(body) != "" {
+		b.WriteString("instructions = ")
+		b.WriteString(tomlMultilineString(body))
+		b.WriteString("\n")
+	}
+	return []byte(b.String()), nil
+}
+
+func readAgentBody(agentMD string) (string, error) {
+	data, err := os.ReadFile(agentMD)
+	if err != nil {
+		return "", err
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return text, nil
+	}
+	rest := strings.TrimPrefix(text, "---\n")
+	end := strings.Index(rest, "\n---\n")
+	if end == -1 {
+		return text, nil
+	}
+	body := rest[end+len("\n---\n"):]
+	body = strings.TrimLeft(body, "\n")
+	return body, nil
+}
+
+func tomlMultilineString(value string) string {
+	escaped := strings.ReplaceAll(value, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	return "\"\"\"\n" + escaped + "\n\"\"\""
 }

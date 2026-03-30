@@ -11,7 +11,7 @@ The parallelization strategy is: one coordinator owns the shared schema and comm
 ## Implementation Phases
 
 ### Phase 1: Shared Go spine and contract
-Status: In progress
+Status: Completed
 
 Owner: coordinator only
 
@@ -43,13 +43,14 @@ Completed in this session:
 - Updated `commands/import.go` and `commands/refresh.go` normalization to understand `.codex/hooks.json` and `.opencode/agent/*.md`.
 - Updated `commands/add.go` scanning so existing Codex hook files, OpenCode agents, and GitHub hook files are detected before takeover.
 - Updated `commands/explain.go` and `src/share/templates/standard/README.md` so the documented structure better matches current Stage 1 behavior.
+- Updated `commands/status.go` to surface the canonical store at the top of `dot-agents status` and to account for newer Stage 1 outputs such as Codex hooks and OpenCode agents.
+- Updated `commands/init.go` so the generated `~/.agents/README.md` and completion guidance describe the Stage 1 canonical buckets more clearly.
 
 Still open in this phase:
-- `commands/init.go` has not been updated to create or explain any new Stage 1 canonical structure beyond the existing layout.
-- `commands/status.go` has not been updated yet to surface the new canonical/resource-emitter state.
+- No additional Phase 1 command-layer work is required before moving on to the remaining platform and validation items.
 
 ### Phase 2: Go platform emitter wave
-Status: In progress
+Status: Completed
 
 Run these workers in parallel after Phase 1 lands.
 
@@ -91,13 +92,12 @@ Completed in this session:
   - `internal/platform/claude.go` now uses shared scoped resolution for MCP/settings precedence and shared skill directory syncing.
 - Worker B scope partially landed:
   - `internal/platform/opencode.go` now emits `.opencode/agent/*.md` from canonical `agents/{scope}/{name}/AGENT.md` instead of the older `rules/opencode-*.md` path.
-  - `internal/platform/codex.go` now uses shared scoped resolution for settings/skills and emits `.codex/hooks.json` from canonical hook files.
+  - `internal/platform/codex.go` now uses shared scoped resolution for settings/skills, emits `.codex/hooks.json` from canonical hook files, and renders native `.codex/agents/*.toml` from canonical `AGENT.md` files.
 - Worker C scope landed for the current shared-resource subset:
   - `internal/platform/copilot.go` now uses shared scoped resolution for skills, MCP, and Claude-compatible hook/settings wiring.
 
 Still open in this phase:
-- Codex agents still use the existing compatibility path (`.claude/agents/`) rather than a native `.codex/agents/*.toml` transform.
-- No platform-specific native transform/render layer has been added yet beyond direct file or directory linkage.
+- No additional Phase 2 emitter work is required for the Stage 1 resource set.
 
 ### Phase 3: Go integration and validation pass
 Status: In progress
@@ -131,10 +131,24 @@ Completed in this session:
 - Added regression coverage in `commands/import_test.go` and `commands/refresh_test.go` for Codex hooks and OpenCode agent normalization.
 - Ran `go test ./commands ./internal/platform ./internal/config ./internal/links`.
 - Ran `go test ./...`.
+- Added integration-style tests in `internal/platform/platform_test.go` covering:
+  - OpenCode agent emission from canonical `agents/{scope}/{name}/AGENT.md`
+  - Codex hook emission to both project and user scope
+- Added integration-style tests in `internal/platform/stage1_integration_test.go` covering:
+  - Claude dual skill outputs into `.claude/skills/` and `.agents/skills/`
+  - Cursor hardlink behavior and MCP target selection
+  - Copilot MCP target selection and hook fanout/priority
+- Added dedicated Codex-native coverage in `internal/platform/codex_test.go` for:
+  - TOML rendering from canonical `AGENT.md`
+  - native `.codex/agents/*.toml` creation and cleanup behavior
+- Expanded `internal/platform/stage1_integration_test.go` with higher-risk precedence coverage for:
+  - Claude hook-vs-settings compat selection at both project and user scope
+  - Cursor hook scope precedence and MCP scope-first fallback
+  - Copilot Claude-compat scope precedence and Copilot instruction precedence
+  - Codex `codex-hooks.json` project fallback precedence over global `codex.json`
 
 Still open in this phase:
-- No tempdir integration tests exist yet for dual-skill outputs, agent transforms, MCP target selection, hardlink behavior, or hook fanout.
-- `commands/status.go` still needs a final reconciliation pass if the new outputs should be surfaced explicitly.
+- Additional coverage is now optional rather than required. The main remaining opportunities are cleanup/removal edge cases and any future bash-parity validation once Phase 4 starts.
 
 ### Phase 4: Bash parity wave
 Status: Not started

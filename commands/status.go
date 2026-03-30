@@ -58,6 +58,8 @@ func runStatus(audit bool, agentFilter string) error {
 		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: dot-agents sync init%s\n", ui.Yellow, ui.Reset)
 	}
 
+	printCanonicalStoreSection(agentsHome)
+
 	// User-level config summary (home directory)
 	printUserConfigSection(agentsHome, audit, agentFilter)
 
@@ -129,9 +131,10 @@ func runStatus(audit bool, agentFilter string) error {
 		}
 		// Cursor MCP link
 		cursorMCP := filepath.Join(path, ".cursor", "mcp.json")
-		if _, err := os.Lstat(cursorMCP); err == nil {
-			cursorOK++
-		}
+		cursorOK += countManagedFileOK(cursorMCP, &cursorWarn)
+		cursorOK += countManagedFileOK(filepath.Join(path, ".cursor", "settings.json"), &cursorWarn)
+		cursorOK += countManagedFileOK(filepath.Join(path, ".cursor", "hooks.json"), &cursorWarn)
+		cursorOK += countManagedFileOK(filepath.Join(path, ".cursorignore"), &cursorWarn)
 		healthOK += cursorOK
 		healthWarn += cursorWarn
 		badges = append(badges, platformBadge{"Cursor", cursorOK > 0, cursorWarn > 0})
@@ -151,15 +154,10 @@ func runStatus(audit bool, agentFilter string) error {
 				}
 			}
 		}
-		// Claude MCP link (.mcp.json)
-		claudeMCP := filepath.Join(path, ".mcp.json")
-		if dest, err := os.Readlink(claudeMCP); err == nil {
-			if _, err := os.Stat(dest); err == nil {
-				claudeOK++
-			} else {
-				claudeWarn++
-			}
-		}
+		claudeOK += countManagedFileOK(filepath.Join(path, ".mcp.json"), &claudeWarn)
+		claudeOK += countManagedFileOK(filepath.Join(path, ".claude", "settings.local.json"), &claudeWarn)
+		claudeOK += countManagedDirEntries(filepath.Join(path, ".claude", "agents"), &claudeWarn)
+		claudeOK += countManagedDirEntries(filepath.Join(path, ".claude", "skills"), &claudeWarn)
 		healthOK += claudeOK
 		healthWarn += claudeWarn
 		badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
@@ -167,41 +165,32 @@ func runStatus(audit bool, agentFilter string) error {
 		// Codex (AGENTS.md)
 		agentsMD := filepath.Join(path, "AGENTS.md")
 		codexOK, codexWarn := 0, 0
-		if dest, err := os.Readlink(agentsMD); err == nil {
-			if _, err := os.Stat(dest); err == nil {
-				codexOK++
-			} else {
-				codexWarn++
-			}
-		}
+		codexOK += countManagedFileOK(agentsMD, &codexWarn)
+		codexOK += countManagedFileOK(filepath.Join(path, ".codex", "config.toml"), &codexWarn)
+		codexOK += countManagedFileOK(filepath.Join(path, ".codex", "hooks.json"), &codexWarn)
+		codexOK += countManagedDirEntries(filepath.Join(path, ".codex", "agents"), &codexWarn)
+		codexOK += countManagedDirEntries(filepath.Join(path, ".agents", "skills"), &codexWarn)
 		healthOK += codexOK
 		healthWarn += codexWarn
 		badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
 
 		// OpenCode
 		opencodeOK, opencodeWarn := 0, 0
-		opencodeJSON := filepath.Join(path, "opencode.json")
-		if dest, err := os.Readlink(opencodeJSON); err == nil {
-			if _, err := os.Stat(dest); err == nil {
-				opencodeOK++
-			} else {
-				opencodeWarn++
-			}
-		}
+		opencodeOK += countManagedFileOK(filepath.Join(path, "opencode.json"), &opencodeWarn)
+		opencodeOK += countManagedDirEntries(filepath.Join(path, ".opencode", "agent"), &opencodeWarn)
+		opencodeOK += countManagedDirEntries(filepath.Join(path, ".agents", "skills"), &opencodeWarn)
 		healthOK += opencodeOK
 		healthWarn += opencodeWarn
 		badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
 
 		// Copilot
 		copilotOK, copilotWarn := 0, 0
-		copilotPath := filepath.Join(path, ".github", "copilot-instructions.md")
-		if dest, err := os.Readlink(copilotPath); err == nil {
-			if _, err := os.Stat(dest); err == nil {
-				copilotOK++
-			} else {
-				copilotWarn++
-			}
-		}
+		copilotOK += countManagedFileOK(filepath.Join(path, ".github", "copilot-instructions.md"), &copilotWarn)
+		copilotOK += countManagedFileOK(filepath.Join(path, ".vscode", "mcp.json"), &copilotWarn)
+		copilotOK += countManagedFileOK(filepath.Join(path, ".claude", "settings.local.json"), &copilotWarn)
+		copilotOK += countManagedDirEntries(filepath.Join(path, ".github", "agents"), &copilotWarn)
+		copilotOK += countManagedDirEntries(filepath.Join(path, ".github", "hooks"), &copilotWarn)
+		copilotOK += countManagedDirEntries(filepath.Join(path, ".agents", "skills"), &copilotWarn)
 		healthOK += copilotOK
 		healthWarn += copilotWarn
 		badges = append(badges, platformBadge{"Copilot", copilotOK > 0, copilotWarn > 0})
@@ -234,6 +223,127 @@ func runStatus(audit bool, agentFilter string) error {
 
 	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+func printCanonicalStoreSection(agentsHome string) {
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout, "  Canonical Store")
+
+	type bucket struct {
+		name       string
+		path       string
+		countDirs  bool
+		markerFile string
+	}
+
+	buckets := []bucket{
+		{name: "rules", path: filepath.Join(agentsHome, "rules")},
+		{name: "settings", path: filepath.Join(agentsHome, "settings")},
+		{name: "mcp", path: filepath.Join(agentsHome, "mcp")},
+		{name: "skills", path: filepath.Join(agentsHome, "skills"), countDirs: true, markerFile: "SKILL.md"},
+		{name: "agents", path: filepath.Join(agentsHome, "agents"), countDirs: true, markerFile: "AGENT.md"},
+		{name: "hooks", path: filepath.Join(agentsHome, "hooks")},
+	}
+
+	for _, bucket := range buckets {
+		scopes, entries := summarizeCanonicalBucket(bucket.path, bucket.countDirs, bucket.markerFile)
+		if scopes == 0 && entries == 0 {
+			fmt.Fprintf(os.Stdout, "  %s-%s %-9s %s(empty)%s\n", ui.Dim, ui.Reset, bucket.name, ui.Dim, ui.Reset)
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "  %s✓%s %-9s %s%d scope(s), %d item(s)%s\n", ui.Green, ui.Reset, bucket.name, ui.Dim, scopes, entries, ui.Reset)
+	}
+}
+
+func summarizeCanonicalBucket(root string, countDirs bool, markerFile string) (int, int) {
+	scopeDirs, err := os.ReadDir(root)
+	if err != nil {
+		return 0, 0
+	}
+	scopeCount, itemCount := 0, 0
+	for _, scopeDir := range scopeDirs {
+		scopePath := filepath.Join(root, scopeDir.Name())
+		if !links.IsDirEntry(scopePath) {
+			continue
+		}
+		n := 0
+		entries, err := os.ReadDir(scopePath)
+		if err != nil {
+			continue
+		}
+		if countDirs {
+			for _, entry := range entries {
+				dirPath := filepath.Join(scopePath, entry.Name())
+				if !links.IsDirEntry(dirPath) {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(dirPath, markerFile)); err == nil {
+					n++
+				}
+			}
+		} else {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					n++
+				}
+			}
+		}
+		if n > 0 {
+			scopeCount++
+			itemCount += n
+		}
+	}
+	return scopeCount, itemCount
+}
+
+func countManagedFileOK(path string, warn *int) int {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		dest, err := os.Readlink(path)
+		if err != nil {
+			*warn = *warn + 1
+			return 0
+		}
+		if _, err := os.Stat(dest); err == nil {
+			return 1
+		}
+		*warn = *warn + 1
+		return 0
+	}
+	return 1
+}
+
+func countManagedDirEntries(dir string, warn *int) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	ok := 0
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		info, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			dest, err := os.Readlink(path)
+			if err != nil {
+				*warn = *warn + 1
+				continue
+			}
+			if _, err := os.Stat(dest); err == nil {
+				ok++
+			} else {
+				*warn = *warn + 1
+			}
+			continue
+		}
+		ok++
+	}
+	return ok
 }
 
 // readRefreshTimestamp reads the refreshed_at field from .agents-refresh
@@ -447,6 +557,8 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 	if agentFilter == "" || agentFilter == "codex" {
 		codexOK, codexWarn := 0, 0
 		codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
+		codexHooks := filepath.Join(homeDir, ".codex", "hooks.json")
+		codexSkillsDir := filepath.Join(homeDir, ".agents", "skills")
 		if entries, err := os.ReadDir(codexAgentsDir); err == nil {
 			for _, e := range entries {
 				linkPath := filepath.Join(codexAgentsDir, e.Name())
@@ -461,6 +573,8 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 				}
 			}
 		}
+		codexOK += countManagedFileOK(codexHooks, &codexWarn)
+		codexOK += countManagedDirEntries(codexSkillsDir, &codexWarn)
 		if codexOK+codexWarn > 0 {
 			badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
 		}
@@ -472,6 +586,37 @@ func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
 			if entries, err := os.ReadDir(codexAgentsDir); err == nil {
 				for _, e := range entries {
 					linkPath := filepath.Join(codexAgentsDir, e.Name())
+					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						if dest, err := os.Readlink(linkPath); err == nil {
+							displayDest := config.DisplayPath(dest)
+							if _, err := os.Stat(dest); err == nil {
+								fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							} else {
+								fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+							}
+						}
+					}
+				}
+			}
+
+			if info, err := os.Lstat(codexHooks); err == nil {
+				if info.Mode()&os.ModeSymlink != 0 {
+					if dest, err := os.Readlink(codexHooks); err == nil {
+						displayDest := config.DisplayPath(dest)
+						if _, err := os.Stat(dest); err == nil {
+							fmt.Fprintf(os.Stdout, "    %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(codexHooks), ui.Dim, displayDest, ui.Reset)
+						} else {
+							fmt.Fprintf(os.Stdout, "    %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(codexHooks), ui.Dim, displayDest, ui.Reset)
+						}
+					}
+				} else {
+					fmt.Fprintf(os.Stdout, "    %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(codexHooks), ui.Dim, ui.Reset)
+				}
+			}
+
+			if entries, err := os.ReadDir(codexSkillsDir); err == nil {
+				for _, e := range entries {
+					linkPath := filepath.Join(codexSkillsDir, e.Name())
 					if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
 						if dest, err := os.Readlink(linkPath); err == nil {
 							displayDest := config.DisplayPath(dest)
@@ -678,6 +823,71 @@ func printCodexAudit(name, path, agentsHome string) {
 		}
 	} else {
 		fmt.Fprintf(os.Stdout, "      %s(no AGENTS.md)%s\n", ui.Dim, ui.Reset)
+	}
+
+	codexConfig := filepath.Join(path, ".codex", "config.toml")
+	if dest, err := os.Readlink(codexConfig); err == nil {
+		displayDest := config.DisplayPath(dest)
+		if _, err := os.Stat(dest); err == nil {
+			fmt.Fprintf(os.Stdout, "      %s✓%s .codex/config.toml %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
+		} else {
+			fmt.Fprintf(os.Stdout, "      %s✗%s .codex/config.toml %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
+		}
+	} else {
+		fmt.Fprintf(os.Stdout, "      %s-%s .codex/config.toml %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	}
+
+	codexHooks := filepath.Join(path, ".codex", "hooks.json")
+	if dest, err := os.Readlink(codexHooks); err == nil {
+		displayDest := config.DisplayPath(dest)
+		if _, err := os.Stat(dest); err == nil {
+			fmt.Fprintf(os.Stdout, "      %s✓%s .codex/hooks.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
+		} else {
+			fmt.Fprintf(os.Stdout, "      %s✗%s .codex/hooks.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
+		}
+	} else {
+		fmt.Fprintf(os.Stdout, "      %s-%s .codex/hooks.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	}
+
+	codexSkillsDir := filepath.Join(path, ".agents", "skills")
+	if entries, err := os.ReadDir(codexSkillsDir); err == nil {
+		okCount, brokenCount := 0, 0
+		for _, e := range entries {
+			linkPath := filepath.Join(codexSkillsDir, e.Name())
+			dest, err := os.Readlink(linkPath)
+			if err != nil {
+				continue
+			}
+			displayDest := config.DisplayPath(dest)
+			if _, err := os.Stat(dest); err == nil {
+				fmt.Fprintf(os.Stdout, "      %s✓%s .agents/skills/%s %s→ %s%s\n", ui.Green, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
+				okCount++
+			} else {
+				fmt.Fprintf(os.Stdout, "      %s✗%s .agents/skills/%s %s→ %s (broken)%s\n", ui.Red, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
+				brokenCount++
+			}
+		}
+		if okCount == 0 && brokenCount == 0 {
+			fmt.Fprintf(os.Stdout, "      %s○%s .agents/skills/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		}
+	}
+
+	codexAgentsDir := filepath.Join(path, ".codex", "agents")
+	if entries, err := os.ReadDir(codexAgentsDir); err == nil {
+		okCount, brokenCount := 0, 0
+		for _, e := range entries {
+			linkPath := filepath.Join(codexAgentsDir, e.Name())
+			if _, err := os.Stat(linkPath); err == nil {
+				fmt.Fprintf(os.Stdout, "      %s✓%s .codex/agents/%s %s(native TOML)%s\n", ui.Green, ui.Reset, e.Name(), ui.Dim, ui.Reset)
+				okCount++
+			} else {
+				fmt.Fprintf(os.Stdout, "      %s✗%s .codex/agents/%s %s(unreadable)%s\n", ui.Red, ui.Reset, e.Name(), ui.Dim, ui.Reset)
+				brokenCount++
+			}
+		}
+		if okCount == 0 && brokenCount == 0 {
+			fmt.Fprintf(os.Stdout, "      %s○%s .codex/agents/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		}
 	}
 	fmt.Fprintln(os.Stdout)
 }
