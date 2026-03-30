@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
-	"github.com/dot-agents/dot-agents/internal/platform"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -130,7 +130,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Create README.md
 	readmePath := filepath.Join(agentsHome, "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
-		content := "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/dot-agents/dot-agents).\n"
+		content := "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n\n" +
+			"## Stage 1 Canonical Buckets\n\n" +
+			"- `rules/` for shared instructions\n" +
+			"- `settings/` for platform settings and current Cursor ignore support\n" +
+			"- `mcp/` for MCP configs\n" +
+			"- `skills/` for canonical skills\n" +
+			"- `agents/` for canonical agent definitions\n" +
+			"- `hooks/` for canonical hook configs\n" +
+			"- `resources/` for backups and restore state\n"
 		os.WriteFile(readmePath, []byte(content), 0644)
 	}
 
@@ -179,6 +187,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	ui.SuccessBox("Initialization complete!",
 		"Add your first project: dot-agents add ~/path/to/project",
+		"See the canonical layout: dot-agents explain structure",
 		"Set up git sync: dot-agents sync init",
 		"Check health: dot-agents doctor",
 	)

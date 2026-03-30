@@ -1,16 +1,25 @@
 package platform
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 type codex struct{}
+
+const (
+	codexAgentsDir = ".agents"
+	codexDir = ".codex"
+	codexHooksJSON = "hooks.json"
+	codexAgentsMarkdown = "AGENTS.md"
+)
 
 func NewCodex() Platform { return &codex{} }
 
@@ -52,7 +61,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 	for _, src := range globalCandidates {
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, "AGENTS.md"))
+			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
 			break
 		}
 	}
@@ -60,30 +69,31 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	for _, name := range []string{"agents.md", "agents.mdc"} {
 		src := filepath.Join(agentsHome, "rules", project, name)
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, "AGENTS.md"))
+			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
 			break
 		}
 	}
 
 	// .codex/config.toml
-	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "codex.toml")
-		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, ".codex", "config.toml"))
-			break
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
 	}
 
-	// Project agents → .claude/agents/ (GCD compat)
+	// Project agents → .codex/agents/*.toml
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
 	// Project skills → .agents/skills/
 	if err := c.createSkillsLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+
+	// Project hooks → .codex/hooks.json
+	if err := c.createHooksLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
@@ -96,126 +106,94 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".codex", "agents")
+		userAgentsDir := filepath.Join(homeRoot, codexDir, "agents")
 		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
-		entries, _ := os.ReadDir(globalAgents)
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			agentDir := filepath.Join(globalAgents, e.Name())
-			if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userAgentsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(agentDir, target)
+		if err := c.writeCodexAgents(agentsHome, "global", userAgentsDir); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (c *codex) ensureUserSkills(agentsHome string) error {
-	globalSkills := filepath.Join(agentsHome, "skills", "global")
-	if _, err := os.Stat(globalSkills); err != nil {
-		return nil
-	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		userSkillsDir := filepath.Join(homeRoot, ".agents", "skills")
-		if err := os.MkdirAll(userSkillsDir, 0755); err != nil {
-			continue
-		}
-		entries, _ := os.ReadDir(globalSkills)
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			skillDir := filepath.Join(globalSkills, e.Name())
-			if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userSkillsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(skillDir, target)
+		userSkillsDir := filepath.Join(homeRoot, codexAgentsDir, "skills")
+		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
+	agentsTarget := filepath.Join(repoPath, codexDir, "agents")
 	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
 		return err
 	}
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentDir, target)
-	}
-	return nil
+	return c.writeCodexAgents(agentsHome, project, agentsTarget)
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
-	skillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
+	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, codexAgentsDir, "skills"))
+}
+
+func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
+	if err := c.writeRepoHooks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
+	return c.writeUserHomeHooks(project, agentsHome)
+}
+
+func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
+	repoTarget := filepath.Join(repoPath, codexDir, codexHooksJSON)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err != nil {
-		return nil
+		return err
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		skillDir := filepath.Join(projectSkills, e.Name())
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(skillsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(skillDir, target)
+	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+		return err
 	}
-	return nil
+	return emitPreferredHookFile(
+		repoTarget,
+		renderCodexHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		directSymlinkHookMode,
+		removeRenderedCodexHookConfig,
+		repoBundles,
+	)
+}
+
+func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	return emitPreferredHookFileToUserHomes(
+		filepath.Join(codexDir, codexHooksJSON),
+		renderCodexHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		directSymlinkHookMode,
+		removeRenderedCodexHookConfig,
+		globalBundles,
+	)
 }
 
 func (c *codex) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, "AGENTS.md"), agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "config.toml"), agentsHome)
-
-	agentsDir := filepath.Join(repoPath, ".claude", "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
-		}
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
+	if err == nil && len(repoBundles) > 0 {
+		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
 	}
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome)
 
-	skillsDir := filepath.Join(repoPath, ".agents", "skills")
+	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents"))
+
+	skillsDir := filepath.Join(repoPath, codexAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
 			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
@@ -223,4 +201,114 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	}
 
 	return nil
+}
+
+func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+	wanted := map[string]bool{}
+	for _, entry := range entries {
+		wanted[entry.Name+".toml"] = true
+		dst := filepath.Join(dstRoot, entry.Name+".toml")
+		if err := c.writeCodexAgentToml(dst, entry.File); err != nil {
+			return err
+		}
+	}
+	if existing, err := os.ReadDir(dstRoot); err == nil {
+		for _, e := range existing {
+			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+		}
+	}
+	return nil
+}
+
+func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+	content, err := renderCodexAgentToml(agentMD)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		if err := os.Remove(dst); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(dst, content, 0644)
+}
+
+func renderCodexAgentToml(agentMD string) ([]byte, error) {
+	meta := readFrontmatter(agentMD)
+	body, err := readAgentBody(agentMD)
+	if err != nil {
+		return nil, err
+	}
+
+	name := strings.TrimSpace(meta["name"])
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(filepath.Dir(agentMD)), string(filepath.Ext(agentMD)))
+	}
+	description := strings.TrimSpace(meta["description"])
+	model := strings.TrimSpace(meta["model"])
+	background := strings.TrimSpace(meta["is_background"])
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "name = %s\n", strconv.Quote(name))
+	fmt.Fprintf(&b, "description = %s\n", strconv.Quote(description))
+	if model != "" {
+		fmt.Fprintf(&b, "model = %s\n", strconv.Quote(model))
+	}
+	if background != "" {
+		fmt.Fprintf(&b, "is_background = %s\n", background)
+	}
+	if strings.TrimSpace(body) != "" {
+		b.WriteString("instructions = ")
+		b.WriteString(tomlMultilineString(body))
+		b.WriteString("\n")
+	}
+	return []byte(b.String()), nil
+}
+
+func readAgentBody(agentMD string) (string, error) {
+	data, err := os.ReadFile(agentMD)
+	if err != nil {
+		return "", err
+	}
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return text, nil
+	}
+	rest := strings.TrimPrefix(text, "---\n")
+	end := strings.Index(rest, "\n---\n")
+	if end == -1 {
+		return text, nil
+	}
+	body := rest[end+len("\n---\n"):]
+	body = strings.TrimLeft(body, "\n")
+	return body, nil
+}
+
+func tomlMultilineString(value string) string {
+	escaped := strings.ReplaceAll(value, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	return "\"\"\"\n" + escaped + "\n\"\"\""
 }

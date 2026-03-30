@@ -28,7 +28,7 @@ jobs:
 
       - name: Install actionlint
         run: |
-          curl -sL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          curl --proto "=https" --tlsv1.2 -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
 
       - name: Run actionlint
         run: |
@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [arc-mac, arc-linux]
+        os: [macos-latest, ubuntu-latest]
 
     steps:
       - name: Checkout

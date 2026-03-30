@@ -1,0 +1,14 @@
+{
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "version": 1,
+  "project": "",
+  "skills": [],
+  "rules": ["global"],
+  "agents": [],
+  "hooks": true,
+  "mcp": true,
+  "settings": true,
+  "sources": [
+    {"type": "local"}
+  ]
+}

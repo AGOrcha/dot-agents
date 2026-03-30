@@ -6,13 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 type claude struct{}
 
-const claudeCodeJSON = "claude-code.json"
+const (
+	claudeCodeJSON          = "claude-code.json"
+	claudeSettingsJSON      = "settings.json"
+	claudeSettingsLocalJSON = "settings.local.json"
+	claudeDir               = ".claude"
+)
 
 func NewClaude() Platform { return &claude{} }
 
@@ -24,7 +29,7 @@ func (c *claude) IsInstalled() bool {
 		return true
 	}
 	home, _ := os.UserHomeDir()
-	_, err := os.Stat(filepath.Join(home, ".claude"))
+	_, err := os.Stat(filepath.Join(home, claudeDir))
 	return err == nil
 }
 
@@ -78,41 +83,42 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	if err := c.ensureUserSettings(agentsHome); err != nil {
 		return err
 	}
-	return os.MkdirAll(filepath.Join(repoPath, ".claude", "rules"), 0755)
+	return os.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
-	settingsSrc := findClaudeSettingsSource(agentsHome, project)
-	if settingsSrc == "" {
+	target := filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON)
+	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
+	if err != nil {
 		return
 	}
-	links.Symlink(settingsSrc, filepath.Join(repoPath, ".claude", "settings.local.json"))
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return
+	}
+	_ = emitPreferredHookFile(
+		target,
+		renderClaudeHookSettings,
+		findClaudeSettingsHookSpec(agentsHome, project),
+		directSymlinkHookMode,
+		removeRenderedClaudeHookSettings,
+		projectBundles,
+		globalBundles,
+	)
 }
 
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
-	for _, scope := range []string{project, "global"} {
-		for _, name := range []string{"claude.json", "mcp.json"} {
-			src := filepath.Join(agentsHome, "mcp", scope, name)
-			if _, err := os.Stat(src); err == nil {
-				links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
-				return
-			}
-		}
+	if src := resolveScopedFile(agentsHome, "mcp", project, "claude.json", "mcp.json"); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
 	}
 }
 
-func findClaudeSettingsSource(agentsHome, scope string) string {
-	for _, dir := range []string{"hooks", "settings"} {
-		src := filepath.Join(agentsHome, dir, scope, claudeCodeJSON)
-		if _, err := os.Stat(src); err == nil {
-			return src
-		}
-	}
-	return ""
+func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
+	return resolveHookSpecInScope(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
 }
 
 func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
-	rulesDir := filepath.Join(repoPath, ".claude", "rules")
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	projectRulesDir := filepath.Join(agentsHome, "rules", project)
 
 	entries, err := os.ReadDir(projectRulesDir)
@@ -138,35 +144,40 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 
 func (c *claude) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
-	if _, err := os.Stat(globalAgents); err != nil {
+	entries, err := os.ReadDir(globalAgents)
+	if err != nil {
 		return nil
 	}
 
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".claude", "agents")
-		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		if err := c.ensureUserAgentsInHome(homeRoot, globalAgents, entries); err != nil {
 			continue
-		}
-		entries, err := os.ReadDir(globalAgents)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			agentDir := filepath.Join(globalAgents, e.Name())
-			if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userAgentsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue // already a symlink
-			}
-			links.Symlink(agentDir, target)
 		}
 	}
 	return nil
+}
+
+func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries []os.DirEntry) error {
+	userAgentsDir := filepath.Join(homeRoot, claudeDir, "agents")
+	if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		c.linkUserAgent(globalAgents, userAgentsDir, entry)
+	}
+	return nil
+}
+
+func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirEntry) {
+	agentDir := filepath.Join(globalAgents, entry.Name())
+	if !isClaudeAgentDir(agentDir) {
+		return
+	}
+	target := filepath.Join(userAgentsDir, entry.Name())
+	if isSymlink(target) {
+		return
+	}
+	links.Symlink(agentDir, target)
 }
 
 func (c *claude) ensureUserRules(agentsHome string) error {
@@ -191,139 +202,85 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 	}
 
 	for _, homeRoot := range config.UserHomeRoots() {
-		target := filepath.Join(homeRoot, ".claude", "CLAUDE.md")
+		target := filepath.Join(homeRoot, claudeDir, "CLAUDE.md")
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink
 		}
-		os.MkdirAll(filepath.Join(homeRoot, ".claude"), 0755)
+		os.MkdirAll(filepath.Join(homeRoot, claudeDir), 0755)
 		links.Symlink(src, target)
 	}
 	return nil
 }
 
 func (c *claude) ensureUserSettings(agentsHome string) error {
-	src := findClaudeSettingsSource(agentsHome, "global")
-	if src == "" {
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, "global", c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	if len(globalBundles) > 0 {
+		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
+	}
+
+	spec := findClaudeSettingsHookSpec(agentsHome, "global")
+	if spec == nil {
+		for _, homeRoot := range config.UserHomeRoots() {
+			_ = removeManagedFileIf(filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
+		}
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		claudeDir := filepath.Join(homeRoot, ".claude")
-		if err := os.MkdirAll(claudeDir, 0755); err != nil {
-			continue
-		}
-		target := filepath.Join(claudeDir, "settings.json")
+		target := filepath.Join(homeRoot, claudeDir, claudeSettingsJSON)
 		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
 			continue // already a symlink, leave it
 		}
-		links.Symlink(src, target)
+		_ = emitHookSpec(spec, target, HookEmissionMode{
+			Shape:     HookShapeDirect,
+			Transport: HookTransportSymlink,
+		})
 	}
 	return nil
 }
 
 func (c *claude) ensureUserSkills(agentsHome string) error {
-	globalSkills := filepath.Join(agentsHome, "skills", "global")
-	if _, err := os.Stat(globalSkills); err != nil {
-		return nil
-	}
-
 	for _, homeRoot := range config.UserHomeRoots() {
-		userSkillsDir := filepath.Join(homeRoot, ".claude", "skills")
-		if err := os.MkdirAll(userSkillsDir, 0755); err != nil {
-			continue
-		}
-		entries, err := os.ReadDir(globalSkills)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			skillDir := filepath.Join(globalSkills, e.Name())
-			if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userSkillsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(skillDir, target)
+		userSkillsDir := filepath.Join(homeRoot, claudeDir, "skills")
+		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentDir, target)
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, claudeDir, "agents"))
 }
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 	c.ensureUserSkills(agentsHome)
-
-	skillsTarget := filepath.Join(repoPath, ".claude", "skills")
-	agentsSkillsTarget := filepath.Join(repoPath, ".agents", "skills")
-	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(agentsSkillsTarget, 0755); err != nil {
-		return err
-	}
-
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		skillDir := filepath.Join(projectSkills, e.Name())
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		name := e.Name()
-		claudeTarget := filepath.Join(skillsTarget, name)
-		if _, err := os.Lstat(claudeTarget); err != nil {
-			links.Symlink(skillDir, claudeTarget)
-		}
-		agentsTarget := filepath.Join(agentsSkillsTarget, name)
-		if _, err := os.Lstat(agentsTarget); err != nil {
-			links.Symlink(skillDir, agentsTarget)
-		}
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(
+		agentsHome,
+		"skills",
+		project,
+		"SKILL.md",
+		filepath.Join(repoPath, claudeDir, "skills"),
+		filepath.Join(repoPath, ".agents", "skills"),
+	)
 }
 
 func (c *claude) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	// Remove .claude/rules/{project}--*.md symlinks
-	rulesDir := filepath.Join(repoPath, ".claude", "rules")
+	c.removeProjectRuleLinks(project, repoPath, agentsHome)
+	c.removeProjectSettingsLink(project, repoPath, agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, ".agents", "skills"), agentsHome)
+	return nil
+}
+
+func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	if entries, err := os.ReadDir(rulesDir); err == nil {
 		prefix := project + "--"
 		for _, e := range entries {
@@ -333,36 +290,38 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 			}
 		}
 	}
+}
 
-	// Remove .claude/settings.local.json
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".claude", "settings.local.json"), agentsHome)
-
-	// Remove .mcp.json
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
-
-	// Remove .claude/agents/ symlinks
-	agentsDir := filepath.Join(repoPath, ".claude", "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
+func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) {
+	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
+	if err == nil && len(projectBundles) > 0 {
+		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
+	} else {
+		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+		if globalErr == nil && len(globalBundles) > 0 {
+			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), agentsHome)
+}
 
-	// Remove .claude/skills/ symlinks
-	skillsDir := filepath.Join(repoPath, ".claude", "skills")
-	if entries, err := os.ReadDir(skillsDir); err == nil {
+func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
+	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
+			links.RemoveIfSymlinkUnder(filepath.Join(dir, e.Name()), agentsHome)
 		}
 	}
+}
 
-	// Remove .agents/skills/ symlinks
-	agentsSkillsDir := filepath.Join(repoPath, ".agents", "skills")
-	if entries, err := os.ReadDir(agentsSkillsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentsSkillsDir, e.Name()), agentsHome)
-		}
+func isClaudeAgentDir(path string) bool {
+	if !links.IsDirEntry(path) {
+		return false
 	}
+	_, err := os.Stat(filepath.Join(path, "AGENT.md"))
+	return err == nil
+}
 
-	return nil
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }

@@ -6,13 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 type cursor struct{}
 
-const cursorHooksFile = "hooks.json"
+const (
+	cursorHooksFile   = "hooks.json"
+	cursorJSON        = "cursor.json"
+	cursorDir         = ".cursor"
+	globalRulesPrefix = "global--"
+)
 
 func NewCursor() Platform { return &cursor{} }
 
@@ -91,209 +96,171 @@ func (c *cursor) CreateLinks(project, repoPath string) error {
 }
 
 func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
-	rulesDir := filepath.Join(repoPath, ".cursor", "rules")
+	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 
-	// Global rules → global--{name}.mdc
-	globalRulesDir := filepath.Join(agentsHome, "rules", "global")
-	if entries, err := os.ReadDir(globalRulesDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			if !strings.HasSuffix(name, ".mdc") && !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			targetName := toMDC(name)
-			src := filepath.Join(globalRulesDir, name)
-			dst := filepath.Join(rulesDir, "global--"+targetName)
-			links.Hardlink(src, dst) // best-effort
-		}
-	}
-
-	// Project rules → {project}--{name}.mdc
-	projectRulesDir := filepath.Join(agentsHome, "rules", project)
-	if entries, err := os.ReadDir(projectRulesDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			if !strings.HasSuffix(name, ".mdc") && !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			targetName := toMDC(name)
-			src := filepath.Join(projectRulesDir, name)
-			dst := filepath.Join(rulesDir, project+"--"+targetName)
-			links.Hardlink(src, dst) // best-effort
-		}
-	}
+	c.linkRuleDir(filepath.Join(agentsHome, "rules", "global"), rulesDir, globalRulesPrefix)
+	c.linkRuleDir(filepath.Join(agentsHome, "rules", project), rulesDir, project+"--")
 	return nil
 }
 
+func (c *cursor) linkRuleDir(sourceDir, rulesDir, prefix string) {
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		c.linkRuleEntry(entry, sourceDir, rulesDir, prefix)
+	}
+}
+
+func (c *cursor) linkRuleEntry(entry os.DirEntry, sourceDir, rulesDir, prefix string) {
+	if entry.IsDir() {
+		return
+	}
+	name := entry.Name()
+	if !isCursorRuleFile(name) {
+		return
+	}
+	links.Hardlink(
+		filepath.Join(sourceDir, name),
+		filepath.Join(rulesDir, prefix+toMDC(name)),
+	) // best-effort
+}
+
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
-	// Project takes priority over global
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "cursor.json")
-		if _, err := os.Stat(src); err == nil {
-			dst := filepath.Join(repoPath, ".cursor", "settings.json")
-			links.Hardlink(src, dst) // best-effort
-			return nil
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
+		dst := filepath.Join(repoPath, cursorDir, "settings.json")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
 
 func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
-	// Priority: project/cursor.json, project/mcp.json, global/cursor.json, global/mcp.json
-	for _, scope := range []string{project, "global"} {
-		for _, name := range []string{"cursor.json", "mcp.json"} {
-			src := filepath.Join(agentsHome, "mcp", scope, name)
-			if _, err := os.Stat(src); err == nil {
-				dst := filepath.Join(repoPath, ".cursor", "mcp.json")
-				links.Hardlink(src, dst) // best-effort
-				return nil
-			}
-		}
+	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
+		dst := filepath.Join(repoPath, cursorDir, "mcp.json")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
 
 func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "cursorignore")
-		if _, err := os.Stat(src); err == nil {
-			dst := filepath.Join(repoPath, ".cursorignore")
-			links.Hardlink(src, dst) // best-effort
-			return nil
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, "cursorignore"); src != "" {
+		dst := filepath.Join(repoPath, ".cursorignore")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
 
 func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
+	if err := c.writeRepoHooks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
-	// Project-level: project scope takes priority over global
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
-		if _, err := os.Stat(src); err == nil {
-			links.Hardlink(src, filepath.Join(repoPath, ".cursor", cursorHooksFile))
-			break
-		}
+	return c.writeUserHomeHooks(project, agentsHome)
+}
+
+func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
+	repoTarget := filepath.Join(repoPath, cursorDir, cursorHooksFile)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
+	if err != nil {
+		return err
 	}
-	// User-level: global scope only
-	src := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
-	if _, err := os.Stat(src); err == nil {
-		for _, homeRoot := range config.UserHomeRoots() {
-			cursorDir := filepath.Join(homeRoot, ".cursor")
-			if err := os.MkdirAll(cursorDir, 0755); err != nil {
-				continue
-			}
-			dst := filepath.Join(cursorDir, cursorHooksFile)
-			if already, _ := links.AreHardlinked(src, dst); already {
-				continue
-			}
-			links.Hardlink(src, dst)
-		}
+	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+		return err
 	}
-	return nil
+	return emitPreferredHookFile(
+		repoTarget,
+		renderCursorHookConfig,
+		resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON),
+		directHardlinkHookMode,
+		removeRenderedCursorHookConfig,
+		repoBundles,
+	)
+}
+
+func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
+	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	return emitPreferredHookFileToUserHomes(
+		filepath.Join(cursorDir, cursorHooksFile),
+		renderCursorHookConfig,
+		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON),
+		directHardlinkHookMode,
+		removeRenderedCursorHookConfig,
+		globalBundles,
+	)
 }
 
 func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil // no agents, fine
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if _, err := os.Stat(filepath.Join(agentDir, "AGENT.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name())
-		if _, err := os.Lstat(target); err == nil {
-			continue // already exists
-		}
-		links.Symlink(agentDir, target) // best-effort
-	}
-	return nil
+	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, ".claude", "agents"))
 }
 
 func (c *cursor) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
-	rulesDir := filepath.Join(repoPath, ".cursor", "rules")
-
-	if entries, err := os.ReadDir(rulesDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			filePath := filepath.Join(rulesDir, name)
-
-			if strings.HasPrefix(name, "global--") {
-				srcName := strings.TrimPrefix(name, "global--")
-				// Try both .mdc and .md source
-				for _, ext := range []string{srcName, strings.TrimSuffix(srcName, ".mdc") + ".md"} {
-					src := filepath.Join(agentsHome, "rules", "global", ext)
-					if linked, _ := links.AreHardlinked(filePath, src); linked {
-						os.Remove(filePath)
-						break
-					}
-				}
-			} else if strings.HasPrefix(name, project+"--") {
-				srcName := strings.TrimPrefix(name, project+"--")
-				for _, ext := range []string{srcName, strings.TrimSuffix(srcName, ".mdc") + ".md"} {
-					src := filepath.Join(agentsHome, "rules", project, ext)
-					if linked, _ := links.AreHardlinked(filePath, src); linked {
-						os.Remove(filePath)
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Remove .cursor/hooks.json if hard-linked to our source
-	hooksFilePath := filepath.Join(repoPath, ".cursor", cursorHooksFile)
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
-		if linked, _ := links.AreHardlinked(hooksFilePath, src); linked {
-			os.Remove(hooksFilePath)
-			break
-		}
-	}
-
-	// Remove agent symlinks
-	agentsTarget := filepath.Join(repoPath, ".claude", "agents")
-	if entries, err := os.ReadDir(agentsTarget); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(agentsTarget, e.Name())
-			links.RemoveIfSymlinkUnder(linkPath, agentsHome)
-		}
-	}
+	c.removeRuleLinks(project, repoPath, agentsHome)
+	c.removeHooksLink(project, repoPath, agentsHome)
+	c.removeAgentLinks(repoPath, agentsHome)
 
 	return nil
+}
+
+func (c *cursor) removeRuleLinks(project, repoPath, agentsHome string) {
+	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		c.removeRuleEntry(entry, rulesDir, project, agentsHome)
+	}
+}
+
+func (c *cursor) removeRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome string) {
+	if entry.IsDir() {
+		return
+	}
+	name := entry.Name()
+	filePath := filepath.Join(rulesDir, name)
+
+	switch {
+	case strings.HasPrefix(name, globalRulesPrefix):
+		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, "global", strings.TrimPrefix(name, globalRulesPrefix)))
+	case strings.HasPrefix(name, project+"--"):
+		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, project, strings.TrimPrefix(name, project+"--")))
+	}
+}
+
+func (c *cursor) removeHooksLink(project, repoPath, agentsHome string) {
+	hooksFilePath := filepath.Join(repoPath, cursorDir, cursorHooksFile)
+	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
+	if err == nil && len(repoBundles) > 0 {
+		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
+	}
+	removeHardlinkIfLinkedToAny(hooksFilePath, []string{
+		filepath.Join(agentsHome, "hooks", project, cursorJSON),
+		filepath.Join(agentsHome, "hooks", "global", cursorJSON),
+	})
+}
+
+func (c *cursor) removeAgentLinks(repoPath, agentsHome string) {
+	agentsTarget := filepath.Join(repoPath, cursorDir, "agents")
+	entries, err := os.ReadDir(agentsTarget)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		links.RemoveIfSymlinkUnder(filepath.Join(agentsTarget, entry.Name()), agentsHome)
+	}
 }
 
 // toMDC converts .md extension to .mdc; leaves .mdc unchanged.
@@ -302,4 +269,25 @@ func toMDC(name string) string {
 		return strings.TrimSuffix(name, ".md") + ".mdc"
 	}
 	return name
+}
+
+func isCursorRuleFile(name string) bool {
+	return strings.HasSuffix(name, ".mdc") || strings.HasSuffix(name, ".md")
+}
+
+func cursorRuleSources(agentsHome, scope, name string) []string {
+	return []string{
+		filepath.Join(agentsHome, "rules", scope, name),
+		filepath.Join(agentsHome, "rules", scope, strings.TrimSuffix(name, ".mdc")+".md"),
+	}
+}
+
+func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
+	for _, src := range sources {
+		if linked, _ := links.AreHardlinked(path, src); linked {
+			_ = os.Remove(path)
+			return true
+		}
+	}
+	return false
 }

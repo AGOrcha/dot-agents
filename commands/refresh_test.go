@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
+
 // ---------- mapResourceRelToDest ----------
 
 func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
@@ -24,7 +26,9 @@ func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
 		{".codex/instructions.md", "rules/proj/agents.md"},
 		{".codex/rules.md", "rules/proj/agents.md"},
 		{".codex/config.toml", "settings/proj/codex.toml"},
+		{".codex/hooks.json", "hooks/proj/codex.json"},
 		{".github/copilot-instructions.md", "rules/proj/copilot-instructions.md"},
+		{".github/hooks/pre-tool.json", "hooks/proj/pre-tool/HOOK.yaml"},
 	}
 	for _, c := range cases {
 		got := mapResourceRelToDest("proj", c.relPath)
@@ -41,8 +45,9 @@ func TestMapResourceRelToDest_SkillsAndAgents(t *testing.T) {
 	}{
 		{".agents/skills/my-skill/SKILL.md", "skills/proj/my-skill/SKILL.md"},
 		{".claude/skills/my-skill/SKILL.md", "skills/proj/my-skill/SKILL.md"},
-		{".github/agents/my-agent.agent.md", "agents/proj/my-agent/AGENT.md"},
-		{".codex/agents/my-agent/AGENT.md", "agents/proj/my-agent/AGENT.md"},
+		{".github/agents/my-agent.agent.md", refreshCanonicalAgentPath},
+		{".codex/agents/my-agent/AGENT.md", refreshCanonicalAgentPath},
+		{".opencode/agent/my-agent.md", refreshCanonicalAgentPath},
 	}
 	for _, c := range cases {
 		got := mapResourceRelToDest("proj", c.relPath)

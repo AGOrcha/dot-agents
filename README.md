@@ -94,7 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/
 ### Manual
 
 ```bash
-git clone https://github.com/dot-agents/dot-agents ~/.dot-agents
+git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
 export PATH="$HOME/.dot-agents/src/bin:$PATH"
 ```
 

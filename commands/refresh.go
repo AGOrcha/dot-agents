@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/platform"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -204,6 +204,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return "rules/" + project + "/agents.md"
 	case relCodexConfigTOML:
 		return "settings/" + project + "/codex.toml"
+	case relCodexHooksJSON:
+		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
 	}
@@ -244,10 +246,16 @@ func mapResourceRelToDest(project, relPath string) string {
 		return "agents/" + project + "/" + rest
 	}
 
+	// .opencode/agent/<name>.md → agents/<project>/<name>/AGENT.md
+	if strings.HasPrefix(relPath, relOpenCodeAgentsDir) && strings.HasSuffix(relPath, ".md") {
+		name := strings.TrimSuffix(filepath.Base(relPath), ".md")
+		return "agents/" + project + "/" + name + "/AGENT.md"
+	}
+
 	// .github/hooks/<name>.json → hooks/<project>/<name>.json
 	if strings.HasPrefix(relPath, relGitHubHooksDir) && strings.HasSuffix(relPath, relJSONSuffix) {
-		name := filepath.Base(relPath)
-		return agentsHooksPrefix + project + "/" + name
+		name := strings.TrimSuffix(filepath.Base(relPath), relJSONSuffix)
+		return agentsHooksPrefix + project + "/" + name + "/HOOK.yaml"
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dot-agents/dot-agents/internal/config"
-	"github.com/dot-agents/dot-agents/internal/platform"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+	"go.yaml.in/yaml/v3"
 )
 
 type importCandidate struct {
@@ -30,10 +32,78 @@ type importResult struct {
 	skipped  int
 }
 
+type importOutput struct {
+	destRel string
+	content []byte
+}
+
+type importedCopilotHooksFile struct {
+	Hooks map[string][]importedCopilotHookAction `json:"hooks"`
+}
+
+type importedCopilotHookAction struct {
+	Type       string `json:"type"`
+	Bash       string `json:"bash"`
+	TimeoutSec int    `json:"timeoutSec,omitempty"`
+}
+
+type importedHookManifest struct {
+	Name      string                    `yaml:"name"`
+	When      string                    `yaml:"when"`
+	Match     importedHookManifestMatch `yaml:"match,omitempty"`
+	Run       importedHookManifestRun   `yaml:"run"`
+	EnabledOn []string                  `yaml:"enabled_on,omitempty"`
+}
+
+type importedHookManifestMatch struct {
+	Tools      []string `yaml:"tools,omitempty"`
+	Expression string   `yaml:"expression,omitempty"`
+}
+
+type importedHookManifestRun struct {
+	Command   string `yaml:"command"`
+	TimeoutMS int    `yaml:"timeout_ms,omitempty"`
+}
+
+type importedClaudeHooksFile struct {
+	Hooks map[string][]importedClaudeHookEntry `json:"hooks"`
+}
+
+type importedClaudeHookEntry struct {
+	Matcher string                     `json:"matcher"`
+	Hooks   []importedClaudeHookAction `json:"hooks"`
+}
+
+type importedClaudeHookAction struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+type importedCursorHooksFile struct {
+	Hooks map[string][]importedCursorHookEntry `json:"hooks"`
+}
+
+type importedCursorHookEntry struct {
+	Command string `json:"command"`
+	Matcher string `json:"matcher,omitempty"`
+	Timeout int    `json:"timeout,omitempty"`
+}
+
+type importedHookSpec struct {
+	nameHint  string
+	when      string
+	matcher   string
+	command   string
+	timeoutMS int
+	enabledOn []string
+	platform  string
+}
+
 const (
 	importScopeProject = "project"
 	importScopeGlobal  = "global"
 	importScopeAll     = "all"
+	importFailedFmt    = "Failed to import %s: %v"
 
 	relClaudeSettingsJSON    = ".claude/settings.json"
 	relCursorSettingsJSON    = ".cursor/settings.json"
@@ -48,6 +118,7 @@ const (
 	relCodexInstructionsMD   = ".codex/instructions.md"
 	relCodexRulesMD          = ".codex/rules.md"
 	relCodexConfigTOML       = ".codex/config.toml"
+	relCodexHooksJSON        = ".codex/hooks.json"
 	relCopilotInstructionsMD = ".github/copilot-instructions.md"
 	relClaudeREADME          = ".claude/CLAUDE.md"
 	relCursorRulesDir        = ".cursor/rules/"
@@ -55,6 +126,7 @@ const (
 	relClaudeSkillsDir       = ".claude/skills/"
 	relGitHubAgentsDir       = ".github/agents/"
 	relCodexAgentsDir        = ".codex/agents/"
+	relOpenCodeAgentsDir     = ".opencode/agent/"
 	relGitHubHooksDir        = ".github/hooks/"
 	relAgentMarkdownSuffix   = ".agent.md"
 	relJSONSuffix            = ".json"
@@ -74,6 +146,7 @@ var projectImportSingles = []string{
 	relCodexInstructionsMD,
 	relCodexRulesMD,
 	relCodexConfigTOML,
+	relCodexHooksJSON,
 	relCopilotInstructionsMD,
 }
 
@@ -83,6 +156,7 @@ var projectImportWalkDirs = []string{
 	".claude/skills",
 	".github/agents",
 	".codex/agents",
+	".opencode/agent",
 	".github/hooks",
 }
 
@@ -93,6 +167,7 @@ var globalImportSingles = []string{
 	relCursorHooksJSON,
 	relClaudeREADME,
 	relCodexConfigTOML,
+	relCodexHooksJSON,
 }
 
 func NewImportCmd() *cobra.Command {
@@ -210,6 +285,10 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string) imp
 		return importResult{}
 	}
 
+	if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo); ok {
+		return result
+	}
+
 	dest := c.destPath(agentsHome)
 	destInfo, err := os.Stat(dest)
 	if os.IsNotExist(err) {
@@ -241,7 +320,7 @@ func importMissingCandidate(c importCandidate, dest, timestamp string) importRes
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	_ = os.MkdirAll(filepath.Dir(dest), 0755)
 	if err := copyFile(c.sourcePath, dest); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -261,7 +340,7 @@ func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp strin
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
 	if err := copyFile(c.sourcePath, dest); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("Failed to import %s: %v", config.DisplayPath(c.sourcePath), err))
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
@@ -408,8 +487,591 @@ func mapGlobalRelToDest(rel string) string {
 		return "rules/global/agents.md"
 	case relCodexConfigTOML:
 		return "settings/global/codex.toml"
+	case relCodexHooksJSON:
+		return "hooks/global/codex.json"
 	default:
 		return ""
+	}
+}
+
+func processCanonicalHookBundleImport(c importCandidate, agentsHome, timestamp string, srcInfo os.FileInfo) (importResult, bool) {
+	outputs, ok, err := canonicalImportOutputs(c)
+	if !ok {
+		return importResult{}, false
+	}
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to canonicalize %s: %v", config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}, true
+	}
+
+	total := importResult{}
+	for _, output := range outputs {
+		delta := processImportOutput(c, output, agentsHome, timestamp, srcInfo)
+		total.imported += delta.imported
+		total.skipped += delta.skipped
+	}
+	return total, true
+}
+
+func processImportOutput(c importCandidate, output importOutput, agentsHome, timestamp string, srcInfo os.FileInfo) importResult {
+	resolved := c
+	resolved.destRel = output.destRel
+	dest := resolved.destPath(agentsHome)
+
+	destInfo, err := os.Stat(dest)
+	if os.IsNotExist(err) {
+		return importMissingContentCandidate(resolved, dest, output.content, timestamp)
+	}
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to inspect %s: %v", resolved.destRel, err))
+		return importResult{skipped: 1}
+	}
+
+	existing, err := os.ReadFile(dest)
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to compare %s and %s: %v", config.DisplayPath(resolved.sourcePath), resolved.destRel, err))
+		return importResult{skipped: 1}
+	}
+	if string(existing) == string(output.content) {
+		return importResult{}
+	}
+
+	return replaceImportContentCandidate(resolved, agentsHome, dest, output.content, timestamp, srcInfo, destInfo)
+}
+
+func importMissingContentCandidate(c importCandidate, dest string, content []byte, timestamp string) importResult {
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("Import %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
+		return importResult{imported: 1}
+	}
+
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
+	_ = os.MkdirAll(filepath.Dir(dest), 0755)
+	if err := os.WriteFile(dest, content, 0644); err != nil {
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}
+	}
+
+	ui.Bullet("ok", fmt.Sprintf("Imported %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
+	return importResult{imported: 1}
+}
+
+func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, content []byte, timestamp string, srcInfo, destInfo os.FileInfo) importResult {
+	if !ui.Confirm(importReplaceMessage(c, srcInfo, destInfo), Flags.Yes) {
+		return importResult{skipped: 1}
+	}
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("Replace %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
+		return importResult{imported: 1}
+	}
+
+	mirrorBackup(c.project, agentsHome, dest, timestamp)
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
+	if err := os.WriteFile(dest, content, 0644); err != nil {
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}
+	}
+
+	ui.Bullet("ok", fmt.Sprintf("Updated %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
+	return importResult{imported: 1}
+}
+
+func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
+	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
+	if err != nil {
+		return nil, false, err
+	}
+	rel = filepath.ToSlash(rel)
+
+	switch rel {
+	case relCursorHooksJSON:
+		return canonicalHookBundleOutputsFromCursorFile(c.project, c.sourcePath)
+	case relCodexHooksJSON:
+		return canonicalHookBundleOutputsFromCodexFile(c.project, c.sourcePath)
+	case relClaudeSettingsLocal, relClaudeSettingsJSON:
+		return canonicalHookBundleOutputsFromClaudeCompatFile(c.project, c.sourcePath)
+	}
+
+	if name, ok := githubHookBundleName(rel); ok {
+		if outputs, canonOK, err := canonicalHookBundleOutputsFromCopilotFile(c.project, c.sourcePath, name); err == nil && canonOK {
+			return outputs, true, nil
+		}
+		// Preserve unsupported hook files without data loss until the shared import
+		// path can canonicalize more native hook shapes.
+		raw, readErr := os.ReadFile(c.sourcePath)
+		if readErr != nil {
+			return nil, true, readErr
+		}
+		return []importOutput{{
+			destRel: agentsHooksPrefix + c.project + "/" + name + ".json",
+			content: raw,
+		}}, true, nil
+	}
+
+	return nil, false, nil
+}
+
+func githubHookBundleName(rel string) (string, bool) {
+	if !strings.HasPrefix(rel, relGitHubHooksDir) || !strings.HasSuffix(rel, relJSONSuffix) {
+		return "", false
+	}
+	return strings.TrimSuffix(filepath.Base(rel), relJSONSuffix), true
+}
+
+func canonicalHookBundleContentFromCopilotFile(path, hookName string) ([]byte, error) {
+	outputs, ok, err := canonicalHookBundleOutputsFromCopilotFile("ignored", path, hookName)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(outputs) != 1 {
+		return nil, fmt.Errorf("expected exactly one canonical copilot hook output")
+	}
+	return outputs[0].content, nil
+}
+
+func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName string) ([]importOutput, bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, err
+	}
+
+	var payload importedCopilotHooksFile
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return nil, false, nil
+	}
+	if len(payload.Hooks) == 0 {
+		return nil, false, nil
+	}
+
+	eventNames := make([]string, 0, len(payload.Hooks))
+	for event := range payload.Hooks {
+		eventNames = append(eventNames, event)
+	}
+	sort.Strings(eventNames)
+
+	specs := make([]importedHookSpec, 0)
+	for _, event := range eventNames {
+		when, ok := canonicalHookWhenFromCopilotEvent(event)
+		if !ok {
+			return nil, false, nil
+		}
+		for _, action := range payload.Hooks[event] {
+			if action.Type != "command" || strings.TrimSpace(action.Bash) == "" {
+				return nil, false, nil
+			}
+			specs = append(specs, importedHookSpec{
+				nameHint:  hookName,
+				when:      when,
+				command:   strings.TrimSpace(action.Bash),
+				timeoutMS: action.TimeoutSec * 1000,
+				enabledOn: []string{"copilot"},
+				platform:  "copilot",
+			})
+		}
+	}
+
+	outputs := buildCanonicalHookOutputs(scope, specs)
+	if len(outputs) == 0 {
+		return nil, false, nil
+	}
+	return outputs, true, nil
+}
+
+func canonicalHookBundleOutputsFromCursorFile(scope, path string) ([]importOutput, bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, err
+	}
+	var payload importedCursorHooksFile
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return nil, false, nil
+	}
+	if len(payload.Hooks) == 0 {
+		return nil, false, nil
+	}
+	specs := make([]importedHookSpec, 0)
+	for event, entries := range payload.Hooks {
+		when, ok := canonicalHookWhenFromCursorEvent(event)
+		if !ok {
+			return nil, false, nil
+		}
+		for _, entry := range entries {
+			command := strings.TrimSpace(entry.Command)
+			if command == "" {
+				return nil, false, nil
+			}
+			specs = append(specs, importedHookSpec{
+				when:      when,
+				matcher:   strings.TrimSpace(entry.Matcher),
+				command:   command,
+				timeoutMS: entry.Timeout * 1000,
+				enabledOn: []string{"cursor"},
+				platform:  "cursor",
+			})
+		}
+	}
+	outputs := buildCanonicalHookOutputs(scope, specs)
+	if len(outputs) == 0 {
+		return nil, false, nil
+	}
+	return outputs, true, nil
+}
+
+func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput, bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, err
+	}
+	var payload importedClaudeHooksFile
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return nil, false, nil
+	}
+	if len(payload.Hooks) == 0 {
+		return nil, false, nil
+	}
+	specs, ok := collectImportedCommandHookSpecs(payload, canonicalHookWhenFromCodexEvent, []string{"codex"}, "codex")
+	if !ok {
+		return nil, false, nil
+	}
+	outputs := buildCanonicalHookOutputs(scope, specs)
+	if len(outputs) == 0 {
+		return nil, false, nil
+	}
+	return outputs, true, nil
+}
+
+func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]importOutput, bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, true, err
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(content, &top); err != nil {
+		return nil, false, nil
+	}
+	if !hasOnlyClaudeCompatKeys(top) {
+		return nil, false, nil
+	}
+	var payload importedClaudeHooksFile
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return nil, false, nil
+	}
+	if len(payload.Hooks) == 0 {
+		return nil, false, nil
+	}
+	specs, ok := collectImportedCommandHookSpecs(payload, canonicalHookWhenFromClaudeEvent, []string{"claude", "copilot"}, "claude")
+	if !ok {
+		return nil, false, nil
+	}
+	outputs := buildCanonicalHookOutputs(scope, specs)
+	if len(outputs) == 0 {
+		return nil, false, nil
+	}
+	return outputs, true, nil
+}
+
+func hasOnlyClaudeCompatKeys(top map[string]json.RawMessage) bool {
+	for key := range top {
+		if key != "hooks" && key != "$schema" {
+			return false
+		}
+	}
+	return true
+}
+
+func collectImportedCommandHookSpecs(
+	payload importedClaudeHooksFile,
+	eventWhen func(string) (string, bool),
+	enabledOn []string,
+	platformID string,
+) ([]importedHookSpec, bool) {
+	specs := make([]importedHookSpec, 0)
+	for event, entries := range payload.Hooks {
+		when, ok := eventWhen(event)
+		if !ok {
+			return nil, false
+		}
+		for _, entry := range entries {
+			matcher := strings.TrimSpace(entry.Matcher)
+			for _, action := range entry.Hooks {
+				command := strings.TrimSpace(action.Command)
+				if action.Type != "command" || command == "" {
+					return nil, false
+				}
+				specs = append(specs, importedHookSpec{
+					when:      when,
+					matcher:   matcher,
+					command:   command,
+					enabledOn: enabledOn,
+					platform:  platformID,
+				})
+			}
+		}
+	}
+	return specs, true
+}
+
+func buildCanonicalHookOutputs(scope string, specs []importedHookSpec) []importOutput {
+	used := map[string]int{}
+	outputs := make([]importOutput, 0, len(specs))
+	for _, spec := range specs {
+		name := importedHookName(spec.nameHint, len(specs), spec.when, spec.matcher, spec.command, used)
+		manifest := importedHookManifest{
+			Name:      name,
+			When:      spec.when,
+			Run:       importedHookManifestRun{Command: spec.command, TimeoutMS: spec.timeoutMS},
+			EnabledOn: append([]string{}, spec.enabledOn...),
+		}
+		if tools := canonicalMatchToolsFromMatcher(spec.matcher); len(tools) > 0 {
+			manifest.Match.Tools = tools
+		}
+		if shouldSetCanonicalMatchExpression(spec.matcher) {
+			manifest.Match.Expression = strings.TrimSpace(spec.matcher)
+		}
+		content, err := yaml.Marshal(manifest)
+		if err != nil {
+			continue
+		}
+		outputs = append(outputs, importOutput{
+			destRel: agentsHooksPrefix + scope + "/" + name + "/HOOK.yaml",
+			content: append(content, '\n'),
+		})
+	}
+	return outputs
+}
+
+func importedHookName(nameHint string, total int, when, matcher, command string, used map[string]int) string {
+	eventPart := sanitizeHookNamePart(strings.ReplaceAll(when, "_", "-"))
+	cmdPart := sanitizeHookNamePart(commandStem(command))
+	matcherPart := sanitizeHookNamePart(matcherNameHint(matcher))
+	hintPart := sanitizeHookNamePart(nameHint)
+
+	if hintPart != "" {
+		return importedHookNameWithHint(hintPart, total, cmdPart, matcherPart, used)
+	}
+	return importedHookNameWithoutHint(eventPart, cmdPart, matcherPart, used)
+}
+
+func importedHookNameWithHint(hintPart string, total int, cmdPart, matcherPart string, used map[string]int) string {
+	if total == 1 {
+		return uniqueImportedHookName(hintPart, used)
+	}
+	cmdPart = importedHookCommandPart(cmdPart, matcherPart)
+	cmdPart = trimRedundantPrefix(cmdPart, hintPart)
+	if cmdPart == "" && matcherPart != "" {
+		cmdPart = trimRedundantPrefix(matcherPart, hintPart)
+	}
+	base := hintPart
+	if cmdPart != "" {
+		base = base + "-" + cmdPart
+	}
+	return uniqueImportedHookName(base, used)
+}
+
+func importedHookNameWithoutHint(eventPart, cmdPart, matcherPart string, used map[string]int) string {
+	cmdPart = importedHookCommandPart(cmdPart, matcherPart)
+	cmdPart = trimRedundantPrefix(cmdPart, eventPart)
+	if cmdPart == "" {
+		if matcherPart != "" {
+			cmdPart = trimRedundantPrefix(matcherPart, eventPart)
+		} else {
+			cmdPart = "hook"
+		}
+	}
+	base := strings.Trim(strings.Join([]string{eventPart, cmdPart}, "-"), "-")
+	if base == "" {
+		base = "hook"
+	}
+	return uniqueImportedHookName(base, used)
+}
+
+func importedHookCommandPart(commandPart, matcherPart string) string {
+	if shouldPreferMatcherInImportedHookName(commandPart) && matcherPart != "" {
+		return matcherPart + "-" + commandPart
+	}
+	return commandPart
+}
+
+func uniqueImportedHookName(base string, used map[string]int) string {
+	used[base]++
+	if used[base] == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, used[base])
+}
+
+func shouldPreferMatcherInImportedHookName(commandStem string) bool {
+	switch commandStem {
+	case "", "run", "hook", "script", "main", "index":
+		return true
+	default:
+		return false
+	}
+}
+
+func matcherNameHint(matcher string) string {
+	tools := canonicalMatchToolsFromMatcher(matcher)
+	if len(tools) == 0 {
+		return ""
+	}
+	if len(tools) == 1 {
+		return tools[0]
+	}
+	return tools[0] + "-" + tools[1]
+}
+
+func trimRedundantPrefix(value, prefix string) string {
+	value = strings.TrimSpace(value)
+	prefix = strings.TrimSpace(prefix)
+	if value == "" || prefix == "" {
+		return value
+	}
+	if value == prefix {
+		return ""
+	}
+	if strings.HasPrefix(value, prefix+"-") {
+		return strings.TrimPrefix(value, prefix+"-")
+	}
+	return value
+}
+
+func commandStem(command string) string {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return ""
+	}
+	first := filepath.Base(parts[0])
+	first = strings.TrimSuffix(first, filepath.Ext(first))
+	return first
+}
+
+func sanitizeHookNamePart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func canonicalMatchToolsFromMatcher(matcher string) []string {
+	matcher = strings.TrimSpace(matcher)
+	if matcher == "" || matcher == "*" {
+		return nil
+	}
+	parts := strings.Split(matcher, "|")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" || !isSimpleHookToken(token) {
+			return nil
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func isSimpleHookToken(token string) bool {
+	for _, r := range token {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func shouldSetCanonicalMatchExpression(matcher string) bool {
+	matcher = strings.TrimSpace(matcher)
+	if matcher == "" || matcher == "*" {
+		return false
+	}
+	tools := canonicalMatchToolsFromMatcher(matcher)
+	return len(tools) == 0 || strings.Join(tools, "|") != matcher
+}
+
+func canonicalHookWhenFromCopilotEvent(event string) (string, bool) {
+	switch event {
+	case "sessionStart":
+		return "session_start", true
+	case "userPromptSubmitted":
+		return "user_prompt_submit", true
+	case "preToolUse":
+		return "pre_tool_use", true
+	default:
+		return "", false
+	}
+}
+
+func canonicalHookWhenFromCursorEvent(event string) (string, bool) {
+	switch event {
+	case "preToolUse":
+		return "pre_tool_use", true
+	case "beforeSubmitPrompt":
+		return "user_prompt_submit", true
+	case "stop":
+		return "stop", true
+	case "sessionStart":
+		return "session_start", true
+	default:
+		return "", false
+	}
+}
+
+func canonicalHookWhenFromCodexEvent(event string) (string, bool) {
+	switch event {
+	case "SessionStart":
+		return "session_start", true
+	case "PreToolUse":
+		return "pre_tool_use", true
+	case "PostToolUse":
+		return "post_tool_use", true
+	case "UserPromptSubmit":
+		return "user_prompt_submit", true
+	case "Stop":
+		return "stop", true
+	default:
+		return "", false
+	}
+}
+
+func canonicalHookWhenFromClaudeEvent(event string) (string, bool) {
+	switch event {
+	case "PreToolUse":
+		return "pre_tool_use", true
+	case "PostToolUse":
+		return "post_tool_use", true
+	case "PostToolUseFailure":
+		return "post_tool_use_failure", true
+	case "Notification":
+		return "notification", true
+	case "UserPromptSubmit":
+		return "user_prompt_submit", true
+	case "SessionStart":
+		return "session_start", true
+	case "SessionEnd":
+		return "session_end", true
+	case "Stop":
+		return "stop", true
+	case "SubagentStart":
+		return "subagent_start", true
+	case "SubagentStop":
+		return "subagent_stop", true
+	case "PreCompact":
+		return "pre_compact", true
+	case "PermissionRequest":
+		return "permission_request", true
+	default:
+		return "", false
 	}
 }
 

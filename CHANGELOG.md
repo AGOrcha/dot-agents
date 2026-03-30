@@ -105,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows support deferred to future release
 - Tasks and History features are opt-in and not yet implemented
 
-[Unreleased]: https://github.com/dot-agents/dot-agents/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/Nikashprakash/dot-agents/compare/v0.1.9...HEAD
+[0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/dot-agents/dot-agents/compare/v0.1.0...v0.1.7
 [0.1.0]: https://github.com/dot-agents/dot-agents/releases/tag/v0.1.0

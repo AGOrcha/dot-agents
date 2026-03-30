@@ -1,6 +1,6 @@
 #!/bin/bash
 # dot-agents - Unified config layer for AI coding agents
-# https://github.com/dot-agents/dot-agents
+# https://github.com/NikashPrakash/dot-agents
 #
 # Usage: dot-agents <command> [options]
 
@@ -42,6 +42,8 @@ ${BOLD}CORE COMMANDS${NC}
                            --redundancy  Check for duplicate rules
                            --migrate     Detect deprecated formats
     refresh (<project>)  Refresh managed setup in project(s) from ~/.agents
+    install              Set up project from .agentsrc.json manifest
+                           --generate   Create .agentsrc.json from current state
 
 ${BOLD}SKILLS, AGENTS & HOOKS${NC}
     skills            Manage skills (list, new, edit, migrate)
@@ -72,7 +74,7 @@ ${BOLD}EXAMPLES${NC}
     dot-agents refresh                  # Refresh all projects
 
 ${BOLD}DOCUMENTATION${NC}
-    https://github.com/dot-agents/dot-agents
+    https://github.com/NikashPrakash/dot-agents
     dot-agents <command> --help   Command-specific help (e.g. refresh --help)
 
 EOF

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dot-agents/dot-agents/commands"
-	"github.com/dot-agents/dot-agents/internal/ui"
+	"github.com/NikashPrakash/dot-agents/commands"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +50,7 @@ It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.`,
 	root.AddCommand(commands.NewHooksCmd())
 	root.AddCommand(commands.NewSyncCmd())
 	root.AddCommand(commands.NewExplainCmd())
+	root.AddCommand(commands.NewInstallCmd())
 
 	// Override Execute error handling for better UX
 	root.SetErr(os.Stderr)

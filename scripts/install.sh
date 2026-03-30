@@ -1,6 +1,6 @@
 #!/bin/bash
 # dot-agents installer
-# https://github.com/dot-agents/dot-agents
+# https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/master/scripts/install.sh | bash
