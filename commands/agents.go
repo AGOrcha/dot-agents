@@ -101,8 +101,20 @@ func createAgent(name, scope string) error {
 		}
 	}
 
-	ui.SuccessBox(fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/", name, scope, name),
-		"Edit the agent: "+config.DisplayPath(agentMD),
-	)
+	nextSteps := []string{"Edit the agent: " + config.DisplayPath(agentMD)}
+
+	// Auto-update .agentsrc.json if at project scope and manifest exists in CWD.
+	if scope != "global" {
+		if cwd, err := os.Getwd(); err == nil {
+			if rc, err := config.LoadAgentsRC(cwd); err == nil {
+				rc.Agents = config.AppendUnique(rc.Agents, name)
+				if saveErr := rc.Save(cwd); saveErr == nil {
+					nextSteps = append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'")
+				}
+			}
+		}
+	}
+
+	ui.SuccessBox(fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/", name, scope, name), nextSteps...)
 	return nil
 }

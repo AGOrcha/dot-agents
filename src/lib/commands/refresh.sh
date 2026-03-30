@@ -235,6 +235,14 @@ cmd_refresh() {
     echo ""
     echo -e "${BOLD}Refreshing: $name${NC}"
     echo -e "  ${DIM}$path${NC}"
+    # Note if manifest has git sources (git resources won't be re-fetched by refresh)
+    if [ -f "$path/.agentsrc.json" ] && command -v jq >/dev/null 2>&1; then
+      local has_git
+      has_git=$(jq -r '.sources[]? | select(.type=="git") | .url' "$path/.agentsrc.json" 2>/dev/null | head -1)
+      if [ -n "$has_git" ]; then
+        echo -e "  ${DIM}ℹ  .agentsrc.json has git sources — use 'dot-agents install' to re-resolve${NC}"
+      fi
+    fi
     if [ "$DRY_RUN" != true ]; then
       create_project_dirs_silent "$name"
       local restored_count

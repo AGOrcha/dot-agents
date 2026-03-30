@@ -419,6 +419,25 @@ EOF
   echo ""
   echo "Edit with: dot-agents skills edit $name"
   echo "Or open directly: \$EDITOR $target_file"
+
+  # Auto-update .agentsrc.json if it exists in CWD
+  if [ -f "$PWD/$AGENTSRC_FILE" ] 2>/dev/null; then
+    _SKILLS_INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! declare -F _agentsrc_add_to_field >/dev/null 2>&1; then
+      source "$_SKILLS_INSTALL_DIR/install.sh" 2>/dev/null || true
+    fi
+    if command -v jq >/dev/null 2>&1; then
+      local manifest="$PWD/$AGENTSRC_FILE"
+      local already
+      already=$(jq -r --arg n "$name" '(.skills // []) | index($n)' "$manifest" 2>/dev/null)
+      if [ "$already" = "null" ]; then
+        local updated
+        updated=$(jq --arg n "$name" '.skills = ((.skills // []) + [$n])' "$manifest")
+        echo "$updated" > "$manifest"
+        log_info "Updated .agentsrc.json: added skill '$name'"
+      fi
+    fi
+  fi
 }
 
 # Edit a skill

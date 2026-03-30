@@ -67,6 +67,18 @@ func runRemove(projectName string, cleanDirs bool) error {
 		"Project registration for '"+projectName+"'",
 	)
 
+	// Warn about git source cache if manifest has git sources
+	if rc, err := config.LoadAgentsRC(projectPath); err == nil {
+		for _, src := range rc.Sources {
+			if src.Type == "git" && src.URL != "" {
+				ui.Warn("Git source cache not cleaned automatically")
+				fmt.Fprintf(os.Stdout, "  Cache: %s~/.cache/dot-agents/sources/%s\n", ui.Dim, ui.Reset)
+				fmt.Fprintf(os.Stdout, "  To clean: %srm -rf ~/.cache/dot-agents/sources/%s\n\n", ui.Dim, ui.Reset)
+				break
+			}
+		}
+	}
+
 	if cleanDirs {
 		ui.WarnBox("Destructive Action",
 			"The --clean flag will permanently delete:",

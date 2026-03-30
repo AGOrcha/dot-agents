@@ -382,6 +382,19 @@ EOF
   echo ""
   echo "Edit with: dot-agents agents edit $name"
   echo "Or open directly: \$EDITOR $target_file"
+
+  # Auto-update .agentsrc.json if it exists in CWD
+  local _agentsrc_file_path="$PWD/.agentsrc.json"
+  if [ -f "$_agentsrc_file_path" ] && command -v jq >/dev/null 2>&1; then
+    local already
+    already=$(jq -r --arg n "$name" '(.agents // []) | index($n)' "$_agentsrc_file_path" 2>/dev/null)
+    if [ "$already" = "null" ]; then
+      local updated
+      updated=$(jq --arg n "$name" '.agents = ((.agents // []) + [$n])' "$_agentsrc_file_path")
+      echo "$updated" > "$_agentsrc_file_path"
+      log_info "Updated .agentsrc.json: added agent '$name'"
+    fi
+  fi
 }
 
 agents_edit() {
