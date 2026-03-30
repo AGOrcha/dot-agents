@@ -258,6 +258,93 @@ Parallel worker split:
 ## Current State
 
 **Done:**
+
+---
+
+## Update — 2026-03-30
+
+Hook work moved well beyond the original handoff. The Go-side Stage 1 hook path now supports canonical `HOOK.yaml` bundles as the primary source, native write-rendered outputs for Claude, Cursor, Codex, and Copilot, cleanup of rendered hook artifacts during both `RemoveLinks` and repeated `CreateLinks` runs, and reverse-import of representable native hook outputs back into canonical bundles.
+
+### What changed since the last handoff
+
+- Implemented safe cleanup helpers for write-rendered hook outputs in `internal/platform/hooks.go`, and wired them into:
+  - `internal/platform/claude.go`
+  - `internal/platform/cursor.go`
+  - `internal/platform/codex.go`
+  - `internal/platform/copilot.go`
+- Added transition cleanup so stale rendered hook files are pruned during repeated create/refresh flows, not only on remove:
+  - Copilot now prunes stale `.github/hooks/*.json` files that were previously rendered from canonical bundles
+  - Claude, Cursor, and Codex now remove stale rendered single-file hook outputs when canonical bundles disappear and no legacy fallback remains
+- Expanded command-layer reverse import so representable native aggregate files now canonicalize into `hooks/<scope>/<name>/HOOK.yaml`:
+  - `.cursor/hooks.json`
+  - `.codex/hooks.json`
+  - `.claude/settings.local.json`
+  - `.claude/settings.json`
+  - `.github/hooks/*.json`
+- Expanded the canonical hook schema itself:
+  - `HOOK.yaml` now supports `match.expression` alongside `match.tools`
+  - shared matcher precedence is now:
+    - `platform_overrides.<platform>.matcher`
+    - canonical `match.expression`
+    - canonical `match.tools`
+- Tightened aggregate import heuristics:
+  - smarter event/command/matcher-based bundle naming
+  - stable numeric suffixes for collisions
+  - stronger use of Copilot filename hints
+  - Copilot multi-action fanout files can now split into multiple canonical hook bundles instead of always falling back to raw JSON
+
+### Files most relevant now
+
+- `internal/platform/hooks.go`
+- `internal/platform/hooks_test.go`
+- `internal/platform/claude.go`
+- `internal/platform/cursor.go`
+- `internal/platform/codex.go`
+- `internal/platform/copilot.go`
+- `internal/platform/stage1_integration_test.go`
+- `commands/import.go`
+- `commands/import_test.go`
+- `commands/refresh.go`
+- `commands/refresh_test.go`
+- `commands/add.go`
+- `docs/CANONICAL_HOOKS_DESIGN.md`
+- `.agents/active/platform-dir-unification.plan.md`
+
+### Validation completed
+
+- `env GOCACHE=/tmp/go-build go test ./commands`
+- `env GOCACHE=/tmp/go-build go test ./internal/platform`
+- `env GOCACHE=/tmp/go-build go test ./...`
+
+At the time of this update, the worktree was clean before appending this handoff update.
+
+### Remaining hook work
+
+The hook path is now in a much stronger place. The remaining opportunities are mostly polish rather than missing architecture:
+
+- deeper transition cleanup edge cases for more complex multi-hook rename/delete sequences
+- even better naming heuristics for highly ambiguous aggregate imports that still do not expose a stable logical identity
+- eventual bash parity once Phase 4 starts
+
+### New context: PR check investigation started
+
+Work on a failing PR check has started in parallel:
+
+- failing check reported by user: `SonarCloud Code Analysis`
+- delegated to subagent: `Jason` (`019d3d33-37ab-7ca1-845f-adb82de6d145`)
+- status at handoff update time: investigation started, no findings merged back yet
+
+This matters because the next agent may need to resume either:
+
+- hook-plan follow-through if the SonarCloud issue points back at these recent changes, or
+- a separate PR-check remediation path once the subagent reports concrete failure details
+
+### Status change
+
+The handoff status should now be treated as:
+
+- hook implementation checkpoint: largely current
+- broader session status: active, because SonarCloud investigation is in progress in a delegated subagent
 - Added `HOOK.yaml` bundle loading under `~/.agents/hooks/<scope>/<name>/HOOK.yaml`.
 - Added bundle-local command resolution so `./script.sh` resolves relative to the hook bundle directory.
 - Added native write-based JSON renderers for:
