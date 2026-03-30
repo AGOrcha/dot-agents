@@ -48,6 +48,7 @@ const (
 	relCodexInstructionsMD   = ".codex/instructions.md"
 	relCodexRulesMD          = ".codex/rules.md"
 	relCodexConfigTOML       = ".codex/config.toml"
+	relCodexHooksJSON        = ".codex/hooks.json"
 	relCopilotInstructionsMD = ".github/copilot-instructions.md"
 	relClaudeREADME          = ".claude/CLAUDE.md"
 	relCursorRulesDir        = ".cursor/rules/"
@@ -55,6 +56,7 @@ const (
 	relClaudeSkillsDir       = ".claude/skills/"
 	relGitHubAgentsDir       = ".github/agents/"
 	relCodexAgentsDir        = ".codex/agents/"
+	relOpenCodeAgentsDir     = ".opencode/agent/"
 	relGitHubHooksDir        = ".github/hooks/"
 	relAgentMarkdownSuffix   = ".agent.md"
 	relJSONSuffix            = ".json"
@@ -74,6 +76,7 @@ var projectImportSingles = []string{
 	relCodexInstructionsMD,
 	relCodexRulesMD,
 	relCodexConfigTOML,
+	relCodexHooksJSON,
 	relCopilotInstructionsMD,
 }
 
@@ -83,6 +86,7 @@ var projectImportWalkDirs = []string{
 	".claude/skills",
 	".github/agents",
 	".codex/agents",
+	".opencode/agent",
 	".github/hooks",
 }
 
@@ -93,6 +97,7 @@ var globalImportSingles = []string{
 	relCursorHooksJSON,
 	relClaudeREADME,
 	relCodexConfigTOML,
+	relCodexHooksJSON,
 }
 
 func NewImportCmd() *cobra.Command {
@@ -408,6 +413,8 @@ func mapGlobalRelToDest(rel string) string {
 		return "rules/global/agents.md"
 	case relCodexConfigTOML:
 		return "settings/global/codex.toml"
+	case relCodexHooksJSON:
+		return "hooks/global/codex.json"
 	default:
 		return ""
 	}

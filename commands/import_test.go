@@ -16,6 +16,7 @@ func TestMapGlobalRelToDest(t *testing.T) {
 		{".cursor/mcp.json", "mcp/global/mcp.json"},
 		{".claude/CLAUDE.md", "rules/global/agents.md"},
 		{".codex/config.toml", "settings/global/codex.toml"},
+		{".codex/hooks.json", "hooks/global/codex.json"},
 		{".cursor/hooks.json", "hooks/global/cursor.json"},
 		{".unknown", ""},
 	}
@@ -35,6 +36,7 @@ func TestMapResourceRelToDestHooks(t *testing.T) {
 		want string
 	}{
 		{relCursorHooksJSON, agentsHooksPrefix + project + "/cursor.json"},
+		{relCodexHooksJSON, agentsHooksPrefix + project + "/codex.json"},
 		{".github/hooks/pre-tool.json", agentsHooksPrefix + project + "/pre-tool.json"},
 		{".github/hooks/post-save.json", agentsHooksPrefix + project + "/post-save.json"},
 	}

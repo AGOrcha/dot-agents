@@ -31,6 +31,7 @@ var aiScanPatterns = []string{
 	"AGENTS.md",
 	".codex/instructions.md",
 	".codex/config.json",
+	".codex/hooks.json",
 	"codex.md",
 	// OpenCode
 	".opencode/instructions.md",
@@ -54,8 +55,10 @@ var aiScanDirPatterns = []string{
 	".claude/skills",
 	".claude/rules",
 	".codex/agents",
+	".opencode/agent",
 	".continue",
 	".github/agents",
+	".github/hooks",
 }
 
 var skipDirs = map[string]bool{

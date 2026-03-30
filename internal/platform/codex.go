@@ -69,12 +69,8 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
 		return err
 	}
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "codex.toml")
-		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, ".codex", "config.toml"))
-			break
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, ".codex", "config.toml"))
 	}
 
 	// Project agents → .claude/agents/ (GCD compat)
@@ -84,6 +80,11 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 
 	// Project skills → .agents/skills/
 	if err := c.createSkillsLinks(project, repoPath, agentsHome); err != nil {
+		return err
+	}
+
+	// Project hooks → .codex/hooks.json
+	if err := c.createHooksLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
 
@@ -120,29 +121,10 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 }
 
 func (c *codex) ensureUserSkills(agentsHome string) error {
-	globalSkills := filepath.Join(agentsHome, "skills", "global")
-	if _, err := os.Stat(globalSkills); err != nil {
-		return nil
-	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		userSkillsDir := filepath.Join(homeRoot, ".agents", "skills")
-		if err := os.MkdirAll(userSkillsDir, 0755); err != nil {
-			continue
-		}
-		entries, _ := os.ReadDir(globalSkills)
-		for _, e := range entries {
-			skillDir := filepath.Join(globalSkills, e.Name())
-			if !links.IsDirEntry(skillDir) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userSkillsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(skillDir, target)
+		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -180,24 +162,37 @@ func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
 		return err
 	}
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
+	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
 	if err != nil {
 		return nil
 	}
 	for _, e := range entries {
-		skillDir := filepath.Join(projectSkills, e.Name())
-		if !links.IsDirEntry(skillDir) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(skillsTarget, e.Name())
+		target := filepath.Join(skillsTarget, e.Name)
 		if _, err := os.Lstat(target); err == nil {
 			continue
 		}
-		links.Symlink(skillDir, target)
+		links.Symlink(e.Dir, target)
+	}
+	return nil
+}
+
+func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
+	src := resolveScopedFile(agentsHome, "hooks", project, "codex.json", "codex-hooks.json")
+	if src == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(repoPath, ".codex"), 0755); err != nil {
+		return err
+	}
+	if err := links.Symlink(src, filepath.Join(repoPath, ".codex", "hooks.json")); err != nil {
+		return err
+	}
+	for _, homeRoot := range config.UserHomeRoots() {
+		userDir := filepath.Join(homeRoot, ".codex")
+		if err := os.MkdirAll(userDir, 0755); err != nil {
+			continue
+		}
+		_ = links.Symlink(src, filepath.Join(userDir, "hooks.json"))
 	}
 	return nil
 }
@@ -207,6 +202,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, "AGENTS.md"), agentsHome)
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "config.toml"), agentsHome)
+	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".codex", "hooks.json"), agentsHome)
 
 	agentsDir := filepath.Join(repoPath, ".claude", "agents")
 	if entries, err := os.ReadDir(agentsDir); err == nil {

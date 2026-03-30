@@ -138,14 +138,9 @@ func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error
 	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 		return err
 	}
-	// Project takes priority over global
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "cursor.json")
-		if _, err := os.Stat(src); err == nil {
-			dst := filepath.Join(repoPath, ".cursor", "settings.json")
-			links.Hardlink(src, dst) // best-effort
-			return nil
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, "cursor.json"); src != "" {
+		dst := filepath.Join(repoPath, ".cursor", "settings.json")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
@@ -154,28 +149,17 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 		return err
 	}
-	// Priority: project/cursor.json, project/mcp.json, global/cursor.json, global/mcp.json
-	for _, scope := range []string{project, "global"} {
-		for _, name := range []string{"cursor.json", "mcp.json"} {
-			src := filepath.Join(agentsHome, "mcp", scope, name)
-			if _, err := os.Stat(src); err == nil {
-				dst := filepath.Join(repoPath, ".cursor", "mcp.json")
-				links.Hardlink(src, dst) // best-effort
-				return nil
-			}
-		}
+	if src := resolveScopedFile(agentsHome, "mcp", project, "cursor.json", "mcp.json"); src != "" {
+		dst := filepath.Join(repoPath, ".cursor", "mcp.json")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
 
-func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "cursorignore")
-		if _, err := os.Stat(src); err == nil {
-			dst := filepath.Join(repoPath, ".cursorignore")
-			links.Hardlink(src, dst) // best-effort
-			return nil
-		}
+func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {	
+	if src := resolveScopedFile(agentsHome, "settings", project, "cursorignore"); src != "" {
+		dst := filepath.Join(repoPath, ".cursorignore")
+		links.Hardlink(src, dst) // best-effort
 	}
 	return nil
 }
@@ -184,16 +168,12 @@ func (c *cursor) createHooksLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(filepath.Join(repoPath, ".cursor"), 0755); err != nil {
 		return err
 	}
-	// Project-level: project scope takes priority over global
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "hooks", scope, "cursor.json")
-		if _, err := os.Stat(src); err == nil {
-			links.Hardlink(src, filepath.Join(repoPath, ".cursor", cursorHooksFile))
-			break
-		}
+	src := resolveScopedFile(agentsHome, "hooks", project, "cursor.json")
+	if src != "" {
+		links.Hardlink(src, filepath.Join(repoPath, ".cursor", cursorHooksFile))
 	}
 	// User-level: global scope only
-	src := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
+	src = filepath.Join(agentsHome, "hooks", "global", "cursor.json")
 	if _, err := os.Stat(src); err == nil {
 		for _, homeRoot := range config.UserHomeRoots() {
 			cursorDir := filepath.Join(homeRoot, ".cursor")

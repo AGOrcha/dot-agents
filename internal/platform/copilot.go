@@ -143,24 +143,16 @@ func (c *copilot) createSkillsLinks(project, repoPath, agentsHome string) error 
 	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
 		return err
 	}
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
+	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
 	if err != nil {
 		return nil
 	}
 	for _, e := range entries {
-		skillDir := filepath.Join(projectSkills, e.Name())
-		if !links.IsDirEntry(skillDir) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(skillsTarget, e.Name())
+		target := filepath.Join(skillsTarget, e.Name)
 		if _, err := os.Lstat(target); err == nil {
 			continue
 		}
-		links.Symlink(skillDir, target)
+		links.Symlink(e.Dir, target)
 	}
 	return nil
 }
@@ -194,35 +186,22 @@ func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error 
 }
 
 func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
-	// Priority: project/copilot.json, project/mcp.json, global/copilot.json, global/mcp.json
-	for _, scope := range []string{project, "global"} {
-		for _, name := range []string{"copilot.json", "mcp.json"} {
-			src := filepath.Join(agentsHome, "mcp", scope, name)
-			if _, err := os.Stat(src); err == nil {
-				if err := os.MkdirAll(filepath.Join(repoPath, ".vscode"), 0755); err != nil {
-					return err
-				}
-				links.Symlink(src, filepath.Join(repoPath, ".vscode", "mcp.json"))
-				return nil
-			}
+	if src := resolveScopedFile(agentsHome, "mcp", project, "copilot.json", "mcp.json"); src != "" {
+		if err := os.MkdirAll(filepath.Join(repoPath, ".vscode"), 0755); err != nil {
+			return err
 		}
+		links.Symlink(src, filepath.Join(repoPath, ".vscode", "mcp.json"))
 	}
 	return nil
 }
 
 func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) error {
-	for _, scope := range []string{project, "global"} {
-		// hooks/ takes priority over settings/
-		for _, dir := range []string{"hooks", "settings"} {
-			src := filepath.Join(agentsHome, dir, scope, "claude-code.json")
-			if _, err := os.Stat(src); err == nil {
-				if err := os.MkdirAll(filepath.Join(repoPath, ".claude"), 0755); err != nil {
-					return err
-				}
-				links.Symlink(src, filepath.Join(repoPath, ".claude", "settings.local.json"))
-				return nil
-			}
+	src := resolveScopedFileFromBuckets(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json")
+	if src != "" {
+		if err := os.MkdirAll(filepath.Join(repoPath, ".claude"), 0755); err != nil {
+			return err
 		}
+		links.Symlink(src, filepath.Join(repoPath, ".claude", "settings.local.json"))
 	}
 	return nil
 }

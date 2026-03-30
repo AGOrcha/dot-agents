@@ -41,34 +41,18 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 	}
 
 	// opencode.json config
-	for _, scope := range []string{project, "global"} {
-		src := filepath.Join(agentsHome, "settings", scope, "opencode.json")
-		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, "opencode.json"))
-			break
-		}
+	if src := resolveScopedFile(agentsHome, "settings", project, "opencode.json"); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, "opencode.json"))
 	}
 
-	// .opencode/agent/ definitions from rules/{project}/opencode-*.md
+	// .opencode/agent/ definitions from canonical agents/{scope}/{name}/AGENT.md
 	agentDir := filepath.Join(repoPath, ".opencode", "agent")
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return err
 	}
 
-	projectRulesDir := filepath.Join(agentsHome, "rules", project)
-	if entries, err := os.ReadDir(projectRulesDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			if !strings.HasPrefix(name, "opencode-") || !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			targetName := strings.TrimPrefix(name, "opencode-")
-			src := filepath.Join(projectRulesDir, name)
-			links.Symlink(src, filepath.Join(agentDir, targetName))
-		}
+	if err := syncScopedFileSymlinks(agentsHome, "agents", project, "AGENT.md", agentDir, ".md"); err != nil {
+		return err
 	}
 
 	// Project skills → .agents/skills/
@@ -80,31 +64,10 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 }
 
 func (o *opencode) ensureUserAgents(agentsHome string) error {
-	globalRules := filepath.Join(agentsHome, "rules", "global")
-	if _, err := os.Stat(globalRules); err != nil {
-		return nil
-	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, ".opencode", "agent")
-		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
-			continue
-		}
-		entries, _ := os.ReadDir(globalRules)
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			if !strings.HasPrefix(name, "opencode-") || !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			targetName := strings.TrimPrefix(name, "opencode-")
-			src := filepath.Join(globalRules, name)
-			target := filepath.Join(userAgentsDir, targetName)
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(src, target)
+		if err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", userAgentsDir, ".md"); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -115,24 +78,16 @@ func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error
 	if err := os.MkdirAll(skillsTarget, 0755); err != nil {
 		return err
 	}
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
+	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
 	if err != nil {
 		return nil
 	}
 	for _, e := range entries {
-		skillDir := filepath.Join(projectSkills, e.Name())
-		if !links.IsDirEntry(skillDir) {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		target := filepath.Join(skillsTarget, e.Name())
+		target := filepath.Join(skillsTarget, e.Name)
 		if _, err := os.Lstat(target); err == nil {
 			continue
 		}
-		links.Symlink(skillDir, target)
+		links.Symlink(e.Dir, target)
 	}
 	return nil
 }

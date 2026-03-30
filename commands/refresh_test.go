@@ -24,6 +24,7 @@ func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
 		{".codex/instructions.md", "rules/proj/agents.md"},
 		{".codex/rules.md", "rules/proj/agents.md"},
 		{".codex/config.toml", "settings/proj/codex.toml"},
+		{".codex/hooks.json", "hooks/proj/codex.json"},
 		{".github/copilot-instructions.md", "rules/proj/copilot-instructions.md"},
 	}
 	for _, c := range cases {
@@ -43,6 +44,7 @@ func TestMapResourceRelToDest_SkillsAndAgents(t *testing.T) {
 		{".claude/skills/my-skill/SKILL.md", "skills/proj/my-skill/SKILL.md"},
 		{".github/agents/my-agent.agent.md", "agents/proj/my-agent/AGENT.md"},
 		{".codex/agents/my-agent/AGENT.md", "agents/proj/my-agent/AGENT.md"},
+		{".opencode/agent/my-agent.md", "agents/proj/my-agent/AGENT.md"},
 	}
 	for _, c := range cases {
 		got := mapResourceRelToDest("proj", c.relPath)
