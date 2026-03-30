@@ -158,12 +158,42 @@ func newSyncPullCmd() *cobra.Command {
 				return fmt.Errorf("git pull: %w", err)
 			}
 
+			// Check if any managed projects have manifests with git sources
+			hasManifests := false
+			if cfg, err := config.Load(); err == nil {
+				for _, name := range cfg.ListProjects() {
+					if path := cfg.GetProjectPath(name); path != "" {
+						if rc, err := config.LoadAgentsRC(path); err == nil {
+							for _, src := range rc.Sources {
+								if src.Type == "git" {
+									hasManifests = true
+									break
+								}
+							}
+							_ = rc
+						}
+					}
+					if hasManifests {
+						break
+					}
+				}
+			}
+
 			// Offer to refresh managed projects so pulled MCP/rule changes take effect.
 			if Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", true) {
 				fmt.Fprintln(os.Stdout)
-				return runRefresh("")
+				if err := runRefresh(""); err != nil {
+					return err
+				}
+				if hasManifests {
+					fmt.Fprintf(os.Stdout, "\n  %sProjects with git sources: run 'dot-agents install' in each to re-resolve resources.%s\n", ui.Dim, ui.Reset)
+				}
+				return nil
 			}
 			fmt.Fprintf(os.Stdout, "\n  %sRun 'dot-agents refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
+			if hasManifests {
+				fmt.Fprintf(os.Stdout, "  %sProjects with git sources: run 'dot-agents install' in each to re-resolve resources.%s\n", ui.Dim, ui.Reset)
+			}
 			return nil
 		},
 	}

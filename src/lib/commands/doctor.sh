@@ -496,6 +496,55 @@ run_doctor_text() {
       "mkdir -p ~/.agents/$dir"
   done
 
+  # Check manifests in registered projects
+  echo ""
+  log_section "Manifests (.agentsrc.json)"
+
+  local manifest_config_file="$AGENTS_HOME/config.json"
+  if [ -f "$manifest_config_file" ] && has_jq; then
+    local manifest_projects
+    manifest_projects=$(jq -r '.projects | keys[]' "$manifest_config_file" 2>/dev/null)
+    local any_manifest_issue=false
+    while IFS= read -r pname; do
+      [ -z "$pname" ] && continue
+      local ppath
+      ppath=$(jq -r --arg p "$pname" '.projects[$p].path // empty' "$manifest_config_file" 2>/dev/null)
+      [ -z "$ppath" ] && continue
+      local mf="$ppath/.agentsrc.json"
+      if [ ! -f "$mf" ]; then
+        echo -e "  ${YELLOW}⚠${NC}  $pname — no manifest (not git-portable)"
+        echo -e "       hint: dot-agents install --generate"
+        any_manifest_issue=true
+      elif ! jq -e '.' "$mf" >/dev/null 2>&1; then
+        echo -e "  ${RED}✗${NC}  $pname — corrupt manifest: $mf"
+        any_manifest_issue=true
+      else
+        local git_url
+        git_url=$(jq -r '.sources[]? | select(.type=="git") | .url' "$mf" 2>/dev/null | head -1)
+        if [ -n "$git_url" ]; then
+          local cache_hash
+          cache_hash=$(echo -n "$git_url" | md5sum 2>/dev/null | cut -c1-12 || \
+                       echo -n "$git_url" | md5 2>/dev/null | cut -c1-12 || echo "unknown")
+          local cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/dot-agents/sources/$cache_hash"
+          if [ ! -d "$cache_dir" ]; then
+            echo -e "  ${YELLOW}⚠${NC}  $pname — git source not yet fetched"
+            echo -e "       hint: dot-agents install (in $ppath)"
+            any_manifest_issue=true
+          else
+            echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (git: $git_url)"
+          fi
+        else
+          echo -e "  ${GREEN}✓${NC}  $pname — manifest ok (local)"
+        fi
+      fi
+    done <<< "$manifest_projects"
+    if [ "$any_manifest_issue" = false ]; then
+      echo -e "  ${DIM}Tip: run with -v to see per-project manifest details${NC}"
+    fi
+  else
+    echo -e "  ${DIM}No projects registered or jq unavailable${NC}"
+  fi
+
   # Check for deprecated formats in registered projects
   echo ""
   log_section "Deprecated Formats"

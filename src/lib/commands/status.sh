@@ -230,6 +230,27 @@ output_status_text() {
           echo -e "         ${YELLOW}↳${NC} $issue"
         done <<< "$issues_output"
       fi
+
+      # Manifest badge
+      local manifest="$path/.agentsrc.json"
+      if [ -f "$manifest" ] && command -v jq >/dev/null 2>&1; then
+        local source_desc="local"
+        local git_url
+        git_url=$(jq -r '.sources[]? | select(.type=="git") | .url' "$manifest" 2>/dev/null | head -1)
+        if [ -n "$git_url" ]; then
+          source_desc="git: $(echo "$git_url" | sed 's|https://||;s|http://||;s|git@||;s|\.git$||')"
+        fi
+        local skill_count agent_count
+        skill_count=$(jq -r '(.skills // []) | length' "$manifest" 2>/dev/null || echo 0)
+        agent_count=$(jq -r '(.agents // []) | length' "$manifest" 2>/dev/null || echo 0)
+        local parts=""
+        [ "$skill_count" -gt 0 ] && parts="${skill_count} skill(s)"
+        [ "$agent_count" -gt 0 ] && parts="${parts:+$parts  }${agent_count} agent(s)"
+        local detail="$source_desc${parts:+  •  $parts}"
+        echo -e "         ${GREEN}✓${NC} manifest  ${DIM}$detail${NC}"
+      else
+        echo -e "         ${YELLOW}○${NC} manifest  ${DIM}not found — run: dot-agents install --generate${NC}"
+      fi
     fi
     echo ""
   done <<< "$projects"
