@@ -204,6 +204,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return "rules/" + project + "/agents.md"
 	case relCodexConfigTOML:
 		return "settings/" + project + "/codex.toml"
+	case relCodexHooksJSON:
+		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
 	}
@@ -242,6 +244,12 @@ func mapResourceRelToDest(project, relPath string) string {
 	if strings.HasPrefix(relPath, relCodexAgentsDir) {
 		rest := strings.TrimPrefix(relPath, relCodexAgentsDir)
 		return "agents/" + project + "/" + rest
+	}
+
+	// .opencode/agent/<name>.md → agents/<project>/<name>/AGENT.md
+	if strings.HasPrefix(relPath, relOpenCodeAgentsDir) && strings.HasSuffix(relPath, ".md") {
+		name := strings.TrimSuffix(filepath.Base(relPath), ".md")
+		return "agents/" + project + "/" + name + "/AGENT.md"
 	}
 
 	// .github/hooks/<name>.json → hooks/<project>/<name>.json

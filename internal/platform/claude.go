@@ -90,25 +90,13 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 }
 
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
-	for _, scope := range []string{project, "global"} {
-		for _, name := range []string{"claude.json", "mcp.json"} {
-			src := filepath.Join(agentsHome, "mcp", scope, name)
-			if _, err := os.Stat(src); err == nil {
-				links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
-				return
-			}
-		}
+	if src := resolveScopedFile(agentsHome, "mcp", project, "claude.json", "mcp.json"); src != "" {
+		links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
 	}
 }
 
 func findClaudeSettingsSource(agentsHome, scope string) string {
-	for _, dir := range []string{"hooks", "settings"} {
-		src := filepath.Join(agentsHome, dir, scope, claudeCodeJSON)
-		if _, err := os.Stat(src); err == nil {
-			return src
-		}
-	}
-	return ""
+	return resolveScopedFileFromBuckets(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
 }
 
 func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
@@ -221,33 +209,10 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 }
 
 func (c *claude) ensureUserSkills(agentsHome string) error {
-	globalSkills := filepath.Join(agentsHome, "skills", "global")
-	if _, err := os.Stat(globalSkills); err != nil {
-		return nil
-	}
-
 	for _, homeRoot := range config.UserHomeRoots() {
 		userSkillsDir := filepath.Join(homeRoot, ".claude", "skills")
-		if err := os.MkdirAll(userSkillsDir, 0755); err != nil {
-			continue
-		}
-		entries, err := os.ReadDir(globalSkills)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			skillDir := filepath.Join(globalSkills, e.Name())
-			if !links.IsDirEntry(skillDir) {
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-				continue
-			}
-			target := filepath.Join(userSkillsDir, e.Name())
-			if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				continue
-			}
-			links.Symlink(skillDir, target)
+		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -293,28 +258,19 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 
-	projectSkills := filepath.Join(agentsHome, "skills", project)
-	entries, err := os.ReadDir(projectSkills)
+	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
 	if err != nil {
 		return nil
 	}
 	for _, e := range entries {
-		skillDir := filepath.Join(projectSkills, e.Name())
-		info, statErr := os.Stat(skillDir)
-		if statErr != nil || !info.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
-			continue
-		}
-		name := e.Name()
+		name := e.Name
 		claudeTarget := filepath.Join(skillsTarget, name)
 		if _, err := os.Lstat(claudeTarget); err != nil {
-			links.Symlink(skillDir, claudeTarget)
+			links.Symlink(e.Dir, claudeTarget)
 		}
 		agentsTarget := filepath.Join(agentsSkillsTarget, name)
 		if _, err := os.Lstat(agentsTarget); err != nil {
-			links.Symlink(skillDir, agentsTarget)
+			links.Symlink(e.Dir, agentsTarget)
 		}
 	}
 	return nil

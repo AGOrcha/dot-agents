@@ -90,8 +90,8 @@ func printPlatformsExplanation() {
 	platforms := [][2]string{
 		{"Cursor", ".cursor/rules/ (hard links), .cursor/settings.json, .cursor/mcp.json"},
 		{"Claude Code", ".claude/rules/ (symlinks), .claude/agents/, .mcp.json"},
-		{"Codex CLI", "AGENTS.md (symlink), .agents/skills/"},
-		{"OpenCode", "opencode.json (symlink), .opencode/agent/"},
+		{"Codex CLI", "AGENTS.md (symlink), .agents/skills/, .codex/hooks.json"},
+		{"OpenCode", "opencode.json (symlink), .opencode/agent/*.md"},
 		{"GitHub Copilot", ".github/copilot-instructions.md (symlink), .vscode/mcp.json"},
 	}
 	fmt.Fprintln(os.Stdout)
@@ -122,6 +122,11 @@ func printStructureExplanation() {
 		{"  ├── ", "agents/", ""},
 		{"  │   ├── ", "global/", "Agents available everywhere"},
 		{"  │   └── ", "{project}/", "Project-specific agents"},
+		{"  ├── ", "hooks/", ""},
+		{"  │   ├── ", "global/", "Global hook configs"},
+		{"  │   └── ", "{project}/", "Project-specific hook configs"},
+		{"  ├── ", "scripts/", "Helper scripts"},
+		{"  ├── ", "local/", "Machine-specific local files"},
 		{"  └── ", "resources/", "Backup files (auto-managed)"},
 	}
 	for _, l := range lines {
