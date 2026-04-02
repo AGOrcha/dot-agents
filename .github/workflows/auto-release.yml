@@ -95,6 +95,7 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOT_AGENTS_PAT: ${{ secrets.DOT_AGENTS_PAT }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           # Ensure an annotated tag for this version exists
