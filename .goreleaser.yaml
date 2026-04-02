@@ -69,9 +69,15 @@ release:
 
 brews:
   - name: dot-agents
+    commit_author:
+      name: github-actions[bot]
+      email: github-actions[bot]@users.noreply.github.com
     repository:
       owner: NikashPrakash
       name: dot-agents
+      branch: master
+      token: "{{ .Env.DOT_AGENTS_PAT }}"
+      pull_request: 
     description: "Manage AI agent configurations across projects"
     homepage: "https://github.com/NikashPrakash/dot-agents"
     license: "MIT"
