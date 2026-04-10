@@ -41,8 +41,7 @@ Use "safe" defaults and avoid shell footguns.
 		`name = "reviewer"`,
 		`description = "reviews changes"`,
 		`model = "gpt-5.1-codex"`,
-		`is_background = true`,
-		`instructions = """`,
+		`developer_instructions = """`,
 		`# Reviewer`,
 		`Use "safe" defaults and avoid shell footguns.`,
 	} {
@@ -99,7 +98,6 @@ Build the feature and keep tests green.
 	assertCodexFileContains(t, "project toml", projectToml, []string{
 		`name = "implementer"`,
 		`description = "project implementer"`,
-		`is_background = false`,
 		`Build the feature and keep tests green.`,
 	})
 

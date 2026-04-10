@@ -269,19 +269,14 @@ func renderCodexAgentToml(agentMD string) ([]byte, error) {
 	}
 	description := strings.TrimSpace(meta["description"])
 	model := strings.TrimSpace(meta["model"])
-	background := strings.TrimSpace(meta["is_background"])
-
 	var b strings.Builder
 	fmt.Fprintf(&b, "name = %s\n", strconv.Quote(name))
 	fmt.Fprintf(&b, "description = %s\n", strconv.Quote(description))
 	if model != "" {
 		fmt.Fprintf(&b, "model = %s\n", strconv.Quote(model))
 	}
-	if background != "" {
-		fmt.Fprintf(&b, "is_background = %s\n", background)
-	}
 	if strings.TrimSpace(body) != "" {
-		b.WriteString("instructions = ")
+		b.WriteString("developer_instructions = ")
 		b.WriteString(tomlMultilineString(body))
 		b.WriteString("\n")
 	}
