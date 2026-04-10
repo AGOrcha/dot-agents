@@ -220,34 +220,52 @@ func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerF
 // detectHookEvents reads the project claude-code.json and returns a StringsOrBool
 // listing hook event names that have at least one entry.
 func detectHookEvents(agentsHome, projectName string) StringsOrBool {
-	settingsPath := filepath.Join(agentsHome, "settings", projectName, "claude-code.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return StringsOrBool{}
-	}
-	var settings map[string]any
-	if json.Unmarshal(data, &settings) != nil {
-		return StringsOrBool{}
-	}
-	hooksVal, ok := settings["hooks"]
-	if !ok {
-		return StringsOrBool{}
-	}
-	hooksMap, ok := hooksVal.(map[string]any)
-	if !ok {
-		return StringsOrBool{}
-	}
-	var hookEvents []string
-	for event, val := range hooksMap {
-		if list, ok := val.([]any); ok && len(list) > 0 {
-			hookEvents = append(hookEvents, event)
+	for _, scope := range []string{projectName, "global"} {
+		hooksDir := filepath.Join(agentsHome, "hooks", scope)
+		entries, err := os.ReadDir(hooksDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
+					return StringsOrBool{All: true}
+				}
+			}
 		}
 	}
-	if len(hookEvents) == 0 {
-		return StringsOrBool{}
+
+	for _, scope := range []string{projectName, "global"} {
+		settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			continue
+		}
+		var settings map[string]any
+		if json.Unmarshal(data, &settings) != nil {
+			continue
+		}
+		hooksVal, ok := settings["hooks"]
+		if !ok {
+			continue
+		}
+		hooksMap, ok := hooksVal.(map[string]any)
+		if !ok {
+			continue
+		}
+		var hookEvents []string
+		for event, val := range hooksMap {
+			if list, ok := val.([]any); ok && len(list) > 0 {
+				hookEvents = append(hookEvents, event)
+			}
+		}
+		if len(hookEvents) == 0 {
+			continue
+		}
+		sort.Strings(hookEvents)
+		return StringsOrBool{Names: hookEvents}
 	}
-	sort.Strings(hookEvents)
-	return StringsOrBool{Names: hookEvents}
+	return StringsOrBool{}
 }
 
 // detectMCPServers scans MCP config files for the project and global scopes

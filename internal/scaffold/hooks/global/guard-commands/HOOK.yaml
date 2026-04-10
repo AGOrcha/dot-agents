@@ -1,0 +1,14 @@
+name: guard-commands
+description: Block exact destructive command patterns before shell execution
+when: pre_tool_use
+match:
+  tools:
+    - Bash
+run:
+  command: ./guard.sh
+  timeout_ms: 5000
+enabled_on:
+  - claude
+  - codex
+  - cursor
+  - copilot

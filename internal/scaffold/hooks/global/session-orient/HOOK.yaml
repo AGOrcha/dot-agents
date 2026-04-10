@@ -1,0 +1,13 @@
+name: session-orient
+description: Load active plans, checkpoint state, lessons, handoffs, proposals, and git state at session start
+when: session_start
+match:
+  tools: []
+  expression: ""
+run:
+  command: ./orient.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
+  - cursor

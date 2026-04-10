@@ -1,0 +1,15 @@
+name: secret-scan
+description: Warn when likely credentials are written to files
+when: post_tool_use
+match:
+  tools:
+    - Write
+    - Edit
+run:
+  command: ./scan.sh
+  timeout_ms: 5000
+enabled_on:
+  - claude
+  - codex
+  - cursor
+  - copilot

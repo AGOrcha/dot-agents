@@ -39,6 +39,16 @@ func AgentsStateDir() string {
 	return filepath.Join(stateHome, "dot-agents")
 }
 
+// AgentsContextDir returns the local workflow context directory under ~/.agents.
+func AgentsContextDir() string {
+	return filepath.Join(AgentsHome(), "context")
+}
+
+// ProjectContextDir returns the local workflow context directory for a project.
+func ProjectContextDir(project string) string {
+	return filepath.Join(AgentsContextDir(), project)
+}
+
 // ExpandPath expands a path with ~ to the full absolute path.
 func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {

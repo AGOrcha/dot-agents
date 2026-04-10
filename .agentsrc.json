@@ -1,0 +1,38 @@
+{
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "version": 1,
+  "project": "dot-agents",
+  "skills": [
+    "agent-handoff",
+    "agent-start",
+    "build-graph",
+    "create-subagent",
+    "gh-fix-ci",
+    "playwright",
+    "review-delta",
+    "review-pr",
+    "self-review",
+    "skill-architect",
+    "split-reviewable-commits"
+  ],
+  "rules": [
+    "global",
+    "project"
+  ],
+  "agents": [
+    "test-runner",
+    "verifier"
+  ],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "sources": [
+    {
+      "type": "local"
+    }
+  ],
+  "refresh": {
+    "version": "dev",
+    "refreshedAt": "2026-04-03T04:23:50Z"
+  }
+}
