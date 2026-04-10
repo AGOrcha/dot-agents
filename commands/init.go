@@ -9,6 +9,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	scaffoldhooks "github.com/NikashPrakash/dot-agents/internal/scaffold/hooks"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -68,6 +69,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		filepath.Join(agentsHome, "skills", "global", "self-review"),
 		filepath.Join(agentsHome, "agents", "global"),
 		filepath.Join(agentsHome, "hooks", "global"),
+		config.AgentsContextDir(),
 		filepath.Join(agentsHome, "scripts"),
 		filepath.Join(agentsHome, "local"),
 	}
@@ -123,26 +125,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Create .gitignore
 	gitignorePath := filepath.Join(agentsHome, ".gitignore")
 	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		content := "local/\n*.dot-agents-backup\n"
+		content := starterGitignoreContent()
 		os.WriteFile(gitignorePath, []byte(content), 0644)
 	}
 
 	// Create README.md
 	readmePath := filepath.Join(agentsHome, "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
-		content := "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n\n" +
-			"## Stage 1 Canonical Buckets\n\n" +
-			"- `rules/` for shared instructions\n" +
-			"- `settings/` for platform settings and current Cursor ignore support\n" +
-			"- `mcp/` for MCP configs\n" +
-			"- `skills/` for canonical skills\n" +
-			"- `agents/` for canonical agent definitions\n" +
-			"- `hooks/` for canonical hook configs\n" +
-			"- `resources/` for backups and restore state\n"
+		content := starterReadmeContent()
 		os.WriteFile(readmePath, []byte(content), 0644)
 	}
 
 	ui.Bullet("ok", "Created template files")
+
+	if err := scaffoldWorkflowAssets(agentsHome); err != nil {
+		return fmt.Errorf("scaffolding starter hook bundles: %w", err)
+	}
+	ui.Bullet("ok", "Scaffolded starter workflow hook bundles")
 
 	// Global Claude Code settings symlink — hooks/ takes priority over settings/
 	claudeHooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
@@ -193,6 +192,30 @@ func runInit(cmd *cobra.Command, args []string) error {
 		"Check health: dot-agents doctor",
 	)
 	return nil
+}
+
+func starterGitignoreContent() string {
+	return "local/\ncontext/\n*.dot-agents-backup\n"
+}
+
+func starterReadmeContent() string {
+	return "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n\n" +
+		"## Stage 1 Canonical Buckets\n\n" +
+		"- `rules/` for shared instructions\n" +
+		"- `settings/` for platform settings and current Cursor ignore support\n" +
+		"- `mcp/` for MCP configs\n" +
+		"- `skills/` for canonical skills\n" +
+		"- `agents/` for canonical agent definitions\n" +
+		"- `hooks/` for canonical hook configs\n" +
+		"- `context/` for local workflow checkpoint state\n" +
+		"- `resources/` for backups and restore state\n"
+}
+
+func scaffoldWorkflowAssets(agentsHome string) error {
+	if err := os.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
+		return err
+	}
+	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
 }
 
 // refreshMarkerContent generates the .agents-refresh marker file content.

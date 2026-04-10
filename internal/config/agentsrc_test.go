@@ -495,6 +495,62 @@ func TestGenerateAgentsRCHooksNoSettings(t *testing.T) {
 	}
 }
 
+func TestGenerateAgentsRCHooksCanonicalBundlesEnableAll(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	bundleDir := filepath.Join(home, "hooks", "global", "session-orient")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte("name: session-orient\nwhen: session_start\nrun:\n  command: ./orient.sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if !rc.Hooks.All {
+		t.Fatalf("Hooks.All = false, want true when canonical hook bundles exist; got %+v", rc.Hooks)
+	}
+	if len(rc.Hooks.Names) != 0 {
+		t.Fatalf("Hooks.Names = %v, want empty when Hooks.All is true", rc.Hooks.Names)
+	}
+}
+
+func TestGenerateAgentsRCHooksLegacySettingsFallBackToGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	settingsDir := filepath.Join(home, "settings", "global")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{
+		"hooks": {
+			"PreToolUse": [{"command":"echo pre"}],
+			"PostToolUse": [],
+			"Stop": [{"command":"echo stop"}]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "claude-code.json"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	got := rc.Hooks.Names
+	sort.Strings(got)
+	want := []string{"PreToolUse", "Stop"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Hooks.Names: got %v, want %v", got, want)
+	}
+}
+
 func TestGenerateAgentsRCMCPNamedServers(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
