@@ -16,9 +16,9 @@ const (
 	copilotMCPJSON           = "mcp.json"
 	copilotClaudeDir         = ".claude"
 	copilotSettingsLocalJSON = "settings.local.json"
-	copilotInstructionsMD = "copilot-instructions.md"
-	copilotGitHubDir = ".github"
-	copilotVSCodeDir = ".vscode"
+	copilotInstructionsMD    = "copilot-instructions.md"
+	copilotGitHubDir         = ".github"
+	copilotVSCodeDir         = ".vscode"
 )
 
 func NewCopilot() Platform { return &copilot{} }
@@ -147,8 +147,8 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	return nil
 }
 
-func (c *copilot) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
+func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
+	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(".agents", "skills"))
 }
 
 func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error {

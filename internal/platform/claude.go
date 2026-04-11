@@ -291,13 +291,11 @@ func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 	c.ensureUserSkills(agentsHome)
-	return syncScopedDirSymlinksTargets(
-		agentsHome,
-		"skills",
+	return ExecuteSharedSkillMirrorPlan(
 		project,
-		"SKILL.md",
-		filepath.Join(repoPath, claudeDir, "skills"),
-		filepath.Join(repoPath, ".agents", "skills"),
+		repoPath,
+		filepath.Join(claudeDir, "skills"),
+		filepath.Join(".agents", "skills"),
 	)
 }
 

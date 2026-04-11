@@ -15,9 +15,9 @@ import (
 type codex struct{}
 
 const (
-	codexAgentsDir = ".agents"
-	codexDir = ".codex"
-	codexHooksJSON = "hooks.json"
+	codexAgentsDir      = ".agents"
+	codexDir            = ".codex"
+	codexHooksJSON      = "hooks.json"
 	codexAgentsMarkdown = "AGENTS.md"
 )
 
@@ -135,8 +135,8 @@ func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
 	return c.writeCodexAgents(agentsHome, project, agentsTarget)
 }
 
-func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, codexAgentsDir, "skills"))
+func (c *codex) createSkillsLinks(project, repoPath, _ string) error {
+	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(codexAgentsDir, "skills"))
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {

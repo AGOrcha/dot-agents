@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Phase 2 in progress — `ResourceIntent` model landed (2026-04-11); planner/executor layer is next
+Status: Phase 2 complete (2026-04-11); Phase 3 shared-target centralization is next
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -57,7 +57,23 @@ The design questions that previously blocked this plan are now resolved in `docs
   - ownership (`shared`, `platform-owned`, `user-home`)
   - pruning/replacement policy
   - provenance label for diagnostics
-- [ ] Add a planner/executor layer that aggregates intents before any filesystem writes.
+- [x] Add a planner/executor layer that aggregates intents before any filesystem writes.
+
+Completed in this session:
+- Added `internal/platform/resource_plan.go` with a minimal `ResourcePlan` builder/executor:
+  - validates and groups intents by conflict key
+  - deduplicates compatible shared-target intents
+  - fails on incompatible intents for the same target
+  - executes the first allowlisted shared-skill mirror slice (`direct_dir` + `symlink`)
+- Routed repo-local shared skill mirrors through the planner/executor in:
+  - `internal/platform/claude.go`
+  - `internal/platform/codex.go`
+  - `internal/platform/opencode.go`
+  - `internal/platform/copilot.go`
+- Added focused regression coverage for:
+  - identical-intent dedupe
+  - conflicting-intent rejection
+  - imported repo skill directory -> managed symlink convergence
 
 ## Phase 3: Centralize Shared Repo Targets First
 

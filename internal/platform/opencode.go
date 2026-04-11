@@ -75,8 +75,8 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 	return nil
 }
 
-func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
+func (o *opencode) createSkillsLinks(project, repoPath, _ string) error {
+	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(".agents", "skills"))
 }
 
 func (o *opencode) RemoveLinks(project, repoPath string) error {
