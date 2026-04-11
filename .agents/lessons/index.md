@@ -7,3 +7,5 @@
 - [`test-stub-upgrade-pattern`](./test-stub-upgrade-pattern/LESSON.md): When upgrading a stub to a real implementation, grep for tests asserting stub side-effects and update them before running the full suite.
 - [`refresh-import-before-relink`](./refresh-import-before-relink/LESSON.md): Refresh flows that import repo files and regenerate managed outputs must import project content before relinking, and must not replay canonical backup snapshots as live state.
 - [`verify-managed-file-target`](./verify-managed-file-target/LESSON.md): When a task touches a managed file path, use the intended managed generation flow first; if a repo-local file is still required, verify the final path is not a generated managed link before closing the task.
+- [`lint-check-count-assertion`](./lint-check-count-assertion/LESSON.md): When adding a new lint check, grep for `ChecksRun` count assertions in tests and update them to `N+1` before running the suite.
+- [`sidecar-manifest-pattern`](./sidecar-manifest-pattern/LESSON.md): Store integrity hashes in a sidecar manifest file keyed by ID, not inline in the file being hashed — avoids self-referential hash problem.
