@@ -215,6 +215,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - one_item_only: yes/no
     - committed_after_tests: yes/no
     - tests_positive_and_negative: yes/no (focused tests exercised both success and intended failure paths for the changed surface, or N/A if change cannot fail)
+    - tests_used_sandbox: yes/no/n/a (yes = mutating/destructive `dot-agents` CLI was run with temp `AGENTS_HOME` and/or temp project copy per the sandbox section; no = those commands were not run; n/a = only read-only CLI or no CLI this iteration)
     - used_workflow_orient_status: yes/no
     - aligned_with_canonical_tasks: yes/no/N/A
     - persisted_via_workflow_commands: yes/no/sandboxed
@@ -298,5 +299,5 @@ This prompt addresses specific failure modes observed in Codex sessions `019d7a6
 | `## Next Iteration Playbook` became append-only and contradictory | Rewrite summary/playbook sections in place instead of appending new candidate blocks |
 | Recent iterations leaned on repeated `workflow health` checks with low new signal | Added a primary-evidence budget and a rule against consecutive health-only traces unless tightly justified |
 | Tests only asserted happy paths for new branching | Steps 11–12 require positive and negative scenarios; step 16 blocks commit when negative coverage is missing for new failure modes; self-assessment `tests_positive_and_negative` |
-| Destructive CLI exercises risked real `~/.agents` | Sandboxed destructive CLI section: temp project + `AGENTS_HOME` (and `KG_HOME` etc.) overrides; traces must label the sandbox |
+| Destructive CLI exercises risked real `~/.agents` | Sandboxed destructive CLI section: temp project + `AGENTS_HOME` (and `KG_HOME` etc.) overrides; traces must label the sandbox; self-assessment `tests_used_sandbox` |
 | Workflow commands were available but not used as the primary loop-management surface | Added explicit dogfood rhythm, startup `workflow status`, canonical-plan inventory at session start, and persist-surface guidance for `workflow checkpoint` / `workflow verify` |
