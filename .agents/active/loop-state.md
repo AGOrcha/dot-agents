@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 2
+Iteration: 4
 
 ## Current Position
 
@@ -20,6 +20,10 @@ Active wave summary (from `.agents/active/*.plan.md`):
 **All actionable implementation work in this loop is complete.** The only remaining active plans are either done, deferred, or blocked on one architectural decision (resource-intent-centralization). No further waves available without starting that RFC.
 
 Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed" in their status header but still have unchecked `- [ ]` items. The status header is authoritative — unchecked boxes on completed plans are stale plan hygiene, not real work.
+
+Analysis prep priority:
+- The next loop-worthy improvement is not more summary prose; it is better evidence capture for the later analysis phase.
+- Future iterations should leave behind structured trace metadata, scenario coverage, and explicit linkage between commands, commits, retries, and follow-on actions.
 
 ## Iteration Log
 
@@ -128,6 +132,52 @@ Self-assessment:
 - 1 deferred (crg-kg-integration phases E/F/G)
 
 To unblock: write the `resource-intent-centralization` RFC (architectural session required, not a loop iteration).
+
+Analysis follow-on once implementation resumes:
+- Prefer iterations that exercise uncovered commands or new workflow states over repeating the same happy-path checks.
+- Capture at least some expected empty-state, warning, retry-recovered, and blocked traces; a later analysis pass will be weak if it only sees `[ok]` outcomes.
+- Link each interesting trace to the triggering plan item, commit, and any retry/error entry so later review can reconstruct cause and effect quickly.
+
+## Analysis Readiness
+
+Questions the later analysis phase should be able to answer:
+- Which commands are reliable only on happy paths vs across realistic repo states?
+- Which workflow states produce the most retries, ambiguity, or operator intervention?
+- Which outputs are correct but still create UX friction or weak operator guidance?
+- Which agent loops stay tightly scoped vs drift or require cleanup work afterward?
+
+Signals already captured:
+- Per-iteration summary, scope, retries, commit, and basic self-assessment
+- Exact CLI invocations with short output snapshots
+- Command-level coverage tracking
+- Freeform CLI observations
+
+Signals still missing or too weak:
+- Structured trace metadata: scenario, duration, exit status, expected vs unexpected, follow-on action
+- Negative and near-miss traces such as retry-recovered, ok-but-empty, ok-with-warning, blocked, or pre-existing tool bug
+- Scenario coverage across repo/workflow states, not just command names
+- Linkage between iteration log entries, CLI traces, error log entries, and commits
+
+Minimum capture rules for remaining work:
+- Every iteration should declare one or more scenario tags such as `clean-repo`, `dirty-repo`, `no-canonical-plan`, `blocked-plan-set`, `kg-pre-postprocess`, or `deferred-wave`
+- Every CLI trace should record whether the result was expected, unexpected, or informative-but-nonblocking
+- Every retry or detour should leave an Error Log entry even if the final outcome is green
+- Prefer at least one new command or one new scenario per iteration until the matrix below is meaningfully filled
+
+## Scenario Coverage
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `clean-repo` | yes | 4 | `workflow status` reported `dirty: 0` |
+| `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
+| `no-canonical-plan` | yes | 3 | `workflow plan` returned expected empty state |
+| `blocked-plan-set` | yes | 4 | active set reduced to completed, blocked, or deferred plans only |
+| `kg-pre-postprocess` | yes | 2 | `kg flows` empty before `kg postprocess` |
+| `kg-postprocess-complete` | no | - | need a run after `kg postprocess` |
+| `expected-warning-or-empty` | yes | 2 | empty flow output was expected |
+| `retry-recovered` | yes | 2 | naming collision fixed before final commit |
+| `pre-existing-tool-bug` | no | - | none isolated yet |
+| `write-command-path` | no | - | no safe write-path workflow/KG command exercised yet |
 
 ## Skip List
 
