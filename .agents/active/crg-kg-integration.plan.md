@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phase A + Phase B + Phase C + Phase D complete (2026-04-11). Phase E (Postgres backend) is next if needed; Phase F (Go MCP server) and Phase G (skill integration) are lower priority.
+Status: Phase A + Phase B + Phase C + Phase D complete (2026-04-11). Phase E (Postgres backend) is next; Phase F (Go MCP server) and Phase G (skill integration) are later after testing the current planned commands via using them.
 Created: 2026-04-10
 
 ## Problem
