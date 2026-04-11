@@ -75,21 +75,52 @@ Always log the exact command, output, and classification under `## CLI Traces` i
 ## Iteration End
 11. Self-review: run `git diff` on any uncommitted changes, fix obvious issues, then commit
 12. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
-13. Update `.agents/active/loop-state.md` with:
-    - Timestamp and iteration number
-    - Which wave and item you worked on
-    - What you completed (with commit hash if applicable)
-    - What's next for the following iteration
-    - Any blockers discovered (add to skip-list if blocking)
-14. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
+13. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
+    ```
+    ### Iteration N — YYYY-MM-DD HH:MM
+    - wave: <plan-name>
+    - item: <specific checklist item text>
+    - files_changed: N
+    - lines_added: N
+    - lines_removed: N
+    - tests_added: N
+    - tests_total_pass: true/false
+    - retries: N (compile/test failures fixed before final commit)
+    - commit: <short hash>
+    - scope_note: "on-target" | "expanded: <reason>" | "split: <reason>"
+    - summary: <one-line description of what was done>
+    ```
+    Get file/line counts from `git diff --stat` after committing.
+14. Append a self-assessment block to the same iteration entry:
+    ```
+    Self-assessment:
+    - read_loop_state: yes/no
+    - one_item_only: yes/no
+    - committed_after_tests: yes/no
+    - ran_cli_command: yes/no
+    - stayed_under_10_files: yes/no
+    - no_destructive_commands: yes/no
+    ```
+    Be honest — these are for post-hoc analysis, not grading.
+15. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
     - The exact command
     - Output summary (truncate long output, keep errors verbatim)
     - Classification: `[ok]`, `[impl-bug]`, `[tool-bug]`, or `[missing-feature]`
-15. Under `## CLI Observations` in loop-state.md, note any patterns:
+16. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
+17. If any compile errors, test failures, or CLI errors occurred during this iteration, append to `## Error Log`:
+    ```
+    ### Iteration N
+    - type: test-failure | compile-error | cli-error
+    - detail: <what failed>
+    - resolution: <what fixed it>
+    - retries: N
+    ```
+18. Under `## CLI Observations` in loop-state.md, note any patterns:
     - Commands that feel awkward or require too many steps
     - Output that is confusing or missing useful info
     - Features that would make the workflow smoother
     - UX friction (e.g., unnecessary prompts, unclear errors)
+19. Update `## Current Position` and `## What's Next` in loop-state.md
 
 ## What NOT to spend time on
 - Workspace hygiene beyond what the current wave requires
@@ -116,3 +147,6 @@ This prompt addresses specific failure modes observed in Codex sessions `019d7a6
 | "collected usage traces" was vague | Concrete `## CLI Traces` section with classification tags |
 | No live testing of the tool being built | Explicit "Exercising Workflow Commands" step after each commit |
 | Tool bugs conflated with implementation bugs | Mandatory classification: `[impl-bug]` vs `[tool-bug]` vs `[missing-feature]` |
+| No structured data for post-hoc analysis | Structured iteration log with metrics, self-assessment, command coverage table |
+| Failures/retries invisible in traces | Dedicated `## Error Log` section with type, detail, resolution, retry count |
+| No command coverage tracking | Running `## Command Coverage` table updated each iteration |

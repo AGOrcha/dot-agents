@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phase A + Phase D complete (2026-04-11). Phase B (parser port, tree-sitter) is next.
+Status: Phase A + Phase B + Phase C + Phase D complete (2026-04-11). Phase E (Postgres backend) is next; Phase F (Go MCP server) and Phase G (skill integration) are later after testing the current planned commands via using them.
 Created: 2026-04-10
 
 ## Problem
@@ -301,23 +301,31 @@ Port the core storage and query engine from Python to Go.
 6. Add `kg_notes` and `note_symbol_links` tables
 7. Tests against SQLite
 
-### Phase B: Parser port (tree-sitter)
+### Phase B: Parser port (CRG subprocess bridge) ✓ COMPLETE
 
-Port AST parsing from Python tree-sitter to Go tree-sitter bindings.
+Delegated AST parsing to the Python code-review-graph CLI via subprocess bridge.
+Decision: full Go tree-sitter port is ~3000 lines of Python; subprocess bridge delivers equivalent
+functionality immediately since `.venv` is already set up with the Python CRG installed.
 
-1. Go tree-sitter bindings for supported languages
-2. Port `parser.py` node/edge extraction logic
-3. Incremental update via file hashing (port `incremental.py`)
-4. `dot-agents kg build` and `dot-agents kg update` commands
+1. ✓ `internal/graphstore/crg.go` — CRGBridge type, DiscoverCRGBin(), Build(), Update(), Status(), DetectChanges()
+2. ✓ `internal/graphstore/crg_test.go` — unit tests for status parsing and bin discovery
+3. ✓ `dot-agents kg build` — full graph build (wraps `code-review-graph build`)
+4. ✓ `dot-agents kg update` — incremental update (wraps `code-review-graph update`)
+5. ✓ `dot-agents kg code-status` — graph stats (nodes, edges, languages)
+6. ✓ `dot-agents kg changes [--brief]` — change impact (wraps `code-review-graph detect-changes`)
 
-### Phase C: Change detection + flows
+### Phase C: Change detection + flows ✓ COMPLETE
 
-Port impact analysis and flow detection.
+Implemented via CRG Python tool bridge (same pattern as Phase B).
 
-1. Port `changes.py` — git diff + graph intersection
-2. Port `flows.py` — entry-point tracing
-3. Port `communities.py` — Louvain clustering
-4. `dot-agents kg changes` and `dot-agents kg impact` commands
+1. ✓ `CRGBridge.GetImpactRadius()` — blast-radius for given files or current diff
+2. ✓ `CRGBridge.ListFlows()` — execution flow listing  
+3. ✓ `CRGBridge.ListCommunities()` — code community listing
+4. ✓ `CRGBridge.Postprocess()` — flows/communities/FTS rebuild
+5. ✓ `dot-agents kg impact [file...]` — blast-radius query with --depth/--limit
+6. ✓ `dot-agents kg flows` — execution flows with --sort/--limit
+7. ✓ `dot-agents kg communities` — code communities with --min-size/--sort
+8. ✓ `dot-agents kg postprocess` — rebuild flows/communities/FTS
 
 ### Phase D: Hot/cold note lifecycle
 
