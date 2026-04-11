@@ -1,6 +1,6 @@
 # Automated Work Looper Prompt
 
-Copy the prompt below into Codex as: `/loop 1hr <prompt>`
+Copy the prompt below into (if command `/loop` available else just paste): `/loop 1hr <prompt>`
 
 ---
 
