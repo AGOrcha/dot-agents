@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 16
+Iteration: 17
 
 ## Current Position
 
@@ -11,7 +11,7 @@ Driving specs:
 
 Active waves:
 - `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 (migrate skills to executor) in_progress — blocks Phase 5. Phase 5 (command-consumer unification) pending.
-- `skill-import-streamline`: Items 1–3 done (`skills promote` command added with managed symlink + manifest update + executor mirror refresh). Next: shared-skills convergence (item 4) and import/promote tests (item 5).
+- `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
 Blocked waves (reassessed):
@@ -26,30 +26,31 @@ State summary:
 - `workflow status` next action is currently stale checkpoint data (`Status: Completed (2026-04-11)`), so wave selection must rely on `workflow orient` + `workflow plan/tasks` + loop-state until checkpoint persistence is refreshed.
 - `skills promote` now does copy-move convergence: canonical path (`~/.agents/skills/<project>/<name>/`) is a real directory; repo-local (`.agents/skills/<name>/`) becomes a managed symlink. Prevents circular symlinks during platform mirror refresh.
 - 6 tests cover success (convergence), idempotency, and 4 error paths (not found, no project name, mispointing symlink, canonical real-dir clash).
-- `skill-import-streamline` items 1–4 complete; item 5 (regression tests) remains.
-- Next slice: `skill-import-streamline` item 5 (add regression tests for full promote flow and mirror convergence) or `resource-intent-centralization` Phase 3 first unchecked item.
+- `skill-import-streamline` wave closed: regression test locks promote path preservation of `ExtraFields` + multi-source `sources` through `Save()` after skill registration.
+- Next slice: `resource-intent-centralization` Phase 3 first unchecked item (shared executor migration in refresh/install paths), or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
-Review target: iterations 13-15 and paired commits.
+Review target: iterations 15-17 and paired commits.
 
 Current findings:
-- `single-commit-closeout`: on-target — iteration 15 is one commit (code + loop-state + plan checkbox).
-- `coverage-reconciliation`: on-target — scenario Coverage updated with `skills-promote-new-command` row; Command Coverage updated with skills commands.
-- `playbook-hygiene`: on-target — playbook rewritten in place for iteration 16.
-- `evidence-signal`: CLI trace is `skills --help` confirming wiring; primary proof is 5 unit tests covering success + 3 error paths.
-- `new-command-surface`: iteration 15 adds the first skills-management write-path command; iteration 16 should exercise `skills list` as a read-only surface to prove the agentsHome scan end-to-end.
-- `workflow-dogfooding`: needs improvement — the repo now has usable `workflow orient/status/plan/tasks` readback, but the loop-state still frames workflow commands mostly as evidence instead of the primary session-management surface.
-- `canonical-plan-reality`: needs improvement — loop-state still carries old empty-plan assumptions in a few sections even though `workflow plan` now returns 6 canonical plans.
-- `checkpoint-freshness`: needs improvement — `workflow status` still surfaces a stale next action from an old checkpoint, which is useful evidence but should be treated as stale readback, not current marching orders.
+- `single-commit-closeout`: on-target — iteration 17 targets one commit (tests + loop-state + plan YAML + canonical advances).
+- `coverage-reconciliation`: on-target — new scenario tag `promote-preserves-extra-manifest`; Command Coverage updated for `workflow advance` and `workflow tasks`.
+- `playbook-hygiene`: on-target — playbook rewritten for iteration 18.
+- `evidence-signal`: primary proof is new `TestPromoteSkillIn_PreservesManifestUnknownFields` plus full `go test ./...`; CLI: `workflow tasks skill-import-streamline` after advancing tasks.
+- `canonical-yaml-drift`: improved — `install-generate-merge` was pending while merge code/tests existed; advanced to completed alongside `add-regression-tests`.
+- `workflow-dogfooding`: needs improvement — orient still lists some plans as paused until PLAN.yaml refresh propagates; use `workflow tasks` for task truth.
+- `canonical-plan-reality`: improved — skill-import-streamline canonical plan marked completed in PLAN.yaml.
+- `checkpoint-freshness`: unchanged — `workflow status` next action remains stale checkpoint text; treat as baseline.
 
-Operating rules for iteration 16+:
+Operating rules for iteration 18+:
 - Prefer one final commit per iteration that includes code plus loop-state/plan updates.
 - Use one primary evidence chain plus at most one secondary probe; reconcile coverage tables before closeout.
 - Rewrite summary sections in place; do not append duplicate playbook blocks.
 - Start each iteration with `workflow orient`, `workflow status`, and `workflow plan`; if the chosen wave has a canonical plan, run `workflow tasks <id>` before selecting the exact checklist item.
 - Treat checkpoint-backed `workflow status` as runtime readback and canonical `workflow tasks` as machine-readable plan truth; if they disagree, log it rather than guessing.
 - Prefer sandboxed `workflow checkpoint` / `workflow verify record` for closeout dogfooding when real `~/.agents` writes are not explicitly approved.
+- After completing a canonical plan's tasks, run `workflow advance` for each task and align PLAN.yaml status with markdown plan headers.
 
 ## Workflow Command Baseline
 
@@ -67,6 +68,37 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 17 — 2026-04-11
+- wave: skill-import-streamline
+- item: Add regression tests for manifest round-trip through promote (`add-regression-tests`); align canonical task `install-generate-merge` with implemented merge
+- scenario_tags: [clean-repo, promote-preserves-extra-manifest, canonical-plan-reconciled]
+- feedback_goal: Does `TestPromoteSkillIn_PreservesManifestUnknownFields` fail if promote drops `ExtraFields` or multi-source `sources`, and does `go test ./...` stay green?
+- files_changed: 5
+- lines_added: 152
+- lines_removed: 37
+- tests_added: 1
+- tests_total_pass: true
+- retries: 0
+- commit: 1e1a29c
+- scope_note: "on-target"
+- summary: Added promote-path regression test preserving legacy `refresh` + custom extra fields and git+local sources; advanced canonical tasks `add-regression-tests` and `install-generate-merge` to completed; PLAN.yaml + markdown plan marked completed for skill-import-streamline.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (new test asserts preservation; existing promote tests still cover errors and convergence)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: yes
+- persisted_via_workflow_commands: yes (workflow advance updated TASKS.yaml in repo)
+- ran_cli_command: yes
+- exercised_new_scenario: yes (promote-preserves-extra-manifest)
+- cli_produced_actionable_feedback: yes (workflow tasks shows add-regression-tests completed)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 13 — 2026-04-11 15:00
 - wave: skill-import-streamline
@@ -488,19 +520,19 @@ Loop closeout rules:
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **skill-import-streamline item 5**: Add regression tests for manifest round-trip, full promote flow (copy-move convergence), and repo `.agents/skills/*` becoming managed links.
-2. **resource-intent-centralization Phase 3 first unchecked item**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
+1. **resource-intent-centralization Phase 3 first unchecked item**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
+2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 17:
-- skill-import-streamline item 5 (regression tests) — completes the wave and locks in the copy-move convergence behavior.
+Preferred single item for iteration 18:
+- resource-intent-centralization Phase 3 (first actionable checklist item in `.agents/active/resource-intent-centralization.plan.md`) — continues the main migration thread now that skill-import-streamline is complete.
 
-Primary feedback goal for iteration 17:
-- Do the new regression tests cover the promote copy-move path, idempotency, and the symlink-mirror state without manual setup? Does `go test ./commands/ -run TestPromote` stay green?
+Primary feedback goal for iteration 18:
+- After the Phase 3 change, does `go test ./...` stay green and does `explain links` (or the closest read-only planner surface) still describe shared targets accurately?
 
 Command-feedback priorities:
-- Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks skill-import-streamline` before choosing the checklist item.
-- Primary evidence: prefer `skills list <project>` and `workflow tasks skill-import-streamline` to confirm convergence and task state.
-- Closeout dogfooding: sandbox `workflow checkpoint` and `workflow verify record` when the wave is complete.
+- Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
+- Primary evidence: targeted package tests plus `workflow tasks` / `workflow health` for planner health.
+- Archive completed `skill-import-streamline` markdown plan to history when convenient (lesson archive-completed-active-plans).
 
 Known baseline CLI noise:
 - `status` / `doctor` warn about 4 broken Claude skill links in user config.
@@ -509,7 +541,7 @@ Known baseline CLI noise:
 - `workflow status` next action is stale checkpoint text today; treat it as a freshness bug / baseline warning, not as the source of truth for wave selection.
 
 Note:
-- `ExecuteSharedSkillMirrorPlan` in `resource_plan.go` now has its first caller (`skills promote`). The Phase 5 cleanup note is no longer relevant.
+- `ExecuteSharedSkillMirrorPlan` is exercised from `skills promote`; skill-import-streamline regression tests now include promote + manifest `ExtraFields` preservation.
 
 ## Analysis Readiness
 
@@ -574,11 +606,12 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 |---|---|---|---|
 | `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
-| `workflow-advance-success` | no | - | requires canonical plan/task state to mutate |
+| `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
 | `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
 | `skills-promote-new-command` | yes | 15 | `skills promote` wired and tested; creates managed symlink + updates .agentsrc.json + calls ExecuteSharedSkillMirrorPlan; CLI help confirms subcommand present |
+| `promote-preserves-extra-manifest` | yes | 17 | `TestPromoteSkillIn_PreservesManifestUnknownFields`: promote path keeps `refresh`/`myteam` ExtraFields and multi-source `sources` after `Save()` |
 
 ### Delegation Lifecycle
 
@@ -712,6 +745,18 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 17 — 2026-04-11
+
+Trace: promote-regression-tests-and-canonical-closeout
+Chain: `go test ./commands/ -run TestPromoteSkillIn_PreservesManifestUnknownFields -count=1` → `workflow advance` (×2) → `workflow tasks skill-import-streamline`
+Commands: `go test` [ok]; `workflow advance skill-import-streamline --task add-regression-tests --status completed` [ok]; `workflow advance skill-import-streamline --task install-generate-merge --status completed` [ok]; `workflow tasks skill-import-streamline` [ok]
+Scenario: [clean-repo, promote-preserves-extra-manifest, workflow-advance-success]
+Feedback goal: Does the new test fail if promote drops ExtraFields, and do canonical tasks show both regression and merge tasks completed?
+Output summary: Unit test passes; advance confirms both tasks completed; `workflow tasks` lists all skill-import-streamline tasks completed except none — full slate green (install-generate-merge now completed).
+Expectation: expected
+Follow-on: archive `skill-import-streamline` active plan to history when convenient
+Classification: [ok]
 
 ### Iteration 15 — 2026-04-11
 
@@ -1159,8 +1204,8 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `workflow plan` | yes | 14 | ok |
 | `workflow checkpoint` | yes | 5 | ok |
 | `workflow log` | yes | 6 | ok |
-| `workflow tasks` | yes | 5 | ok-empty |
-| `workflow advance` | no | - | - |
+| `workflow tasks` | yes | 17 | ok |
+| `workflow advance` | yes | 17 | ok |
 | `workflow health` | yes | 13 | ok |
 | `workflow verify` | no | - | - |
 | `workflow prefs` | no | - | - |

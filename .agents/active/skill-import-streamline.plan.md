@@ -1,6 +1,6 @@
 # Skill Import Streamline Plan
 
-Status: In progress — manifest round-trip and install --generate merge landed; skills import/promote and symlink convergence remain.
+Status: Completed — manifest preservation, install --generate merge, `skills promote` with copy-move convergence, and regression tests are in place.
 Depends on: shared resource executor (resource-intent-centralization) for promotion/convergence items only.
 
 
@@ -36,8 +36,8 @@ Depends on: shared resource executor (resource-intent-centralization) for promot
   1. imports repo-local skill content into `~/.agents/skills/<project>/`
   2. updates `.agentsrc.json`
   3. refreshes shared skill mirrors
-- [ ] Fix shared `.agents/skills/*` convergence so repo-local source directories can become managed mirrors after promotion without conflicting platform relink behavior.
-- [ ] Add tests for:
+- [x] Fix shared `.agents/skills/*` convergence so repo-local source directories can become managed mirrors after promotion without conflicting platform relink behavior.
+- [x] Add tests for:
   - manifest save preserving `sources` and unknown fields
   - import/promote of project skills in one command path
   - repo `.agents/skills/*` becoming managed links after successful promotion

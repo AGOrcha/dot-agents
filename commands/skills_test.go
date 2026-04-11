@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,75 @@ func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 	}
 	if !found {
 		t.Errorf(".agentsrc.json Skills = %v; want 'my-skill' to be present", rc.Skills)
+	}
+}
+
+// TestPromoteSkillIn_PreservesManifestUnknownFields regression-tests that promote's
+// LoadAgentsRC → append Skills → Save path keeps ExtraFields (legacy refresh block,
+// custom keys) and known multi-source declarations — not only the isolated marshal tests.
+func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	manifest := `{
+  "version": 1,
+  "project": "regproj",
+  "sources": [{"type":"local"},{"type":"git","url":"https://example.com/repo.git"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "refresh": {"interval": "daily", "auto": true},
+  "myteam": "platform"
+}`
+	if err := os.WriteFile(filepath.Join(projectPath, config.AgentsRCFile), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeSkillMD(t, projectPath, "extra-skill")
+
+	if err := promoteSkillIn("extra-skill", projectPath); err != nil {
+		t.Fatalf("promoteSkillIn: %v", err)
+	}
+
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if len(rc.ExtraFields) < 2 {
+		t.Fatalf("ExtraFields: got %d keys, want at least 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
+	}
+	if _, ok := rc.ExtraFields["refresh"]; !ok {
+		t.Error("ExtraFields missing 'refresh' after promote")
+	}
+	if _, ok := rc.ExtraFields["myteam"]; !ok {
+		t.Error("ExtraFields missing 'myteam' after promote")
+	}
+	var refreshVal map[string]any
+	if err := json.Unmarshal(rc.ExtraFields["refresh"], &refreshVal); err != nil {
+		t.Fatalf("unmarshal refresh: %v", err)
+	}
+	if refreshVal["interval"] != "daily" {
+		t.Errorf("refresh.interval: got %v, want daily", refreshVal["interval"])
+	}
+	if len(rc.Sources) < 2 {
+		t.Errorf("Sources: want at least 2 entries preserved, got %+v", rc.Sources)
+	}
+	found := false
+	for _, s := range rc.Skills {
+		if s == "extra-skill" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Skills should include extra-skill, got %v", rc.Skills)
 	}
 }
 

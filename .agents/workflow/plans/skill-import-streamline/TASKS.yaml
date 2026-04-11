@@ -13,7 +13,7 @@ tasks:
       notes: ""
     - id: install-generate-merge
       title: Make install --generate merge with existing manifest instead of replacing sources
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -48,7 +48,7 @@ tasks:
       notes: ""
     - id: add-regression-tests
       title: Tests for manifest round-trip, promote flow, and mirror convergence
-      status: pending
+      status: completed
       depends_on:
         - shared-skills-convergence
       blocks: []
