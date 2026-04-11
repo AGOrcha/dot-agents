@@ -134,13 +134,22 @@ func runRefresh(projectFilter string) error {
 
 		config.SetWindowsMirrorContext(path)
 
-		if !Flags.DryRun {
-			var installedEnabled []platform.Platform
-			for _, p := range enabledPlatforms {
-				if p.IsInstalled() {
-					installedEnabled = append(installedEnabled, p)
+		var installedEnabled []platform.Platform
+		for _, p := range enabledPlatforms {
+			if p.IsInstalled() {
+				installedEnabled = append(installedEnabled, p)
+			}
+		}
+		if Flags.DryRun {
+			lines, err := platform.DryRunSharedTargetPlanLines(name, path, installedEnabled)
+			if err != nil {
+				ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
+			} else {
+				for _, line := range lines {
+					ui.DryRun(line)
 				}
 			}
+		} else {
 			if err := platform.CollectAndExecuteSharedTargetPlan(name, path, installedEnabled); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 			}

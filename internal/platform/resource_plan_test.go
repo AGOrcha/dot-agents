@@ -77,6 +77,51 @@ func TestResourcePlanExecuteReplacesAllowlistedImportedSkillDir(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonicalSkillDir)
 }
 
+func TestDryRunSharedTargetPlanLinesNone(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	lines, err := DryRunSharedTargetPlanLines("proj", repo, []Platform{NewCodex()})
+	if err != nil {
+		t.Fatalf("DryRunSharedTargetPlanLines: %v", err)
+	}
+	if len(lines) != 1 || lines[0] != "shared targets: (none)" {
+		t.Fatalf("got %v", lines)
+	}
+}
+
+func TestDryRunSharedTargetPlanLinesDedupesCrossPlatform(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	platforms := []Platform{NewCodex(), NewOpenCode(), NewCopilot()}
+	lines, err := DryRunSharedTargetPlanLines("proj", repo, platforms)
+	if err != nil {
+		t.Fatalf("DryRunSharedTargetPlanLines: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("want 1 merged shared row for codex+opencode+copilot -> .agents/skills/review, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], ".agents/skills/review") || !strings.Contains(lines[0], "2 duplicate intent(s) merged") {
+		t.Fatalf("unexpected dry-run line: %q", lines[0])
+	}
+}
+
 func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

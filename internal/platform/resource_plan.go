@@ -269,6 +269,42 @@ func CollectAndExecuteSharedTargetPlan(project, repoPath string, platforms []Pla
 	return plan.Execute(repoPath, config.AgentsHome())
 }
 
+// DryRunSharedTargetPlanLines describes what CollectAndExecuteSharedTargetPlan would
+// write (merged shared-target rows, duplicate-intent counts) without touching the filesystem.
+func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform) ([]string, error) {
+	var all []ResourceIntent
+	for _, p := range platforms {
+		intents, err := p.SharedTargetIntents(project)
+		if err != nil {
+			return nil, fmt.Errorf("%s shared intents: %w", p.ID(), err)
+		}
+		all = append(all, intents...)
+	}
+	if len(all) == 0 {
+		return []string{"shared targets: (none)"}, nil
+	}
+	plan, err := BuildResourcePlan(all)
+	if err != nil {
+		return nil, err
+	}
+	agentsHome := config.AgentsHome()
+	var lines []string
+	for _, res := range plan.Resources {
+		intent := res.Intent
+		src := intent.SourceRef.CanonicalPath(agentsHome)
+		if src == "" {
+			src = "(unknown source)"
+		}
+		dest := resolveIntentTargetPath(intent.TargetPath, repoPath)
+		line := fmt.Sprintf("shared target: symlink %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+		if n := len(res.Duplicates); n > 0 {
+			line += fmt.Sprintf(" (%d duplicate intent(s) merged)", n)
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
 func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...string) error {
 	intents, err := BuildSharedSkillMirrorIntents(project, targetRoots...)
 	if err != nil {

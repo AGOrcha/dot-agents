@@ -188,13 +188,22 @@ func createInstallPlatformLinks(projectName, projectPath string) {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
-	if !Flags.DryRun {
-		var installed []platform.Platform
-		for _, p := range platform.All() {
-			if p.IsInstalled() {
-				installed = append(installed, p)
+	var installed []platform.Platform
+	for _, p := range platform.All() {
+		if p.IsInstalled() {
+			installed = append(installed, p)
+		}
+	}
+	if Flags.DryRun {
+		lines, err := platform.DryRunSharedTargetPlanLines(projectName, projectPath, installed)
+		if err != nil {
+			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
+		} else {
+			for _, line := range lines {
+				ui.DryRun(line)
 			}
 		}
+	} else {
 		if err := platform.CollectAndExecuteSharedTargetPlan(projectName, projectPath, installed); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 		}
