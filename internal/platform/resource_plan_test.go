@@ -77,6 +77,16 @@ func TestResourcePlanExecuteReplacesAllowlistedImportedSkillDir(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonicalSkillDir)
 }
 
+func TestBuildSharedTargetPlanEmptyPlatforms(t *testing.T) {
+	plan, err := BuildSharedTargetPlan("proj", nil)
+	if err != nil {
+		t.Fatalf("BuildSharedTargetPlan: %v", err)
+	}
+	if len(plan.Resources) != 0 {
+		t.Fatalf("len(plan.Resources) = %d, want 0", len(plan.Resources))
+	}
+}
+
 func TestDryRunSharedTargetPlanLinesNone(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
@@ -91,6 +101,13 @@ func TestDryRunSharedTargetPlanLinesNone(t *testing.T) {
 	}
 	if len(lines) != 1 || lines[0] != "shared targets: (none)" {
 		t.Fatalf("got %v", lines)
+	}
+	plan, err := BuildSharedTargetPlan("proj", []Platform{NewCodex()})
+	if err != nil {
+		t.Fatalf("BuildSharedTargetPlan: %v", err)
+	}
+	if len(plan.Resources) != 0 {
+		t.Fatalf("empty dry-run should match empty BuildSharedTargetPlan, got %d resources", len(plan.Resources))
 	}
 }
 

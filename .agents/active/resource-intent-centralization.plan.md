@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Phase 4 complete (2026-04-11); Phase 5 in progress — status/explain now use shared-target registry in audit
+Status: Phase 4 complete (2026-04-11); Phase 5 in progress — shared plan build centralized (`BuildSharedTargetPlan`); status/explain audit registry done
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -107,6 +107,7 @@ Completed in this session:
 
 ## Phase 5: Unify Command Consumers
 
+- [x] Single shared projection plan build: `BuildSharedTargetPlan` aggregates intents once; `DryRunSharedTargetPlanLines` and `CollectAndExecuteSharedTargetPlan` both use it (2026-04-11).
 - [ ] Update `refresh` to:
   1. canonicalize inputs
   2. build projection intents

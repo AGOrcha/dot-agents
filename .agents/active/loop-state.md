@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 21
+Iteration: 22
 
 ## Current Position
 
@@ -31,7 +31,8 @@ State summary:
 - `BuildSharedAgentMirrorIntents` + extended allowlist (`.claude/agents/`) centralizes project-scoped canonical `agents/<project>/<name>/AGENT.md` mirrors into `.claude/agents/<name>`; Cursor emits the same targets so Claude+Cursor duplicate intents merge once. Three new unit tests cover dedupe, imported-dir replacement, and Claude+Cursor execute path.
 - Phase 3 non-dir agent outputs: Codex `.codex/agents/*.toml` (render), OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` (file symlinks) now go through `CollectAndExecuteSharedTargetPlan` via `BuildSharedCodexAgentTomlIntents` / `BuildSharedAgentFileSymlinkIntents`; executor handles `RenderSingle`+`write` and `DirectFile`+`symlink`. Adapters thinned; `pruneCodexRepoAgentTomls` preserves stale-toml cleanup.
 - Phase 5 started: `status --audit` and `doctor --verbose` audit tail call `DryRunSharedTargetPlanLines` via `InstalledEnabledPlatforms` (same merge rules as `refresh --dry-run`). `explain links` documents the registry diagnostic path. `refresh` now computes installed+enabled platforms once per run.
-- Next slice: Phase 5 remaining — unify `refresh`/`install`/`remove` flow with single projection plan where not already; or `crg-kg-integration` Phase E incremental work.
+- Phase 5 library slice: `BuildSharedTargetPlan` is the single intent aggregation + `BuildResourcePlan` merge path for both dry-run lines and `CollectAndExecuteSharedTargetPlan` execute (no duplicate collection/merge between dry-run and apply).
+- Next slice: Phase 5 remaining — explicit `refresh`/`install`/`remove` command-flow ordering vs executor; or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
@@ -72,6 +73,36 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 22 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 5 — centralize shared projection plan build (`BuildSharedTargetPlan` for dry-run + execute)
+- scenario_tags: [clean-repo, canonical-plan-present, dry-run-shared-target-preview]
+- feedback_goal: After refactoring to `BuildSharedTargetPlan`, does `refresh --dry-run` still emit the same merged shared-target lines (duplicate merges, skill rows)?
+- files_changed: 4
+- lines_added: 103
+- lines_removed: 32
+- tests_added: 1
+- tests_total_pass: true
+- retries: 0
+- scope_note: "on-target"
+- summary: Added `BuildSharedTargetPlan` + `collectSharedTargetIntents`; `CollectAndExecuteSharedTargetPlan` and `DryRunSharedTargetPlanLines` share one plan build; `formatSharedTargetPlanForDryRun` extracted; tests for empty platforms and dry-run/build parity
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (empty-platform plan + empty dry-run parity; existing conflict/dedupe tests unchanged)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: N/A (phase-5-unify-commands still pending)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes
+- exercised_new_scenario: no (reconfirms dry-run-shared-target-preview after refactor — meaningful as regression signal)
+- cli_produced_actionable_feedback: yes (six skill rows + merge counts unchanged)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 21 — 2026-04-11
 - wave: resource-intent-centralization
@@ -641,11 +672,11 @@ Candidate paths (priority order):
 1. **resource-intent-centralization Phase 5 (remaining)**: `refresh`/`install`/`remove` single projection plan sequencing — next unchecked bullets in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 22:
-- Phase 5 refresh/install/remove unification slice **or** Phase E Postgres — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
+Preferred single item for iteration 23:
+- Phase 5 — remaining `refresh`/`install`/`remove` command-layer sequencing **or** `crg-kg-integration` Phase E Postgres slice.
 
-Primary feedback goal for iteration 22 (example):
-- After the next code change, does `refresh --dry-run` still match `status --audit` shared registry lines for the same project list?
+Primary feedback goal for iteration 23 (example):
+- Does `install --dry-run` still share the same merged plan as `refresh --dry-run` for a fixture project, or does `remove` gain intent-based cleanup?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -726,7 +757,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
-| `dry-run-shared-target-preview` | yes | 20 | `refresh --dry-run` prints merged skill rows plus write/symlink-file lines when those intents exist; iteration 20 live: skills only (no canonical project agents; OpenCode not in enabled platforms) |
+| `dry-run-shared-target-preview` | yes | 22 | Iteration 22: `refresh --dry-run dot-agents` after `BuildSharedTargetPlan` refactor — six skill rows, duplicate merges on `.agents/skills/*`; parity with pre-refactor behavior |
 | `status-audit-shared-registry` | yes | 21 | `status --audit` prints Shared target registry via same `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms` as refresh dry-run; cross-checked merge counts vs iteration 20 dry-run semantics |
 | `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
 | `agents-non-dir-outputs-centralized` | yes | 20 | `BuildSharedCodexAgentTomlIntents` + `BuildSharedAgentFileSymlinkIntents`; executor `RenderSingle`/`DirectFile`; tests for execute + allowlist negative |
@@ -865,10 +896,21 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Phase **5** still needed: `status` / `explain` should read from the same resource registry as the executor (not fully unified yet).
+- Phase **5** — shared plan **build** is unified (`BuildSharedTargetPlan`); remaining work is command-flow alignment (`refresh`/`install`/`remove` sequencing and remove-side intent cleanup).
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 22 — 2026-04-11
+
+Trace: refresh-dry-run-after-build-shared-target-plan
+Command: `go run ./cmd/dot-agents refresh --dry-run dot-agents`
+Scenario: [clean-repo, canonical-plan-present, dry-run-shared-target-preview]
+Feedback goal: After `BuildSharedTargetPlan` centralization, does `refresh --dry-run` still show merged shared-target skill lines with duplicate-intent counts?
+Output summary: Six `shared target:` symlink lines (three `.agents/skills/*` with `(2 duplicate intent(s) merged)`; three `.claude/skills/*`); then per-platform dry-run refresh lines and `.agents-refresh` dry-run.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 21 — 2026-04-11
 
@@ -1413,7 +1455,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `status` | yes | 21 | ok (incl. `--audit` shared registry trace) |
 | `doctor` | yes | 7 | ok-warning |
 | `explain` | yes | 21 | ok (links topic: registry diagnostics cross-ref) |
-| `refresh` | yes | 20 | ok (dry-run merged skills; write/symlink-file rows when intents apply) |
+| `refresh` | yes | 22 | ok (dry-run merged skills; post–BuildSharedTargetPlan refactor) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow plan` | yes | 14 | ok |

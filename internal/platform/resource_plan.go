@@ -417,32 +417,7 @@ func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []Resource
 	return intents
 }
 
-// CollectAndExecuteSharedTargetPlan aggregates SharedTargetIntents from all
-// provided platforms, builds a single ResourcePlan that deduplicates compatible
-// shared-target intents and fails fast on incompatible ones, then executes it.
-// This is the command-layer entry point for centralized shared-target writes.
-func CollectAndExecuteSharedTargetPlan(project, repoPath string, platforms []Platform) error {
-	var all []ResourceIntent
-	for _, p := range platforms {
-		intents, err := p.SharedTargetIntents(project)
-		if err != nil {
-			return fmt.Errorf("%s shared intents: %w", p.ID(), err)
-		}
-		all = append(all, intents...)
-	}
-	if len(all) == 0 {
-		return nil
-	}
-	plan, err := BuildResourcePlan(all)
-	if err != nil {
-		return err
-	}
-	return plan.Execute(repoPath, config.AgentsHome())
-}
-
-// DryRunSharedTargetPlanLines describes what CollectAndExecuteSharedTargetPlan would
-// write (merged shared-target rows, duplicate-intent counts) without touching the filesystem.
-func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform) ([]string, error) {
+func collectSharedTargetIntents(project string, platforms []Platform) ([]ResourceIntent, error) {
 	var all []ResourceIntent
 	for _, p := range platforms {
 		intents, err := p.SharedTargetIntents(project)
@@ -451,13 +426,48 @@ func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform)
 		}
 		all = append(all, intents...)
 	}
-	if len(all) == 0 {
-		return []string{"shared targets: (none)"}, nil
+	return all, nil
+}
+
+// BuildSharedTargetPlan aggregates SharedTargetIntents from all provided platforms and
+// builds a single merged ResourcePlan (dedupe, conflict detection). Dry-run and execute
+// paths both use this so intent collection and planning happen once per operation.
+func BuildSharedTargetPlan(project string, platforms []Platform) (ResourcePlan, error) {
+	all, err := collectSharedTargetIntents(project, platforms)
+	if err != nil {
+		return ResourcePlan{}, err
 	}
-	plan, err := BuildResourcePlan(all)
+	return BuildResourcePlan(all)
+}
+
+// CollectAndExecuteSharedTargetPlan runs BuildSharedTargetPlan then executes it against
+// the repo and agents home. This is the command-layer entry point for centralized
+// shared-target writes.
+func CollectAndExecuteSharedTargetPlan(project, repoPath string, platforms []Platform) error {
+	plan, err := BuildSharedTargetPlan(project, platforms)
+	if err != nil {
+		return err
+	}
+	if len(plan.Resources) == 0 {
+		return nil
+	}
+	return plan.Execute(repoPath, config.AgentsHome())
+}
+
+// DryRunSharedTargetPlanLines describes what CollectAndExecuteSharedTargetPlan would
+// write (merged shared-target rows, duplicate-intent counts) without touching the filesystem.
+func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform) ([]string, error) {
+	plan, err := BuildSharedTargetPlan(project, platforms)
 	if err != nil {
 		return nil, err
 	}
+	if len(plan.Resources) == 0 {
+		return []string{"shared targets: (none)"}, nil
+	}
+	return formatSharedTargetPlanForDryRun(plan, repoPath), nil
+}
+
+func formatSharedTargetPlanForDryRun(plan ResourcePlan, repoPath string) []string {
 	agentsHome := config.AgentsHome()
 	var lines []string
 	for _, res := range plan.Resources {
@@ -483,7 +493,7 @@ func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform)
 		}
 		lines = append(lines, line)
 	}
-	return lines, nil
+	return lines
 }
 
 func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...string) error {
