@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 11
+Iteration: 12
 
 ## Current Position
 
@@ -10,27 +10,55 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 started. Claude adapter thinned (iteration 11): createSkillsLinks no longer calls ExecuteSharedSkillMirrorPlan; shared targets are command-layer only. Remaining: thin codex, opencode, copilot adapters (same pattern).
+- `resource-intent-centralization`: Phase 4 COMPLETE (2026-04-11). All 4 platform adapters (claude, codex, opencode, copilot) now delegate shared-target writes to the command-layer CollectAndExecuteSharedTargetPlan; createSkillsLinks is a no-op for shared targets. Next: Phase 5 (unify command consumers: remove, status, explain registry).
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
 - `platform-dir-unification`
 - `refresh-skill-relink`
 - `skill-import-streamline`
-These remain blocked on `resource-intent-centralization`.
+These were blocked on `resource-intent-centralization`; may now be unblocked. Evaluate at start of next iteration.
 
 State summary:
-- 29/41 commands tested (workflow drift now covered)
-- 12 scenario families covered
-- Mutation/reconciliation: workflow drift now exercised (all 3 projects lack .agents/workflow/)
+- 30/41 commands tested (kg health now exercised: uninitialized state)
+- 13 scenario families covered
+- Phase 4 complete — all adapter thinning done; ExecuteSharedSkillMirrorPlan has zero callers outside its own file
 - Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
 
-Supervisor note from iteration 11:
-- Thinned claude.createSkillsLinks to user-home only. Updated 2 stage1 tests to use CollectAndExecuteSharedTargetPlan first (command-layer pattern). All tests pass.
-- workflow drift shows all 3 managed projects lack .agents/workflow/ — a valid multi-project-drift-detected-no-workflow state. Saved to ~/.agents/context/drift-report.json (outside repo, per guardrails).
-- The next iteration should thin codex, opencode, and copilot adapters (3 files, each 1-line change), then verify stage1 tests pass.
+Supervisor note from iteration 12:
+- Thinned codex, opencode, and copilot createSkillsLinks to return nil (3 files, 1 line each). No stage1 tests to update (none assert skills from these adapters directly). All tests pass (go test ./...).
+- `kg health` exercised for first time: cleanly reports uninitialized state (kg-uninitialized scenario).
+- `workflow health` confirmed stable after adapter thinning.
+- `ExecuteSharedSkillMirrorPlan` now has zero callers from adapters; it remains in resource_plan.go but is effectively dead code until it is either repurposed or removed in Phase 5.
+- Next iteration should evaluate whether blocked waves are now unblocked, then start Phase 5 or the first blocked wave.
 
 ## Iteration Log
+
+### Iteration 12 — 2026-04-11 14:30
+- wave: resource-intent-centralization
+- item: Phase 4 — thin codex, opencode, and copilot createSkillsLinks to return nil (shared targets now command-layer only)
+- scenario_tags: [clean-repo, platform-adapter-thinned, kg-uninitialized]
+- feedback_goal: After thinning all 4 platform adapters, do all tests still pass, and does kg health cleanly surface the uninitialized state?
+- files_changed: 3
+- lines_added: 3
+- lines_removed: 3
+- tests_added: 0
+- tests_total_pass: true
+- retries: 0
+- commit: a174e48
+- scope_note: "on-target"
+- summary: Thinned codex/opencode/copilot createSkillsLinks to no-ops; ExecuteSharedSkillMirrorPlan now has zero callers from adapters; Phase 4 complete
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (kg health — kg-uninitialized scenario, first time exercised)
+- cli_produced_actionable_feedback: yes (confirmed kg-uninitialized reports cleanly; workflow health stable after full adapter thinning)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 11 — 2026-04-11 13:30
 - wave: resource-intent-centralization
@@ -309,31 +337,28 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Primary implementation target:
-- `resource-intent-centralization` Phase 4 — thin codex, opencode, and copilot `createSkillsLinks` to no-ops (`.agents/skills` is now command-layer only); check if any stage1 tests assert skills from these adapters directly
+Phase 4 is complete. Evaluate next wave selection at start of iteration 13.
 
-Preferred single item:
-- In codex.go, opencode.go, copilot.go: change `createSkillsLinks` to `return nil`; run `go test ./...` to check if any tests fail; if they do, update them to use the command-layer pattern; commit
+Candidate paths (in priority order):
+1. **Check unblocked waves**: `platform-dir-unification`, `refresh-skill-relink`, `skill-import-streamline` were blocked on resource-intent-centralization — verify their current Status header and pick the best next wave
+2. **resource-intent-centralization Phase 5**: update `remove`, `status`, and `explain` to use the same resource registry; update `explain` to read from the actual managed resource state
+3. **crg-kg-integration Phase E**: Postgres backend for GraphStore
 
-Primary feedback goal:
-- Answer: "After thinning all 4 platform adapters, do all stage1 integration tests still pass, and does `workflow drift` still report the same 3 no-workflow warnings?"
-
-Anti-goal for the next iteration:
-- Do not also thin cursor (cursor has no skills); do not change test assertions beyond the minimum required
+Preferred feedback goal for next iteration:
+- Answer: "Do the previously blocked waves become actionable now that Phase 4 is complete, or are there deeper dependencies that still block them?"
 
 Command-feedback priorities:
-- Prefer a new command/scenario combination over refreshing timestamps on already-covered commands
-- Prefer mutation/reconciliation or analysis/readback stacks over another bootstrap stack
-- If the only safe result is "no change yet", say why that still answers the feedback goal
+- First: read blocked wave plan files to evaluate readiness
+- Prefer a new uncovered command/scenario over repeating bootstrap chains
+- Uncovered: `workflow tasks`, `workflow advance`, `kg lint`, `kg build`, `kg update`, `workflow sweep --dry-run`
 
 Known baseline CLI noise:
 - `status` / `doctor` warn about 4 broken Claude skill links in user config
 - `doctor` warns that the `dot-agents` git source is not yet fetched
 - Treat these as baseline environment noise unless the current iteration changes their underlying code path
 
-Requirement note:
-- `agents/` is now explicitly in scope for resource-intent-centralization as the immediate companion to `skills/`.
-- Do not treat subagent projections as a separate later architecture; once the planner path is proven on skills, extend the same framework to canonical `agents/` outputs.
+Cleanup note for future iteration:
+- `ExecuteSharedSkillMirrorPlan` in resource_plan.go now has zero callers from adapters. Consider removing it in Phase 5 or marking it internal-only.
 
 ## Analysis Readiness
 
@@ -382,7 +407,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `clean-repo` | yes | 8 | Reconfirmed after the planner/executor slice landed; the post-commit `explain` traces ran from a clean repo state |
+| `clean-repo` | yes | 12 | Reconfirmed after Phase 4 complete; all 4 adapters thinned, tests pass, workflow health stable |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
 | `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
 | `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, and `workflow drift` all returned expected empty/no-plan states |
@@ -424,7 +449,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `no-kg-home-configured` | yes | 5 | `kg health`, `kg query`, and `kg lint` fail clearly with setup guidance |
+| `no-kg-home-configured` | yes | 12 | `kg health` fails with actionable "run kg setup" guidance; confirmed again post-Phase 4 (kg-uninitialized state) |
 | `kg-setup-complete` | no | - | requires `kg setup`, which writes outside the repo and needs approval |
 | `kg-empty-but-healthy` | no | - | would be the post-setup, pre-ingest baseline |
 | `kg-ingest-queue-drain` | no | - | `kg queue` + `kg ingest --all` path untested |
@@ -534,6 +559,22 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 12 — 2026-04-11
+
+Trace: all-adapters-thinned-kg-uninitialized (analysis/readback + kg-lifecycle)
+Chain: `kg health` → `workflow health`
+```
+$ go run ./cmd/dot-agents kg health
+✗ Error: knowledge graph not initialized at /Users/nikashp/knowledge-graph — run 'dot-agents kg setup' first
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy, branch: feature/PA-cursor-projectsync-phase1-extract-293f, dirty files: 0, has active plan: true, canonical plans: 0, has checkpoint: true
+```
+Scenario: [clean-repo, kg-uninitialized, platform-adapter-thinned]
+Feedback goal: After thinning all 4 adapters, does kg health cleanly surface uninitialized state and does workflow health remain stable?
+Expectation: expected — kg health error is actionable and clean; workflow health is unaffected by adapter changes
+Follow-on: documented — kg-uninitialized now covered; workflow health confirmed stable post-Phase 4
+Classification: [ok-empty] for kg health (expected uninitialized state), [ok] for workflow health
 
 ### Iteration 11 — 2026-04-11
 

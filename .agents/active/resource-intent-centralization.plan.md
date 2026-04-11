@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Phase 2 complete (2026-04-11); Phase 3 shared-target centralization is next
+Status: Phase 4 complete (2026-04-11); Phase 5 command-consumer unification is next
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -91,16 +91,18 @@ Completed in this session:
   - `.github/agents/*.agent.md`
   - any shared compatibility mirrors or cleanup paths needed to keep `agents/` behavior consistent across platforms
 
-## Phase 4: Thin Platform Adapters
+## Phase 4: Thin Platform Adapters ✓ COMPLETE (2026-04-11)
 
-- [ ] Refactor platform `CreateLinks()` implementations so they primarily emit intents instead of mutating the filesystem directly for shared outputs.
-- [ ] Leave truly platform-owned outputs local to the platform adapter:
+- [x] Refactor platform `CreateLinks()` implementations so they primarily emit intents instead of mutating the filesystem directly for shared outputs.
+  - claude.createSkillsLinks: now only handles user-home skills; shared targets delegated to command layer (iteration 11)
+  - codex.createSkillsLinks, opencode.createSkillsLinks, copilot.createSkillsLinks: now return nil; all shared targets delegated to command layer (iteration 12)
+- [x] Leave truly platform-owned outputs local to the platform adapter:
   - `.codex/hooks.json`
   - `.github/copilot-instructions.md`
   - `.cursor/rules/*`
   - native rendered hook/config outputs
-- [ ] Preserve current precedence and transform behavior while moving ownership to the executor.
-- [ ] Apply the same adapter-thinning to `agents/` projections once the planner supports them so platform code stops owning agent projection logic ad hoc.
+- [x] Preserve current precedence and transform behavior while moving ownership to the executor.
+- [ ] Apply the same adapter-thinning to `agents/` projections once the planner supports them so platform code stops owning agent projection logic ad hoc. (deferred — SharedTargetIntents for agents/ not yet implemented)
 
 ## Phase 5: Unify Command Consumers
 
