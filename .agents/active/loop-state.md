@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 18
+Iteration: 19
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 (migrate skills to executor) in_progress — blocks Phase 5. Phase 5 (command-consumer unification) pending.
+- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 in_progress — repo-local `.claude/agents/*` dir mirrors now go through `CollectAndExecuteSharedTargetPlan` (Claude + Cursor intents dedupe); Codex/OpenCode/Copilot agent projections still adapter-local. Phase 5 pending.
 - `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
@@ -28,11 +28,12 @@ State summary:
 - 6 tests cover success (convergence), idempotency, and 4 error paths (not found, no project name, mispointing symlink, canonical real-dir clash).
 - `skill-import-streamline` wave closed: regression test locks promote path preservation of `ExtraFields` + multi-source `sources` through `Save()` after skill registration.
 - `DryRunSharedTargetPlanLines` surfaces the same merged `ResourcePlan` as `CollectAndExecuteSharedTargetPlan` for `refresh --dry-run` and `install --dry-run` (no filesystem writes).
-- Next slice: `resource-intent-centralization` Phase 3 remaining bullets (agents/ projections, directory-replacement tests) or `crg-kg-integration` Phase E incremental work.
+- `BuildSharedAgentMirrorIntents` + extended allowlist (`.claude/agents/`) centralizes project-scoped canonical `agents/<project>/<name>/AGENT.md` mirrors into `.claude/agents/<name>`; Cursor emits the same targets so Claude+Cursor duplicate intents merge once. Three new unit tests cover dedupe, imported-dir replacement, and Claude+Cursor execute path.
+- Next slice: `resource-intent-centralization` Phase 3 — render/file-shaped agent outputs (Codex `.toml`, Copilot `.agent.md`, OpenCode `.md`) or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
-Review target: iterations 16-18 and paired commits.
+Review target: iterations 17-19 and paired commits.
 
 Current findings:
 - `single-commit-closeout`: on-target — iteration 17 targets one commit (tests + loop-state + plan YAML + canonical advances).
@@ -69,6 +70,32 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 19 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 3 — centralize project-scoped `agents/` dir mirrors (`.claude/agents/<name>`) in shared target plan; thin Claude/Cursor `createAgentsLinks` for repo paths
+- scenario_tags: [clean-repo, agents-repo-symlink-centralized, canonical-plan-present, dry-run-vs-apply]
+- feedback_goal: Does `refresh --dry-run` surface `.claude/agents` shared-target rows when canonical project agents exist, and do unit tests prove Claude+Cursor agent intents dedupe to a single symlink?
+- files_changed: 5
+- lines_added: 257
+- lines_removed: 24
+- tests_added: 3
+- tests_total_pass: true
+- retries: 0
+- commit: 1b160c9
+- scope_note: "on-target"
+- summary: Added `BuildSharedAgentMirrorIntents`, allowlisted `.claude/agents/` for imported-dir replacement, merged agent intents into Claude `SharedTargetIntents` and Cursor `SharedTargetIntents`, no-op repo `createAgentsLinks`; tests for dedupe, replacement, Claude+Cursor execute.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (agents-repo-symlink-centralized; live dry-run had no agent rows — empty canonical agents for `dot-agents`)
+- cli_produced_actionable_feedback: yes (confirms skills dry-run unchanged; agent rows absent = expected empty state here)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 18 — 2026-04-11 12:00
 - wave: resource-intent-centralization
@@ -540,21 +567,21 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Loop closeout rules (iteration 19+):
+Loop closeout rules (iteration 20+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
 - Reconcile coverage tables before ending the iteration.
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 3**: Remaining migration bullets (canonical `agents/` projections into planner, executor-only replacement tests) or next smallest unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
+1. **resource-intent-centralization Phase 3**: Non-dir agent projections (Codex TOML render, Copilot `.agent.md`, OpenCode file symlinks) or registry/status alignment — pick one unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 19:
-- Continue Phase 3 toward `agents/` SharedTargetIntents **or** a focused executor/registry test from Phase 6 — pick one unchecked checklist line after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
+Preferred single item for iteration 20:
+- Next Phase 3 slice for rendered/file agent outputs **or** Phase 6 registry test — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
 
-Primary feedback goal for iteration 19 (example):
-- After the next Phase 3/6 slice, does `go test ./...` stay green and does the closest read-only surface (`explain links`, `workflow health`, or new dry-run output) still match actual managed behavior?
+Primary feedback goal for iteration 20 (example):
+- After the next slice, does the closest dry-run or test surface show the new intent shape without regressing shared skills?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -595,7 +622,7 @@ Signals already captured:
 
 Signals still missing or too weak:
 - A live **apply** trace that proves the shared plan runs once at the command layer during a real `refresh`/`install` (guardrail limits direct `refresh` in loop; dry-run now proves merged plan visibility)
-- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork
+- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **partial:** dir-shaped `.claude/agents/*` mirrors are now in the shared plan; TOML/render/file variants still pending
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
@@ -634,7 +661,8 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
-| `dry-run-shared-target-preview` | yes | 18 | `refresh --dry-run` prints merged `shared target:` symlink lines with duplicate-intent merge counts before per-platform dry-run; pairs with apply path tested via unit/integration tests |
+| `dry-run-shared-target-preview` | yes | 19 | `refresh --dry-run` prints merged skill rows; agent dir rows appear when `~/.agents/agents/<project>/<name>/AGENT.md` exists (iteration 19 live trace: no project agents for `dot-agents`, so only skills — expected empty-state for agents) |
+| `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
 | `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
@@ -770,10 +798,39 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- The imported-directory replacement slice for shared `.agents/skills/*` mirrors now exists in the planner/executor layer, but command-level multi-platform aggregation/dedupe is still outstanding before the broader shared-target migration can be considered complete.
+- Project-scoped **directory** agent mirrors (`.claude/agents/<name>`) now share the same planner/dedupe path as skills; Codex/Copilot/OpenCode **rendered or file-symlink** agent outputs remain on adapter-specific code paths until a later Phase 3 slice.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 19 — 2026-04-11
+
+Trace: workflow-orient-dirty-wip
+Command: `go run ./cmd/dot-agents workflow orient` (truncated)
+Scenario: [clean-repo, canonical-plan-present]
+Feedback goal: Confirm canonical plan readback before dry-run (repo had uncommitted loop-state + platform edits during trace).
+Output summary: 6 canonical plans; resource-intent-centralization active; branch feature/PA-cursor-projectsync-phase1-extract-293f; dirty files: 4 (WIP).
+Expectation: informative-nonblocking
+Follow-on: none — dirty count expected mid-iteration
+Classification: [ok]
+
+Trace: refresh-dry-run-post-agent-centralization
+Command: `go run ./cmd/dot-agents refresh --dry-run dot-agents`
+Scenario: [clean-repo, dry-run-vs-apply, agents-repo-symlink-centralized, dry-run-shared-target-preview]
+Feedback goal: Do shared-target lines include `.claude/agents/<name>` when canonical agents exist, and are skill merge counts unchanged?
+Output summary: Six shared-target lines for skills only (`.agents/skills/*` with 2 duplicate merges; `.claude/skills/*` without merge count). No `.claude/agents` lines — no `~/.agents/agents/dot-agents/*/AGENT.md` in this environment.
+Expectation: expected — agent mirror rows are conditional on canonical agent dirs
+Follow-on: none — empty-state for agents is valid evidence paired with unit tests for populated state
+Classification: [ok-empty]
+
+Trace: workflow-health-after-dry-run-iter19
+Command: `go run ./cmd/dot-agents workflow health`
+Scenario: [clean-repo, repo-health-stack]
+Feedback goal: Workflow subsystem still healthy after dry-run.
+Output summary: status healthy; dirty files 4 (WIP); canonical plans 6; checkpoint true.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 18 — 2026-04-11
 
@@ -1258,7 +1315,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `status` | yes | 7 | ok-warning |
 | `doctor` | yes | 7 | ok-warning |
 | `explain` | yes | 18 | ok |
-| `refresh` | yes | 18 | ok (dry-run path shows merged shared targets) |
+| `refresh` | yes | 19 | ok (dry-run path shows merged shared targets; agent rows when canonical agents exist) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow plan` | yes | 14 | ok |
