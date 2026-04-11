@@ -106,6 +106,15 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	if _, err := os.Stat(projectPath); err == nil {
 		config.SetWindowsMirrorContext(projectPath)
+		var installed []platform.Platform
+		for _, p := range platform.All() {
+			if p.IsInstalled() {
+				installed = append(installed, p)
+			}
+		}
+		if err := platform.RemoveSharedTargetPlan(projectName, projectPath, installed); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		}
 		for _, p := range platform.All() {
 			if err := p.RemoveLinks(projectName, projectPath); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))

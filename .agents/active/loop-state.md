@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 22
+Iteration: 23
 
 ## Current Position
 
@@ -32,7 +32,8 @@ State summary:
 - Phase 3 non-dir agent outputs: Codex `.codex/agents/*.toml` (render), OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` (file symlinks) now go through `CollectAndExecuteSharedTargetPlan` via `BuildSharedCodexAgentTomlIntents` / `BuildSharedAgentFileSymlinkIntents`; executor handles `RenderSingle`+`write` and `DirectFile`+`symlink`. Adapters thinned; `pruneCodexRepoAgentTomls` preserves stale-toml cleanup.
 - Phase 5 started: `status --audit` and `doctor --verbose` audit tail call `DryRunSharedTargetPlanLines` via `InstalledEnabledPlatforms` (same merge rules as `refresh --dry-run`). `explain links` documents the registry diagnostic path. `refresh` now computes installed+enabled platforms once per run.
 - Phase 5 library slice: `BuildSharedTargetPlan` is the single intent aggregation + `BuildResourcePlan` merge path for both dry-run lines and `CollectAndExecuteSharedTargetPlan` execute (no duplicate collection/merge between dry-run and apply).
-- Next slice: Phase 5 remaining — explicit `refresh`/`install`/`remove` command-flow ordering vs executor; or `crg-kg-integration` Phase E incremental work.
+- `remove` runs `RemoveSharedTargetPlan` (same merged plan as install/refresh) for all **installed** platforms before per-platform `RemoveLinks`; unit tests cover skill symlink + Codex TOML teardown.
+- Next slice: Phase 5 remaining — `refresh`/`install` explicit sequencing bullets; thin duplicate shared-target cleanup in adapters optional; or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
@@ -73,6 +74,36 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 23 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 5 — `remove` calls `RemoveSharedTargetPlan` before per-platform `RemoveLinks`; `ResourcePlan.RemoveSharedTargets` + tests
+- scenario_tags: [clean-repo, canonical-plan-present, remove-shared-target-plan]
+- feedback_goal: After `CollectAndExecuteSharedTargetPlan`, does `RemoveSharedTargetPlan` remove the same shared symlink / rendered targets deterministically (tests)?
+- files_changed: 5
+- lines_added: 178
+- lines_removed: 7
+- tests_added: 2
+- tests_total_pass: true
+- retries: 0
+- scope_note: "on-target"
+- summary: Added `RemoveSharedTargetPlan` / `RemoveSharedTargets` for merged shared intents; `remove` command runs it for installed platforms before adapter `RemoveLinks`; tests for skill symlink + Codex TOML removal
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (execute→remove success paths; RemoveIfSymlinkUnder no-op for non-managed links implicit in links pkg)
+- tests_used_sandbox: no (unit tests only; live `remove` destructive — not run)
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: N/A (phase-5-unify-commands still pending)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes
+- exercised_new_scenario: yes (remove-shared-target-plan — evidence via tests not live CLI)
+- cli_produced_actionable_feedback: informative-nonblocking (orient confirms session; remove behavior proven in `go test`)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 22 — 2026-04-11
 - wave: resource-intent-centralization
@@ -672,11 +703,11 @@ Candidate paths (priority order):
 1. **resource-intent-centralization Phase 5 (remaining)**: `refresh`/`install`/`remove` single projection plan sequencing — next unchecked bullets in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 23:
-- Phase 5 — remaining `refresh`/`install`/`remove` command-layer sequencing **or** `crg-kg-integration` Phase E Postgres slice.
+Preferred single item for iteration 24:
+- Phase 5 — `refresh`/`install` checklist (canonicalize → build → execute) **or** `crg-kg-integration` Phase E Postgres slice.
 
-Primary feedback goal for iteration 23 (example):
-- Does `install --dry-run` still share the same merged plan as `refresh --dry-run` for a fixture project, or does `remove` gain intent-based cleanup?
+Primary feedback goal for iteration 24 (example):
+- Does `install --dry-run` surface the same merged `BuildSharedTargetPlan` rows as `refresh --dry-run` for a registered project (read-only compare), or pick Phase E DB slice?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -758,6 +789,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
 | `dry-run-shared-target-preview` | yes | 22 | Iteration 22: `refresh --dry-run dot-agents` after `BuildSharedTargetPlan` refactor — six skill rows, duplicate merges on `.agents/skills/*`; parity with pre-refactor behavior |
+| `remove-shared-target-plan` | yes | 23 | `RemoveSharedTargetPlan` after `CollectAndExecuteSharedTargetPlan` in tests removes `.agents/skills/*` symlink and `.codex/agents/*.toml`; live `remove` not traced (destructive) |
 | `status-audit-shared-registry` | yes | 21 | `status --audit` prints Shared target registry via same `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms` as refresh dry-run; cross-checked merge counts vs iteration 20 dry-run semantics |
 | `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
 | `agents-non-dir-outputs-centralized` | yes | 20 | `BuildSharedCodexAgentTomlIntents` + `BuildSharedAgentFileSymlinkIntents`; executor `RenderSingle`/`DirectFile`; tests for execute + allowlist negative |
@@ -896,10 +928,21 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Phase **5** — shared plan **build** is unified (`BuildSharedTargetPlan`); remaining work is command-flow alignment (`refresh`/`install`/`remove` sequencing and remove-side intent cleanup).
+- Phase **5** — shared plan **build** is unified (`BuildSharedTargetPlan`); **`remove`** now tears down shared targets via `RemoveSharedTargetPlan` before adapters; remaining work is explicit `refresh`/`install` sequencing vs checklist and optional adapter thinning for overlap.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 23 — 2026-04-11
+
+Trace: workflow-orient-pre-commit
+Command: `go run ./cmd/dot-agents workflow orient` (head)
+Scenario: [clean-repo, canonical-plan-present]
+Feedback goal: Session/orient still coherent before committing remove-path change; any unexpected dirty-file churn?
+Output summary: Project dot-agents, branch feature/PA-cursor-projectsync-phase1-extract-293f, sha 8e8bb85; dirty files: 5 during WIP (expected before commit).
+Expectation: informative-nonblocking
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 22 — 2026-04-11
 
@@ -1456,6 +1499,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `doctor` | yes | 7 | ok-warning |
 | `explain` | yes | 21 | ok (links topic: registry diagnostics cross-ref) |
 | `refresh` | yes | 22 | ok (dry-run merged skills; post–BuildSharedTargetPlan refactor) |
+| `remove` | tests only | 23 | ok (RemoveSharedTargetPlan covered in `resource_plan_test`; live cmd guardrail) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow plan` | yes | 14 | ok |

@@ -454,6 +454,50 @@ func CollectAndExecuteSharedTargetPlan(project, repoPath string, platforms []Pla
 	return plan.Execute(repoPath, config.AgentsHome())
 }
 
+// RemoveSharedTargetPlan removes repo-local shared targets implied by the merged plan for
+// the given platforms (same aggregation as CollectAndExecuteSharedTargetPlan). Symlinks
+// are removed only when they point into agentsHome; rendered files are removed for known
+// materializers (e.g. codex-agent-toml).
+func RemoveSharedTargetPlan(project, repoPath string, platforms []Platform) error {
+	plan, err := BuildSharedTargetPlan(project, platforms)
+	if err != nil {
+		return err
+	}
+	return plan.RemoveSharedTargets(repoPath, config.AgentsHome())
+}
+
+// RemoveSharedTargets deletes managed outputs for each resource in the plan.
+func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
+	for _, res := range p.Resources {
+		if err := removeManagedIntentTarget(res.Intent, repoPath, agentsHome); err != nil {
+			return fmt.Errorf("%s: %w", res.Intent.IntentID, err)
+		}
+	}
+	return nil
+}
+
+func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome string) error {
+	target := resolveIntentTargetPath(intent.TargetPath, repoPath)
+	switch {
+	case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
+		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
+		return nil
+	case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
+		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
+		return nil
+	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
+		switch intent.Materializer {
+		case "codex-agent-toml":
+			_ = os.Remove(target)
+			return nil
+		default:
+			return fmt.Errorf("unsupported materializer %q for remove", intent.Materializer)
+		}
+	default:
+		return nil
+	}
+}
+
 // DryRunSharedTargetPlanLines describes what CollectAndExecuteSharedTargetPlan would
 // write (merged shared-target rows, duplicate-intent counts) without touching the filesystem.
 func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform) ([]string, error) {

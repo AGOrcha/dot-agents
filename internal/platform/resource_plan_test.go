@@ -285,6 +285,80 @@ Ship it.
 	}
 }
 
+func TestRemoveSharedTargetPlanRemovesSkillSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills", "review"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "review"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	importedSkill := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
+	canonicalSkillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.WriteFile(importedSkill, []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalSkillDir, "SKILL.md"), []byte("---\nname: canonical-review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	platforms := []Platform{NewClaude()}
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+	target := filepath.Join(repo, ".agents", "skills", "review")
+	if err := RemoveSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("RemoveSharedTargetPlan: %v", err)
+	}
+	if _, err := os.Lstat(target); err == nil {
+		t.Fatal("expected shared skill symlink removed")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("Lstat: %v", err)
+	}
+}
+
+func TestRemoveSharedTargetPlanRemovesCodexAgentToml(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "implementer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `---
+name: implementer
+description: does work
+---
+
+# Body
+Ship it.
+`
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	platforms := []Platform{NewCodex()}
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+	tomlPath := filepath.Join(repo, ".codex", "agents", "implementer.toml")
+	if err := RemoveSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("RemoveSharedTargetPlan: %v", err)
+	}
+	if _, err := os.Stat(tomlPath); !os.IsNotExist(err) {
+		t.Fatalf("expected toml removed: %v", err)
+	}
+}
+
 func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

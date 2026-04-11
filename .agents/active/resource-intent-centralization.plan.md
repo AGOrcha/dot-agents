@@ -113,7 +113,7 @@ Completed in this session:
   2. build projection intents
   3. execute one projection plan
 - [ ] Update `install` to use the same projection executor after canonical source linking.
-- [ ] Update `remove` to remove managed outputs via the same registry/intents instead of platform-specific path lists where possible.
+- [x] `remove` calls `RemoveSharedTargetPlan` (merged shared intents) before per-platform `RemoveLinks`; idempotent overlap with adapter cleanup (2026-04-11).
 - [x] Update `status` and `explain` to read from the same resource registry so diagnostics describe actual managed behavior rather than hand-maintained expectations. (`status --audit` / doctor verbose: `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms`; `explain links` documents the path.)
 
 ## Phase 6: Verification
