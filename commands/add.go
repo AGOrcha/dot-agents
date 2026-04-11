@@ -468,10 +468,16 @@ func runAdd(pathArg, nameArg string) error {
 	ui.Step("Creating links...")
 	config.SetWindowsMirrorContext(projectPath)
 
+	var addInstalled []platform.Platform
 	for _, p := range platform.All() {
-		if !p.IsInstalled() {
-			continue
+		if p.IsInstalled() {
+			addInstalled = append(addInstalled, p)
 		}
+	}
+	if err := platform.CollectAndExecuteSharedTargetPlan(projectName, projectPath, addInstalled); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+	}
+	for _, p := range addInstalled {
 		if err := p.CreateLinks(projectName, projectPath); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
 		} else {
