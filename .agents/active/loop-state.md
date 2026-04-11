@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 7
+Iteration: 8
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 2 in progress. `ResourceIntent` / `ResourceSourceRef` model landed; planner/executor layer is next.
+- `resource-intent-centralization`: Phase 2 complete. The initial planner/executor slice for shared skill mirrors landed; Phase 3 command-level shared-target aggregation is next.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
@@ -20,17 +20,43 @@ Blocked waves:
 These remain blocked on `resource-intent-centralization`.
 
 State summary:
-- 27/41 commands tested
+- 28/41 commands tested
 - 12 scenario families covered
 - Mutation/reconciliation coverage is still the largest command-feedback gap
 - Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
 
-Supervisor note from iteration 7:
-- The implementation slice was on target, but the post-commit CLI run was low-signal.
-- Re-running `status` -> `workflow health` -> `doctor` only reconfirmed an already-covered healthy path.
-- The next iteration should use a CLI run that answers a question about planner/executor behavior, not just repo health.
+Supervisor note from iteration 8:
+- The implementation slice stayed on the intended Phase 2 seam and the CLI trace finally answered a planner-specific question.
+- The remaining gap is no longer "planner exists or not"; it is whether shared targets are aggregated once at the command layer with cross-platform dedupe/conflict handling.
+- The next iteration should avoid more explain-only evidence and move to the first safe command-level aggregation slice or the nearest runnable projection-integrity readback.
 
 ## Iteration Log
+
+### Iteration 8 — 2026-04-11 10:19
+- wave: resource-intent-centralization
+- item: Phase 2 — add a planner/executor layer that aggregates intents before any filesystem writes
+- scenario_tags: [clean-repo, planner-diagnostic-visible]
+- feedback_goal: Does `dot-agents explain` now surface centralized shared-skill planning clearly enough to make the new planner visible without a write command?
+- files_changed: 9
+- lines_added: 424
+- lines_removed: 24
+- tests_added: 4
+- tests_total_pass: true
+- retries: 0
+- commit: 46f9d38
+- scope_note: on-target
+- summary: Added a minimal `ResourcePlan` builder/executor for shared skill mirrors, routed repo-local shared skill projections through it for Claude/Codex/OpenCode/Copilot, and documented the new ownership model in `dot-agents explain`
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes
+- cli_produced_actionable_feedback: yes
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 7 — 2026-04-11 09:54
 - wave: resource-intent-centralization
@@ -206,21 +232,21 @@ Self-assessment:
 ## Next Iteration Playbook
 
 Primary implementation target:
-- `resource-intent-centralization` Phase 2 — add the planner/executor layer that consumes `internal/platform.ResourceIntent`
+- `resource-intent-centralization` Phase 3 — centralize shared repo targets at the command/orchestration layer, starting with multi-platform `.agents/skills/<name>` aggregation
 
 Preferred single item:
-- Start with the smallest planner/executor slice that can aggregate intents before writes, even if only for shared skill-style targets at first
+- Route one real command path through a single shared-target plan build so Claude/Codex/OpenCode/Copilot stop reaching `.agents/skills/<name>` independently
 
 Primary feedback goal:
-- Answer: "Can the new planner/executor surface or aggregate intents in a way that changes observable workflow/resource behavior or diagnostics?"
+- Answer: "Can the shared-target planner now aggregate `.agents/skills/<name>` once per command run and surface conflicts or integrity clearly enough to trust the Phase 3 migration?"
 
 Preferred post-commit CLI path:
-- First choice: whichever `dot-agents` command directly exercises or exposes the new planner/executor layer
-- Likely candidates: `workflow health`, `workflow status`, `workflow orient`, `workflow plan`, or the most directly affected write path if it becomes safely runnable
-- Fallback only if no closer surface exists: `status` -> `doctor` -> `workflow health`
+- First choice: the closest safe command or readback that exercises shared-target projection integrity after the next planner wiring lands
+- Likely candidates: a projection-facing readback surface tied to the shared skill mirror slice, or the most directly affected write path if it becomes safely runnable under the guardrails
+- Fallback only if no closer surface exists: `explain` plus the nearest read-only integrity surface that reflects the new command-level aggregation
 
 Anti-goal for the next iteration:
-- Do not spend the CLI budget on another duplicate healthy bootstrap trace unless it is the closest runnable surface to the code change
+- Do not spend the CLI budget on another explain-only or repo-health-only trace unless the command-layer aggregation work still has no closer safe surface
 
 Command-feedback priorities:
 - Prefer a new command/scenario combination over refreshing timestamps on already-covered commands
@@ -244,17 +270,18 @@ Signals already captured:
 - Per-iteration summary, scope, retries, commit, and basic self-assessment
 - Exact CLI invocations with short output snapshots and structured metadata (scenario, expectation, follow-on, classification)
 - A clearer distinction between high-signal feedback traces and low-signal baseline health rechecks
-- Command-level coverage tracking (27 of ~41 commands now tested)
+- Command-level coverage tracking (28 of ~41 commands now tested)
 - Scenario coverage grouped by workflow, KG, CRG, bridge/config, delegation, integration, and outcome-quality families
-- The `ResourceIntent` contract itself is now codified in Go with validation tests, reducing ambiguity before planner/executor implementation starts
+- The `ResourceIntent` contract and the first `ResourcePlan` builder/executor slice are now codified in Go with validation, dedupe/conflict, and imported-dir convergence tests
 - Write-command-path traces: kg warm, kg link CRUD, workflow checkpoint
 - Empty-state traces: kg health/query/lint (no KG_HOME), workflow tasks/plan (no PLAN.yaml), kg flows (no igraph)
 - Warning-state traces: kg link orphan, workflow status next-action parsing, kg flows misleading help text
 - Before/after traces: workflow health warn→healthy after checkpoint write
 - Small integration traces already exist, especially status/doctor/workflow-health and checkpoint→health improvement; these now anchor the first bootstrap and closeout stacks
+- `dot-agents explain` now exposes the centralized shared-skill ownership model, giving a safe read-only diagnostic surface for planner-aware iterations
 
 Signals still missing or too weak:
-- Feedback-oriented traces that directly answer a feature question for `resource-intent-centralization`; iteration 7 mostly reconfirmed baseline health
+- A live command trace that proves the new planner is aggregated once at the command layer during a projection-style run, not just inside per-platform skill emitters and explain text
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, and plan/task flows with real `PLAN.yaml` + `TASKS.yaml` (workflow log now covered)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
@@ -277,7 +304,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `clean-repo` | yes | 7 | Reconfirmed after the `ResourceIntent` model commit; `status`, `workflow health`, and `doctor` all ran from a clean repo state |
+| `clean-repo` | yes | 8 | Reconfirmed after the planner/executor slice landed; the post-commit `explain` traces ran from a clean repo state |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
 | `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
 | `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, and `workflow drift` all returned expected empty/no-plan states |
@@ -406,6 +433,7 @@ These are larger chained checks that cross subsystem boundaries. Grouping them b
 |---|---|---|---|
 | `ok-empty-expected` | yes | 5 | multiple no-op/empty traces recorded and classified explicitly |
 | `ok-warning-ux-friction` | yes | 5 | warnings captured for orphan links, misleading flows guidance, and next-action parsing |
+| `planner-diagnostic-visible` | yes | 8 | `explain links` and `explain platforms` now expose centralized shared-skill planning clearly enough to serve as a safe read-only planner trace |
 | `retry-recovered` | yes | 2 | naming collision fixed before final commit |
 | `retry-recovered-with-error-log` | no | - | retry happened, but no matching `## Error Log` entry exists yet |
 | `pre-existing-tool-bug-confirmed` | yes | 5 | `kg flows` help text is wrong after postprocess when igraph is absent |
@@ -424,10 +452,26 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Shared `.agents/skills/*` projection bug: repo-local skill directories are not converted to managed symlinks after import. Documented in `skill-import-streamline.plan.md`. Architectural direction is now captured in `docs/rfcs/resource-intent-centralization-rfc.md`; implementation remains outstanding.
+- The imported-directory replacement slice for shared `.agents/skills/*` mirrors now exists in the planner/executor layer, but command-level multi-platform aggregation/dedupe is still outstanding before the broader shared-target migration can be considered complete.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 8 — 2026-04-11
+
+Trace: planner-diagnostic-visible (analysis/readback stack)
+Chain: `explain links` → `explain platforms`
+```
+$ go run ./cmd/dot-agents explain links
+Link Types — added a "CENTRALIZED SHARED TARGETS" section explaining that `.agents/skills/<name>` is planned centrally before writes so compatible platforms converge on one managed mirror instead of racing to replace the same directory.
+$ go run ./cmd/dot-agents explain platforms
+Supported Platforms — Claude now lists `.claude/skills/` plus shared `.agents/skills/`; Codex, OpenCode, and GitHub Copilot each list shared `.agents/skills/` explicitly.
+```
+Scenario: [clean-repo, planner-diagnostic-visible]
+Feedback goal: Does `dot-agents explain` now surface centralized shared-skill planning clearly enough to make the new planner visible without a write command?
+Expectation: expected — this iteration added the first safe read-only diagnostic for the planner/executor slice because `refresh` / `install` remain off-limits under the loop guardrails
+Follow-on: documented — the next iteration should move from planner visibility to command-level shared-target aggregation/integrity evidence
+Classification: [ok]
 
 ### Iteration 7 — 2026-04-11
 
@@ -739,6 +783,7 @@ Classification: [ok]
 |---|---|---|---|
 | `status` | yes | 7 | ok-warning |
 | `doctor` | yes | 7 | ok-warning |
+| `explain` | yes | 8 | ok |
 | `workflow status` | yes | 5 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow checkpoint` | yes | 5 | ok |
@@ -793,6 +838,8 @@ Format:
 
 ## CLI Observations
 
+- `explain links` is now a useful safe trace for planner-oriented iterations: it surfaces centralized shared-target ownership without needing `refresh` or `install`.
+- `explain platforms` now makes the shared `.agents/skills/` mirror explicit across Claude, Codex, OpenCode, and Copilot, which is a better operator-facing diagnostic than the older per-platform wording.
 - `kg changes` returns qualified names with absolute file paths (e.g. `/Users/.../kg.go::runKGWarm`) — CRG uses absolute paths internally. This is slightly noisy in output; could be made relative to repo root in a future iteration.
 - `--brief` flag sends human-readable text from CRG, not JSON. The bridge handles both modes correctly now.
 - `kg build` and `kg update` stream output directly; no structured return — good for interactive use.
