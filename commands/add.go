@@ -474,7 +474,7 @@ func runAdd(pathArg, nameArg string) error {
 			addInstalled = append(addInstalled, p)
 		}
 	}
-	if err := platform.CollectAndExecuteSharedTargetPlan(projectName, projectPath, addInstalled); err != nil {
+	if _, err := platform.RunSharedTargetProjection(projectName, projectPath, addInstalled, false); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 	}
 	for _, p := range addInstalled {
@@ -510,7 +510,6 @@ func runAdd(pathArg, nameArg string) error {
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
 	return nil
 }
-
 
 // backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
 // and removes the originals from the project tree. No *.dot-agents-backup files are left
@@ -634,4 +633,3 @@ func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 		projectsync.CopyFile(srcFile, tsTarget) //nolint:errcheck
 	}
 }
-

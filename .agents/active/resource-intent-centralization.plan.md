@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Phase 4 complete (2026-04-11); Phase 5 in progress — shared plan build centralized (`BuildSharedTargetPlan`); status/explain audit registry done
+Status: Phase 4 complete (2026-04-11); Phase 5 in progress — `RunSharedTargetProjection` unifies refresh/install/add shared-target dry-run + apply; status/explain audit registry done
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -108,11 +108,9 @@ Completed in this session:
 ## Phase 5: Unify Command Consumers
 
 - [x] Single shared projection plan build: `BuildSharedTargetPlan` aggregates intents once; `DryRunSharedTargetPlanLines` and `CollectAndExecuteSharedTargetPlan` both use it (2026-04-11).
-- [ ] Update `refresh` to:
-  1. canonicalize inputs
-  2. build projection intents
-  3. execute one projection plan
-- [ ] Update `install` to use the same projection executor after canonical source linking.
+- [x] Update `refresh` to canonicalize repo context (`SetWindowsMirrorContext`), use `InstalledEnabledPlatforms`, then one shared projection step: `RunSharedTargetProjection` (merged plan → dry-run lines or execute) (2026-04-11).
+- [x] Update `install` to call `RunSharedTargetProjection` in `createInstallPlatformLinks` after manifest linking (same executor as refresh; platform list = installed only) (2026-04-11).
+- [x] `add` uses `RunSharedTargetProjection` for the shared-target apply path (2026-04-11).
 - [x] `remove` calls `RemoveSharedTargetPlan` (merged shared intents) before per-platform `RemoveLinks`; idempotent overlap with adapter cleanup (2026-04-11).
 - [x] Update `status` and `explain` to read from the same resource registry so diagnostics describe actual managed behavior rather than hand-maintained expectations. (`status --audit` / doctor verbose: `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms`; `explain links` documents the path.)
 

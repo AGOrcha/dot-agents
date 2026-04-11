@@ -194,18 +194,16 @@ func createInstallPlatformLinks(projectName, projectPath string) {
 			installed = append(installed, p)
 		}
 	}
-	if Flags.DryRun {
-		lines, err := platform.DryRunSharedTargetPlanLines(projectName, projectPath, installed)
-		if err != nil {
+	lines, err := platform.RunSharedTargetProjection(projectName, projectPath, installed, Flags.DryRun)
+	if err != nil {
+		if Flags.DryRun {
 			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
 		} else {
-			for _, line := range lines {
-				ui.DryRun(line)
-			}
-		}
-	} else {
-		if err := platform.CollectAndExecuteSharedTargetPlan(projectName, projectPath, installed); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		}
+	} else if lines != nil {
+		for _, line := range lines {
+			ui.DryRun(line)
 		}
 	}
 

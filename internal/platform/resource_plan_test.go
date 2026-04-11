@@ -87,6 +87,50 @@ func TestBuildSharedTargetPlanEmptyPlatforms(t *testing.T) {
 	}
 }
 
+func TestRunSharedTargetProjectionDryRunMatchesDryRunLines(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	plats := []Platform{NewCodex()}
+	want, err := DryRunSharedTargetPlanLines("proj", repo, plats)
+	if err != nil {
+		t.Fatalf("DryRunSharedTargetPlanLines: %v", err)
+	}
+	got, err := RunSharedTargetProjection("proj", repo, plats, true)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjection dry-run: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len: got %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRunSharedTargetProjectionApplyReturnsNilLines(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	lines, err := RunSharedTargetProjection("proj", repo, []Platform{NewCodex()}, false)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjection apply: %v", err)
+	}
+	if lines != nil {
+		t.Fatalf("apply mode should return nil lines, got %#v", lines)
+	}
+}
+
 func TestDryRunSharedTargetPlanLinesNone(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

@@ -440,6 +440,20 @@ func BuildSharedTargetPlan(project string, platforms []Platform) (ResourcePlan, 
 	return BuildResourcePlan(all)
 }
 
+// RunSharedTargetProjection is the command-layer entry point for shared-target
+// projection: it builds the merged ResourcePlan (BuildSharedTargetPlan) and either
+// returns dry-run preview lines or executes writes. This keeps refresh/install/add on
+// one code path for "build intents → plan → dry-run or apply".
+//
+// Callers must set config.SetWindowsMirrorContext(repoPath) before calling when the
+// repo needs Windows-specific path behavior for intent resolution.
+func RunSharedTargetProjection(project, repoPath string, platforms []Platform, dryRun bool) ([]string, error) {
+	if dryRun {
+		return DryRunSharedTargetPlanLines(project, repoPath, platforms)
+	}
+	return nil, CollectAndExecuteSharedTargetPlan(project, repoPath, platforms)
+}
+
 // CollectAndExecuteSharedTargetPlan runs BuildSharedTargetPlan then executes it against
 // the repo and agents home. This is the command-layer entry point for centralized
 // shared-target writes.
