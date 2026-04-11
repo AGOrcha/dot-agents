@@ -9,13 +9,18 @@ The cross-platform matrix below counts only officially documented project-level 
 
 ## Official Platform Locations
 
-Official docs checked on 2026-03-29.
+Official docs were checked on 2026-03-29.
+
+Spot re-verification on 2026-04-11:
+
+- Codex, Claude Code, OpenCode, and GitHub Copilot locations below were re-checked against current vendor docs and remain directionally correct.
+- Cursor compatibility locations still need manual follow-up. The direct docs fetch/search path was inconclusive on 2026-04-11, so Cursor compatibility claims below remain based on the earlier manual doc pass rather than a fresh automated verification.
 
 ### Cursor
 
 - [Rules](https://cursor.com/docs/rules): project rules live in `.cursor/rules/`. Cursor also documents `AGENTS.md` as a markdown instructions alternative. User rules and team rules exist, but those are settings or dashboard scopes rather than shared repo files.
-- [Skills](https://cursor.com/docs/skills): project skills can live in `.cursor/skills/<name>/SKILL.md`. Cursor also documents compatibility discovery for `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, and `.codex/skills/<name>/SKILL.md`, plus user-level `~/.cursor/skills/`, `~/.claude/skills/`, and `~/.codex/skills/`.
-- [Subagents](https://cursor.com/docs/subagents): project subagents can live in `.cursor/agents/`, `.claude/agents/`, or `.codex/agents/`; user-level subagents can live in `~/.cursor/agents/`, `~/.claude/agents/`, or `~/.codex/agents/`. Cursor documents `.cursor/agents/` as the precedence winner when names collide.
+- [Skills](https://cursor.com/docs/skills): project skills can live in `.cursor/skills/<name>/SKILL.md`. Cursor compatibility discovery for `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, and `.codex/skills/<name>/SKILL.md` is kept here from the 2026-03-29 manual doc pass and should be manually re-verified.
+- [Subagents](https://cursor.com/docs/subagents): project subagents can live in `.cursor/agents/`, `.claude/agents/`, or `.codex/agents/`; user-level subagents can live in `~/.cursor/agents/`, `~/.claude/agents/`, or `~/.codex/agents/`. These compatibility notes are likewise carried forward from the earlier manual verification and should be manually re-checked.
 - [MCP](https://cursor.com/docs/mcp): project MCP config can live in `.cursor/mcp.json`; user-level config can live in `~/.cursor/mcp.json`.
 - [Hooks](https://cursor.com/docs/hooks): hooks live in `.cursor/hooks.json` or `~/.cursor/hooks.json`.
 

@@ -11,13 +11,13 @@ Driving specs:
 
 Active wave summary (from `.agents/active/*.plan.md`):
 - **active-artifact-cleanup**: Completed (2026-04-11) — all items done
-- **crg-kg-integration**: Phases A-D complete. E/F/G (Postgres, Go MCP, skill integration) deferred
-- **platform-dir-unification**: Blocked — Phases 4+5 need resource-intent-centralization RFC
+- **crg-kg-integration**: Phases A-D complete. E/F active next (Postgres, Go MCP); G (skill integration) deferred
+- **platform-dir-unification**: Blocked — Phases 4+5 need resource-intent-centralization implementation rollout
 - **refresh-skill-relink**: Blocked on resource-intent-centralization
 - **skill-import-streamline**: Blocked on resource-intent-centralization
-- **resource-intent-centralization**: Architectural RFC needed — skip
+- **resource-intent-centralization**: RFC accepted (2026-04-11) — implementation planning ready
 
-**All actionable implementation work in this loop is complete.** The only remaining active plans are either done, deferred, or blocked on one architectural decision (resource-intent-centralization). No further waves available without starting that RFC.
+**Actionable implementation work remains.** The architectural blocker on `resource-intent-centralization` is resolved by `docs/rfcs/resource-intent-centralization-rfc.md`, so the next loop can start implementation there. `crg-kg-integration` Phases E and F also remain active follow-on work; only Phase G is deferred.
 
 As of iteration 5: evidence capture substantially complete. 26/41 commands tested, 12 scenarios covered, write-path exercised, multiple ok-warning and ok-empty traces captured with structured metadata.
 
@@ -152,14 +152,18 @@ Self-assessment:
 
 ## What's Next
 
-**No actionable implementation waves remain.** All completed waves have been archived. The 5 remaining active plans are:
+**Actionable implementation waves remain.** The 5 remaining active plans now break down as:
 - 1 completed cleanup plan (active-artifact-cleanup — archive when convenient)
-- 3 blocked on `resource-intent-centralization` RFC
-- 1 deferred (crg-kg-integration phases E/F/G — Postgres backend, Go MCP server, skill integration)
+- 3 plans blocked on `resource-intent-centralization` implementation (`platform-dir-unification`, `refresh-skill-relink`, `skill-import-streamline`)
+- 1 active architectural-to-implementation bridge (`resource-intent-centralization` — RFC accepted, next work is implementation)
+- 1 partially deferred graph plan (`crg-kg-integration` — Phases E/F active, Phase G deferred)
 
-To unblock: write the `resource-intent-centralization` RFC (architectural session required, not a loop iteration).
+Recommended implementation order:
+- Start `resource-intent-centralization` Phase 1 (shared command spine extraction), then proceed into Phases 2-3 for planner/executor and shared skill targets
+- Keep `crg-kg-integration` Phase E (Postgres backend) and Phase F (Go MCP server) in the active queue
+- Defer only `crg-kg-integration` Phase G (skill integration) until E/F land and the new graph surfaces are exercised
 
-Evidence capture is now substantially complete for read-only commands (iteration 5). Write-path commands (`kg warm`, `kg link`, `workflow checkpoint`) have been exercised. Remaining gaps: `kg query` and `kg lint` fail with "not initialized" because KG_HOME does not exist — require `kg setup` first.
+Evidence capture is now broad enough to support command-landscape analysis, but still uneven across state families. Read-only workflow coverage is strong; repo-local write paths have some traces; the biggest remaining gaps are canonical workflow write paths, delegation flows, initialized KG lifecycle, bridge/config states, and CRG build/update end-to-end runs.
 
 Analysis follow-on once implementation resumes:
 - Prefer iterations that exercise uncovered commands or new workflow states over repeating the same happy-path checks.
@@ -178,57 +182,184 @@ Signals already captured:
 - Per-iteration summary, scope, retries, commit, and basic self-assessment
 - Exact CLI invocations with short output snapshots and structured metadata (scenario, expectation, follow-on, classification)
 - Command-level coverage tracking (26 of ~41 commands now tested)
-- Scenario coverage matrix with 12 distinct scenarios documented
+- Scenario coverage grouped by workflow, KG, CRG, bridge/config, delegation, integration, and outcome-quality families
 - Write-command-path traces: kg warm, kg link CRUD, workflow checkpoint
 - Empty-state traces: kg health/query/lint (no KG_HOME), workflow tasks/plan (no PLAN.yaml), kg flows (no igraph)
 - Warning-state traces: kg link orphan, workflow status next-action parsing, kg flows misleading help text
 - Before/after traces: workflow health warn→healthy after checkpoint write
+- Small integration traces already exist, especially status/doctor/workflow-health and checkpoint→health improvement; these now anchor the first bootstrap and closeout stacks
 
 Signals still missing or too weak:
-- `kg build` and `kg update` never exercised — need a build run to validate the CRG subprocess bridge end-to-end
-- `workflow advance` never exercised — requires a PLAN.yaml canonical plan to exist
-- Write commands that modify multi-repo state (workflow fanout, merge-back) — untested
-- Error-path traces for kg commands that fail mid-execution (not just "not initialized")
-- `kg query` and `kg lint` require `kg setup` to be run first — blocked until KG_HOME is initialized
+- Canonical workflow state transitions: `workflow log`, `workflow advance`, `workflow verify`, and plan/task flows with real `PLAN.yaml` + `TASKS.yaml`
+- Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
+- Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
+- Initialized KG lifecycle: `kg setup`, `kg ingest`, `kg queue`, `kg query`, `kg lint`, `kg maintain`, and `kg sync`
+- CRG end-to-end build/update traces and subprocess failure paths, not just read/query style commands
+- Bridge/config states for both `workflow graph` and `kg bridge`
+- Larger multi-command integration checks across bootstrap, mutation/reconciliation, analysis/readback, and closeout stacks that prove subsystems stay coherent when chained together, not just that individual commands succeed in isolation
 
 Minimum capture rules for remaining work:
-- Every iteration should declare one or more scenario tags such as `clean-repo`, `dirty-repo`, `no-canonical-plan`, `blocked-plan-set`, `kg-pre-postprocess`, or `deferred-wave`
+- Every iteration should declare one or more scenario tags from the family buckets below; when possible, include both one command-coverage gain and one state-transition gain
 - Every CLI trace should record whether the result was expected, unexpected, or informative-but-nonblocking
 - Every retry or detour should leave an Error Log entry even if the final outcome is green
-- Prefer at least one new command or one new scenario per iteration until the matrix below is meaningfully filled
+- Prefer paired state coverage when useful: uninitialized vs initialized, disabled vs enabled, dry-run vs apply, empty vs populated, raw vs postprocess-complete
 
 ## Scenario Coverage
 
+Coverage is grouped by state family so later analysis can distinguish "which command ran" from "what situation it exercised."
+
+### Workflow Project State
+
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `clean-repo` | yes | 5 | `status`, `doctor`, `workflow health` all run clean |
+| `clean-repo` | yes | 5 | `status`, `doctor`, and `workflow health` all ran from a clean repo state |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
-| `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, `workflow drift` all returned expected empty states |
-| `blocked-plan-set` | yes | 5 | `workflow orient` rendered all 6 active plans including blocked/deferred ones |
-| `kg-pre-postprocess` | yes | 2 | `kg flows` empty before `kg postprocess` |
-| `kg-postprocess-complete` | yes | 5 | `kg postprocess` ran (50 communities, 923 FTS entries); flows still 0 because igraph unavailable |
-| `expected-warning-or-empty` | yes | 5 | multiple ok-empty and ok-warning traces captured |
+| `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
+| `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, and `workflow drift` all returned expected empty/no-plan states |
+| `canonical-plan-present` | no | - | requires a real `PLAN.yaml` + `TASKS.yaml` plan to exist |
+| `current-focus-task-present` | no | - | requires active canonical plan state with `current_focus_task` set |
+| `blocked-plan-set` | yes | 5 | `workflow orient` rendered blocked and deferred active plans correctly |
+| `blocked-task-visible` | no | - | requires canonical tasks with `blocked` status surfaced by `workflow tasks` or `plan show` |
+
+### Workflow Write Paths
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
+| `workflow-log-visible` | no | - | `workflow log` not exercised yet |
+| `workflow-advance-success` | no | - | requires canonical plan/task state to mutate |
+| `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
+| `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
+| `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
+
+### Delegation Lifecycle
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `fanout-success` | no | - | `workflow fanout` not exercised yet |
+| `fanout-write-scope-conflict` | no | - | no overlapping delegation contract has been created/tested |
+| `merge-back-success` | no | - | `workflow merge-back` not exercised yet |
+| `merge-back-without-contract` | no | - | missing-contract error path not exercised yet |
+
+### Cross-Project Workflow Ops
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `multi-project-drift-empty` | yes | 5 | `workflow drift` ran, but only in the no-plan / no-remediation-needed path |
+| `multi-project-drift-detected` | no | - | need a stale checkpoint or missing workflow dir in a managed project |
+| `sweep-dry-run` | no | - | `workflow sweep` not exercised yet |
+| `sweep-apply-confirmed` | no | - | apply path is both untested and more invasive |
+
+### KG Lifecycle
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `no-kg-home-configured` | yes | 5 | `kg health`, `kg query`, and `kg lint` fail clearly with setup guidance |
+| `kg-setup-complete` | no | - | requires `kg setup`, which writes outside the repo and needs approval |
+| `kg-empty-but-healthy` | no | - | would be the post-setup, pre-ingest baseline |
+| `kg-ingest-queue-drain` | no | - | `kg queue` + `kg ingest --all` path untested |
+| `kg-query-success` | no | - | blocked until KG is initialized with real notes |
+| `kg-lint-success` | no | - | blocked until KG is initialized |
+
+### KG Maintenance And Storage Integrity
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `write-command-path` | yes | 5 | repo-local write-style traces exist for `kg warm`, `kg link`, and `workflow checkpoint` |
+| `warm-layer-empty` | yes | 5 | `kg warm` / `kg warm stats` succeeded with zero notes and a created SQLite DB |
+| `warm-layer-populated` | no | - | requires initialized KG notes to sync into SQLite |
+| `orphan-link` | yes | 5 | `kg link add` accepted a non-existent note id; referential integrity gap documented |
+| `kg-lint-repair-cycle` | no | - | `kg maintain reweave` plus re-lint path untested |
+| `stale-note-marking` | no | - | `kg maintain mark-stale` not exercised |
+| `compact-archives-superseded` | no | - | `kg maintain compact` not exercised |
+| `kg-sync-pull-lint` | no | - | `kg sync` path not exercised |
+
+### CRG And Code-Graph States
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `crg-read-surface` | yes | 2 | `kg code-status`, `kg changes`, `kg impact`, and `kg communities` exercised read/query behavior |
+| `crg-build-complete` | no | - | `kg build` not exercised yet |
+| `crg-update-from-diff` | no | - | `kg update` not exercised yet |
+| `kg-pre-postprocess` | yes | 2 | `kg flows` was empty before `kg postprocess` |
+| `kg-postprocess-complete` | yes | 5 | `kg postprocess` rebuilt communities and FTS; flows stayed 0 without igraph |
+| `postprocess-complete-with-real-flows` | no | - | requires igraph-capable environment and/or richer graph data |
+| `crg-subprocess-failure` | no | - | no forced missing-binary or subprocess stderr path captured yet |
+
+### Bridge And Config States
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `workflow-graph-disabled` | no | - | `workflow graph health/query` not exercised yet |
+| `workflow-graph-enabled` | no | - | requires `.agents/workflow/graph-bridge.yaml` configured and enabled |
+| `bridge-intent-disallowed` | no | - | disallowed-intent guard path untested |
+| `kg-bridge-mapping-reviewed` | no | - | `kg bridge health/mapping/query` not exercised yet |
+
+### Cross-Subsystem Integration Checks
+
+These are larger chained checks that cross subsystem boundaries. Grouping them by stack type makes it easier to ask later whether the system is strongest at bootstrap, reconciliation, analysis, or closeout work.
+
+#### Bootstrap Stacks
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `repo-health-stack` | yes | 5 | `status`, `doctor`, and `workflow health` together gave a consistent high-level health picture |
+| `project-add-health-stack` | no | - | would cover `add` -> `status` -> `doctor` -> `workflow status` for managed-project bootstrap |
+| `kg-bootstrap-stack` | no | - | grounded in past session history: `kg setup` -> `kg health` -> `kg queue` |
+| `managed-project-sync-stack` | no | - | would cover `add` or `import` -> `sync` -> `status` -> `doctor` |
+
+#### Mutation And Reconciliation Stacks
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `projection-refresh-integrity-stack` | no | - | projected-file mutation or refresh-style operation followed by `status` / `doctor` / managed-file inspection |
+| `managed-file-restore-stack` | no | - | inspired by the AGENTS overwrite incident: detect overwrite -> restore -> `status` -> `doctor` -> `workflow health` |
+| `prefs-review-health-stack` | no | - | would cover `workflow prefs set-shared` -> `review show/approve/reject` -> `workflow health` |
+| `drift-remediation-stack` | no | - | would validate `workflow drift` -> `workflow sweep` -> follow-up `status` / `workflow health` |
+
+#### Analysis And Readback Stacks
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `kg-ingest-validation-stack` | no | - | grounded in past session history: `kg ingest` -> `kg health` -> `kg query` or `kg queue` |
+| `kg-crg-postprocess-stack` | no | - | `kg build` or `kg update` -> `kg postprocess` -> `kg code-status` / `kg flows` |
+| `workflow-kg-bridge-stack` | no | - | would connect `workflow graph` commands with `kg bridge` health/query/mapping in one scenario |
+| `kg-to-workflow-memory-stack` | no | - | would connect KG evidence creation (`kg ingest` or `kg warm`) with `workflow checkpoint` / `workflow health` |
+
+#### Closeout And Evidence Stacks
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `checkpoint-health-stack` | yes | 5 | `workflow checkpoint` followed by `workflow health` showed a useful before/after state transition |
+| `kg-write-workflow-checkpoint-stack` | yes | 5 | `kg warm`, `kg link` CRUD, and `workflow checkpoint` were all exercised in one evidence-gathering pass |
+| `verification-checkpoint-stack` | no | - | would cover `workflow verify record` -> `workflow checkpoint` -> `workflow log` -> `workflow health` |
+| `loop-iteration-closeout-stack` | no | - | would tie plan/tasks, verification, checkpoint, and health/log readback into one end-of-iteration chain |
+
+### Outcome-Quality States
+
+| Scenario | Covered | Last Iteration | Notes |
+|---|---|---|---|
+| `ok-empty-expected` | yes | 5 | multiple no-op/empty traces recorded and classified explicitly |
+| `ok-warning-ux-friction` | yes | 5 | warnings captured for orphan links, misleading flows guidance, and next-action parsing |
 | `retry-recovered` | yes | 2 | naming collision fixed before final commit |
-| `pre-existing-tool-bug` | yes | 5 | `kg flows` help text incorrect after postprocess (says "run postprocess" but igraph is needed) |
-| `write-command-path` | yes | 5 | `kg warm`, `kg link add/list/remove`, `workflow checkpoint` all exercised |
-| `no-kg-home-configured` | yes | 5 | `kg health`, `kg query`, `kg lint` all fail with clear "kg setup" error |
-| `orphan-link` | yes | 5 | `kg link add` accepts non-existent note-id — no referential integrity |
+| `retry-recovered-with-error-log` | no | - | retry happened, but no matching `## Error Log` entry exists yet |
+| `pre-existing-tool-bug-confirmed` | yes | 5 | `kg flows` help text is wrong after postprocess when igraph is absent |
+| `blocked-environment` | no | - | no scenario explicitly tagged as blocked by missing dependency or approval gate |
 
 ## Skip List
 
 Plans to skip (blocked, requires architectural work, completed, or out of scope for loop):
-- `resource-intent-centralization` — architectural redesign, needs focused RFC session
 - `refresh-skill-relink` — blocked on resource-intent-centralization
 - `skill-import-streamline` — blocked on resource-intent-centralization
 - `platform-dir-unification` — blocked on resource-intent-centralization
-- `crg-kg-integration` phases E/F/G — deferred, lower priority than other work
+- `crg-kg-integration` Phase G — deferred until Phases E/F land and are exercised
 
 (Completed plans archived to .agents/history/ on 2026-04-11:)
 - kg-phase-1 through kg-phase-6, wave-3 through wave-7, workflow-automation-product-spec-review, agentsrc-local-schema, resource-sync-architecture-analysis
 
 ## Blockers
 
-- Shared `.agents/skills/*` projection bug: repo-local skill directories are not converted to managed symlinks after import. Documented in `skill-import-streamline.plan.md`. Blocked on resource-intent-centralization.
+- Shared `.agents/skills/*` projection bug: repo-local skill directories are not converted to managed symlinks after import. Documented in `skill-import-streamline.plan.md`. Architectural direction is now captured in `docs/rfcs/resource-intent-centralization-rfc.md`; implementation remains outstanding.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces

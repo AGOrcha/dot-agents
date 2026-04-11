@@ -1,7 +1,7 @@
 # Refresh Skill Relink Plan
 
-Status: Blocked — all items pending; blocked on resource-intent-centralization (needs centralized managed-resource planner before this can be fixed cleanly).
-Depends on: resource-intent-centralization
+Status: Blocked — all items pending; blocked on resource-intent-centralization implementation (RFC accepted, centralized managed-resource planner still needs to land).
+Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus resource-intent-centralization implementation
 
 
 

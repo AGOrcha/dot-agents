@@ -1,9 +1,13 @@
 # Resource Intent Centralization Plan
 
+Status: Ready for implementation — RFC accepted in `docs/rfcs/resource-intent-centralization-rfc.md` (2026-04-11)
+Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
+
 ## Context
 
 This plan builds on:
 
+- `docs/rfcs/resource-intent-centralization-rfc.md`
 - `.agents/active/platform-dir-unification.plan.md`
 - `.agents/active/resource-sync-architecture-analysis.plan.md`
 - `.agents/active/planner-resource-write-safety.md`
@@ -20,6 +24,17 @@ It is intentionally scoped to the shared resource ownership problem, not the con
 ## Goal
 
 Introduce a maintainable internal model where platforms declare what they need, a central executor owns shared projection targets, and command flows (`import`, `install`, `refresh`, `remove`, `status`, `explain`) stop depending on scattered path logic and ad hoc filesystem mutations.
+
+## Resolved Direction
+
+The design questions that previously blocked this plan are now resolved in `docs/rfcs/resource-intent-centralization-rfc.md`.
+
+- `ResourceIntent` is a small declarative model with typed source references, explicit ownership, shape/transport, and pruning/replacement policy.
+- Shared repo-local targets are planned centrally before writes; platform adapters stay thin for truly platform-owned outputs.
+- Import naming conflicts preserve both variants using origin-prefixed fallback names and create advisory review notes under `~/.agents/review-notes/import-conflicts/`.
+- Non-empty directory replacement remains executor-only and allowlisted; low-level link helpers stay conservative.
+- The first rollout slice is shared skill convergence first: repo `.agents/skills/<name>` and related shared compatibility mirrors before broader expansion.
+- Focused verification should cover intent dedupe/conflicts, import conflict notes, imported directory -> managed mirror convergence, and status/explain registry correctness.
 
 ## Phase 1: Extract Shared Command Spine
 
@@ -47,8 +62,8 @@ Introduce a maintainable internal model where platforms declare what they need, 
 
 - [ ] Migrate the highest-conflict repo-local outputs onto the shared executor first:
   - `.agents/skills/<name>`
-  - `.claude/agents/<name>` if it remains shared
-  - `.claude/settings.local.json` compatibility output if multiple platforms still project it
+  - `.claude/skills/<name>` when emitted as a shared compatibility mirror
+  - `.claude/settings.local.json` compatibility output if multiple platforms still project it after the skill-mirror slice lands
 - [ ] Deduplicate identical intents and fail fast on incompatible intents for the same path.
 - [ ] Add safe directory replacement only in the centralized executor for approved shared targets.
 
@@ -75,7 +90,9 @@ Introduce a maintainable internal model where platforms declare what they need, 
 ## Phase 6: Verification
 
 - [ ] Add focused tests for shared-target intent dedupe and conflict detection.
+- [ ] Add import conflict coverage for stable origin-prefixed fallback naming and advisory review-note creation.
 - [ ] Add refresh/import regression tests for imported directory -> managed shared-target transition.
+- [ ] Add coverage proving non-empty directory replacement is executor-only and allowlisted.
 - [ ] Add status/explain coverage so the new registry remains the source of truth.
 - [ ] Run focused packages first, then `go test ./...`.
 

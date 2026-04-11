@@ -13,7 +13,11 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
 1. Read `.agents/active/loop-state.md` for prior iteration context (skip if missing)
 2. Run `git status --short` to see current dirty state — if there are uncommitted changes from a prior iteration, review and commit them first
 3. Skim the two driving specs only if loop-state.md doesn't already summarize the current position
-4. Identify the current scenario tags before selecting work. Reuse existing tags from `## Scenario Coverage` when possible, or add precise new ones such as `clean-repo`, `dirty-repo`, `no-canonical-plan`, `blocked-plan-set`, `kg-pre-postprocess`, `kg-postprocess-complete`, `retry-recovered`, or `write-command-path`
+4. Identify the current scenario tags before selecting work. Choose tags from the family buckets in `## Scenario Coverage`: workflow project state, workflow write paths, delegation lifecycle, cross-project workflow ops, KG lifecycle, KG maintenance/storage integrity, CRG/code-graph states, bridge/config states, cross-subsystem integration checks, and outcome-quality states
+   - Reuse existing tags when possible; add a new tag only when it captures a genuinely different state transition
+   - Prefer paired scenarios when useful: uninitialized vs initialized, disabled vs enabled, dry-run vs apply, empty vs populated, raw vs postprocess-complete
+   - For integration scenarios, choose a sub-bucket first: `bootstrap`, `mutation-and-reconciliation`, `analysis-and-readback`, or `closeout-and-evidence`
+   - Good examples: `canonical-plan-present`, `workflow-advance-success`, `fanout-write-scope-conflict`, `kg-setup-complete`, `warm-layer-populated`, `crg-build-complete`, `workflow-graph-disabled`, `repo-health-stack`, `managed-file-restore-stack`, `kg-crg-postprocess-stack`, `verification-checkpoint-stack`, `ok-warning-ux-friction`
 
 ## Wave Selection
 5. Use the plan-wave-picker skill (`.agents/skills/plan-wave-picker/`) to select the next wave from `.agents/active/*.plan.md`
@@ -38,7 +42,11 @@ After committing implementation work, exercise relevant `go run ./cmd/dot-agents
 
 Analysis-oriented trace goals:
 - Prefer commands or repo states that add new evidence, not just repeated happy-path confirmation
+- When possible, add both one uncovered command and one uncovered state transition in the same iteration
 - If the current iteration only hits `[ok]` paths, try to include one safe expected empty-state, warning-state, or other non-destructive edge case
+- Favor paired-state coverage over isolated one-offs so later analysis can compare behavior across contrasting conditions
+- When a subsystem is already partially covered, prefer an integration scenario that chains 2-4 commands across subsystems instead of another isolated single-command success
+- For integration scenarios, prefer the next uncovered stack type rather than repeating the same kind of chain every time
 - Favor uncovered scenario/command combinations over duplicate runs when choosing what to exercise
 
 Read-only commands (always safe to run):
@@ -60,7 +68,33 @@ Write commands (use when the wave you just implemented adds or changes these):
 - `go run ./cmd/dot-agents kg ingest <source>` — ingest a source
 - `go run ./cmd/dot-agents kg warm` — sync hot notes to warm layer
 
+Approval-gated or fixture-gated commands (high-value for coverage, but only run when the wave justifies them and the safety rules allow it):
+- `go run ./cmd/dot-agents workflow verify record` — writes verification history
+- `go run ./cmd/dot-agents workflow prefs set-local <key> <value>` / `set-shared <key> <value>` — writes outside the repo or queues proposals
+- `go run ./cmd/dot-agents review approve <id>` / `reject <id>` — requires pending proposals
+- `go run ./cmd/dot-agents workflow fanout` / `workflow merge-back` — requires canonical plan/task fixtures and writes workflow artifacts
+- `go run ./cmd/dot-agents workflow sweep --apply` — mutates managed-project workflow state
+- `go run ./cmd/dot-agents kg setup` / `kg sync` — writes to `KG_HOME`, outside the repo
+
 Pick the commands most relevant to the wave you just worked on. Run at least one read-only command per iteration.
+If the relevant command set is already well-covered, prefer the next uncovered scenario family rather than repeating another low-signal success trace.
+Integration checks are especially valuable when they cross subsystem boundaries. Prefer one of these sub-buckets:
+- Bootstrap stacks:
+  `status` -> `doctor` -> `workflow health`
+  `add` -> `status` -> `doctor` -> `workflow status`
+  `kg setup` -> `kg health` -> `kg queue`
+- Mutation-and-reconciliation stacks:
+  managed-file mutation or refresh-style operation -> `status` -> `doctor` -> managed-file inspection
+  overwrite detection -> restore/regenerate -> `status` -> `doctor` -> `workflow health`
+  `workflow drift` -> `workflow sweep` -> `workflow health`
+- Analysis-and-readback stacks:
+  `kg ingest` -> `kg health` -> `kg query`
+  `kg build` or `kg update` -> `kg postprocess` -> `kg code-status` / `kg flows`
+  `workflow graph health/query` -> `kg bridge health/mapping/query`
+- Closeout-and-evidence stacks:
+  `workflow checkpoint` -> `workflow health` -> `workflow log`
+  `workflow verify record` -> `workflow checkpoint` -> `workflow log` -> `workflow health`
+  `kg warm` -> `kg link add/list/remove` -> `workflow checkpoint`
 
 ### Handling command issues
 When a command fails or produces unexpected output, classify it:
@@ -123,8 +157,12 @@ Always log the exact command, output, scenario tags, expectation (`expected`, `u
     - Expectation: `expected`, `unexpected`, or `informative-nonblocking`
     - Follow-on: `none`, `documented`, `fixed same iteration`, `deferred`, or similar
     - Classification: `[ok]`, `[ok-empty]`, `[ok-warning]`, `[retry-recovered]`, `[impl-bug]`, `[tool-bug]`, `[missing-feature]`, or `[blocked]`
+    - If multiple commands form one integration scenario, give them a shared scenario tag and note the chain in the trace labels or follow-on text
 17. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
 18. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
+    - Update the matching family bucket, not just the first row that seems close
+    - When a scenario is one half of a useful pair, note which side was exercised and what still remains uncovered
+    - For integration scenarios, describe the command chain, the stack sub-bucket, and whether the subsystems stayed coherent end-to-end
 19. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
     ```
     ### Iteration N
@@ -169,3 +207,5 @@ This prompt addresses specific failure modes observed in Codex sessions `019d7a6
 | Failures/retries invisible in traces | Dedicated `## Error Log` section with type, detail, resolution, retry count |
 | No command coverage tracking | Running `## Command Coverage` table updated each iteration |
 | Command coverage lacked scenario context | Added `## Scenario Coverage`, scenario tags, expectation field, and richer trace classifications |
+| Flat scenario lists encouraged ad hoc tags | Grouped scenario families and paired-state guidance keep coverage systematic |
+| Single-command traces missed end-to-end behavior | Added cross-subsystem integration scenarios for multi-command checks spanning workflow, KG, and config surfaces |
