@@ -1,7 +1,7 @@
 # Skill Import Streamline Plan
 
-Status: Blocked — all items pending; blocked on resource-intent-centralization (shared skill mirror convergence requires centralized resource executor).
-Depends on: resource-intent-centralization
+Status: Blocked — all items pending; blocked on resource-intent-centralization implementation (RFC accepted, shared skill mirror convergence still requires the centralized resource executor to land).
+Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus resource-intent-centralization implementation
 
 
 
