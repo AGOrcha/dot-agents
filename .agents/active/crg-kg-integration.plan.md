@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phase A + Phase D + Phase B complete (2026-04-11). Phase C (change detection + flows) is next.
+Status: Phase A + Phase B + Phase C + Phase D complete (2026-04-11). Phase E (Postgres backend) is next if needed; Phase F (Go MCP server) and Phase G (skill integration) are lower priority.
 Created: 2026-04-10
 
 ## Problem
@@ -314,14 +314,18 @@ functionality immediately since `.venv` is already set up with the Python CRG in
 5. ✓ `dot-agents kg code-status` — graph stats (nodes, edges, languages)
 6. ✓ `dot-agents kg changes [--brief]` — change impact (wraps `code-review-graph detect-changes`)
 
-### Phase C: Change detection + flows
+### Phase C: Change detection + flows ✓ COMPLETE
 
-Port impact analysis and flow detection.
+Implemented via CRG Python tool bridge (same pattern as Phase B).
 
-1. Port `changes.py` — git diff + graph intersection
-2. Port `flows.py` — entry-point tracing
-3. Port `communities.py` — Louvain clustering
-4. `dot-agents kg changes` and `dot-agents kg impact` commands
+1. ✓ `CRGBridge.GetImpactRadius()` — blast-radius for given files or current diff
+2. ✓ `CRGBridge.ListFlows()` — execution flow listing  
+3. ✓ `CRGBridge.ListCommunities()` — code community listing
+4. ✓ `CRGBridge.Postprocess()` — flows/communities/FTS rebuild
+5. ✓ `dot-agents kg impact [file...]` — blast-radius query with --depth/--limit
+6. ✓ `dot-agents kg flows` — execution flows with --sort/--limit
+7. ✓ `dot-agents kg communities` — code communities with --min-size/--sort
+8. ✓ `dot-agents kg postprocess` — rebuild flows/communities/FTS
 
 ### Phase D: Hot/cold note lifecycle
 
