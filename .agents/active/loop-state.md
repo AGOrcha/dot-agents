@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 12
+Iteration: 13
 
 ## Current Position
 
@@ -10,29 +10,53 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 COMPLETE (2026-04-11). All 4 platform adapters (claude, codex, opencode, copilot) now delegate shared-target writes to the command-layer CollectAndExecuteSharedTargetPlan; createSkillsLinks is a no-op for shared targets. Next: Phase 5 (unify command consumers: remove, status, explain registry).
-- `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
+- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 5 (command-consumer unification) next.
+- `skill-import-streamline`: UNBLOCKED. First item done: AgentsRC round-trip preservation (iteration 13). Remaining: install --generate merge, skills import/promote command.
+- `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
-Blocked waves:
-- `platform-dir-unification`
-- `refresh-skill-relink`
-- `skill-import-streamline`
-These were blocked on `resource-intent-centralization`; may now be unblocked. Evaluate at start of next iteration.
+Blocked waves (reassessed):
+- `platform-dir-unification`: Phase 4 (bash parity) is still deferrable — no urgency, bash path is orthogonal.
+- `refresh-skill-relink`: effectively done (all root-cause items are resolved by resource-intent-centralization). Remaining item is a regression test that requires running `refresh`, which is guardrail-blocked. Can update status to reflect this.
 
 State summary:
-- 30/41 commands tested (kg health now exercised: uninitialized state)
-- 13 scenario families covered
-- Phase 4 complete — all adapter thinning done; ExecuteSharedSkillMirrorPlan has zero callers outside its own file
-- Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
+- 31/41 commands tested (workflow sweep --dry-run now exercised)
+- 14 scenario families covered
+- AgentsRC now preserves unknown fields on save; `refresh` block no longer silently dropped
+- `workflow sweep --dry-run` shows 5 actions across 3 projects; all valid (no workflow dirs, no checkpoints)
 
-Supervisor note from iteration 12:
-- Thinned codex, opencode, and copilot createSkillsLinks to return nil (3 files, 1 line each). No stage1 tests to update (none assert skills from these adapters directly). All tests pass (go test ./...).
-- `kg health` exercised for first time: cleanly reports uninitialized state (kg-uninitialized scenario).
-- `workflow health` confirmed stable after adapter thinning.
-- `ExecuteSharedSkillMirrorPlan` now has zero callers from adapters; it remains in resource_plan.go but is effectively dead code until it is either repurposed or removed in Phase 5.
-- Next iteration should evaluate whether blocked waves are now unblocked, then start Phase 5 or the first blocked wave.
+Supervisor note from iteration 13:
+- Implemented AgentsRC round-trip preservation: custom MarshalJSON/UnmarshalJSON capture unknown fields in ExtraFields map; Save() merges them back. 2 new tests pass.
+- `workflow sweep --dry-run` exercised for first time: correctly proposes creating .agents/workflow/ dirs and checkpoint reminders for projects that lack them. [ok] state.
+- `workflow health` confirmed stable.
+- Next: continue skill-import-streamline (install --generate merge) or resource-intent-centralization Phase 5.
 
 ## Iteration Log
+
+### Iteration 13 — 2026-04-11 15:00
+- wave: skill-import-streamline
+- item: Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)
+- scenario_tags: [clean-repo, sweep-dry-run, manifest-roundtrip-fixed]
+- feedback_goal: Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?
+- files_changed: 2
+- lines_added: 178
+- lines_removed: 0
+- tests_added: 2
+- tests_total_pass: true
+- retries: 0
+- commit: 5926031
+- scope_note: "on-target"
+- summary: Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
+- cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 12 — 2026-04-11 14:30
 - wave: resource-intent-centralization
@@ -337,7 +361,26 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Phase 4 is complete. Evaluate next wave selection at start of iteration 13.
+Candidate paths (in priority order):
+1. **skill-import-streamline item 2**: Make `install --generate` merge with existing `.agentsrc.json` instead of replacing sources wholesale. Located in `GenerateAgentsRC()` and `commands/install.go`. Contains the AgentsRC round-trip fix (iteration 13) as a prerequisite — now done.
+2. **resource-intent-centralization Phase 5**: Update `explain` to read from resource registry for diagnostics. Closest to the changed code path (platform/resource_plan.go).
+3. **crg-kg-integration Phase E**: Postgres backend for GraphStore (significant scope; requires external setup).
+
+Preferred single item for iteration 14:
+- `skill-import-streamline` item 2: `GenerateAgentsRC()` is lossy — it replaces `sources` wholesale. Fix to merge with existing manifest fields rather than overwriting. Change is in `internal/config/agentsrc.go` (add MergeInto or similar).
+
+Primary feedback goal:
+- "After the fix, does `install --generate` preserve manually added git sources in .agentsrc.json?"
+
+Command-feedback priorities:
+- First: run `workflow health` to confirm stability
+- New uncovered scenario: `workflow verify record` (closeout-and-evidence) or `workflow tasks <plan>` (uncovered command)
+- Avoid repeating bootstrap/health chains already well-covered
+
+Known baseline CLI noise:
+- `status` / `doctor` warn about 4 broken Claude skill links in user config
+- `doctor` warns that the `dot-agents` git source is not yet fetched
+- `workflow sweep --dry-run` shows 5 actions — all valid, not noise
 
 Candidate paths (in priority order):
 1. **Check unblocked waves**: `platform-dir-unification`, `refresh-skill-relink`, `skill-import-streamline` were blocked on resource-intent-centralization — verify their current Status header and pick the best next wave
@@ -442,7 +485,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 |---|---|---|---|
 | `multi-project-drift-empty` | yes | 5 | `workflow drift` ran, but only in the no-plan / no-remediation-needed path |
 | `multi-project-drift-detected` | yes | 11 | `workflow drift` showed all 3 projects missing .agents/workflow/ — valid no-workflow-initialized state; report saved to drift-report.json |
-| `sweep-dry-run` | no | - | `workflow sweep` not exercised yet |
+| `sweep-dry-run` | yes | 13 | `workflow sweep --dry-run` proposed 5 actions across 3 projects (create .agents/workflow/ + checkpoint reminders); matches drift report from iteration 11 |
 | `sweep-apply-confirmed` | no | - | apply path is both untested and more invasive |
 
 ### KG Lifecycle
@@ -559,6 +602,28 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 13 — 2026-04-11
+
+Trace: manifest-roundtrip-sweep-dryrun (mutation-and-reconciliation + cross-project)
+Chain: `workflow sweep --dry-run` → `workflow health`
+```
+$ go run ./cmd/dot-agents workflow sweep --dry-run
+Sweep Plan [dry-run]
+  ○ 1. [ResumeAgent] Create .agents/workflow/ directory in ResumeAgent
+  ○ 2. [ResumeAgent] Add checkpoint reminder annotation for ResumeAgent
+  ○ 3. [dot-agents] Create .agents/workflow/ directory in dot-agents
+  ○ 4. [payout] Create .agents/workflow/ directory in payout
+  ○ 5. [payout] Add checkpoint reminder annotation for payout
+  Run with --apply to execute these actions.
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy, branch: feature/...293f, dirty: 0, has active plan: true, canonical plans: 0, has checkpoint: true
+```
+Scenario: [clean-repo, sweep-dry-run, manifest-roundtrip-fixed]
+Feedback goal: Does AgentsRC.Save() preserve unknown JSON fields? (confirmed by 2 new tests) + Does workflow sweep dry-run accurately report drift from iteration 11's report?
+Expectation: expected — sweep proposes 5 actions matching drift report (3 no-workflow, 2 no-checkpoint). workflow health stable.
+Follow-on: documented — sweep-dry-run scenario now covered; --apply remains gated.
+Classification: [ok]
 
 ### Iteration 12 — 2026-04-11
 
