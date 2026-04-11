@@ -227,8 +227,9 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	)
 }
 
-func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, ".claude", "agents"))
+func (c *cursor) createAgentsLinks(_ string, _ string, _ string) error {
+	// `.claude/agents/*` mirrors match Claude's layout; command layer runs CollectAndExecuteSharedTargetPlan first.
+	return nil
 }
 
 func (c *cursor) RemoveLinks(project, repoPath string) error {
@@ -318,6 +319,7 @@ func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
 	return false
 }
 
-func (c *cursor) SharedTargetIntents(_ string) ([]ResourceIntent, error) {
-	return nil, nil
+func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
+	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
 }

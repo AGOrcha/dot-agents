@@ -285,8 +285,10 @@ func (c *claude) ensureUserSkills(agentsHome string) error {
 	return nil
 }
 
-func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, claudeDir, "agents"))
+func (c *claude) createAgentsLinks(_ string, _ string, _ string) error {
+	// Repo-local `.claude/agents/*` mirrors are written by CollectAndExecuteSharedTargetPlan.
+	// User-home links for global agents remain in ensureUserAgents (prepareLinks).
+	return nil
 }
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
@@ -357,8 +359,19 @@ func isSymlink(path string) bool {
 }
 
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	return BuildSharedSkillMirrorIntents(project,
+	skills, err := BuildSharedSkillMirrorIntents(project,
 		filepath.Join(claudeDir, "skills"),
 		filepath.Join(".agents", "skills"),
 	)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := BuildSharedAgentMirrorIntents(project, filepath.Join(claudeDir, "agents"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ResourceIntent, 0, len(skills)+len(agents))
+	out = append(out, skills...)
+	out = append(out, agents...)
+	return out, nil
 }

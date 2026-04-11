@@ -175,7 +175,7 @@ func prepareIntentTargetForReplacement(target string, intent ResourceIntent) err
 }
 
 func removeImportedDirIfAllowlisted(target string, intent ResourceIntent) error {
-	if !isAllowlistedSharedSkillTarget(intent.TargetPath) {
+	if !isAllowlistedSharedMirrorTarget(intent.TargetPath) {
 		return fmt.Errorf("target %s is not allowlisted for imported directory replacement", intent.TargetPath)
 	}
 	for _, marker := range intent.MarkerFiles {
@@ -189,9 +189,11 @@ func removeImportedDirIfAllowlisted(target string, intent ResourceIntent) error 
 	return fmt.Errorf("refusing to replace unmanaged directory %s without imported markers", target)
 }
 
-func isAllowlistedSharedSkillTarget(targetPath string) bool {
+func isAllowlistedSharedMirrorTarget(targetPath string) bool {
 	normalized := filepath.ToSlash(targetPath)
-	return strings.HasPrefix(normalized, ".agents/skills/") || strings.HasPrefix(normalized, ".claude/skills/")
+	return strings.HasPrefix(normalized, ".agents/skills/") ||
+		strings.HasPrefix(normalized, ".claude/skills/") ||
+		strings.HasPrefix(normalized, ".claude/agents/")
 }
 
 func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
@@ -244,6 +246,55 @@ func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []Resource
 func sanitizeIntentRoot(root string) string {
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ".", "")
 	return replacer.Replace(root)
+}
+
+// BuildSharedAgentMirrorIntents builds symlink intents for canonical agents/ buckets
+// (per-entry directories with AGENT.md) into the given repo-relative target roots.
+func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
+	intents := make([]ResourceIntent, 0)
+	for _, root := range targetRoots {
+		root = filepath.Clean(root)
+		if root == "." {
+			continue
+		}
+		intents = append(intents, buildSharedAgentMirrorIntentsForRoot(project, root)...)
+	}
+	return intents, nil
+}
+
+func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+	agentsHome := config.AgentsHome()
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+
+	intents := make([]ResourceIntent, 0, len(entries))
+	for _, entry := range entries {
+		targetPath := filepath.Join(targetRoot, entry.Name)
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("agents.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			Project:     project,
+			Bucket:      "agents",
+			LogicalName: entry.Name,
+			TargetPath:  targetPath,
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        project,
+				Bucket:       "agents",
+				RelativePath: entry.Name,
+				Kind:         ResourceSourceCanonicalDir,
+				Origin:       "shared-agent-mirror",
+			},
+			Shape:         ResourceShapeDirectDir,
+			Transport:     ResourceTransportSymlink,
+			Materializer:  "shared-agent-dir-symlink",
+			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+			PrunePolicy:   ResourcePruneTarget,
+			MarkerFiles:   []string{"AGENT.md"},
+		})
+	}
+	return intents
 }
 
 // CollectAndExecuteSharedTargetPlan aggregates SharedTargetIntents from all
