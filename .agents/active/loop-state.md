@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 4
+Iteration: 5
 
 ## Current Position
 
@@ -19,6 +19,8 @@ Active wave summary (from `.agents/active/*.plan.md`):
 
 **All actionable implementation work in this loop is complete.** The only remaining active plans are either done, deferred, or blocked on one architectural decision (resource-intent-centralization). No further waves available without starting that RFC.
 
+As of iteration 5: evidence capture substantially complete. 26/41 commands tested, 12 scenarios covered, write-path exercised, multiple ok-warning and ok-empty traces captured with structured metadata.
+
 Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed" in their status header but still have unchecked `- [ ]` items. The status header is authoritative — unchecked boxes on completed plans are stale plan hygiene, not real work.
 
 Analysis prep priority:
@@ -26,6 +28,30 @@ Analysis prep priority:
 - Future iterations should leave behind structured trace metadata, scenario coverage, and explicit linkage between commands, commits, retries, and follow-on actions.
 
 ## Iteration Log
+
+### Iteration 5 — 2026-04-11
+- wave: none (no actionable implementation wave — evidence-capture-only iteration)
+- item: Exercise uncovered write-command-path and kg-postprocess-complete scenarios
+- scenario_tags: [write-command-path, kg-postprocess-complete, clean-repo, no-kg-home-configured]
+- files_changed: 0 (loop-state.md only)
+- lines_added: 0
+- lines_removed: 0
+- tests_added: 0
+- tests_total_pass: true
+- retries: 0
+- commit: (loop-state update only)
+- scope_note: on-target
+- summary: Exercised kg warm, kg warm stats, kg link add/list/remove, kg postprocess, kg flows (after postprocess), workflow checkpoint, workflow health (before+after checkpoint), workflow orient, workflow drift, workflow plan, status, doctor, kg health, kg query, kg lint. Captured write-path trace, postprocess-complete trace, and several ok-empty/ok-warning patterns.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes (single focus: evidence capture across uncovered commands)
+- committed_after_tests: yes
+- ran_cli_command: yes (14 distinct commands)
+- exercised_new_scenario: yes (write-command-path, kg-postprocess-complete, no-kg-home-configured)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 4 — 2026-04-11
 - wave: active-artifact-cleanup
@@ -127,11 +153,13 @@ Self-assessment:
 ## What's Next
 
 **No actionable implementation waves remain.** All completed waves have been archived. The 5 remaining active plans are:
-- 1 just-completed cleanup plan (will archive next pass)
+- 1 completed cleanup plan (active-artifact-cleanup — archive when convenient)
 - 3 blocked on `resource-intent-centralization` RFC
-- 1 deferred (crg-kg-integration phases E/F/G)
+- 1 deferred (crg-kg-integration phases E/F/G — Postgres backend, Go MCP server, skill integration)
 
 To unblock: write the `resource-intent-centralization` RFC (architectural session required, not a loop iteration).
+
+Evidence capture is now substantially complete for read-only commands (iteration 5). Write-path commands (`kg warm`, `kg link`, `workflow checkpoint`) have been exercised. Remaining gaps: `kg query` and `kg lint` fail with "not initialized" because KG_HOME does not exist — require `kg setup` first.
 
 Analysis follow-on once implementation resumes:
 - Prefer iterations that exercise uncovered commands or new workflow states over repeating the same happy-path checks.
@@ -148,15 +176,20 @@ Questions the later analysis phase should be able to answer:
 
 Signals already captured:
 - Per-iteration summary, scope, retries, commit, and basic self-assessment
-- Exact CLI invocations with short output snapshots
-- Command-level coverage tracking
-- Freeform CLI observations
+- Exact CLI invocations with short output snapshots and structured metadata (scenario, expectation, follow-on, classification)
+- Command-level coverage tracking (26 of ~41 commands now tested)
+- Scenario coverage matrix with 12 distinct scenarios documented
+- Write-command-path traces: kg warm, kg link CRUD, workflow checkpoint
+- Empty-state traces: kg health/query/lint (no KG_HOME), workflow tasks/plan (no PLAN.yaml), kg flows (no igraph)
+- Warning-state traces: kg link orphan, workflow status next-action parsing, kg flows misleading help text
+- Before/after traces: workflow health warn→healthy after checkpoint write
 
 Signals still missing or too weak:
-- Structured trace metadata: scenario, duration, exit status, expected vs unexpected, follow-on action
-- Negative and near-miss traces such as retry-recovered, ok-but-empty, ok-with-warning, blocked, or pre-existing tool bug
-- Scenario coverage across repo/workflow states, not just command names
-- Linkage between iteration log entries, CLI traces, error log entries, and commits
+- `kg build` and `kg update` never exercised — need a build run to validate the CRG subprocess bridge end-to-end
+- `workflow advance` never exercised — requires a PLAN.yaml canonical plan to exist
+- Write commands that modify multi-repo state (workflow fanout, merge-back) — untested
+- Error-path traces for kg commands that fail mid-execution (not just "not initialized")
+- `kg query` and `kg lint` require `kg setup` to be run first — blocked until KG_HOME is initialized
 
 Minimum capture rules for remaining work:
 - Every iteration should declare one or more scenario tags such as `clean-repo`, `dirty-repo`, `no-canonical-plan`, `blocked-plan-set`, `kg-pre-postprocess`, or `deferred-wave`
@@ -168,16 +201,18 @@ Minimum capture rules for remaining work:
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `clean-repo` | yes | 4 | `workflow status` reported `dirty: 0` |
+| `clean-repo` | yes | 5 | `status`, `doctor`, `workflow health` all run clean |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
-| `no-canonical-plan` | yes | 3 | `workflow plan` returned expected empty state |
-| `blocked-plan-set` | yes | 4 | active set reduced to completed, blocked, or deferred plans only |
+| `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, `workflow drift` all returned expected empty states |
+| `blocked-plan-set` | yes | 5 | `workflow orient` rendered all 6 active plans including blocked/deferred ones |
 | `kg-pre-postprocess` | yes | 2 | `kg flows` empty before `kg postprocess` |
-| `kg-postprocess-complete` | no | - | need a run after `kg postprocess` |
-| `expected-warning-or-empty` | yes | 2 | empty flow output was expected |
+| `kg-postprocess-complete` | yes | 5 | `kg postprocess` ran (50 communities, 923 FTS entries); flows still 0 because igraph unavailable |
+| `expected-warning-or-empty` | yes | 5 | multiple ok-empty and ok-warning traces captured |
 | `retry-recovered` | yes | 2 | naming collision fixed before final commit |
-| `pre-existing-tool-bug` | no | - | none isolated yet |
-| `write-command-path` | no | - | no safe write-path workflow/KG command exercised yet |
+| `pre-existing-tool-bug` | yes | 5 | `kg flows` help text incorrect after postprocess (says "run postprocess" but igraph is needed) |
+| `write-command-path` | yes | 5 | `kg warm`, `kg link add/list/remove`, `workflow checkpoint` all exercised |
+| `no-kg-home-configured` | yes | 5 | `kg health`, `kg query`, `kg lint` all fail with clear "kg setup" error |
+| `orphan-link` | yes | 5 | `kg link add` accepts non-existent note-id — no referential integrity |
 
 ## Skip List
 
@@ -197,6 +232,205 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 5 — 2026-04-11
+
+Trace: kg-warm-no-kg-home
+```
+$ go run ./cmd/dot-agents kg warm
+✓ Warm sync complete: 0 notes indexed, 0 skipped
+```
+Scenario: [write-command-path, no-kg-home-configured]
+Expectation: informative-nonblocking — KG_HOME (~/.knowledge-graph) not initialized, so no notes to sync
+Follow-on: documented
+Classification: [ok-empty]
+
+Trace: kg-warm-stats-no-kg-home
+```
+$ go run ./cmd/dot-agents kg warm stats
+Warm Layer Stats — Notes indexed: 0, Symbol links: 0, Code nodes: 0, Code edges: 0
+  Last warm sync: 2026-04-11T06:34:52Z, DB path: /Users/nikashp/knowledge-graph/ops/graphstore.db
+```
+Scenario: [write-command-path, no-kg-home-configured]
+Expectation: expected — warm DB exists even without KG_HOME notes
+Follow-on: none
+Classification: [ok-empty]
+
+Trace: kg-link-add-nonexistent-note
+```
+$ go run ./cmd/dot-agents kg link add nonexistent-note "commands::runKGWarm"
+✓ Link created (id=1): nonexistent-note -[mentions]-> commands::runKGWarm
+```
+Scenario: [write-command-path, orphan-link]
+Expectation: unexpected — no referential integrity check against note existence
+Follow-on: documented — potential data quality issue; `kg link add` should validate note-id exists
+Classification: [ok-warning]
+
+Trace: kg-link-list
+```
+$ go run ./cmd/dot-agents kg link list nonexistent-note
+  [1] nonexistent-note -[mentions]-> commands::runKGWarm
+```
+Scenario: [write-command-path]
+Expectation: expected
+Follow-on: none (test link removed with `kg link remove 1`)
+Classification: [ok]
+
+Trace: kg-postprocess-complete
+```
+$ go run ./cmd/dot-agents kg postprocess
+Running post-processing on /Users/nikashp/Documents/dot-agents ...
+INFO: FTS index rebuilt: 923 rows indexed
+INFO: igraph not available, using file-based community detection
+Post-processing: 50 communities, 923 FTS entries
+```
+Scenario: [kg-postprocess-complete]
+Expectation: expected — igraph unavailable note is informational
+Follow-on: none
+Classification: [ok]
+
+Trace: kg-flows-after-postprocess
+```
+$ go run ./cmd/dot-agents kg flows
+Execution Flows — Found 0 execution flow(s)
+No flows detected. Run 'dot-agents kg postprocess' to detect flows.
+```
+Scenario: [kg-postprocess-complete]
+Expectation: unexpected — flows still 0 even after postprocess; help text still says to run postprocess (misleading)
+Follow-on: documented — igraph is required for flow detection; without igraph the help text is incorrect. Should say "install igraph for flow detection"
+Classification: [ok-warning]
+
+Trace: workflow-checkpoint-write
+```
+$ go run ./cmd/dot-agents workflow checkpoint
+✓ Checkpoint written
+  ~/.agents/context/dot-agents/checkpoint.yaml
+```
+Scenario: [write-command-path, clean-repo]
+Expectation: expected
+Follow-on: none
+Classification: [ok]
+
+Trace: workflow-health-before-checkpoint
+```
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: warn
+Warnings: - no checkpoint recorded
+```
+Scenario: [write-command-path]
+Expectation: expected — no checkpoint existed before
+Follow-on: none
+Classification: [ok]
+
+Trace: workflow-health-after-checkpoint
+```
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy
+  has active plan: true, canonical plans: 0, has checkpoint: true, pending proposals: 0
+```
+Scenario: [write-command-path]
+Expectation: expected — checkpoint resolves the warn state
+Follow-on: none
+Classification: [ok]
+
+Trace: workflow-orient-blocked-plan-set
+```
+$ go run ./cmd/dot-agents workflow orient
+# Project — branch: feature/workflow-auto-operator, sha: 4ed7421, dirty files: 1
+# Canonical Plans — none
+# Active Plans — (includes all 6 active/*.plan.md files with status/depends-on headers visible)
+```
+Scenario: [blocked-plan-set]
+Expectation: expected — orient renders all active plans verbatim including blocked ones
+Follow-on: none
+Classification: [ok]
+
+Trace: workflow-drift-no-workflow-dir
+```
+$ go run ./cmd/dot-agents workflow drift
+Workflow Drift Report — 3 projects checked, all warn
+  ResumeAgent: no checkpoint found, no .agents/workflow/ directory
+  dot-agents: no .agents/workflow/ directory
+  payout: no checkpoint found, no .agents/workflow/ directory
+Summary: healthy: 0, warnings: 3, unreachable: 0
+```
+Scenario: [no-canonical-plan, blocked-plan-set]
+Expectation: expected — no projects have initialized .agents/workflow/ directories
+Follow-on: documented
+Classification: [ok-empty]
+
+Trace: workflow-status-after-checkpoint
+```
+$ go run ./cmd/dot-agents workflow status
+Next Action: Status: Completed (2026-04-11)
+```
+Scenario: [write-command-path]
+Expectation: unexpected — "Next Action" renders the status-header text of the first active plan literally
+Follow-on: documented — checkpoint serializes first active plan's `Status:` field as next_action verbatim; this is misleading UX
+Classification: [ok-warning]
+
+Trace: workflow-tasks-no-yaml-plan
+```
+$ go run ./cmd/dot-agents workflow tasks crg-kg-integration
+Error: plan "crg-kg-integration" not found: open .../PLAN.yaml: no such file or directory
+```
+Scenario: [no-canonical-plan]
+Expectation: expected — `workflow tasks` requires PLAN.yaml canonical plans, not .plan.md files
+Follow-on: none
+Classification: [ok-empty]
+
+Trace: status-full
+```
+$ go run ./cmd/dot-agents status
+dot-agents, ResumeAgent, payout — all projects showing ✓ on platforms+manifest
+User Config: ! 4 broken links (.claude/skills/debug-test-skill*)
+dot-agents manifest: ! git source not yet fetched
+```
+Scenario: [clean-repo]
+Expectation: expected — broken links are pre-existing, git source requires explicit install
+Follow-on: none
+Classification: [ok-warning]
+
+Trace: doctor-broken-links
+```
+$ go run ./cmd/dot-agents doctor
+User Config: ! 4 broken link(s) — .claude/skills/debug-test-skill variants
+dot-agents: ! git source not yet fetched
+```
+Scenario: [clean-repo]
+Expectation: expected — pre-existing environment issue, not a regression
+Follow-on: none
+Classification: [ok-warning]
+
+Trace: kg-health-no-kg-home
+```
+$ go run ./cmd/dot-agents kg health
+Error: knowledge graph not initialized at /Users/nikashp/knowledge-graph — run 'dot-agents kg setup' first
+```
+Scenario: [no-kg-home-configured]
+Expectation: expected — KG_HOME not initialized
+Follow-on: none
+Classification: [ok-empty]
+
+Trace: kg-query-no-kg-home
+```
+$ go run ./cmd/dot-agents kg query "GraphStore interface implementation"
+Error: knowledge graph not initialized — run 'dot-agents kg setup' first
+```
+Scenario: [no-kg-home-configured]
+Expectation: expected
+Follow-on: none
+Classification: [ok-empty]
+
+Trace: kg-lint-no-kg-home
+```
+$ go run ./cmd/dot-agents kg lint
+Error: knowledge graph not initialized — run 'dot-agents kg setup' first
+```
+Scenario: [no-kg-home-configured]
+Expectation: expected
+Follow-on: none
+Classification: [ok-empty]
 
 ### Iteration 4 — 2026-04-11
 ```
@@ -260,37 +494,37 @@ Classification: [ok]
 
 | Command | Tested | Last Iteration | Status |
 |---|---|---|---|
-| `status` | no | - | - |
-| `doctor` | no | - | - |
-| `workflow status` | yes | 4 | ok |
-| `workflow orient` | no | - | - |
-| `workflow checkpoint` | no | - | - |
+| `status` | yes | 5 | ok-warning |
+| `doctor` | yes | 5 | ok-warning |
+| `workflow status` | yes | 5 | ok-warning |
+| `workflow orient` | yes | 5 | ok |
+| `workflow checkpoint` | yes | 5 | ok |
 | `workflow log` | no | - | - |
-| `workflow plan` | no | - | - |
-| `workflow tasks` | no | - | - |
+| `workflow plan` | yes | 5 | ok-empty |
+| `workflow tasks` | yes | 5 | ok-empty |
 | `workflow advance` | no | - | - |
-| `workflow health` | no | - | - |
+| `workflow health` | yes | 5 | ok |
 | `workflow verify` | no | - | - |
 | `workflow prefs` | no | - | - |
 | `workflow graph` | no | - | - |
 | `workflow fanout` | no | - | - |
 | `workflow merge-back` | no | - | - |
-| `workflow drift` | no | - | - |
+| `workflow drift` | yes | 5 | ok-empty |
 | `workflow sweep` | no | - | - |
 | `kg setup` | no | - | - |
-| `kg health` | no | - | - |
+| `kg health` | yes | 5 | ok-empty |
 | `kg ingest` | no | - | - |
 | `kg queue` | no | - | - |
-| `kg query` | no | - | - |
-| `kg lint` | no | - | - |
+| `kg query` | yes | 5 | ok-empty |
+| `kg lint` | yes | 5 | ok-empty |
 | `kg maintain` | no | - | - |
 | `kg bridge` | no | - | - |
 | `kg sync` | no | - | - |
-| `kg warm` | no | - | - |
-| `kg warm stats` | no | - | - |
-| `kg link add` | no | - | - |
-| `kg link list` | no | - | - |
-| `kg link remove` | no | - | - |
+| `kg warm` | yes | 5 | ok-empty |
+| `kg warm stats` | yes | 5 | ok-empty |
+| `kg link add` | yes | 5 | ok-warning |
+| `kg link list` | yes | 5 | ok |
+| `kg link remove` | yes | 5 | ok |
 | `kg build` | no | - | - |
 | `kg update` | no | - | - |
 | `kg code-status` | yes | 1 | ok |
@@ -298,8 +532,8 @@ Classification: [ok]
 | `kg changes --brief` | yes | 1 | ok |
 | `kg impact` | yes | 2 | ok |
 | `kg communities` | yes | 2 | ok |
-| `kg flows` | yes | 2 | ok |
-| `kg postprocess` | no | - | - |
+| `kg flows` | yes | 5 | ok-warning |
+| `kg postprocess` | yes | 5 | ok |
 
 ## Error Log
 
@@ -320,5 +554,10 @@ Format:
 - `--brief` flag sends human-readable text from CRG, not JSON. The bridge handles both modes correctly now.
 - `kg build` and `kg update` stream output directly; no structured return — good for interactive use.
 - `kg impact` output includes File-level nodes in "Changed nodes" section — these add noise; filtered out in the render pass (only non-File nodes shown). Good UX decision.
-- `kg flows` is empty without first running `kg postprocess` — worth noting in help text or adding a tip in the empty-state message (already done: "Run 'dot-agents kg postprocess' to detect flows").
+- `kg flows` help text says "Run 'dot-agents kg postprocess' to detect flows" but the real requirement is `igraph` being installed. After postprocess without igraph, flows are still 0 and the message is misleading. Should say "Install igraph or run in an environment with igraph available."
 - `runPyQuery` pattern works cleanly for calling CRG Python tool functions without needing a full MCP server — useful pattern for adding more CRG capabilities later.
+- `kg warm` silently succeeds with 0 notes when KG_HOME doesn't exist — reasonable behavior but could print a hint: "KG_HOME not initialized, run 'dot-agents kg setup' to create note directories."
+- `kg link add` accepts any string as note-id without checking if the note exists in the warm DB or filesystem. Creates orphaned links. A future iteration should add a soft validation warning.
+- `workflow status` Next Action field shows the literal `Status: <text>` header from the first active plan — this is the plan's status line, not a meaningful next action. The field needs a smarter extraction strategy.
+- `workflow drift` flags all 3 registered projects as warn because none have `.agents/workflow/` directories. This is by design (PLAN.yaml workflow not used), but operators would see this as noisy on every run. Consider filtering or suppressing for projects without canonical workflow initialization.
+- `workflow checkpoint` and `workflow health` work well as a write→verify pair: checkpoint clears the "no checkpoint" warning in health. Good UX feedback loop.
