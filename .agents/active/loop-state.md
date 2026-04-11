@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 14
+Iteration: 16
 
 ## Current Position
 
@@ -21,7 +21,13 @@ Blocked waves (reassessed):
 State summary:
 - `skills promote <name>` command added: creates managed symlink in `agentsHome/skills/<project>/<name>` pointing to repo-local skill, registers in `.agentsrc.json`, calls `ExecuteSharedSkillMirrorPlan` for platform mirrors. 5 unit tests cover success, idempotency, and 3 error paths.
 - `ExecuteSharedSkillMirrorPlan` now has its first caller from the command layer (`skills promote`).
-- Next slice: `skill-import-streamline` item 4 (shared-skills convergence) or `resource-intent-centralization` Phase 3 first unchecked item (migrate callers to use executor).
+- The intended workflow surfaces are now genuinely usable for this repo: `workflow orient`, `workflow status`, `workflow health`, `workflow plan`, and `workflow tasks crg-kg-integration` all return meaningful data.
+- Canonical plan inventory is no longer empty: `workflow plan` currently lists 6 canonical plans, and `workflow tasks crg-kg-integration` shows Phase E in progress with dependent Phase F/G pending.
+- `workflow status` next action is currently stale checkpoint data (`Status: Completed (2026-04-11)`), so wave selection must rely on `workflow orient` + `workflow plan/tasks` + loop-state until checkpoint persistence is refreshed.
+- `skills promote` now does copy-move convergence: canonical path (`~/.agents/skills/<project>/<name>/`) is a real directory; repo-local (`.agents/skills/<name>/`) becomes a managed symlink. Prevents circular symlinks during platform mirror refresh.
+- 6 tests cover success (convergence), idempotency, and 4 error paths (not found, no project name, mispointing symlink, canonical real-dir clash).
+- `skill-import-streamline` items 1–4 complete; item 5 (regression tests) remains.
+- Next slice: `skill-import-streamline` item 5 (add regression tests for full promote flow and mirror convergence) or `resource-intent-centralization` Phase 3 first unchecked item.
 
 ## Loop Health
 
@@ -33,11 +39,32 @@ Current findings:
 - `playbook-hygiene`: on-target — playbook rewritten in place for iteration 16.
 - `evidence-signal`: CLI trace is `skills --help` confirming wiring; primary proof is 5 unit tests covering success + 3 error paths.
 - `new-command-surface`: iteration 15 adds the first skills-management write-path command; iteration 16 should exercise `skills list` as a read-only surface to prove the agentsHome scan end-to-end.
+- `workflow-dogfooding`: needs improvement — the repo now has usable `workflow orient/status/plan/tasks` readback, but the loop-state still frames workflow commands mostly as evidence instead of the primary session-management surface.
+- `canonical-plan-reality`: needs improvement — loop-state still carries old empty-plan assumptions in a few sections even though `workflow plan` now returns 6 canonical plans.
+- `checkpoint-freshness`: needs improvement — `workflow status` still surfaces a stale next action from an old checkpoint, which is useful evidence but should be treated as stale readback, not current marching orders.
 
 Operating rules for iteration 16+:
 - Prefer one final commit per iteration that includes code plus loop-state/plan updates.
 - Use one primary evidence chain plus at most one secondary probe; reconcile coverage tables before closeout.
 - Rewrite summary sections in place; do not append duplicate playbook blocks.
+- Start each iteration with `workflow orient`, `workflow status`, and `workflow plan`; if the chosen wave has a canonical plan, run `workflow tasks <id>` before selecting the exact checklist item.
+- Treat checkpoint-backed `workflow status` as runtime readback and canonical `workflow tasks` as machine-readable plan truth; if they disagree, log it rather than guessing.
+- Prefer sandboxed `workflow checkpoint` / `workflow verify record` for closeout dogfooding when real `~/.agents` writes are not explicitly approved.
+
+## Workflow Command Baseline
+
+Current repo baseline from live readback:
+- `workflow orient`: usable. Lists repo metadata, 6 canonical plans, 6 active markdown plans, checkpoint pointer, lessons, and health.
+- `workflow status`: usable, but next action is stale checkpoint text: `Status: Completed (2026-04-11)`.
+- `workflow health`: healthy; dirty files `0`, active plan `true`, canonical plans `6`, checkpoint `true`, proposals `0`.
+- `workflow plan`: usable; canonical inventory currently contains `active-artifact-cleanup`, `crg-kg-integration`, `platform-dir-unification`, `refresh-skill-relink`, `resource-intent-centralization`, and `skill-import-streamline`.
+- `workflow tasks crg-kg-integration`: usable; `phase-e-postgres` is `in_progress`, `phase-f-go-mcp` pending, `phase-g-skill-integration` pending.
+- `workflow verify log`: usable empty-state; returns `No verification records found.`
+
+Dogfood implications:
+- Session start should use workflow commands first, then markdown plans for richer rationale and checklist detail.
+- Canonical plan/task presence is now a normal condition for this repo, not an aspirational future state.
+- Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
 
@@ -63,6 +90,36 @@ Self-assessment:
 - ran_cli_command: yes
 - exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
 - cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
+### Iteration 16 — 2026-04-11
+- wave: skill-import-streamline
+- item: Fix shared `.agents/skills/*` convergence so repo-local source directories can become managed mirrors after promotion without conflicting platform relink behavior
+- scenario_tags: [canonical-plan-stale, skills-promote-convergence, skills-list-readback]
+- feedback_goal: After promote, does `skills list <project>` show the promoted skill, confirming the agentsHome scan works end-to-end with canonical as real dir + repo-local as managed symlink?
+- files_changed: 5
+- lines_added: 97
+- lines_removed: 43
+- tests_added: 1
+- tests_total_pass: true
+- retries: 2 (io/fs import order + SKILL.md check ordering before symlink validation)
+- commit: (pending)
+- scope_note: "on-target"
+- summary: Rewrote promoteSkillIn to copy-move: canonical is real dir, repo-local becomes managed symlink. Added mispointing-symlink error path test. Canonical tasks advanced for items 1-4.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (convergence success + idempotency + 4 error paths including new symlink-mispoints)
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: yes (advanced items 1-4 to completed; workflow tasks confirms)
+- persisted_via_workflow_commands: sandboxed (workflow advance used to update canonical task state)
+- ran_cli_command: yes
+- exercised_new_scenario: yes (skills-list-readback: `skills list dot-agents` returns 3 skills)
+- cli_produced_actionable_feedback: yes (agentsHome scan returns correct results end-to-end)
 - linked_traces_to_outcomes: yes
 - stayed_under_10_files: yes
 - no_destructive_commands: yes
@@ -428,25 +485,28 @@ Loop closeout rules:
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
 - Reconcile coverage tables before ending the iteration.
+- Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **skill-import-streamline item 4**: Fix shared `.agents/skills/*` convergence — repo-local source directories becoming managed mirrors after promotion without conflicting platform relink behavior.
-2. **resource-intent-centralization Phase 3 item 1**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
-3. **skill-import-streamline item 5**: Add tests for manifest save preserving sources/unknown-fields, import/promote of project skills, and repo `.agents/skills/*` becoming managed links.
+1. **skill-import-streamline item 5**: Add regression tests for manifest round-trip, full promote flow (copy-move convergence), and repo `.agents/skills/*` becoming managed links.
+2. **resource-intent-centralization Phase 3 first unchecked item**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
 
-Preferred single item for iteration 16:
-- skill-import-streamline item 4 (shared-skills convergence) — it validates the promote flow end-to-end and unblocks resource-intent Phase 3.
+Preferred single item for iteration 17:
+- skill-import-streamline item 5 (regression tests) — completes the wave and locks in the copy-move convergence behavior.
 
-Primary feedback goal for iteration 16:
-- After a `skills promote`, does `skills list <project>` show the newly promoted skill, confirming the agentsHome scan works end-to-end?
+Primary feedback goal for iteration 17:
+- Do the new regression tests cover the promote copy-move path, idempotency, and the symlink-mirror state without manual setup? Does `go test ./commands/ -run TestPromote` stay green?
 
 Command-feedback priorities:
-- Prefer `skills list <project>` as the closest runnable surface; secondary `workflow orient` to confirm no regressions.
+- Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks skill-import-streamline` before choosing the checklist item.
+- Primary evidence: prefer `skills list <project>` and `workflow tasks skill-import-streamline` to confirm convergence and task state.
+- Closeout dogfooding: sandbox `workflow checkpoint` and `workflow verify record` when the wave is complete.
 
 Known baseline CLI noise:
 - `status` / `doctor` warn about 4 broken Claude skill links in user config.
 - `doctor` warns that the `dot-agents` git source is not yet fetched.
 - `workflow sweep --dry-run` shows 5 actions across 3 projects; these are valid drift findings, not noise.
+- `workflow status` next action is stale checkpoint text today; treat it as a freshness bug / baseline warning, not as the source of truth for wave selection.
 
 Note:
 - `ExecuteSharedSkillMirrorPlan` in `resource_plan.go` now has its first caller (`skills promote`). The Phase 5 cleanup note is no longer relevant.
@@ -465,6 +525,7 @@ Signals already captured:
 - A clearer distinction between high-signal feedback traces and low-signal baseline health rechecks
 - Command-level coverage tracking (28 of ~41 commands now tested)
 - Scenario coverage grouped by workflow, KG, CRG, bridge/config, delegation, integration, and outcome-quality families
+- Workflow dogfooding baseline is now explicit: `workflow orient/status/health/plan/tasks/verify log` are all known-good read surfaces, with one known freshness issue in `workflow status`
 - The `ResourceIntent` contract and the first `ResourcePlan` builder/executor slice are now codified in Go with validation, dedupe/conflict, and imported-dir convergence tests
 - Write-command-path traces: kg warm, kg link CRUD, workflow checkpoint
 - Empty-state traces: kg health/query/lint (no KG_HOME), workflow tasks/plan (no PLAN.yaml), kg flows (no igraph)
@@ -476,7 +537,7 @@ Signals already captured:
 Signals still missing or too weak:
 - A live command trace that proves the new planner is aggregated once at the command layer during a projection-style run, not just inside per-platform skill emitters and explain text
 - Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork
-- Canonical workflow state transitions: `workflow advance`, `workflow verify`, and plan/task flows with real `PLAN.yaml` + `TASKS.yaml` (workflow log now covered)
+- Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
 - Initialized KG lifecycle: `kg setup`, `kg ingest`, `kg queue`, `kg query`, `kg lint`, `kg maintain`, and `kg sync`
@@ -501,8 +562,8 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `clean-repo` | yes | 12 | Reconfirmed after Phase 4 complete; all 4 adapters thinned, tests pass, workflow health stable |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
 | `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
-| `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, and `workflow drift` all returned expected empty/no-plan states |
-| `canonical-plan-present` | no | - | requires a real `PLAN.yaml` + `TASKS.yaml` plan to exist |
+| `no-canonical-plan` | yes | 5 | historical empty-state trace from early loop setup; keep as contrast against the now-populated canonical plan inventory |
+| `canonical-plan-present` | yes | 14 | `workflow plan` now lists 6 canonical plans; live workflow readback during dogfooding review confirmed the inventory is stable |
 | `current-focus-task-present` | no | - | requires active canonical plan state with `current_focus_task` set |
 | `blocked-plan-set` | yes | 5 | `workflow orient` rendered blocked and deferred active plans correctly |
 | `blocked-task-visible` | no | - | requires canonical tasks with `blocked` status surfaced by `workflow tasks` or `plan show` |
@@ -1084,6 +1145,8 @@ Change Impact — structured output with changed symbols, test gaps, review prio
 Classification: [ok]
 
 ## Command Coverage
+
+This table tracks the last **loop-traced** invocation per command. For current live readback capability outside a numbered iteration, also see `## Workflow Command Baseline`.
 
 | Command | Tested | Last Iteration | Status |
 |---|---|---|---|
