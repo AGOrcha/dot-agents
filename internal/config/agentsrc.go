@@ -106,6 +106,95 @@ type AgentsRC struct {
 	MCP      StringsOrBool `json:"mcp"`
 	Settings bool          `json:"settings"`
 	Sources  []Source      `json:"sources"`
+
+	// ExtraFields captures unknown JSON keys so Save() can round-trip them
+	// instead of silently dropping legacy or custom fields.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
+var agentsRCKnown = map[string]bool{
+	"$schema": true, "version": true, "project": true,
+	"skills": true, "rules": true, "agents": true,
+	"hooks": true, "mcp": true, "settings": true, "sources": true,
+}
+
+// agentsRCCore is an alias used in custom marshal/unmarshal to avoid
+// infinite recursion while still using the standard json encoder.
+type agentsRCCore struct {
+	Schema   string        `json:"$schema,omitempty"`
+	Version  int           `json:"version"`
+	Project  string        `json:"project,omitempty"`
+	Skills   []string      `json:"skills,omitempty"`
+	Rules    []string      `json:"rules,omitempty"`
+	Agents   []string      `json:"agents,omitempty"`
+	Hooks    StringsOrBool `json:"hooks"`
+	MCP      StringsOrBool `json:"mcp"`
+	Settings bool          `json:"settings"`
+	Sources  []Source      `json:"sources"`
+}
+
+func (a *AgentsRC) UnmarshalJSON(data []byte) error {
+	var core agentsRCCore
+	if err := json.Unmarshal(data, &core); err != nil {
+		return err
+	}
+	a.Schema = core.Schema
+	a.Version = core.Version
+	a.Project = core.Project
+	a.Skills = core.Skills
+	a.Rules = core.Rules
+	a.Agents = core.Agents
+	a.Hooks = core.Hooks
+	a.MCP = core.MCP
+	a.Settings = core.Settings
+	a.Sources = core.Sources
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for k, v := range all {
+		if !agentsRCKnown[k] {
+			if a.ExtraFields == nil {
+				a.ExtraFields = make(map[string]json.RawMessage)
+			}
+			a.ExtraFields[k] = v
+		}
+	}
+	return nil
+}
+
+func (a AgentsRC) MarshalJSON() ([]byte, error) {
+	core := agentsRCCore{
+		Schema:   a.Schema,
+		Version:  a.Version,
+		Project:  a.Project,
+		Skills:   a.Skills,
+		Rules:    a.Rules,
+		Agents:   a.Agents,
+		Hooks:    a.Hooks,
+		MCP:      a.MCP,
+		Settings: a.Settings,
+		Sources:  a.Sources,
+	}
+	data, err := json.Marshal(core)
+	if err != nil {
+		return nil, err
+	}
+	if len(a.ExtraFields) == 0 {
+		return data, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range a.ExtraFields {
+		if _, exists := m[k]; !exists {
+			m[k] = v
+		}
+	}
+	return json.Marshal(m)
 }
 
 // Source describes where to find agent resources.

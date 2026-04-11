@@ -678,6 +678,95 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	}
 }
 
+// ── Unknown field round-trip ─────────────────────────────────────────────────
+
+func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Write a manifest that contains a legacy "refresh" block and a custom
+	// "myteam" key that AgentsRC does not model.
+	input := `{
+  "version": 1,
+  "project": "myproject",
+  "sources": [{"type":"local"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "refresh": {"interval": "daily", "auto": true},
+  "myteam": "platform"
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+
+	// Known fields intact
+	if rc.Project != "myproject" {
+		t.Errorf("Project: got %q, want %q", rc.Project, "myproject")
+	}
+	// Extra fields captured
+	if len(rc.ExtraFields) != 2 {
+		t.Fatalf("ExtraFields: got %d keys, want 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
+	}
+	if _, ok := rc.ExtraFields["refresh"]; !ok {
+		t.Error("ExtraFields missing 'refresh'")
+	}
+	if _, ok := rc.ExtraFields["myteam"]; !ok {
+		t.Error("ExtraFields missing 'myteam'")
+	}
+
+	// Mutate a known field and save
+	rc.Project = "renamed"
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Reload and check both the mutation and the extra fields survived
+	rc2, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC after save: %v", err)
+	}
+	if rc2.Project != "renamed" {
+		t.Errorf("Project after save: got %q, want %q", rc2.Project, "renamed")
+	}
+	if len(rc2.ExtraFields) != 2 {
+		t.Fatalf("ExtraFields after save: got %d keys, want 2; keys: %v", len(rc2.ExtraFields), rc2.ExtraFields)
+	}
+	if _, ok := rc2.ExtraFields["refresh"]; !ok {
+		t.Error("ExtraFields after save missing 'refresh'")
+	}
+	// Verify the refresh block value is intact
+	var refreshVal map[string]any
+	if err := json.Unmarshal(rc2.ExtraFields["refresh"], &refreshVal); err != nil {
+		t.Fatalf("unmarshal refresh extra field: %v", err)
+	}
+	if refreshVal["interval"] != "daily" {
+		t.Errorf("refresh.interval: got %v, want 'daily'", refreshVal["interval"])
+	}
+}
+
+func TestAgentsRCKnownFieldsNotDuplicated(t *testing.T) {
+	// Known fields must not appear in ExtraFields even if the JSON has a key
+	// collision (e.g. someone accidentally writes "version" twice — last wins
+	// in Go's json.Unmarshal, and it should stay in the known slot only).
+	tmp := t.TempDir()
+	input := `{"version":1,"project":"p","sources":[{"type":"local"}],"hooks":false,"mcp":false,"settings":false}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if len(rc.ExtraFields) != 0 {
+		t.Errorf("ExtraFields should be empty for a manifest with only known keys, got: %v", rc.ExtraFields)
+	}
+}
+
 // ── JSON shape produced by Save ───────────────────────────────────────────────
 
 func TestAgentsRCJSONShape(t *testing.T) {
