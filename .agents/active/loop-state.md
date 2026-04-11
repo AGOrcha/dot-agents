@@ -78,7 +78,7 @@ Self-assessment:
 - tests_added: 5
 - tests_total_pass: true
 - retries: 0
-- commit: TBD
+- commit: f9488ba
 - scope_note: "on-target"
 - summary: Added `skills promote` subcommand with promoteSkillIn; creates managed symlink + updates manifest + calls ExecuteSharedSkillMirrorPlan; 5 tests cover success, idempotency, 3 error paths
 
