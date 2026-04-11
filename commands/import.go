@@ -37,6 +37,25 @@ type importResult struct {
 type importOutput struct {
 	destRel string
 	content []byte
+	// Origin is the emitting platform id for canonical hook imports (cursor, codex, claude, copilot, github).
+	// When set and an on-disk conflict occurs, RFC §6 non-destructive alternate naming applies.
+	Origin string
+}
+
+// importConflictReviewNote is the on-disk shape for ~/.agents/review-notes/import-conflicts/*.yaml (RFC §7).
+type importConflictReviewNote struct {
+	ID               string   `yaml:"id"`
+	Status           string   `yaml:"status"`
+	Kind             string   `yaml:"kind"`
+	Bucket           string   `yaml:"bucket"`
+	Scope            string   `yaml:"scope"`
+	LogicalName      string   `yaml:"logical_name"`
+	CanonicalTarget  string   `yaml:"canonical_target"`
+	AlternateTarget  string   `yaml:"alternate_target"`
+	Origin           string   `yaml:"origin"`
+	Rationale        string   `yaml:"rationale,omitempty"`
+	SuggestedActions []string `yaml:"suggested_actions,omitempty"`
+	CreatedAt        string   `yaml:"created_at"`
 }
 
 type importedCopilotHooksFile struct {
@@ -565,6 +584,17 @@ func processImportOutput(c importCandidate, output importOutput, agentsHome, tim
 		return importResult{}
 	}
 
+	if output.Origin != "" {
+		if altRel, ok := importConflictFirstFreeAlternateDestRel(agentsHome, output.destRel, output.Origin); ok {
+			altDest := filepath.Join(agentsHome, altRel)
+			if _, err := os.Stat(altDest); os.IsNotExist(err) {
+				resolved := c
+				resolved.destRel = altRel
+				return importPreservedConflictCandidate(resolved, agentsHome, output.destRel, altRel, altDest, output.content, timestamp, output.Origin)
+			}
+		}
+	}
+
 	return replaceImportContentCandidate(resolved, agentsHome, dest, output.content, timestamp, srcInfo, destInfo)
 }
 
@@ -605,6 +635,134 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 	return importResult{imported: 1}
 }
 
+func importPreservedConflictCandidate(c importCandidate, agentsHome, primaryRel, altRel, altDest string, content []byte, timestamp, origin string) importResult {
+	if Flags.DryRun {
+		ui.DryRun(fmt.Sprintf("Import conflict: preserve %s; write alternate %s", primaryRel, altRel))
+		return importResult{imported: 1}
+	}
+
+	if err := writeImportConflictReviewNote(agentsHome, c.project, primaryRel, altRel, origin); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("could not write import conflict review note: %v", err))
+	}
+
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
+	if err := os.MkdirAll(filepath.Dir(altDest), 0755); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to create %s: %v", altRel, err))
+		return importResult{skipped: 1}
+	}
+	if err := os.WriteFile(altDest, content, 0644); err != nil {
+		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
+		return importResult{skipped: 1}
+	}
+
+	ui.Bullet("ok", fmt.Sprintf("Preserved %s; imported alternate -> %s", primaryRel, altRel))
+	return importResult{imported: 1}
+}
+
+// importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
+func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
+	o := sanitizeHookNamePart(origin)
+	if o == "" {
+		o = "import"
+	}
+	log := sanitizeHookNamePart(logical)
+	if log == "" {
+		log = "hook"
+	}
+	base := o + "-" + log
+	if !taken(base) {
+		return base
+	}
+	n := 2
+	for {
+		cand := fmt.Sprintf("%s-%d", base, n)
+		if !taken(cand) {
+			return cand
+		}
+		n++
+	}
+}
+
+// importConflictFirstFreeAlternateDestRel returns a hooks-relative path under agentsHome that does not yet exist.
+func importConflictFirstFreeAlternateDestRel(agentsHome, primaryDestRel, origin string) (string, bool) {
+	primaryDestRel = filepath.ToSlash(primaryDestRel)
+	if !strings.HasPrefix(primaryDestRel, agentsHooksPrefix) {
+		return "", false
+	}
+	trim := strings.TrimPrefix(primaryDestRel, agentsHooksPrefix)
+	parts := strings.Split(trim, "/")
+	if len(parts) == 3 && parts[2] == "HOOK.yaml" {
+		scope, logical := parts[0], parts[1]
+		taken := func(bundle string) bool {
+			p := filepath.Join(agentsHome, "hooks", scope, bundle, "HOOK.yaml")
+			_, err := os.Stat(p)
+			return err == nil
+		}
+		name := importConflictStableBundleName(logical, origin, taken)
+		return agentsHooksPrefix + scope + "/" + name + "/HOOK.yaml", true
+	}
+	if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
+		scope := parts[0]
+		stem := strings.TrimSuffix(parts[1], ".json")
+		taken := func(stemCandidate string) bool {
+			p := filepath.Join(agentsHome, "hooks", scope, stemCandidate+".json")
+			_, err := os.Stat(p)
+			return err == nil
+		}
+		newStem := importConflictStableBundleName(stem, origin, taken)
+		return agentsHooksPrefix + scope + "/" + newStem + ".json", true
+	}
+	return "", false
+}
+
+func logicalNameFromHooksDest(destRel string) string {
+	destRel = filepath.ToSlash(destRel)
+	trim := strings.TrimPrefix(destRel, agentsHooksPrefix)
+	parts := strings.Split(trim, "/")
+	if len(parts) == 3 && parts[2] == "HOOK.yaml" {
+		return parts[1]
+	}
+	if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
+		return strings.TrimSuffix(parts[1], ".json")
+	}
+	return ""
+}
+
+func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel, origin string) error {
+	if Flags.DryRun {
+		return nil
+	}
+	dir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	id := fmt.Sprintf("ic-%d", time.Now().UnixNano())
+	logical := logicalNameFromHooksDest(primaryRel)
+	note := importConflictReviewNote{
+		ID:              id,
+		Status:          "pending",
+		Kind:            "duplicate_name",
+		Bucket:          "hooks",
+		Scope:           project,
+		LogicalName:     logical,
+		CanonicalTarget: primaryRel,
+		AlternateTarget: alternateRel,
+		Origin:          origin,
+		Rationale:       "Import produced different canonical hook content than the existing managed file; alternate path preserves both variants per resource-intent-centralization RFC §6.",
+		SuggestedActions: []string{
+			"Compare canonical_target vs alternate_target and reconcile hook bundles manually if needed.",
+			"Delete the alternate after merging if it is redundant.",
+		},
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := yaml.Marshal(&note)
+	if err != nil {
+		return err
+	}
+	fn := filepath.Join(dir, id+".yaml")
+	return os.WriteFile(fn, append(data, '\n'), 0644)
+}
+
 func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
 	if err != nil {
@@ -634,6 +792,7 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 		return []importOutput{{
 			destRel: agentsHooksPrefix + c.project + "/" + name + ".json",
 			content: raw,
+			Origin:  "github",
 		}}, true, nil
 	}
 
@@ -864,6 +1023,7 @@ func buildCanonicalHookOutputs(scope string, specs []importedHookSpec) []importO
 		outputs = append(outputs, importOutput{
 			destRel: agentsHooksPrefix + scope + "/" + name + "/HOOK.yaml",
 			content: append(content, '\n'),
+			Origin:  spec.platform,
 		})
 	}
 	return outputs

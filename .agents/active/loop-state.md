@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 25
+Iteration: 26
 
 ## Current Position
 
@@ -35,7 +35,8 @@ State summary:
 - `remove` runs `RemoveSharedTargetPlan` (same merged plan as install/refresh) for all **installed** platforms before per-platform `RemoveLinks`; unit tests cover skill symlink + Codex TOML teardown.
 - `RunSharedTargetProjection(project, repoPath, platforms, dryRun)` wraps `DryRunSharedTargetPlanLines` vs `CollectAndExecuteSharedTargetPlan` so refresh, install (`createInstallPlatformLinks`), and `add` share one command-layer entry point for shared targets (tests: dry-run parity + apply returns nil lines).
 - Phase 6 (partial): `internal/platform/resource_plan_test.go` adds `stubPlatform` and tests that `BuildSharedTargetPlan` / `DryRunSharedTargetPlanLines` surface dedupe, `conflicting intents`, and platform `SharedTargetIntents` failures on the aggregation path (not only direct `BuildResourcePlan`).
-- Next slice: Phase 6 remaining bullets (import conflict, refresh/import regression, executor-only replacement, status/explain); optional adapter thinning; or `crg-kg-integration` Phase E incremental work.
+- Phase 6 (partial): **import conflict** — canonical hook `importOutput` carries `Origin` (platform id); when on-disk content differs, `processImportOutput` writes an origin-prefixed alternate under `hooks/<scope>/…` and an advisory YAML under `AGENTS_HOME/review-notes/import-conflicts/` (RFC §6–§7); replace-with-confirm remains when `Origin` is empty. Covered by unit + integration tests (`TestProcessImportOutput_preservesHookConflict`, dry-run branch).
+- Next slice: Phase 6 remaining bullets (refresh/import regression, executor-only replacement, status/explain tests); optional adapter thinning; or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
@@ -76,6 +77,37 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 26 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 6 — import conflict coverage: origin-prefixed alternate hook paths + `review-notes/import-conflicts/` advisory YAML
+- scenario_tags: [clean-repo, canonical-plan-present, import-conflict-preserve-both]
+- feedback_goal: After adding `importOutput.Origin` and preserve-both conflict handling, do unit tests prove the alternate bundle path and review note are written without hitting interactive replace?
+- files_changed: 4
+- lines_added: 431
+- lines_removed: 9
+- tests_added: 7
+- tests_total_pass: true
+- retries: 0
+- commit: (same commit as this change; see `git log -1`)
+- scope_note: "on-target"
+- summary: Hook canonical imports attach platform Origin; content mismatch writes `hooks/…/<origin-logical>/HOOK.yaml` (or `.json` fallback) plus RFC-shaped review note; dry-run skips writes; replace path unchanged when Origin empty; `import --help` CLI sanity
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (success preserve path, dry-run no write, unsupported dest rel implicit via first-free tests)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes (session start)
+- aligned_with_canonical_tasks: partial (phase-6-verification still pending in YAML; markdown Phase 6 item 2 done)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes (`import --help`)
+- exercised_new_scenario: yes (import-conflict-preserve-both)
+- cli_produced_actionable_feedback: informative-nonblocking (help confirms import still wired; behavior proven in tests)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 25 — 2026-04-11
 - wave: resource-intent-centralization
@@ -756,6 +788,9 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
+Preferred single item for iteration 27:
+- Phase **6** next unchecked bullet — refresh/import regression for imported-directory → managed shared-target transition, executor-only replacement tests, or status/explain registry tests; **or** `crg-kg-integration` Phase E Postgres slice.
+
 Loop closeout rules (iteration 21+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
@@ -763,14 +798,11 @@ Loop closeout rules (iteration 21+):
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 6 (remaining)**: next unchecked bullets — import conflict coverage, refresh/import regression, non-empty dir replacement allowlist, status/explain registry tests.
+1. **resource-intent-centralization Phase 6 (remaining)**: refresh/import regression, non-empty dir replacement allowlist, status/explain registry tests.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 26:
-- Phase **6** next verification bullet **or** `crg-kg-integration` Phase E Postgres slice **or** `workflow advance` to reconcile canonical `phase-5-unify-commands` when markdown/YAML scope align.
-
-Primary feedback goal for iteration 26 (example):
-- Does new import-conflict or registry test fail if `collectSharedTargetIntents` ordering changes, or does Postgres store test pass?
+Primary feedback goal for iteration 27 (example):
+- Does a new refresh/import regression test fail if shared-target execution order changes, or does a Postgres graphstore test pass?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -862,6 +894,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
 | `skills-promote-new-command` | yes | 15 | `skills promote` wired and tested; creates managed symlink + updates .agentsrc.json + calls ExecuteSharedSkillMirrorPlan; CLI help confirms subcommand present |
 | `promote-preserves-extra-manifest` | yes | 17 | `TestPromoteSkillIn_PreservesManifestUnknownFields`: promote path keeps `refresh`/`myteam` ExtraFields and multi-source `sources` after `Save()` |
+| `import-conflict-preserve-both` | yes | 26 | `TestProcessImportOutput_preservesHookConflict` + dry-run test: alternate `hooks/…/HOOK.yaml`, `review-notes/import-conflicts/ic-*.yaml`; `Origin` empty still uses replace path |
 
 ### Delegation Lifecycle
 
@@ -996,6 +1029,17 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 26 — 2026-04-11
+
+Trace: import-help-after-conflict-import-change
+Command: `go run ./cmd/dot-agents import --help`
+Scenario: [clean-repo, canonical-plan-present, import-conflict-preserve-both]
+Feedback goal: Does the `import` subcommand still register after hook conflict handling changes (help path intact)?
+Output summary: Usage line, `--scope`, global flags including `--dry-run` / `--yes` (replace prompts still relevant when Origin empty).
+Expectation: expected
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 25 — 2026-04-11
 
@@ -1637,6 +1681,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `skills list` | no | - | - |
 | `skills new` | no | - | - |
 | `skills promote` | yes | 15 | ok (--help verified; subcommand wired) |
+| `import --help` | yes | 26 | ok — post import-conflict wiring |
 
 ## Error Log
 
