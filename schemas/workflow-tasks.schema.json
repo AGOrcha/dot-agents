@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-tasks.schema.json",
+  "title": "dot-agents canonical workflow tasks",
+  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/TASKS.yaml. Matches commands.CanonicalTaskFile in commands/workflow.go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_id", "tasks"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Must match parent directory id and PLAN.yaml id"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "status",
+          "depends_on",
+          "blocks",
+          "write_scope",
+          "verification_required"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "description": "Stable task identifier"
+          },
+          "title": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "blocked",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "blocks": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "owner": { "type": "string" },
+          "write_scope": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "verification_required": { "type": "boolean" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,11 +1,19 @@
 # Schema Follow-Ups
 
-This repo now has a repo-local JSON Schema for `.agentsrc.json` at `schemas/agentsrc.schema.json`.
+This repo now has repo-local JSON Schemas under `schemas/`:
 
-Deferred until `.agents/active/resource-intent-centralization.plan.md` is complete:
+| Schema | Path | Target artifact |
+|--------|------|-----------------|
+| `.agentsrc.json` | `schemas/agentsrc.schema.json` | Project manifest (aligned with Go `AgentsRC`; rejects unknown top-level fields) |
+| `HOOK.yaml` | `schemas/hook.schema.json` | Canonical hook bundle manifest under `~/.agents/hooks/<scope>/<name>/` |
+| Workflow plan | `schemas/workflow-plan.schema.json` | `.agents/workflow/plans/<id>/PLAN.yaml` |
+| Workflow tasks | `schemas/workflow-tasks.schema.json` | `.agents/workflow/plans/<id>/TASKS.yaml` |
 
-- canonical `HOOK.yaml` schema file
-- schema-backed validation for other introduced canonical files and bundles
-- deciding which schema families remain repo-local versus moving into exported/public schema paths
+Editor validation: point YAML language servers at these `$id` paths (see `# yaml-language-server: $schema=...` comments in generated bundles).
 
-The current rule is to keep the repo-local `.agentsrc.json` schema aligned with the Go `AgentsRC` model and reject unknown top-level fields.
+**Still deferred (not blocking schema files):**
+
+- Wire schema-backed **runtime** validation in the Go CLI for `HOOK.yaml`, `PLAN.yaml`, and `TASKS.yaml` (optional; unmarshaling already enforces structure for workflow files).
+- Deciding which schema families remain repo-local versus moving into exported/public schema paths for downstream consumers.
+
+The former deferral tied to `resource-intent-centralization` for *authoring* `HOOK.yaml` schema is satisfied: the schema file exists; command-layer validation remains a separate follow-up.

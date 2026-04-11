@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-plan.schema.json",
+  "title": "dot-agents canonical workflow plan",
+  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/PLAN.yaml. Matches commands.CanonicalPlan in commands/workflow.go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "status",
+    "summary",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+      "description": "Directory name under .agents/workflow/plans/; use kebab-case"
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "paused", "completed", "archived"]
+    },
+    "summary": { "type": "string" },
+    "created_at": {
+      "type": "string",
+      "description": "RFC3339 timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "RFC3339 timestamp"
+    },
+    "owner": { "type": "string" },
+    "success_criteria": { "type": "string" },
+    "verification_strategy": { "type": "string" },
+    "current_focus_task": { "type": "string" }
+  }
+}

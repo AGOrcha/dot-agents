@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: "platform-dir-unification"
+title: "Canonical ~/.agents Rollout Plan"
+status: "paused"
+summary: "Stage 1+2+3 Go layer complete; bash parity and new buckets blocked on resource-intent rollout."
+created_at: "2026-03-01T00:00:00Z"
+updated_at: "2026-04-11T12:00:00Z"
+owner: "dot-agents"
+success_criteria: "Documented canonical buckets + command mapping; bash parity when unblocked."
+verification_strategy: "Integration tests; manual bash smoke when Phase 4+5 resume"
+current_focus_task: "Unblock Phases 4–5 after resource-intent-centralization"
