@@ -2532,6 +2532,142 @@ func runKGSync(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// ── Phase B: CRG code-graph commands ─────────────────────────────────────────
+
+// crgRepoRoot returns the nearest git repo root above the cwd, falling back to cwd.
+func crgRepoRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	cur := dir
+	for {
+		if _, err := os.Stat(filepath.Join(cur, ".git")); err == nil {
+			return cur
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return dir
+}
+
+func runKGBuild(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
+	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
+	return bridge.Build(graphstore.BuildOptions{
+		SkipFlows:       skipFlows,
+		SkipPostprocess: skipPost,
+	})
+}
+
+func runKGUpdate(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	base, _ := cmd.Flags().GetString("base")
+	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
+	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	ui.Info(fmt.Sprintf("Updating code graph for %s ...", root))
+	return bridge.Update(graphstore.UpdateOptions{
+		Base:            base,
+		SkipFlows:       skipFlows,
+		SkipPostprocess: skipPost,
+	})
+}
+
+func runKGCodeStatus(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	status, err := bridge.Status()
+	if err != nil {
+		return err
+	}
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header("Code Graph Status")
+	ui.Info(fmt.Sprintf("  Nodes:        %d", status.Nodes))
+	ui.Info(fmt.Sprintf("  Edges:        %d", status.Edges))
+	ui.Info(fmt.Sprintf("  Files:        %d", status.Files))
+	ui.Info(fmt.Sprintf("  Languages:    %s", status.Languages))
+	ui.Info(fmt.Sprintf("  Last updated: %s", status.LastUpdated))
+	return nil
+}
+
+func runKGChanges(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	base, _ := cmd.Flags().GetString("base")
+	brief, _ := cmd.Flags().GetBool("brief")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	report, err := bridge.DetectChanges(graphstore.DetectChangesOptions{
+		Base:  base,
+		Brief: brief,
+	})
+	if err != nil {
+		return err
+	}
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header("Change Impact")
+	ui.Info(report.Summary)
+	if len(report.ChangedFunctions) > 0 {
+		ui.Section("Changed symbols")
+		for _, n := range report.ChangedFunctions {
+			ui.Bullet("warn", fmt.Sprintf("[risk=%.2f] %s", n.RiskScore, n.QualifiedName))
+		}
+	}
+	if len(report.TestGaps) > 0 {
+		ui.Section("Test gaps")
+		for _, g := range report.TestGaps {
+			ui.Bullet("error", g.QualifiedName)
+		}
+	}
+	if len(report.ReviewPriorities) > 0 {
+		ui.Section("Review priorities")
+		for _, p := range report.ReviewPriorities {
+			ui.Bullet("found", fmt.Sprintf("[risk=%.2f] %s — %s", p.RiskScore, p.QualifiedName, p.Reason))
+		}
+	}
+	return nil
+}
+
 // ── Phase D: Hot/cold note lifecycle ─────────────────────────────────────────
 
 // graphstoreDBPath returns the path to the SQLite warm-layer database.
@@ -2930,6 +3066,46 @@ func NewKGCmd() *cobra.Command {
 	}
 	kgLinkCmd.AddCommand(kgLinkAddCmd, kgLinkListCmd, kgLinkRemoveCmd)
 
-	kgCmd.AddCommand(kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd, kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd)
+	// Phase B: CRG code-graph subcommands
+	kgBuildCmd := &cobra.Command{
+		Use:   "build",
+		Short: "Full code graph build (re-parse all files via code-review-graph)",
+		RunE:  runKGBuild,
+	}
+	kgBuildCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgBuildCmd.Flags().Bool("skip-flows", false, "Skip flow/community detection (faster)")
+	kgBuildCmd.Flags().Bool("skip-postprocess", false, "Skip all post-processing (raw parse only)")
+
+	kgUpdateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Incremental code graph update (changed files only)",
+		RunE:  runKGUpdate,
+	}
+	kgUpdateCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgUpdateCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgUpdateCmd.Flags().Bool("skip-flows", false, "Skip flow/community detection")
+	kgUpdateCmd.Flags().Bool("skip-postprocess", false, "Skip all post-processing")
+
+	kgCodeStatusCmd := &cobra.Command{
+		Use:   "code-status",
+		Short: "Show code graph stats (nodes, edges, languages)",
+		RunE:  runKGCodeStatus,
+	}
+	kgCodeStatusCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+
+	kgChangesCmd := &cobra.Command{
+		Use:   "changes",
+		Short: "Detect change impact in the current diff",
+		RunE:  runKGChanges,
+	}
+	kgChangesCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgChangesCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgChangesCmd.Flags().Bool("brief", false, "Show brief summary only")
+
+	kgCmd.AddCommand(
+		kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd,
+		kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd,
+		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgChangesCmd,
+	)
 	return kgCmd
 }

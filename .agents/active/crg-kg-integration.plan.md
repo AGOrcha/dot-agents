@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phase A + Phase D complete (2026-04-11). Phase B (parser port, tree-sitter) is next.
+Status: Phase A + Phase D + Phase B complete (2026-04-11). Phase C (change detection + flows) is next.
 Created: 2026-04-10
 
 ## Problem
@@ -301,14 +301,18 @@ Port the core storage and query engine from Python to Go.
 6. Add `kg_notes` and `note_symbol_links` tables
 7. Tests against SQLite
 
-### Phase B: Parser port (tree-sitter)
+### Phase B: Parser port (CRG subprocess bridge) ✓ COMPLETE
 
-Port AST parsing from Python tree-sitter to Go tree-sitter bindings.
+Delegated AST parsing to the Python code-review-graph CLI via subprocess bridge.
+Decision: full Go tree-sitter port is ~3000 lines of Python; subprocess bridge delivers equivalent
+functionality immediately since `.venv` is already set up with the Python CRG installed.
 
-1. Go tree-sitter bindings for supported languages
-2. Port `parser.py` node/edge extraction logic
-3. Incremental update via file hashing (port `incremental.py`)
-4. `dot-agents kg build` and `dot-agents kg update` commands
+1. ✓ `internal/graphstore/crg.go` — CRGBridge type, DiscoverCRGBin(), Build(), Update(), Status(), DetectChanges()
+2. ✓ `internal/graphstore/crg_test.go` — unit tests for status parsing and bin discovery
+3. ✓ `dot-agents kg build` — full graph build (wraps `code-review-graph build`)
+4. ✓ `dot-agents kg update` — incremental update (wraps `code-review-graph update`)
+5. ✓ `dot-agents kg code-status` — graph stats (nodes, edges, languages)
+6. ✓ `dot-agents kg changes [--brief]` — change impact (wraps `code-review-graph detect-changes`)
 
 ### Phase C: Change detection + flows
 
