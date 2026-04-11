@@ -1,7 +1,7 @@
 # KG Phase 3: Deterministic Query Surface
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 3
-Status: Third phase
+Status: Completed (2026-04-10)
 Depends on: KG Phase 2 (basic ingest — graph has content to query)
 
 ## Goal
