@@ -133,6 +133,19 @@ func runRefresh(projectFilter string) error {
 		}
 
 		config.SetWindowsMirrorContext(path)
+
+		if !Flags.DryRun {
+			var installedEnabled []platform.Platform
+			for _, p := range enabledPlatforms {
+				if p.IsInstalled() {
+					installedEnabled = append(installedEnabled, p)
+				}
+			}
+			if err := platform.CollectAndExecuteSharedTargetPlan(name, path, installedEnabled); err != nil {
+				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+			}
+		}
+
 		for _, p := range enabledPlatforms {
 			if !p.IsInstalled() {
 				ui.Skip(p.DisplayName() + " (not installed)")
