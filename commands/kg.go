@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -536,6 +537,13 @@ func runKGSetup() error {
 	if err := saveManifest(home, emptyManifest); err != nil {
 		return fmt.Errorf("write integrity manifest: %w", err)
 	}
+
+	// Phase D: initialize warm-layer SQLite database
+	warmStore, err := openKGStore(home)
+	if err != nil {
+		return fmt.Errorf("init warm store: %w", err)
+	}
+	warmStore.Close()
 
 	// Append setup event to log
 	if err := appendLogEntry(home, "setup | graph initialized"); err != nil {
@@ -2524,6 +2532,244 @@ func runKGSync(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// ── Phase D: Hot/cold note lifecycle ─────────────────────────────────────────
+
+// graphstoreDBPath returns the path to the SQLite warm-layer database.
+func graphstoreDBPath(kgHomeDir string) string {
+	return filepath.Join(kgHomeDir, "ops", "graphstore.db")
+}
+
+// openKGStore opens (or creates) the warm-layer SQLite database.
+func openKGStore(kgHomeDir string) (*graphstore.SQLiteStore, error) {
+	return graphstore.OpenSQLite(graphstoreDBPath(kgHomeDir))
+}
+
+// noteToKGNote converts a GraphNote from the hot filesystem layer to a
+// graphstore.KGNote for the warm database layer.
+func noteToKGNote(note *GraphNote, filePath string) graphstore.KGNote {
+	archivedAt := ""
+	if note.Status == "archived" || note.Status == "superseded" {
+		archivedAt = note.UpdatedAt
+	}
+	return graphstore.KGNote{
+		ID:         note.ID,
+		Title:      note.Title,
+		NoteType:   note.Type,
+		Status:     note.Status,
+		Summary:    note.Summary,
+		FilePath:   filePath,
+		Version:    note.Version,
+		ArchivedAt: archivedAt,
+	}
+}
+
+// runKGWarm syncs all hot filesystem notes into the warm SQLite layer.
+func runKGWarm(cmd *cobra.Command, _ []string) error {
+	home := kgHome()
+	noteTypeFilter, _ := cmd.Flags().GetString("type")
+
+	store, err := openKGStore(home)
+	if err != nil {
+		return fmt.Errorf("open warm store: %w", err)
+	}
+	defer store.Close()
+
+	allTypes := []string{"source", "entity", "concept", "synthesis", "decision", "repo", "session"}
+	var typeList []string
+	if noteTypeFilter != "" {
+		if !isValidNoteType(noteTypeFilter) {
+			return fmt.Errorf("invalid note type %q", noteTypeFilter)
+		}
+		typeList = []string{noteTypeFilter}
+	} else {
+		typeList = allTypes
+	}
+	subdirs := make([]string, len(typeList))
+	for i, t := range typeList {
+		subdirs[i] = noteSubdir(t)
+	}
+
+	var indexed, skipped int
+	for _, sub := range subdirs {
+		dir := filepath.Join(home, "notes", sub)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue // directory may not exist yet
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			fpath := filepath.Join(dir, e.Name())
+			data, err := os.ReadFile(fpath)
+			if err != nil {
+				skipped++
+				continue
+			}
+			note, _, err := parseGraphNote(data)
+			if err != nil || note.ID == "" {
+				skipped++
+				continue
+			}
+			kn := noteToKGNote(note, fpath)
+			if err := store.UpsertKGNote(kn); err != nil {
+				skipped++
+				continue
+			}
+			indexed++
+		}
+	}
+
+	// Also walk _archived directory
+	archivedDir := filepath.Join(home, "notes", "_archived")
+	if entries, err := os.ReadDir(archivedDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			fpath := filepath.Join(archivedDir, e.Name())
+			data, err := os.ReadFile(fpath)
+			if err != nil {
+				skipped++
+				continue
+			}
+			note, _, err := parseGraphNote(data)
+			if err != nil || note.ID == "" {
+				skipped++
+				continue
+			}
+			kn := noteToKGNote(note, fpath)
+			if kn.ArchivedAt == "" {
+				kn.ArchivedAt = note.UpdatedAt // treat physical archive dir as archived
+			}
+			if err := store.UpsertKGNote(kn); err != nil {
+				skipped++
+				continue
+			}
+			indexed++
+		}
+	}
+
+	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
+
+	ui.SuccessBox(
+		fmt.Sprintf("Warm sync complete: %d notes indexed, %d skipped", indexed, skipped),
+		"dot-agents kg link add <note-id> <symbol> — link a note to a code symbol",
+		"dot-agents kg link list <note-id>         — list all symbol links for a note",
+	)
+	return nil
+}
+
+// runKGLinkAdd creates a note→symbol link.
+func runKGLinkAdd(cmd *cobra.Command, args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: kg link add <note-id> <qualified-name>")
+	}
+	kind, _ := cmd.Flags().GetString("kind")
+	if kind == "" {
+		kind = "mentions"
+	}
+	validLinkKinds := map[string]bool{
+		"mentions": true, "implements": true, "documents": true,
+		"decides": true, "references": true,
+	}
+	if !validLinkKinds[kind] {
+		return fmt.Errorf("invalid link kind %q: must be one of mentions|implements|documents|decides|references", kind)
+	}
+
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return fmt.Errorf("open warm store: %w", err)
+	}
+	defer store.Close()
+
+	link := graphstore.NoteSymbolLink{
+		NoteID:        args[0],
+		QualifiedName: args[1],
+		LinkKind:      kind,
+	}
+	id, err := store.UpsertNoteSymbolLink(link)
+	if err != nil {
+		return fmt.Errorf("create link: %w", err)
+	}
+	ui.Success(fmt.Sprintf("Link created (id=%d): %s -[%s]-> %s", id, args[0], kind, args[1]))
+	return nil
+}
+
+// runKGLinkList shows all symbol links for a note.
+func runKGLinkList(_ *cobra.Command, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: kg link list <note-id>")
+	}
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return fmt.Errorf("open warm store: %w", err)
+	}
+	defer store.Close()
+
+	links, err := store.GetLinksForNote(args[0])
+	if err != nil {
+		return fmt.Errorf("get links: %w", err)
+	}
+	if len(links) == 0 {
+		ui.Info(fmt.Sprintf("No symbol links for note %q. Run 'kg warm' first if notes are not yet indexed.", args[0]))
+		return nil
+	}
+	for _, l := range links {
+		fmt.Printf("  [%d] %s -[%s]-> %s\n", l.ID, l.NoteID, l.LinkKind, l.QualifiedName)
+	}
+	return nil
+}
+
+// runKGLinkRemove deletes a note→symbol link by ID.
+func runKGLinkRemove(_ *cobra.Command, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: kg link remove <link-id>")
+	}
+	var id int64
+	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
+		return fmt.Errorf("invalid link ID %q: must be an integer", args[0])
+	}
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return fmt.Errorf("open warm store: %w", err)
+	}
+	defer store.Close()
+
+	if err := store.DeleteNoteSymbolLink(id); err != nil {
+		return fmt.Errorf("remove link: %w", err)
+	}
+	ui.Success(fmt.Sprintf("Link %d removed", id))
+	return nil
+}
+
+// runKGWarmStats shows warm layer stats without doing a sync.
+func runKGWarmStats(_ *cobra.Command, _ []string) error {
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return fmt.Errorf("open warm store: %w", err)
+	}
+	defer store.Close()
+
+	stats, err := store.GetStats()
+	if err != nil {
+		return fmt.Errorf("get stats: %w", err)
+	}
+	lastSync, _ := store.GetMetadata("last_warm_sync")
+	if lastSync == "" {
+		lastSync = "never"
+	}
+	ui.InfoBox("Warm Layer Stats",
+		fmt.Sprintf("Notes indexed:    %d", stats.NotesCount),
+		fmt.Sprintf("Symbol links:     %d", stats.LinksCount),
+		fmt.Sprintf("Code nodes:       %d", stats.TotalNodes),
+		fmt.Sprintf("Code edges:       %d", stats.TotalEdges),
+		fmt.Sprintf("Last warm sync:   %s", lastSync),
+		fmt.Sprintf("DB path:          %s", graphstoreDBPath(kgHome())),
+	)
+	return nil
+}
+
 func NewKGCmd() *cobra.Command {
 	kgCmd := &cobra.Command{
 		Use:   "kg",
@@ -2645,6 +2891,45 @@ func NewKGCmd() *cobra.Command {
 	}
 	kgSyncCmd.Flags().Bool("push", false, "Push current state instead of pulling")
 
-	kgCmd.AddCommand(kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd, kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd)
+	// Phase D: warm layer sync
+	kgWarmCmd := &cobra.Command{
+		Use:   "warm",
+		Short: "Sync hot filesystem notes into the warm SQLite layer",
+		RunE:  runKGWarm,
+	}
+	kgWarmCmd.Flags().String("type", "", "Only sync notes of this type (source|entity|concept|synthesis|decision|repo|session)")
+
+	kgWarmStatsCmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Show warm layer statistics",
+		RunE:  runKGWarmStats,
+	}
+	kgWarmCmd.AddCommand(kgWarmStatsCmd)
+
+	// Phase D: note→symbol links
+	kgLinkCmd := &cobra.Command{
+		Use:   "link",
+		Short: "Manage note→code symbol cross-references",
+	}
+	kgLinkAddCmd := &cobra.Command{
+		Use:   "add <note-id> <qualified-name>",
+		Short: "Link a knowledge note to a code symbol",
+		RunE:  runKGLinkAdd,
+	}
+	kgLinkAddCmd.Flags().String("kind", "mentions", "Link kind: mentions|implements|documents|decides|references")
+
+	kgLinkListCmd := &cobra.Command{
+		Use:   "list <note-id>",
+		Short: "List all symbol links for a note",
+		RunE:  runKGLinkList,
+	}
+	kgLinkRemoveCmd := &cobra.Command{
+		Use:   "remove <link-id>",
+		Short: "Remove a note→symbol link by ID",
+		RunE:  runKGLinkRemove,
+	}
+	kgLinkCmd.AddCommand(kgLinkAddCmd, kgLinkListCmd, kgLinkRemoveCmd)
+
+	kgCmd.AddCommand(kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd, kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd)
 	return kgCmd
 }

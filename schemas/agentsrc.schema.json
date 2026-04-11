@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/agentsrc.schema.json",
+  "title": "dot-agents project manifest",
+  "description": "Repo-local schema for .agentsrc.json. This intentionally tracks the current Go AgentsRC model and rejects unknown top-level fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skills": {
+      "$ref": "#/$defs/stringList"
+    },
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "global",
+          "project"
+        ]
+      }
+    },
+    "agents": {
+      "$ref": "#/$defs/stringList"
+    },
+    "hooks": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "mcp": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "settings": {
+      "type": "boolean"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stringsOrBool": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/stringList"
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "local",
+            "git"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "git"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

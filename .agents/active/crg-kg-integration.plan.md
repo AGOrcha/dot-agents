@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Active
+Status: Phase A + Phase D complete (2026-04-11). Phase B (parser port, tree-sitter) is next.
 Created: 2026-04-10
 
 ## Problem

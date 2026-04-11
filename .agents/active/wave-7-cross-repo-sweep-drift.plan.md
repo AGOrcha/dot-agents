@@ -1,7 +1,7 @@
 # Wave 7: Cross-Repo Sweep And Drift
 
 Spec: `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` — Wave 7
-Status: Directional backlog (requires RFC before coding)
+Status: Completed (2026-04-11) — all 7 steps implemented and tested. RFC at docs/rfcs/wave-7-cross-repo-sweep-rfc.md
 Depends on: Wave 6 (delegation), stable multi-project inventory
 
 ## Goal

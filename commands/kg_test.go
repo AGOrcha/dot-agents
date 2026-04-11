@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -1557,4 +1559,237 @@ func TestLintIntegrityViolations_DetectsOutOfBandEdit(t *testing.T) {
 	if !found {
 		t.Error("expected integrity_violation for ent-cobra after out-of-band edit")
 	}
+}
+
+// ── Phase D: warm layer + note→symbol links ────────────────────────────────
+
+func TestRunKGSetup_InitializesWarmDB(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("runKGSetup: %v", err)
+	}
+	dbPath := graphstoreDBPath(home)
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Errorf("expected warm DB at %s, got: %v", dbPath, err)
+	}
+}
+
+func TestRunKGWarm_IndexesNotes(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	cmd := newKGWarmCmdForTest()
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm: %v", err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	stats, err := store.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	// setupKGWithNotes creates 5 notes (2 entities, 2 decisions, 1 repo)
+	if stats.NotesCount != 5 {
+		t.Errorf("expected 5 notes in warm layer, got %d", stats.NotesCount)
+	}
+}
+
+func TestRunKGWarm_TypeFilter(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	cmd := newKGWarmCmdForTest()
+	if err := cmd.Flags().Set("type", "entity"); err != nil {
+		t.Fatalf("set type flag: %v", err)
+	}
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm with type=entity: %v", err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	stats, _ := store.GetStats()
+	// Only 2 entity notes
+	if stats.NotesCount != 2 {
+		t.Errorf("expected 2 entity notes after type filter, got %d", stats.NotesCount)
+	}
+}
+
+func TestRunKGWarm_Idempotent(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	cmd := newKGWarmCmdForTest()
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("first runKGWarm: %v", err)
+	}
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("second runKGWarm: %v", err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	stats, _ := store.GetStats()
+	if stats.NotesCount != 5 {
+		t.Errorf("idempotent warm should produce 5 notes, got %d", stats.NotesCount)
+	}
+}
+
+func TestRunKGWarm_ArchivedNotesIndexed(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	// Compact to move superseded/archived notes to _archived dir
+	// First mark a note as archived
+	archiveDir := filepath.Join(home, "notes", "_archived")
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Manually write an archived note
+	archivedNote := &GraphNote{
+		SchemaVersion: 1, ID: "archived-001", Type: "decision",
+		Title: "Old Decision", Status: "archived",
+		CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-06-01T00:00:00Z",
+	}
+	if err := createGraphNote(home, archivedNote, "This decision was superseded."); err != nil {
+		t.Fatalf("createGraphNote archived: %v", err)
+	}
+	// Move it to _archived
+	src := filepath.Join(home, "notes", "decisions", "archived-001.md")
+	dst := filepath.Join(archiveDir, "archived-001.md")
+	if err := os.Rename(src, dst); err != nil {
+		t.Fatalf("move to archived: %v", err)
+	}
+
+	cmd := newKGWarmCmdForTest()
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm: %v", err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	n, err := store.GetKGNote("archived-001")
+	if err != nil {
+		t.Fatalf("GetKGNote: %v", err)
+	}
+	if n == nil {
+		t.Fatal("archived note not indexed in warm layer")
+	}
+	if n.ArchivedAt == "" {
+		t.Error("archived note should have archived_at set")
+	}
+}
+
+func TestNoteSymbolLink_AddListRemove(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	// Warm first so notes exist
+	cmd := newKGWarmCmdForTest()
+	_ = runKGWarm(cmd, nil)
+
+	// Add a link
+	addCmd := newKGLinkAddCmdForTest("mentions")
+	if err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "commands::NewKGCmd"}); err != nil {
+		t.Fatalf("runKGLinkAdd: %v", err)
+	}
+
+	// List links
+	if err := runKGLinkList(nil, []string{"dec-use-cobra"}); err != nil {
+		t.Fatalf("runKGLinkList: %v", err)
+	}
+
+	// Verify via store
+	store, _ := openKGStore(home)
+	defer store.Close()
+	links, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links) != 1 {
+		t.Fatalf("expected 1 link, got %d", len(links))
+	}
+	if links[0].QualifiedName != "commands::NewKGCmd" {
+		t.Errorf("unexpected qualified name: %s", links[0].QualifiedName)
+	}
+	if links[0].LinkKind != "mentions" {
+		t.Errorf("unexpected link kind: %s", links[0].LinkKind)
+	}
+
+	// Remove the link
+	linkID := fmt.Sprintf("%d", links[0].ID)
+	removeCmd := newKGLinkRemoveCmdForTest()
+	if err := runKGLinkRemove(removeCmd, []string{linkID}); err != nil {
+		t.Fatalf("runKGLinkRemove: %v", err)
+	}
+	links2, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links2) != 0 {
+		t.Errorf("expected 0 links after remove, got %d", len(links2))
+	}
+}
+
+func TestNoteSymbolLink_InvalidKind(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	addCmd := newKGLinkAddCmdForTest("bad-kind")
+	err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "cmd::F"})
+	if err == nil {
+		t.Error("expected error for invalid link kind")
+	}
+}
+
+func TestNoteSymbolLink_InvalidRemoveID(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	removeCmd := newKGLinkRemoveCmdForTest()
+	err := runKGLinkRemove(removeCmd, []string{"not-a-number"})
+	if err == nil {
+		t.Error("expected error for non-integer link ID")
+	}
+}
+
+func TestRunKGWarmStats(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	cmd := newKGWarmCmdForTest()
+	_ = runKGWarm(cmd, nil)
+
+	if err := runKGWarmStats(nil, nil); err != nil {
+		t.Fatalf("runKGWarmStats: %v", err)
+	}
+}
+
+// ── test helpers ──────────────────────────────────────────────────────────────
+
+func newKGWarmCmdForTest() *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("type", "", "")
+	return cmd
+}
+
+func newKGLinkAddCmdForTest(kind string) *cobra.Command {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("kind", kind, "")
+	return cmd
+}
+
+func newKGLinkRemoveCmdForTest() *cobra.Command {
+	return &cobra.Command{}
 }

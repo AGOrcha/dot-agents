@@ -69,18 +69,27 @@ type workflowCheckpoint struct {
 }
 
 type workflowOrientState struct {
-	Project        workflowProjectRef             `json:"project"`
-	Git            workflowGitSummary             `json:"git"`
-	ActivePlans    []workflowPlanSummary          `json:"active_plans"`
-	CanonicalPlans []workflowCanonicalPlanSummary `json:"canonical_plans"`
-	Checkpoint     *workflowCheckpoint            `json:"checkpoint"`
-	Handoffs       []workflowHandoffSummary       `json:"handoffs"`
-	Lessons        []string                       `json:"lessons"`
-	Proposals      workflowProposalSummary        `json:"proposals"`
-	NextAction     string                         `json:"next_action"`
-	Warnings       []string                       `json:"warnings"`
-	Health         *WorkflowHealthSnapshot        `json:"health,omitempty"`
-	Preferences    *WorkflowPreferences           `json:"preferences,omitempty"`
+	Project            workflowProjectRef             `json:"project"`
+	Git                workflowGitSummary             `json:"git"`
+	ActivePlans        []workflowPlanSummary          `json:"active_plans"`
+	CanonicalPlans     []workflowCanonicalPlanSummary `json:"canonical_plans"`
+	Checkpoint         *workflowCheckpoint            `json:"checkpoint"`
+	Handoffs           []workflowHandoffSummary       `json:"handoffs"`
+	Lessons            []string                       `json:"lessons"`
+	Proposals          workflowProposalSummary        `json:"proposals"`
+	NextAction         string                         `json:"next_action"`
+	Warnings           []string                       `json:"warnings"`
+	Health             *WorkflowHealthSnapshot        `json:"health,omitempty"`
+	Preferences        *WorkflowPreferences           `json:"preferences,omitempty"`
+	ActiveDelegations  workflowDelegationSummary      `json:"active_delegations"`  // Wave 6 Step 7
+	PendingMergeBacks  int                            `json:"pending_merge_backs"`  // Wave 6 Step 7
+	LocalDrift         *RepoDriftReport               `json:"local_drift,omitempty"` // Wave 7 Step 7
+}
+
+// workflowDelegationSummary is a compact view of active delegation state for orient/status.
+type workflowDelegationSummary struct {
+	ActiveCount      int  `json:"active_count"`
+	PendingIntents   int  `json:"pending_intents"`   // delegations with a non-empty pending_intent
 }
 
 // CanonicalPlan is the PLAN.yaml schema for .agents/workflow/plans/<id>/PLAN.yaml
@@ -386,7 +395,27 @@ func NewWorkflowCmd() *cobra.Command {
 	_ = mergeBackCmd.MarkFlagRequired("task")
 	_ = mergeBackCmd.MarkFlagRequired("summary")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd)
+	// drift subcommand (Wave 7)
+	driftCmd := &cobra.Command{
+		Use:   "drift",
+		Short: "Detect workflow drift across managed repos (read-only)",
+		RunE:  runWorkflowDrift,
+	}
+	driftCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
+	driftCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
+	driftCmd.Flags().String("project", "", "Check only this project (by name)")
+
+	// sweep subcommand (Wave 7)
+	sweepCmd := &cobra.Command{
+		Use:   "sweep",
+		Short: "Plan and optionally apply fixes for workflow drift across managed repos",
+		RunE:  runWorkflowSweep,
+	}
+	sweepCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
+	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
+	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
+
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
 	return cmd
 }
 
@@ -415,6 +444,8 @@ func runWorkflowStatus() error {
 	fmt.Fprintf(os.Stdout, "  pending handoffs: %d\n", len(state.Handoffs))
 	fmt.Fprintf(os.Stdout, "  lessons: %d\n", len(state.Lessons))
 	fmt.Fprintf(os.Stdout, "  pending proposals: %d\n", state.Proposals.PendingCount)
+	fmt.Fprintf(os.Stdout, "  active delegations: %d\n", state.ActiveDelegations.ActiveCount)
+	fmt.Fprintf(os.Stdout, "  pending merge-backs: %d\n", state.PendingMergeBacks)
 	fmt.Fprintln(os.Stdout)
 
 	ui.Section("Last Checkpoint")
@@ -544,6 +575,34 @@ func runWorkflowLog(showAll bool) error {
 	return nil
 }
 
+// collectDelegationSummary loads active delegations and counts pending intents and merge-backs.
+func collectDelegationSummary(projectPath string) (workflowDelegationSummary, int) {
+	contracts, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return workflowDelegationSummary{}, 0
+	}
+	summary := workflowDelegationSummary{}
+	for _, c := range contracts {
+		if c.Status == "pending" || c.Status == "active" {
+			summary.ActiveCount++
+			if c.PendingIntent != CoordinationIntentNone {
+				summary.PendingIntents++
+			}
+		}
+	}
+	// Count unprocessed merge-back artifacts
+	mergeBackEntries, err := os.ReadDir(mergeBackDir(projectPath))
+	pendingMergebacks := 0
+	if err == nil {
+		for _, e := range mergeBackEntries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				pendingMergebacks++
+			}
+		}
+	}
+	return summary, pendingMergebacks
+}
+
 func collectWorkflowState() (*workflowOrientState, error) {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -566,6 +625,7 @@ func collectWorkflowState() (*workflowOrientState, error) {
 	if err != nil {
 		return nil, err
 	}
+	delegationSummary, pendingMergebacks := collectDelegationSummary(project.Path)
 
 	warnings := append([]string{}, gitWarnings...)
 	warnings = append(warnings, canonicalWarnings...)
@@ -583,8 +643,19 @@ func collectWorkflowState() (*workflowOrientState, error) {
 		Proposals: workflowProposalSummary{
 			PendingCount: proposals,
 		},
-		NextAction: deriveWorkflowNextAction(checkpoint, canonicalPlans, activePlans),
-		Warnings:   warnings,
+		NextAction:        deriveWorkflowNextAction(checkpoint, canonicalPlans, activePlans),
+		Warnings:          warnings,
+		ActiveDelegations: delegationSummary,
+		PendingMergeBacks: pendingMergebacks,
+	}
+
+	// Wave 7 Step 7: local drift check for current project
+	localDrift := detectRepoDrift(
+		ManagedProject{Name: project.Name, Path: project.Path},
+		defaultCheckpointStaleDays, defaultProposalStaleDays,
+	)
+	if localDrift.Status != "healthy" {
+		state.LocalDrift = &localDrift
 	}
 	health := computeWorkflowHealth(state)
 	state.Health = &health
@@ -891,6 +962,20 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	}
 	fmt.Fprintln(out)
 
+	// Wave 6 Step 7: Delegations section
+	fmt.Fprintln(out, "# Delegations")
+	fmt.Fprintln(out)
+	if state.ActiveDelegations.ActiveCount == 0 && state.PendingMergeBacks == 0 {
+		fmt.Fprintln(out, "- none")
+	} else {
+		fmt.Fprintf(out, "- active delegations: %d\n", state.ActiveDelegations.ActiveCount)
+		if state.ActiveDelegations.PendingIntents > 0 {
+			fmt.Fprintf(out, "- pending intents: %d (check delegation contracts)\n", state.ActiveDelegations.PendingIntents)
+		}
+		fmt.Fprintf(out, "- pending merge-backs: %d\n", state.PendingMergeBacks)
+	}
+	fmt.Fprintln(out)
+
 	fmt.Fprintln(out, "# Recent Lessons")
 	fmt.Fprintln(out)
 	if len(state.Lessons) == 0 {
@@ -940,6 +1025,16 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 		fmt.Fprintf(out, "- plan_directory: %s\n", strPtrVal(p.Planning.PlanDirectory))
 		fmt.Fprintf(out, "- package_manager: %s\n", strPtrVal(p.Execution.PackageManager))
 		fmt.Fprintf(out, "- formatter: %s\n", strPtrVal(p.Execution.Formatter))
+	}
+	if state.LocalDrift != nil {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "# Local Drift")
+		fmt.Fprintln(out)
+		for _, w := range state.LocalDrift.Warnings {
+			fmt.Fprintf(out, "- warn: %s\n", w)
+		}
+		fmt.Fprintln(out, "  (run 'dot-agents workflow drift' for cross-repo view)")
 	}
 	if len(state.Warnings) > 0 {
 		fmt.Fprintln(out)
@@ -2817,5 +2912,463 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Artifact: .agents/active/merge-back/%s.md", taskID),
 		"Parent agent should review this artifact before advancing task to completed",
 	)
+	return nil
+}
+
+// ── Wave 7: Cross-Repo Sweep and Drift ───────────────────────────────────────
+
+const (
+	defaultCheckpointStaleDays = 7
+	defaultProposalStaleDays   = 30
+)
+
+// ManagedProject is one entry from ~./agents/config.json loaded for drift checks.
+type ManagedProject struct {
+	Name string
+	Path string
+}
+
+// loadManagedProjects returns all registered projects from the global config.
+func loadManagedProjects() ([]ManagedProject, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	names := cfg.ListProjects()
+	sort.Strings(names)
+	projects := make([]ManagedProject, 0, len(names))
+	for _, name := range names {
+		path := cfg.GetProjectPath(name)
+		if path == "" {
+			continue
+		}
+		projects = append(projects, ManagedProject{Name: name, Path: path})
+	}
+	return projects, nil
+}
+
+// RepoDriftReport captures drift conditions for one managed project.
+type RepoDriftReport struct {
+	Project               ManagedProject `json:"project"`
+	Reachable             bool           `json:"reachable"`             // false if path doesn't exist
+	MissingCheckpoint     bool           `json:"missing_checkpoint"`    // no checkpoint file
+	StaleCheckpoint       bool           `json:"stale_checkpoint"`      // checkpoint older than threshold
+	CheckpointAgeDays     int            `json:"checkpoint_age_days"`   // -1 if no checkpoint
+	StaleProposalCount    int            `json:"stale_proposal_count"`  // proposals older than threshold
+	MissingWorkflowDir    bool           `json:"missing_workflow_dir"`  // no .agents/workflow/
+	MissingPlanStructure  bool           `json:"missing_plan_structure"` // no .agents/workflow/plans/
+	Warnings              []string       `json:"warnings"`
+	Status                string         `json:"status"` // healthy|warn|unreachable
+}
+
+// detectRepoDrift inspects one managed project for workflow drift.
+// All checks are read-only.
+func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleDays int) RepoDriftReport {
+	report := RepoDriftReport{Project: project, CheckpointAgeDays: -1}
+
+	// 1. Reachability
+	if _, err := os.Stat(project.Path); err != nil {
+		report.Reachable = false
+		report.Status = "unreachable"
+		report.Warnings = append(report.Warnings, fmt.Sprintf("project path %q does not exist or is not accessible", project.Path))
+		return report
+	}
+	report.Reachable = true
+
+	// 2. Checkpoint existence and age
+	checkpointPath := filepath.Join(config.ProjectContextDir(project.Name), "checkpoint.yaml")
+	checkpointData, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		report.MissingCheckpoint = true
+		report.Warnings = append(report.Warnings, "no checkpoint found")
+	} else {
+		var cp workflowCheckpoint
+		if err := yaml.Unmarshal(checkpointData, &cp); err == nil && cp.Timestamp != "" {
+			t, err := time.Parse(time.RFC3339, cp.Timestamp)
+			if err == nil {
+				ageDays := int(time.Since(t).Hours() / 24)
+				report.CheckpointAgeDays = ageDays
+				if ageDays > checkpointStaleDays {
+					report.StaleCheckpoint = true
+					report.Warnings = append(report.Warnings, fmt.Sprintf("checkpoint is %d days old (threshold: %d)", ageDays, checkpointStaleDays))
+				}
+			}
+		}
+	}
+
+	// 3. Stale proposals
+	proposals, err := config.ListPendingProposals()
+	if err == nil {
+		cutoff := time.Now().UTC().AddDate(0, 0, -proposalStaleDays)
+		for _, p := range proposals {
+			t, err := time.Parse(time.RFC3339, p.CreatedAt)
+			if err == nil && t.Before(cutoff) {
+				report.StaleProposalCount++
+			}
+		}
+		if report.StaleProposalCount > 0 {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("%d stale proposals (older than %d days)", report.StaleProposalCount, proposalStaleDays))
+		}
+	}
+
+	// 4. Workflow directory presence
+	workflowDir := filepath.Join(project.Path, ".agents", "workflow")
+	if _, err := os.Stat(workflowDir); os.IsNotExist(err) {
+		report.MissingWorkflowDir = true
+		report.Warnings = append(report.Warnings, "no .agents/workflow/ directory — workflow not initialized")
+	}
+
+	// 5. Canonical plan structure
+	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
+	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
+		report.MissingPlanStructure = true
+		// Only warn if workflow dir exists (otherwise workflow dir warning is enough)
+		if !report.MissingWorkflowDir {
+			report.Warnings = append(report.Warnings, "no .agents/workflow/plans/ directory — no canonical plans")
+		}
+	}
+
+	if len(report.Warnings) == 0 {
+		report.Status = "healthy"
+	} else {
+		report.Status = "warn"
+	}
+	return report
+}
+
+// AggregateDriftReport summarizes drift across all managed projects.
+type AggregateDriftReport struct {
+	Timestamp       string            `json:"timestamp"`
+	TotalProjects   int               `json:"total_projects"`
+	ProjectsChecked int               `json:"projects_checked"`
+	Reports         []RepoDriftReport `json:"reports"`
+	HealthyCount    int               `json:"healthy_count"`
+	WarnCount       int               `json:"warn_count"`
+	UnreachableCount int              `json:"unreachable_count"`
+	TopWarnings     []string          `json:"top_warnings"`
+}
+
+// aggregateDrift combines per-repo reports into a summary.
+func aggregateDrift(reports []RepoDriftReport) AggregateDriftReport {
+	agg := AggregateDriftReport{
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		TotalProjects: len(reports),
+		Reports:       reports,
+	}
+	seen := make(map[string]bool)
+	for _, r := range reports {
+		agg.ProjectsChecked++
+		switch r.Status {
+		case "healthy":
+			agg.HealthyCount++
+		case "unreachable":
+			agg.UnreachableCount++
+		default:
+			agg.WarnCount++
+		}
+		for _, w := range r.Warnings {
+			if !seen[w] {
+				seen[w] = true
+				agg.TopWarnings = append(agg.TopWarnings, fmt.Sprintf("[%s] %s", r.Project.Name, w))
+			}
+		}
+	}
+	return agg
+}
+
+// sweepLogPath returns the path for the sweep operation log.
+func sweepLogPath() string {
+	return filepath.Join(config.AgentsContextDir(), "sweep-log.jsonl")
+}
+
+// driftReportPath returns the path for the persisted drift report.
+func driftReportPath() string {
+	return filepath.Join(config.AgentsContextDir(), "drift-report.json")
+}
+
+// saveDriftReport writes the aggregate drift report to disk.
+func saveDriftReport(agg AggregateDriftReport) error {
+	if err := os.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(agg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(driftReportPath(), data, 0644)
+}
+
+// runWorkflowDrift is the read-only cross-repo drift detection command.
+func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
+	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
+	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
+	projectFilter, _ := cmd.Flags().GetString("project")
+
+	projects, err := loadManagedProjects()
+	if err != nil {
+		return fmt.Errorf("load managed projects: %w", err)
+	}
+	if len(projects) == 0 {
+		ui.Info("No managed projects registered. Add one with: dot-agents add <path>")
+		return nil
+	}
+
+	// Filter to single project if requested
+	if projectFilter != "" {
+		var filtered []ManagedProject
+		for _, p := range projects {
+			if p.Name == projectFilter {
+				filtered = append(filtered, p)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("project %q not found in managed projects", projectFilter)
+		}
+		projects = filtered
+	}
+
+	// Run drift detection
+	reports := make([]RepoDriftReport, 0, len(projects))
+	for _, p := range projects {
+		reports = append(reports, detectRepoDrift(p, checkpointDays, proposalDays))
+	}
+	agg := aggregateDrift(reports)
+
+	// Save to disk
+	_ = saveDriftReport(agg)
+
+	if Flags.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(agg)
+	}
+
+	// Human-readable output
+	ui.Header("Workflow Drift Report")
+	fmt.Fprintf(os.Stdout, "  %s projects checked%s\n\n", ui.Bold, ui.Reset)
+
+	for _, r := range reports {
+		statusBadge := ui.ColorText(ui.Green, "healthy")
+		if r.Status == "warn" {
+			statusBadge = ui.ColorText(ui.Yellow, "warn")
+		} else if r.Status == "unreachable" {
+			statusBadge = ui.ColorText(ui.Red, "unreachable")
+		}
+		fmt.Fprintf(os.Stdout, "  %-20s [%s]\n", r.Project.Name, statusBadge)
+		for _, w := range r.Warnings {
+			fmt.Fprintf(os.Stdout, "    %s↳ %s%s\n", ui.Dim, ui.Reset, w)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Summary")
+	fmt.Fprintf(os.Stdout, "  healthy: %d  warnings: %d  unreachable: %d\n",
+		agg.HealthyCount, agg.WarnCount, agg.UnreachableCount)
+	fmt.Fprintf(os.Stdout, "  report saved: %s\n", config.DisplayPath(driftReportPath()))
+	return nil
+}
+
+// ── Wave 7: Sweep types ───────────────────────────────────────────────────────
+
+// SweepActionType enumerates the kinds of fixes the sweep can apply.
+type SweepActionType string
+
+const (
+	SweepActionScaffoldWorkflowDir    SweepActionType = "scaffold_workflow_dir"
+	SweepActionCreatePlanStructure    SweepActionType = "create_plan_structure"
+	SweepActionCreateCheckpointReminder SweepActionType = "create_checkpoint_reminder"
+	SweepActionFlagStaleProposals     SweepActionType = "flag_stale_proposals"
+)
+
+// SweepActionItem is one actionable fix in a sweep plan.
+type SweepActionItem struct {
+	Project             ManagedProject  `json:"project"`
+	Action              SweepActionType `json:"action"`
+	Description         string          `json:"description"`
+	RequiresConfirmation bool           `json:"requires_confirmation"`
+}
+
+// SweepPlan is the collection of planned actions for a sweep run.
+type SweepPlan struct {
+	CreatedAt string            `json:"created_at"`
+	Actions   []SweepActionItem `json:"actions"`
+}
+
+// planSweep generates a sweep plan from drift reports.
+func planSweep(reports []RepoDriftReport) SweepPlan {
+	plan := SweepPlan{CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+	for _, r := range reports {
+		if !r.Reachable {
+			continue // can't fix unreachable projects
+		}
+		if r.MissingWorkflowDir {
+			plan.Actions = append(plan.Actions, SweepActionItem{
+				Project:              r.Project,
+				Action:               SweepActionScaffoldWorkflowDir,
+				Description:          fmt.Sprintf("Create .agents/workflow/ directory in %s", r.Project.Name),
+				RequiresConfirmation: true,
+			})
+		}
+		if r.MissingPlanStructure && !r.MissingWorkflowDir {
+			plan.Actions = append(plan.Actions, SweepActionItem{
+				Project:              r.Project,
+				Action:               SweepActionCreatePlanStructure,
+				Description:          fmt.Sprintf("Create .agents/workflow/plans/ directory in %s", r.Project.Name),
+				RequiresConfirmation: true,
+			})
+		}
+		if r.MissingCheckpoint || r.StaleCheckpoint {
+			plan.Actions = append(plan.Actions, SweepActionItem{
+				Project:              r.Project,
+				Action:               SweepActionCreateCheckpointReminder,
+				Description:          fmt.Sprintf("Add checkpoint reminder annotation for %s", r.Project.Name),
+				RequiresConfirmation: false, // read-only annotation, no mutation
+			})
+		}
+		if r.StaleProposalCount > 0 {
+			plan.Actions = append(plan.Actions, SweepActionItem{
+				Project:              r.Project,
+				Action:               SweepActionFlagStaleProposals,
+				Description:          fmt.Sprintf("Flag %d stale proposal(s) in %s for review", r.StaleProposalCount, r.Project.Name),
+				RequiresConfirmation: false, // flagging only, not deleting
+			})
+		}
+	}
+	return plan
+}
+
+// SweepLogEntry is one record in sweep-log.jsonl.
+type SweepLogEntry struct {
+	Timestamp   string          `json:"timestamp"`
+	Project     string          `json:"project"`
+	Action      SweepActionType `json:"action"`
+	Description string          `json:"description"`
+	Applied     bool            `json:"applied"`
+	DryRun      bool            `json:"dry_run"`
+}
+
+// appendSweepLog appends one entry to the sweep log.
+func appendSweepLog(entry SweepLogEntry) {
+	_ = os.MkdirAll(filepath.Dir(sweepLogPath()), 0755)
+	f, err := os.OpenFile(sweepLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	data, _ := json.Marshal(entry)
+	_, _ = f.Write(append(data, '\n'))
+}
+
+// applySweepAction executes one sweep action.
+func applySweepAction(item SweepActionItem) error {
+	switch item.Action {
+	case SweepActionScaffoldWorkflowDir:
+		return os.MkdirAll(filepath.Join(item.Project.Path, ".agents", "workflow"), 0755)
+	case SweepActionCreatePlanStructure:
+		return os.MkdirAll(filepath.Join(item.Project.Path, ".agents", "workflow", "plans"), 0755)
+	case SweepActionCreateCheckpointReminder, SweepActionFlagStaleProposals:
+		// These are informational; logged but no filesystem mutation
+		return nil
+	default:
+		return fmt.Errorf("unknown sweep action %q", item.Action)
+	}
+}
+
+// runWorkflowSweep runs drift detection and optionally applies fixes.
+func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
+	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
+	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
+	applyFlag, _ := cmd.Flags().GetBool("apply")
+	dryRun := !applyFlag
+
+	projects, err := loadManagedProjects()
+	if err != nil {
+		return fmt.Errorf("load managed projects: %w", err)
+	}
+	if len(projects) == 0 {
+		ui.Info("No managed projects registered.")
+		return nil
+	}
+
+	// Run drift detection
+	reports := make([]RepoDriftReport, 0, len(projects))
+	for _, p := range projects {
+		reports = append(reports, detectRepoDrift(p, checkpointDays, proposalDays))
+	}
+
+	plan := planSweep(reports)
+	if len(plan.Actions) == 0 {
+		ui.Success("No sweep actions needed — all projects look healthy.")
+		return nil
+	}
+
+	modeLabel := "dry-run"
+	if !dryRun {
+		modeLabel = "apply"
+	}
+	ui.Header(fmt.Sprintf("Sweep Plan [%s]", modeLabel))
+	fmt.Fprintln(os.Stdout)
+
+	for i, action := range plan.Actions {
+		marker := "○"
+		if action.RequiresConfirmation && !dryRun {
+			marker = "⚡"
+		}
+		fmt.Fprintf(os.Stdout, "  %s %d. [%s] %s\n", marker, i+1, action.Project.Name, action.Description)
+	}
+	fmt.Fprintln(os.Stdout)
+
+	if dryRun {
+		ui.Info("Run with --apply to execute these actions.")
+		for _, action := range plan.Actions {
+			appendSweepLog(SweepLogEntry{
+				Timestamp:   time.Now().UTC().Format(time.RFC3339),
+				Project:     action.Project.Name,
+				Action:      action.Action,
+				Description: action.Description,
+				Applied:     false,
+				DryRun:      true,
+			})
+		}
+		return nil
+	}
+
+	// Apply with per-action confirmation for destructive actions
+	applied := 0
+	for _, action := range plan.Actions {
+		if action.RequiresConfirmation && !Flags.Yes {
+			fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
+			var resp string
+			fmt.Scanln(&resp)
+			if strings.ToLower(strings.TrimSpace(resp)) != "y" {
+				ui.Info(fmt.Sprintf("  Skipped: %s", action.Description))
+				appendSweepLog(SweepLogEntry{
+					Timestamp:   time.Now().UTC().Format(time.RFC3339),
+					Project:     action.Project.Name,
+					Action:      action.Action,
+					Description: action.Description,
+					Applied:     false,
+					DryRun:      false,
+				})
+				continue
+			}
+		}
+		if err := applySweepAction(action); err != nil {
+			ui.Warn(fmt.Sprintf("Failed: %s — %v", action.Description, err))
+		} else {
+			applied++
+			ui.Success(fmt.Sprintf("Applied: %s", action.Description))
+		}
+		appendSweepLog(SweepLogEntry{
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			Project:     action.Project.Name,
+			Action:      action.Action,
+			Description: action.Description,
+			Applied:     true,
+			DryRun:      false,
+		})
+	}
+	fmt.Fprintln(os.Stdout)
+	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", applied, len(plan.Actions)))
 	return nil
 }

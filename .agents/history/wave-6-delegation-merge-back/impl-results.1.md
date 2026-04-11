@@ -96,5 +96,24 @@ go run ./cmd/dot-agents workflow merge-back --help → registered correctly
 go run ./cmd/dot-agents kg sync --help → registered correctly
 ```
 
-## Wave 6 Steps Remaining
-- Step 7: Orient/status integration (ActiveDelegations + PendingMergeBacks counts in orient output)
+## Wave 6 Step 7 — Orient/Status Integration
+
+### State additions
+- `workflowDelegationSummary` struct (active count, pending intents count)
+- `ActiveDelegations workflowDelegationSummary` + `PendingMergeBacks int` fields on `workflowOrientState`
+
+### collectDelegationSummary
+- Scans `listDelegationContracts` for active/pending; counts non-empty `PendingIntent` fields
+- Counts merge-back .md files under `.agents/active/merge-back/`
+- Wired into `collectWorkflowState()`
+
+### Orient output
+- New `# Delegations` section in `renderWorkflowOrientMarkdown` — shows active count, pending intents, merge-back count
+- `runWorkflowStatus` — two new lines: active delegations, pending merge-backs
+
+### Tests
+- `TestCollectDelegationSummary_Empty`
+- `TestCollectDelegationSummary_WithActiveContracts` — 2 active, 1 with pending intent
+- `TestCollectDelegationSummary_CompletedNotCounted`
+
+## Wave 6 Complete — all 7 steps implemented and tested

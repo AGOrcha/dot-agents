@@ -1,7 +1,7 @@
 # Wave 6: Delegation And Merge-Back
 
 Spec: `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` — Wave 6
-Status: RFC written (2026-04-10) — docs/rfcs/wave-6-delegation-rfc.md. Ready for implementation once RFC is accepted.
+Status: Completed (2026-04-10) — all 7 steps implemented and tested.
 Depends on: Wave 5 (knowledge-graph bridge), stable single-agent workflow model
 
 ## Goal
@@ -89,11 +89,12 @@ Transport-neutral coordination semantics (not raw chat syntax):
 
 ### Step 7: Integration with orient/status
 
-- [ ] Add `ActiveDelegations` to `workflowOrientState` — count, any with pending intents
-- [ ] Add `PendingMergeBacks` — count of unprocessed merge-back artifacts
-- [ ] Update `renderWorkflowOrientMarkdown()` — "# Delegations" section
-- [ ] Update `runWorkflowStatus()` — delegation count
-- [ ] Tests: orient reflects delegation state
+- [x] Add `ActiveDelegations` (`workflowDelegationSummary`) to `workflowOrientState`
+- [x] Add `PendingMergeBacks int` to `workflowOrientState`
+- [x] `collectDelegationSummary` — counts active delegations and pending intents
+- [x] `renderWorkflowOrientMarkdown()` — "# Delegations" section (active count, pending intents, merge-back count)
+- [x] `runWorkflowStatus()` — prints active delegations and pending merge-backs
+- [x] Tests: empty project, active with intent, completed not counted
 
 ## Files Modified
 

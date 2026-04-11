@@ -1454,3 +1454,234 @@ func TestSaveLoadMergeBack_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v", loaded)
 	}
 }
+
+// ── Wave 6 Step 7: orient/status delegation summary ───────────────────────────
+
+func TestCollectDelegationSummary_Empty(t *testing.T) {
+	dir := setupTestProject(t)
+	summary, mergebacks := collectDelegationSummary(dir)
+	if summary.ActiveCount != 0 || summary.PendingIntents != 0 {
+		t.Errorf("expected empty summary on fresh project: %+v", summary)
+	}
+	if mergebacks != 0 {
+		t.Errorf("expected 0 merge-backs, got %d", mergebacks)
+	}
+}
+
+func TestCollectDelegationSummary_WithActiveContracts(t *testing.T) {
+	dir := setupTestProject(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	// One active with pending intent, one active without
+	for _, tc := range []struct {
+		taskID string
+		intent CoordinationIntent
+	}{
+		{"task-001", CoordinationIntentStatusRequest},
+		{"task-002", CoordinationIntentNone},
+	} {
+		c := &DelegationContract{
+			SchemaVersion: 1, ID: "del-" + tc.taskID, ParentPlanID: "plan-001",
+			ParentTaskID: tc.taskID, Title: tc.taskID, WriteScope: []string{tc.taskID + "/"},
+			Status: "active", PendingIntent: tc.intent, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := saveDelegationContract(dir, c); err != nil {
+			t.Fatalf("save %s: %v", tc.taskID, err)
+		}
+	}
+	summary, _ := collectDelegationSummary(dir)
+	if summary.ActiveCount != 2 {
+		t.Errorf("expected 2 active, got %d", summary.ActiveCount)
+	}
+	if summary.PendingIntents != 1 {
+		t.Errorf("expected 1 pending intent, got %d", summary.PendingIntents)
+	}
+}
+
+func TestCollectDelegationSummary_CompletedNotCounted(t *testing.T) {
+	dir := setupTestProject(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-task-001", ParentPlanID: "plan-001",
+		ParentTaskID: "task-001", Title: "done", WriteScope: []string{"commands/"},
+		Status: "completed", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, c); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	summary, _ := collectDelegationSummary(dir)
+	if summary.ActiveCount != 0 {
+		t.Errorf("completed delegation should not count as active, got %d", summary.ActiveCount)
+	}
+}
+
+// ── Wave 7: Drift & Sweep ─────────────────────────────────────────────────────
+
+func TestDetectRepoDrift_Unreachable(t *testing.T) {
+	project := ManagedProject{Name: "gone", Path: "/nonexistent/path/does/not/exist"}
+	report := detectRepoDrift(project, 7, 30)
+	if report.Reachable {
+		t.Error("expected unreachable")
+	}
+	if report.Status != "unreachable" {
+		t.Errorf("expected status=unreachable, got %s", report.Status)
+	}
+}
+
+func TestDetectRepoDrift_FreshProject(t *testing.T) {
+	dir := t.TempDir()
+	// A brand-new project: no checkpoint, no workflow dir
+	project := ManagedProject{Name: "fresh", Path: dir}
+	report := detectRepoDrift(project, 7, 30)
+	if !report.Reachable {
+		t.Error("expected reachable")
+	}
+	if !report.MissingCheckpoint {
+		t.Error("expected missing_checkpoint")
+	}
+	if !report.MissingWorkflowDir {
+		t.Error("expected missing_workflow_dir")
+	}
+	if report.Status != "warn" {
+		t.Errorf("expected warn, got %s", report.Status)
+	}
+}
+
+func TestDetectRepoDrift_HealthyProject(t *testing.T) {
+	dir := t.TempDir()
+	// Create a workflow dir, plans dir, and a fresh checkpoint
+	if err := os.MkdirAll(filepath.Join(dir, ".agents", "workflow", "plans"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a recent checkpoint (today)
+	projectName := "healthy-proj"
+	checkpointDir := filepath.Join(config.AgentsContextDir(), projectName)
+	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	checkpointData := []byte("schema_version: 1\ntimestamp: " + time.Now().UTC().Format(time.RFC3339) + "\n")
+	checkpointPath := filepath.Join(checkpointDir, "checkpoint.yaml")
+	if err := os.WriteFile(checkpointPath, checkpointData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(checkpointDir) })
+
+	project := ManagedProject{Name: projectName, Path: dir}
+	report := detectRepoDrift(project, 7, 30)
+	if report.MissingCheckpoint {
+		t.Error("should not flag missing checkpoint")
+	}
+	if report.StaleCheckpoint {
+		t.Error("should not flag stale checkpoint for fresh checkpoint")
+	}
+	if report.Status != "healthy" {
+		t.Errorf("expected healthy, got %s — warnings: %v", report.Status, report.Warnings)
+	}
+}
+
+func TestDetectRepoDrift_StaleCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".agents", "workflow", "plans"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectName := "stale-cp-proj"
+	checkpointDir := filepath.Join(config.AgentsContextDir(), projectName)
+	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// 30-day-old checkpoint
+	oldTime := time.Now().AddDate(0, 0, -30).UTC().Format(time.RFC3339)
+	checkpointData := []byte("schema_version: 1\ntimestamp: " + oldTime + "\n")
+	if err := os.WriteFile(filepath.Join(checkpointDir, "checkpoint.yaml"), checkpointData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(checkpointDir) })
+
+	project := ManagedProject{Name: projectName, Path: dir}
+	report := detectRepoDrift(project, 7, 30)
+	if !report.StaleCheckpoint {
+		t.Error("expected stale_checkpoint")
+	}
+	if report.CheckpointAgeDays < 28 {
+		t.Errorf("expected checkpoint age >= 28 days, got %d", report.CheckpointAgeDays)
+	}
+}
+
+func TestAggregateDrift_Summary(t *testing.T) {
+	reports := []RepoDriftReport{
+		{Project: ManagedProject{Name: "a"}, Status: "healthy"},
+		{Project: ManagedProject{Name: "b"}, Status: "warn", Warnings: []string{"stale checkpoint"}},
+		{Project: ManagedProject{Name: "c"}, Status: "unreachable", Warnings: []string{"path missing"}},
+	}
+	agg := aggregateDrift(reports)
+	if agg.HealthyCount != 1 {
+		t.Errorf("healthy: want 1, got %d", agg.HealthyCount)
+	}
+	if agg.WarnCount != 1 {
+		t.Errorf("warn: want 1, got %d", agg.WarnCount)
+	}
+	if agg.UnreachableCount != 1 {
+		t.Errorf("unreachable: want 1, got %d", agg.UnreachableCount)
+	}
+	if len(agg.TopWarnings) != 2 {
+		t.Errorf("top_warnings: want 2, got %d", len(agg.TopWarnings))
+	}
+}
+
+func TestPlanSweep_GeneratesActions(t *testing.T) {
+	reports := []RepoDriftReport{
+		{
+			Project:           ManagedProject{Name: "needs-workflow", Path: "/tmp/x"},
+			Reachable:         true,
+			MissingWorkflowDir: true,
+			MissingCheckpoint: true,
+			Status:            "warn",
+		},
+	}
+	plan := planSweep(reports)
+	if len(plan.Actions) == 0 {
+		t.Fatal("expected sweep actions")
+	}
+	// Scaffold workflow dir should be present
+	found := false
+	for _, a := range plan.Actions {
+		if a.Action == SweepActionScaffoldWorkflowDir {
+			found = true
+			if !a.RequiresConfirmation {
+				t.Error("scaffold_workflow_dir should require confirmation")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected scaffold_workflow_dir action")
+	}
+}
+
+func TestPlanSweep_UnreachableSkipped(t *testing.T) {
+	reports := []RepoDriftReport{
+		{Project: ManagedProject{Name: "gone"}, Reachable: false, Status: "unreachable"},
+	}
+	plan := planSweep(reports)
+	if len(plan.Actions) != 0 {
+		t.Errorf("expected no actions for unreachable project, got %d", len(plan.Actions))
+	}
+}
+
+func TestPlanSweep_AllMutatingActionsRequireConfirmation(t *testing.T) {
+	reports := []RepoDriftReport{
+		{
+			Project:              ManagedProject{Name: "x"},
+			Reachable:            true,
+			MissingWorkflowDir:   true,
+			MissingPlanStructure: true,
+			Status:               "warn",
+		},
+	}
+	plan := planSweep(reports)
+	for _, a := range plan.Actions {
+		if a.Action == SweepActionScaffoldWorkflowDir || a.Action == SweepActionCreatePlanStructure {
+			if !a.RequiresConfirmation {
+				t.Errorf("action %s should require confirmation", a.Action)
+			}
+		}
+	}
+}

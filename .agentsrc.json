@@ -1,5 +1,5 @@
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "./schemas/agentsrc.schema.json",
   "version": 1,
   "project": "dot-agents",
   "skills": [
@@ -13,7 +13,10 @@
     "review-pr",
     "self-review",
     "skill-architect",
-    "split-reviewable-commits"
+    "split-reviewable-commits",
+    "plan-wave-picker",
+    "delegation-lifecycle",
+    "provider-consumer-pair"
   ],
   "rules": [
     "global",
@@ -35,9 +38,5 @@
       "url": "git@github.com:NikashPrakash/agents-config.git",
       "ref": "main"
     }
-  ],
-  "refresh": {
-    "version": "dev",
-    "refreshedAt": "2026-04-03T04:23:50Z"
-  }
+  ]
 }

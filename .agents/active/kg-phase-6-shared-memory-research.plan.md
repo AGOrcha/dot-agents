@@ -1,7 +1,7 @@
 # KG Phase 6: Shared-Memory Research
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 6
-Status: Research complete — RFC written (2026-04-10). Awaiting RFC acceptance before Phase A+B+C implementation.
+Status: Completed (2026-04-11) — RFC accepted; Phase A (content hashes + sidecar manifest), Phase B (version counter), Phase C (kg sync) all implemented and tested. Phase D (LWW sync) deferred.
 Depends on: KG Phases 1-5 stable
 
 ## Goal
