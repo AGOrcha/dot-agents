@@ -105,7 +105,7 @@ Self-assessment:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 2 (io/fs import order + SKILL.md check ordering before symlink validation)
-- commit: (pending)
+- commit: 918bb30
 - scope_note: "on-target"
 - summary: Rewrote promoteSkillIn to copy-move: canonical is real dir, repo-local becomes managed symlink. Added mispointing-symlink error path test. Canonical tasks advanced for items 1-4.
 
