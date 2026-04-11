@@ -200,9 +200,9 @@ These remain separate follow-on work.
 
 ---
 
-### 9. Initial Rollout Is Shared Skill Convergence First
+### 9. Initial Rollout Is Shared Skill Convergence First, With `agents/` Immediately Following In The Same Framework
 
-**Decision:** The first implementation slice should centralize only the highest-conflict shared repo targets, starting with project skill mirrors.
+**Decision:** The first implementation slice should centralize the highest-conflict shared repo targets starting with project skill mirrors, then bring canonical `agents/` projections into the same intent/planner framework as the immediate follow-on slice.
 
 **First slice:**
 
@@ -210,13 +210,21 @@ These remain separate follow-on work.
 - repo `.claude/skills/<name>` when emitted as a shared compatibility mirror
 - any other repo-local shared compat targets still emitted by multiple platforms after that first migration
 
+**Immediate follow-on in the same rollout:**
+
+- canonical `agents/` bucket projections under repo-local platform paths
+- examples:
+  - `.claude/agents/<name>`
+  - `.codex/agents/*.toml`
+  - `.opencode/agent/*.md`
+  - `.github/agents/*.agent.md`
+
 **Deferred in this RFC’s rollout:**
 
 - native platform hook/config files
-- native agent renderers
 - new Stage 2 resource buckets
 
-**Why:** Skills are the clearest current breakage, and the surrounding import/relink flows already expose the failure mode directly.
+**Why:** Skills are the clearest current breakage, and the surrounding import/relink flows already expose the failure mode directly. But once the intent/planner framework exists, `agents/` is the next closest resource class and should not be left behind as a separate architecture track.
 
 ---
 
@@ -237,7 +245,7 @@ Implementation may proceed when the following are treated as fixed design decisi
 3. Ownership is explicit per target
 4. Import conflicts preserve both variants and write advisory review notes
 5. Non-empty directory replacement is allowlisted and executor-only
-6. First rollout scope is shared skill convergence, not all resources at once
+6. First rollout scope starts with shared skill convergence and then brings `agents/` into the same framework before broader resource expansion
 7. `status` and `explain` eventually consume the same projection registry
 
 ---

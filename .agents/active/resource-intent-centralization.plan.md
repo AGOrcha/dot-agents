@@ -19,7 +19,7 @@ It is intentionally scoped to the shared resource ownership problem, not the con
 - Do not auto-promote review-stage skill outputs back into canonical managed resources yet.
 - Do not solve shared-target conflicts by making low-level link helpers broadly destructive.
 - Keep canonicalization separate from projection.
-- Treat shared repo-local targets such as `.agents/skills/<name>` as centrally owned outputs.
+- Treat shared repo-local targets such as `.agents/skills/<name>` as centrally owned outputs, and carry canonical `agents/` projections through the same intent/planner framework once the shared-skill slice is in place.
 
 ## Goal
 
@@ -33,7 +33,7 @@ The design questions that previously blocked this plan are now resolved in `docs
 - Shared repo-local targets are planned centrally before writes; platform adapters stay thin for truly platform-owned outputs.
 - Import naming conflicts preserve both variants using origin-prefixed fallback names and create advisory review notes under `~/.agents/review-notes/import-conflicts/`.
 - Non-empty directory replacement remains executor-only and allowlisted; low-level link helpers stay conservative.
-- The first rollout slice is shared skill convergence first: repo `.agents/skills/<name>` and related shared compatibility mirrors before broader expansion.
+- The first rollout slice is shared skill convergence first, immediately followed by canonical `agents/` bucket onboarding into the same framework: repo `.agents/skills/<name>` and related shared compatibility mirrors first, then repo-local `agents/` projections (`.claude/agents/`, `.codex/agents/*.toml`, `.opencode/agent/*.md`, `.github/agents/*.agent.md`) rather than treating agents as a separate architecture later.
 - Focused verification should cover intent dedupe/conflicts, import conflict notes, imported directory -> managed mirror convergence, and status/explain registry correctness.
 
 ## Phase 1: Extract Shared Command Spine ✓ COMPLETE (2026-04-11)
@@ -74,6 +74,7 @@ Completed in this session:
   - identical-intent dedupe
   - conflicting-intent rejection
   - imported repo skill directory -> managed symlink convergence
+- Requirement update: after the shared-skill slice, the same framework should absorb canonical `agents/` projections too; `agents/` is now part of the rollout scope, not a deferred architectural extra.
 
 ## Phase 3: Centralize Shared Repo Targets First
 
@@ -83,6 +84,12 @@ Completed in this session:
   - `.claude/settings.local.json` compatibility output if multiple platforms still project it after the skill-mirror slice lands
 - [ ] Deduplicate identical intents and fail fast on incompatible intents for the same path.
 - [ ] Add safe directory replacement only in the centralized executor for approved shared targets.
+- [ ] Extend the same planner/executor framework to canonical `agents/` projections immediately after the shared-skill path is stable:
+  - `.claude/agents/<name>`
+  - `.codex/agents/*.toml`
+  - `.opencode/agent/*.md`
+  - `.github/agents/*.agent.md`
+  - any shared compatibility mirrors or cleanup paths needed to keep `agents/` behavior consistent across platforms
 
 ## Phase 4: Thin Platform Adapters
 
@@ -93,6 +100,7 @@ Completed in this session:
   - `.cursor/rules/*`
   - native rendered hook/config outputs
 - [ ] Preserve current precedence and transform behavior while moving ownership to the executor.
+- [ ] Apply the same adapter-thinning to `agents/` projections once the planner supports them so platform code stops owning agent projection logic ad hoc.
 
 ## Phase 5: Unify Command Consumers
 

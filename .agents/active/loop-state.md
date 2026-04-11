@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 2 complete. The initial planner/executor slice for shared skill mirrors landed; Phase 3 command-level shared-target aggregation is next.
+- `resource-intent-centralization`: Phase 2 complete. The initial planner/executor slice for shared skill mirrors landed; Phase 3 command-level shared-target aggregation is next, and canonical `agents/` projections are now explicitly part of the same rollout framework.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
@@ -27,8 +27,8 @@ State summary:
 
 Supervisor note from iteration 8:
 - The implementation slice stayed on the intended Phase 2 seam and the CLI trace finally answered a planner-specific question.
-- The remaining gap is no longer "planner exists or not"; it is whether shared targets are aggregated once at the command layer with cross-platform dedupe/conflict handling.
-- The next iteration should avoid more explain-only evidence and move to the first safe command-level aggregation slice or the nearest runnable projection-integrity readback.
+- The remaining gap is no longer "planner exists or not"; it is whether shared targets are aggregated once at the command layer with cross-platform dedupe/conflict handling, and then whether `agents/` can ride the same framework cleanly after skills.
+- The next iteration should avoid more explain-only evidence and move to the first safe command-level aggregation slice or the nearest runnable projection-integrity readback, with `agents/` kept in scope for the same framework.
 
 ## Iteration Log
 
@@ -232,13 +232,13 @@ Self-assessment:
 ## Next Iteration Playbook
 
 Primary implementation target:
-- `resource-intent-centralization` Phase 3 — centralize shared repo targets at the command/orchestration layer, starting with multi-platform `.agents/skills/<name>` aggregation
+- `resource-intent-centralization` Phase 3 — centralize shared repo targets at the command/orchestration layer, starting with multi-platform `.agents/skills/<name>` aggregation and then carrying canonical `agents/` projections through the same planner path
 
 Preferred single item:
-- Route one real command path through a single shared-target plan build so Claude/Codex/OpenCode/Copilot stop reaching `.agents/skills/<name>` independently
+- Route one real command path through a single shared-target plan build so Claude/Codex/OpenCode/Copilot stop reaching `.agents/skills/<name>` independently, while keeping the resulting planner surface usable for the next `agents/` slice
 
 Primary feedback goal:
-- Answer: "Can the shared-target planner now aggregate `.agents/skills/<name>` once per command run and surface conflicts or integrity clearly enough to trust the Phase 3 migration?"
+- Answer: "Can the shared-target planner now aggregate `.agents/skills/<name>` once per command run and surface conflicts or integrity clearly enough to trust the Phase 3 migration, and is the framework shaped cleanly enough that `agents/` can plug into it next without redesign?"
 
 Preferred post-commit CLI path:
 - First choice: the closest safe command or readback that exercises shared-target projection integrity after the next planner wiring lands
@@ -257,6 +257,10 @@ Known baseline CLI noise:
 - `status` / `doctor` warn about 4 broken Claude skill links in user config
 - `doctor` warns that the `dot-agents` git source is not yet fetched
 - Treat these as baseline environment noise unless the current iteration changes their underlying code path
+
+Requirement note:
+- `agents/` is now explicitly in scope for resource-intent-centralization as the immediate companion to `skills/`.
+- Do not treat subagent projections as a separate later architecture; once the planner path is proven on skills, extend the same framework to canonical `agents/` outputs.
 
 ## Analysis Readiness
 
@@ -282,6 +286,7 @@ Signals already captured:
 
 Signals still missing or too weak:
 - A live command trace that proves the new planner is aggregated once at the command layer during a projection-style run, not just inside per-platform skill emitters and explain text
+- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, and plan/task flows with real `PLAN.yaml` + `TASKS.yaml` (workflow log now covered)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
