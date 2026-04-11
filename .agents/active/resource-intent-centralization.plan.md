@@ -116,7 +116,7 @@ Completed in this session:
 
 ## Phase 6: Verification
 
-- [ ] Add focused tests for shared-target intent dedupe and conflict detection.
+- [x] Add focused tests for shared-target intent dedupe and conflict detection. (2026-04-11 — `BuildSharedTargetPlan` aggregation path via `stubPlatform`: dedupe across platforms, conflicting intents error, `SharedTargetIntents` error wrap + `DryRunSharedTargetPlanLines` propagation; complements direct `BuildResourcePlan` tests)
 - [ ] Add import conflict coverage for stable origin-prefixed fallback naming and advisory review-note creation.
 - [ ] Add refresh/import regression tests for imported directory -> managed shared-target transition.
 - [ ] Add coverage proving non-empty directory replacement is executor-only and allowlisted.

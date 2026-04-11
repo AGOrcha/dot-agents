@@ -1,11 +1,111 @@
 package platform
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// stubPlatform implements Platform with fixed SharedTargetIntents for testing
+// BuildSharedTargetPlan aggregation (collect → BuildResourcePlan) without
+// real platform fixtures.
+type stubPlatform struct {
+	id      string
+	intents []ResourceIntent
+	err     error
+}
+
+func (s stubPlatform) ID() string                      { return s.id }
+func (s stubPlatform) DisplayName() string             { return s.id }
+func (s stubPlatform) IsInstalled() bool               { return true }
+func (s stubPlatform) Version() string                 { return "" }
+func (s stubPlatform) CreateLinks(_, _ string) error   { return nil }
+func (s stubPlatform) RemoveLinks(_, _ string) error   { return nil }
+func (s stubPlatform) HasDeprecatedFormat(string) bool { return false }
+func (s stubPlatform) DeprecatedDetails(string) string { return "" }
+func (s stubPlatform) SharedTargetIntents(string) ([]ResourceIntent, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.intents, nil
+}
+
+func TestBuildSharedTargetPlanDedupesIdenticalIntentsAcrossPlatforms(t *testing.T) {
+	intents := []ResourceIntent{
+		validSharedSkillIntent(".agents/skills/review", "stub-a"),
+		validSharedSkillIntent(".agents/skills/review", "stub-b"),
+	}
+	plan, err := BuildSharedTargetPlan("proj", []Platform{
+		stubPlatform{id: "stub-a", intents: intents[:1]},
+		stubPlatform{id: "stub-b", intents: intents[1:]},
+	})
+	if err != nil {
+		t.Fatalf("BuildSharedTargetPlan: %v", err)
+	}
+	if len(plan.Resources) != 1 {
+		t.Fatalf("len(plan.Resources) = %d, want 1", len(plan.Resources))
+	}
+	if len(plan.Resources[0].Duplicates) != 1 {
+		t.Fatalf("len(Duplicates) = %d, want 1", len(plan.Resources[0].Duplicates))
+	}
+}
+
+func TestBuildSharedTargetPlanRejectsConflictingIntentsAcrossPlatforms(t *testing.T) {
+	conflictB := validSharedSkillIntent(".agents/skills/review", "stub-b")
+	conflictB.SourceRef.RelativePath = "lint"
+	conflictB.IntentID = "skills.proj.lint.agents-skills"
+	_, err := BuildSharedTargetPlan("proj", []Platform{
+		stubPlatform{id: "stub-a", intents: []ResourceIntent{validSharedSkillIntent(".agents/skills/review", "stub-a")}},
+		stubPlatform{id: "stub-b", intents: []ResourceIntent{conflictB}},
+	})
+	if err == nil {
+		t.Fatal("BuildSharedTargetPlan returned nil error")
+	}
+	if !strings.Contains(err.Error(), "conflicting intents") {
+		t.Fatalf("error = %q, want conflicting intents", err)
+	}
+}
+
+func TestBuildSharedTargetPlanWrapsSharedIntentCollectionError(t *testing.T) {
+	wrapped := errors.New("boom")
+	_, err := BuildSharedTargetPlan("proj", []Platform{
+		stubPlatform{id: "bad", err: wrapped},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, wrapped) {
+		t.Fatalf("errors.Is: got %v, want %v", err, wrapped)
+	}
+	if !strings.Contains(err.Error(), "bad shared intents") {
+		t.Fatalf("error = %q, want platform id in message", err)
+	}
+}
+
+func TestDryRunSharedTargetPlanLinesPropagatesBuildPlanError(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	conflictB := validSharedSkillIntent(".agents/skills/review", "stub-b")
+	conflictB.SourceRef.RelativePath = "other"
+	conflictB.IntentID = "skills.proj.other.agents-skills"
+	_, err := DryRunSharedTargetPlanLines("proj", repo, []Platform{
+		stubPlatform{id: "stub-a", intents: []ResourceIntent{validSharedSkillIntent(".agents/skills/review", "stub-a")}},
+		stubPlatform{id: "stub-b", intents: []ResourceIntent{conflictB}},
+	})
+	if err == nil {
+		t.Fatal("DryRunSharedTargetPlanLines returned nil error")
+	}
+	if !strings.Contains(err.Error(), "conflicting intents") {
+		t.Fatalf("error = %q", err)
+	}
+}
 
 func TestBuildResourcePlanDedupesIdenticalSharedSkillIntents(t *testing.T) {
 	intents := []ResourceIntent{
