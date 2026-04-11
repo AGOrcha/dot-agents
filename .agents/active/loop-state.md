@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 9
+Iteration: 10
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 2 complete. Phase 3 machinery (SharedTargetIntents + CollectAndExecuteSharedTargetPlan) landed in iteration 9. Next: wire command layer to call CollectAndExecuteSharedTargetPlan before the platform loop, and thin platform createSkillsLinks to be no-ops for shared targets.
+- `resource-intent-centralization`: Phase 3 command-layer wiring complete (iterations 9+10). install.go, refresh.go, add.go now all call CollectAndExecuteSharedTargetPlan before the platform loop. Per-platform createSkillsLinks still runs (idempotent). Phase 3 checklist item 1 done; items 2+3 (dedup/fail-fast) were already in place from Phase 2. Phase 4 (thin platform adapters) is next.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
@@ -20,17 +20,43 @@ Blocked waves:
 These remain blocked on `resource-intent-centralization`.
 
 State summary:
-- 28/41 commands tested
+- 28/41 commands tested (workflow status now re-confirmed)
 - 12 scenario families covered
 - Mutation/reconciliation coverage is still the largest command-feedback gap
 - Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
 
-Supervisor note from iteration 9:
-- Added SharedTargetIntents to the Platform interface and CollectAndExecuteSharedTargetPlan to resource_plan.go. Cross-platform dedupe test proves codex+opencode+copilot targeting .agents/skills produces one symlink, not three writes.
-- The CLI traces confirmed the planner-diagnostic-visible surface (explain links) is stable and workflow health is healthy after the interface addition.
-- The machinery is in place; the next iteration should wire the command layer (install.go, refresh.go, add.go) to call CollectAndExecuteSharedTargetPlan before the platform loop, and make createSkillsLinks no-ops for shared targets. The feedback goal: does `workflow health` stay clean after command-layer wiring lands?
+Supervisor note from iteration 10:
+- Wired install.go, refresh.go, and add.go to call CollectAndExecuteSharedTargetPlan before the per-platform loop. Tests pass; workflow health + workflow status both clean after the wiring.
+- The per-platform createSkillsLinks still runs, making shared targets idempotent (written twice, correctly). Phase 4 will thin the adapters so createSkillsLinks becomes a no-op for shared targets.
+- The next iteration should pick Phase 4 (thin adapters) or move to crg-kg-integration Phase E if Phase 4 needs architectural review first.
 
 ## Iteration Log
+
+### Iteration 10 — 2026-04-11 12:30
+- wave: resource-intent-centralization
+- item: Phase 3 — wire command layer (install.go, refresh.go, add.go) to call CollectAndExecuteSharedTargetPlan before the platform loop
+- scenario_tags: [clean-repo, command-layer-shared-plan-wired]
+- feedback_goal: Does workflow health stay healthy after command-layer wiring, confirming the new pre-platform shared plan doesn't break the build path?
+- files_changed: 3
+- lines_added: 33
+- lines_removed: 2
+- tests_added: 0
+- tests_total_pass: true
+- retries: 0
+- commit: a5ec829
+- scope_note: "on-target"
+- summary: Wired CollectAndExecuteSharedTargetPlan into install, refresh, and add command flows before the per-platform CreateLinks loop
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: no (workflow health and workflow status are covered paths; new evidence is they stay clean after wiring — low-signal but necessary)
+- cli_produced_actionable_feedback: yes (confirmed backward compatibility of command-layer addition)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 9 — 2026-04-11 11:30
 - wave: resource-intent-centralization
@@ -258,21 +284,16 @@ Self-assessment:
 ## Next Iteration Playbook
 
 Primary implementation target:
-- `resource-intent-centralization` Phase 3 — wire command layer (install.go, refresh.go, add.go) to call `CollectAndExecuteSharedTargetPlan` before the per-platform `CreateLinks` loop, and make each platform's `createSkillsLinks` a no-op for shared `.agents/skills` targets
+- `resource-intent-centralization` Phase 4 — thin platform adapters so `createSkillsLinks` is a no-op for shared targets (`.agents/skills`, `.claude/skills`); the command layer already handles them via CollectAndExecuteSharedTargetPlan
 
 Preferred single item:
-- Wire `install.go` (and/or `refresh.go`) to call `CollectAndExecuteSharedTargetPlan` before the platform loop; adjust one platform's `createSkillsLinks` to skip shared-target execution; verify `go test ./...` still passes
+- In claude.go, change `createSkillsLinks` to only call `ensureUserSkills` (skip `ExecuteSharedSkillMirrorPlan`); update `stage1_integration_test.go` tests that call `NewClaude().CreateLinks()` directly to also call `CollectAndExecuteSharedTargetPlan` first; verify `go test ./...` still passes
 
 Primary feedback goal:
-- Answer: "Does `workflow health` stay clean after command-layer wiring of CollectAndExecuteSharedTargetPlan, and is the `.agents/skills` target now written exactly once instead of once per platform?"
-
-Preferred post-commit CLI path:
-- First choice: the closest safe command or readback that exercises shared-target projection integrity after the next planner wiring lands
-- Likely candidates: a projection-facing readback surface tied to the shared skill mirror slice, or the most directly affected write path if it becomes safely runnable under the guardrails
-- Fallback only if no closer surface exists: `explain` plus the nearest read-only integrity surface that reflects the new command-level aggregation
+- Answer: "After thinning claude.createSkillsLinks, do the stage1 integration tests still pass when using the command-layer pattern (CollectAndExecuteSharedTargetPlan + CreateLinks)?"
 
 Anti-goal for the next iteration:
-- Do not spend the CLI budget on another explain-only or repo-health-only trace unless the command-layer aggregation work still has no closer safe surface
+- Do not thin all four platforms at once — start with one (claude) and verify tests pass before expanding
 
 Command-feedback priorities:
 - Prefer a new command/scenario combination over refreshing timestamps on already-covered commands
@@ -487,6 +508,22 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 10 — 2026-04-11
+
+Trace: command-layer-wiring-health-check (bootstrap stack)
+Chain: `workflow health` → `workflow status`
+```
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy, branch: feature/PA-cursor-projectsync-phase1-extract-293f, dirty files: 0, has active plan: true, canonical plans: 0, has checkpoint: true
+$ go run ./cmd/dot-agents workflow status
+sha: a5ec829 (current commit), dirty files: 0, active plans: 6, has checkpoint: true, next-action UX: still shows "Status: Completed" — known issue
+```
+Scenario: [clean-repo, command-layer-shared-plan-wired]
+Feedback goal: Does workflow health stay healthy after command-layer wiring?
+Expectation: expected — command-layer addition is backward-compatible; shared plan runs at command startup before platforms
+Follow-on: documented — next iteration: thin platform adapters starting with claude.go
+Classification: [ok]
 
 ### Iteration 9 — 2026-04-11
 
