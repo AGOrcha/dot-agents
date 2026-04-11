@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 17
+Iteration: 18
 
 ## Current Position
 
@@ -27,11 +27,12 @@ State summary:
 - `skills promote` now does copy-move convergence: canonical path (`~/.agents/skills/<project>/<name>/`) is a real directory; repo-local (`.agents/skills/<name>/`) becomes a managed symlink. Prevents circular symlinks during platform mirror refresh.
 - 6 tests cover success (convergence), idempotency, and 4 error paths (not found, no project name, mispointing symlink, canonical real-dir clash).
 - `skill-import-streamline` wave closed: regression test locks promote path preservation of `ExtraFields` + multi-source `sources` through `Save()` after skill registration.
-- Next slice: `resource-intent-centralization` Phase 3 first unchecked item (shared executor migration in refresh/install paths), or `crg-kg-integration` Phase E incremental work.
+- `DryRunSharedTargetPlanLines` surfaces the same merged `ResourcePlan` as `CollectAndExecuteSharedTargetPlan` for `refresh --dry-run` and `install --dry-run` (no filesystem writes).
+- Next slice: `resource-intent-centralization` Phase 3 remaining bullets (agents/ projections, directory-replacement tests) or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
-Review target: iterations 15-17 and paired commits.
+Review target: iterations 16-18 and paired commits.
 
 Current findings:
 - `single-commit-closeout`: on-target — iteration 17 targets one commit (tests + loop-state + plan YAML + canonical advances).
@@ -68,6 +69,32 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 18 — 2026-04-11 12:00
+- wave: resource-intent-centralization
+- item: Phase 3 — dry-run visibility for centralized shared-target plan (`refresh` / `install` aligned with `CollectAndExecuteSharedTargetPlan`)
+- scenario_tags: [clean-repo, dry-run-vs-apply, planner-diagnostic-visible, canonical-plan-present]
+- feedback_goal: Does `refresh --dry-run` print merged `shared target:` lines (duplicate merge counts) before per-platform dry-run rows, and does `explain links` still describe centralized shared targets?
+- files_changed: 4
+- lines_added: 109
+- lines_removed: 10
+- tests_added: 2
+- tests_total_pass: true
+- retries: 0
+- commit: dcc2478
+- scope_note: "on-target"
+- summary: Added `DryRunSharedTargetPlanLines` and wired `refresh`/`install` dry-run paths to print merged symlink plan; two unit tests (none + cross-platform dedupe).
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (dry-run-shared-target-preview paired with prior apply-only behavior)
+- cli_produced_actionable_feedback: yes (live `refresh --dry-run dot-agents` showed merged rows + `.claude` vs `.agents` targets)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 17 — 2026-04-11
 - wave: skill-import-streamline
@@ -513,25 +540,25 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Loop closeout rules:
+Loop closeout rules (iteration 19+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
 - Reconcile coverage tables before ending the iteration.
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 3 first unchecked item**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
+1. **resource-intent-centralization Phase 3**: Remaining migration bullets (canonical `agents/` projections into planner, executor-only replacement tests) or next smallest unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 18:
-- resource-intent-centralization Phase 3 (first actionable checklist item in `.agents/active/resource-intent-centralization.plan.md`) — continues the main migration thread now that skill-import-streamline is complete.
+Preferred single item for iteration 19:
+- Continue Phase 3 toward `agents/` SharedTargetIntents **or** a focused executor/registry test from Phase 6 — pick one unchecked checklist line after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
 
-Primary feedback goal for iteration 18:
-- After the Phase 3 change, does `go test ./...` stay green and does `explain links` (or the closest read-only planner surface) still describe shared targets accurately?
+Primary feedback goal for iteration 19 (example):
+- After the next Phase 3/6 slice, does `go test ./...` stay green and does the closest read-only surface (`explain links`, `workflow health`, or new dry-run output) still match actual managed behavior?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
-- Primary evidence: targeted package tests plus `workflow tasks` / `workflow health` for planner health.
+- Primary evidence: targeted package tests plus `refresh --dry-run` / `workflow health` when touching shared-target paths.
 - Archive completed `skill-import-streamline` markdown plan to history when convenient (lesson archive-completed-active-plans).
 
 Known baseline CLI noise:
@@ -567,7 +594,7 @@ Signals already captured:
 - `dot-agents explain` now exposes the centralized shared-skill ownership model, giving a safe read-only diagnostic surface for planner-aware iterations
 
 Signals still missing or too weak:
-- A live command trace that proves the new planner is aggregated once at the command layer during a projection-style run, not just inside per-platform skill emitters and explain text
+- A live **apply** trace that proves the shared plan runs once at the command layer during a real `refresh`/`install` (guardrail limits direct `refresh` in loop; dry-run now proves merged plan visibility)
 - Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
@@ -607,6 +634,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
+| `dry-run-shared-target-preview` | yes | 18 | `refresh --dry-run` prints merged `shared target:` symlink lines with duplicate-intent merge counts before per-platform dry-run; pairs with apply path tested via unit/integration tests |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
 | `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
@@ -629,6 +657,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `multi-project-drift-empty` | yes | 5 | `workflow drift` ran, but only in the no-plan / no-remediation-needed path |
 | `multi-project-drift-detected` | yes | 11 | `workflow drift` showed all 3 projects missing .agents/workflow/ — valid no-workflow-initialized state; report saved to drift-report.json |
 | `sweep-dry-run` | yes | 13 | `workflow sweep --dry-run` proposed 5 actions across 3 projects (create .agents/workflow/ + checkpoint reminders); matches drift report from iteration 11 |
+| `refresh-install-dry-run` | yes | 18 | `refresh --dry-run` now surfaces centralized shared-target rows; `install --dry-run` uses same helper (not separately traced this iteration) |
 | `sweep-apply-confirmed` | no | - | apply path is both untested and more invasive |
 
 ### KG Lifecycle
@@ -745,6 +774,36 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 18 — 2026-04-11
+
+Trace: explain-links-planner-baseline
+Command: `go run ./cmd/dot-agents explain links` (truncated)
+Scenario: [clean-repo, planner-diagnostic-visible]
+Feedback goal: Confirm centralized shared-target wording unchanged after dry-run wiring.
+Output summary: CENTRALIZED SHARED TARGETS section still present; describes planning before writes.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
+
+Trace: refresh-dry-run-shared-target-chain (mutation-and-reconciliation: dry-run vs apply)
+Chain: `explain links` → `refresh --dry-run dot-agents` → `workflow health`
+Command: `go run ./cmd/dot-agents refresh --dry-run dot-agents`
+Scenario: [clean-repo, dry-run-vs-apply, dry-run-shared-target-preview, canonical-plan-present]
+Feedback goal: Does dry-run list merged shared symlink rows with duplicate-intent counts before per-platform dry-run lines?
+Output summary: Six `shared target: symlink … -> …` lines for three skills — `.agents/skills/*` rows show `(2 duplicate intent(s) merged)`; `.claude/skills/*` rows have no merge count (distinct conflict keys). Then Cursor/Claude/Codex/Copilot dry-run refresh lines and `.agents-refresh` dry-run.
+Expectation: expected
+Follow-on: none — paired apply path already proven in prior iterations via non-dry refresh/install tests
+Classification: [ok]
+
+Trace: workflow-health-after-dry-run
+Command: `go run ./cmd/dot-agents workflow health`
+Scenario: [clean-repo, repo-health-stack]
+Feedback goal: Confirm read-only workflow subsystem still healthy after dry-run (no mutations).
+Output summary: status healthy, dirty files 0, canonical plans 6, checkpoint true.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 17 — 2026-04-11
 
@@ -1198,7 +1257,8 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `install --generate` | tests only | 14 | ok (merge behavior unit-tested; live cmd guardrail-blocked in loop) |
 | `status` | yes | 7 | ok-warning |
 | `doctor` | yes | 7 | ok-warning |
-| `explain` | yes | 11 | ok |
+| `explain` | yes | 18 | ok |
+| `refresh` | yes | 18 | ok (dry-run path shows merged shared targets) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow plan` | yes | 14 | ok |

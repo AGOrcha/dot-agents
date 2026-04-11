@@ -78,6 +78,7 @@ Completed in this session:
 
 ## Phase 3: Centralize Shared Repo Targets First
 
+- [x] `refresh` / `install --dry-run` emit merged shared-target symlink lines (with duplicate-intent merge counts) before per-platform dry-run rows — operators can see the centralized plan without writes (2026-04-11).
 - [ ] Migrate the highest-conflict repo-local outputs onto the shared executor first:
   - `.agents/skills/<name>`
   - `.claude/skills/<name>` when emitted as a shared compatibility mirror
