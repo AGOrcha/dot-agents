@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 10
+Iteration: 11
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 3 command-layer wiring complete (iterations 9+10). install.go, refresh.go, add.go now all call CollectAndExecuteSharedTargetPlan before the platform loop. Per-platform createSkillsLinks still runs (idempotent). Phase 3 checklist item 1 done; items 2+3 (dedup/fail-fast) were already in place from Phase 2. Phase 4 (thin platform adapters) is next.
+- `resource-intent-centralization`: Phase 4 started. Claude adapter thinned (iteration 11): createSkillsLinks no longer calls ExecuteSharedSkillMirrorPlan; shared targets are command-layer only. Remaining: thin codex, opencode, copilot adapters (same pattern).
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
@@ -20,17 +20,43 @@ Blocked waves:
 These remain blocked on `resource-intent-centralization`.
 
 State summary:
-- 28/41 commands tested (workflow status now re-confirmed)
+- 29/41 commands tested (workflow drift now covered)
 - 12 scenario families covered
-- Mutation/reconciliation coverage is still the largest command-feedback gap
+- Mutation/reconciliation: workflow drift now exercised (all 3 projects lack .agents/workflow/)
 - Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
 
-Supervisor note from iteration 10:
-- Wired install.go, refresh.go, and add.go to call CollectAndExecuteSharedTargetPlan before the per-platform loop. Tests pass; workflow health + workflow status both clean after the wiring.
-- The per-platform createSkillsLinks still runs, making shared targets idempotent (written twice, correctly). Phase 4 will thin the adapters so createSkillsLinks becomes a no-op for shared targets.
-- The next iteration should pick Phase 4 (thin adapters) or move to crg-kg-integration Phase E if Phase 4 needs architectural review first.
+Supervisor note from iteration 11:
+- Thinned claude.createSkillsLinks to user-home only. Updated 2 stage1 tests to use CollectAndExecuteSharedTargetPlan first (command-layer pattern). All tests pass.
+- workflow drift shows all 3 managed projects lack .agents/workflow/ — a valid multi-project-drift-detected-no-workflow state. Saved to ~/.agents/context/drift-report.json (outside repo, per guardrails).
+- The next iteration should thin codex, opencode, and copilot adapters (3 files, each 1-line change), then verify stage1 tests pass.
 
 ## Iteration Log
+
+### Iteration 11 — 2026-04-11 13:30
+- wave: resource-intent-centralization
+- item: Phase 4 — thin claude.createSkillsLinks to user-home only; update stage1 tests to use command-layer pattern
+- scenario_tags: [clean-repo, platform-adapter-thinned, multi-project-drift-empty-state]
+- feedback_goal: After thinning claude adapter, do stage1 integration tests still pass using CollectAndExecuteSharedTargetPlan + CreateLinks pattern?
+- files_changed: 2
+- lines_added: 13
+- lines_removed: 6
+- tests_added: 0
+- tests_total_pass: true
+- retries: 0
+- commit: 076a8f5
+- scope_note: "on-target"
+- summary: Thinned claude.createSkillsLinks (now user-home only); updated TestClaudeCreateLinksDualSkillOutputs and TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink to use command-layer pattern
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (workflow drift — multi-project-drift-empty-state, first time exercised)
+- cli_produced_actionable_feedback: yes (drift shows all 3 projects lack .agents/workflow/)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 10 — 2026-04-11 12:30
 - wave: resource-intent-centralization
@@ -284,16 +310,16 @@ Self-assessment:
 ## Next Iteration Playbook
 
 Primary implementation target:
-- `resource-intent-centralization` Phase 4 — thin platform adapters so `createSkillsLinks` is a no-op for shared targets (`.agents/skills`, `.claude/skills`); the command layer already handles them via CollectAndExecuteSharedTargetPlan
+- `resource-intent-centralization` Phase 4 — thin codex, opencode, and copilot `createSkillsLinks` to no-ops (`.agents/skills` is now command-layer only); check if any stage1 tests assert skills from these adapters directly
 
 Preferred single item:
-- In claude.go, change `createSkillsLinks` to only call `ensureUserSkills` (skip `ExecuteSharedSkillMirrorPlan`); update `stage1_integration_test.go` tests that call `NewClaude().CreateLinks()` directly to also call `CollectAndExecuteSharedTargetPlan` first; verify `go test ./...` still passes
+- In codex.go, opencode.go, copilot.go: change `createSkillsLinks` to `return nil`; run `go test ./...` to check if any tests fail; if they do, update them to use the command-layer pattern; commit
 
 Primary feedback goal:
-- Answer: "After thinning claude.createSkillsLinks, do the stage1 integration tests still pass when using the command-layer pattern (CollectAndExecuteSharedTargetPlan + CreateLinks)?"
+- Answer: "After thinning all 4 platform adapters, do all stage1 integration tests still pass, and does `workflow drift` still report the same 3 no-workflow warnings?"
 
 Anti-goal for the next iteration:
-- Do not thin all four platforms at once — start with one (claude) and verify tests pass before expanding
+- Do not also thin cursor (cursor has no skills); do not change test assertions beyond the minimum required
 
 Command-feedback priorities:
 - Prefer a new command/scenario combination over refreshing timestamps on already-covered commands
@@ -390,7 +416,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
 | `multi-project-drift-empty` | yes | 5 | `workflow drift` ran, but only in the no-plan / no-remediation-needed path |
-| `multi-project-drift-detected` | no | - | need a stale checkpoint or missing workflow dir in a managed project |
+| `multi-project-drift-detected` | yes | 11 | `workflow drift` showed all 3 projects missing .agents/workflow/ — valid no-workflow-initialized state; report saved to drift-report.json |
 | `sweep-dry-run` | no | - | `workflow sweep` not exercised yet |
 | `sweep-apply-confirmed` | no | - | apply path is both untested and more invasive |
 
@@ -508,6 +534,22 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 11 — 2026-04-11
+
+Trace: adapter-thin-drift-check (mutation-and-reconciliation)
+Chain: `workflow drift` → `explain links`
+```
+$ go run ./cmd/dot-agents workflow drift
+Workflow Drift Report — 3 projects checked. ResumeAgent: warn (no checkpoint, no .agents/workflow/). dot-agents: warn (no .agents/workflow/). payout: warn (no checkpoint, no .agents/workflow/). healthy: 0, warnings: 3, unreachable: 0. report saved to ~/.agents/context/drift-report.json
+$ go run ./cmd/dot-agents explain links
+[CENTRALIZED SHARED TARGETS section still present and accurate after adapter thinning]
+```
+Scenario: [clean-repo, platform-adapter-thinned, multi-project-drift-empty-state]
+Feedback goal: After thinning claude adapter, does workflow drift expose the project state accurately and does explain links remain coherent?
+Expectation: expected — drift correctly surfaces no-workflow projects; explain links is unaffected by adapter change
+Follow-on: documented — drift-report.json written outside repo (guardrail-safe, it's in ~/.agents/context/); next iteration: thin codex/opencode/copilot adapters
+Classification: [ok-warning] — drift warnings are valid (no workflow initialized in these projects), not implementation bugs
 
 ### Iteration 10 — 2026-04-11
 
