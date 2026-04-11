@@ -69,6 +69,21 @@ func TestClaudeCreateLinksDualSkillOutputs(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
 }
 
+func TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: canonical review\n---\n")
+	writeTextFile(t, filepath.Join(repo, dirAgents, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: imported review\n---\n")
+
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "skills", "review"), skillDir)
+}
+
 func TestClaudeCreateLinksSymlinksGlobalAgentsIntoUserHome(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
