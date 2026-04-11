@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 8
+Iteration: 9
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 2 complete. The initial planner/executor slice for shared skill mirrors landed; Phase 3 command-level shared-target aggregation is next, and canonical `agents/` projections are now explicitly part of the same rollout framework.
+- `resource-intent-centralization`: Phase 2 complete. Phase 3 machinery (SharedTargetIntents + CollectAndExecuteSharedTargetPlan) landed in iteration 9. Next: wire command layer to call CollectAndExecuteSharedTargetPlan before the platform loop, and thin platform createSkillsLinks to be no-ops for shared targets.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active; Phase G deferred.
 
 Blocked waves:
@@ -25,12 +25,38 @@ State summary:
 - Mutation/reconciliation coverage is still the largest command-feedback gap
 - Many archived/completed plans still contain stale unchecked boxes; trust the `Status:` header, not unchecked items
 
-Supervisor note from iteration 8:
-- The implementation slice stayed on the intended Phase 2 seam and the CLI trace finally answered a planner-specific question.
-- The remaining gap is no longer "planner exists or not"; it is whether shared targets are aggregated once at the command layer with cross-platform dedupe/conflict handling, and then whether `agents/` can ride the same framework cleanly after skills.
-- The next iteration should avoid more explain-only evidence and move to the first safe command-level aggregation slice or the nearest runnable projection-integrity readback, with `agents/` kept in scope for the same framework.
+Supervisor note from iteration 9:
+- Added SharedTargetIntents to the Platform interface and CollectAndExecuteSharedTargetPlan to resource_plan.go. Cross-platform dedupe test proves codex+opencode+copilot targeting .agents/skills produces one symlink, not three writes.
+- The CLI traces confirmed the planner-diagnostic-visible surface (explain links) is stable and workflow health is healthy after the interface addition.
+- The machinery is in place; the next iteration should wire the command layer (install.go, refresh.go, add.go) to call CollectAndExecuteSharedTargetPlan before the platform loop, and make createSkillsLinks no-ops for shared targets. The feedback goal: does `workflow health` stay clean after command-layer wiring lands?
 
 ## Iteration Log
+
+### Iteration 9 — 2026-04-11 11:30
+- wave: resource-intent-centralization
+- item: Phase 3 — add SharedTargetIntents to Platform interface and CollectAndExecuteSharedTargetPlan command-layer aggregation function
+- scenario_tags: [clean-repo, planner-diagnostic-visible, interface-machinery-added]
+- feedback_goal: Does explain links still surface planner correctly, and does workflow health stay clean after the interface expansion?
+- files_changed: 8
+- lines_added: 87
+- lines_removed: 0
+- tests_added: 1
+- tests_total_pass: true
+- retries: 0
+- commit: 0f034fc
+- scope_note: "split: Phase 3 command-layer wiring deferred to next iteration; this iteration adds machinery only"
+- summary: Added SharedTargetIntents to Platform interface (5 platform impls), added CollectAndExecuteSharedTargetPlan aggregation helper, added cross-platform dedupe test
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: no (explain links and workflow health are previously covered; new evidence is that they stay clean after interface expansion — low signal)
+- cli_produced_actionable_feedback: yes (confirmed backward compatibility of interface addition)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 8 — 2026-04-11 10:19
 - wave: resource-intent-centralization
@@ -232,13 +258,13 @@ Self-assessment:
 ## Next Iteration Playbook
 
 Primary implementation target:
-- `resource-intent-centralization` Phase 3 — centralize shared repo targets at the command/orchestration layer, starting with multi-platform `.agents/skills/<name>` aggregation and then carrying canonical `agents/` projections through the same planner path
+- `resource-intent-centralization` Phase 3 — wire command layer (install.go, refresh.go, add.go) to call `CollectAndExecuteSharedTargetPlan` before the per-platform `CreateLinks` loop, and make each platform's `createSkillsLinks` a no-op for shared `.agents/skills` targets
 
 Preferred single item:
-- Route one real command path through a single shared-target plan build so Claude/Codex/OpenCode/Copilot stop reaching `.agents/skills/<name>` independently, while keeping the resulting planner surface usable for the next `agents/` slice
+- Wire `install.go` (and/or `refresh.go`) to call `CollectAndExecuteSharedTargetPlan` before the platform loop; adjust one platform's `createSkillsLinks` to skip shared-target execution; verify `go test ./...` still passes
 
 Primary feedback goal:
-- Answer: "Can the shared-target planner now aggregate `.agents/skills/<name>` once per command run and surface conflicts or integrity clearly enough to trust the Phase 3 migration, and is the framework shaped cleanly enough that `agents/` can plug into it next without redesign?"
+- Answer: "Does `workflow health` stay clean after command-layer wiring of CollectAndExecuteSharedTargetPlan, and is the `.agents/skills` target now written exactly once instead of once per platform?"
 
 Preferred post-commit CLI path:
 - First choice: the closest safe command or readback that exercises shared-target projection integrity after the next planner wiring lands
@@ -461,6 +487,22 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 9 — 2026-04-11
+
+Trace: planner-diagnostic-stable-after-interface-expansion (analysis/readback)
+Chain: `explain links` → `workflow health`
+```
+$ go run ./cmd/dot-agents explain links
+[CENTRALIZED SHARED TARGETS section present — .agents/skills/<name> planned centrally before writes]
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy, branch: feature/PA-cursor-projectsync-phase1-extract-293f, dirty files: 0, has active plan: true, canonical plans: 0, has checkpoint: true
+```
+Scenario: [clean-repo, planner-diagnostic-visible]
+Feedback goal: Does explain links still surface planner correctly, and does workflow health stay clean after the interface expansion?
+Expectation: expected — interface addition is backward-compatible; explain and health surfaces are unaffected
+Follow-on: documented — next iteration: wire command layer; feedback goal becomes "was .agents/skills written once not 4x?"
+Classification: [ok]
 
 ### Iteration 8 — 2026-04-11
 
