@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 13
+Iteration: 14
 
 ## Current Position
 
@@ -11,7 +11,7 @@ Driving specs:
 
 Active waves:
 - `resource-intent-centralization`: Phase 4 COMPLETE. Phase 5 (command-consumer unification) next.
-- `skill-import-streamline`: UNBLOCKED. First item done: AgentsRC round-trip preservation (iteration 13). Remaining: install --generate merge, skills import/promote command.
+- `skill-import-streamline`: Items 1–2 done (manifest round-trip, `install --generate` merge). Next: skills import/promote command path and shared-skills convergence.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
 Blocked waves (reassessed):
@@ -19,16 +19,25 @@ Blocked waves (reassessed):
 - `refresh-skill-relink`: effectively done (all root-cause items are resolved by resource-intent-centralization). Remaining item is a regression test that requires running `refresh`, which is guardrail-blocked. Can update status to reflect this.
 
 State summary:
-- 31/41 commands tested (workflow sweep --dry-run now exercised)
-- 14 scenario families covered
-- AgentsRC now preserves unknown fields on save; `refresh` block no longer silently dropped
-- `workflow sweep --dry-run` shows 5 actions across 3 projects; all valid (no workflow dirs, no checkpoints)
+- `MergeGenerateAgentsRC` preserves existing git/local sources, non-empty project name, and `ExtraFields` when `install --generate` runs with an existing `.agentsrc.json`; filesystem-derived lists still come from `GenerateAgentsRC`. Covered by six unit tests (nil args, git+local merge, local dedupe, git dedupe, extra fields).
+- Live `install --generate` remains guardrail-blocked in the loop; evidence is tests + read-only `workflow plan` trace.
+- Next slice: `skill-import-streamline` item 3 (skills import/promote) or `resource-intent-centralization` Phase 5.
 
-Supervisor note from iteration 13:
-- Implemented AgentsRC round-trip preservation: custom MarshalJSON/UnmarshalJSON capture unknown fields in ExtraFields map; Save() merges them back. 2 new tests pass.
-- `workflow sweep --dry-run` exercised for first time: correctly proposes creating .agents/workflow/ dirs and checkpoint reminders for projects that lack them. [ok] state.
-- `workflow health` confirmed stable.
-- Next: continue skill-import-streamline (install --generate merge) or resource-intent-centralization Phase 5.
+## Loop Health
+
+Review target: iterations 12-14 and paired commits.
+
+Current findings:
+- `single-commit-closeout`: improving — iteration 14 targets one commit including loop-state + plan checkbox updates with the implementation.
+- `coverage-reconciliation`: improving — iteration 14 reconciles `workflow plan` and new `install --generate` coverage row against traces before closeout.
+- `playbook-hygiene`: improving — single rewritten playbook block below (no duplicate candidate stacks).
+- `scenario-tag-canon`: use `install-generate-source-merge` (table row) with `clean-repo` for this iteration; avoid ad hoc aliases.
+- `evidence-signal`: primary feedback for iteration 14 is unit-test proof of source merge; CLI trace is secondary read-only `workflow plan` (not another `workflow health` pass).
+
+Operating rules for iteration 15+:
+- Prefer one final commit per iteration that includes code plus loop-state/plan updates.
+- Use one primary evidence chain plus at most one secondary probe; reconcile coverage tables before closeout.
+- Rewrite summary sections in place; do not append duplicate playbook blocks.
 
 ## Iteration Log
 
@@ -54,6 +63,33 @@ Self-assessment:
 - ran_cli_command: yes
 - exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
 - cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
+### Iteration 14 — 2026-04-11
+- wave: skill-import-streamline
+- item: Make `install --generate` merge with existing `.agentsrc.json` (preserve sources, project, ExtraFields)
+- scenario_tags: [clean-repo, install-generate-source-merge]
+- feedback_goal: After merge, does generated manifest state preserve pre-existing git/manual sources and extra keys instead of replacing `sources` wholesale?
+- files_changed: 5
+- lines_added: 269
+- lines_removed: 62
+- tests_added: 6
+- tests_total_pass: true
+- retries: 0
+- commit: 0e76c79
+- scope_note: "on-target"
+- summary: Added MergeGenerateAgentsRC + merge in runInstallGenerate when manifest exists; dry-run shows merged project and source count; six unit tests
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (nil-arg and dedupe edge cases)
+- ran_cli_command: yes
+- exercised_new_scenario: yes (install-generate-source-merge via tests; live install blocked)
+- cli_produced_actionable_feedback: informative-nonblocking (workflow plan lists canonical plans; merge behavior proven in tests)
 - linked_traces_to_outcomes: yes
 - stayed_under_10_files: yes
 - no_destructive_commands: yes
@@ -361,47 +397,33 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Candidate paths (in priority order):
-1. **skill-import-streamline item 2**: Make `install --generate` merge with existing `.agentsrc.json` instead of replacing sources wholesale. Located in `GenerateAgentsRC()` and `commands/install.go`. Contains the AgentsRC round-trip fix (iteration 13) as a prerequisite — now done.
-2. **resource-intent-centralization Phase 5**: Update `explain` to read from resource registry for diagnostics. Closest to the changed code path (platform/resource_plan.go).
-3. **crg-kg-integration Phase E**: Postgres backend for GraphStore (significant scope; requires external setup).
+Loop closeout rules:
+- Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
+- Run one primary evidence chain plus at most one secondary probe.
+- Reconcile coverage tables before ending the iteration.
 
-Preferred single item for iteration 14:
-- `skill-import-streamline` item 2: `GenerateAgentsRC()` is lossy — it replaces `sources` wholesale. Fix to merge with existing manifest fields rather than overwriting. Change is in `internal/config/agentsrc.go` (add MergeInto or similar).
+Candidate paths (priority order):
+1. **skill-import-streamline item 3**: Add a project-scope skills import/promote command path (canonical import + manifest + shared mirrors), or the next smallest slice the plan allows.
+2. **resource-intent-centralization Phase 5**: Update `remove`, `status`, and `explain` to use the same resource registry and retire the now-zero-caller adapter helper in `internal/platform/resource_plan.go`.
+3. **Readiness reassessment only if needed**: Re-check `platform-dir-unification` and `refresh-skill-relink` if their markdown status lines are stale.
 
-Primary feedback goal:
-- "After the fix, does `install --generate` preserve manually added git sources in .agentsrc.json?"
+Preferred single item for iteration 15:
+- Either skill-import-streamline item 3 (promote path) or resource-intent Phase 5 first unchecked wave item — pick with plan-wave-picker.
 
-Command-feedback priorities:
-- First: run `workflow health` to confirm stability
-- New uncovered scenario: `workflow verify record` (closeout-and-evidence) or `workflow tasks <plan>` (uncovered command)
-- Avoid repeating bootstrap/health chains already well-covered
-
-Known baseline CLI noise:
-- `status` / `doctor` warn about 4 broken Claude skill links in user config
-- `doctor` warns that the `dot-agents` git source is not yet fetched
-- `workflow sweep --dry-run` shows 5 actions — all valid, not noise
-
-Candidate paths (in priority order):
-1. **Check unblocked waves**: `platform-dir-unification`, `refresh-skill-relink`, `skill-import-streamline` were blocked on resource-intent-centralization — verify their current Status header and pick the best next wave
-2. **resource-intent-centralization Phase 5**: update `remove`, `status`, and `explain` to use the same resource registry; update `explain` to read from the actual managed resource state
-3. **crg-kg-integration Phase E**: Postgres backend for GraphStore
-
-Preferred feedback goal for next iteration:
-- Answer: "Do the previously blocked waves become actionable now that Phase 4 is complete, or are there deeper dependencies that still block them?"
+Primary feedback goal (placeholder — refine when wave is chosen):
+- Ask a concrete question the chosen command or test run can answer (avoid generic health-only checks).
 
 Command-feedback priorities:
-- First: read blocked wave plan files to evaluate readiness
-- Prefer a new uncovered command/scenario over repeating bootstrap chains
-- Uncovered: `workflow tasks`, `workflow advance`, `kg lint`, `kg build`, `kg update`, `workflow sweep --dry-run`
+- Prefer the closest runnable surface to the code changed; use tests when loop guardrails block writes (`install --generate`, `refresh`, etc.).
+- Secondary: `workflow tasks <id>` when a canonical plan matches the wave, or `workflow verify record` only with safe fixtures.
 
 Known baseline CLI noise:
-- `status` / `doctor` warn about 4 broken Claude skill links in user config
-- `doctor` warns that the `dot-agents` git source is not yet fetched
-- Treat these as baseline environment noise unless the current iteration changes their underlying code path
+- `status` / `doctor` warn about 4 broken Claude skill links in user config.
+- `doctor` warns that the `dot-agents` git source is not yet fetched.
+- `workflow sweep --dry-run` shows 5 actions across 3 projects; these are valid drift findings, not noise.
 
-Cleanup note for future iteration:
-- `ExecuteSharedSkillMirrorPlan` in resource_plan.go now has zero callers from adapters. Consider removing it in Phase 5 or marking it internal-only.
+Cleanup note:
+- `ExecuteSharedSkillMirrorPlan` in `resource_plan.go` now has zero callers from adapters. Fold removal or re-scoping into Phase 5 rather than leaving it as silent residue.
 
 ## Analysis Readiness
 
@@ -528,6 +550,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
+| `install-generate-source-merge` | yes | 14 | MergeGenerateAgentsRC unit tests: git+local preserved, dedupe, ExtraFields; live `install --generate` not run (loop guardrail) |
 | `workflow-graph-disabled` | no | - | `workflow graph health/query` not exercised yet |
 | `workflow-graph-enabled` | no | - | requires `.agents/workflow/graph-bridge.yaml` configured and enabled |
 | `bridge-intent-disallowed` | no | - | disallowed-intent guard path untested |
@@ -581,16 +604,15 @@ These are larger chained checks that cross subsystem boundaries. Grouping them b
 | `ok-warning-ux-friction` | yes | 5 | warnings captured for orphan links, misleading flows guidance, and next-action parsing |
 | `planner-diagnostic-visible` | yes | 8 | `explain links` and `explain platforms` now expose centralized shared-skill planning clearly enough to serve as a safe read-only planner trace |
 | `retry-recovered` | yes | 2 | naming collision fixed before final commit |
-| `retry-recovered-with-error-log` | no | - | retry happened, but no matching `## Error Log` entry exists yet |
+| `retry-recovered-with-error-log` | yes | 2 | Iteration 2 naming-collision retry is now mirrored in `## Error Log` for later analysis |
 | `pre-existing-tool-bug-confirmed` | yes | 5 | `kg flows` help text is wrong after postprocess when igraph is absent |
 | `blocked-environment` | no | - | no scenario explicitly tagged as blocked by missing dependency or approval gate |
 
 ## Skip List
 
 Plans to skip (blocked, requires architectural work, completed, or out of scope for loop):
-- `refresh-skill-relink` — blocked on resource-intent-centralization
-- `skill-import-streamline` — blocked on resource-intent-centralization
-- `platform-dir-unification` — blocked on resource-intent-centralization
+- `refresh-skill-relink` — paused; convergence items still tied to shared executor
+- `platform-dir-unification` — paused; bash parity deferred
 - `crg-kg-integration` Phase G — deferred until Phases E/F land and are exercised
 
 (Completed plans archived to .agents/history/ on 2026-04-11:)
@@ -602,6 +624,20 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 14 — 2026-04-11
+
+Trace: workflow-plan-canonical-list (read-only; install-generate blocked)
+Chain: `workflow plan` (primary evidence after tests — confirms canonical plan registry still healthy post-merge code)
+```
+$ go run ./cmd/dot-agents workflow plan
+```
+(Output: lists active-artifact-cleanup completed, crg-kg-integration active, platform-dir-unification paused, refresh-skill-relink paused, resource-intent-centralization active, skill-import-streamline paused.)
+Scenario: [clean-repo, install-generate-source-merge]
+Feedback goal: Does merge logic for `install --generate` preserve manual/git sources? — answered by six `internal/config` tests; CLI trace is secondary sanity on workflow subsystem.
+Expectation: informative-nonblocking — merge behavior not observable via this command; tests carry proof.
+Follow-on: none — next iteration may add `explain` line about merge if operators need discoverability.
+Classification: [ok] for `workflow plan`
 
 ### Iteration 13 — 2026-04-11
 
@@ -1013,26 +1049,27 @@ Classification: [ok]
 
 | Command | Tested | Last Iteration | Status |
 |---|---|---|---|
+| `install --generate` | tests only | 14 | ok (merge behavior unit-tested; live cmd guardrail-blocked in loop) |
 | `status` | yes | 7 | ok-warning |
 | `doctor` | yes | 7 | ok-warning |
-| `explain` | yes | 8 | ok |
-| `workflow status` | yes | 5 | ok-warning |
+| `explain` | yes | 11 | ok |
+| `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
+| `workflow plan` | yes | 14 | ok |
 | `workflow checkpoint` | yes | 5 | ok |
 | `workflow log` | yes | 6 | ok |
-| `workflow plan` | yes | 5 | ok-empty |
 | `workflow tasks` | yes | 5 | ok-empty |
 | `workflow advance` | no | - | - |
-| `workflow health` | yes | 7 | ok |
+| `workflow health` | yes | 13 | ok |
 | `workflow verify` | no | - | - |
 | `workflow prefs` | no | - | - |
 | `workflow graph` | no | - | - |
 | `workflow fanout` | no | - | - |
 | `workflow merge-back` | no | - | - |
-| `workflow drift` | yes | 5 | ok-empty |
-| `workflow sweep` | no | - | - |
+| `workflow drift` | yes | 11 | ok-warning |
+| `workflow sweep` | yes | 13 | ok |
 | `kg setup` | no | - | - |
-| `kg health` | yes | 5 | ok-empty |
+| `kg health` | yes | 12 | ok-empty |
 | `kg ingest` | no | - | - |
 | `kg queue` | no | - | - |
 | `kg query` | yes | 5 | ok-empty |
@@ -1057,7 +1094,11 @@ Classification: [ok]
 
 ## Error Log
 
-(No errors recorded yet)
+### Iteration 2
+- type: compile-error
+- detail: Naming collision between the new CRG bridge result type and existing `ImpactResult` in `store.go` during Phase C command wiring.
+- resolution: Renamed the conflicting result type before the final green test/CLI pass.
+- retries: 1
 
 <!--
 Format:

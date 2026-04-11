@@ -1,7 +1,7 @@
 # Skill Import Streamline Plan
 
-Status: Blocked — all items pending; blocked on resource-intent-centralization implementation (RFC accepted, shared skill mirror convergence still requires the centralized resource executor to land).
-Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus resource-intent-centralization implementation
+Status: In progress — manifest round-trip and install --generate merge landed; skills import/promote and symlink convergence remain.
+Depends on: shared resource executor (resource-intent-centralization) for promotion/convergence items only.
 
 
 
@@ -30,8 +30,8 @@ Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus resource-inte
 
 ## Next Slice
 
-- [ ] Add manifest round-trip preservation for unknown fields, or explicitly model the current `refresh` block if it is still supported.
-- [ ] Make `install --generate` merge with existing `.agentsrc.json` where appropriate instead of replacing `sources` and other manual declarations wholesale.
+- [x] Add manifest round-trip preservation for unknown fields, or explicitly model the current `refresh` block if it is still supported.
+- [x] Make `install --generate` merge with existing `.agentsrc.json` where appropriate instead of replacing `sources` and other manual declarations wholesale.
 - [ ] Add a project-scope “skills import/promote” command path that:
   1. imports repo-local skill content into `~/.agents/skills/<project>/`
   2. updates `.agentsrc.json`

@@ -28,7 +28,10 @@ the appropriate platform-specific symlinks and hard links.
 Commit .agentsrc.json to git so any contributor can run 'dot-agents install'
 after cloning — no manual init or sync required.
 
-Use --generate to create .agentsrc.json from the current ~/.agents/ state.`,
+Use --generate to create or refresh .agentsrc.json from the current ~/.agents/ state.
+If a manifest already exists, generated skill and platform lists replace stale values,
+but existing source entries (for example git remotes), a non-empty project name, and
+unknown JSON keys are preserved.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if generate {
 				return runInstallGenerate()
@@ -246,9 +249,21 @@ func runInstallGenerate() error {
 		return fmt.Errorf("generating manifest: %w", err)
 	}
 
+	manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
+	if _, statErr := os.Stat(manifestPath); statErr == nil {
+		existing, loadErr := config.LoadAgentsRC(projectPath)
+		if loadErr != nil {
+			return fmt.Errorf("loading existing %s: %w", config.AgentsRCFile, loadErr)
+		}
+		rc = config.MergeGenerateAgentsRC(existing, rc)
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("accessing %s: %w", config.AgentsRCFile, statErr)
+	}
+
 	if Flags.DryRun {
 		ui.DryRun(fmt.Sprintf("Would write %s with:", config.AgentsRCFile))
-		ui.DryRun(fmt.Sprintf("  project:  %s", projectName))
+		ui.DryRun(fmt.Sprintf("  project:  %s", rc.Project))
+		ui.DryRun(fmt.Sprintf("  sources:  %d entries", len(rc.Sources)))
 		ui.DryRun(fmt.Sprintf("  skills:   %v", rc.Skills))
 		ui.DryRun(fmt.Sprintf("  rules:    %v", rc.Rules))
 		ui.DryRun(fmt.Sprintf("  agents:   %v", rc.Agents))

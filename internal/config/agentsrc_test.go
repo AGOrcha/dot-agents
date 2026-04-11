@@ -340,6 +340,92 @@ func TestAgentsRCSaveTrailingNewline(t *testing.T) {
 	}
 }
 
+func TestMergeGenerateAgentsRCNilArgs(t *testing.T) {
+	gen := &AgentsRC{Version: 1, Project: "g", Sources: []Source{{Type: testSourceTypeLocal}}}
+	if got := MergeGenerateAgentsRC(nil, gen); got != gen {
+		t.Fatal("nil existing should return generated pointer")
+	}
+	ex := &AgentsRC{Version: 1, Project: "e"}
+	if got := MergeGenerateAgentsRC(ex, nil); got != ex {
+		t.Fatal("nil generated should return existing pointer")
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesGitSource(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Project: "keep-me",
+		Sources: []Source{
+			{Type: "git", URL: "https://example.com/skills.git", Ref: "main"},
+		},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Project: "scan-name",
+		Skills:  []string{"a"},
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.Project != "keep-me" {
+		t.Errorf("Project: got %q, want preserved existing", out.Project)
+	}
+	if len(out.Sources) != 2 {
+		t.Fatalf("Sources: got %d entries, want local + git", len(out.Sources))
+	}
+	if out.Sources[0].Type != testSourceTypeLocal {
+		t.Errorf("first source should be generated local, got %+v", out.Sources[0])
+	}
+	if out.Sources[1].Type != "git" || out.Sources[1].URL != "https://example.com/skills.git" {
+		t.Errorf("git source not preserved: %+v", out.Sources[1])
+	}
+	if len(out.Skills) != 1 || out.Skills[0] != "a" {
+		t.Errorf("generated skills should win: %+v", out.Skills)
+	}
+}
+
+func TestMergeGenerateAgentsRCDedupesLocalSources(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.Sources) != 1 {
+		t.Fatalf("Sources: got %v, want single local", out.Sources)
+	}
+}
+
+func TestMergeGenerateAgentsRCDedupesGitSources(t *testing.T) {
+	gitSrc := Source{Type: "git", URL: "https://example.com/r.git", Ref: "v1"}
+	existing := &AgentsRC{Version: 1, Sources: []Source{gitSrc}}
+	generated := &AgentsRC{Version: 1, Sources: []Source{{Type: testSourceTypeLocal}, gitSrc}}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.Sources) != 2 {
+		t.Fatalf("Sources: got %d entries %+v, want local + git only", len(out.Sources), out.Sources)
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
+	legacy := json.RawMessage(`{"interval":"1h"}`)
+	existing := &AgentsRC{
+		Version:     1,
+		Sources:     []Source{{Type: "git", URL: "https://x.test/r.git"}},
+		ExtraFields: map[string]json.RawMessage{"refresh": legacy},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.ExtraFields) != 1 || string(out.ExtraFields["refresh"]) != string(legacy) {
+		t.Errorf("ExtraFields not preserved: %#v", out.ExtraFields)
+	}
+}
+
 // ── GenerateAgentsRC ─────────────────────────────────────────────────────────
 
 // agentsHomeFixture builds a minimal ~/.agents/ tree under tmp and returns its path.

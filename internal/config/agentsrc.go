@@ -284,6 +284,71 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	return rc, nil
 }
 
+// MergeGenerateAgentsRC overlays a freshly generated manifest onto an existing
+// on-disk manifest. Scan-derived lists (skills, rules, agents, hooks, mcp,
+// settings) come from generated; an existing non-empty project name, unknown
+// JSON keys (ExtraFields), and supplemental sources (e.g. git remotes not
+// produced by GenerateAgentsRC) are preserved. Source entries are unioned with
+// deduplication so the default local source is not duplicated when merging.
+func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
+	if existing == nil {
+		return generated
+	}
+	if generated == nil {
+		return existing
+	}
+	out := *generated
+	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
+	if existing.Project != "" {
+		out.Project = existing.Project
+	}
+	if len(existing.ExtraFields) > 0 {
+		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
+	}
+	return &out
+}
+
+func cloneExtraFieldsMap(m map[string]json.RawMessage) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func mergeSourceSlices(generated, existing []Source) []Source {
+	seen := make(map[string]bool)
+	var out []Source
+	for _, s := range generated {
+		k := sourceMergeKey(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	for _, s := range existing {
+		k := sourceMergeKey(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func sourceMergeKey(s Source) string {
+	switch s.Type {
+	case "local":
+		return "local:" + s.Path
+	case "git":
+		return "git:" + s.URL + "\x00" + s.Ref
+	default:
+		return "type:" + s.Type + "\x00" + s.Path + "\x00" + s.URL + "\x00" + s.Ref
+	}
+}
+
 // collectScopedDirs returns unique entry names from resource subdirs that contain markerFile.
 func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) []string {
 	var names []string
