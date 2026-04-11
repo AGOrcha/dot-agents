@@ -1,7 +1,7 @@
 # KG Phase 5: Bridge Readiness
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 5
-Status: Fifth phase
+Status: Completed (2026-04-10)
 Depends on: KG Phase 4 (lint/maintenance), Wave 5 (dot-agents graph bridge)
 
 ## Goal

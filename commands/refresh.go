@@ -33,15 +33,13 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			return runRefresh(filter)
 		},
 	}
-	cmd.Flags().BoolVar(&refreshImport, "import", false, "Import project/global configs into ~/.agents before relinking")
+	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
 	return cmd
 }
 
 func runRefresh(projectFilter string) error {
-	if refreshImport {
-		if err := runImportFromRefresh(projectFilter, "all"); err != nil {
-			return fmt.Errorf("import before refresh: %w", err)
-		}
+	if err := runImportFromRefresh(projectFilter, refreshImportScope()); err != nil {
+		return fmt.Errorf("import before refresh: %w", err)
 	}
 
 	cfg, err := config.Load()
@@ -170,6 +168,13 @@ func runRefresh(projectFilter string) error {
 		ui.Success(fmt.Sprintf("Refreshed %d project(s).", count))
 	}
 	return nil
+}
+
+func refreshImportScope() string {
+	if refreshImport {
+		return importScopeAll
+	}
+	return importScopeProject
 }
 
 // resolveRefreshCommit returns the commit hash and describe string embedded at build time.

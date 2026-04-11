@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -189,6 +190,11 @@ func NewImportCmd() *cobra.Command {
 }
 
 func runImportFromRefresh(projectFilter, scope string) error {
+	oldYes := Flags.Yes
+	Flags.Yes = true
+	defer func() {
+		Flags.Yes = oldYes
+	}()
 	return runImportInternal(projectFilter, scope, true)
 }
 
@@ -276,7 +282,7 @@ func sortImportCandidates(candidates []importCandidate) {
 }
 
 func processImportCandidate(c importCandidate, agentsHome, timestamp string) importResult {
-	if isManagedSymlink(c.sourcePath, agentsHome) {
+	if isManagedImportSource(c, agentsHome) {
 		return importResult{}
 	}
 
@@ -309,6 +315,29 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string) imp
 	}
 
 	return replaceImportCandidate(c, agentsHome, dest, timestamp, srcInfo, destInfo)
+}
+
+func isManagedImportSource(c importCandidate, agentsHome string) bool {
+	if isManagedSymlink(c.sourcePath, agentsHome) {
+		return true
+	}
+
+	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+
+	if c.project == "global" {
+		destRel := mapGlobalRelToDest(rel)
+		if destRel == "" {
+			return false
+		}
+		linked, err := links.AreHardlinked(c.sourcePath, filepath.Join(agentsHome, destRel))
+		return err == nil && linked
+	}
+
+	return isManagedProjectOutput(c.project, c.sourceRoot, c.sourcePath, agentsHome)
 }
 
 func importMissingCandidate(c importCandidate, dest, timestamp string) importResult {

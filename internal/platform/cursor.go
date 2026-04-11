@@ -100,23 +100,29 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
-
-	c.linkRuleDir(filepath.Join(agentsHome, "rules", "global"), rulesDir, globalRulesPrefix)
-	c.linkRuleDir(filepath.Join(agentsHome, "rules", project), rulesDir, project+"--")
+	desired := map[string]string{}
+	c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired)
+	c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired)
+	if err := c.pruneRuleLinks(rulesDir, project, desired); err != nil {
+		return err
+	}
+	for target, src := range desired {
+		links.Hardlink(src, filepath.Join(rulesDir, target)) // best-effort
+	}
 	return nil
 }
 
-func (c *cursor) linkRuleDir(sourceDir, rulesDir, prefix string) {
+func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		c.linkRuleEntry(entry, sourceDir, rulesDir, prefix)
+		c.collectRuleEntry(entry, sourceDir, prefix, desired)
 	}
 }
 
-func (c *cursor) linkRuleEntry(entry os.DirEntry, sourceDir, rulesDir, prefix string) {
+func (c *cursor) collectRuleEntry(entry os.DirEntry, sourceDir, prefix string, desired map[string]string) {
 	if entry.IsDir() {
 		return
 	}
@@ -124,10 +130,30 @@ func (c *cursor) linkRuleEntry(entry os.DirEntry, sourceDir, rulesDir, prefix st
 	if !isCursorRuleFile(name) {
 		return
 	}
-	links.Hardlink(
-		filepath.Join(sourceDir, name),
-		filepath.Join(rulesDir, prefix+toMDC(name)),
-	) // best-effort
+	desired[prefix+toMDC(name)] = filepath.Join(sourceDir, name)
+}
+
+func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]string) error {
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, globalRulesPrefix) && !strings.HasPrefix(name, project+"--") {
+			continue
+		}
+		if _, ok := desired[name]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {

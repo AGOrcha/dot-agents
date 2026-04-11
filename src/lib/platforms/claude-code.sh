@@ -106,6 +106,8 @@ claude_create_rules_links() {
   local project="$1"
   local repo_path="$2"
   local rules_dir="$repo_path/.claude/rules"
+  local wanted_names=()
+  local wanted_sources=()
 
   shopt -s nullglob
   # Project rules
@@ -115,10 +117,35 @@ claude_create_rules_links() {
       [ -f "$rule_file" ] || continue
       local stem
       stem=$(basename "${rule_file%.*}")
-      ln -sf "$rule_file" "$rules_dir/${project}--${stem}.md"
+      wanted_names+=("${project}--${stem}.md")
+      wanted_sources+=("$rule_file")
     done
   fi
   shopt -u nullglob
+
+  local existing base keep i
+  for existing in "$rules_dir/${project}"--*.md; do
+    [ -e "$existing" ] || [ -L "$existing" ] || continue
+    base=$(basename "$existing")
+    keep=false
+    if [ ${#wanted_names[@]} -gt 0 ]; then
+      for wanted in "${wanted_names[@]}"; do
+        if [ "$wanted" = "$base" ]; then
+          keep=true
+          break
+        fi
+      done
+    fi
+    if [ "$keep" != true ]; then
+      rm -f "$existing" 2>/dev/null || true
+    fi
+  done
+
+  if [ ${#wanted_names[@]} -gt 0 ]; then
+    for i in "${!wanted_names[@]}"; do
+      ln -sf "${wanted_sources[$i]}" "$rules_dir/${wanted_names[$i]}"
+    done
+  fi
 }
 
 # User-level dirs for global agents/skills

@@ -1,7 +1,7 @@
 # Wave 5: Knowledge-Graph Bridge And Integration Readiness
 
 Spec: `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` — Wave 5
-Status: Next wave
+Status: Completed (2026-04-10)
 Depends on: Wave 4 (shared preferences), KG Phase 3+ (deterministic query surface)
 
 ## Goal

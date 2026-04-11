@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -125,9 +126,42 @@ func scanExistingAIConfigs(projectPath string) []string {
 	return results
 }
 
+func isManagedCursorRuleRel(project, rel string) bool {
+	if !strings.HasPrefix(rel, relCursorRulesDir) {
+		return false
+	}
+	name := filepath.Base(rel)
+	return strings.HasPrefix(name, "global--") || strings.HasPrefix(name, project+"--")
+}
+
+func isManagedProjectOutput(project, projectPath, filePath, agentsHome string) bool {
+	if isManagedSymlink(filePath, agentsHome) {
+		return true
+	}
+
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+
+	// Managed Cursor rule names live in a reserved namespace and should never
+	// be re-imported or backed up as user-authored files.
+	if isManagedCursorRuleRel(project, rel) {
+		return true
+	}
+
+	destRel := mapResourceRelToDest(project, rel)
+	if destRel == "" {
+		return false
+	}
+	linked, err := links.AreHardlinked(filePath, filepath.Join(agentsHome, destRel))
+	return err == nil && linked
+}
+
 // checkExistingConfigFiles returns root-level AI config files/entries that dot-agents would replace.
 // Excludes files already managed by dot-agents and backup artifacts.
-func checkExistingConfigFiles(projectPath, agentsHome string) []string {
+func checkExistingConfigFiles(project, projectPath, agentsHome string) []string {
 	candidates := []string{
 		filepath.Join(projectPath, ".mcp.json"),
 		filepath.Join(projectPath, "AGENTS.md"),
@@ -149,6 +183,9 @@ func checkExistingConfigFiles(projectPath, agentsHome string) []string {
 			if strings.HasPrefix(dest, agentsHome) {
 				continue // already managed
 			}
+		}
+		if isManagedProjectOutput(project, projectPath, f, agentsHome) {
+			continue
 		}
 		found = append(found, f)
 	}
@@ -332,7 +369,7 @@ func runAdd(pathArg, nameArg string) error {
 	)
 
 	// Identify files that will be replaced
-	existingFiles := checkExistingConfigFiles(projectPath, agentsHome)
+	existingFiles := checkExistingConfigFiles(projectName, projectPath, agentsHome)
 
 	// Show files that will be replaced
 	if len(existingFiles) > 0 {
@@ -535,7 +572,7 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 		return 0
 	}
 	relPath := strings.TrimPrefix(path, resourcesDir+"/")
-	if strings.HasPrefix(relPath, "backups/") {
+	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
 		return 0
 	}
 	canonicalCount, handled := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
@@ -543,6 +580,15 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 		return canonicalCount
 	}
 	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
+}
+
+func isCanonicalResourceBackupRel(relPath string) bool {
+	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+		if strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool) {

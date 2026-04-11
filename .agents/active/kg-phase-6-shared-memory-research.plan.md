@@ -1,7 +1,7 @@
 # KG Phase 6: Shared-Memory Research
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 6
-Status: Sixth phase (research, not implementation)
+Status: Research complete — RFC written (2026-04-10). Awaiting RFC acceptance before Phase A+B+C implementation.
 Depends on: KG Phases 1-5 stable
 
 ## Goal
@@ -34,7 +34,7 @@ This phase is research-only. It produces evaluation documents and an RFC. No pro
 
 ### Step 1: Evaluation of verification models
 
-- [ ] Research document: `docs/research/kg-verification-models.md`
+- [x] Research document: `docs/research/kg-verification-models.md`
   - Survey existing approaches (content-addressable storage, git-based verification, Merkle DAGs)
   - Evaluate fit for local-first markdown graph
   - Recommend: which model, what tradeoffs, implementation complexity estimate
@@ -42,7 +42,7 @@ This phase is research-only. It produces evaluation documents and an RFC. No pro
 
 ### Step 2: Evaluation of shared-memory approaches
 
-- [ ] Research document: `docs/research/kg-shared-memory-evaluation.md`
+- [x] Research document: `docs/research/kg-shared-memory-evaluation.md`
   - Survey approaches: CRDTs for markdown, git-based collaboration, custom sync protocols
   - Evaluate: conflict rate expectations, resolution complexity, user experience
   - Consider: is multi-machine sync a real requirement or can git push/pull suffice?
@@ -50,7 +50,7 @@ This phase is research-only. It produces evaluation documents and an RFC. No pro
 
 ### Step 3: Truth boundary documentation
 
-- [ ] Document: `docs/research/kg-truth-boundaries.md`
+- [x] Document: `docs/research/kg-truth-boundaries.md`
   - Define ownership for each truth domain
   - Map interactions between domains (workflow reads graph, graph imports workflow artifacts)
   - Identify invariants that must hold across boundaries
@@ -58,7 +58,7 @@ This phase is research-only. It produces evaluation documents and an RFC. No pro
 
 ### Step 4: RFC for shared-memory layer
 
-- [ ] RFC: `docs/rfcs/kg-shared-memory-rfc.md`
+- [x] RFC: `docs/rfcs/kg-shared-memory-rfc.md`
   - Based on research findings
   - Propose: scope of shared-memory layer, integration points, phased approach
   - Define: what stays in KG, what stays in dot-agents, what needs a new layer

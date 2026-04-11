@@ -179,6 +179,7 @@ config_add_project() {
   local name="$1"
   local path="$2"
   local config_file="$AGENTS_HOME/config.json"
+  path=$(expand_path "$path")
 
   if ! _json_has_jq; then
     log_error "jq is required to modify config.json"
@@ -239,7 +240,9 @@ config_list_projects() {
 config_get_project_path() {
   local name="$1"
   local config_file="$AGENTS_HOME/config.json"
-  json_get_file "$config_file" ".projects.\"$name\".path"
+  local path
+  path=$(json_get_file "$config_file" ".projects.\"$name\".path")
+  [ -n "$path" ] && expand_path "$path"
 }
 
 # Get whether a platform is enabled in config.json.

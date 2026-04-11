@@ -41,8 +41,11 @@ cursor_version() {
 cursor_create_rule_links() {
   local project="$1"
   local repo_path="$2"
+  local rules_dir="$repo_path/.cursor/rules"
 
-  mkdir -p "$repo_path/.cursor/rules"
+  mkdir -p "$rules_dir"
+  local wanted_names=()
+  local wanted_sources=()
 
   # Global rules → prefixed with "global--"
   if [ -d "$AGENTS_HOME/rules/global" ]; then
@@ -53,7 +56,8 @@ cursor_create_rule_links() {
       # Convert .md to .mdc for Cursor if needed
       local target_name="$basename"
       [[ "$basename" == *.md ]] && [[ "$basename" != *.mdc ]] && target_name="${basename%.md}.mdc"
-      ln -f "$rule" "$repo_path/.cursor/rules/global--$target_name" 2>/dev/null || true
+      wanted_names+=("global--$target_name")
+      wanted_sources+=("$rule")
     done
   fi
 
@@ -65,7 +69,36 @@ cursor_create_rule_links() {
       basename=$(basename "$rule")
       local target_name="$basename"
       [[ "$basename" == *.md ]] && [[ "$basename" != *.mdc ]] && target_name="${basename%.md}.mdc"
-      ln -f "$rule" "$repo_path/.cursor/rules/${project}--$target_name" 2>/dev/null || true
+      wanted_names+=("${project}--$target_name")
+      wanted_sources+=("$rule")
+    done
+  fi
+
+  local existing base keep i
+  for existing in "$rules_dir"/*; do
+    [ -e "$existing" ] || continue
+    base=$(basename "$existing")
+    case "$base" in
+      global--*|"${project}"--*)
+        keep=false
+        if [ ${#wanted_names[@]} -gt 0 ]; then
+          for wanted in "${wanted_names[@]}"; do
+            if [ "$wanted" = "$base" ]; then
+              keep=true
+              break
+            fi
+          done
+        fi
+        if [ "$keep" != true ]; then
+          rm -f "$existing" 2>/dev/null || true
+        fi
+        ;;
+    esac
+  done
+
+  if [ ${#wanted_names[@]} -gt 0 ]; then
+    for i in "${!wanted_names[@]}"; do
+      ln -f "${wanted_sources[$i]}" "$rules_dir/${wanted_names[$i]}" 2>/dev/null || true
     done
   fi
 }

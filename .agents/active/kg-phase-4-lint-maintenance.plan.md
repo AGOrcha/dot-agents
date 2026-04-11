@@ -1,7 +1,7 @@
 # KG Phase 4: Lint And Maintenance
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 4
-Status: Fourth phase
+Status: Completed (2026-04-10)
 Depends on: KG Phase 3 (query surface — graph has content and query capability)
 
 ## Goal

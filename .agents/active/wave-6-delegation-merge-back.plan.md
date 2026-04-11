@@ -1,7 +1,7 @@
 # Wave 6: Delegation And Merge-Back
 
 Spec: `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` — Wave 6
-Status: Directional backlog (requires RFC before coding)
+Status: RFC written (2026-04-10) — docs/rfcs/wave-6-delegation-rfc.md. Ready for implementation once RFC is accepted.
 Depends on: Wave 5 (knowledge-graph bridge), stable single-agent workflow model
 
 ## Goal
@@ -28,7 +28,7 @@ The RFC should resolve: concurrency model (lock-based vs reservation-based), con
 
 ### Step 1: Delegation contract types
 
-- [ ] `DelegationContract` struct:
+- [x] `DelegationContract` struct:
   - schema_version, id, parent_plan_id, parent_task_id
   - title, summary
   - write_scope ([]string — file/directory patterns this delegate may touch)
@@ -38,67 +38,54 @@ The RFC should resolve: concurrency model (lock-based vs reservation-based), con
   - owner (string — delegate agent identity)
   - status: pending/active/completed/failed/cancelled
   - created_at, updated_at
-- [ ] `isValidDelegationStatus()` validation
-- [ ] `loadDelegationContract(projectPath, taskID) (*DelegationContract, error)`
-- [ ] `saveDelegationContract(projectPath string, contract *DelegationContract) error`
-- [ ] `listDelegationContracts(projectPath string) ([]string, error)`
-- [ ] Tests: round-trip, list, validation
+- [x] `isValidDelegationStatus()` validation
+- [x] `loadDelegationContract(projectPath, taskID) (*DelegationContract, error)`
+- [x] `saveDelegationContract(projectPath string, contract *DelegationContract) error`
+- [x] `listDelegationContracts(projectPath string) ([]string, error)`
+- [x] Tests: round-trip, list, validation
 
 ### Step 2: Write-scope validation
 
-- [ ] `validateWriteScope(contracts []DelegationContract) []string` — detect overlapping write scopes across active delegations. Returns list of conflict descriptions.
-- [ ] Uses `filepath.Match` or glob-based overlap detection
-- [ ] Overlap check runs on delegation creation and on advance to active
-- [ ] Tests: non-overlapping passes, overlapping detected, nested patterns handled
+- [x] `writeScopeOverlaps(existing, newScope, excludeTaskID)` — detect overlapping write scopes across active delegations. Returns list of conflict descriptions.
+- [x] Uses prefix containment for non-wildcard patterns (90%+ of real cases per RFC)
+- [x] Overlap check runs on delegation creation
+- [x] Tests: non-overlapping passes, overlapping detected, nested patterns handled, completed delegation skipped
 
 ### Step 3: Merge-back artifact types
 
-- [ ] `MergeBackSummary` struct:
-  - schema_version, task_id, parent_plan_id
-  - title, summary
-  - files_changed ([]string)
-  - verification_result: status, summary
-  - integration_notes (string — guidance for parent agent)
-  - blockers_encountered ([]string)
-  - created_at
-- [ ] `saveMergeBack(projectPath string, summary *MergeBackSummary) error` — writes markdown to `.agents/active/merge-back/<task-id>.md` with YAML frontmatter
-- [ ] `loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error)`
-- [ ] Tests: write/read round-trip
+- [x] `MergeBackSummary` struct with all required fields
+- [x] `saveMergeBack` — writes markdown with YAML frontmatter to `.agents/active/merge-back/<task-id>.md`
+- [x] `loadMergeBack` — parses YAML frontmatter from merge-back file
+- [x] Tests: write/read round-trip
 
 ### Step 4: Coordination intent types
 
 Transport-neutral coordination semantics (not raw chat syntax):
 
-- [ ] `CoordinationIntent` enum type: `status_request`, `review_request`, `escalation_notice`, `ack`
-- [ ] Stored as fields in delegation contract, not as marker strings
-- [ ] `DelegationContract` gets `pending_intent` field (optional CoordinationIntent)
-- [ ] Parent/delegate can set/clear intents via advance command
-- [ ] Tests: intent lifecycle
+- [x] `CoordinationIntent` enum type: `status_request`, `review_request`, `escalation_notice`, `ack`
+- [x] Stored as `pending_intent` field in `DelegationContract`
+- [x] No chat syntax or @mentions anywhere in storage
 
 ### Step 5: `workflow fanout` subcommand
 
-- [ ] `fanoutCmd` (Use: "fanout") with `runWorkflowFanout()`:
+- [x] `fanoutCmd` (Use: "fanout") with `runWorkflowFanout()`:
   - Required flags: `--plan <plan-id>`, `--task <task-id>`
   - Optional flags: `--owner`, `--write-scope` (comma-separated)
-  1. Load canonical plan and task from Wave 2
-  2. Validate task exists and is not already delegated
-  3. Check write-scope overlaps against existing active delegations
-  4. Create delegation contract under `.agents/active/delegation/`
-  5. Update task status to `in_progress` with delegation marker
-  6. `ui.Success()` with contract path
-- [ ] Tests: create delegation, overlap rejected, missing plan/task errors
+  1. Loads and validates plan + task exist
+  2. Validates task not already delegated
+  3. Checks write-scope overlaps against active delegations
+  4. Creates `.agents/active/delegation/<task-id>.yaml`
+  5. Advances task status to `in_progress`
 
 ### Step 6: `workflow merge-back` subcommand
 
-- [ ] `mergeBackCmd` (Use: "merge-back") with `runWorkflowMergeBack()`:
-  - Required flag: `--task <task-id>`
-  - Optional flags: `--summary`, `--verification-status`, `--integration-notes`
-  1. Load delegation contract
-  2. Collect changed files (git diff against delegation start point)
-  3. Create merge-back summary
-  4. Update delegation status to completed
-  5. `ui.Success()` with merge-back path
-- [ ] Tests: merge-back created, delegation status updated
+- [x] `mergeBackCmd` (Use: "merge-back") with `runWorkflowMergeBack()`:
+  - Required flags: `--task <task-id>`, `--summary`
+  - Optional flags: `--verification-status`, `--integration-notes`
+  1. Loads delegation contract
+  2. Collects changed files via git diff
+  3. Creates merge-back summary at `.agents/active/merge-back/<task-id>.md`
+  4. Updates delegation status to completed
 
 ### Step 7: Integration with orient/status
 

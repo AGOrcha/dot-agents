@@ -123,8 +123,9 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 
 	entries, err := os.ReadDir(projectRulesDir)
 	if err != nil {
-		return nil // no project rules
+		return c.pruneProjectRuleLinks(rulesDir, project)
 	}
+	wanted := map[string]string{}
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -136,8 +137,41 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 		}
 		stem := strings.TrimSuffix(name, ext)
 		src := filepath.Join(projectRulesDir, name)
-		dst := filepath.Join(rulesDir, project+"--"+stem+".md")
-		links.Symlink(src, dst)
+		wanted[project+"--"+stem+".md"] = src
+	}
+	if err := c.pruneProjectRuleLinks(rulesDir, project, wanted); err != nil {
+		return err
+	}
+	for name, src := range wanted {
+		links.Symlink(src, filepath.Join(rulesDir, name))
+	}
+	return nil
+}
+
+func (c *claude) pruneProjectRuleLinks(rulesDir, project string, wanted ...map[string]string) error {
+	keep := map[string]string{}
+	if len(wanted) > 0 {
+		keep = wanted[0]
+	}
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return nil
+	}
+	prefix := project + "--"
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if _, ok := keep[name]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }

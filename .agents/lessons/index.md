@@ -4,3 +4,6 @@
 - [`additive-state-fields`](./additive-state-fields/LESSON.md): When extending a central state struct, add a new field rather than reusing an existing one — keeps JSON contract stable and callers unbroken.
 - [`test-string-count-ids`](./test-string-count-ids/LESSON.md): When checking for duplicate entries in a markdown index, count `"- [id]"` (the entry prefix) not the raw ID string — the ID can appear multiple times in a single valid link entry.
 - [`kg-test-fixture-helper`](./kg-test-fixture-helper/LESSON.md): KG tests needing a populated graph should use `setupKGWithNotes(t)` — don't re-seed notes inline per test.
+- [`test-stub-upgrade-pattern`](./test-stub-upgrade-pattern/LESSON.md): When upgrading a stub to a real implementation, grep for tests asserting stub side-effects and update them before running the full suite.
+- [`refresh-import-before-relink`](./refresh-import-before-relink/LESSON.md): Refresh flows that import repo files and regenerate managed outputs must import project content before relinking, and must not replay canonical backup snapshots as live state.
+- [`verify-managed-file-target`](./verify-managed-file-target/LESSON.md): When a task touches a managed file path, use the intended managed generation flow first; if a repo-local file is still required, verify the final path is not a generated managed link before closing the task.

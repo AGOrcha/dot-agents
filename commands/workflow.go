@@ -340,7 +340,53 @@ func NewWorkflowCmd() *cobra.Command {
 
 	prefsCmd.AddCommand(prefsShowCmd, prefsSetLocalCmd, prefsSetSharedCmd)
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd)
+	// graph subcommand tree (Wave 5)
+	graphCmd := &cobra.Command{
+		Use:   "graph",
+		Short: "Query knowledge graph context",
+	}
+	graphQueryCmd := &cobra.Command{
+		Use:   "query [query string]",
+		Short: "Query graph context by bridge intent",
+		RunE:  runWorkflowGraphQuery,
+	}
+	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions")
+	graphQueryCmd.Flags().String("scope", "", "Optional scope filter")
+
+	graphHealthCmd := &cobra.Command{
+		Use:   "health",
+		Short: "Show graph bridge adapter health",
+		RunE:  runWorkflowGraphHealth,
+	}
+	graphCmd.AddCommand(graphQueryCmd, graphHealthCmd)
+
+	// fanout subcommand (Wave 6)
+	fanoutCmd := &cobra.Command{
+		Use:   "fanout",
+		Short: "Delegate a task to a sub-agent with a bounded write scope",
+		RunE:  runWorkflowFanout,
+	}
+	fanoutCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	fanoutCmd.Flags().String("task", "", "Task ID to delegate (required)")
+	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
+	fanoutCmd.Flags().String("write-scope", "", "Comma-separated file/dir patterns this delegate may touch")
+	_ = fanoutCmd.MarkFlagRequired("plan")
+	_ = fanoutCmd.MarkFlagRequired("task")
+
+	// merge-back subcommand (Wave 6)
+	mergeBackCmd := &cobra.Command{
+		Use:   "merge-back",
+		Short: "Record a sub-agent's completed work as a merge-back artifact",
+		RunE:  runWorkflowMergeBack,
+	}
+	mergeBackCmd.Flags().String("task", "", "Task ID that was delegated (required)")
+	mergeBackCmd.Flags().String("summary", "", "Summary of what was done (required)")
+	mergeBackCmd.Flags().String("verification-status", "unknown", "pass|fail|partial|unknown")
+	mergeBackCmd.Flags().String("integration-notes", "", "Guidance for the parent agent")
+	_ = mergeBackCmd.MarkFlagRequired("task")
+	_ = mergeBackCmd.MarkFlagRequired("summary")
+
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd)
 	return cmd
 }
 
@@ -1990,5 +2036,786 @@ func runWorkflowPrefsSetShared(key, value string) error {
 	}
 	ui.Info(fmt.Sprintf("Proposal %s created for shared preference change.", id))
 	ui.Info("Run 'dot-agents review' to approve and apply.")
+	return nil
+}
+
+// ── Wave 5: Graph bridge types ─────────────────────────────────────────────────
+
+// ContextMapping maps a repo concept to a graph query scope.
+type ContextMapping struct {
+	RepoScope  string `json:"repo_scope" yaml:"repo_scope"`
+	GraphScope string `json:"graph_scope" yaml:"graph_scope"`
+	Intent     string `json:"intent" yaml:"intent"`
+}
+
+// GraphBridgeConfig is the schema for .agents/workflow/graph-bridge.yaml.
+type GraphBridgeConfig struct {
+	SchemaVersion  int              `json:"schema_version" yaml:"schema_version"`
+	Enabled        bool             `json:"enabled" yaml:"enabled"`
+	GraphHome      string           `json:"graph_home" yaml:"graph_home"`
+	AllowedIntents []string         `json:"allowed_intents" yaml:"allowed_intents"`
+	ContextMappings []ContextMapping `json:"context_mappings" yaml:"context_mappings"`
+}
+
+var validWorkflowBridgeIntents = map[string]bool{
+	"plan_context":    true,
+	"decision_lookup": true,
+	"entity_context":  true,
+	"workflow_memory": true,
+	"contradictions":  true,
+}
+
+func isValidWorkflowBridgeIntent(intent string) bool { return validWorkflowBridgeIntents[intent] }
+
+// loadGraphBridgeConfig reads .agents/workflow/graph-bridge.yaml. If absent, bridge is disabled.
+func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
+	p := filepath.Join(projectPath, ".agents", "workflow", "graph-bridge.yaml")
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return &GraphBridgeConfig{Enabled: false}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cfg GraphBridgeConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse graph-bridge.yaml: %w", err)
+	}
+	return &cfg, nil
+}
+
+// ── Wave 5: Bridge query contract ────────────────────────────────────────────
+
+// GraphBridgeQuery is the input to a bridge query.
+type GraphBridgeQuery struct {
+	Intent  string `json:"intent"`
+	Project string `json:"project"`
+	Scope   string `json:"scope,omitempty"`
+	Query   string `json:"query"`
+}
+
+// GraphBridgeResult is one result item.
+type GraphBridgeResult struct {
+	ID         string   `json:"id"`
+	Type       string   `json:"type"`
+	Title      string   `json:"title"`
+	Summary    string   `json:"summary"`
+	Path       string   `json:"path"`
+	SourceRefs []string `json:"source_refs,omitempty"`
+}
+
+// GraphBridgeResponse is the normalized response envelope.
+type GraphBridgeResponse struct {
+	SchemaVersion int                 `json:"schema_version"`
+	Intent        string              `json:"intent"`
+	Query         string              `json:"query"`
+	Results       []GraphBridgeResult `json:"results"`
+	Warnings      []string            `json:"warnings"`
+	Provider      string              `json:"provider"`
+	Timestamp     string              `json:"timestamp"`
+}
+
+// ── Wave 5: Graph bridge adapter ─────────────────────────────────────────────
+
+// GraphBridgeAdapter is the interface for bridge backends.
+type GraphBridgeAdapter interface {
+	Query(query GraphBridgeQuery) (GraphBridgeResponse, error)
+	Health() (GraphBridgeHealth, error)
+}
+
+// GraphBridgeHealth is the adapter availability and last-query status.
+type GraphBridgeHealth struct {
+	SchemaVersion   int      `json:"schema_version"`
+	Timestamp       string   `json:"timestamp"`
+	AdapterAvailable bool    `json:"adapter_available"`
+	GraphHomeExists bool     `json:"graph_home_exists"`
+	NoteCount       int      `json:"note_count"`
+	LastQueryTime   string   `json:"last_query_time,omitempty"`
+	LastQueryStatus string   `json:"last_query_status,omitempty"`
+	Status          string   `json:"status"` // healthy|warn|error
+	Warnings        []string `json:"warnings,omitempty"`
+}
+
+// writeGraphBridgeHealth writes health to ~/.agents/context/<project>/graph-bridge-health.json.
+func writeGraphBridgeHealth(project string, health GraphBridgeHealth) error {
+	dir := config.ProjectContextDir(project)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(health, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "graph-bridge-health.json"), data, 0644)
+}
+
+// readGraphBridgeHealth reads the cached health snapshot.
+func readGraphBridgeHealth(project string) (*GraphBridgeHealth, error) {
+	p := filepath.Join(config.ProjectContextDir(project), "graph-bridge-health.json")
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var h GraphBridgeHealth
+	if err := json.Unmarshal(data, &h); err != nil {
+		return nil, err
+	}
+	return &h, nil
+}
+
+// LocalGraphAdapter scans KG_HOME filesystem using simple string matching.
+// This is intentionally independent of the kg package — agents use it without
+// needing the kg subcommand installed.
+type LocalGraphAdapter struct {
+	graphHome string
+	lastQuery string
+	lastStatus string
+}
+
+func NewLocalGraphAdapter(graphHome string) *LocalGraphAdapter {
+	return &LocalGraphAdapter{graphHome: graphHome}
+}
+
+func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
+	h := GraphBridgeHealth{
+		SchemaVersion: 1,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+	info, err := os.Stat(a.graphHome)
+	h.GraphHomeExists = err == nil && info.IsDir()
+	configExists := false
+	if _, err := os.Stat(filepath.Join(a.graphHome, "self", "config.yaml")); err == nil {
+		configExists = true
+	}
+	h.AdapterAvailable = h.GraphHomeExists && configExists
+	if !h.AdapterAvailable {
+		h.Status = "warn"
+		h.Warnings = append(h.Warnings, fmt.Sprintf("graph not initialized at %s", a.graphHome))
+		return h, nil
+	}
+	// Count notes
+	noteDirs := []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"}
+	for _, sub := range noteDirs {
+		entries, err := os.ReadDir(filepath.Join(a.graphHome, "notes", sub))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				h.NoteCount++
+			}
+		}
+	}
+	h.LastQueryTime = a.lastQuery
+	h.LastQueryStatus = a.lastStatus
+	h.Status = "healthy"
+	return h, nil
+}
+
+func (a *LocalGraphAdapter) Query(query GraphBridgeQuery) (GraphBridgeResponse, error) {
+	resp := GraphBridgeResponse{
+		SchemaVersion: 1,
+		Intent:        query.Intent,
+		Query:         query.Query,
+		Provider:      "local-graph",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Results:       []GraphBridgeResult{},
+	}
+
+	// Map bridge intents to note types
+	noteTypes := map[string][]string{
+		"plan_context":    {"decisions", "synthesis"},
+		"decision_lookup": {"decisions"},
+		"entity_context":  {"entities"},
+		"workflow_memory": {"sources", "sessions"},
+		"contradictions":  {"decisions"},
+	}
+	subdirs, ok := noteTypes[query.Intent]
+	if !ok {
+		return resp, fmt.Errorf("unsupported bridge intent: %s", query.Intent)
+	}
+
+	seen := make(map[string]bool)
+	q := strings.ToLower(query.Query)
+	for _, sub := range subdirs {
+		dir := filepath.Join(a.graphHome, "notes", sub)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			content := strings.ToLower(string(data))
+			if q == "" || strings.Contains(content, q) {
+				// Parse frontmatter for id/title/summary
+				id, title, summary, srcRefs := parseNoteMetadata(string(data))
+				if id == "" {
+					id = strings.TrimSuffix(e.Name(), ".md")
+				}
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				resp.Results = append(resp.Results, GraphBridgeResult{
+					ID:         id,
+					Type:       strings.TrimSuffix(sub, "s"),
+					Title:      title,
+					Summary:    summary,
+					Path:       filepath.Join("notes", sub, e.Name()),
+					SourceRefs: srcRefs,
+				})
+				if len(resp.Results) >= 10 {
+					break
+				}
+			}
+		}
+	}
+
+	a.lastQuery = time.Now().UTC().Format(time.RFC3339)
+	a.lastStatus = "ok"
+	return resp, nil
+}
+
+// parseNoteMetadata extracts id/title/summary/source_refs from YAML frontmatter.
+func parseNoteMetadata(content string) (id, title, summary string, sourceRefs []string) {
+	if !strings.HasPrefix(content, "---") {
+		return
+	}
+	rest := content[3:]
+	idx := strings.Index(rest, "\n---")
+	if idx < 0 {
+		return
+	}
+	fm := rest[:idx]
+	for _, line := range strings.Split(fm, "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "id: "); ok {
+			id = strings.Trim(after, "\"'")
+		} else if after, ok := strings.CutPrefix(line, "title: "); ok {
+			title = strings.Trim(after, "\"'")
+		} else if after, ok := strings.CutPrefix(line, "summary: "); ok {
+			summary = strings.Trim(after, "\"'")
+		} else if after, ok := strings.CutPrefix(line, "- "); ok && strings.Contains(fm, "source_refs:") {
+			sourceRefs = append(sourceRefs, strings.Trim(after, "\"'"))
+		}
+	}
+	return
+}
+
+// ── Wave 5: workflow graph subcommands ────────────────────────────────────────
+
+func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
+	projectPath, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	cfg, err := loadGraphBridgeConfig(projectPath)
+	if err != nil {
+		return fmt.Errorf("load bridge config: %w", err)
+	}
+	if !cfg.Enabled {
+		return fmt.Errorf("graph bridge not configured — create .agents/workflow/graph-bridge.yaml with enabled: true")
+	}
+
+	intent, _ := cmd.Flags().GetString("intent")
+	if intent == "" {
+		return fmt.Errorf("--intent is required")
+	}
+	if !isValidWorkflowBridgeIntent(intent) {
+		return fmt.Errorf("unknown intent %q — valid: plan_context, decision_lookup, entity_context, workflow_memory, contradictions", intent)
+	}
+	// Validate against allowed intents
+	allowed := cfg.AllowedIntents
+	if len(allowed) > 0 {
+		ok := false
+		for _, a := range allowed {
+			if a == intent {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("intent %q not in allowed_intents for this repo", intent)
+		}
+	}
+
+	scope, _ := cmd.Flags().GetString("scope")
+	query := strings.Join(args, " ")
+	graphHome := cfg.GraphHome
+	if graphHome == "" {
+		home, _ := os.UserHomeDir()
+		graphHome = filepath.Join(home, "knowledge-graph")
+	}
+	adapter := NewLocalGraphAdapter(graphHome)
+	resp, err := adapter.Query(GraphBridgeQuery{
+		Intent:  intent,
+		Project: filepath.Base(projectPath),
+		Scope:   scope,
+		Query:   query,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Update health
+	health, _ := adapter.Health()
+	health.LastQueryTime = time.Now().UTC().Format(time.RFC3339)
+	health.LastQueryStatus = "ok"
+	_ = writeGraphBridgeHealth(filepath.Base(projectPath), health)
+
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(resp, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header(fmt.Sprintf("Graph Query: %s  [%s]", intent, query))
+	if len(resp.Results) == 0 {
+		ui.Info("No results found.")
+	} else {
+		for _, r := range resp.Results {
+			ui.Bullet("found", fmt.Sprintf("[%s] %s — %s", r.Type, r.Title, r.Summary))
+		}
+	}
+	for _, w := range resp.Warnings {
+		ui.Warn(w)
+	}
+	return nil
+}
+
+func runWorkflowGraphHealth(_ *cobra.Command, _ []string) error {
+	projectPath, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	cfg, err := loadGraphBridgeConfig(projectPath)
+	if err != nil {
+		return fmt.Errorf("load bridge config: %w", err)
+	}
+
+	graphHome := cfg.GraphHome
+	if graphHome == "" {
+		home, _ := os.UserHomeDir()
+		graphHome = filepath.Join(home, "knowledge-graph")
+	}
+	adapter := NewLocalGraphAdapter(graphHome)
+	health, err := adapter.Health()
+	if err != nil {
+		return err
+	}
+	_ = writeGraphBridgeHealth(filepath.Base(projectPath), health)
+
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(health, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	badge := ui.ColorText(ui.Green, health.Status)
+	if health.Status != "healthy" {
+		badge = ui.ColorText(ui.Yellow, health.Status)
+	}
+	ui.Header(fmt.Sprintf("Graph Bridge Health  [%s]", badge))
+	ui.Info(fmt.Sprintf("  Graph home: %s", graphHome))
+	ui.Info(fmt.Sprintf("  Adapter available: %v", health.AdapterAvailable))
+	ui.Info(fmt.Sprintf("  Notes: %d", health.NoteCount))
+	ui.Info(fmt.Sprintf("  Bridge enabled: %v", cfg.Enabled))
+	if !cfg.Enabled {
+		ui.Warn("Bridge not enabled — create .agents/workflow/graph-bridge.yaml to enable")
+	}
+	for _, w := range health.Warnings {
+		ui.Warn(w)
+	}
+	return nil
+}
+
+// ── Wave 6: Delegation & Merge-back ──────────────────────────────────────────
+
+// CoordinationIntent is transport-neutral coordination between parent and delegate.
+// Stored as enum field in DelegationContract, never as chat syntax or @mentions.
+type CoordinationIntent string
+
+const (
+	CoordinationIntentNone             CoordinationIntent = ""
+	CoordinationIntentStatusRequest    CoordinationIntent = "status_request"
+	CoordinationIntentReviewRequest    CoordinationIntent = "review_request"
+	CoordinationIntentEscalationNotice CoordinationIntent = "escalation_notice"
+	CoordinationIntentAck              CoordinationIntent = "ack"
+)
+
+var validCoordinationIntents = map[CoordinationIntent]bool{
+	CoordinationIntentNone:             true,
+	CoordinationIntentStatusRequest:    true,
+	CoordinationIntentReviewRequest:    true,
+	CoordinationIntentEscalationNotice: true,
+	CoordinationIntentAck:              true,
+}
+
+// DelegationContract declares a bounded task delegation from parent to sub-agent.
+// Stored at .agents/active/delegation/<task-id>.yaml
+type DelegationContract struct {
+	SchemaVersion              int                `json:"schema_version" yaml:"schema_version"`
+	ID                         string             `json:"id" yaml:"id"`
+	ParentPlanID               string             `json:"parent_plan_id" yaml:"parent_plan_id"`
+	ParentTaskID               string             `json:"parent_task_id" yaml:"parent_task_id"`
+	Title                      string             `json:"title" yaml:"title"`
+	Summary                    string             `json:"summary" yaml:"summary"`
+	WriteScope                 []string           `json:"write_scope" yaml:"write_scope"` // immutable after creation
+	SuccessCriteria            string             `json:"success_criteria" yaml:"success_criteria"`
+	VerificationExpectations   string             `json:"verification_expectations" yaml:"verification_expectations"`
+	MayMutateWorkflowState     bool               `json:"may_mutate_workflow_state" yaml:"may_mutate_workflow_state"`
+	Owner                      string             `json:"owner" yaml:"owner"` // delegate agent identity
+	Status                     string             `json:"status" yaml:"status"` // pending|active|completed|failed|cancelled
+	PendingIntent              CoordinationIntent `json:"pending_intent,omitempty" yaml:"pending_intent,omitempty"`
+	CreatedAt                  string             `json:"created_at" yaml:"created_at"`
+	UpdatedAt                  string             `json:"updated_at" yaml:"updated_at"`
+}
+
+var validDelegationStatuses = map[string]bool{
+	"pending": true, "active": true, "completed": true, "failed": true, "cancelled": true,
+}
+
+func isValidDelegationStatus(s string) bool { return validDelegationStatuses[s] }
+
+func delegationDir(projectPath string) string {
+	return filepath.Join(projectPath, ".agents", "active", "delegation")
+}
+
+func mergeBackDir(projectPath string) string {
+	return filepath.Join(projectPath, ".agents", "active", "merge-back")
+}
+
+func loadDelegationContract(projectPath, taskID string) (*DelegationContract, error) {
+	path := filepath.Join(delegationDir(projectPath), taskID+".yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c DelegationContract
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse delegation contract %s: %w", taskID, err)
+	}
+	return &c, nil
+}
+
+func saveDelegationContract(projectPath string, c *DelegationContract) error {
+	dir := delegationDir(projectPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
+}
+
+func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
+	dir := delegationDir(projectPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var contracts []DelegationContract
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		taskID := strings.TrimSuffix(e.Name(), ".yaml")
+		c, err := loadDelegationContract(projectPath, taskID)
+		if err != nil {
+			continue // skip unreadable contracts
+		}
+		contracts = append(contracts, *c)
+	}
+	return contracts, nil
+}
+
+// ── Write-scope overlap detection (Wave 6 Step 2) ────────────────────────────
+
+// writeScopeOverlaps returns conflict descriptions for any overlapping write scopes
+// between active delegations and the proposed new scope.
+// Detection strategy: prefix containment covers 90%+ of real cases (per RFC).
+// Full glob intersection is deferred.
+func writeScopeOverlaps(existing []DelegationContract, newScope []string, excludeTaskID string) []string {
+	var conflicts []string
+	for _, c := range existing {
+		if c.Status != "pending" && c.Status != "active" {
+			continue // only check live delegations
+		}
+		if c.ParentTaskID == excludeTaskID {
+			continue
+		}
+		for _, np := range newScope {
+			for _, ep := range c.WriteScope {
+				if scopePathsOverlap(np, ep) {
+					conflicts = append(conflicts, fmt.Sprintf(
+						"task %s has overlapping write scope: %q overlaps %q (existing delegation for task %s)",
+						excludeTaskID, np, ep, c.ParentTaskID,
+					))
+				}
+			}
+		}
+	}
+	return conflicts
+}
+
+// scopePathsOverlap returns true if path a and path b overlap.
+// Two paths overlap if one is a prefix of the other, or they are identical.
+// This handles the 90%+ case of disjoint directory trees.
+func scopePathsOverlap(a, b string) bool {
+	// Normalize: ensure directory paths end with /
+	na := filepath.ToSlash(filepath.Clean(a))
+	nb := filepath.ToSlash(filepath.Clean(b))
+	// Identical
+	if na == nb {
+		return true
+	}
+	// a is prefix of b: commands/ vs commands/workflow.go
+	if strings.HasPrefix(nb, na+"/") || strings.HasPrefix(na, nb+"/") {
+		return true
+	}
+	return false
+}
+
+// ── MergeBackSummary (Wave 6 Step 3) ─────────────────────────────────────────
+
+// MergeBackSummary is produced by the delegate and consumed by the parent.
+// Stored at .agents/active/merge-back/<task-id>.md with YAML frontmatter.
+type MergeBackSummary struct {
+	SchemaVersion      int                      `json:"schema_version" yaml:"schema_version"`
+	TaskID             string                   `json:"task_id" yaml:"task_id"`
+	ParentPlanID       string                   `json:"parent_plan_id" yaml:"parent_plan_id"`
+	Title              string                   `json:"title" yaml:"title"`
+	Summary            string                   `json:"summary" yaml:"summary"`
+	FilesChanged       []string                 `json:"files_changed" yaml:"files_changed"`
+	VerificationResult MergeBackVerification    `json:"verification_result" yaml:"verification_result"`
+	IntegrationNotes   string                   `json:"integration_notes" yaml:"integration_notes"`
+	BlockersEncountered []string                `json:"blockers_encountered,omitempty" yaml:"blockers_encountered,omitempty"`
+	CreatedAt          string                   `json:"created_at" yaml:"created_at"`
+}
+
+// MergeBackVerification captures the delegate's self-reported verification.
+type MergeBackVerification struct {
+	Status  string `json:"status" yaml:"status"` // pass|fail|partial|unknown
+	Summary string `json:"summary" yaml:"summary"`
+}
+
+func saveMergeBack(projectPath string, s *MergeBackSummary) error {
+	dir := mergeBackDir(projectPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	// Render as markdown with YAML frontmatter
+	frontmatter, err := yaml.Marshal(s)
+	if err != nil {
+		return err
+	}
+	content := fmt.Sprintf("---\n%s---\n\n## Summary\n\n%s\n\n## Integration Notes\n\n%s\n",
+		string(frontmatter), s.Summary, s.IntegrationNotes)
+	return os.WriteFile(filepath.Join(dir, s.TaskID+".md"), []byte(content), 0644)
+}
+
+func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
+	path := filepath.Join(mergeBackDir(projectPath), taskID+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	// Extract YAML frontmatter
+	content := string(data)
+	if !strings.HasPrefix(content, "---\n") {
+		return nil, fmt.Errorf("merge-back %s: missing frontmatter", taskID)
+	}
+	rest := content[4:]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return nil, fmt.Errorf("merge-back %s: unterminated frontmatter", taskID)
+	}
+	var s MergeBackSummary
+	if err := yaml.Unmarshal([]byte(rest[:end]), &s); err != nil {
+		return nil, fmt.Errorf("parse merge-back %s: %w", taskID, err)
+	}
+	return &s, nil
+}
+
+// ── workflow fanout subcommand (Wave 6 Step 5) ───────────────────────────────
+
+func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	planID, _ := cmd.Flags().GetString("plan")
+	taskID, _ := cmd.Flags().GetString("task")
+	owner, _ := cmd.Flags().GetString("owner")
+	writeScopeCSV, _ := cmd.Flags().GetString("write-scope")
+
+	// Validate plan exists
+	plan, err := loadCanonicalPlan(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	// Validate task exists in plan
+	tf, err := loadCanonicalTasks(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("tasks for plan %s not found: %w", planID, err)
+	}
+	var targetTask *CanonicalTask
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == taskID {
+			targetTask = &tf.Tasks[i]
+			break
+		}
+	}
+	if targetTask == nil {
+		return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+	}
+	if targetTask.Status != "pending" && targetTask.Status != "in_progress" {
+		return fmt.Errorf("task %s has status %q — only pending or in_progress tasks can be delegated", taskID, targetTask.Status)
+	}
+
+	// Check for existing delegation for this task
+	if _, err := loadDelegationContract(project.Path, taskID); err == nil {
+		return fmt.Errorf("task %s already has an active delegation contract", taskID)
+	}
+
+	// Parse write scope
+	var writeScope []string
+	if writeScopeCSV != "" {
+		for _, p := range strings.Split(writeScopeCSV, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				writeScope = append(writeScope, p)
+			}
+		}
+	}
+
+	// Check write-scope overlap
+	existing, err := listDelegationContracts(project.Path)
+	if err != nil {
+		return fmt.Errorf("list delegations: %w", err)
+	}
+	if conflicts := writeScopeOverlaps(existing, writeScope, taskID); len(conflicts) > 0 {
+		for _, c := range conflicts {
+			ui.Warn(c)
+		}
+		return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
+	}
+
+	// Create delegation contract
+	now := time.Now().UTC().Format(time.RFC3339)
+	contract := &DelegationContract{
+		SchemaVersion:   1,
+		ID:              fmt.Sprintf("del-%s-%d", taskID, time.Now().Unix()),
+		ParentPlanID:    planID,
+		ParentTaskID:    taskID,
+		Title:           targetTask.Title,
+		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
+		WriteScope:      writeScope,
+		SuccessCriteria: targetTask.Notes,
+		Owner:           owner,
+		Status:          "active",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := saveDelegationContract(project.Path, contract); err != nil {
+		return fmt.Errorf("save delegation contract: %w", err)
+	}
+
+	// Advance task to in_progress
+	if targetTask.Status == "pending" {
+		targetTask.Status = "in_progress"
+		if err := saveCanonicalTasks(project.Path, tf); err != nil {
+			ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
+		}
+	}
+
+	ui.SuccessBox(
+		fmt.Sprintf("Delegation created for task %s", taskID),
+		fmt.Sprintf("Contract: .agents/active/delegation/%s.yaml", taskID),
+		fmt.Sprintf("Write scope: %s", strings.Join(writeScope, ", ")),
+	)
+	return nil
+}
+
+// ── workflow merge-back subcommand (Wave 6 Step 6) ───────────────────────────
+
+func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	taskID, _ := cmd.Flags().GetString("task")
+	summary, _ := cmd.Flags().GetString("summary")
+	verificationStatus, _ := cmd.Flags().GetString("verification-status")
+	integrationNotes, _ := cmd.Flags().GetString("integration-notes")
+
+	// Load delegation contract
+	contract, err := loadDelegationContract(project.Path, taskID)
+	if err != nil {
+		return fmt.Errorf("delegation contract for task %s not found: %w", taskID, err)
+	}
+	if contract.Status == "completed" || contract.Status == "cancelled" {
+		return fmt.Errorf("delegation for task %s is already %s", taskID, contract.Status)
+	}
+
+	// Collect changed files via git diff
+	var filesChanged []string
+	gitOut, err := exec.Command("git", "-C", project.Path, "diff", "--name-only", "HEAD").Output()
+	if err == nil {
+		for _, f := range strings.Split(strings.TrimSpace(string(gitOut)), "\n") {
+			if f != "" {
+				filesChanged = append(filesChanged, f)
+			}
+		}
+	}
+
+	// Create merge-back summary
+	now := time.Now().UTC().Format(time.RFC3339)
+	mergeBack := &MergeBackSummary{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		ParentPlanID:  contract.ParentPlanID,
+		Title:         contract.Title,
+		Summary:       summary,
+		FilesChanged:  filesChanged,
+		VerificationResult: MergeBackVerification{
+			Status:  verificationStatus,
+			Summary: integrationNotes,
+		},
+		IntegrationNotes: integrationNotes,
+		CreatedAt:        now,
+	}
+	if err := saveMergeBack(project.Path, mergeBack); err != nil {
+		return fmt.Errorf("save merge-back: %w", err)
+	}
+
+	// Update delegation status to completed
+	contract.Status = "completed"
+	if err := saveDelegationContract(project.Path, contract); err != nil {
+		ui.Warn(fmt.Sprintf("merge-back created but failed to update delegation status: %v", err))
+	}
+
+	ui.SuccessBox(
+		fmt.Sprintf("Merge-back created for task %s", taskID),
+		fmt.Sprintf("Artifact: .agents/active/merge-back/%s.md", taskID),
+		"Parent agent should review this artifact before advancing task to completed",
+	)
 	return nil
 }

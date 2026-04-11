@@ -34,6 +34,7 @@ _import_project_candidates() {
     "opencode.json" "AGENTS.md" ".codex/instructions.md" ".codex/rules.md" \
     ".codex/config.toml" ".github/copilot-instructions.md"; do
     [[ -e "$repo/$rel" || -L "$repo/$rel" ]] || continue
+    is_managed_project_output "$project" "$repo" "$repo/$rel" && continue
     local dest_rel
     dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel")
     [[ -n "$dest_rel" ]] || continue
@@ -45,6 +46,7 @@ _import_project_candidates() {
     [[ -d "$repo/$dir" ]] || continue
     while IFS= read -r -d '' path; do
       rel_path="${path#$repo/}"
+      is_managed_project_output "$project" "$repo" "$path" && continue
       dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel_path")
       [[ -n "$dest_rel" ]] || continue
       echo "$project|$repo|$path|$dest_rel"

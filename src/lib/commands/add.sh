@@ -236,7 +236,7 @@ cmd_add() {
     "Other agents use symlinks for flexibility."
 
   # Check for existing files that would be replaced (root-level only)
-  check_existing_config_files "$project_path"
+  check_existing_config_files "$project_name" "$project_path"
   local existing_files=()
   [ ${#_CHECK_EXISTING_FILES[@]} -gt 0 ] && existing_files=("${_CHECK_EXISTING_FILES[@]}")
 
@@ -566,11 +566,42 @@ check_deprecated_formats() {
 #   opencode_create_links() from platforms/opencode.sh
 #   copilot_create_links() from platforms/github-copilot.sh
 
+is_managed_cursor_rule_rel() {
+  local project="$1"
+  local rel_path="$2"
+  [[ "$rel_path" == .cursor/rules/* ]] || return 1
+  local name
+  name=$(basename "$rel_path")
+  [[ "$name" == global--* || "$name" == "${project}"--* ]]
+}
+
+is_managed_project_output() {
+  local project="$1"
+  local project_path="$2"
+  local file_path="$3"
+
+  local rel_path="${file_path#$project_path/}"
+  if [ "$rel_path" = "$file_path" ]; then
+    return 1
+  fi
+
+  if is_managed_cursor_rule_rel "$project" "$rel_path"; then
+    return 0
+  fi
+
+  local dest_rel
+  dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel_path")
+  [ -n "$dest_rel" ] || return 1
+
+  are_hardlinked "$file_path" "$AGENTS_HOME/$dest_rel"
+}
+
 # Check for existing config files that would be replaced by linking
 # Sets global _CHECK_EXISTING_FILES array with results
-# Usage: check_existing_config_files "/path/to/project"
+# Usage: check_existing_config_files "project-name" "/path/to/project"
 check_existing_config_files() {
-  local project_path="$1"
+  local project="$1"
+  local project_path="$2"
   _CHECK_EXISTING_FILES=()
 
   # Root-level files that would be directly replaced
@@ -602,9 +633,12 @@ check_existing_config_files() {
         for subfile in "$file"/*; do
           # Skip files that are already backups to prevent cascading backups
           [[ "$subfile" == *.dot-agents-backup ]] && continue
-          [ -e "$subfile" ] && _CHECK_EXISTING_FILES+=("$subfile")
+          [ -e "$subfile" ] || continue
+          is_managed_project_output "$project" "$project_path" "$subfile" && continue
+          _CHECK_EXISTING_FILES+=("$subfile")
         done
       else
+        is_managed_project_output "$project" "$project_path" "$file" && continue
         _CHECK_EXISTING_FILES+=("$file")
       fi
     fi

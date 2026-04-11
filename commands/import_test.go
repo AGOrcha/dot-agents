@@ -503,6 +503,45 @@ func TestFilesDifferent(t *testing.T) {
 	}
 }
 
+func TestProcessImportCandidate_SkipsManagedCursorHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	repo := filepath.Join(tmp, "repo")
+	project := canonicalImportProject
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	source := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
+	if err := os.MkdirAll(filepath.Dir(source), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rulePath := filepath.Join(repo, ".cursor", "rules", "global--rules.mdc")
+	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(source, rulePath); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := importCandidate{
+		project:    project,
+		sourceRoot: repo,
+		sourcePath: rulePath,
+		destRel:    mapResourceRelToDest(project, ".cursor/rules/global--rules.mdc"),
+	}
+	result := processImportCandidate(candidate, agentsHome, "20260410-120000")
+	if result.imported != 0 || result.skipped != 0 {
+		t.Fatalf("managed hardlink should have been ignored, got %+v", result)
+	}
+
+	if _, err := os.Stat(filepath.Join(agentsHome, "resources", project)); !os.IsNotExist(err) {
+		t.Fatalf("managed hardlink should not create resources backup")
+	}
+}
+
 func canonicalImportFromJSON(t *testing.T, relPath, content string) ([]importOutput, bool) {
 	t.Helper()
 	sourceRoot := t.TempDir()

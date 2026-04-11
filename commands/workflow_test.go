@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"go.yaml.in/yaml/v3"
 )
 
 func initWorkflowTestRepo(t *testing.T) string {
@@ -1166,5 +1168,289 @@ func TestPreferences_OrientIncludesPreferences(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "test_command") {
 		t.Fatalf("orient output missing test_command:\n%s", rendered)
+	}
+}
+
+// ── Wave 5: Graph bridge types ────────────────────────────────────────────────
+
+func TestLoadGraphBridgeConfig_Absent(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := loadGraphBridgeConfig(dir)
+	if err != nil {
+		t.Fatalf("loadGraphBridgeConfig absent: %v", err)
+	}
+	if cfg.Enabled {
+		t.Error("expected bridge disabled when config absent")
+	}
+}
+
+func TestLoadGraphBridgeConfig_Present(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, ".agents", "workflow")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `schema_version: 1
+enabled: true
+graph_home: /tmp/my-graph
+allowed_intents:
+  - plan_context
+  - decision_lookup
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), []byte(content), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := loadGraphBridgeConfig(dir)
+	if err != nil {
+		t.Fatalf("loadGraphBridgeConfig: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("expected bridge enabled")
+	}
+	if cfg.GraphHome != "/tmp/my-graph" {
+		t.Errorf("graph_home: got %s", cfg.GraphHome)
+	}
+	if len(cfg.AllowedIntents) != 2 {
+		t.Errorf("allowed_intents: expected 2, got %d", len(cfg.AllowedIntents))
+	}
+}
+
+func TestIsValidWorkflowBridgeIntent(t *testing.T) {
+	valid := []string{"plan_context", "decision_lookup", "entity_context", "workflow_memory", "contradictions"}
+	for _, intent := range valid {
+		if !isValidWorkflowBridgeIntent(intent) {
+			t.Errorf("expected %s to be valid", intent)
+		}
+	}
+	if isValidWorkflowBridgeIntent("unknown") {
+		t.Error("'unknown' should not be valid")
+	}
+}
+
+// ── Wave 5: GraphBridgeHealth write/read ─────────────────────────────────────
+
+func TestWriteReadGraphBridgeHealth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	h := GraphBridgeHealth{
+		SchemaVersion:    1,
+		Timestamp:        "2026-01-01T00:00:00Z",
+		AdapterAvailable: true,
+		NoteCount:        5,
+		Status:           "healthy",
+	}
+	if err := writeGraphBridgeHealth("test-project", h); err != nil {
+		t.Fatalf("writeGraphBridgeHealth: %v", err)
+	}
+	got, err := readGraphBridgeHealth("test-project")
+	if err != nil {
+		t.Fatalf("readGraphBridgeHealth: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil health")
+	}
+	if got.NoteCount != 5 {
+		t.Errorf("NoteCount: got %d, want 5", got.NoteCount)
+	}
+}
+
+// ── Wave 5: LocalGraphAdapter ─────────────────────────────────────────────────
+
+func newTempKGForWorkflow(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("KG_HOME", dir)
+	return dir
+}
+
+func TestLocalGraphAdapter_Health_NotInitialized(t *testing.T) {
+	dir := t.TempDir()
+	adapter := NewLocalGraphAdapter(dir)
+	h, err := adapter.Health()
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.AdapterAvailable {
+		t.Error("expected unavailable before setup")
+	}
+	if h.Status == "healthy" {
+		t.Error("expected non-healthy status")
+	}
+}
+
+func TestLocalGraphAdapter_Query_ReturnsResults(t *testing.T) {
+	home := newTempKGForWorkflow(t)
+	// Set up KG with notes using the kg package functions
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("kg setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "dec-workflow-test", Type: "decision",
+		Title: "Use cobra for CLI", Summary: "We chose cobra.", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := createGraphNote(home, note, "body content about cobra CLI framework"); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+
+	adapter := NewLocalGraphAdapter(home)
+	resp, err := adapter.Query(GraphBridgeQuery{
+		Intent: "decision_lookup",
+		Query:  "cobra",
+	})
+	if err != nil {
+		t.Fatalf("adapter.Query: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Error("expected at least one result for 'cobra'")
+	}
+	if resp.Results[0].Type != "decision" {
+		t.Errorf("expected type=decision, got %s", resp.Results[0].Type)
+	}
+}
+
+func TestLocalGraphAdapter_Query_UnknownIntent(t *testing.T) {
+	dir := t.TempDir()
+	adapter := NewLocalGraphAdapter(dir)
+	_, err := adapter.Query(GraphBridgeQuery{Intent: "bad_intent", Query: "x"})
+	if err == nil {
+		t.Error("expected error for unknown intent")
+	}
+}
+
+// ── Wave 6: Delegation & Merge-back ─────────────────────────────���────────────
+
+func setupTestProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	// Create minimal plan + tasks
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "plan-001")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	plan := CanonicalPlan{SchemaVersion: 1, ID: "plan-001", Title: "Test Plan", Status: "active",
+		CreatedAt: "2026-04-10T00:00:00Z", UpdatedAt: "2026-04-10T00:00:00Z"}
+	planData, _ := yaml.Marshal(plan)
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatalf("write PLAN.yaml: %v", err)
+	}
+	tasks := CanonicalTaskFile{SchemaVersion: 1, PlanID: "plan-001", Tasks: []CanonicalTask{
+		{ID: "task-001", Title: "Do the thing", Status: "pending", WriteScope: []string{"commands/"}},
+		{ID: "task-002", Title: "Other task", Status: "pending", WriteScope: []string{"internal/"}},
+	}}
+	tasksData, _ := yaml.Marshal(tasks)
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), tasksData, 0644); err != nil {
+		t.Fatalf("write TASKS.yaml: %v", err)
+	}
+	return dir
+}
+
+func TestLoadSaveDelegationContract_RoundTrip(t *testing.T) {
+	dir := setupTestProject(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-task-001", ParentPlanID: "plan-001", ParentTaskID: "task-001",
+		Title: "Do the thing", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, c); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := loadDelegationContract(dir, "task-001")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.ID != c.ID || loaded.Status != "active" {
+		t.Errorf("round-trip mismatch: %+v", loaded)
+	}
+}
+
+func TestListDelegationContracts(t *testing.T) {
+	dir := setupTestProject(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, id := range []string{"task-001", "task-002"} {
+		c := &DelegationContract{
+			SchemaVersion: 1, ID: "del-" + id, ParentPlanID: "plan-001", ParentTaskID: id,
+			Title: id, WriteScope: []string{id + "/"}, Status: "active",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := saveDelegationContract(dir, c); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+	}
+	contracts, err := listDelegationContracts(dir)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(contracts) != 2 {
+		t.Errorf("expected 2 contracts, got %d", len(contracts))
+	}
+}
+
+func TestWriteScopeOverlaps_NoConflict(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	existing := []DelegationContract{
+		{ParentTaskID: "task-001", WriteScope: []string{"commands/"}, Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	conflicts := writeScopeOverlaps(existing, []string{"internal/"}, "task-002")
+	if len(conflicts) != 0 {
+		t.Errorf("expected no conflicts, got: %v", conflicts)
+	}
+}
+
+func TestWriteScopeOverlaps_DetectsConflict(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	existing := []DelegationContract{
+		{ParentTaskID: "task-001", WriteScope: []string{"commands/"}, Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	// commands/workflow.go is contained within commands/ — should conflict
+	conflicts := writeScopeOverlaps(existing, []string{"commands/workflow.go"}, "task-002")
+	if len(conflicts) == 0 {
+		t.Error("expected conflict for commands/workflow.go vs commands/")
+	}
+}
+
+func TestWriteScopeOverlaps_IdenticalScope(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	existing := []DelegationContract{
+		{ParentTaskID: "task-001", WriteScope: []string{"commands/"}, Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	conflicts := writeScopeOverlaps(existing, []string{"commands/"}, "task-002")
+	if len(conflicts) == 0 {
+		t.Error("expected conflict for identical scope")
+	}
+}
+
+func TestWriteScopeOverlaps_SkipsCompletedDelegation(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	existing := []DelegationContract{
+		{ParentTaskID: "task-001", WriteScope: []string{"commands/"}, Status: "completed", CreatedAt: now, UpdatedAt: now},
+	}
+	// Completed delegation should not block new delegation with same scope
+	conflicts := writeScopeOverlaps(existing, []string{"commands/"}, "task-002")
+	if len(conflicts) != 0 {
+		t.Errorf("completed delegation should not block, got: %v", conflicts)
+	}
+}
+
+func TestSaveLoadMergeBack_RoundTrip(t *testing.T) {
+	dir := setupTestProject(t)
+	s := &MergeBackSummary{
+		SchemaVersion: 1, TaskID: "task-001", ParentPlanID: "plan-001",
+		Title: "Do the thing", Summary: "Implemented the feature.",
+		FilesChanged: []string{"commands/workflow.go"},
+		VerificationResult: MergeBackVerification{Status: "pass", Summary: "tests green"},
+		IntegrationNotes: "No conflicts expected.",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := saveMergeBack(dir, s); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := loadMergeBack(dir, "task-001")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.TaskID != "task-001" || loaded.VerificationResult.Status != "pass" {
+		t.Errorf("round-trip mismatch: %+v", loaded)
 	}
 }

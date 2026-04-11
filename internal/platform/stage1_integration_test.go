@@ -151,6 +151,26 @@ func TestCursorCreateLinksMCPFallsBackToProjectGenericBeforeGlobalPlatformFile(t
 	assertHardlinked(t, filepath.Join(repo, dirCursor, fileMCPJSON), projectGenericMCP)
 }
 
+func TestCursorCreateLinksPrunesStaleManagedRuleFiles(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	globalRule := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
+	writeTextFile(t, globalRule, "---\ndescription: global rules\n---\n")
+	mkdirAll(t, filepath.Join(repo, dirCursor, "rules"))
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "global--agents.mdc"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "proj--agents.mdc"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "user-local.mdc"), "keep\n")
+
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
+
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "global--agents.mdc"))
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "proj--agents.mdc"))
+	assertFileContains(t, filepath.Join(repo, dirCursor, "rules", "user-local.mdc"), "keep\n")
+	assertHardlinked(t, filepath.Join(repo, dirCursor, "rules", "global--rules.mdc"), globalRule)
+}
+
 func TestCopilotCreateLinksMCPSelectionAndHookFanout(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
@@ -201,6 +221,24 @@ func TestClaudeCreateLinksPrefersHooksOverSettingsAndUsesGlobalCompatForUser(t *
 
 	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), projectHook)
 	assertSymlinkTarget(t, filepath.Join(home, dirClaude, fileSettingsJSON), globalHook)
+}
+
+func TestClaudeCreateLinksPrunesStaleProjectRuleSymlinks(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	projectRule := filepath.Join(agentsHome, "rules", "proj", "lint.mdc")
+	writeTextFile(t, projectRule, "---\ndescription: lint\n---\n")
+	mkdirAll(t, filepath.Join(repo, dirClaude, "rules"))
+	writeTextFile(t, filepath.Join(repo, dirClaude, "rules", "proj--legacy.md"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirClaude, "rules", "user-local.md"), "keep\n")
+
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertNoFile(t, filepath.Join(repo, dirClaude, "rules", "proj--legacy.md"))
+	assertFileContains(t, filepath.Join(repo, dirClaude, "rules", "user-local.md"), "keep\n")
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "rules", "proj--lint.md"), projectRule)
 }
 
 func TestCursorCreateLinksPrefersProjectHooksForRepoAndGlobalForUser(t *testing.T) {
@@ -712,6 +750,17 @@ func assertNoFile(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be absent, got err=%v", path, err)
+	}
+}
+
+func assertFileContains(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(content) != want {
+		t.Fatalf("expected %s to contain %q, got %q", path, want, string(content))
 	}
 }
 

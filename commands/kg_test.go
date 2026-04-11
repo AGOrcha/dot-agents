@@ -891,15 +891,21 @@ func TestExecuteQuery_GraphHealth(t *testing.T) {
 	}
 }
 
-func TestExecuteQuery_Contradictions_Stub(t *testing.T) {
+func TestExecuteQuery_Contradictions_NoConflict(t *testing.T) {
+	// setupKGWithNotes has decisions "Use cobra for CLI" and "Use YAML config" —
+	// different enough topics that contradiction detection finds nothing.
 	home := setupKGWithNotes(t)
 
 	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: ""})
 	if err != nil {
 		t.Fatalf("executeQuery contradictions: %v", err)
 	}
-	if len(resp.Warnings) == 0 {
-		t.Error("expected stub warning for contradictions")
+	// Results may be empty (no contradictions in fixture); just verify no error and valid shape
+	if resp.SchemaVersion != 1 {
+		t.Errorf("expected schema_version 1, got %d", resp.SchemaVersion)
+	}
+	if resp.Results == nil {
+		t.Error("Results should be non-nil slice")
 	}
 }
 
@@ -973,5 +979,582 @@ func TestExecuteBatchQuery(t *testing.T) {
 		if r.Intent != queries[i].Intent {
 			t.Errorf("response[%d] intent mismatch: got %s, want %s", i, r.Intent, queries[i].Intent)
 		}
+	}
+}
+
+// ── Phase 4: Link graph ───────────────────────────────────────────────────────
+
+func TestBuildLinkGraph_Empty(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	adj, notes, err := buildLinkGraph(home)
+	if err != nil {
+		t.Fatalf("buildLinkGraph: %v", err)
+	}
+	if len(adj) != 0 || len(notes) != 0 {
+		t.Errorf("expected empty graph, got adj=%d notes=%d", len(adj), len(notes))
+	}
+}
+
+func TestBuildLinkGraph_WithLinks(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	target := &GraphNote{SchemaVersion: 1, ID: "ent-target", Type: "entity", Title: "Target", Summary: "T", Status: "active", CreatedAt: now, UpdatedAt: now}
+	root := &GraphNote{SchemaVersion: 1, ID: "dec-root", Type: "decision", Title: "Root", Summary: "R", Status: "active", Links: []string{"ent-target"}, CreatedAt: now, UpdatedAt: now}
+	_ = createGraphNote(home, target, "")
+	_ = createGraphNote(home, root, "")
+
+	adj, notes, err := buildLinkGraph(home)
+	if err != nil {
+		t.Fatalf("buildLinkGraph: %v", err)
+	}
+	if len(notes) != 2 {
+		t.Errorf("expected 2 notes, got %d", len(notes))
+	}
+	if len(adj["dec-root"]) != 1 || adj["dec-root"][0] != "ent-target" {
+		t.Errorf("expected dec-root -> ent-target link, got %v", adj["dec-root"])
+	}
+}
+
+// ── Phase 4: Individual lint checks ──────────────────────────────────────────
+
+func setupLintFixture(t *testing.T) (string, map[string][]string, map[string]*GraphNote) {
+	t.Helper()
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	notes := []*GraphNote{
+		{SchemaVersion: 1, ID: "ent-a", Type: "entity", Title: "Entity A", Summary: "Summary A.", Status: "active", SourceRefs: []string{"src-1"}, CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-good", Type: "decision", Title: "Use Go", Summary: "We chose Go.", Status: "active", SourceRefs: []string{"src-1"}, Links: []string{"ent-a"}, CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-orphan", Type: "decision", Title: "Orphan Decision", Summary: "No refs.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-broken", Type: "decision", Title: "Broken Link", Summary: "Has broken link.", Status: "active", Links: []string{"does-not-exist"}, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, n := range notes {
+		if err := createGraphNote(home, n, "body"); err != nil {
+			t.Fatalf("createGraphNote %s: %v", n.ID, err)
+		}
+	}
+	adj, noteMap, err := buildLinkGraph(home)
+	if err != nil {
+		t.Fatalf("buildLinkGraph: %v", err)
+	}
+	return home, adj, noteMap
+}
+
+func TestLintBrokenLinks(t *testing.T) {
+	_, adj, notes := setupLintFixture(t)
+	results := lintBrokenLinks(adj, notes)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "dec-broken" && r.Check == "broken_links" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected broken_links finding for dec-broken, got: %v", results)
+	}
+}
+
+func TestLintOrphanPages(t *testing.T) {
+	_, adj, notes := setupLintFixture(t)
+	results := lintOrphanPages(adj, notes)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "dec-orphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected orphan finding for dec-orphan, got: %v", results)
+	}
+}
+
+func TestLintMissingSourceRefs(t *testing.T) {
+	_, _, notes := setupLintFixture(t)
+	results := lintMissingSourceRefs(notes)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "dec-orphan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected missing_source_refs for dec-orphan, got: %v", results)
+	}
+}
+
+func TestLintStalePages(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	oldTime := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	staleNote := &GraphNote{
+		SchemaVersion: 1, ID: "ent-stale", Type: "entity",
+		Title: "Old Entity", Summary: "Very old.", Status: "active",
+		CreatedAt: oldTime, UpdatedAt: oldTime,
+	}
+	_ = createGraphNote(home, staleNote, "")
+
+	_, notes, _ := buildLinkGraph(home)
+	results := lintStalePages(notes, 90*24*time.Hour)
+	if len(results) == 0 {
+		t.Error("expected stale_pages finding")
+	}
+	if results[0].NoteID != "ent-stale" {
+		t.Errorf("expected ent-stale, got %s", results[0].NoteID)
+	}
+}
+
+func TestLintIndexDrift(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{SchemaVersion: 1, ID: "ent-drift", Type: "entity", Title: "Drift", Summary: "S", Status: "active", CreatedAt: now, UpdatedAt: now}
+	_ = createGraphNote(home, note, "")
+
+	// Manually remove from index to create drift
+	indexPath := filepath.Join(home, "notes", "index.md")
+	data, _ := os.ReadFile(indexPath)
+	lines := strings.Split(string(data), "\n")
+	var kept []string
+	for _, l := range lines {
+		if !strings.Contains(l, "ent-drift") {
+			kept = append(kept, l)
+		}
+	}
+	_ = os.WriteFile(indexPath, []byte(strings.Join(kept, "\n")), 0644)
+
+	_, noteMap, _ := buildLinkGraph(home)
+	results := lintIndexDrift(home, noteMap)
+	if len(results) == 0 {
+		t.Error("expected index_drift finding")
+	}
+}
+
+func TestLintContradictions(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	notes := []*GraphNote{
+		{SchemaVersion: 1, ID: "dec-use-yaml", Type: "decision", Title: "Use YAML config format", Summary: "Use YAML.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-use-json", Type: "decision", Title: "Use JSON config format", Summary: "Use JSON.", Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, n := range notes {
+		_ = createGraphNote(home, n, "")
+	}
+	_, noteMap, _ := buildLinkGraph(home)
+	results := lintContradictions(noteMap)
+	if len(results) == 0 {
+		t.Error("expected contradiction finding between YAML and JSON config decisions")
+	}
+}
+
+func TestLintContradictions_NonConflicting(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	notes := []*GraphNote{
+		{SchemaVersion: 1, ID: "dec-a", Type: "decision", Title: "Use cobra for CLI parsing", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-b", Type: "decision", Title: "Deploy to production weekly", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, n := range notes {
+		_ = createGraphNote(home, n, "")
+	}
+	_, noteMap, _ := buildLinkGraph(home)
+	results := lintContradictions(noteMap)
+	if len(results) != 0 {
+		t.Errorf("expected no contradictions for unrelated decisions, got: %v", results)
+	}
+}
+
+// ── Phase 4: Full lint run ────────────────────────────────────────────────────
+
+func TestRunGraphLint_FullRun(t *testing.T) {
+	home, _, _ := setupLintFixture(t)
+
+	report, err := runGraphLint(home)
+	if err != nil {
+		t.Fatalf("runGraphLint: %v", err)
+	}
+	if report.ChecksRun != 8 { // 7 original + integrity_violation (Phase 6A)
+		t.Errorf("expected 8 checks, got %d", report.ChecksRun)
+	}
+	// Should have at least one error (broken link)
+	if report.ErrorCount == 0 {
+		t.Error("expected at least one error from broken_links")
+	}
+	// Report file should exist
+	if _, err := os.Stat(filepath.Join(home, "ops", "lint", "lint-report.json")); err != nil {
+		t.Errorf("lint-report.json missing: %v", err)
+	}
+}
+
+// ── Phase 4: Contradictions query (Phase 3 upgrade) ──────────────────────────
+
+func TestExecuteQuery_Contradictions_Live(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	notes := []*GraphNote{
+		{SchemaVersion: 1, ID: "dec-yaml", Type: "decision", Title: "Use YAML config format", Summary: "YAML.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-toml", Type: "decision", Title: "Use TOML config format", Summary: "TOML.", Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, n := range notes {
+		_ = createGraphNote(home, n, "")
+	}
+
+	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: ""})
+	if err != nil {
+		t.Fatalf("executeQuery contradictions: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Error("expected contradiction results from live detection")
+	}
+}
+
+// ── Phase 4: Maintenance operations ──────────────────────────────────────────
+
+func TestRunKGReweave_RemovesBrokenLinks(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "dec-reweave", Type: "decision",
+		Title: "Reweave Test", Summary: "S", Status: "active",
+		Links: []string{"does-not-exist"},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	_ = createGraphNote(home, note, "body")
+
+	if err := runKGReweave(home); err != nil {
+		t.Fatalf("runKGReweave: %v", err)
+	}
+
+	// Verify broken link was removed
+	path := filepath.Join(home, "notes", "decisions", "dec-reweave.md")
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "does-not-exist") {
+		t.Error("broken link should have been removed by reweave")
+	}
+}
+
+func TestRunKGMarkStale(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	oldTime := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "ent-mark-stale", Type: "entity",
+		Title: "Old", Summary: "S", Status: "active",
+		CreatedAt: oldTime, UpdatedAt: oldTime,
+	}
+	_ = createGraphNote(home, note, "body")
+
+	if err := runKGMarkStale(home, 90*24*time.Hour); err != nil {
+		t.Fatalf("runKGMarkStale: %v", err)
+	}
+
+	path := filepath.Join(home, "notes", "entities", "ent-mark-stale.md")
+	data, _ := os.ReadFile(path)
+	parsed, _, _ := parseGraphNote(data)
+	if parsed.Status != "stale" {
+		t.Errorf("expected status=stale, got %s", parsed.Status)
+	}
+}
+
+func TestRunKGCompact(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "dec-archived", Type: "decision",
+		Title: "Old Decision", Summary: "S", Status: "archived",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	_ = createGraphNote(home, note, "body")
+
+	if err := runKGCompact(home); err != nil {
+		t.Fatalf("runKGCompact: %v", err)
+	}
+
+	// Note should be moved to _archived/
+	archivePath := filepath.Join(home, "notes", "_archived", "dec-archived.md")
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Errorf("expected note in _archived: %v", err)
+	}
+	// Original should be gone
+	origPath := filepath.Join(home, "notes", "decisions", "dec-archived.md")
+	if _, err := os.Stat(origPath); !os.IsNotExist(err) {
+		t.Error("original note should have been moved")
+	}
+}
+
+
+// ── Phase 5: Bridge intent mapping ───────────────────────────────────────────
+
+func TestResolveBridgeQuery(t *testing.T) {
+	queries, err := resolveBridgeQuery("plan_context", "deployment")
+	if err != nil {
+		t.Fatalf("resolveBridgeQuery: %v", err)
+	}
+	if len(queries) < 2 {
+		t.Errorf("plan_context should fan out to 2+ KG queries, got %d", len(queries))
+	}
+	for _, q := range queries {
+		if q.Query != "deployment" {
+			t.Errorf("query string not propagated: got %s", q.Query)
+		}
+	}
+}
+
+func TestResolveBridgeQuery_Unknown(t *testing.T) {
+	_, err := resolveBridgeQuery("unknown_bridge_intent", "x")
+	if err == nil {
+		t.Error("expected error for unknown bridge intent")
+	}
+}
+
+func TestMergeBridgeResults_Deduplication(t *testing.T) {
+	r := GraphQueryResult{ID: "dec-001", Type: "decision", Title: "T", Summary: "S"}
+	resp1 := GraphQueryResponse{Intent: "decision_lookup", Results: []GraphQueryResult{r}}
+	resp2 := GraphQueryResponse{Intent: "synthesis_lookup", Results: []GraphQueryResult{r}} // same note
+
+	merged := mergeBridgeResults([]GraphQueryResponse{resp1, resp2}, "plan_context")
+	if len(merged.Results) != 1 {
+		t.Errorf("expected 1 deduplicated result, got %d", len(merged.Results))
+	}
+	if merged.Intent != "plan_context" {
+		t.Errorf("expected plan_context intent, got %s", merged.Intent)
+	}
+}
+
+// ── Phase 5: LocalFileAdapter ─────────────────────────────────────────────────
+
+func TestLocalFileAdapter_Available(t *testing.T) {
+	home := newTempKG(t)
+	adapter := NewLocalFileAdapter(home)
+	if adapter.Available() {
+		t.Error("adapter should be unavailable before setup")
+	}
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if !adapter.Available() {
+		t.Error("adapter should be available after setup")
+	}
+}
+
+func TestLocalFileAdapter_Query(t *testing.T) {
+	home := setupKGWithNotes(t)
+	adapter := NewLocalFileAdapter(home)
+
+	resp, err := adapter.Query(GraphQuery{Intent: "decision_lookup", Query: "cobra", Limit: 5})
+	if err != nil {
+		t.Fatalf("adapter.Query: %v", err)
+	}
+	if resp.Provider != "local-index" {
+		t.Errorf("provider: got %s", resp.Provider)
+	}
+	if len(resp.Results) == 0 {
+		t.Error("expected results for 'cobra'")
+	}
+}
+
+func TestLocalFileAdapter_Health(t *testing.T) {
+	home := setupKGWithNotes(t)
+	adapter := NewLocalFileAdapter(home)
+
+	h, err := adapter.Health()
+	if err != nil {
+		t.Fatalf("adapter.Health: %v", err)
+	}
+	if !h.Available {
+		t.Error("expected adapter available")
+	}
+	if h.NoteCount == 0 {
+		t.Error("expected note count > 0")
+	}
+}
+
+// ── Phase 5: executeBridgeQuery ───────────────────────────────────────────────
+
+func TestExecuteBridgeQuery(t *testing.T) {
+	home := setupKGWithNotes(t)
+
+	resp, err := executeBridgeQuery(home, "decision_lookup", "cobra")
+	if err != nil {
+		t.Fatalf("executeBridgeQuery: %v", err)
+	}
+	if resp.Intent != "decision_lookup" {
+		t.Errorf("intent: got %s", resp.Intent)
+	}
+	if len(resp.Results) == 0 {
+		t.Error("expected results for cobra decision lookup")
+	}
+}
+
+func TestExecuteBridgeQuery_PlanContext_Fanout(t *testing.T) {
+	home := setupKGWithNotes(t)
+
+	resp, err := executeBridgeQuery(home, "plan_context", "cobra")
+	if err != nil {
+		t.Fatalf("executeBridgeQuery plan_context: %v", err)
+	}
+	if resp.Intent != "plan_context" {
+		t.Errorf("intent: got %s", resp.Intent)
+	}
+	// plan_context fans out to decision_lookup + synthesis_lookup — should get decision results
+	if len(resp.Results) == 0 {
+		t.Error("expected results from plan_context fanout")
+	}
+}
+
+// ── Phase 5: Bridge contract ──────────────────────────────────────────────────
+
+func TestWriteBridgeContract(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// Setup already calls writeBridgeContract; verify file exists and is valid YAML
+	contractPath := filepath.Join(home, "self", "schema", "bridge-contract.yaml")
+	data, err := os.ReadFile(contractPath)
+	if err != nil {
+		t.Fatalf("bridge-contract.yaml missing: %v", err)
+	}
+	if !strings.Contains(string(data), "plan_context") {
+		t.Error("contract should contain plan_context intent")
+	}
+	if !strings.Contains(string(data), "local-file") {
+		t.Error("contract should list local-file adapter")
+	}
+}
+
+// ── Phase 6A: Integrity manifest ─────────────────────────────────────────────
+
+func TestManifest_InitAndLoad(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	m, err := loadManifest(home)
+	if err != nil {
+		t.Fatalf("loadManifest: %v", err)
+	}
+	if m.SchemaVersion != 1 {
+		t.Errorf("schema_version: got %d", m.SchemaVersion)
+	}
+	if len(m.Notes) != 0 {
+		t.Errorf("expected empty manifest after setup, got %d entries", len(m.Notes))
+	}
+}
+
+func TestManifest_UpdatedOnCreate(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	note := &GraphNote{SchemaVersion: 1, ID: "ent-test-001", Type: "entity", Title: "Test", Status: "active", CreatedAt: "2026-04-10T00:00:00Z"}
+	body := "Test body content."
+	if err := createGraphNote(home, note, body); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	m, err := loadManifest(home)
+	if err != nil {
+		t.Fatalf("loadManifest: %v", err)
+	}
+	entry, ok := m.Notes["ent-test-001"]
+	if !ok {
+		t.Fatal("manifest should have entry for ent-test-001")
+	}
+	if entry.Hash != noteBodyHash(body) {
+		t.Errorf("hash mismatch: got %s", entry.Hash)
+	}
+}
+
+func TestManifest_VersionIncrementOnUpdate(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	note := &GraphNote{SchemaVersion: 1, ID: "ent-v-001", Type: "entity", Title: "V Test", Status: "active", CreatedAt: "2026-04-10T00:00:00Z"}
+	if err := createGraphNote(home, note, "v0"); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	if note.Version != 0 {
+		t.Errorf("version after create: want 0, got %d", note.Version)
+	}
+	note.Title = "V Test Updated"
+	if err := updateGraphNote(home, note, "v1"); err != nil {
+		t.Fatalf("updateGraphNote: %v", err)
+	}
+	// Re-read from disk and check version
+	path := filepath.Join(home, "notes", "entities", "ent-v-001.md")
+	data, _ := os.ReadFile(path)
+	reloaded, _, _ := parseGraphNote(data)
+	if reloaded.Version != 1 {
+		t.Errorf("version after first update: want 1, got %d", reloaded.Version)
+	}
+}
+
+func TestLintIntegrityViolations_CleanGraph(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_, notes, err := buildLinkGraph(home)
+	if err != nil {
+		t.Fatalf("buildLinkGraph: %v", err)
+	}
+	results := lintIntegrityViolations(home, notes)
+	if len(results) != 0 {
+		t.Errorf("expected no integrity violations on clean graph, got %d", len(results))
+	}
+}
+
+func TestLintIntegrityViolations_DetectsOutOfBandEdit(t *testing.T) {
+	home := setupKGWithNotes(t)
+	// Directly modify a note file outside of kg commands
+	notePath := filepath.Join(home, "notes", "entities", "ent-cobra.md")
+	existing, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read note: %v", err)
+	}
+	// Append directly to file (bypassing updateGraphNote)
+	modified := string(existing) + "\nOut-of-band edit.\n"
+	if err := os.WriteFile(notePath, []byte(modified), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	_, notes, err := buildLinkGraph(home)
+	if err != nil {
+		t.Fatalf("buildLinkGraph: %v", err)
+	}
+	results := lintIntegrityViolations(home, notes)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "ent-cobra" && r.Check == "integrity_violation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected integrity_violation for ent-cobra after out-of-band edit")
 	}
 }
