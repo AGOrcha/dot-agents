@@ -367,6 +367,10 @@ func TestHookTranslationAcrossPlatformsUsesProjectHookSources(t *testing.T) {
 	writeTextFile(t, copilotProjectHook, "{\"name\":\"pre-tool\"}\n")
 	mkdirAll(t, repo)
 
+	platforms := []Platform{NewCursor(), NewCodex(), NewClaude(), NewCopilot()}
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewCursor().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("Cursor CreateLinks failed: %v", err)
 	}
@@ -405,6 +409,9 @@ func TestClaudeCompatTranslationFallsBackToSettingsBucket(t *testing.T) {
 	writeTextFile(t, globalSettings, "{\"scope\":\"global-settings\"}\n")
 	mkdirAll(t, repo)
 
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewClaude(), NewCopilot()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewClaude().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("Claude CreateLinks failed: %v", err)
 	}
@@ -692,6 +699,9 @@ func newPlatformTestPaths(t *testing.T) platformTestPaths {
 
 func mustCreateLinks(t *testing.T, label string, p Platform, project, repo string) {
 	t.Helper()
+	if err := CollectAndExecuteSharedTargetPlan(project, repo, []Platform{p}); err != nil {
+		t.Fatalf("%s CollectAndExecuteSharedTargetPlan: %v", label, err)
+	}
 	if err := p.CreateLinks(project, repo); err != nil {
 		t.Fatalf("%s CreateLinks failed: %v", label, err)
 	}

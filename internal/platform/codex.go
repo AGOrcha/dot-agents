@@ -82,7 +82,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
 	}
 
-	// Project agents → .codex/agents/*.toml
+	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
@@ -128,11 +128,9 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, codexDir, "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-	return c.writeCodexAgents(agentsHome, project, agentsTarget)
+	// TOML files are materialized by CollectAndExecuteSharedTargetPlan; prune stale
+	// `.toml` when canonical agents are removed.
+	return pruneCodexRepoAgentTomls(project, repoPath, agentsHome)
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, _ string) error {
@@ -203,6 +201,29 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	return nil
 }
 
+func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	if err != nil {
+		return nil
+	}
+	wanted := map[string]bool{}
+	for _, entry := range entries {
+		wanted[entry.Name+".toml"] = true
+	}
+	dstRoot := filepath.Join(repoPath, codexDir, "agents")
+	if existing, err := os.ReadDir(dstRoot); err != nil {
+		return nil
+	} else {
+		for _, e := range existing {
+			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+		}
+	}
+	return nil
+}
+
 func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
 	if err != nil {
@@ -240,7 +261,7 @@ func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) e
 	return nil
 }
 
-func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+func writeCodexAgentTomlFile(dst, agentMD string) error {
 	content, err := renderCodexAgentToml(agentMD)
 	if err != nil {
 		return err
@@ -254,6 +275,10 @@ func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
 		}
 	}
 	return os.WriteFile(dst, content, 0644)
+}
+
+func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+	return writeCodexAgentTomlFile(dst, agentMD)
 }
 
 func renderCodexAgentToml(agentMD string) ([]byte, error) {
@@ -309,5 +334,13 @@ func tomlMultilineString(value string) string {
 }
 
 func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	return BuildSharedSkillMirrorIntents(project, filepath.Join(codexAgentsDir, "skills"))
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(codexAgentsDir, "skills"))
+	if err != nil {
+		return nil, err
+	}
+	tomls, err := BuildSharedCodexAgentTomlIntents(project)
+	if err != nil {
+		return nil, err
+	}
+	return append(skills, tomls...), nil
 }

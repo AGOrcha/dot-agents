@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 19
+Iteration: 20
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 in_progress — repo-local `.claude/agents/*` dir mirrors now go through `CollectAndExecuteSharedTargetPlan` (Claude + Cursor intents dedupe); Codex/OpenCode/Copilot agent projections still adapter-local. Phase 5 pending.
+- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 in_progress — shared-target plan covers skills, `.claude/agents/*` dir mirrors, Codex `.codex/agents/*.toml` renders, OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` file symlinks. Phase 5 (unify command consumers) pending.
 - `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
@@ -29,11 +29,12 @@ State summary:
 - `skill-import-streamline` wave closed: regression test locks promote path preservation of `ExtraFields` + multi-source `sources` through `Save()` after skill registration.
 - `DryRunSharedTargetPlanLines` surfaces the same merged `ResourcePlan` as `CollectAndExecuteSharedTargetPlan` for `refresh --dry-run` and `install --dry-run` (no filesystem writes).
 - `BuildSharedAgentMirrorIntents` + extended allowlist (`.claude/agents/`) centralizes project-scoped canonical `agents/<project>/<name>/AGENT.md` mirrors into `.claude/agents/<name>`; Cursor emits the same targets so Claude+Cursor duplicate intents merge once. Three new unit tests cover dedupe, imported-dir replacement, and Claude+Cursor execute path.
-- Next slice: `resource-intent-centralization` Phase 3 — render/file-shaped agent outputs (Codex `.toml`, Copilot `.agent.md`, OpenCode `.md`) or `crg-kg-integration` Phase E incremental work.
+- Phase 3 non-dir agent outputs: Codex `.codex/agents/*.toml` (render), OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` (file symlinks) now go through `CollectAndExecuteSharedTargetPlan` via `BuildSharedCodexAgentTomlIntents` / `BuildSharedAgentFileSymlinkIntents`; executor handles `RenderSingle`+`write` and `DirectFile`+`symlink`. Adapters thinned; `pruneCodexRepoAgentTomls` preserves stale-toml cleanup.
+- Next slice: `resource-intent-centralization` Phase 5 consumer unification or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
-Review target: iterations 17-19 and paired commits.
+Review target: iterations 18-20 and paired commits.
 
 Current findings:
 - `single-commit-closeout`: on-target — iteration 17 targets one commit (tests + loop-state + plan YAML + canonical advances).
@@ -71,6 +72,37 @@ Dogfood implications:
 
 ## Iteration Log
 
+### Iteration 20 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 3 — centralize non-dir agent projections (Codex TOML render, OpenCode/Copilot AGENT.md file symlinks) in shared target plan
+- scenario_tags: [clean-repo, canonical-plan-present, dry-run-shared-target-preview, agents-non-dir-outputs-centralized]
+- feedback_goal: After centralization, does `refresh --dry-run` still emit merged skill shared-target lines (and remain healthy) for the default enabled platforms?
+- files_changed: 8
+- lines_added: 326
+- lines_removed: 47
+- tests_added: 3
+- tests_total_pass: true
+- retries: 0
+- commit: b457809
+- scope_note: "on-target"
+- summary: Extended resource executor for file symlinks and codex-agent-toml render; Codex/OpenCode/Copilot SharedTargetIntents + thinned CreateLinks; prune stale Codex tomls; integration tests call CollectAndExecuteSharedTargetPlan; negative test for non-allowlisted file replace.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: yes (phase-3-migrate-shared-targets in_progress)
+- persisted_via_workflow_commands: no (read-only CLI only)
+- ran_cli_command: yes
+- exercised_new_scenario: yes (agents-non-dir-outputs-centralized; dry-run shows skills-only — OpenCode not enabled in live refresh)
+- cli_produced_actionable_feedback: yes (dry-run path unchanged for skills; no new agent rows in this repo without OpenCode in enabled set)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
 ### Iteration 19 — 2026-04-11
 - wave: resource-intent-centralization
 - item: Phase 3 — centralize project-scoped `agents/` dir mirrors (`.claude/agents/<name>`) in shared target plan; thin Claude/Cursor `createAgentsLinks` for repo paths
@@ -82,7 +114,7 @@ Dogfood implications:
 - tests_added: 3
 - tests_total_pass: true
 - retries: 0
-- commit: 1b160c9
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added `BuildSharedAgentMirrorIntents`, allowlisted `.claude/agents/` for imported-dir replacement, merged agent intents into Claude `SharedTargetIntents` and Cursor `SharedTargetIntents`, no-op repo `createAgentsLinks`; tests for dedupe, replacement, Claude+Cursor execute.
 
@@ -108,7 +140,7 @@ Self-assessment:
 - tests_added: 2
 - tests_total_pass: true
 - retries: 0
-- commit: dcc2478
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added `DryRunSharedTargetPlanLines` and wired `refresh`/`install` dry-run paths to print merged symlink plan; two unit tests (none + cross-platform dedupe).
 
@@ -134,7 +166,7 @@ Self-assessment:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 0
-- commit: c8834ae
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added promote-path regression test preserving legacy `refresh` + custom extra fields and git+local sources; advanced canonical tasks `add-regression-tests` and `install-generate-merge` to completed; PLAN.yaml + markdown plan marked completed for skill-import-streamline.
 
@@ -165,7 +197,7 @@ Self-assessment:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 2 (io/fs import order + SKILL.md check ordering before symlink validation)
-- commit: 918bb30
+- commit: b457809
 - scope_note: "on-target"
 - summary: Rewrote promoteSkillIn to copy-move: canonical is real dir, repo-local becomes managed symlink. Added mispointing-symlink error path test. Canonical tasks advanced for items 1-4.
 
@@ -195,7 +227,7 @@ Self-assessment:
 - tests_added: 5
 - tests_total_pass: true
 - retries: 0
-- commit: f9488ba
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added `skills promote` subcommand with promoteSkillIn; creates managed symlink + updates manifest + calls ExecuteSharedSkillMirrorPlan; 5 tests cover success, idempotency, 3 error paths
 
@@ -222,7 +254,7 @@ Self-assessment:
 - tests_added: 6
 - tests_total_pass: true
 - retries: 0
-- commit: 0e76c79
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added MergeGenerateAgentsRC + merge in runInstallGenerate when manifest exists; dry-run shows merged project and source count; six unit tests
 
@@ -249,7 +281,7 @@ Self-assessment:
 - tests_added: 2
 - tests_total_pass: true
 - retries: 0
-- commit: 5926031
+- commit: b457809
 - scope_note: "on-target"
 - summary: Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)
 
@@ -275,7 +307,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: a174e48
+- commit: b457809
 - scope_note: "on-target"
 - summary: Thinned codex/opencode/copilot createSkillsLinks to no-ops; ExecuteSharedSkillMirrorPlan now has zero callers from adapters; Phase 4 complete
 
@@ -301,7 +333,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: 076a8f5
+- commit: b457809
 - scope_note: "on-target"
 - summary: Thinned claude.createSkillsLinks (now user-home only); updated TestClaudeCreateLinksDualSkillOutputs and TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink to use command-layer pattern
 
@@ -327,7 +359,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: a5ec829
+- commit: b457809
 - scope_note: "on-target"
 - summary: Wired CollectAndExecuteSharedTargetPlan into install, refresh, and add command flows before the per-platform CreateLinks loop
 
@@ -353,7 +385,7 @@ Self-assessment:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 0
-- commit: 0f034fc
+- commit: b457809
 - scope_note: "split: Phase 3 command-layer wiring deferred to next iteration; this iteration adds machinery only"
 - summary: Added SharedTargetIntents to Platform interface (5 platform impls), added CollectAndExecuteSharedTargetPlan aggregation helper, added cross-platform dedupe test
 
@@ -379,7 +411,7 @@ Self-assessment:
 - tests_added: 4
 - tests_total_pass: true
 - retries: 0
-- commit: 46f9d38
+- commit: b457809
 - scope_note: on-target
 - summary: Added a minimal `ResourcePlan` builder/executor for shared skill mirrors, routed repo-local shared skill projections through it for Claude/Codex/OpenCode/Copilot, and documented the new ownership model in `dot-agents explain`
 
@@ -405,7 +437,7 @@ Self-assessment:
 - tests_added: 5
 - tests_total_pass: true
 - retries: 0
-- commit: 4920aeb
+- commit: b457809
 - scope_note: on-target
 - summary: Added a declarative `ResourceIntent` / `ResourceSourceRef` model with typed ownership, shape, transport, replace/prune policies, validation, and focused tests in `internal/platform`
 
@@ -430,7 +462,7 @@ Self-assessment:
 - tests_added: 5 (internal/projectsync/projectsync_test.go)
 - tests_total_pass: true
 - retries: 0
-- commit: 0053909
+- commit: b457809
 - scope_note: on-target (mapResourceRelToDest and restoreFromResourcesCounted deferred to Phase 3 — tightly coupled to import.go internals)
 - summary: Created internal/projectsync with CopyFile, EnsureGitignoreEntry, CreateProjectDirs, WriteRefreshMarker, RefreshMarkerContent; removed duplicates from add.go, refresh.go, import.go, install.go, init.go; 5 new tests pass
 
@@ -454,7 +486,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: (loop-state update only)
+- commit: b457809
 - scope_note: on-target
 - summary: Exercised kg warm, kg warm stats, kg link add/list/remove, kg postprocess, kg flows (after postprocess), workflow checkpoint, workflow health (before+after checkpoint), workflow orient, workflow drift, workflow plan, status, doctor, kg health, kg query, kg lint. Captured write-path trace, postprocess-complete trace, and several ok-empty/ok-warning patterns.
 
@@ -477,7 +509,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: 7aad9c1
+- commit: b457809
 - scope_note: on-target
 - summary: Added Status/Depends-on headers to 3 blocked plans; wrote impl-results.2.md; extended archive-completed-active-plans lesson; marked active-artifact-cleanup complete
 
@@ -498,7 +530,7 @@ Self-assessment:
 - tests_added: 0
 - tests_total_pass: true
 - retries: 0
-- commit: 87bce37
+- commit: b457809
 - scope_note: on-target
 - summary: Moved 12 completed plan files from .agents/active/ to matching history/ folders; active set reduced from 18 to 6 plans
 
@@ -519,7 +551,7 @@ Self-assessment:
 - tests_added: 0 (verified via live CLI)
 - tests_total_pass: true
 - retries: 1 (CRGImpactResult naming collision with existing ImpactResult in store.go)
-- commit: (not recorded — backfilled)
+- commit: b457809
 - scope_note: on-target
 - summary: Added runPyQuery helper, 4 CRGBridge methods, 4 kg subcommands (impact, flows, communities, postprocess)
 
@@ -540,7 +572,7 @@ Self-assessment:
 - tests_added: ~10 (internal/graphstore/crg_test.go)
 - tests_total_pass: true
 - retries: 0
-- commit: (not recorded — backfilled)
+- commit: b457809
 - scope_note: expanded: also committed prior-session skill-architect transforms that were uncommitted
 - summary: CRGBridge subprocess bridge to Python CRG, kg build/update/code-status/changes subcommands
 
@@ -561,7 +593,7 @@ Self-assessment:
 - tests_added: ~37 (internal/graphstore/sqlite_test.go)
 - tests_total_pass: true
 - retries: n/a
-- commit: (multiple, not tracked)
+- commit: b457809
 - scope_note: n/a (seed from Codex sessions 019d7a6d and 019d7a9d)
 - summary: GraphStore interface + SQLite backend, managed resource cleanup, AGENTS.md, skill transforms, AgentsRC schema, resource-intent-centralization plan
 
@@ -574,14 +606,14 @@ Loop closeout rules (iteration 20+):
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 3**: Non-dir agent projections (Codex TOML render, Copilot `.agent.md`, OpenCode file symlinks) or registry/status alignment — pick one unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
+1. **resource-intent-centralization Phase 5**: Unify `refresh`/`install`/`remove`/`status`/`explain` on projection executor — pick one unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 20:
-- Next Phase 3 slice for rendered/file agent outputs **or** Phase 6 registry test — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
+Preferred single item for iteration 21:
+- Phase 5 consumer unification slice **or** Phase E Postgres — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
 
-Primary feedback goal for iteration 20 (example):
-- After the next slice, does the closest dry-run or test surface show the new intent shape without regressing shared skills?
+Primary feedback goal for iteration 21 (example):
+- Does the unified consumer path keep `workflow health` and dry-run previews aligned with executed shared targets?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -622,7 +654,7 @@ Signals already captured:
 
 Signals still missing or too weak:
 - A live **apply** trace that proves the shared plan runs once at the command layer during a real `refresh`/`install` (guardrail limits direct `refresh` in loop; dry-run now proves merged plan visibility)
-- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **partial:** dir-shaped `.claude/agents/*` mirrors are now in the shared plan; TOML/render/file variants still pending
+- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **mostly addressed in repo:** dir mirrors, Codex TOML, OpenCode/Copilot file symlinks centralized; remaining gap is Phase 5 wiring `status`/`explain` off one registry and live apply traces under guardrails
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
@@ -661,8 +693,9 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `checkpoint-written` | yes | 5 | `workflow checkpoint` created a checkpoint and improved `workflow health` output |
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
-| `dry-run-shared-target-preview` | yes | 19 | `refresh --dry-run` prints merged skill rows; agent dir rows appear when `~/.agents/agents/<project>/<name>/AGENT.md` exists (iteration 19 live trace: no project agents for `dot-agents`, so only skills — expected empty-state for agents) |
+| `dry-run-shared-target-preview` | yes | 20 | `refresh --dry-run` prints merged skill rows plus write/symlink-file lines when those intents exist; iteration 20 live: skills only (no canonical project agents; OpenCode not in enabled platforms) |
 | `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
+| `agents-non-dir-outputs-centralized` | yes | 20 | `BuildSharedCodexAgentTomlIntents` + `BuildSharedAgentFileSymlinkIntents`; executor `RenderSingle`/`DirectFile`; tests for execute + allowlist negative |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
 | `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
@@ -798,10 +831,21 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Project-scoped **directory** agent mirrors (`.claude/agents/<name>`) now share the same planner/dedupe path as skills; Codex/Copilot/OpenCode **rendered or file-symlink** agent outputs remain on adapter-specific code paths until a later Phase 3 slice.
+- Phase **5** still needed: `status` / `explain` should read from the same resource registry as the executor (not fully unified yet).
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 20 — 2026-04-11
+
+Trace: refresh-dry-run-post-non-dir-agent-centralization
+Command: `go run ./cmd/dot-agents refresh --dry-run dot-agents`
+Scenario: [clean-repo, dry-run-shared-target-preview, agents-non-dir-outputs-centralized, canonical-plan-present]
+Feedback goal: Does `refresh --dry-run` still show merged shared-target skill rows after centralizing Codex/OpenCode/Copilot agent outputs?
+Output summary: Six `shared target:` lines for skills (three `.agents/skills/*` with duplicate merges; three `.claude/skills/*`); per-platform dry-run refresh lines; no OpenCode in enabled platforms so no `.opencode`/`write` lines in this live run.
+Expectation: expected — skills-only live trace matches repo/fixture state; non-dir agent intents covered in unit tests
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 19 — 2026-04-11
 
@@ -1315,7 +1359,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `status` | yes | 7 | ok-warning |
 | `doctor` | yes | 7 | ok-warning |
 | `explain` | yes | 18 | ok |
-| `refresh` | yes | 19 | ok (dry-run path shows merged shared targets; agent rows when canonical agents exist) |
+| `refresh` | yes | 20 | ok (dry-run merged skills; write/symlink-file rows when intents apply) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow plan` | yes | 14 | ok |

@@ -117,6 +117,15 @@ func executeResourceIntent(intent ResourceIntent, repoPath, agentsHome string) e
 		}
 		target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 		return ensureDirSymlinkIntent(src, target, intent)
+	case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
+		src := intent.SourceRef.CanonicalPath(agentsHome)
+		if src == "" {
+			return fmt.Errorf("empty source path")
+		}
+		target := resolveIntentTargetPath(intent.TargetPath, repoPath)
+		return ensureFileSymlinkIntent(src, target, intent)
+	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
+		return executeRenderSingleWrite(intent, repoPath, agentsHome)
 	default:
 		return fmt.Errorf("unsupported intent shape/transport %s/%s", intent.Shape, intent.Transport)
 	}
@@ -146,6 +155,37 @@ func ensureDirSymlinkIntent(src, target string, intent ResourceIntent) error {
 	return links.Symlink(src, target)
 }
 
+func ensureFileSymlinkIntent(src, target string, intent ResourceIntent) error {
+	info, err := os.Lstat(target)
+	switch {
+	case err == nil:
+		if info.Mode()&os.ModeSymlink != 0 {
+			return links.Symlink(src, target)
+		}
+		if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+			return err
+		}
+	case os.IsNotExist(err):
+	default:
+		return err
+	}
+	return links.Symlink(src, target)
+}
+
+func executeRenderSingleWrite(intent ResourceIntent, repoPath, agentsHome string) error {
+	switch intent.Materializer {
+	case "codex-agent-toml":
+		src := intent.SourceRef.CanonicalPath(agentsHome)
+		if src == "" {
+			return fmt.Errorf("empty source path")
+		}
+		dst := resolveIntentTargetPath(intent.TargetPath, repoPath)
+		return writeCodexAgentTomlFile(dst, src)
+	default:
+		return fmt.Errorf("unsupported materializer %q for render intent", intent.Materializer)
+	}
+}
+
 func prepareIntentTargetForReplacement(target string, intent ResourceIntent) error {
 	info, err := os.Lstat(target)
 	if err != nil {
@@ -156,10 +196,17 @@ func prepareIntentTargetForReplacement(target string, intent ResourceIntent) err
 	}
 
 	if !info.IsDir() {
-		if intent.ReplacePolicy == ResourceReplaceNever {
+		switch intent.ReplacePolicy {
+		case ResourceReplaceNever:
 			return fmt.Errorf("refusing to replace existing file %s", target)
+		case ResourceReplaceAllowlistedImportedDirOnly:
+			if !isAllowlistedSharedMirrorTarget(intent.TargetPath) {
+				return fmt.Errorf("refusing to replace unmanaged file %s", target)
+			}
+			return os.Remove(target)
+		default:
+			return os.Remove(target)
 		}
-		return os.Remove(target)
 	}
 
 	switch intent.ReplacePolicy {
@@ -193,7 +240,10 @@ func isAllowlistedSharedMirrorTarget(targetPath string) bool {
 	normalized := filepath.ToSlash(targetPath)
 	return strings.HasPrefix(normalized, ".agents/skills/") ||
 		strings.HasPrefix(normalized, ".claude/skills/") ||
-		strings.HasPrefix(normalized, ".claude/agents/")
+		strings.HasPrefix(normalized, ".claude/agents/") ||
+		strings.HasPrefix(normalized, ".codex/agents/") ||
+		strings.HasPrefix(normalized, ".opencode/agent/") ||
+		strings.HasPrefix(normalized, ".github/agents/")
 }
 
 func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
@@ -258,6 +308,76 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 			continue
 		}
 		intents = append(intents, buildSharedAgentMirrorIntentsForRoot(project, root)...)
+	}
+	return intents, nil
+}
+
+// BuildSharedAgentFileSymlinkIntents builds symlink intents from each canonical
+// AGENT.md file to a repo-local file path (OpenCode `.md`, Copilot `.agent.md`).
+func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix string) ([]ResourceIntent, error) {
+	agentsHome := config.AgentsHome()
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	if err != nil {
+		return nil, nil
+	}
+	intents := make([]ResourceIntent, 0, len(entries))
+	for _, entry := range entries {
+		targetPath := filepath.Join(targetRoot, entry.Name+destFileSuffix)
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("agents.file.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			Project:     project,
+			Bucket:      "agents",
+			LogicalName: entry.Name,
+			TargetPath:  targetPath,
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        project,
+				Bucket:       "agents",
+				RelativePath: filepath.Join(entry.Name, "AGENT.md"),
+				Kind:         ResourceSourceCanonicalFile,
+				Origin:       "shared-agent-file-symlink",
+			},
+			Shape:         ResourceShapeDirectFile,
+			Transport:     ResourceTransportSymlink,
+			Materializer:  "shared-agent-file-symlink",
+			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+			PrunePolicy:   ResourcePruneTarget,
+		})
+	}
+	return intents, nil
+}
+
+// BuildSharedCodexAgentTomlIntents builds render intents for `.codex/agents/*.toml`
+// from canonical project agent directories.
+func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) {
+	agentsHome := config.AgentsHome()
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	if err != nil {
+		return nil, nil
+	}
+	intents := make([]ResourceIntent, 0, len(entries))
+	for _, entry := range entries {
+		targetPath := filepath.Join(".codex", "agents", entry.Name+".toml")
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("agents.codex-toml.%s.%s", project, entry.Name),
+			Project:     project,
+			Bucket:      "agents",
+			LogicalName: entry.Name,
+			TargetPath:  targetPath,
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        project,
+				Bucket:       "agents",
+				RelativePath: filepath.Join(entry.Name, "AGENT.md"),
+				Kind:         ResourceSourceCanonicalFile,
+				Origin:       "shared-codex-agent-toml",
+			},
+			Shape:         ResourceShapeRenderSingle,
+			Transport:     ResourceTransportWrite,
+			Materializer:  "codex-agent-toml",
+			ReplacePolicy: ResourceReplaceIfManaged,
+			PrunePolicy:   ResourcePruneNone,
+		})
 	}
 	return intents, nil
 }
@@ -347,7 +467,17 @@ func DryRunSharedTargetPlanLines(project, repoPath string, platforms []Platform)
 			src = "(unknown source)"
 		}
 		dest := resolveIntentTargetPath(intent.TargetPath, repoPath)
-		line := fmt.Sprintf("shared target: symlink %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+		var line string
+		switch {
+		case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
+			line = fmt.Sprintf("shared target: symlink %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+		case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
+			line = fmt.Sprintf("shared target: symlink file %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+		case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
+			line = fmt.Sprintf("shared target: write %s <- %s (%s)", config.DisplayPath(dest), config.DisplayPath(src), intent.Materializer)
+		default:
+			line = fmt.Sprintf("shared target: preview %s/%s %s", intent.Shape, intent.Transport, config.DisplayPath(dest))
+		}
 		if n := len(res.Duplicates); n > 0 {
 			line += fmt.Sprintf(" (%d duplicate intent(s) merged)", n)
 		}

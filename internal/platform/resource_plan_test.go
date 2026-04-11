@@ -205,6 +205,118 @@ func TestCollectAndExecuteSharedTargetPlanDedupesClaudeCursorAgents(t *testing.T
 	}
 }
 
+func TestCollectAndExecuteSharedTargetPlanWritesOpenCodeAndCopilotAgentFiles(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentMD := filepath.Join(agentDir, "AGENT.md")
+	if err := os.WriteFile(agentMD, []byte("# Reviewer\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewOpenCode(), NewCopilot()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+
+	opencodeLink := filepath.Join(repo, ".opencode", "agent", "reviewer.md")
+	copilotLink := filepath.Join(repo, ".github", "agents", "reviewer.agent.md")
+	assertSymlinkTarget(t, opencodeLink, agentMD)
+	assertSymlinkTarget(t, copilotLink, agentMD)
+}
+
+func TestCollectAndExecuteSharedTargetPlanWritesCodexAgentToml(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "implementer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `---
+name: implementer
+description: does work
+---
+
+# Body
+Ship it.
+`
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewCodex()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+
+	tomlPath := filepath.Join(repo, ".codex", "agents", "implementer.toml")
+	b, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("read toml: %v", err)
+	}
+	if !strings.Contains(string(b), `name = "implementer"`) || !strings.Contains(string(b), "Ship it.") {
+		t.Fatalf("unexpected toml: %s", b)
+	}
+}
+
+func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentMD := filepath.Join(agentDir, "AGENT.md")
+	if err := os.WriteFile(agentMD, []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(repo, "blocked", "x.md")
+	if err := os.MkdirAll(filepath.Dir(blocker), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blocker, []byte("user"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:    "agents.file.proj.x.test",
+		Project:     "proj",
+		Bucket:      "agents",
+		LogicalName: "x",
+		TargetPath:  "blocked/x.md",
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:         ResourceShapeDirectFile,
+		Transport:     ResourceTransportSymlink,
+		Materializer:  "shared-agent-file-symlink",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Fatal("expected error replacing unmanaged file outside allowlist")
+	}
+}
+
 func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

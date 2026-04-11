@@ -152,30 +152,7 @@ func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
 }
 
 func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, copilotGitHubDir, "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if !links.IsDirEntry(agentDir) {
-			continue
-		}
-		agentMD := filepath.Join(agentDir, "AGENT.md")
-		if _, err := os.Stat(agentMD); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name()+".agent.md")
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentMD, target)
-	}
+	// `.github/agents/*.agent.md` — symlinked from canonical AGENT.md by CollectAndExecuteSharedTargetPlan
 	return nil
 }
 
@@ -347,5 +324,13 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) {
 }
 
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	return BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	if err != nil {
+		return nil, err
+	}
+	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(copilotGitHubDir, "agents"), ".agent.md")
+	if err != nil {
+		return nil, err
+	}
+	return append(skills, agents...), nil
 }
