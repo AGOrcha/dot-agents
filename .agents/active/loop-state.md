@@ -17,26 +17,62 @@ Active wave summary (from `.agents/active/*.plan.md`):
 
 Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed" in their status header but still have unchecked `- [ ]` items. The status header is authoritative — unchecked boxes on completed plans are stale plan hygiene, not real work.
 
-## Last Completed
+## Iteration Log
 
-**Iteration 2 — 2026-04-11**
-Wave: `crg-kg-integration` Phase C
-- Extended `internal/graphstore/crg.go` with `runPyQuery()` helper (executes Python via .venv interpreter, returns JSON).
-- Added `GetImpactRadius()`, `ListFlows()`, `ListCommunities()`, `Postprocess()` methods to CRGBridge.
-- Added `dot-agents kg impact`, `kg flows`, `kg communities`, `kg postprocess` subcommands.
-- Fixed `CRGImpactResult` naming collision with existing `ImpactResult` in `store.go`.
-- All tests pass. Commands verified live: `kg impact commands/kg.go` shows 112 changed nodes + 2 impacted files; `kg communities --min-size 5` shows 41 communities; `kg flows` shows 0 (flows need postprocess first).
+### Iteration 2 — 2026-04-11
+- wave: crg-kg-integration
+- item: Phase C — CRG advanced query bridge (impact, flows, communities, postprocess)
+- files_changed: 3
+- lines_added: ~350
+- lines_removed: ~10
+- tests_added: 0 (verified via live CLI)
+- tests_total_pass: true
+- retries: 1 (CRGImpactResult naming collision with existing ImpactResult in store.go)
+- commit: (not recorded — backfilled)
+- scope_note: on-target
+- summary: Added runPyQuery helper, 4 CRGBridge methods, 4 kg subcommands (impact, flows, communities, postprocess)
 
-**Iteration 1 — 2026-04-11**
-Wave: `crg-kg-integration` Phase B
-- Committed skill-architect transforms (delegation-lifecycle, plan-wave-picker, provider-consumer-pair) that were left uncommitted from prior session.
-- Implemented `internal/graphstore/crg.go`: CRGBridge type that delegates build/update/status/change-detection to the Python code-review-graph CLI installed in `.venv`. Avoids a full Go tree-sitter port (~3000 lines) by using subprocess bridge.
-- Added `dot-agents kg build`, `kg update`, `kg code-status`, `kg changes` subcommands to `commands/kg.go`.
-- Wrote unit tests in `internal/graphstore/crg_test.go`.
-- All tests pass (`go test ./...`). CLI commands verified live against this repo.
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
-(Prior seed from manual Codex sessions `019d7a6d` and `019d7a9d`):
-- Managed resource cleanup, AGENTS.md, skill transforms, AgentsRC schema, resource-intent-centralization plan.
+### Iteration 1 — 2026-04-11
+- wave: crg-kg-integration
+- item: Phase B — CRG subprocess bridge and basic code-graph CLI commands
+- files_changed: 6
+- lines_added: ~500
+- lines_removed: ~5
+- tests_added: ~10 (internal/graphstore/crg_test.go)
+- tests_total_pass: true
+- retries: 0
+- commit: (not recorded — backfilled)
+- scope_note: expanded: also committed prior-session skill-architect transforms that were uncommitted
+- summary: CRGBridge subprocess bridge to Python CRG, kg build/update/code-status/changes subcommands
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: no (also committed prior-session leftovers)
+- committed_after_tests: yes
+- ran_cli_command: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
+### Iteration 0 — 2026-04-11 (seed)
+- wave: n/a (manual sessions)
+- item: n/a
+- files_changed: ~30
+- lines_added: ~2000
+- lines_removed: ~200
+- tests_added: ~37 (internal/graphstore/sqlite_test.go)
+- tests_total_pass: true
+- retries: n/a
+- commit: (multiple, not tracked)
+- scope_note: n/a (seed from Codex sessions 019d7a6d and 019d7a9d)
+- summary: GraphStore interface + SQLite backend, managed resource cleanup, AGENTS.md, skill transforms, AgentsRC schema, resource-intent-centralization plan
 
 ## What's Next
 
@@ -106,6 +142,64 @@ $ go run ./cmd/dot-agents kg changes
 Change Impact — structured output with changed symbols, test gaps, review priorities
 ```
 Classification: [ok]
+
+## Command Coverage
+
+| Command | Tested | Last Iteration | Status |
+|---|---|---|---|
+| `status` | no | - | - |
+| `doctor` | no | - | - |
+| `workflow status` | no | - | - |
+| `workflow orient` | no | - | - |
+| `workflow checkpoint` | no | - | - |
+| `workflow log` | no | - | - |
+| `workflow plan` | no | - | - |
+| `workflow tasks` | no | - | - |
+| `workflow advance` | no | - | - |
+| `workflow health` | no | - | - |
+| `workflow verify` | no | - | - |
+| `workflow prefs` | no | - | - |
+| `workflow graph` | no | - | - |
+| `workflow fanout` | no | - | - |
+| `workflow merge-back` | no | - | - |
+| `workflow drift` | no | - | - |
+| `workflow sweep` | no | - | - |
+| `kg setup` | no | - | - |
+| `kg health` | no | - | - |
+| `kg ingest` | no | - | - |
+| `kg queue` | no | - | - |
+| `kg query` | no | - | - |
+| `kg lint` | no | - | - |
+| `kg maintain` | no | - | - |
+| `kg bridge` | no | - | - |
+| `kg sync` | no | - | - |
+| `kg warm` | no | - | - |
+| `kg warm stats` | no | - | - |
+| `kg link add` | no | - | - |
+| `kg link list` | no | - | - |
+| `kg link remove` | no | - | - |
+| `kg build` | no | - | - |
+| `kg update` | no | - | - |
+| `kg code-status` | yes | 1 | ok |
+| `kg changes` | yes | 1 | ok |
+| `kg changes --brief` | yes | 1 | ok |
+| `kg impact` | yes | 2 | ok |
+| `kg communities` | yes | 2 | ok |
+| `kg flows` | yes | 2 | ok |
+| `kg postprocess` | no | - | - |
+
+## Error Log
+
+(No errors recorded yet)
+
+<!--
+Format:
+### Iteration N
+- type: test-failure | compile-error | cli-error
+- detail: <what failed>
+- resolution: <what fixed it>
+- retries: N
+-->
 
 ## CLI Observations
 
