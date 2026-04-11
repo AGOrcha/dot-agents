@@ -357,11 +357,20 @@ Status: Next wave
 
 The knowledge-graph and ingestion layer should remain its own product, but `dot-agents` should be integration-ready so agents can query external graph-backed context through deterministic workflow-aware interfaces instead of rediscovering conventions in prompts.
 
+With the code-review-graph port into the KG subsystem, the bridge must serve two distinct query families:
+
+1. **Knowledge queries** — decisions, concepts, entities, synthesis (from curated notes)
+2. **Code structure queries** — symbols, call edges, impact radius, change detection (from parsed AST)
+
+These must resolve through the same deterministic contract so agents do not need to know which subsystem stores the answer.
+
 ### Goals
 
 - Make `dot-agents` a stable bridge to external knowledge systems used by agents.
 - Normalize query intents and response shapes for workflow-related graph access.
 - Keep graph ingestion, indexing, and storage outside the `dot-agents` product boundary.
+- Support code-structure queries alongside knowledge-note queries through the same bridge contract.
+- Enable skills to consume graph data without coupling to storage internals.
 
 ### Resolved Decisions
 
@@ -370,10 +379,13 @@ The knowledge-graph and ingestion layer should remain its own product, but `dot-
 - Query semantics should be canonical and transport-neutral.
 - Provider-specific graph adapters may vary, but the query intents and normalized outputs should not.
 - DKG-style shared memory and verification protocols belong to the knowledge-graph layer, not the `dot-agents` core workflow layer.
+- Code-structure graph is ported from `code-review-graph` Python into Go and shares the `GraphStore` backend.
 
 ### Bridge Scope
 
-The initial bridge should support deterministic query intents such as:
+The bridge should support deterministic query intents across both subsystems:
+
+#### Knowledge note intents
 
 - `plan_context`
   - get supporting decisions, specs, and lessons for a plan or task
@@ -385,6 +397,28 @@ The initial bridge should support deterministic query intents such as:
   - retrieve prior handoffs, learnings, or linked artifacts relevant to current work
 - `contradictions`
   - surface conflicting or stale knowledge relevant to the active workflow state
+
+#### Code structure intents
+
+- `symbol_lookup`
+  - find a function, class, or type by name or qualified path
+- `impact_radius`
+  - given a symbol, find everything affected by a change to it
+- `change_analysis`
+  - git diff intersected with the graph: risk scores, test gaps, blast radius
+- `callers_of` / `callees_of`
+  - trace call edges in either direction
+- `tests_for`
+  - find tests covering a given symbol
+- `community_context`
+  - get the code community a symbol belongs to and its neighbors
+
+#### Cross-reference intents
+
+- `symbol_decisions`
+  - given a symbol, find knowledge notes linked to it (why does this code exist?)
+- `decision_symbols`
+  - given a decision note, find the code symbols that implement it
 
 ### Canonical Artifacts
 
@@ -410,6 +444,33 @@ Every graph bridge query should resolve to a normalized shape with:
 
 The point is not to hide provider differences completely. The point is to ensure the agent always has one deterministic contract to ask through.
 
+For code structure results, each result item includes:
+
+- `qualified_name` — the fully qualified symbol path
+- `kind` — File, Class, Function, Type, Test
+- `file_path` and `line_start` / `line_end`
+- `risk_score` — when available from change detection
+- `test_coverage` — known, unknown, or missing
+
+For knowledge note results, each result item includes:
+
+- `id`, `type`, `title`, `summary`, `status`, `confidence`
+- `source_refs` and `links`
+
+### Skill Integration Points
+
+Skills are the primary consumers of bridge queries. The bridge enables skills to use graph data without calling MCP tools directly:
+
+| Skill | Bridge intents used |
+|-------|-------------------|
+| `build-graph` | `symbol_lookup` (verify), `community_context` (report) |
+| `review-delta` | `change_analysis`, `impact_radius`, `tests_for`, `symbol_decisions` |
+| `review-pr` | `change_analysis`, `impact_radius`, `tests_for`, `callers_of`, `symbol_decisions` |
+| `self-review` | `change_analysis` (risk awareness), `tests_for` (coverage check) |
+| `agent-start` | `community_context` (orient), `decision_lookup` (context) |
+| `split-reviewable-commits` | `community_context` (semantic commit boundaries) |
+| `gh-fix-ci` | `change_analysis` (scope investigation to changed symbols) |
+
 ### CLI Surface
 
 These are likely escape-hatch commands for the first bridge:
@@ -417,9 +478,16 @@ These are likely escape-hatch commands for the first bridge:
 - `dot-agents workflow graph query --intent ...`
 - `dot-agents workflow graph health`
 
+These map to `dot-agents kg` commands for direct access:
+
+- `dot-agents kg search <query>` — FTS across notes and symbols
+- `dot-agents kg changes [--base <ref>]` — change detection
+- `dot-agents kg impact <symbol>` — impact radius
+- `dot-agents kg bridge query --intent <intent> <query>` — unified bridge query
+
 ### Acceptance Standard
 
-This wave is complete when an agent can obtain graph-backed workflow context through one deterministic query contract without needing repo-specific prompt conventions.
+This wave is complete when an agent can obtain graph-backed workflow context — both knowledge notes and code structure — through one deterministic query contract without needing repo-specific prompt conventions.
 
 ## Wave 6: Delegation And Merge-Back
 
