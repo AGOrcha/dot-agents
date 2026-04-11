@@ -1,5 +1,10 @@
 # Skill Import Streamline Plan
 
+Status: Blocked — all items pending; blocked on resource-intent-centralization (shared skill mirror convergence requires centralized resource executor).
+Depends on: resource-intent-centralization
+
+
+
 ## Problems Observed
 
 - `.agentsrc.json` lost non-struct fields such as the legacy `refresh` block when rewritten by command paths that use `AgentsRC.Save()`.
