@@ -10,14 +10,37 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active wave summary (from `.agents/active/*.plan.md`):
-- **crg-kg-integration**: Phases A + B + C + D all complete. Remaining phases (E Postgres, F Go MCP, G skill integration) are lower priority and not yet started.
-- **kg-phase-6-shared-memory-research**: research steps complete, optional prototype remaining — next candidate
-- **wave-7-cross-repo-sweep-drift**: status says Completed but has unchecked items — verify before picking
-- **resource-intent-centralization**: plan written, architectural — skip
+- **active-artifact-cleanup**: In progress — "Normalize stale plan state + add lesson" items remain
+- **crg-kg-integration**: Phases A-D complete. E/F/G (Postgres, Go MCP, skill integration) deferred
+- **platform-dir-unification**: Mixed status (2 completed, 1 in-progress, 2 not started) — blocked on resource-intent-centralization
+- **refresh-skill-relink**: Blocked on resource-intent-centralization
+- **skill-import-streamline**: Blocked on resource-intent-centralization
+- **resource-intent-centralization**: Architectural RFC needed — skip
 
 Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed" in their status header but still have unchecked `- [ ]` items. The status header is authoritative — unchecked boxes on completed plans are stale plan hygiene, not real work.
 
 ## Iteration Log
+
+### Iteration 3 — 2026-04-11 18:00
+- wave: active-artifact-cleanup
+- item: Archive completed plan files out of `.agents/active/` when the task is done or already has matching history coverage
+- files_changed: 12
+- lines_added: 0
+- lines_removed: 11
+- tests_added: 0
+- tests_total_pass: true
+- retries: 0
+- commit: 87bce37
+- scope_note: on-target
+- summary: Moved 12 completed plan files from .agents/active/ to matching history/ folders; active set reduced from 18 to 6 plans
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- stayed_under_10_files: no (12 files — all plan renames, no code changes; scope is correct)
+- no_destructive_commands: yes
 
 ### Iteration 2 — 2026-04-11
 - wave: crg-kg-integration
@@ -76,8 +99,8 @@ Self-assessment:
 
 ## What's Next
 
-- `kg-phase-6-shared-memory-research` — check unchecked items, implement any remaining prototype steps.
-- `wave-7-cross-repo-sweep-drift` — verify whether unchecked items are truly stale or real work.
+- `active-artifact-cleanup` — "Normalize stale plan state" and "Add lesson for keeping .agents/active/ focused" are the two remaining items
+- After cleanup complete: all remaining active plans are either architectural (skip) or deferred (crg-kg phases E/F/G). May be at a natural stopping point for this loop.
 
 ## Skip List
 
@@ -86,17 +109,10 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `refresh-skill-relink` — blocked on resource-intent-centralization
 - `skill-import-streamline` — blocked on resource-intent-centralization
 - `platform-dir-unification` — blocked on resource-intent-centralization
-- `agentsrc-local-schema` — completed
-- `workflow-automation-product-spec-review` — review artifact, not implementation
-- `wave-6-delegation-merge-back` — all items checked, completed
-- `kg-phase-1-graph-core` — status: Completed
-- `kg-phase-2-basic-ingest` — status: Completed
-- `kg-phase-3-deterministic-query` — status: Completed
-- `kg-phase-4-lint-maintenance` — status: Completed
-- `kg-phase-5-bridge-readiness` — status: Completed
-- `wave-3-structured-query-health-surface` — status: Completed
-- `wave-4-shared-preferences` — status: Completed
-- `wave-5-knowledge-graph-bridge` — status: Completed
+- `crg-kg-integration` phases E/F/G — deferred, lower priority than other work
+
+(Completed plans archived to .agents/history/ on 2026-04-11:)
+- kg-phase-1 through kg-phase-6, wave-3 through wave-7, workflow-automation-product-spec-review, agentsrc-local-schema, resource-sync-architecture-analysis
 
 ## Blockers
 
