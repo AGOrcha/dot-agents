@@ -2621,6 +2621,157 @@ func runKGCodeStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+func runKGImpact(cmd *cobra.Command, args []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	base, _ := cmd.Flags().GetString("base")
+	maxDepth, _ := cmd.Flags().GetInt("depth")
+	maxResults, _ := cmd.Flags().GetInt("limit")
+
+	var files []string
+	if len(args) > 0 {
+		files = args
+	}
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	result, err := bridge.GetImpactRadius(graphstore.ImpactOptions{
+		ChangedFiles: files,
+		MaxDepth:     maxDepth,
+		MaxResults:   maxResults,
+		Base:         base,
+	})
+	if err != nil {
+		return err
+	}
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header("Impact Radius")
+	ui.Info(result.Summary)
+	if len(result.ChangedNodes) > 0 {
+		ui.Section("Changed nodes")
+		for _, n := range result.ChangedNodes {
+			if n.Kind == "File" {
+				continue // file-level nodes are noisy
+			}
+			ui.Bullet("warn", fmt.Sprintf("[%s] %s", n.Kind, n.Name))
+		}
+	}
+	if len(result.ImpactedNodes) > 0 {
+		ui.Section("Impacted nodes")
+		for _, n := range result.ImpactedNodes {
+			if n.Kind == "File" {
+				continue
+			}
+			ui.Bullet("found", fmt.Sprintf("[%s] %s", n.Kind, n.Name))
+		}
+	}
+	if len(result.ImpactedFiles) > 0 {
+		ui.Section("Impacted files")
+		for _, f := range result.ImpactedFiles {
+			ui.Bullet("found", f)
+		}
+	}
+	if result.Truncated {
+		ui.Info(fmt.Sprintf("  (results truncated — %d total impacted)", result.TotalImpacted))
+	}
+	return nil
+}
+
+func runKGFlows(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	limit, _ := cmd.Flags().GetInt("limit")
+	sortBy, _ := cmd.Flags().GetString("sort")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	result, err := bridge.ListFlows(limit, sortBy)
+	if err != nil {
+		return err
+	}
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header(fmt.Sprintf("Execution Flows  [%s]", result.Summary))
+	if len(result.Flows) == 0 {
+		ui.Info("No flows detected. Run 'dot-agents kg postprocess' to detect flows.")
+		return nil
+	}
+	for _, f := range result.Flows {
+		ui.Bullet("found", fmt.Sprintf("[%s] %s (steps=%d, criticality=%.2f)", f.Kind, f.Name, f.StepCount, f.Criticality))
+		if f.EntryPoint != "" {
+			ui.Info(fmt.Sprintf("        entry: %s", f.EntryPoint))
+		}
+	}
+	return nil
+}
+
+func runKGCommunities(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	minSize, _ := cmd.Flags().GetInt("min-size")
+	sortBy, _ := cmd.Flags().GetString("sort")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	result, err := bridge.ListCommunities(minSize, sortBy)
+	if err != nil {
+		return err
+	}
+	if Flags.JSON {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+	ui.Header(fmt.Sprintf("Code Communities  [%s]", result.Summary))
+	for _, c := range result.Communities {
+		ui.Bullet("found", fmt.Sprintf("[%s] %s (size=%d, cohesion=%.2f)", c.DominantLanguage, c.Name, c.Size, c.Cohesion))
+		if c.Description != "" {
+			ui.Info(fmt.Sprintf("        %s", c.Description))
+		}
+	}
+	return nil
+}
+
+func runKGPostprocess(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("repo")
+	if root == "" {
+		root = crgRepoRoot()
+	}
+	noFlows, _ := cmd.Flags().GetBool("no-flows")
+	noCommunities, _ := cmd.Flags().GetBool("no-communities")
+	noFTS, _ := cmd.Flags().GetBool("no-fts")
+
+	bridge, err := graphstore.NewCRGBridge(root)
+	if err != nil {
+		return err
+	}
+	ui.Info(fmt.Sprintf("Running post-processing on %s ...", root))
+	return bridge.Postprocess(graphstore.PostprocessOptions{
+		NoFlows:       noFlows,
+		NoCommunities: noCommunities,
+		NoFTS:         noFTS,
+	})
+}
+
 func runKGChanges(cmd *cobra.Command, _ []string) error {
 	root, _ := cmd.Flags().GetString("repo")
 	if root == "" {
@@ -3102,10 +3253,50 @@ func NewKGCmd() *cobra.Command {
 	kgChangesCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
 	kgChangesCmd.Flags().Bool("brief", false, "Show brief summary only")
 
+	// Phase C: impact, flows, communities, postprocess
+	kgImpactCmd := &cobra.Command{
+		Use:   "impact [file...]",
+		Short: "Show blast radius for given files (or current diff)",
+		RunE:  runKGImpact,
+	}
+	kgImpactCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgImpactCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgImpactCmd.Flags().Int("depth", 2, "Max hop depth for impact traversal")
+	kgImpactCmd.Flags().Int("limit", 50, "Max impacted nodes to return")
+
+	kgFlowsCmd := &cobra.Command{
+		Use:   "flows",
+		Short: "List detected execution flows",
+		RunE:  runKGFlows,
+	}
+	kgFlowsCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgFlowsCmd.Flags().Int("limit", 20, "Max flows to show")
+	kgFlowsCmd.Flags().String("sort", "criticality", "Sort by: criticality|size")
+
+	kgCommunitiesCmd := &cobra.Command{
+		Use:   "communities",
+		Short: "List detected code communities",
+		RunE:  runKGCommunities,
+	}
+	kgCommunitiesCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgCommunitiesCmd.Flags().Int("min-size", 0, "Only show communities with at least this many members")
+	kgCommunitiesCmd.Flags().String("sort", "size", "Sort by: size|cohesion")
+
+	kgPostprocessCmd := &cobra.Command{
+		Use:   "postprocess",
+		Short: "Rebuild flows, communities, and FTS index",
+		RunE:  runKGPostprocess,
+	}
+	kgPostprocessCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgPostprocessCmd.Flags().Bool("no-flows", false, "Skip flow detection")
+	kgPostprocessCmd.Flags().Bool("no-communities", false, "Skip community detection")
+	kgPostprocessCmd.Flags().Bool("no-fts", false, "Skip FTS rebuild")
+
 	kgCmd.AddCommand(
 		kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd,
 		kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd,
 		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgChangesCmd,
+		kgImpactCmd, kgFlowsCmd, kgCommunitiesCmd, kgPostprocessCmd,
 	)
 	return kgCmd
 }

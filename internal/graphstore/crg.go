@@ -91,6 +91,52 @@ func (b *CRGBridge) run(args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// pythonBin returns the path to the Python interpreter in the same .venv as
+// the CRG binary.
+func (b *CRGBridge) pythonBin() string {
+	// b.Bin is e.g. /path/to/.venv/bin/code-review-graph
+	// Python is in the same bin/ directory.
+	binDir := filepath.Dir(b.Bin)
+	candidates := []string{
+		filepath.Join(binDir, "python3"),
+		filepath.Join(binDir, "python"),
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return "python3"
+}
+
+// runPyQuery executes a Python expression via the venv interpreter and returns
+// the JSON output. The expression must print exactly one JSON document to stdout.
+// The expression receives a pre-imported `repo_root` variable set to b.RepoRoot.
+func (b *CRGBridge) runPyQuery(pyExpr string) ([]byte, error) {
+	// Wrap in a small script: set repo_root, exec the expression, print result.
+	script := fmt.Sprintf(`
+import json, sys
+sys.path.insert(0, %q)
+repo_root = %q
+%s
+`, b.RepoRoot, b.RepoRoot, pyExpr)
+
+	py := b.pythonBin()
+	cmd := exec.Command(py, "-c", script)
+	cmd.Dir = b.RepoRoot
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("crg-py: %s", msg)
+	}
+	return stdout.Bytes(), nil
+}
+
 // runStreamed executes the command with stdout/stderr forwarded directly to the
 // caller's stdout/stderr — suitable for long-running commands like build.
 func (b *CRGBridge) runStreamed(args ...string) error {
@@ -251,6 +297,201 @@ type CRGPriority struct {
 type DetectChangesOptions struct {
 	Base  string
 	Brief bool
+}
+
+// ── Impact radius ─────────────────────────────────────────────────────────────
+
+// ImpactOptions configures a blast-radius query.
+type ImpactOptions struct {
+	// ChangedFiles is the list of repo-relative or absolute file paths to analyze.
+	// If empty, the current git diff (HEAD~1) is used.
+	ChangedFiles []string
+	MaxDepth     int
+	MaxResults   int
+	Base         string
+}
+
+// CRGImpactResult is the structured output of an impact-radius query via CRG.
+type CRGImpactResult struct {
+	Status        string       `json:"status"`
+	Summary       string       `json:"summary"`
+	ChangedFiles  []string     `json:"changed_files"`
+	ChangedNodes  []ImpactNode `json:"changed_nodes"`
+	ImpactedNodes []ImpactNode `json:"impacted_nodes"`
+	ImpactedFiles []string     `json:"impacted_files"`
+	Truncated     bool         `json:"truncated"`
+	TotalImpacted int          `json:"total_impacted"`
+}
+
+// ImpactNode is one node in an impact result.
+type ImpactNode struct {
+	ID            int64  `json:"id"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	QualifiedName string `json:"qualified_name"`
+	FilePath      string `json:"file_path"`
+	LineStart     int    `json:"line_start"`
+	LineEnd       int    `json:"line_end"`
+	Language      string `json:"language"`
+	IsTest        bool   `json:"is_test"`
+}
+
+// GetImpactRadius returns the blast-radius for the given files (or current diff).
+func (b *CRGBridge) GetImpactRadius(opts ImpactOptions) (*CRGImpactResult, error) {
+	maxDepth := opts.MaxDepth
+	if maxDepth == 0 {
+		maxDepth = 2
+	}
+	maxResults := opts.MaxResults
+	if maxResults == 0 {
+		maxResults = 50
+	}
+
+	filesJSON := "None"
+	if len(opts.ChangedFiles) > 0 {
+		parts := make([]string, len(opts.ChangedFiles))
+		for i, f := range opts.ChangedFiles {
+			parts[i] = fmt.Sprintf("%q", f)
+		}
+		filesJSON = "[" + strings.Join(parts, ", ") + "]"
+	}
+
+	base := opts.Base
+	if base == "" {
+		base = "HEAD~1"
+	}
+
+	pyExpr := fmt.Sprintf(`
+from code_review_graph.tools.query import get_impact_radius
+result = get_impact_radius(
+    changed_files=%s,
+    max_depth=%d,
+    max_results=%d,
+    repo_root=repo_root,
+    base=%q,
+)
+print(json.dumps(result))
+`, filesJSON, maxDepth, maxResults, base)
+
+	out, err := b.runPyQuery(pyExpr)
+	if err != nil {
+		return nil, err
+	}
+	var result CRGImpactResult
+	if err := json.Unmarshal(bytes.TrimSpace(out), &result); err != nil {
+		return nil, fmt.Errorf("parse impact result: %w", err)
+	}
+	return &result, nil
+}
+
+// ── Flows ─────────────────────────────────────────────────────────────────────
+
+// FlowsResult is the output of list_flows.
+type FlowsResult struct {
+	Status  string     `json:"status"`
+	Summary string     `json:"summary"`
+	Flows   []FlowInfo `json:"flows"`
+}
+
+// FlowInfo is one execution flow entry.
+type FlowInfo struct {
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	EntryPoint  string  `json:"entry_point"`
+	StepCount   int     `json:"step_count"`
+	Criticality float64 `json:"criticality"`
+	Kind        string  `json:"kind"`
+}
+
+// ListFlows returns the top execution flows detected in the graph.
+func (b *CRGBridge) ListFlows(limit int, sortBy string) (*FlowsResult, error) {
+	if limit == 0 {
+		limit = 20
+	}
+	if sortBy == "" {
+		sortBy = "criticality"
+	}
+	pyExpr := fmt.Sprintf(`
+from code_review_graph.tools.flows_tools import list_flows
+result = list_flows(repo_root=repo_root, sort_by=%q, limit=%d)
+print(json.dumps(result))
+`, sortBy, limit)
+
+	out, err := b.runPyQuery(pyExpr)
+	if err != nil {
+		return nil, err
+	}
+	var result FlowsResult
+	if err := json.Unmarshal(bytes.TrimSpace(out), &result); err != nil {
+		return nil, fmt.Errorf("parse flows result: %w", err)
+	}
+	return &result, nil
+}
+
+// ── Communities ───────────────────────────────────────────────────────────────
+
+// CommunitiesResult is the output of list_communities.
+type CommunitiesResult struct {
+	Status      string          `json:"status"`
+	Summary     string          `json:"summary"`
+	Communities []CommunityInfo `json:"communities"`
+}
+
+// CommunityInfo is one code community.
+type CommunityInfo struct {
+	ID               int64    `json:"id"`
+	Name             string   `json:"name"`
+	Size             int      `json:"size"`
+	Cohesion         float64  `json:"cohesion"`
+	DominantLanguage string   `json:"dominant_language"`
+	Description      string   `json:"description"`
+	Members          []string `json:"members"`
+}
+
+// ListCommunities returns detected code communities.
+func (b *CRGBridge) ListCommunities(minSize int, sortBy string) (*CommunitiesResult, error) {
+	if sortBy == "" {
+		sortBy = "size"
+	}
+	pyExpr := fmt.Sprintf(`
+from code_review_graph.tools.community_tools import list_communities_func
+result = list_communities_func(repo_root=repo_root, sort_by=%q, min_size=%d)
+print(json.dumps(result))
+`, sortBy, minSize)
+
+	out, err := b.runPyQuery(pyExpr)
+	if err != nil {
+		return nil, err
+	}
+	var result CommunitiesResult
+	if err := json.Unmarshal(bytes.TrimSpace(out), &result); err != nil {
+		return nil, fmt.Errorf("parse communities result: %w", err)
+	}
+	return &result, nil
+}
+
+// ── Postprocess ───────────────────────────────────────────────────────────────
+
+// PostprocessOptions controls which post-processing steps to run.
+type PostprocessOptions struct {
+	NoFlows       bool
+	NoCommunities bool
+	NoFTS         bool
+}
+
+// Postprocess runs flows/communities/FTS rebuilding via `code-review-graph postprocess`.
+func (b *CRGBridge) Postprocess(opts PostprocessOptions) error {
+	args := []string{"postprocess", "--repo", b.RepoRoot}
+	if opts.NoFlows {
+		args = append(args, "--no-flows")
+	}
+	if opts.NoCommunities {
+		args = append(args, "--no-communities")
+	}
+	if opts.NoFTS {
+		args = append(args, "--no-fts")
+	}
+	return b.runStreamed(args...)
 }
 
 // DetectChanges returns the change-impact report for the current diff.
