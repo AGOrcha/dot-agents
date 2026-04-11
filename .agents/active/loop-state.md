@@ -80,7 +80,7 @@ Dogfood implications:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 0
-- commit: 1e1a29c
+- commit: c8834ae
 - scope_note: "on-target"
 - summary: Added promote-path regression test preserving legacy `refresh` + custom extra fields and git+local sources; advanced canonical tasks `add-regression-tests` and `install-generate-merge` to completed; PLAN.yaml + markdown plan marked completed for skill-import-streamline.
 
@@ -96,32 +96,6 @@ Self-assessment:
 - ran_cli_command: yes
 - exercised_new_scenario: yes (promote-preserves-extra-manifest)
 - cli_produced_actionable_feedback: yes (workflow tasks shows add-regression-tests completed)
-- linked_traces_to_outcomes: yes
-- stayed_under_10_files: yes
-- no_destructive_commands: yes
-
-### Iteration 13 — 2026-04-11 15:00
-- wave: skill-import-streamline
-- item: Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)
-- scenario_tags: [clean-repo, sweep-dry-run, manifest-roundtrip-fixed]
-- feedback_goal: Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?
-- files_changed: 2
-- lines_added: 178
-- lines_removed: 0
-- tests_added: 2
-- tests_total_pass: true
-- retries: 0
-- commit: 5926031
-- scope_note: "on-target"
-- summary: Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)
-
-Self-assessment:
-- read_loop_state: yes
-- one_item_only: yes
-- committed_after_tests: yes
-- ran_cli_command: yes
-- exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
-- cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
 - linked_traces_to_outcomes: yes
 - stayed_under_10_files: yes
 - no_destructive_commands: yes
@@ -206,6 +180,32 @@ Self-assessment:
 - ran_cli_command: yes
 - exercised_new_scenario: yes (install-generate-source-merge via tests; live install blocked)
 - cli_produced_actionable_feedback: informative-nonblocking (workflow plan lists canonical plans; merge behavior proven in tests)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
+### Iteration 13 — 2026-04-11 15:00
+- wave: skill-import-streamline
+- item: Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)
+- scenario_tags: [clean-repo, sweep-dry-run, manifest-roundtrip-fixed]
+- feedback_goal: Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?
+- files_changed: 2
+- lines_added: 178
+- lines_removed: 0
+- tests_added: 2
+- tests_total_pass: true
+- retries: 0
+- commit: 5926031
+- scope_note: "on-target"
+- summary: Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
+- cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
 - linked_traces_to_outcomes: yes
 - stayed_under_10_files: yes
 - no_destructive_commands: yes
