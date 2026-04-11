@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 0 (initial seed — no automated iteration has run yet)
+Iteration: 1
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active wave summary (from `.agents/active/*.plan.md`):
-- **crg-kg-integration**: Phase A + D complete, Phase B (parser port, tree-sitter) is next — primary active track
+- **crg-kg-integration**: Phase A + D + B complete. Phase C (change detection + flows) is next.
 - **kg-phase-6-shared-memory-research**: research steps complete, optional prototype remaining
 - **wave-7-cross-repo-sweep-drift**: status says Completed but has unchecked items — verify before picking
 - **wave-6-delegation-merge-back**: all items checked, done
@@ -20,26 +20,26 @@ Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed"
 
 ## Last Completed
 
-(Seed from manual Codex sessions `019d7a6d` and `019d7a9d`):
-- Managed resource cleanup: path normalization, stale rule pruning, import-before-relink fix
-- AGENTS.md regenerated as repo-local contributor guide
-- Skill architect transforms for plan-wave-picker, delegation-lifecycle, provider-consumer-pair
-- Skill import/promotion into canonical `~/.agents/skills/dot-agents/`
-- AgentsRC local schema at `schemas/agentsrc.schema.json`
-- Resource-intent-centralization plan written
+**Iteration 1 — 2026-04-11**
+Wave: `crg-kg-integration` Phase B
+- Committed skill-architect transforms (delegation-lifecycle, plan-wave-picker, provider-consumer-pair) that were left uncommitted from prior session.
+- Implemented `internal/graphstore/crg.go`: CRGBridge type that delegates build/update/status/change-detection to the Python code-review-graph CLI installed in `.venv`. Avoids a full Go tree-sitter port (~3000 lines) by using subprocess bridge.
+- Added `dot-agents kg build`, `kg update`, `kg code-status`, `kg changes` subcommands to `commands/kg.go`.
+- Wrote unit tests in `internal/graphstore/crg_test.go`.
+- All tests pass (`go test ./...`). CLI commands verified live against this repo.
+
+(Prior seed from manual Codex sessions `019d7a6d` and `019d7a9d`):
+- Managed resource cleanup, AGENTS.md, skill transforms, AgentsRC schema, resource-intent-centralization plan.
 
 ## What's Next
 
-Pick the first actionable implementation wave item. Likely candidates:
-- `crg-kg-integration` Phase B items
-- `kg-phase-6-shared-memory-research` next unchecked item
-- `wave-7-cross-repo-sweep-drift` next unchecked item
+- `crg-kg-integration` Phase C: port `changes.py` (git diff + graph intersection), `flows.py`, `communities.py`, and add `dot-agents kg impact` command.
+- Alternative: check `kg-phase-6-shared-memory-research` unchecked items.
 
 ## Skip List
 
 Plans to skip (blocked, requires architectural work, completed, or out of scope for loop):
 - `resource-intent-centralization` — architectural redesign, needs focused RFC session
-- `resource-sync-architecture-analysis` — analysis-only, superseded by resource-intent-centralization
 - `refresh-skill-relink` — blocked on resource-intent-centralization
 - `skill-import-streamline` — blocked on resource-intent-centralization
 - `platform-dir-unification` — blocked on resource-intent-centralization
@@ -62,19 +62,27 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## CLI Traces
 
-(No traces yet — this section will be populated by automated iterations)
-
-<!--
-Format for CLI trace entries:
-
-### Iteration N — YYYY-MM-DD HH:MM
+### Iteration 1 — 2026-04-11
 ```
-$ go run ./cmd/dot-agents <command>
-<output summary or error>
+$ go run ./cmd/dot-agents kg code-status
+Code Graph Status — Nodes: 923, Edges: 6281, Files: 50, Languages: go ruby, Last updated: 2026-04-11T00:49:52
 ```
-Classification: [ok] | [impl-bug] | [tool-bug] | [missing-feature]
--->
+Classification: [ok]
+
+```
+$ go run ./cmd/dot-agents kg changes --brief
+Change Impact — Analyzed 15 changed file(s): 5 changed functions, 0 flows, 5 test gaps, risk 0.30
+```
+Classification: [ok]
+
+```
+$ go run ./cmd/dot-agents kg changes
+Change Impact — structured output with changed symbols, test gaps, review priorities
+```
+Classification: [ok]
 
 ## CLI Observations
 
-(No observations yet — this section captures UX friction, awkward flows, and feature requests from using the CLI during iterations)
+- `kg changes` returns qualified names with absolute file paths (e.g. `/Users/.../kg.go::runKGWarm`) — CRG uses absolute paths internally. This is slightly noisy in output; could be made relative to repo root in a future iteration.
+- `--brief` flag sends human-readable text from CRG, not JSON. The bridge handles both modes correctly now.
+- `kg build` and `kg update` stream output directly; no structured return — good for interactive use.
