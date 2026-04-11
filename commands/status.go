@@ -11,6 +11,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -274,7 +275,7 @@ func runStatus(audit bool, agentFilter string) error {
 		}
 
 		if audit {
-			printAudit(name, path, agentsHome, agentFilter)
+			printAudit(name, path, agentsHome, agentFilter, cfg)
 		}
 	}
 
@@ -499,7 +500,7 @@ func readRefreshTimestamp(projectPath string) string {
 	return ""
 }
 
-func printAudit(name, path, agentsHome, agentFilter string) {
+func printAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) {
 	fmt.Fprintln(os.Stdout)
 
 	if agentFilter == "" || agentFilter == "cursor" {
@@ -517,6 +518,30 @@ func printAudit(name, path, agentsHome, agentFilter string) {
 	if agentFilter == "" || agentFilter == "copilot" {
 		printCopilotAudit(name, path)
 	}
+	printSharedTargetRegistry(name, path, cfg)
+}
+
+// printSharedTargetRegistry lists the merged shared-target ResourcePlan lines using the same
+// code path as refresh/install dry-run (DryRunSharedTargetPlanLines).
+func printSharedTargetRegistry(project, repo string, cfg *config.Config) {
+	plats := platform.InstalledEnabledPlatforms(cfg)
+	if len(plats) == 0 {
+		fmt.Fprintf(os.Stdout, "    %sShared target registry%s\n", ui.Cyan, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s(no enabled+installed platforms — nothing to plan)%s\n", ui.Dim, ui.Reset)
+		fmt.Fprintln(os.Stdout)
+		return
+	}
+	lines, err := platform.DryRunSharedTargetPlanLines(project, repo, plats)
+	fmt.Fprintf(os.Stdout, "    %sShared target registry%s %s(same merge rules as refresh --dry-run)%s\n", ui.Cyan, ui.Reset, ui.Dim, ui.Reset)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "      %s! %v%s\n", ui.Yellow, err, ui.Reset)
+		fmt.Fprintln(os.Stdout)
+		return
+	}
+	for _, line := range lines {
+		fmt.Fprintf(os.Stdout, "      %s%s%s\n", ui.Dim, line, ui.Reset)
+	}
+	fmt.Fprintln(os.Stdout)
 }
 
 // printUserConfigSection reports on user-level (home directory) config links.

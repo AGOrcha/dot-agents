@@ -151,6 +151,10 @@ func printLinkTypesExplanation() {
 	fmt.Fprintf(os.Stdout, "  projections converge on one managed mirror instead of each platform racing\n")
 	fmt.Fprintf(os.Stdout, "  to replace the same directory independently.\n")
 	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "  %sRegistry diagnostics:%s run %sdot-agents status --audit%s — the \"Shared target registry\"\n", ui.Dim, ui.Reset, ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  section per project lists the merged plan lines produced by the same builder\n")
+	fmt.Fprintf(os.Stdout, "  as %srefresh --dry-run%s (no filesystem writes).\n", ui.Cyan, ui.Reset)
+	fmt.Fprintln(os.Stdout)
 }
 
 func printPlatformsExplanation() {

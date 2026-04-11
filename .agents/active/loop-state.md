@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 20
+Iteration: 21
 
 ## Current Position
 
@@ -30,7 +30,8 @@ State summary:
 - `DryRunSharedTargetPlanLines` surfaces the same merged `ResourcePlan` as `CollectAndExecuteSharedTargetPlan` for `refresh --dry-run` and `install --dry-run` (no filesystem writes).
 - `BuildSharedAgentMirrorIntents` + extended allowlist (`.claude/agents/`) centralizes project-scoped canonical `agents/<project>/<name>/AGENT.md` mirrors into `.claude/agents/<name>`; Cursor emits the same targets so Claude+Cursor duplicate intents merge once. Three new unit tests cover dedupe, imported-dir replacement, and Claude+Cursor execute path.
 - Phase 3 non-dir agent outputs: Codex `.codex/agents/*.toml` (render), OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` (file symlinks) now go through `CollectAndExecuteSharedTargetPlan` via `BuildSharedCodexAgentTomlIntents` / `BuildSharedAgentFileSymlinkIntents`; executor handles `RenderSingle`+`write` and `DirectFile`+`symlink`. Adapters thinned; `pruneCodexRepoAgentTomls` preserves stale-toml cleanup.
-- Next slice: `resource-intent-centralization` Phase 5 consumer unification or `crg-kg-integration` Phase E incremental work.
+- Phase 5 started: `status --audit` and `doctor --verbose` audit tail call `DryRunSharedTargetPlanLines` via `InstalledEnabledPlatforms` (same merge rules as `refresh --dry-run`). `explain links` documents the registry diagnostic path. `refresh` now computes installed+enabled platforms once per run.
+- Next slice: Phase 5 remaining — unify `refresh`/`install`/`remove` flow with single projection plan where not already; or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
@@ -71,6 +72,37 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 21 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 5 — `status`/`explain` read shared-target registry (`DryRunSharedTargetPlanLines`); `InstalledEnabledPlatforms` helper; refresh uses shared selector
+- scenario_tags: [clean-repo, canonical-plan-present, status-audit-shared-registry, planner-diagnostic-visible]
+- feedback_goal: Does `status --audit` list the same merged `shared target:` lines as `refresh --dry-run` for each managed project?
+- files_changed: 8
+- lines_added: 158
+- lines_removed: 25
+- tests_added: 2
+- tests_total_pass: true
+- retries: 0
+- commit: fb68a05
+- scope_note: "on-target"
+- summary: Added platform.InstalledEnabledPlatforms; status/doctor audit prints Shared target registry; explain links documents path; refresh hoists installed-enabled platform list
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (all-disabled empty slice + invariant test)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: N/A (phase-5-unify-commands still pending; phase-3-migrate-shared-targets in_progress)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes
+- exercised_new_scenario: yes (status-audit-shared-registry)
+- cli_produced_actionable_feedback: yes (audit lines match dry-run merge semantics)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 20 — 2026-04-11
 - wave: resource-intent-centralization
@@ -599,21 +631,21 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Loop closeout rules (iteration 20+):
+Loop closeout rules (iteration 21+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
 - Reconcile coverage tables before ending the iteration.
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 5**: Unify `refresh`/`install`/`remove`/`status`/`explain` on projection executor — pick one unchecked line in `.agents/active/resource-intent-centralization.plan.md`.
+1. **resource-intent-centralization Phase 5 (remaining)**: `refresh`/`install`/`remove` single projection plan sequencing — next unchecked bullets in `.agents/active/resource-intent-centralization.plan.md`.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Preferred single item for iteration 21:
-- Phase 5 consumer unification slice **or** Phase E Postgres — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
+Preferred single item for iteration 22:
+- Phase 5 refresh/install/remove unification slice **or** Phase E Postgres — pick after `workflow tasks resource-intent-centralization` + `workflow plan` readback.
 
-Primary feedback goal for iteration 21 (example):
-- Does the unified consumer path keep `workflow health` and dry-run previews aligned with executed shared targets?
+Primary feedback goal for iteration 22 (example):
+- After the next code change, does `refresh --dry-run` still match `status --audit` shared registry lines for the same project list?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -651,10 +683,11 @@ Signals already captured:
 - Before/after traces: workflow health warn→healthy after checkpoint write
 - Small integration traces already exist, especially status/doctor/workflow-health and checkpoint→health improvement; these now anchor the first bootstrap and closeout stacks
 - `dot-agents explain` now exposes the centralized shared-skill ownership model, giving a safe read-only diagnostic surface for planner-aware iterations
+- `status --audit` shared registry (iteration 21) gives per-project merged-plan readback without `refresh --dry-run`, using the same builder as command-layer shared targets
 
 Signals still missing or too weak:
 - A live **apply** trace that proves the shared plan runs once at the command layer during a real `refresh`/`install` (guardrail limits direct `refresh` in loop; dry-run now proves merged plan visibility)
-- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **mostly addressed in repo:** dir mirrors, Codex TOML, OpenCode/Copilot file symlinks centralized; remaining gap is Phase 5 wiring `status`/`explain` off one registry and live apply traces under guardrails
+- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **mostly addressed in repo:** dir mirrors, Codex TOML, OpenCode/Copilot file symlinks centralized; **status/explain registry slice done (iter 21)**; remaining gap is Phase 5 wiring `refresh`/`install`/`remove` on one plan pass and live apply traces under guardrails
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
@@ -694,6 +727,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `workflow-log-visible` | yes | 6 | `workflow log` showed checkpoint from prior iteration; next_action UX issue confirmed |
 | `workflow-advance-success` | yes | 17 | `workflow advance` moved `add-regression-tests` and `install-generate-merge` to completed in TASKS.yaml |
 | `dry-run-shared-target-preview` | yes | 20 | `refresh --dry-run` prints merged skill rows plus write/symlink-file lines when those intents exist; iteration 20 live: skills only (no canonical project agents; OpenCode not in enabled platforms) |
+| `status-audit-shared-registry` | yes | 21 | `status --audit` prints Shared target registry via same `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms` as refresh dry-run; cross-checked merge counts vs iteration 20 dry-run semantics |
 | `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
 | `agents-non-dir-outputs-centralized` | yes | 20 | `BuildSharedCodexAgentTomlIntents` + `BuildSharedAgentFileSymlinkIntents`; executor `RenderSingle`/`DirectFile`; tests for execute + allowlist negative |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
@@ -813,7 +847,7 @@ These are larger chained checks that cross subsystem boundaries. Grouping them b
 |---|---|---|---|
 | `ok-empty-expected` | yes | 5 | multiple no-op/empty traces recorded and classified explicitly |
 | `ok-warning-ux-friction` | yes | 5 | warnings captured for orphan links, misleading flows guidance, and next-action parsing |
-| `planner-diagnostic-visible` | yes | 8 | `explain links` and `explain platforms` now expose centralized shared-skill planning clearly enough to serve as a safe read-only planner trace |
+| `planner-diagnostic-visible` | yes | 21 | `explain links` now references `status --audit` for live merged-plan lines; iteration 8 baseline was explain-only |
 | `retry-recovered` | yes | 2 | naming collision fixed before final commit |
 | `retry-recovered-with-error-log` | yes | 2 | Iteration 2 naming-collision retry is now mirrored in `## Error Log` for later analysis |
 | `pre-existing-tool-bug-confirmed` | yes | 5 | `kg flows` help text is wrong after postprocess when igraph is absent |
@@ -835,6 +869,26 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 21 — 2026-04-11
+
+Trace: status-audit-shared-registry-vs-dry-run-semantics
+Command: `go run ./cmd/dot-agents status --audit` (excerpt: Shared target registry sections per project)
+Scenario: [clean-repo, canonical-plan-present, status-audit-shared-registry]
+Feedback goal: Does `status --audit` show merged `shared target:` lines aligned with `refresh --dry-run` (same duplicate-merge counts and shapes)?
+Output summary: Per project, "Shared target registry (same merge rules as refresh --dry-run)" lists symlink/write/symlink-file lines — e.g. dot-agents shows six skill rows with `(2 duplicate intent(s) merged)` on `.agents/skills/*`; payout shows agent symlink + codex toml + copilot file symlink rows.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
+
+Trace: explain-links-registry-doc
+Command: `go run ./cmd/dot-agents explain links` (tail — Registry diagnostics)
+Scenario: [planner-diagnostic-visible, status-audit-shared-registry]
+Feedback goal: Does `explain links` point operators at `status --audit` for live merged-plan readback?
+Output summary: New "Registry diagnostics" lines reference `dot-agents status --audit` and parity with `refresh --dry-run`.
+Expectation: expected
+Follow-on: none
+Classification: [ok]
 
 ### Iteration 20 — 2026-04-11
 
@@ -1356,9 +1410,9 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | Command | Tested | Last Iteration | Status |
 |---|---|---|---|
 | `install --generate` | tests only | 14 | ok (merge behavior unit-tested; live cmd guardrail-blocked in loop) |
-| `status` | yes | 7 | ok-warning |
+| `status` | yes | 21 | ok (incl. `--audit` shared registry trace) |
 | `doctor` | yes | 7 | ok-warning |
-| `explain` | yes | 18 | ok |
+| `explain` | yes | 21 | ok (links topic: registry diagnostics cross-ref) |
 | `refresh` | yes | 20 | ok (dry-run merged skills; write/symlink-file rows when intents apply) |
 | `workflow status` | yes | 10 | ok-warning |
 | `workflow orient` | yes | 5 | ok |

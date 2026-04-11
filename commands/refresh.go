@@ -83,6 +83,8 @@ func runRefresh(projectFilter string) error {
 		return nil
 	}
 
+	installedEnabled := platform.InstalledEnabledPlatforms(cfg)
+
 	// Resolve dot-agents git commit
 	refreshCommit, refreshDescribe := resolveRefreshCommit()
 
@@ -134,12 +136,6 @@ func runRefresh(projectFilter string) error {
 
 		config.SetWindowsMirrorContext(path)
 
-		var installedEnabled []platform.Platform
-		for _, p := range enabledPlatforms {
-			if p.IsInstalled() {
-				installedEnabled = append(installedEnabled, p)
-			}
-		}
 		if Flags.DryRun {
 			lines, err := platform.DryRunSharedTargetPlanLines(name, path, installedEnabled)
 			if err != nil {

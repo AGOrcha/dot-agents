@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Phase 4 complete (2026-04-11); Phase 5 command-consumer unification is next
+Status: Phase 4 complete (2026-04-11); Phase 5 in progress — status/explain now use shared-target registry in audit
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -113,7 +113,7 @@ Completed in this session:
   3. execute one projection plan
 - [ ] Update `install` to use the same projection executor after canonical source linking.
 - [ ] Update `remove` to remove managed outputs via the same registry/intents instead of platform-specific path lists where possible.
-- [ ] Update `status` and `explain` to read from the same resource registry so diagnostics describe actual managed behavior rather than hand-maintained expectations.
+- [x] Update `status` and `explain` to read from the same resource registry so diagnostics describe actual managed behavior rather than hand-maintained expectations. (`status --audit` / doctor verbose: `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms`; `explain links` documents the path.)
 
 ## Phase 6: Verification
 

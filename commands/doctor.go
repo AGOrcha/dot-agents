@@ -115,14 +115,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		if total == 0 {
 			ui.Bullet("none", fmt.Sprintf("%s — no managed links detected", name))
 			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "")
+				printAudit(name, path, agentsHome, "", cfg)
 			}
 			continue
 		}
 		if len(brokenLinks) == 0 {
 			ui.Bullet("ok", fmt.Sprintf("%s — %d links healthy", name, ok))
 			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "")
+				printAudit(name, path, agentsHome, "", cfg)
 			}
 			continue
 		}
@@ -132,7 +132,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 		if Flags.Verbose {
 			// Show full audit detail (healthy + broken) in verbose mode
-			printAudit(name, path, agentsHome, "")
+			printAudit(name, path, agentsHome, "", cfg)
 		} else {
 			// Default: show only broken links
 			for _, bl := range brokenLinks {
