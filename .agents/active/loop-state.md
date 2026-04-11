@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 6
+Iteration: 7
 
 ## Current Position
 
@@ -15,11 +15,11 @@ Active wave summary (from `.agents/active/*.plan.md`):
 - **platform-dir-unification**: Blocked — Phases 4+5 need resource-intent-centralization implementation rollout
 - **refresh-skill-relink**: Blocked on resource-intent-centralization
 - **skill-import-streamline**: Blocked on resource-intent-centralization
-- **resource-intent-centralization**: Phase 1 complete (2026-04-11) — `internal/projectsync` extracted. Phase 2 (ResourceIntent model) is next.
+- **resource-intent-centralization**: Phase 1 complete and Phase 2 started (2026-04-11) — declarative `ResourceIntent` model landed in `internal/platform`; planner/executor layer is next.
 
-**Actionable implementation work remains.** `resource-intent-centralization` Phase 2 is next (define ResourceIntent shape + planner/executor layer). `crg-kg-integration` Phases E/F are also active but lower priority.
+**Actionable implementation work remains.** `resource-intent-centralization` Phase 2 remains next (planner/executor layer after the ResourceIntent shape). `crg-kg-integration` Phases E/F are also active but lower priority.
 
-As of iteration 6: 27/41 commands tested (workflow log added), 12 scenario families covered. Phase 1 of resource-intent-centralization complete — internal/projectsync extracted. Bootstrap, closeout, and partial analysis stacks exercised. Mutation/reconciliation stacks still uncovered.
+As of iteration 7: 27/41 commands tested (no new command coverage this iteration), 12 scenario families covered. Resource-intent-centralization Phase 2 is now in progress: the shared `ResourceIntent` model is defined and regression-tested, but no planner/executor wiring has landed yet. Bootstrap, closeout, and partial analysis stacks are exercised. Mutation/reconciliation stacks still uncovered.
 
 Note: Many older plans (kg-phase-1 through 5, wave-3 through 5) show "Completed" in their status header but still have unchecked `- [ ]` items. The status header is authoritative — unchecked boxes on completed plans are stale plan hygiene, not real work.
 
@@ -28,6 +28,30 @@ Analysis prep priority:
 - Future iterations should leave behind structured trace metadata, scenario coverage, and explicit linkage between commands, commits, retries, and follow-on actions.
 
 ## Iteration Log
+
+### Iteration 7 — 2026-04-11 09:54
+- wave: resource-intent-centralization
+- item: Phase 2 — Define an internal `ResourceIntent` shape for projection outputs
+- scenario_tags: [clean-repo, repo-health-stack]
+- files_changed: 2
+- lines_added: 345
+- lines_removed: 0
+- tests_added: 5
+- tests_total_pass: true
+- retries: 0
+- commit: 4920aeb
+- scope_note: on-target
+- summary: Added a declarative `ResourceIntent` / `ResourceSourceRef` model with typed ownership, shape, transport, replace/prune policies, validation, and focused tests in `internal/platform`
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- ran_cli_command: yes
+- exercised_new_scenario: no
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 6 — 2026-04-11
 - wave: resource-intent-centralization
@@ -179,15 +203,15 @@ Self-assessment:
 **Actionable implementation waves remain.** The remaining active plans:
 - 1 completed cleanup plan (active-artifact-cleanup — archive when convenient)
 - 3 plans blocked on `resource-intent-centralization` rollout (`platform-dir-unification`, `refresh-skill-relink`, `skill-import-streamline`)
-- `resource-intent-centralization` Phase 1 done; Phase 2 (ResourceIntent model + planner/executor) is next
+- `resource-intent-centralization` Phase 2 is in progress; the `ResourceIntent` model is done and the planner/executor layer is next
 - `crg-kg-integration` Phases E/F remain active; Phase G deferred
 
 Recommended implementation order:
-- `resource-intent-centralization` Phase 2: define `ResourceIntent` shape and planner/executor layer in `internal/projectsync` or a new `internal/resources` package
+- `resource-intent-centralization` Phase 2: add the planner/executor layer that consumes `internal/platform.ResourceIntent`
 - Then Phase 3 (centralize shared repo targets) and Phase 4 (thin platform adapters) to unblock the blocked plans
 - `crg-kg-integration` Phase E/F are lower priority until resource-intent lands
 
-Evidence capture is now broad enough to support command-landscape analysis, but still uneven across state families. Read-only workflow coverage is strong; repo-local write paths have some traces; the biggest remaining gaps are canonical workflow write paths, delegation flows, initialized KG lifecycle, bridge/config states, and CRG build/update end-to-end runs.
+Evidence capture is now broad enough to support command-landscape analysis, but still uneven across state families. Read-only workflow coverage is strong; repo-local write paths have some traces; the biggest remaining gaps are canonical workflow write paths, delegation flows, initialized KG lifecycle, bridge/config states, CRG build/update end-to-end runs, and mutation/reconciliation stacks.
 
 Analysis follow-on once implementation resumes:
 - Prefer iterations that exercise uncovered commands or new workflow states over repeating the same happy-path checks.
@@ -205,8 +229,9 @@ Questions the later analysis phase should be able to answer:
 Signals already captured:
 - Per-iteration summary, scope, retries, commit, and basic self-assessment
 - Exact CLI invocations with short output snapshots and structured metadata (scenario, expectation, follow-on, classification)
-- Command-level coverage tracking (26 of ~41 commands now tested)
+- Command-level coverage tracking (27 of ~41 commands now tested)
 - Scenario coverage grouped by workflow, KG, CRG, bridge/config, delegation, integration, and outcome-quality families
+- The `ResourceIntent` contract itself is now codified in Go with validation tests, reducing ambiguity before planner/executor implementation starts
 - Write-command-path traces: kg warm, kg link CRUD, workflow checkpoint
 - Empty-state traces: kg health/query/lint (no KG_HOME), workflow tasks/plan (no PLAN.yaml), kg flows (no igraph)
 - Warning-state traces: kg link orphan, workflow status next-action parsing, kg flows misleading help text
@@ -236,7 +261,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `clean-repo` | yes | 5 | `status`, `doctor`, and `workflow health` all ran from a clean repo state |
+| `clean-repo` | yes | 7 | Reconfirmed after the `ResourceIntent` model commit; `status`, `workflow health`, and `doctor` all ran from a clean repo state |
 | `dirty-repo` | yes | 3 | `workflow status` reported `dirty files: 1` |
 | `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
 | `no-canonical-plan` | yes | 5 | `workflow plan`, `workflow tasks`, and `workflow drift` all returned expected empty/no-plan states |
@@ -327,7 +352,7 @@ These are larger chained checks that cross subsystem boundaries. Grouping them b
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `repo-health-stack` | yes | 6 | Re-run post-refactor on new branch; status+health+doctor all consistent with iteration 5 |
+| `repo-health-stack` | yes | 7 | Re-run after the `ResourceIntent` model commit; `status` → `workflow health` → `doctor` stayed coherent end-to-end on the current branch |
 | `project-add-health-stack` | no | - | would cover `add` -> `status` -> `doctor` -> `workflow status` for managed-project bootstrap |
 | `kg-bootstrap-stack` | no | - | grounded in past session history: `kg setup` -> `kg health` -> `kg queue` |
 | `managed-project-sync-stack` | no | - | would cover `add` or `import` -> `sync` -> `status` -> `doctor` |
@@ -387,6 +412,23 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 7 — 2026-04-11
+
+Trace: repo-health-stack-after-resource-intent-model (integration: bootstrap stack)
+Chain: `status` → `workflow health` → `doctor`
+```
+$ go run ./cmd/dot-agents status
+dot-agents, ResumeAgent, payout — all projects showing healthy manifest/platform summaries; pre-existing user-config warnings and unfetched git source still surfaced
+$ go run ./cmd/dot-agents workflow health
+Workflow Health — status: healthy, branch: feature/PA-cursor-projectsync-phase1-extract-293f, dirty files: 0, has active plan: true, canonical plans: 0, has checkpoint: true
+$ go run ./cmd/dot-agents doctor
+Installation: ✓, Platforms: ✓ (4/5 installed), User Config: ! 4 broken Claude skill links (pre-existing), Projects: ✓ (3), Link Health: ✓, dot-agents manifest: ! git source not yet fetched
+```
+Scenario: [clean-repo, repo-health-stack]
+Expectation: expected — the new internal model is not wired into command behavior yet, so repo health should remain unchanged
+Follow-on: none
+Classification: [ok-warning]
 
 ### Iteration 6 — 2026-04-11
 
@@ -678,8 +720,8 @@ Classification: [ok]
 
 | Command | Tested | Last Iteration | Status |
 |---|---|---|---|
-| `status` | yes | 6 | ok-warning |
-| `doctor` | yes | 6 | ok-warning |
+| `status` | yes | 7 | ok-warning |
+| `doctor` | yes | 7 | ok-warning |
 | `workflow status` | yes | 5 | ok-warning |
 | `workflow orient` | yes | 5 | ok |
 | `workflow checkpoint` | yes | 5 | ok |
@@ -687,7 +729,7 @@ Classification: [ok]
 | `workflow plan` | yes | 5 | ok-empty |
 | `workflow tasks` | yes | 5 | ok-empty |
 | `workflow advance` | no | - | - |
-| `workflow health` | yes | 5 | ok |
+| `workflow health` | yes | 7 | ok |
 | `workflow verify` | no | - | - |
 | `workflow prefs` | no | - | - |
 | `workflow graph` | no | - | - |
