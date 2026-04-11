@@ -136,7 +136,7 @@ func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) createSkillsLinks(project, repoPath, _ string) error {
-	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(codexAgentsDir, "skills"))
+	return nil
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {

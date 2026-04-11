@@ -148,7 +148,7 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 }
 
 func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
-	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(".agents", "skills"))
+	return nil
 }
 
 func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error {

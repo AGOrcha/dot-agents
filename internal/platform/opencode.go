@@ -76,7 +76,7 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 }
 
 func (o *opencode) createSkillsLinks(project, repoPath, _ string) error {
-	return ExecuteSharedSkillMirrorPlan(project, repoPath, filepath.Join(".agents", "skills"))
+	return nil
 }
 
 func (o *opencode) RemoveLinks(project, repoPath string) error {
