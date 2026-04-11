@@ -1,5 +1,10 @@
 # Refresh Skill Relink Plan
 
+Status: Blocked — all items pending; blocked on resource-intent-centralization (needs centralized managed-resource planner before this can be fixed cleanly).
+Depends on: resource-intent-centralization
+
+
+
 ## Problem
 
 `go run ./cmd/dot-agents refresh dot-agents` successfully imports repo-local skill files from `.agents/skills/plan-wave-picker/**` into canonical `~/.agents/skills/dot-agents/plan-wave-picker/**`, but refresh then warns for Claude, Codex, and Copilot when relinking `.agents/skills/plan-wave-picker`.
