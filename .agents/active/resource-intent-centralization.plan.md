@@ -36,15 +36,16 @@ The design questions that previously blocked this plan are now resolved in `docs
 - The first rollout slice is shared skill convergence first: repo `.agents/skills/<name>` and related shared compatibility mirrors before broader expansion.
 - Focused verification should cover intent dedupe/conflicts, import conflict notes, imported directory -> managed mirror convergence, and status/explain registry correctness.
 
-## Phase 1: Extract Shared Command Spine
+## Phase 1: Extract Shared Command Spine ✓ COMPLETE (2026-04-11)
 
-- [ ] Move shared canonicalization/project-sync helpers out of `commands/add.go` and `commands/refresh.go` into a neutral package, likely `internal/projectsync` or `internal/resources`.
-- [ ] Extract and centralize:
-  - canonical path mapping (`mapResourceRelToDest`)
-  - project bucket directory creation
-  - resource restore from `~/.agents/resources`
-  - refresh marker writing
-- [ ] Keep command behavior unchanged during extraction.
+- [x] Move shared project-sync helpers into `internal/projectsync` package.
+- [x] Extracted and centralized:
+  - project bucket directory creation (`CreateProjectDirs`)
+  - refresh marker writing (`WriteRefreshMarker`, `RefreshMarkerContent`)
+  - file copy helper (`CopyFile`)
+  - gitignore entry helper (`EnsureGitignoreEntry`)
+- [x] Behavior unchanged — all callers in add.go, refresh.go, import.go, install.go, init.go updated.
+- Deferred to Phase 3: `mapResourceRelToDest` (tightly coupled to import.go constants); `restoreFromResourcesCounted` chain (transitively depends on `importCandidate`/`canonicalImportOutputs`).
 
 ## Phase 2: Introduce Resource Intent Model
 
