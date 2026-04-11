@@ -290,13 +290,11 @@ func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
 }
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
+	// Shared repo targets (.claude/skills/*, .agents/skills/*) are now written
+	// by CollectAndExecuteSharedTargetPlan at the command layer before
+	// CreateLinks is called. This method only handles user-home skill links.
 	c.ensureUserSkills(agentsHome)
-	return ExecuteSharedSkillMirrorPlan(
-		project,
-		repoPath,
-		filepath.Join(claudeDir, "skills"),
-		filepath.Join(".agents", "skills"),
-	)
+	return nil
 }
 
 func (c *claude) RemoveLinks(project, repoPath string) error {

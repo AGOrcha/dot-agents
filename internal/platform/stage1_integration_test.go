@@ -63,6 +63,10 @@ func TestClaudeCreateLinksDualSkillOutputs(t *testing.T) {
 	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: review changes\n---\n")
 	mkdirAll(t, repo)
 
+	// Shared targets are now written by the command-layer plan before CreateLinks.
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
 	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "skills", "review"), skillDir)
@@ -78,6 +82,11 @@ func TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink(t *test
 	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: canonical review\n---\n")
 	writeTextFile(t, filepath.Join(repo, dirAgents, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: imported review\n---\n")
 
+	// Shared targets are now written by the command-layer plan before CreateLinks.
+	// The executor replaces the imported directory with a managed symlink.
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
 	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
