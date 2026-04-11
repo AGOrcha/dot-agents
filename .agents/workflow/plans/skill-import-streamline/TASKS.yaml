@@ -1,53 +1,60 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
-plan_id: "skill-import-streamline"
+plan_id: skill-import-streamline
 tasks:
-  - id: "manifest-preserve-unknown"
-    title: "Preserve unknown .agentsrc.json fields on save (or model legacy blocks explicitly)"
-    status: "pending"
-    depends_on: []
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["internal/config/agentsrc.go"]
-    verification_required: true
-    notes: ""
-
-  - id: "install-generate-merge"
-    title: "Make install --generate merge with existing manifest instead of replacing sources"
-    status: "pending"
-    depends_on: []
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["commands/install.go", "internal/config/"]
-    verification_required: true
-    notes: ""
-
-  - id: "skills-promote-command"
-    title: "Project-scope skills import/promote command path"
-    status: "pending"
-    depends_on: ["manifest-preserve-unknown"]
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["commands/"]
-    verification_required: true
-    notes: "Import to ~/.agents/skills/<project>/, update manifest, refresh mirrors"
-
-  - id: "shared-skills-convergence"
-    title: "Fix shared .agents/skills convergence after promotion (planner-owned)"
-    status: "pending"
-    depends_on: ["skills-promote-command"]
-    blocks: ["add-regression-tests"]
-    owner: "dot-agents"
-    write_scope: ["internal/platform/", "commands/"]
-    verification_required: true
-    notes: ""
-
-  - id: "add-regression-tests"
-    title: "Tests for manifest round-trip, promote flow, and mirror convergence"
-    status: "pending"
-    depends_on: ["shared-skills-convergence"]
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["commands/*_test.go", "internal/config/*_test.go"]
-    verification_required: true
-    notes: ""
+    - id: manifest-preserve-unknown
+      title: Preserve unknown .agentsrc.json fields on save (or model legacy blocks explicitly)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+      verification_required: true
+      notes: ""
+    - id: install-generate-merge
+      title: Make install --generate merge with existing manifest instead of replacing sources
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/install.go
+        - internal/config/
+      verification_required: true
+      notes: ""
+    - id: skills-promote-command
+      title: Project-scope skills import/promote command path
+      status: completed
+      depends_on:
+        - manifest-preserve-unknown
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+      verification_required: true
+      notes: Import to ~/.agents/skills/<project>/, update manifest, refresh mirrors
+    - id: shared-skills-convergence
+      title: Fix shared .agents/skills convergence after promotion (planner-owned)
+      status: completed
+      depends_on:
+        - skills-promote-command
+      blocks:
+        - add-regression-tests
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+        - commands/
+      verification_required: true
+      notes: ""
+    - id: add-regression-tests
+      title: Tests for manifest round-trip, promote flow, and mirror convergence
+      status: pending
+      depends_on:
+        - shared-skills-convergence
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/*_test.go
+        - internal/config/*_test.go
+      verification_required: true
+      notes: ""

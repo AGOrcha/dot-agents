@@ -51,7 +51,7 @@ func writeSkillMD(t *testing.T, projectPath, skillName string) {
 
 // ── promoteSkillIn success ────────────────────────────────────────────────────
 
-func TestPromoteSkillIn_CreatesSymlinkAndUpdatesManifest(t *testing.T) {
+func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest")
 	writeSkillMD(t, projectPath, "my-skill")
 
@@ -59,23 +59,38 @@ func TestPromoteSkillIn_CreatesSymlinkAndUpdatesManifest(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Managed symlink created in agentsHome/skills/<project>/<name>
-	symlink := filepath.Join(agentsHome, "skills", "myprojtest", "my-skill")
-	fi, err := os.Lstat(symlink)
+	canonicalPath := filepath.Join(agentsHome, "skills", "myprojtest", "my-skill")
+	repoLocalPath := filepath.Join(projectPath, ".agents", "skills", "my-skill")
+
+	// Canonical path must be a real directory containing SKILL.md.
+	cfi, err := os.Lstat(canonicalPath)
 	if err != nil {
-		t.Fatalf("symlink not created at %s: %v", symlink, err)
+		t.Fatalf("canonical path not created at %s: %v", canonicalPath, err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected symlink at %s, got %v", symlink, fi.Mode())
+	if cfi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("canonical path %s should be a real directory, got symlink", canonicalPath)
 	}
-	// Symlink should point to the repo-local skill dir.
-	target, err := os.Readlink(symlink)
+	if !cfi.IsDir() {
+		t.Errorf("canonical path %s should be a directory, got %v", canonicalPath, cfi.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(canonicalPath, "SKILL.md")); err != nil {
+		t.Errorf("canonical SKILL.md missing: %v", err)
+	}
+
+	// Repo-local path must now be a managed symlink pointing to canonical.
+	rfi, err := os.Lstat(repoLocalPath)
 	if err != nil {
-		t.Fatalf("readlink: %v", err)
+		t.Fatalf("repo-local path missing after promote: %v", err)
 	}
-	expectedTarget := filepath.Join(projectPath, ".agents", "skills", "my-skill")
-	if target != expectedTarget {
-		t.Errorf("symlink target = %q, want %q", target, expectedTarget)
+	if rfi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("repo-local path %s should be a symlink after promote, got %v", repoLocalPath, rfi.Mode())
+	}
+	target, err := os.Readlink(repoLocalPath)
+	if err != nil {
+		t.Fatalf("readlink repo-local: %v", err)
+	}
+	if target != canonicalPath {
+		t.Errorf("repo-local symlink target = %q, want %q", target, canonicalPath)
 	}
 
 	// .agentsrc.json should have the skill registered.
@@ -98,22 +113,23 @@ func TestPromoteSkillIn_IdempotentOnExistingSymlink(t *testing.T) {
 	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest2")
 	writeSkillMD(t, projectPath, "idem-skill")
 
-	// First promote.
+	// First promote: copies content, repo-local becomes managed symlink.
 	if err := promoteSkillIn("idem-skill", projectPath); err != nil {
 		t.Fatalf("first promote: %v", err)
 	}
-	// Second promote should update the symlink without error.
+	// Second promote: repo-local is already a symlink to canonical — idempotent.
 	if err := promoteSkillIn("idem-skill", projectPath); err != nil {
 		t.Fatalf("second promote: %v", err)
 	}
 
-	symlink := filepath.Join(agentsHome, "skills", "myprojtest2", "idem-skill")
-	fi, err := os.Lstat(symlink)
+	// Canonical still a real directory.
+	canonical := filepath.Join(agentsHome, "skills", "myprojtest2", "idem-skill")
+	fi, err := os.Lstat(canonical)
 	if err != nil {
-		t.Fatalf("symlink missing after second promote: %v", err)
+		t.Fatalf("canonical missing after second promote: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected symlink after second promote, got %v", fi.Mode())
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("canonical should be a real directory after second promote, got symlink")
 	}
 
 	// Skills list should not contain duplicates.
@@ -175,6 +191,29 @@ func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
 	}
 }
 
+func TestPromoteSkillIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
+	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest5")
+	writeSkillMD(t, projectPath, "mis-skill")
+
+	// Manually create repo-local as a symlink pointing somewhere else.
+	repoLocalPath := filepath.Join(projectPath, ".agents", "skills", "mis-skill")
+	// Remove the real dir first, create symlink to a different location.
+	if err := os.RemoveAll(repoLocalPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(agentsHome, "other"), repoLocalPath); err != nil {
+		t.Fatal(err)
+	}
+
+	err := promoteSkillIn("mis-skill", projectPath)
+	if err == nil {
+		t.Fatal("expected error when repo-local symlink points elsewhere, got nil")
+	}
+	if !strings.Contains(err.Error(), "already a symlink but points to") {
+		t.Errorf("error message = %q; want 'already a symlink but points to' substring", err.Error())
+	}
+}
+
 func TestPromoteSkillIn_ErrorExistingNonSymlink(t *testing.T) {
 	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest4")
 	writeSkillMD(t, projectPath, "clash-skill")
@@ -187,9 +226,9 @@ func TestPromoteSkillIn_ErrorExistingNonSymlink(t *testing.T) {
 
 	err := promoteSkillIn("clash-skill", projectPath)
 	if err == nil {
-		t.Fatal("expected error when destination is a real directory, got nil")
+		t.Fatal("expected error when canonical path is a real directory, got nil")
 	}
-	if !strings.Contains(err.Error(), "not a managed symlink") {
-		t.Errorf("error message = %q; want 'not a managed symlink' substring", err.Error())
+	if !strings.Contains(err.Error(), "real directory") {
+		t.Errorf("error message = %q; want 'real directory' substring", err.Error())
 	}
 }
