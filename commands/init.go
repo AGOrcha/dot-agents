@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -218,17 +217,3 @@ func scaffoldWorkflowAssets(agentsHome string) error {
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
 }
 
-// refreshMarkerContent generates the .agents-refresh marker file content.
-func refreshMarkerContent(version, commit, describe string) []byte {
-	now := time.Now().UTC().Format(time.RFC3339)
-	content := "# dot-agents refresh marker — do not edit\n"
-	content += "version=" + version + "\n"
-	if commit != "" {
-		content += "commit=" + commit + "\n"
-	}
-	if describe != "" {
-		content += "describe=" + describe + "\n"
-	}
-	content += "refreshed_at=" + now + "\n"
-	return []byte(content)
-}

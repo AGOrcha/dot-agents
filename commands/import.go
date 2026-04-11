@@ -12,6 +12,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -347,8 +348,7 @@ func importMissingCandidate(c importCandidate, dest, timestamp string) importRes
 	}
 
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	_ = os.MkdirAll(filepath.Dir(dest), 0755)
-	if err := copyFile(c.sourcePath, dest); err != nil {
+	if err := projectsync.CopyFile(c.sourcePath, dest); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -368,7 +368,7 @@ func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp strin
 
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := copyFile(c.sourcePath, dest); err != nil {
+	if err := projectsync.CopyFile(c.sourcePath, dest); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}

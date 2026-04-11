@@ -11,6 +11,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -452,7 +453,7 @@ func runAdd(pathArg, nameArg string) error {
 
 	// Step 4: Create project dirs
 	ui.Step("Creating project structure...")
-	if err := createProjectDirs(projectName); err != nil {
+	if err := projectsync.CreateProjectDirs(projectName); err != nil {
 		return err
 	}
 	ui.Bullet("ok", "Created ~/.agents/ directories")
@@ -479,7 +480,7 @@ func runAdd(pathArg, nameArg string) error {
 	}
 
 	// Add .agents-refresh to .gitignore
-	ensureGitignoreEntry(projectPath, ".agents-refresh")
+	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 
 	// Step 6: Register
 	cfg.AddProject(projectName, projectPath)
@@ -504,23 +505,6 @@ func runAdd(pathArg, nameArg string) error {
 	return nil
 }
 
-func createProjectDirs(project string) error {
-	agentsHome := config.AgentsHome()
-	dirs := []string{
-		filepath.Join(agentsHome, "rules", project),
-		filepath.Join(agentsHome, "settings", project),
-		filepath.Join(agentsHome, "mcp", project),
-		filepath.Join(agentsHome, "skills", project),
-		filepath.Join(agentsHome, "agents", project),
-		filepath.Join(agentsHome, "hooks", project),
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", d, err)
-		}
-	}
-	return nil
-}
 
 // backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
 // and removes the originals from the project tree. No *.dot-agents-backup files are left
@@ -618,8 +602,7 @@ func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
 		return 0
 	}
 	destPath := filepath.Join(agentsHome, destRel)
-	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
-	if err := copyFile(path, destPath); err == nil {
+	if err := projectsync.CopyFile(path, destPath); err == nil {
 		return 1
 	}
 	return 0
@@ -637,39 +620,12 @@ func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 
 	// Active (latest) copy — overwritten on each backup run
 	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	os.MkdirAll(filepath.Dir(activeTarget), 0755)
-	copyFile(srcFile, activeTarget)
+	projectsync.CopyFile(srcFile, activeTarget) //nolint:errcheck
 
 	// Timestamped immutable copy
 	if timestamp != "" {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		os.MkdirAll(filepath.Dir(tsTarget), 0755)
-		copyFile(srcFile, tsTarget)
+		projectsync.CopyFile(srcFile, tsTarget) //nolint:errcheck
 	}
 }
 
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0644)
-}
-
-func ensureGitignoreEntry(repoPath, entry string) {
-	gitignorePath := filepath.Join(repoPath, ".gitignore")
-	data, err := os.ReadFile(gitignorePath)
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) == entry {
-				return
-			}
-		}
-	}
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintln(f, entry)
-}
