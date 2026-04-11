@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +20,7 @@ func NewSkillsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newSkillsListCmd())
 	cmd.AddCommand(newSkillsNewCmd())
+	cmd.AddCommand(newSkillsPromoteCmd())
 	return cmd
 }
 
@@ -213,5 +215,90 @@ func createSkill(name, scope string) error {
 	}
 
 	ui.SuccessBox(fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/", name, scope, name), skillCreationNextSteps(name, scope, skillMD)...)
+	return nil
+}
+
+func newSkillsPromoteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "promote <name>",
+		Short: "Promote a repo-local skill to shared storage",
+		Long: `Promotes a skill from .agents/skills/<name>/ in the current repo to
+~/.agents/skills/<project>/<name>/, registers it in .agentsrc.json, and
+refreshes shared skill mirrors for all platforms.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectPath, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolving project path: %w", err)
+			}
+			return promoteSkillIn(args[0], projectPath)
+		},
+	}
+}
+
+// promoteSkillIn promotes a repo-local skill (.agents/skills/<name>/) into the
+// shared agents store (~/.agents/skills/<project>/<name>/ as a managed symlink),
+// registers it in .agentsrc.json, and refreshes platform-level skill mirrors.
+func promoteSkillIn(name, projectPath string) error {
+	// Verify the repo-local skill exists and has a SKILL.md.
+	sourcePath := filepath.Join(projectPath, ".agents", "skills", name)
+	if _, err := os.Stat(filepath.Join(sourcePath, "SKILL.md")); err != nil {
+		return fmt.Errorf("skill %q not found in .agents/skills/ (expected SKILL.md at %s/SKILL.md)", name, sourcePath)
+	}
+
+	// Load project manifest for project name.
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return fmt.Errorf("loading .agentsrc.json: %w", err)
+	}
+	projectName := rc.Project
+	if projectName == "" {
+		return fmt.Errorf(".agentsrc.json has no project name set")
+	}
+
+	// Create managed symlink: agentsHome/skills/<project>/<name> -> <repo>/.agents/skills/<name>
+	agentsHome := config.AgentsHome()
+	destDir := filepath.Join(agentsHome, "skills", projectName)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("creating skills directory: %w", err)
+	}
+	destPath := filepath.Join(destDir, name)
+	if fi, err := os.Lstat(destPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			// Update existing symlink.
+			_ = os.Remove(destPath)
+		} else {
+			return fmt.Errorf("skill %q already exists at %s and is not a managed symlink", name, destPath)
+		}
+	}
+	if err := os.Symlink(sourcePath, destPath); err != nil {
+		return fmt.Errorf("creating skill symlink: %w", err)
+	}
+
+	// Register in .agentsrc.json.
+	rc.Skills = config.AppendUnique(rc.Skills, name)
+	if err := rc.Save(projectPath); err != nil {
+		return fmt.Errorf("updating .agentsrc.json: %w", err)
+	}
+
+	// Refresh platform-level skill mirrors using the shared executor.
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		ui.Bullet("warn", "could not determine home directory; skipping platform mirrors: "+err.Error())
+	} else {
+		targetRoots := []string{
+			filepath.Join(homeDir, ".agents", "skills"),
+			filepath.Join(homeDir, ".claude", "skills"),
+		}
+		if err := platform.ExecuteSharedSkillMirrorPlan(projectName, projectPath, targetRoots...); err != nil {
+			ui.Bullet("warn", "platform mirror refresh failed: "+err.Error())
+		}
+	}
+
+	ui.SuccessBox(
+		fmt.Sprintf("Promoted skill '%s' for project '%s'", name, projectName),
+		fmt.Sprintf("Registered in .agentsrc.json (%d skill(s) total)", len(rc.Skills)),
+		"Run 'dot-agents refresh' to sync across all platforms",
+	)
 	return nil
 }

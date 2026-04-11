@@ -32,7 +32,7 @@ Depends on: shared resource executor (resource-intent-centralization) for promot
 
 - [x] Add manifest round-trip preservation for unknown fields, or explicitly model the current `refresh` block if it is still supported.
 - [x] Make `install --generate` merge with existing `.agentsrc.json` where appropriate instead of replacing `sources` and other manual declarations wholesale.
-- [ ] Add a project-scope “skills import/promote” command path that:
+- [x] Add a project-scope “skills import/promote” command path that:
   1. imports repo-local skill content into `~/.agents/skills/<project>/`
   2. updates `.agentsrc.json`
   3. refreshes shared skill mirrors

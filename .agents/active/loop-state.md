@@ -10,8 +10,8 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 5 (command-consumer unification) next.
-- `skill-import-streamline`: Items 1–2 done (manifest round-trip, `install --generate` merge). Next: skills import/promote command path and shared-skills convergence.
+- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 (migrate skills to executor) in_progress — blocks Phase 5. Phase 5 (command-consumer unification) pending.
+- `skill-import-streamline`: Items 1–3 done (`skills promote` command added with managed symlink + manifest update + executor mirror refresh). Next: shared-skills convergence (item 4) and import/promote tests (item 5).
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
 Blocked waves (reassessed):
@@ -19,22 +19,22 @@ Blocked waves (reassessed):
 - `refresh-skill-relink`: effectively done (all root-cause items are resolved by resource-intent-centralization). Remaining item is a regression test that requires running `refresh`, which is guardrail-blocked. Can update status to reflect this.
 
 State summary:
-- `MergeGenerateAgentsRC` preserves existing git/local sources, non-empty project name, and `ExtraFields` when `install --generate` runs with an existing `.agentsrc.json`; filesystem-derived lists still come from `GenerateAgentsRC`. Covered by six unit tests (nil args, git+local merge, local dedupe, git dedupe, extra fields).
-- Live `install --generate` remains guardrail-blocked in the loop; evidence is tests + read-only `workflow plan` trace.
-- Next slice: `skill-import-streamline` item 3 (skills import/promote) or `resource-intent-centralization` Phase 5.
+- `skills promote <name>` command added: creates managed symlink in `agentsHome/skills/<project>/<name>` pointing to repo-local skill, registers in `.agentsrc.json`, calls `ExecuteSharedSkillMirrorPlan` for platform mirrors. 5 unit tests cover success, idempotency, and 3 error paths.
+- `ExecuteSharedSkillMirrorPlan` now has its first caller from the command layer (`skills promote`).
+- Next slice: `skill-import-streamline` item 4 (shared-skills convergence) or `resource-intent-centralization` Phase 3 first unchecked item (migrate callers to use executor).
 
 ## Loop Health
 
-Review target: iterations 12-14 and paired commits.
+Review target: iterations 13-15 and paired commits.
 
 Current findings:
-- `single-commit-closeout`: improving — iteration 14 targets one commit including loop-state + plan checkbox updates with the implementation.
-- `coverage-reconciliation`: improving — iteration 14 reconciles `workflow plan` and new `install --generate` coverage row against traces before closeout.
-- `playbook-hygiene`: improving — single rewritten playbook block below (no duplicate candidate stacks).
-- `scenario-tag-canon`: use `install-generate-source-merge` (table row) with `clean-repo` for this iteration; avoid ad hoc aliases.
-- `evidence-signal`: primary feedback for iteration 14 is unit-test proof of source merge; CLI trace is secondary read-only `workflow plan` (not another `workflow health` pass).
+- `single-commit-closeout`: on-target — iteration 15 is one commit (code + loop-state + plan checkbox).
+- `coverage-reconciliation`: on-target — scenario Coverage updated with `skills-promote-new-command` row; Command Coverage updated with skills commands.
+- `playbook-hygiene`: on-target — playbook rewritten in place for iteration 16.
+- `evidence-signal`: CLI trace is `skills --help` confirming wiring; primary proof is 5 unit tests covering success + 3 error paths.
+- `new-command-surface`: iteration 15 adds the first skills-management write-path command; iteration 16 should exercise `skills list` as a read-only surface to prove the agentsHome scan end-to-end.
 
-Operating rules for iteration 15+:
+Operating rules for iteration 16+:
 - Prefer one final commit per iteration that includes code plus loop-state/plan updates.
 - Use one primary evidence chain plus at most one secondary probe; reconcile coverage tables before closeout.
 - Rewrite summary sections in place; do not append duplicate playbook blocks.
@@ -63,6 +63,33 @@ Self-assessment:
 - ran_cli_command: yes
 - exercised_new_scenario: yes (workflow sweep --dry-run — first time; sweep-dry-run scenario covered)
 - cli_produced_actionable_feedback: yes (sweep proposes 5 actions across 3 projects; confirms drift report was accurate)
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
+### Iteration 15 — 2026-04-11
+- wave: skill-import-streamline
+- item: Add a project-scope "skills import/promote" command path
+- scenario_tags: [clean-repo, skills-promote-new-command]
+- feedback_goal: Does `skills promote` create the managed symlink in agentsHome/skills/<project>/, update .agentsrc.json Skills, and return errors for non-existent skill / missing project name / real-dir conflict?
+- files_changed: 2
+- lines_added: 154
+- lines_removed: 0
+- tests_added: 5
+- tests_total_pass: true
+- retries: 0
+- commit: TBD
+- scope_note: "on-target"
+- summary: Added `skills promote` subcommand with promoteSkillIn; creates managed symlink + updates manifest + calls ExecuteSharedSkillMirrorPlan; 5 tests cover success, idempotency, 3 error paths
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (success + idempotency + skill-not-found + no-project-name + non-symlink-conflict)
+- ran_cli_command: yes
+- exercised_new_scenario: yes (skills-promote-new-command; skills --help shows new subcommand)
+- cli_produced_actionable_feedback: yes (skills --help confirms promote wired correctly)
 - linked_traces_to_outcomes: yes
 - stayed_under_10_files: yes
 - no_destructive_commands: yes
@@ -403,27 +430,26 @@ Loop closeout rules:
 - Reconcile coverage tables before ending the iteration.
 
 Candidate paths (priority order):
-1. **skill-import-streamline item 3**: Add a project-scope skills import/promote command path (canonical import + manifest + shared mirrors), or the next smallest slice the plan allows.
-2. **resource-intent-centralization Phase 5**: Update `remove`, `status`, and `explain` to use the same resource registry and retire the now-zero-caller adapter helper in `internal/platform/resource_plan.go`.
-3. **Readiness reassessment only if needed**: Re-check `platform-dir-unification` and `refresh-skill-relink` if their markdown status lines are stale.
+1. **skill-import-streamline item 4**: Fix shared `.agents/skills/*` convergence — repo-local source directories becoming managed mirrors after promotion without conflicting platform relink behavior.
+2. **resource-intent-centralization Phase 3 item 1**: Migrate the highest-conflict repo-local outputs (`.agents/skills/<name>`, `.claude/skills/<name>`) onto the shared executor in `commands/refresh.go` and `commands/install.go`.
+3. **skill-import-streamline item 5**: Add tests for manifest save preserving sources/unknown-fields, import/promote of project skills, and repo `.agents/skills/*` becoming managed links.
 
-Preferred single item for iteration 15:
-- Either skill-import-streamline item 3 (promote path) or resource-intent Phase 5 first unchecked wave item — pick with plan-wave-picker.
+Preferred single item for iteration 16:
+- skill-import-streamline item 4 (shared-skills convergence) — it validates the promote flow end-to-end and unblocks resource-intent Phase 3.
 
-Primary feedback goal (placeholder — refine when wave is chosen):
-- Ask a concrete question the chosen command or test run can answer (avoid generic health-only checks).
+Primary feedback goal for iteration 16:
+- After a `skills promote`, does `skills list <project>` show the newly promoted skill, confirming the agentsHome scan works end-to-end?
 
 Command-feedback priorities:
-- Prefer the closest runnable surface to the code changed; use tests when loop guardrails block writes (`install --generate`, `refresh`, etc.).
-- Secondary: `workflow tasks <id>` when a canonical plan matches the wave, or `workflow verify record` only with safe fixtures.
+- Prefer `skills list <project>` as the closest runnable surface; secondary `workflow orient` to confirm no regressions.
 
 Known baseline CLI noise:
 - `status` / `doctor` warn about 4 broken Claude skill links in user config.
 - `doctor` warns that the `dot-agents` git source is not yet fetched.
 - `workflow sweep --dry-run` shows 5 actions across 3 projects; these are valid drift findings, not noise.
 
-Cleanup note:
-- `ExecuteSharedSkillMirrorPlan` in `resource_plan.go` now has zero callers from adapters. Fold removal or re-scoping into Phase 5 rather than leaving it as silent residue.
+Note:
+- `ExecuteSharedSkillMirrorPlan` in `resource_plan.go` now has its first caller (`skills promote`). The Phase 5 cleanup note is no longer relevant.
 
 ## Analysis Readiness
 
@@ -491,6 +517,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
 | `shared-pref-proposal-pending` | no | - | requires approval-gated write path outside repo |
 | `review-approve-reject-loop` | no | - | depends on queued shared preference proposals |
+| `skills-promote-new-command` | yes | 15 | `skills promote` wired and tested; creates managed symlink + updates .agentsrc.json + calls ExecuteSharedSkillMirrorPlan; CLI help confirms subcommand present |
 
 ### Delegation Lifecycle
 
@@ -624,6 +651,17 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 15 — 2026-04-11
+
+Trace: skills-promote-help-verify
+Command: `go run ./cmd/dot-agents skills --help`
+Scenario: [clean-repo, skills-promote-new-command]
+Feedback goal: Does `skills promote` appear as a subcommand in the CLI, confirming correct wiring?
+Output summary: `Available Commands: list, new, promote` — promote is wired with short description "Promote a repo-local skill to shared storage".
+Expectation: expected
+Follow-on: none — next iteration exercise `skills list <project>` after a sandbox promote to confirm agentsHome scan works end-to-end.
+Classification: [ok]
 
 ### Iteration 14 — 2026-04-11
 
@@ -1091,6 +1129,9 @@ Classification: [ok]
 | `kg communities` | yes | 2 | ok |
 | `kg flows` | yes | 5 | ok-warning |
 | `kg postprocess` | yes | 5 | ok |
+| `skills list` | no | - | - |
+| `skills new` | no | - | - |
+| `skills promote` | yes | 15 | ok (--help verified; subcommand wired) |
 
 ## Error Log
 
