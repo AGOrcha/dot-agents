@@ -18,9 +18,13 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
    - Prefer paired scenarios when useful: uninitialized vs initialized, disabled vs enabled, dry-run vs apply, empty vs populated, raw vs postprocess-complete
    - For integration scenarios, choose a sub-bucket first: `bootstrap`, `mutation-and-reconciliation`, `analysis-and-readback`, or `closeout-and-evidence`
    - Good examples: `canonical-plan-present`, `workflow-advance-success`, `fanout-write-scope-conflict`, `kg-setup-complete`, `warm-layer-populated`, `crg-build-complete`, `workflow-graph-disabled`, `repo-health-stack`, `managed-file-restore-stack`, `kg-crg-postprocess-stack`, `verification-checkpoint-stack`, `ok-warning-ux-friction`
+5. Before implementing, write down one short **feedback goal** for the post-commit command run
+   - This is the concrete question the CLI exercise must answer for the current change
+   - Good examples: "Do projected shared targets now dedupe cleanly?", "Does `workflow health` expose the new planner state?", "Can `kg build` now reach postprocess without a bridge mismatch?"
+   - Bad examples: "make sure nothing broke", "run something relevant", "reconfirm repo health"
 
 ## Wave Selection
-5. Use the plan-wave-picker skill (`.agents/skills/plan-wave-picker/`) to select the next wave from `.agents/active/*.plan.md`
+6. Use the plan-wave-picker skill (`.agents/skills/plan-wave-picker/`) to select the next wave from `.agents/active/*.plan.md`
    - Priority order: in-progress waves with unchecked items > waves with all dependencies complete > new waves
    - Skip plans tagged as blocked, waiting on external input, or listed in the skip-list section of loop-state.md
    - A plan's Status header (e.g., "Status: Completed") is authoritative — unchecked `- [ ]` items on a completed plan are stale, not real work
@@ -28,19 +32,20 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
    - If no actionable wave exists, write that finding to loop-state.md and stop
 
 ## Implementation (ONE item per iteration)
-6. Pick the next single unchecked item from the selected wave's plan
-7. Implement the code change — keep scope tight, touch minimal files
-8. Run focused tests first: `go test ./<changed-packages>`
-9. Run regression: `go test ./...`
-10. If tests pass, commit immediately:
+7. Pick the next single unchecked item from the selected wave's plan
+8. Implement the code change — keep scope tight, touch minimal files
+9. Run focused tests first: `go test ./<changed-packages>`
+10. Run regression: `go test ./...`
+11. If tests pass, commit immediately:
    - Format: `<area>: <what changed>`
    - Example: `kg: add deterministic query for entity lookup`
-11. If tests fail, fix the failure before moving on — do not leave red tests uncommitted
+12. If tests fail, fix the failure before moving on — do not leave red tests uncommitted
 
 ## Exercising Workflow Commands (after each implementation commit)
 After committing implementation work, exercise relevant `go run ./cmd/dot-agents` commands as a live integration test. This is real product testing — treat the results seriously.
 
 Analysis-oriented trace goals:
+- Start from the feedback goal you wrote earlier. The command run should answer that question or prove why it cannot be answered yet.
 - Prefer commands or repo states that add new evidence, not just repeated happy-path confirmation
 - When possible, add both one uncovered command and one uncovered state transition in the same iteration
 - If the current iteration only hits `[ok]` paths, try to include one safe expected empty-state, warning-state, or other non-destructive edge case
@@ -48,6 +53,13 @@ Analysis-oriented trace goals:
 - When a subsystem is already partially covered, prefer an integration scenario that chains 2-4 commands across subsystems instead of another isolated single-command success
 - For integration scenarios, prefer the next uncovered stack type rather than repeating the same kind of chain every time
 - Favor uncovered scenario/command combinations over duplicate runs when choosing what to exercise
+- A repeated command chain is acceptable only if one of these is true:
+  - it is the closest runnable surface to the code you changed
+  - it exercises a new scenario/state tag
+  - it verifies a previously failing or warning path after a fix
+  - loop-state.md explicitly lists it as the recommended next feedback path
+- If a command only reconfirms an existing healthy path, say so explicitly and keep the trace short; do not treat it as meaningful new evidence
+- If warnings are known baseline noise, mark them as baseline in the trace follow-on or CLI observations instead of pretending they are fresh feedback
 
 Read-only commands (always safe to run):
 - `go run ./cmd/dot-agents status` — verify project health
@@ -78,6 +90,11 @@ Approval-gated or fixture-gated commands (high-value for coverage, but only run 
 
 Pick the commands most relevant to the wave you just worked on. Run at least one read-only command per iteration.
 If the relevant command set is already well-covered, prefer the next uncovered scenario family rather than repeating another low-signal success trace.
+Bias the selection toward commands that are nearest to the changed code path:
+- command wiring or planner state changes: prefer `workflow health`, `workflow status`, `workflow orient`, `workflow plan`, `workflow tasks`, or the directly affected write path
+- KG/CRG bridge changes: prefer `kg health`, `kg query`, `kg build/update`, `kg postprocess`, `kg flows`, or `kg bridge`
+- cross-project workflow changes: prefer `workflow drift`, `workflow sweep`, `status`, and `doctor`
+- only fall back to the generic `status` -> `doctor` bootstrap stack when no closer runnable surface exists
 Integration checks are especially valuable when they cross subsystem boundaries. Prefer one of these sub-buckets:
 - Bootstrap stacks:
   `status` -> `doctor` -> `workflow health`
@@ -117,14 +134,15 @@ Always log the exact command, output, scenario tags, expectation (`expected`, `u
 - Maximum 10 files changed per iteration — if scope grows beyond that, split the work and commit what you have
 
 ## Iteration End
-12. Self-review: run `git diff` on any uncommitted changes, fix obvious issues, then commit
-13. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
-14. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
+13. Self-review: run `git diff` on any uncommitted changes, fix obvious issues, then commit
+14. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
+15. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
     ```
     ### Iteration N — YYYY-MM-DD HH:MM
     - wave: <plan-name>
     - item: <specific checklist item text>
     - scenario_tags: [tag-1, tag-2]
+    - feedback_goal: <the concrete question the CLI run was meant to answer>
     - files_changed: N
     - lines_added: N
     - lines_removed: N
@@ -136,7 +154,7 @@ Always log the exact command, output, scenario tags, expectation (`expected`, `u
     - summary: <one-line description of what was done>
     ```
     Get file/line counts from `git diff --stat` after committing.
-15. Append a self-assessment block to the same iteration entry:
+16. Append a self-assessment block to the same iteration entry:
     ```
     Self-assessment:
     - read_loop_state: yes/no
@@ -144,26 +162,28 @@ Always log the exact command, output, scenario tags, expectation (`expected`, `u
     - committed_after_tests: yes/no
     - ran_cli_command: yes/no
     - exercised_new_scenario: yes/no
+    - cli_produced_actionable_feedback: yes/no
     - linked_traces_to_outcomes: yes/no
     - stayed_under_10_files: yes/no
     - no_destructive_commands: yes/no
     ```
     Be honest — these are for post-hoc analysis, not grading.
-16. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
+17. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
     - A trace label, for example `Trace: workflow-status-clean-repo`
     - The exact command
     - Scenario tags
+    - Feedback goal
     - Output summary (truncate long output, keep errors verbatim)
     - Expectation: `expected`, `unexpected`, or `informative-nonblocking`
     - Follow-on: `none`, `documented`, `fixed same iteration`, `deferred`, or similar
     - Classification: `[ok]`, `[ok-empty]`, `[ok-warning]`, `[retry-recovered]`, `[impl-bug]`, `[tool-bug]`, `[missing-feature]`, or `[blocked]`
     - If multiple commands form one integration scenario, give them a shared scenario tag and note the chain in the trace labels or follow-on text
-17. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
-18. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
+18. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
+19. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
     - Update the matching family bucket, not just the first row that seems close
     - When a scenario is one half of a useful pair, note which side was exercised and what still remains uncovered
     - For integration scenarios, describe the command chain, the stack sub-bucket, and whether the subsystems stayed coherent end-to-end
-19. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
+20. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
     ```
     ### Iteration N
     - type: test-failure | compile-error | cli-error
@@ -171,12 +191,12 @@ Always log the exact command, output, scenario tags, expectation (`expected`, `u
     - resolution: <what fixed it>
     - retries: N
     ```
-20. Under `## CLI Observations` in loop-state.md, note any patterns:
+21. Under `## CLI Observations` in loop-state.md, note any patterns:
     - Commands that feel awkward or require too many steps
     - Output that is confusing or missing useful info
     - Features that would make the workflow smoother
     - UX friction (e.g., unnecessary prompts, unclear errors)
-21. Update `## Current Position`, `## What's Next`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
+22. Update `## Current Position`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
 
 ## What NOT to spend time on
 - Workspace hygiene beyond what the current wave requires
