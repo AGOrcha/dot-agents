@@ -1,6 +1,6 @@
 # Resource Intent Centralization Plan
 
-Status: Ready for implementation — RFC accepted in `docs/rfcs/resource-intent-centralization-rfc.md` (2026-04-11)
+Status: Phase 2 in progress — `ResourceIntent` model landed (2026-04-11); planner/executor layer is next
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md`
 
 ## Context
@@ -49,8 +49,8 @@ The design questions that previously blocked this plan are now resolved in `docs
 
 ## Phase 2: Introduce Resource Intent Model
 
-- [ ] Define an internal `ResourceIntent` shape for projection outputs.
-- [ ] Minimum fields:
+- [x] Define an internal `ResourceIntent` shape for projection outputs. (`internal/platform/resource_intent.go`, validated by `internal/platform/resource_intent_test.go`)
+- [x] Minimum fields are present on `ResourceIntent` / `ResourceSourceRef`:
   - target path
   - source bucket/scope resolver
   - transport (`symlink`, `hardlink`, rendered file, rendered fanout)
