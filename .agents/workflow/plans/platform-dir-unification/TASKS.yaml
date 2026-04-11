@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: "platform-dir-unification"
+tasks:
+  - id: "resume-phases-4-5"
+    title: "Resume Phase 4 (bash parity) and Phase 5 (new buckets) when resource-intent unblocks"
+    status: "blocked"
+    depends_on: []
+    blocks: []
+    owner: "dot-agents"
+    write_scope: ["src/lib/", "internal/platform/", "commands/"]
+    verification_required: false
+    notes: "Blocked per plan Status header — see resource-intent-centralization"

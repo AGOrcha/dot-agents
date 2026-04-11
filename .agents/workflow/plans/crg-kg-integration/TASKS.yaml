@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: "crg-kg-integration"
+tasks:
+  - id: "phase-e-postgres"
+    title: "Phase E — Postgres graphstore backend"
+    status: "in_progress"
+    depends_on: []
+    blocks: ["phase-f-go-mcp"]
+    owner: "dot-agents"
+    write_scope:
+      - "internal/graphstore/"
+      - "commands/"
+    verification_required: true
+    notes: "See .agents/active/crg-kg-integration.plan.md Phase E"
+
+  - id: "phase-f-go-mcp"
+    title: "Phase F — MCP server in Go"
+    status: "pending"
+    depends_on: ["phase-e-postgres"]
+    blocks: ["phase-g-skill-integration"]
+    owner: "dot-agents"
+    write_scope: ["commands/", "internal/"]
+    verification_required: true
+    notes: "After Phase E"
+
+  - id: "phase-g-skill-integration"
+    title: "Phase G — Skill integration (review-delta / review-pr bridge)"
+    status: "pending"
+    depends_on: ["phase-f-go-mcp"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/skills/", "commands/"]
+    verification_required: true
+    notes: "Deferred until E/F exercised"

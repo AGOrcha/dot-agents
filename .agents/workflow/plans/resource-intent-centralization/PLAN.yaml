@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: "resource-intent-centralization"
+title: "Resource Intent Centralization Plan"
+status: "active"
+summary: "Central resource planner/executor for shared repo-local projection targets; unify command consumers in Phase 5."
+created_at: "2026-02-23T00:00:00Z"
+updated_at: "2026-04-11T12:00:00Z"
+owner: "dot-agents"
+success_criteria: "Shared targets dedupe safely; refresh/install/remove/status use one projection plan."
+verification_strategy: "go test ./...; focused intent/planner packages"
+current_focus_task: "Phase 5: Unify command consumers (refresh/install/remove/status/explain)"

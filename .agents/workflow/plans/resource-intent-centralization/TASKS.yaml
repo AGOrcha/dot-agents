@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: "resource-intent-centralization"
+tasks:
+  - id: "phase-3-migrate-shared-targets"
+    title: "Phase 3 — Migrate highest-conflict repo-local outputs onto shared executor"
+    status: "in_progress"
+    depends_on: []
+    blocks: ["phase-5-unify-commands", "phase-6-verification"]
+    owner: "dot-agents"
+    write_scope:
+      - "internal/platform/"
+      - "commands/"
+    verification_required: true
+    notes: "Skills + agents/ projections per .agents/active/resource-intent-centralization.plan.md"
+
+  - id: "phase-4-agents-thin"
+    title: "Phase 4 — Thin adapters for agents/ projections via planner (deferred slice)"
+    status: "pending"
+    depends_on: ["phase-3-migrate-shared-targets"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: ["internal/platform/"]
+    verification_required: true
+    notes: "SharedTargetIntents for agents/ not yet implemented"
+
+  - id: "phase-5-unify-commands"
+    title: "Phase 5 — Unify refresh/install/remove/status/explain on projection executor"
+    status: "pending"
+    depends_on: ["phase-3-migrate-shared-targets"]
+    blocks: ["phase-6-verification"]
+    owner: "dot-agents"
+    write_scope: ["commands/"]
+    verification_required: true
+    notes: ""
+
+  - id: "phase-6-verification"
+    title: "Phase 6 — Registry, dedupe/conflict, import notes, status/explain coverage"
+    status: "pending"
+    depends_on: ["phase-5-unify-commands"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: ["commands/", "internal/platform/"]
+    verification_required: true
+    notes: ""

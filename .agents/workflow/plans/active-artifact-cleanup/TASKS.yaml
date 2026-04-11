@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: "active-artifact-cleanup"
+tasks:
+  - id: "inventory-active-plans"
+    title: "Inventory .agents/active/*.plan.md"
+    status: "completed"
+    depends_on: []
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/active/"]
+    verification_required: false
+    notes: ""
+
+  - id: "review-lessons-index"
+    title: "Review .agents/lessons/index.md for cleanup guidance"
+    status: "completed"
+    depends_on: []
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/lessons/"]
+    verification_required: false
+    notes: ""
+
+  - id: "archive-completed-plans"
+    title: "Archive completed plan files to .agents/history/"
+    status: "completed"
+    depends_on: ["inventory-active-plans"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/active/", ".agents/history/"]
+    verification_required: false
+    notes: "12 plans archived 2026-04-11"
+
+  - id: "normalize-stale-headers"
+    title: "Normalize stale plan Status headers"
+    status: "completed"
+    depends_on: ["inventory-active-plans"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/active/"]
+    verification_required: false
+    notes: ""
+
+  - id: "lesson-active-focus"
+    title: "Lesson: keep .agents/active/ focused on current work"
+    status: "completed"
+    depends_on: ["archive-completed-plans"]
+    blocks: []
+    owner: "dot-agents"
+    write_scope: [".agents/lessons/"]
+    verification_required: false
+    notes: "archive-completed-active-plans LESSON.md"

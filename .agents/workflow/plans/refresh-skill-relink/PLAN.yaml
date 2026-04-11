@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: "refresh-skill-relink"
+title: "Refresh Skill Relink Plan"
+status: "paused"
+summary: "Fix non-empty .agents/skills/<name> relink warnings via centralized resource planner."
+created_at: "2026-04-01T00:00:00Z"
+updated_at: "2026-04-11T12:00:00Z"
+owner: "dot-agents"
+success_criteria: "Refresh imports then relinks shared skill mirrors without spurious directory warnings."
+verification_strategy: "refresh integration tests; manual dot-agents refresh smoke"
+current_focus_task: "Await shared executor replacing per-platform syncScopedDirSymlinksTargets"

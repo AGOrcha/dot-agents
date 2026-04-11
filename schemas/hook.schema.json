@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/hook.schema.json",
+  "title": "dot-agents canonical hook bundle manifest",
+  "description": "Repo-local JSON Schema for ~/.agents/hooks/<scope>/<name>/HOOK.yaml. Aligns with internal/platform/hooks.go hookManifest and docs/CANONICAL_HOOKS_DESIGN.md. Editors validating YAML should map this schema; runtime validation in the CLI is not required for correctness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable logical hook id; defaults to bundle directory name if omitted in some loaders"
+    },
+    "description": {
+      "type": "string"
+    },
+    "when": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical lifecycle event. Common values include pre_tool_use, post_tool_use, session_start, user_prompt_submit, stop. Platform overrides may supply native event names."
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "expression": {
+          "type": "string",
+          "description": "Richer matcher when token lists are insufficient"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Command relative to hook bundle directory or absolute"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "enabled_on": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["claude", "cursor", "codex", "copilot", "opencode"]
+      },
+      "uniqueItems": true,
+      "description": "If omitted, emit everywhere representable"
+    },
+    "required_on": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["claude", "cursor", "codex", "copilot", "opencode"]
+      },
+      "uniqueItems": true
+    },
+    "platform_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "event": { "type": "string" },
+          "matcher": { "type": "string" },
+          "file": { "type": "string" }
+        }
+      }
+    }
+  }
+}

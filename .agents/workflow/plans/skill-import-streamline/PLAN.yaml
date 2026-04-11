@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: "skill-import-streamline"
+title: "Skill Import Streamline Plan"
+status: "paused"
+summary: "Preserve manifest fields; merge install --generate; unified promote path; shared skill convergence."
+created_at: "2026-04-01T00:00:00Z"
+updated_at: "2026-04-11T12:00:00Z"
+owner: "dot-agents"
+success_criteria: "No lossy .agentsrc rewrites; one coherent promote workflow; tests cover regressions."
+verification_strategy: "go test ./internal/config/... ./commands/..."
+current_focus_task: "Manifest round-trip + install --generate merge"
