@@ -77,6 +77,41 @@ func TestResourcePlanExecuteReplacesAllowlistedImportedSkillDir(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonicalSkillDir)
 }
 
+func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	// Set up a skill in agentsHome
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	platforms := []Platform{NewCodex(), NewOpenCode(), NewCopilot()}
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+
+	// All three platforms target .agents/skills/review; it should be a single symlink
+	target := filepath.Join(repo, ".agents", "skills", "review")
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("Lstat(%s): %v", target, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
+	}
+}
+
 func validSharedSkillIntent(targetPath, emitter string) ResourceIntent {
 	return ResourceIntent{
 		IntentID:    "skills.proj.review." + emitter,

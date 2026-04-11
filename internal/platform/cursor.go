@@ -317,3 +317,7 @@ func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
 	}
 	return false
 }
+
+func (c *cursor) SharedTargetIntents(_ string) ([]ResourceIntent, error) {
+	return nil, nil
+}

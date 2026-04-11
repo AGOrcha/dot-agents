@@ -100,3 +100,7 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 
 	return nil
 }
+
+func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	return BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+}

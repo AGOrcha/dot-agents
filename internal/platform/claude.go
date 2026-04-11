@@ -357,3 +357,10 @@ func isSymlink(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
+
+func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	return BuildSharedSkillMirrorIntents(project,
+		filepath.Join(claudeDir, "skills"),
+		filepath.Join(".agents", "skills"),
+	)
+}

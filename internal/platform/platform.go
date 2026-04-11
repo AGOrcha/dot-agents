@@ -18,6 +18,12 @@ type Platform interface {
 	HasDeprecatedFormat(repoPath string) bool
 	// DeprecatedDetails returns a description of the deprecated format.
 	DeprecatedDetails(repoPath string) string
+	// SharedTargetIntents returns the ResourceIntents this platform would write
+	// to shared (cross-platform) repo-local targets such as .agents/skills/*.
+	// These intents are aggregated by the command layer into a single
+	// ResourcePlan so compatible targets are deduped and conflicts are caught
+	// before any filesystem writes occur.
+	SharedTargetIntents(project string) ([]ResourceIntent, error)
 }
 
 // All returns the ordered list of all supported platforms.

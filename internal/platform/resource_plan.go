@@ -246,6 +246,29 @@ func sanitizeIntentRoot(root string) string {
 	return replacer.Replace(root)
 }
 
+// CollectAndExecuteSharedTargetPlan aggregates SharedTargetIntents from all
+// provided platforms, builds a single ResourcePlan that deduplicates compatible
+// shared-target intents and fails fast on incompatible ones, then executes it.
+// This is the command-layer entry point for centralized shared-target writes.
+func CollectAndExecuteSharedTargetPlan(project, repoPath string, platforms []Platform) error {
+	var all []ResourceIntent
+	for _, p := range platforms {
+		intents, err := p.SharedTargetIntents(project)
+		if err != nil {
+			return fmt.Errorf("%s shared intents: %w", p.ID(), err)
+		}
+		all = append(all, intents...)
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	plan, err := BuildResourcePlan(all)
+	if err != nil {
+		return err
+	}
+	return plan.Execute(repoPath, config.AgentsHome())
+}
+
 func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...string) error {
 	intents, err := BuildSharedSkillMirrorIntents(project, targetRoots...)
 	if err != nil {

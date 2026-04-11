@@ -345,3 +345,7 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) {
 		}
 	}
 }
+
+func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	return BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+}

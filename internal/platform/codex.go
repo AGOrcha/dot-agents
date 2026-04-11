@@ -307,3 +307,7 @@ func tomlMultilineString(value string) string {
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 	return "\"\"\"\n" + escaped + "\n\"\"\""
 }
+
+func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	return BuildSharedSkillMirrorIntents(project, filepath.Join(codexAgentsDir, "skills"))
+}
