@@ -1,7 +1,7 @@
 # KG Phase 1: Graph Core
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 1
-Status: First phase
+Status: Completed (2026-04-10)
 Depends on: Nothing (standalone subproject)
 
 ## Goal

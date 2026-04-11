@@ -53,6 +53,7 @@ It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.`,
 	root.AddCommand(commands.NewSyncCmd())
 	root.AddCommand(commands.NewExplainCmd())
 	root.AddCommand(commands.NewInstallCmd())
+	root.AddCommand(commands.NewKGCmd())
 
 	// Override Execute error handling for better UX
 	root.SetErr(os.Stderr)

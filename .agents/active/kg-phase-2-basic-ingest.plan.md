@@ -1,7 +1,7 @@
 # KG Phase 2: Basic Ingest
 
 Spec: `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — Phase 2
-Status: Second phase
+Status: Completed (2026-04-10)
 Depends on: KG Phase 1 (graph core)
 
 ## Goal

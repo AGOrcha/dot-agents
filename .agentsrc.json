@@ -29,6 +29,11 @@
   "sources": [
     {
       "type": "local"
+    },
+    {
+      "type": "git",
+      "url": "git@github.com:NikashPrakash/agents-config.git",
+      "ref": "main"
     }
   ],
   "refresh": {
