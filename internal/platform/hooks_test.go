@@ -313,3 +313,61 @@ func mustParseHookIndex(t *testing.T, s string) int64 {
 	}
 	return n
 }
+
+func TestListHookSpecsGraphIntegrationBundles(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
+	globalRoot := filepath.Join(agentsHome, "hooks", "global")
+	writeTextFile(t, filepath.Join(globalRoot, "graph-update", "HOOK.yaml"), `name: graph-update
+description: test
+when: post_tool_use
+match:
+  expression: "Edit|Write|Bash"
+run:
+  command: dot-agents kg update --skip-flows
+  timeout_ms: 5000
+enabled_on:
+  - claude
+`)
+	writeTextFile(t, filepath.Join(globalRoot, "graph-precommit", "HOOK.yaml"), `name: graph-precommit
+description: test
+when: pre_tool_use
+match:
+  tools:
+    - Bash
+run:
+  command: ./graph-precommit.sh
+  timeout_ms: 10000
+`)
+	writeTextFile(t, filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh"), "#!/bin/sh\nexit 0\n")
+
+	specs, err := listHookSpecs(agentsHome, "global")
+	if err != nil {
+		t.Fatalf("listHookSpecs: %v", err)
+	}
+	var gotUpdate, gotPre *HookSpec
+	for i := range specs {
+		switch specs[i].Name {
+		case "graph-update":
+			gotUpdate = &specs[i]
+		case "graph-precommit":
+			gotPre = &specs[i]
+		}
+	}
+	if gotUpdate == nil {
+		t.Fatal("expected graph-update spec")
+	}
+	if gotUpdate.When != "post_tool_use" || !strings.Contains(gotUpdate.Command, "kg update") {
+		t.Fatalf("graph-update: %#v", gotUpdate)
+	}
+	if gotPre == nil {
+		t.Fatal("expected graph-precommit spec")
+	}
+	if gotPre.When != "pre_tool_use" || gotPre.Command != "./graph-precommit.sh" {
+		t.Fatalf("graph-precommit: %#v", gotPre)
+	}
+	wantResolved := filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh")
+	if got := resolveHookCommand(*gotPre); got != wantResolved {
+		t.Fatalf("resolveHookCommand = %q, want %q", got, wantResolved)
+	}
+}

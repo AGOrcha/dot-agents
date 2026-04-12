@@ -1,0 +1,15 @@
+name: graph-precommit
+description: >
+  Claude Code has no PreCommit hook event; this runs on PreToolUse/Bash when the tool
+  input looks like a git commit, and executes kg change brief (same intent as legacy CRG pre-commit).
+when: pre_tool_use
+match:
+  tools:
+    - Bash
+run:
+  command: ./graph-precommit.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
+  - cursor

@@ -46,7 +46,7 @@ tasks:
         See plan.md Phase F for full struct definitions, tool catalog table, and test shapes.
     - id: phase-g-skill-integration
       title: Phase G — Wire build-graph / review-delta / review-pr skills to native dot-agents kg commands
-      status: in_progress
+      status: completed
       depends_on:
         - phase-f-go-mcp
       blocks: []
@@ -62,6 +62,9 @@ tasks:
         - .agents/skills/review-pr/
         - .agents/skills/self-review/
         - .agents/skills/agent-start/
+        - internal/scaffold/hooks/global/graph-update/
+        - internal/scaffold/hooks/global/graph-orient/
+        - internal/scaffold/hooks/global/graph-precommit/
         - ~/.agents/hooks/global/
       verification_required: true
       notes: |
@@ -82,7 +85,8 @@ tasks:
           graph-precommit/HOOK.yaml (pre_commit, "dot-agents kg changes --brief")
         See plan.md Hooks Integration section for exact HOOK.yaml content.
 
-        Merge-back 2026-04-12: Canonical embedded copies added under
-        src/share/templates/standard/skills/global/ for build-graph, review-delta, review-pr; self-review and
-        agent-start templates updated for kg/workflow readback. Global ~/.agents/skills/global remains the
-        runtime mirror; hooks under ~/.agents/hooks/global/ still TODO for full Phase G closeout.
+        Merge-back 2026-04-12: Canonical embedded copies under
+        src/share/templates/standard/skills/global/ (build-graph, review-delta, review-pr); self-review/agent-start
+        touch-ups. 2026-04-12: Embedded global hook bundles under internal/scaffold/hooks/global/
+        (graph-update, graph-orient, graph-precommit with Bash/git-commit gate for kg changes --brief).
+        Runtime copies live under ~/.agents/hooks/global/ after init/CopyMissingGlobalBundles.
