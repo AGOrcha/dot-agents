@@ -589,7 +589,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		RunE: runWorkflowGraphQuery,
 	}
-	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions; code-structure intents use dot-agents kg bridge query")
+	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions; code-structure intents are forwarded to `dot-agents kg bridge query`")
 	graphQueryCmd.Flags().String("scope", "", "Optional scope filter")
 
 	graphHealthCmd := &cobra.Command{
@@ -3164,6 +3164,34 @@ func isWorkflowGraphCodeBridgeIntent(intent string) bool {
 	return workflowGraphCodeBridgeIntents[intent]
 }
 
+// workflowDotAgentsExe resolves the path to the dot-agents binary for nested CLI invocations
+// (e.g. workflow graph query forwarding to kg bridge). Tests replace this with a freshly built
+// binary because os.Executable() in `go test` points at the test harness, not the real CLI.
+var workflowDotAgentsExe = func() (string, error) {
+	return os.Executable()
+}
+
+func runWorkflowGraphQueryViaKGBridge(projectPath, intent string, queryArgs []string) error {
+	exe, err := workflowDotAgentsExe()
+	if err != nil {
+		return fmt.Errorf("resolve dot-agents executable: %w", err)
+	}
+	argv := []string{"kg", "bridge", "query", "--intent", intent}
+	argv = append(argv, queryArgs...)
+	if Flags.JSON {
+		argv = append([]string{"--json"}, argv...)
+	}
+	cmd := exec.Command(exe, argv...)
+	cmd.Dir = projectPath
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kg bridge query (via workflow graph query): %w", err)
+	}
+	return nil
+}
+
 // loadGraphBridgeConfig reads .agents/workflow/graph-bridge.yaml. If absent, bridge is disabled.
 func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 	p := filepath.Join(projectPath, ".agents", "workflow", "graph-bridge.yaml")
@@ -3422,11 +3450,9 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 			"Workflow graph queries require a bridge intent such as `plan_context` or `decision_lookup`.",
 		)
 	}
+	scope, _ := cmd.Flags().GetString("scope")
 	if isWorkflowGraphCodeBridgeIntent(intent) {
-		return ErrorWithHints(
-			fmt.Sprintf("workflow graph query does not handle code-structure intent %q", intent),
-			fmt.Sprintf("Use `dot-agents kg bridge query --intent %s` instead.", intent),
-		)
+		return runWorkflowGraphQueryViaKGBridge(projectPath, intent, args)
 	}
 	cfg, err := loadGraphBridgeConfig(projectPath)
 	if err != nil {
@@ -3460,7 +3486,6 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	scope, _ := cmd.Flags().GetString("scope")
 	query := strings.Join(args, " ")
 	graphHome := cfg.GraphHome
 	if graphHome == "" {

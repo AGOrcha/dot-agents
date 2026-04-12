@@ -219,6 +219,22 @@ Practical rule:
 - use graph-first lookup for symbols, callers/callees, blast radius, tests, and decision links
 - fall back to `rg` only when the graph is absent, stale, or the question is raw text shaped
 
+### KG-First Query Routing
+
+`workflow graph query` distinguishes two intent families:
+
+1. **Workflow / KG-note intents** (`plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions`) — served by the workflow graph bridge when `.agents/workflow/graph-bridge.yaml` has `enabled: true`, using the configured `graph_home` and `LocalGraphAdapter`.
+
+2. **Code-structure intents** (`symbol_lookup`, `impact_radius`, `change_analysis`, `tests_for`, `callers_of`, `callees_of`, `community_context`, `symbol_decisions`, `decision_symbols`) — **not** handled on the workflow-local bridge path. The CLI forwards to the same entry point as a manual invocation:
+
+   `dot-agents kg bridge query --intent <intent> <query>`
+
+   The child process inherits the current working directory (the project), connects stdout and stderr to the parent, and receives the global `--json` flag when the parent was run with `--json` (so JSON output shape matches `kg bridge query`).
+
+   The workflow-local `--scope` flag still applies only to note-oriented queries on the filesystem bridge. When `kg bridge query` grows an optional `--scope`, the forwarder can pass it through without duplicating semantics here.
+
+This keeps a single implementation for code-structure queries (CRG / structural graph behavior in `kg bridge`) while leaving note-oriented workflow queries on the filesystem bridge.
+
 ## Initial Product Slices
 
 Phase 3B/3C correspond to items 4 and 5 below: define the canonical slice artifact first, then gate delegation on fanout readiness checks.

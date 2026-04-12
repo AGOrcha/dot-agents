@@ -1799,30 +1799,54 @@ func TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowGraphQueryRejectsCodeStructureIntent(t *testing.T) {
+func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
+	oldExe := workflowDotAgentsExe
+	t.Cleanup(func() { workflowDotAgentsExe = oldExe })
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, ".."))
+	bin := filepath.Join(t.TempDir(), "dot-agents")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/dot-agents")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build dot-agents: %v\n%s", err, out)
+	}
+	workflowDotAgentsExe = func() (string, error) { return bin, nil }
+
 	project := t.TempDir()
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("KG_HOME", t.TempDir())
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("intent", "symbol_lookup", "")
 	cmd.Flags().String("scope", "", "")
 
 	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 	if err := os.Chdir(project); err != nil {
 		t.Fatal(err)
 	}
 
-	err := runWorkflowGraphQuery(cmd, nil)
+	err = runWorkflowGraphQuery(cmd, []string{"SomeQuery"})
 	if err == nil {
-		t.Fatal("expected code-structure intent to be rejected")
+		t.Fatal("expected error from kg bridge when graph is not initialized")
 	}
-	if !strings.Contains(err.Error(), "code-structure intent") {
-		t.Fatalf("unexpected error: %v", err)
+	if strings.Contains(err.Error(), "workflow graph query does not handle") {
+		t.Fatalf("expected route to kg bridge, got old guard: %v", err)
 	}
-	if !strings.Contains(err.Error(), "kg bridge query") {
-		t.Fatalf("unexpected error: %v", err)
+	if strings.Contains(err.Error(), "Use `dot-agents kg bridge query") {
+		t.Fatalf("expected route to kg bridge, got manual-use hint: %v", err)
+	}
+}
+
+func TestWorkflowGraphQueryKGBridgeIntentsNotRouted(t *testing.T) {
+	kgIntents := []string{"plan_context", "decision_lookup", "entity_context", "workflow_memory", "contradictions"}
+	for _, intent := range kgIntents {
+		if isWorkflowGraphCodeBridgeIntent(intent) {
+			t.Errorf("intent %q must not be classified as workflow code-bridge intent (should use local graph bridge path)", intent)
+		}
 	}
 }
 
