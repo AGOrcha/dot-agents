@@ -110,6 +110,32 @@ The orchestrator should reuse existing canonical artifacts where possible.
 | `.agents/active/fold-back/<id>.yaml` | pending low-risk observation to reconcile into plans, matrix, or lessons |
 | `.agents/active/delegation-bundles/<delegation-id>.yaml` | per-delegate worker/profile/prompt/context/verification bundle; inspectable handoff payload paired with the delegation contract |
 
+### Delegation bundle workflow (orchestrator / delegation, Phase 8)
+
+Phase 8 models handoff as three layers (do not collapse into a single ad hoc prompt):
+
+1. **Global worker profile** — under `~/.agents/` (stable habits: honor `write_scope`, trust canonical tasks, verification cadence, trace discipline).
+2. **Project overlay** — repo-local files (plan locations, regression matrix, validation queue, project loop guidance).
+3. **Per-delegation bundle** — `.agents/active/delegation-bundles/<delegation_id>.yaml`, validated by [`schemas/workflow-delegation-bundle.schema.json`](../schemas/workflow-delegation-bundle.schema.json).
+
+**CLI status:** the Go CLI does **not** yet write delegation bundles from `workflow fanout`. Flags such as `--prompt`, `--prompt-file`, `--delegate-profile`, and `--context-file` are **not** wired. Fanout today only creates the delegation contract under `.agents/active/delegation/`. Until bundle persistence lands, author the bundle YAML by hand (or via skills) after fanout so the worker payload stays a durable repo artifact.
+
+**Manual workflow (today):**
+
+1. Run `workflow fanout` (and `--slice` when using `SLICES.yaml`) to create `.agents/active/delegation/<parent_task_id>.yaml`.
+2. Read the contract’s `id` field (for example `del-<task-id>-<unix>`).
+3. Write `.agents/active/delegation-bundles/<delegation_id>.yaml` using the same `delegation_id` value as the contract `id`, then fill `worker`, `prompt`, `context`, `verification`, and `closeout` per the schema.
+
+**Closeout responsibilities** — bundle `closeout.worker_must` / `closeout.parent_must` line up with workflow commands as follows:
+
+| Role | Schema token | Command |
+|------|----------------|---------|
+| Worker | `workflow_verify_record` | `dot-agents workflow verify record …` |
+| Worker | `workflow_checkpoint` | `dot-agents workflow checkpoint …` |
+| Worker | `workflow_merge_back` | `dot-agents workflow merge-back …` |
+| Parent | `workflow_advance` | `dot-agents workflow advance …` |
+| Parent | `workflow_delegation_closeout` | `dot-agents workflow delegation closeout …` (planned in Phase 7; not implemented yet) |
+
 ### Plan lifecycle
 
 Canonical plan bundles need a terminal lifecycle, not just task-level completion.
@@ -310,7 +336,7 @@ This is where files like `.agents/active/active.loop.md` or repo-specific loop p
 
 #### 3. Delegation bundle
 
-Per-task persisted payload created by `workflow fanout`:
+Per-delegation persisted payload at `.agents/active/delegation-bundles/<delegation_id>.yaml` (intended to be written by `workflow fanout` once Phase 8 flags exist; **manual until then** — see **Delegation bundle workflow** under *Canonical Artifact Direction*):
 
 - chosen plan/task/slice and selection reason
 - owner plus worker profile reference
@@ -338,8 +364,8 @@ Global loop-worker behavior should also require negative-path coverage whenever 
 
 Use a sibling artifact rather than overloading the core delegation contract:
 
-- contract: `.agents/active/delegation/<delegation-id>.yaml`
-- bundle: `.agents/active/delegation-bundles/<delegation-id>.yaml`
+- contract file: `.agents/active/delegation/<parent_task_id>.yaml` (unique delegation id is the contract’s `id` field)
+- bundle file: `.agents/active/delegation-bundles/<delegation_id>.yaml` (`delegation_id` should match the contract `id`)
 - schema: `schemas/workflow-delegation-bundle.schema.json`
 
 The schema should be embedded into the binary alongside the other repo-local schemas so later runtime validation can bind directly to the canonical artifact contract.
