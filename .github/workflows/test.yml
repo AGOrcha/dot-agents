@@ -78,7 +78,7 @@ jobs:
       - name: Test --help
         run: |
           ./src/bin/dot-agents --help
-          ./src/bin/dot-agents --help | grep -q "USAGE"
+          ./src/bin/dot-agents --help | grep -q "Usage:"
 
       - name: Test init --dry-run
         run: |
@@ -115,9 +115,9 @@ jobs:
         run: |
           ./src/bin/dot-agents remove ci-test --dry-run
 
-      - name: Test sync (no git repo)
+      - name: Test sync status
         run: |
-          ./src/bin/dot-agents sync status 2>&1 | grep -q "not a git repository" || true
+          ./src/bin/dot-agents sync status
 
       - name: Cleanup
         run: |

@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016382590591000
+plan_id: platform-dir-unification
+task_id: phase-4-bash-deprecation
+observation: 'Fold-back: merge-back integrated — bash deprecation slice for platform-dir-unification.'
+classification: small
+routed_to: task_note:platform-dir-unification/phase-4-bash-deprecation
+created_at: "2026-04-12T17:53:02Z"

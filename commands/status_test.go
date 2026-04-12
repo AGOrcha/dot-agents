@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -129,5 +130,58 @@ platforms: [opencode]
 	}
 	if !strings.Contains(rendered, "my-plugin") {
 		t.Fatalf("status output missing plugin name:\n%s", rendered)
+	}
+}
+
+func TestStatusJSONOutput(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}}
+	cfg.AddProject("repo", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	prevJSON := Flags.JSON
+	Flags.JSON = true
+	defer func() { Flags.JSON = prevJSON }()
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runStatus(false, ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	os.Stdout = oldStdout
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var report statusJSONReport
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("status output is not valid json: %v\n%s", err, string(out))
+	}
+	if report.AgentsHome != agentsHome {
+		t.Fatalf("agents_home = %q, want %q", report.AgentsHome, agentsHome)
+	}
+	if len(report.Projects) != 1 || report.Projects[0].Name != "repo" {
+		t.Fatalf("unexpected projects payload: %#v", report.Projects)
+	}
+	if !report.Projects[0].PathExists {
+		t.Fatalf("expected project path to exist in report: %#v", report.Projects[0])
 	}
 }

@@ -62,7 +62,7 @@ tasks:
         - commands/import_test.go
         - commands/doctor_test.go
       verification_required: true
-      notes: |
+      notes: |-
         SCHEMA WIRING: create schemas/schemas.go embed package (see docs/SCHEMA_FOLLOWUPS.md); go get
         github.com/santhosh-tekuri/jsonschema/v5; wire LoadPluginSpec to validate via schemas.Plugin
         before unmarshal into typed struct; drop validatePluginSpec manual validator; add PluginManifestSchema
@@ -85,6 +85,7 @@ tasks:
         Tests: TestStatusShowsPluginsSection, TestImportFromOpencodePluginDir,
         TestImportFromCursorPluginManifest, TestDoctorPluginBrokenSymlink.
         See plan.md Phase 4 section for exact code patterns.
+        - Fold-back: merge-back integrated — plugin command readback slice complete.
     - id: phase-5-closeout
       title: Phase 5 — Close out duplicate branch artifacts and feed Stage 2 bucket expansion
       status: completed
@@ -98,4 +99,6 @@ tasks:
         - commands/
         - internal/platform/
       verification_required: true
-      notes: Closeout only. The rebuilt plugin-resource path is the baseline now; retire duplicate branch assumptions and stale docs/cache artifacts from the planning surface, and leave implementation follow-ons to later Stage 2 slices.
+      notes: |-
+        Closeout only. The rebuilt plugin-resource path is the baseline now; retire duplicate branch assumptions and stale docs/cache artifacts from the planning surface, and leave implementation follow-ons to later Stage 2 slices.
+        - Fold-back: merge-back integrated — donor-branch ambiguity closed; plugin path baseline for Stage 2.

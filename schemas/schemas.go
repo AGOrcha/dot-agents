@@ -20,10 +20,20 @@ type Schema struct {
 //go:embed plugin.schema.json
 var pluginSchemaBytes []byte
 
+//go:embed workflow-delegation-bundle.schema.json
+var workflowDelegationBundleSchemaBytes []byte
+
 // Plugin is the embedded schema handle for PLUGIN.yaml.
 var Plugin = Schema{
 	name: "plugin.schema.json",
 	data: pluginSchemaBytes,
+}
+
+// WorkflowDelegationBundle is the embedded schema handle for
+// .agents/active/delegation-bundles/<delegation-id>.yaml.
+var WorkflowDelegationBundle = Schema{
+	name: "workflow-delegation-bundle.schema.json",
+	data: workflowDelegationBundleSchemaBytes,
 }
 
 // Validate checks jsonBytes against the supplied schema handle.

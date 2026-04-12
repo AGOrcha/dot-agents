@@ -40,7 +40,9 @@ tasks:
         - .agents/workflow/plans/
         - docs/
       verification_required: true
-      notes: Phase 3A is complete; the remaining slice-artifact/readiness lane stays in the plan/doc surface and keeps the derived graph as the only source of truth.
+      notes: |-
+        Phase 3A is complete; the remaining slice-artifact/readiness lane stays in the plan/doc surface and keeps the derived graph as the only source of truth.
+        - Fold-back: merge-back integrated — plan/task graph + slices model.
     - id: phase-4-fanout-from-slices
       title: Phase 4 — Wire workflow fanout --slice flag to resolve task and write-scope from SLICES.yaml
       status: completed
@@ -54,7 +56,7 @@ tasks:
         - commands/workflow.go
         - commands/workflow_test.go
       verification_required: true
-      notes: |
+      notes: |-
         Add --slice flag to fanoutCmd in NewWorkflowCmd(). Remove MarkFlagRequired("task"); replace with
         runtime mutual-exclusion: error if both --slice and --task set; error if neither set after slice
         resolution. In runWorkflowFanout: when --slice provided, call loadCanonicalSlices(project.Path,
@@ -62,6 +64,7 @@ tasks:
         --write-scope not explicitly passed). Error if slice.Status == "completed".
         Tests: TestFanoutFromSlice, TestFanoutSliceAndTaskMutuallyExclusive, TestFanoutSliceNotFound,
         TestFanoutSliceAlreadyCompleted. See plan.md Phase 4 section for full code sketch and test shapes.
+        - Fold-back: merge-back integrated — workflow fanout --slice resolves task/write_scope from SLICES.yaml.
     - id: phase-5-kg-first-understanding
       title: Phase 5 — Auto-route code-structure intents in workflow graph query to kg bridge
       status: completed
@@ -74,7 +77,7 @@ tasks:
         - commands/workflow_test.go
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: |
+      notes: |-
         commands/kg.go slice is complete (per delegation merge-back). Remaining work:
         1. commands/workflow.go — runWorkflowGraphQuery (line ~3017): replace the error-on-code-structure-intent
            guard with an exec.Command subprocess call to "dot-agents kg bridge query --intent <intent>
@@ -85,6 +88,7 @@ tasks:
         3. docs/LOOP_ORCHESTRATION_SPEC.md — add "KG-First Query Routing" section with routing table mapping
            each intent to its backing system (LocalGraphAdapter vs kg bridge subprocess). See plan.md Phase 5
            section for full detail.
+        - Fold-back: merge-back integrated — workflow graph query forwards code-structure intents to kg bridge.
     - id: phase-6-fold-back-reconciliation
       title: Phase 6 — Implement workflow fold-back create/list with small vs proposal routing
       status: pending
@@ -127,14 +131,23 @@ tasks:
         Add a parent-driven closeout/reconcile surface after merge-back so completed delegation artifacts do not
         stay in `.agents/active/` forever. Scope:
         1. consume a completed delegation contract + merge-back artifact as one closeout unit
-        2. archive or relocate processed artifacts out of active state into durable history
+        2. archive or relocate processed artifacts out of active state into durable history under the owning
+           plan, using `.agents/history/<plan-id>/<optional-subplan>/delegate-merge-back-archive/<yyyy-mm-dd>/<task-or-slice>/`
+           as the canonical destination instead of a repo-wide catchall archive
         3. advance the canonical task to completed/failed based on parent decision
         4. if the closed task completes the plan, update PLAN.yaml status/current_focus_task coherently
-        5. make orient/status pending-merge-back counts reflect unintegrated artifacts only
-        6. document stale-active-contract cleanup rules for already-completed plans
+        5. define canonical plan retirement: `completed` remains in `.agents/workflow/plans/<plan-id>/` until
+           verification/fold-back/cleanup are done; `archived` means the bundle has moved to
+           `.agents/history/<plan-id>/plan-archive/<yyyy-mm-dd>/`
+        6. archive the final bundle by preserving PLAN/TASKS/(optional) SLICES/narrative plan doc in the
+           history tree, stamping the archived copy `status: archived`, and removing the source bundle from
+           `.agents/workflow/plans/<plan-id>/`
+        7. make orient/status pending-merge-back counts reflect unintegrated artifacts only
+        8. document stale-active-contract cleanup rules for already-completed plans, including migration of legacy
+           flat archives like `.agents/history/delegation-merge-back-archive/...`
         Candidate surface: `workflow delegation closeout` or `workflow reconcile delegation`.
         Tests should cover completed-contract archival, merge-back consumption, task completion, plan completion,
-        and stale completed-plan cleanup.
+        completed-plan archive/removal from `.agents/workflow/plans/`, and stale completed-plan cleanup.
     - id: phase-8-delegate-prompt-and-file-inputs
       title: Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
       status: pending
@@ -147,17 +160,28 @@ tasks:
         - commands/workflow_test.go
         - docs/LOOP_ORCHESTRATION_SPEC.md
         - .agents/skills/
+        - schemas/
       verification_required: true
       notes: |
-        Extend the orchestration/delegation contract so a parent can give each sub-agent an explicit prompt via:
-        1. inline argument text
-        2. one or more prompt/context files
-        3. optional per-owner overrides when multiple delegates are spun up separately
+        Implement Phase 8 as a 3-layer delegation model:
+        1. global loop-worker profile under `~/.agents/`
+        2. repo-local project overlay prompt/guidance files
+        3. per-delegation bundle artifact in repo state
         Direction:
-        - add repeatable fanout flags such as `--prompt`, `--prompt-file`, and `--context-file`
-        - persist those inputs on the delegation contract or a sibling bundle artifact instead of leaving them
-          only in transient terminal history
-        - teach `orchestrator-session-start` / `delegation-lifecycle` how to pass the bundle forward
-        - allow different prompt/file sets per sub-agent by making the inputs delegation-specific, not plan-global
-        Tests should cover inline prompt capture, prompt-file loading, repeated context files, and no-leak
-        behavior when multiple delegation contracts for different tasks use different prompt bundles.
+        - add repeatable fanout flags such as `--delegate-profile`, `--project-overlay`, `--prompt`,
+          `--prompt-file`, `--context-file`, `--feedback-goal`, `--scenario-tag`, `--regression-artifact`,
+          and `--validation-queue`
+        - persist those inputs in a sibling bundle artifact under
+          `.agents/active/delegation-bundles/<delegation-id>.yaml`
+        - add `schemas/workflow-delegation-bundle.schema.json` and embed it into the binary via `schemas/`
+        - teach `orchestrator-session-start` / `delegation-lifecycle` to consume persisted bundles instead of
+          reconstructing task handoff from memory
+        - support six reusable testing additions in the bundle/profile contract:
+          feedback_goal, scenario_tags, regression_matrix/regression_artifacts, higher-layer validation queue,
+          evidence classification taxonomy, and sandbox policy for mutating verification
+        - require negative-path coverage metadata when new failure modes are introduced
+        - model worker closeout (`workflow verify record`, `workflow checkpoint`, `workflow merge-back`) separately
+          from parent closeout (`workflow advance`, delegation closeout/archive)
+        Tests should cover bundle persistence, inline prompt capture, prompt-file loading, repeated context files,
+        reusable verification metadata capture, and no-leak behavior when multiple delegation contracts for
+        different tasks use different bundles.

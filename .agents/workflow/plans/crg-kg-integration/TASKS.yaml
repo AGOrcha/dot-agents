@@ -12,7 +12,9 @@ tasks:
         - internal/graphstore/
         - commands/
       verification_required: true
-      notes: See .agents/active/crg-kg-integration.plan.md Phase E
+      notes: |-
+        See .agents/active/crg-kg-integration.plan.md Phase E
+        - Fold-back: merge-back integrated — Phase E Postgres graphstore slice.
     - id: phase-f-go-mcp
       title: Phase F — Go MCP server embedded in dot-agents kg serve (stdio, JSON-RPC 2.0)
       status: completed
@@ -28,7 +30,7 @@ tasks:
         - commands/add.go
         - commands/init.go
       verification_required: true
-      notes: |
+      notes: |-
         New file internal/graphstore/mcp_server.go: MCPServer struct with Serve(r, w), dispatch(method,
         id, params), and eight handler methods (one per tool). Transport: JSON-RPC 2.0 over stdin/stdout.
         Tool dispatch: method=="tools/call", route by params.name. Also handle "tools/list".
@@ -44,6 +46,7 @@ tasks:
         Tests: TestKGServeToolsList, TestKGServeBuildOrUpdateGraph (mock CRGBridge), TestKGServeGetImpactRadius,
         TestKGServeUnknownTool (expect JSON-RPC error -32601).
         See plan.md Phase F for full struct definitions, tool catalog table, and test shapes.
+        - Fold-back: merge-back integrated — Phase F Go MCP server slice.
     - id: phase-g-skill-integration
       title: Phase G — Wire build-graph / review-delta / review-pr skills to native dot-agents kg commands
       status: completed
@@ -67,7 +70,7 @@ tasks:
         - internal/scaffold/hooks/global/graph-precommit/
         - ~/.agents/hooks/global/
       verification_required: true
-      notes: |
+      notes: |-
         Deferred until Phase E/F are exercised. When this task activates, the concrete changes are:
         build-graph skill: replace MCP tool calls (build_or_update_graph_tool, list_graph_stats_tool)
           with "dot-agents kg build" and "dot-agents kg code-status" CLI invocations.
@@ -90,3 +93,4 @@ tasks:
         touch-ups. 2026-04-12: Embedded global hook bundles under internal/scaffold/hooks/global/
         (graph-update, graph-orient, graph-precommit with Bash/git-commit gate for kg changes --brief).
         Runtime copies live under ~/.agents/hooks/global/ after init/CopyMissingGlobalBundles.
+        - Fold-back: merge-back integrated — Phase G embedded CRG skills + global graph hooks; crg-kg plan closed.

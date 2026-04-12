@@ -16,7 +16,7 @@ tasks:
         - scripts/
         - tests/
       verification_required: true
-      notes: |
+      notes: |-
         Delete these files in a single commit:
           src/lib/commands/init.sh
           src/lib/commands/import.sh
@@ -33,6 +33,7 @@ tasks:
         If it does, replace the delegation with a direct exec of the Go binary.
         After deletion: grep src/ scripts/ tests/ for any remaining `source` or `.` references to the deleted paths and remove them.
         Acceptance: go test ./... passes; scripts/verify.sh passes; no source/. references to deleted files remain.
+        - Fold-back: merge-back integrated — bash deprecation slice for platform-dir-unification.
     - id: phase-5-new-buckets
       title: Phase 5 — Add Stage 2 bucket expansion (commands, output-styles, modes, plugins, themes, prompts)
       status: completed
@@ -45,7 +46,7 @@ tasks:
         - commands/
         - docs/
       verification_required: true
-      notes: |
+      notes: |-
         Coordinator first — extend the shared resource descriptor layer in internal/platform/ to declare new
         bucket types: commands, output-styles, ignore, modes, plugins (fed by plugin-resource-salvage plan),
         themes, prompts.
@@ -58,3 +59,4 @@ tasks:
           Worker C: Copilot additions
         Acceptance: go test ./...; dot-agents status shows new bucket entries; round-trip import/refresh
         preserves new bucket files.
+        - Fold-back: merge-back integrated — Stage 2 bucket expansion slice landed.

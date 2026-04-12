@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,6 +40,46 @@ type platformBadge struct {
 	broken  bool
 }
 
+type statusJSONReport struct {
+	AgentsHome     string                    `json:"agents_home"`
+	Git            statusJSONGit             `json:"git"`
+	CanonicalStore map[string]statusJSONItem `json:"canonical_store"`
+	Plugins        []statusJSONPlugin        `json:"plugins,omitempty"`
+	UserConfig     []statusJSONPlatform      `json:"user_config"`
+	Projects       []statusJSONProject       `json:"projects"`
+}
+
+type statusJSONGit struct {
+	Initialized bool   `json:"initialized"`
+	Branch      string `json:"branch,omitempty"`
+	Remote      string `json:"remote,omitempty"`
+}
+
+type statusJSONItem struct {
+	Scopes int `json:"scopes"`
+	Items  int `json:"items"`
+}
+
+type statusJSONPlugin struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
+type statusJSONPlatform struct {
+	Name    string `json:"name"`
+	Present bool   `json:"present"`
+	Broken  bool   `json:"broken"`
+}
+
+type statusJSONProject struct {
+	Name          string               `json:"name"`
+	Path          string               `json:"path"`
+	PathExists    bool                 `json:"path_exists"`
+	Platforms     []statusJSONPlatform `json:"platforms"`
+	ManifestFound bool                 `json:"manifest_found"`
+	LastRefreshed string               `json:"last_refreshed,omitempty"`
+}
+
 func NewStatusCmd() *cobra.Command {
 	var audit bool
 	var agentFilter string
@@ -72,6 +113,20 @@ func runStatus(audit bool, agentFilter string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 	agentsHome := config.AgentsHome()
+
+	if Flags.JSON {
+		report, err := buildStatusJSONReport(cfg, agentsHome, agentFilter)
+		if err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal status json: %w", err)
+		}
+		fmt.Fprintln(os.Stdout, string(data))
+		return nil
+	}
+
 	displayHome := config.DisplayPath(agentsHome)
 
 	ui.Header("dot-agents status")
@@ -292,6 +347,182 @@ func runStatus(audit bool, agentFilter string) error {
 
 	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (*statusJSONReport, error) {
+	report := &statusJSONReport{
+		AgentsHome:     agentsHome,
+		Git:            statusGitInfo(agentsHome),
+		CanonicalStore: make(map[string]statusJSONItem),
+		UserConfig:     collectUserConfigPlatforms(agentFilter),
+	}
+
+	for _, bucket := range platform.CanonicalStoreBucketSpecs() {
+		root := platform.CanonicalBucketRoot(agentsHome, bucket.Name)
+		scopes, items := summarizeCanonicalBucket(root, bucket.CountDirs, bucket.MarkerFile)
+		report.CanonicalStore[string(bucket.Name)] = statusJSONItem{Scopes: scopes, Items: items}
+	}
+
+	specs, err := platform.ListPluginSpecs(agentsHome, "")
+	if err == nil {
+		for _, spec := range specs {
+			scope := spec.Scope
+			if scope == "" {
+				scope = "global"
+			}
+			report.Plugins = append(report.Plugins, statusJSONPlugin{Name: spec.Name, Scope: scope})
+		}
+	}
+
+	names := cfg.ListProjects()
+	sort.Strings(names)
+	for _, name := range names {
+		path := cfg.GetProjectPath(name)
+		project := statusJSONProject{
+			Name:          name,
+			Path:          path,
+			PathExists:    pathExists(path),
+			Platforms:     collectProjectPlatforms(path),
+			ManifestFound: pathExists(filepath.Join(path, config.AgentsRCFile)),
+			LastRefreshed: readRefreshTimestamp(path),
+		}
+		report.Projects = append(report.Projects, project)
+	}
+
+	return report, nil
+}
+
+func statusGitInfo(agentsHome string) statusJSONGit {
+	gitDir := filepath.Join(agentsHome, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return statusJSONGit{}
+	}
+
+	info := statusJSONGit{Initialized: true}
+	branchOut, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	info.Branch = strings.TrimSpace(string(branchOut))
+	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
+	info.Remote = strings.TrimSpace(string(remoteOut))
+	return info
+}
+
+func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	var out []statusJSONPlatform
+	if agentFilter == "" || agentFilter == "claude" {
+		out = appendPlatformIfPresent(out, "Claude", countPlatformHealth(
+			[]string{
+				filepath.Join(homeDir, statusClaudeDir, "CLAUDE.md"),
+				filepath.Join(homeDir, statusClaudeDir, statusClaudeSettingsJSON),
+			},
+			[]string{
+				filepath.Join(homeDir, statusClaudeDir, "agents"),
+				filepath.Join(homeDir, statusClaudeDir, "skills"),
+			},
+		))
+	}
+	if agentFilter == "" || agentFilter == "codex" {
+		out = appendPlatformIfPresent(out, "Codex", countPlatformHealth(
+			[]string{
+				filepath.Join(homeDir, statusCodexDir, statusHooksJSON),
+			},
+			[]string{
+				filepath.Join(homeDir, statusCodexDir, "agents"),
+				filepath.Join(homeDir, statusAgentsDir, "skills"),
+			},
+		))
+	}
+	if agentFilter == "" || agentFilter == "opencode" {
+		out = appendPlatformIfPresent(out, "OpenCode", countPlatformHealth(nil, []string{
+			filepath.Join(homeDir, statusOpenCodeDir, "agent"),
+		}))
+	}
+	return out
+}
+
+func collectProjectPlatforms(path string) []statusJSONPlatform {
+	return []statusJSONPlatform{
+		platformStatus("Cursor", countPlatformHealth(
+			[]string{
+				filepath.Join(path, statusCursorDir, statusCopilotMCPJSON),
+				filepath.Join(path, statusCursorDir, statusClaudeSettingsJSON),
+				filepath.Join(path, statusCursorDir, statusHooksJSON),
+				filepath.Join(path, ".cursorignore"),
+			},
+			[]string{
+				filepath.Join(path, statusCursorDir, "rules"),
+			},
+		)),
+		platformStatus("Claude", countPlatformHealth(
+			[]string{
+				filepath.Join(path, ".mcp.json"),
+				filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
+			},
+			[]string{
+				filepath.Join(path, statusClaudeDir, "rules"),
+				filepath.Join(path, statusClaudeDir, "agents"),
+				filepath.Join(path, statusClaudeDir, "skills"),
+			},
+		)),
+		platformStatus("Codex", countPlatformHealth(
+			[]string{
+				filepath.Join(path, statusAgentsMarkdown),
+				filepath.Join(path, statusCodexDir, "config.toml"),
+				filepath.Join(path, statusCodexDir, statusHooksJSON),
+			},
+			[]string{
+				filepath.Join(path, statusCodexDir, "agents"),
+				filepath.Join(path, statusAgentsDir, "skills"),
+			},
+		)),
+		platformStatus("OpenCode", countPlatformHealth(
+			[]string{
+				filepath.Join(path, "opencode.json"),
+			},
+			[]string{
+				filepath.Join(path, statusOpenCodeDir, "agent"),
+				filepath.Join(path, statusAgentsDir, "skills"),
+			},
+		)),
+		platformStatus("Copilot", countPlatformHealth(
+			[]string{
+				filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
+				filepath.Join(path, ".vscode", statusCopilotMCPJSON),
+				filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
+			},
+			[]string{
+				filepath.Join(path, statusGitHubDir, "agents"),
+				filepath.Join(path, statusGitHubDir, "hooks"),
+				filepath.Join(path, statusAgentsDir, "skills"),
+			},
+		)),
+	}
+}
+
+func countPlatformHealth(files, dirs []string) platformBadge {
+	okCount, warnCount := 0, 0
+	addManagedCounts(&okCount, &warnCount, files, dirs)
+	return platformBadge{present: okCount > 0, broken: warnCount > 0}
+}
+
+func platformStatus(name string, badge platformBadge) statusJSONPlatform {
+	return statusJSONPlatform{Name: name, Present: badge.present, Broken: badge.broken}
+}
+
+func appendPlatformIfPresent(out []statusJSONPlatform, name string, badge platformBadge) []statusJSONPlatform {
+	if !badge.present && !badge.broken {
+		return out
+	}
+	return append(out, platformStatus(name, badge))
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func printCanonicalStoreSection(agentsHome string) {

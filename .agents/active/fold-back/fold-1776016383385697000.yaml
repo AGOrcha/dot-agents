@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016383385697000
+plan_id: crg-kg-integration
+task_id: phase-g-skill-integration
+observation: 'Fold-back: merge-back integrated — Phase G embedded CRG skills + global graph hooks; crg-kg plan closed.'
+classification: small
+routed_to: task_note:crg-kg-integration/phase-g-skill-integration
+created_at: "2026-04-12T17:53:03Z"

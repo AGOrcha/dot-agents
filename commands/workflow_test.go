@@ -2443,3 +2443,246 @@ func TestPlanSweep_AllMutatingActionsRequireConfirmation(t *testing.T) {
 		}
 	}
 }
+
+// ── Phase 6: fold-back ───────────────────────────────────────────────────────
+
+func setupFoldBackProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "p1")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	plan := CanonicalPlan{
+		SchemaVersion: 1,
+		ID:            "p1",
+		Title:         "P1",
+		Status:        "active",
+		Summary:       "start",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		UpdatedAt:     "2026-04-10T00:00:00Z",
+	}
+	planData, err := yaml.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatalf("write PLAN.yaml: %v", err)
+	}
+	tasks := CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        "p1",
+		Tasks: []CanonicalTask{
+			{ID: "t1", Title: "T1", Status: "pending", Notes: "existing"},
+		},
+	}
+	tasksData, err := yaml.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("marshal tasks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), tasksData, 0644); err != nil {
+		t.Fatalf("write TASKS.yaml: %v", err)
+	}
+	return dir
+}
+
+func setupFoldBackTwoPlanProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, pid := range []string{"p1", "p2"} {
+		plansDir := filepath.Join(dir, ".agents", "workflow", "plans", pid)
+		if err := os.MkdirAll(plansDir, 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		plan := CanonicalPlan{
+			SchemaVersion: 1,
+			ID:            pid,
+			Title:         pid,
+			Status:        "active",
+			Summary:       "s",
+			CreatedAt:     "2026-04-10T00:00:00Z",
+			UpdatedAt:     "2026-04-10T00:00:00Z",
+		}
+		planData, err := yaml.Marshal(plan)
+		if err != nil {
+			t.Fatalf("marshal plan: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+			t.Fatalf("write PLAN: %v", err)
+		}
+		tasks := CanonicalTaskFile{
+			SchemaVersion: 1,
+			PlanID:        pid,
+			Tasks: []CanonicalTask{
+				{ID: "t1", Title: "T", Status: "pending"},
+			},
+		}
+		tasksData, err := yaml.Marshal(tasks)
+		if err != nil {
+			t.Fatalf("marshal tasks: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), tasksData, 0644); err != nil {
+			t.Fatalf("write TASKS: %v", err)
+		}
+	}
+	return dir
+}
+
+func executeWorkflowCommandOutput(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	cmd := NewWorkflowCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("workflow %v: %v\n%s", args, err, buf.String())
+	}
+	return buf.String()
+}
+
+func TestFoldBackCreateSmall(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--observation", "new obs"); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tf.Tasks[0].Notes, "existing") || !strings.Contains(tf.Tasks[0].Notes, "new obs") {
+		t.Fatalf("task notes = %q", tf.Tasks[0].Notes)
+	}
+	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("glob fold-back artifacts: got %d files", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a foldBackArtifact
+	if err := yaml.Unmarshal(data, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.Classification != "small" || a.RoutedTo != "task_note:p1/t1" {
+		t.Fatalf("artifact: %+v", a)
+	}
+}
+
+func TestFoldBackCreateNoTask(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--observation", "plan-level obs"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loadCanonicalPlan(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Summary, "start") || !strings.Contains(plan.Summary, "plan-level obs") {
+		t.Fatalf("plan summary = %q", plan.Summary)
+	}
+	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one fold-back file, got %d", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a foldBackArtifact
+	if err := yaml.Unmarshal(data, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.Classification != "small" || a.RoutedTo != "plan_summary:p1" || a.TaskID != "" {
+		t.Fatalf("artifact: %+v", a)
+	}
+}
+
+func TestFoldBackCreatePropose(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	tfBefore, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeNotes := tfBefore.Tasks[0].Notes
+
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--observation", "big change", "--propose"); err != nil {
+		t.Fatal(err)
+	}
+
+	tfAfter, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tfAfter.Tasks[0].Notes != beforeNotes {
+		t.Fatalf("TASKS.yaml notes changed under --propose: %q -> %q", beforeNotes, tfAfter.Tasks[0].Notes)
+	}
+
+	propMatches, err := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(propMatches) != 1 {
+		t.Fatalf("expected one proposal, got %d", len(propMatches))
+	}
+
+	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one fold-back artifact, got %d", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a foldBackArtifact
+	if err := yaml.Unmarshal(data, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.Classification != "proposal" || !strings.HasPrefix(a.RoutedTo, "proposal:obs-") {
+		t.Fatalf("artifact: %+v", a)
+	}
+}
+
+func TestFoldBackList(t *testing.T) {
+	repo := setupFoldBackTwoPlanProject(t)
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--observation", "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p2", "--task", "t1", "--observation", "a2"); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := Flags.JSON
+	Flags.JSON = true
+	defer func() { Flags.JSON = prev }()
+
+	outAll := executeWorkflowCommandOutput(t, repo, "fold-back", "list")
+	if !strings.Contains(outAll, `"plan_id": "p1"`) || !strings.Contains(outAll, `"plan_id": "p2"`) {
+		t.Fatalf("list all should include both plans: %s", outAll)
+	}
+
+	outP1 := executeWorkflowCommandOutput(t, repo, "fold-back", "list", "--plan", "p1")
+	if !strings.Contains(outP1, `"plan_id": "p1"`) || strings.Contains(outP1, `"plan_id": "p2"`) {
+		t.Fatalf("filtered list: %s", outP1)
+	}
+}

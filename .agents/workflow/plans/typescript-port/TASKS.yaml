@@ -13,7 +13,7 @@ tasks:
         - .agents/workflow/plans/
         - docs/
       verification_required: false
-      notes: |
+      notes: |-
         Phase 1 is the planning checkpoint. Capture the office-machine donor branch
         (`origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines`)
         as source material, not as a merge target. Rewrite the port plan around the current repo:
@@ -22,6 +22,7 @@ tasks:
         3. current hook renderer shapes
         4. workflow command surface
         5. Stage 2 bucket and plugin-roadmap boundaries
+        - Fold-back: merge-back integrated — TS port Phase 1 donor audit complete; plan aligned to current Go contracts.
     - id: phase-2-foundations-on-current-contracts
       title: Phase 2 — Rebuild core config, path, link, and hook foundations on current contracts
       status: pending

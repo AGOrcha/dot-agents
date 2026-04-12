@@ -108,7 +108,30 @@ The orchestrator should reuse existing canonical artifacts where possible.
 | `.agents/workflow/plans/<plan-id>/SLICES.yaml` | read-first canonical slice artifact for Phase 3B, plus optional sub-task decomposition and fanout-readiness inputs for safe parallel work |
 | `.agents/workflow/testing-matrix.yaml` | canonical verification targets and scenario coverage |
 | `.agents/active/fold-back/<id>.yaml` | pending low-risk observation to reconcile into plans, matrix, or lessons |
-| future: delegation prompt bundle artifact or contract fields | inspectable prompt/context payload handed to one delegated sub-agent |
+| `.agents/active/delegation-bundles/<delegation-id>.yaml` | per-delegate worker/profile/prompt/context/verification bundle; inspectable handoff payload paired with the delegation contract |
+
+### Plan lifecycle
+
+Canonical plan bundles need a terminal lifecycle, not just task-level completion.
+
+- `draft`, `active`, and `paused` plans live under `.agents/workflow/plans/<plan-id>/`
+- `completed` means execution is done but the bundle still lives in `.agents/workflow/plans/<plan-id>/` long enough for final verification, fold-back, and delegation closeout
+- `archived` means the canonical bundle has been retired out of `.agents/workflow/plans/` and preserved under plan-owned history
+
+Archive preconditions:
+
+- every canonical task is terminal, and required work is `completed` rather than merely abandoned
+- no active delegation contracts, pending merge-backs, or pending fold-back artifacts still point at the plan
+- `PLAN.yaml` has already been reconciled to a terminal closeout state: `status: completed`, `current_focus_task: ""`, and final summary/notes written
+
+Archive action:
+
+- write a final archived copy of the bundle under `.agents/history/<plan-id>/plan-archive/<yyyy-mm-dd>/`
+- preserve `PLAN.yaml`, `TASKS.yaml`, optional `SLICES.yaml`, and the human narrative plan doc when present
+- stamp the archived copy's `PLAN.yaml` with `status: archived` and an updated timestamp
+- remove the source bundle from `.agents/workflow/plans/<plan-id>/` so active-plan discovery surfaces no longer treat it as a live canonical plan
+
+This keeps `.agents/workflow/plans/` reserved for live canonical plans while `.agents/history/<plan-id>/` becomes the durable record for completed work.
 
 ### Graph model
 
@@ -205,13 +228,7 @@ The orchestrator should default to graph-backed understanding when the question 
 
 Near-term command direction:
 
-- extend `workflow graph query` to support code intents from the KG spec:
-  - `symbol_lookup`
-  - `impact_radius`
-  - `change_analysis`
-  - `tests_for`
-  - `community_context`
-  - `symbol_decisions`
+- `workflow graph query` forwards **code-structure intents** (see table below; includes `symbol_lookup`, `impact_radius`, `change_analysis`, `tests_for`, `callers_of`, `callees_of`, `community_context`, `symbol_decisions`, `decision_symbols`) to `kg bridge query` — same behavior as invoking `dot-agents kg bridge query --intent …` from the repo.
 - keep `kg changes`, `kg impact`, `kg communities`, and `kg flows` as direct escape hatches
 
 Practical rule:
@@ -221,17 +238,26 @@ Practical rule:
 
 ### KG-First Query Routing
 
-`workflow graph query` distinguishes two intent families:
+`workflow graph query` distinguishes two intent families. Summary:
 
-1. **Workflow / KG-note intents** (`plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions`) — served by the workflow graph bridge when `.agents/workflow/graph-bridge.yaml` has `enabled: true`, using the configured `graph_home` and `LocalGraphAdapter`.
+| Intent | Routing | Backing |
+|--------|---------|---------|
+| `plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions` | Workflow graph bridge (requires `.agents/workflow/graph-bridge.yaml` with `enabled: true`) | `LocalGraphAdapter` over configured `graph_home` (KG notes tree) |
+| `symbol_lookup`, `impact_radius`, `change_analysis`, `tests_for`, `callers_of`, `callees_of`, `community_context`, `symbol_decisions`, `decision_symbols` | Subprocess: same as `dot-agents kg bridge query --intent <intent> …` | CRG / code graph via `kg bridge` |
 
-2. **Code-structure intents** (`symbol_lookup`, `impact_radius`, `change_analysis`, `tests_for`, `callers_of`, `callees_of`, `community_context`, `symbol_decisions`, `decision_symbols`) — **not** handled on the workflow-local bridge path. The CLI forwards to the same entry point as a manual invocation:
+Details:
+
+1. **Workflow / KG-note intents** — served when the bridge config is enabled, using `graph_home` and `LocalGraphAdapter`.
+
+2. **Code-structure intents** — **not** handled on the workflow-local filesystem bridge path. The CLI forwards to the same entry point as a manual invocation:
 
    `dot-agents kg bridge query --intent <intent> <query>`
 
-   The child process inherits the current working directory (the project), connects stdout and stderr to the parent, and receives the global `--json` flag when the parent was run with `--json` (so JSON output shape matches `kg bridge query`).
+   The child process uses the project working directory as `Dir`, connects stdout and stderr to the parent, and receives the global `--json` flag when the parent was run with `--json` (so JSON output shape matches `kg bridge query`).
 
-   The workflow-local `--scope` flag still applies only to note-oriented queries on the filesystem bridge. When `kg bridge query` grows an optional `--scope`, the forwarder can pass it through without duplicating semantics here.
+   The workflow-local `--scope` flag applies to note-oriented queries on the filesystem bridge only; it is not passed through to the kg subprocess today. If `kg bridge query` gains a compatible `--scope`, the forwarder can pass it through without duplicating semantics here.
+
+Orchestrator agents should prefer `workflow graph query` for both families so dispatch stays centralized. Use `grep` / `glob` only when the graph is absent, stale, or the question is raw text shaped.
 
 This keeps a single implementation for code-structure queries (CRG / structural graph behavior in `kg bridge`) while leaving note-oriented workflow queries on the filesystem bridge.
 
@@ -245,6 +271,185 @@ Phase 3B/3C correspond to items 4 and 5 below: define the canonical slice artifa
 4. Add read-first `SLICES.yaml` support through `workflow slices` and graph rendering.
 5. Add slice artifacts and fanout-from-slice readiness checks.
 6. Add fold-back reconciliation for loop observations and testing-matrix updates.
-7. Expand workflow graph bridge to code-structure intents so the orchestrator can ask richer questions without repo spelunking.
+7. Route code-structure questions through `workflow graph query` → `kg bridge` (implemented); keep extending `kg bridge` capabilities as CRG evolves.
 8. Add delegation closeout so completed delegation and merge-back artifacts reconcile cleanly into task and plan state.
 9. Add per-delegate prompt/context bundle inputs so fanout can hand sub-agents reproducible prompts and files.
+
+### Phase 8: Delegation bundle direction
+
+Phase 8 should formalize delegation handoff as a three-layer model rather than treating one giant prompt as the interface.
+
+#### 1. Global worker profile
+
+Reusable, user-local behavior under `~/.agents/`:
+
+- bounded worker discipline: honor `write_scope`, trust canonical task state, avoid mutating shared workflow state directly
+- verification discipline: run focused tests first, then broader regression only as justified
+- trace discipline: record a concrete `feedback_goal`, use scenario tags, and classify evidence/results
+- closeout discipline:
+  - worker records `workflow verify record`
+  - worker records `workflow checkpoint`
+  - worker returns `workflow merge-back`
+  - parent advances canonical task state
+  - parent runs delegation closeout / archive once accepted
+
+This profile should be stable across repos. It describes how a loop worker behaves, not what one repo is working on.
+
+#### 2. Project overlay
+
+Repo-local guidance layered on top of the worker profile:
+
+- plan and loop-state locations
+- preferred verification surfaces
+- quality gates and hook expectations
+- regression matrix path
+- higher-layer validation queue path
+- project-specific scenario families and verification heuristics
+
+This is where files like `.agents/active/active.loop.md` or repo-specific loop prompts belong once trimmed into project overlays instead of full worker definitions.
+
+#### 3. Delegation bundle
+
+Per-task persisted payload created by `workflow fanout`:
+
+- chosen plan/task/slice and selection reason
+- owner plus worker profile reference
+- project overlay file references
+- prompt text and prompt files
+- context files
+- verification plan, feedback goal, scenario tags, and closeout expectations
+
+This bundle is the transport/persistence layer for a specific delegation, not the definition of the worker itself.
+
+### Phase 8: Reusable testing additions
+
+The global loop-worker profile should carry six reusable testing/verification additions that are not repo-specific:
+
+1. `feedback_goal` — every delegated iteration states the concrete question the evidence run must answer.
+2. `scenario_tags` with stable coverage families and paired-state guidance.
+3. `regression_matrix` support — a repo may point at one or more durable matrix artifacts for scenario/run-variant tracking.
+4. `higher_layer_validation_queue` support — queue features that are code-complete and automated-check complete but still deserve manual/live validation.
+5. evidence/result `classification` taxonomy such as `ok`, `ok-empty`, `ok-warning`, `retry-recovered`, `impl-bug`, `tool-bug`, `missing-feature`, and `blocked`.
+6. `sandbox_policy` for destructive or stateful verification, so a worker can prove mutating behavior without touching the user's live home/project state.
+
+Global loop-worker behavior should also require negative-path coverage whenever the delegated change introduces new failure modes.
+
+### Phase 8: Canonical artifact and schema
+
+Use a sibling artifact rather than overloading the core delegation contract:
+
+- contract: `.agents/active/delegation/<delegation-id>.yaml`
+- bundle: `.agents/active/delegation-bundles/<delegation-id>.yaml`
+- schema: `schemas/workflow-delegation-bundle.schema.json`
+
+The schema should be embedded into the binary alongside the other repo-local schemas so later runtime validation can bind directly to the canonical artifact contract.
+
+### Phase 8: Candidate command shape
+
+```bash
+dot-agents workflow fanout \
+  --plan <plan-id> \
+  --task <task-id> \
+  --owner <delegate-name> \
+  --write-scope "commands/,internal/platform/" \
+  --delegate-profile loop-worker \
+  --project-overlay .agents/active/active.loop.md \
+  --feedback-goal "Does fold-back create/list persist small and proposal routes cleanly?" \
+  --scenario-tag canonical-plan-present \
+  --scenario-tag workflow-fold-back-small \
+  --regression-artifact .agents/workflow/testing-matrix.yaml \
+  --validation-queue .agents/active/live-testing-queue.md \
+  --prompt "Implement Phase 6 only; keep write-scope tight" \
+  --prompt-file .agents/prompts/loop-worker.project.md \
+  --context-file .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml \
+  --context-file docs/LOOP_ORCHESTRATION_SPEC.md
+```
+
+### Phase 8: Bundle example
+
+```yaml
+schema_version: 1
+delegation_id: del-phase-6-20260412T213000Z
+plan_id: loop-orchestrator-layer
+task_id: phase-6-fold-back-reconciliation
+slice_id: ""
+owner: worker-a
+
+worker:
+  profile: loop-worker
+  profile_version: 1
+  project_overlay_files:
+    - .agents/active/active.loop.md
+
+selection:
+  selected_by: orchestrator-session-start
+  selected_at: "2026-04-12T21:30:00Z"
+  reason: "first pending unblocked canonical task"
+
+scope:
+  write_scope:
+    - commands/workflow.go
+    - commands/workflow_test.go
+  constraints:
+    - "Do not mutate shared workflow state outside the delegated task"
+
+prompt:
+  inline:
+    - "Implement only the selected task."
+  prompt_files:
+    - .agents/prompts/loop-worker.project.md
+
+context:
+  required_files:
+    - .agents/workflow/plans/loop-orchestrator-layer/PLAN.yaml
+    - .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml
+  optional_files:
+    - .agents/active/loop-state.md
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+
+verification:
+  feedback_goal: "Does fold-back create/list persist small and proposal routes cleanly?"
+  scenario_tags:
+    - canonical-plan-present
+    - workflow-fold-back-small
+  regression_artifacts:
+    - .agents/workflow/testing-matrix.yaml
+  higher_layer_validation_queue: .agents/active/live-testing-queue.md
+  focused_commands:
+    - go test ./commands
+  regression_commands:
+    - go test ./...
+  evidence_policy:
+    require_negative_coverage: true
+    classification_required: true
+    sandbox_mutations: true
+    primary_chain_max: 3
+
+closeout:
+  worker_must:
+    - workflow_verify_record
+    - workflow_checkpoint
+    - workflow_merge_back
+  parent_must:
+    - workflow_advance
+    - workflow_delegation_closeout
+```
+
+### Phase 8: Rules
+
+- the global loop-worker profile stays reusable; project overlays and delegation bundles must not fork that behavior ad hoc
+- prompt/context inputs must be delegation-specific so different sub-agents can receive different bundles
+- repeatable flags are preferable to comma-separated prompt/context strings
+- the bundle must be inspectable after fanout so the handoff can be reproduced and audited
+- the worker should read from the persisted bundle rather than reconstructing context from memory
+- regression matrix and validation queue references are optional at the schema level but should be supported consistently where a repo uses them
+- negative-path coverage is required when the delegated change introduces new failure modes
+- worker closeout and parent closeout responsibilities must remain distinct
+
+### Phase 8: Acceptance shape
+
+- a parent can choose a stable worker profile and add one or more repo-local project overlays
+- a parent can supply inline prompts, prompt files, and multiple context files
+- a delegated worker receives reproducible verification metadata, not just prose instructions
+- two different delegated sub-agents can receive different prompt/context/testing bundles without colliding
+- the resulting bundle is inspectable from repo artifacts and backed by an embedded schema

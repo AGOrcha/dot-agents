@@ -26,7 +26,7 @@ Add a planner/orchestrator layer above the focused loop agent so work selection,
 - [x] Phase 3B - add `SLICES.yaml` support for safe parallel sub-task decomposition
 - [x] Phase 3C - add fanout-from-slice support on top of existing delegation contracts
 - [x] Phase 4 — Wire `workflow fanout --slice <id>` to resolve task and write-scope from SLICES.yaml
-- [ ] Phase 5 — Auto-route code-structure intents in `workflow graph query` to kg bridge; add tests and spec doc
+- [x] Phase 5 — Auto-route code-structure intents in `workflow graph query` to kg bridge; add tests and spec doc
 - [ ] Phase 6 — Implement `workflow fold-back create/list` with small vs proposal routing
 - [ ] Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
 - [ ] Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
@@ -87,63 +87,18 @@ Note: the existing `writeScope` population from `writeScopeCSV` is a CSV split l
 
 ## Phase 5: KG-first graph query routing
 
-**Goal:** `workflow graph query --intent <code-structure-intent> <query>` auto-routes to the kg bridge via subprocess instead of returning an error. Tests and spec doc land alongside the code change.
+**Status:** Implemented.
 
-**File:** `commands/workflow.go`, function `runWorkflowGraphQuery` (line 3017–3019)
+**Goal:** `workflow graph query --intent <code-structure-intent> <query>` auto-routes to the kg bridge via subprocess instead of returning the old guard error. Tests and spec live alongside the implementation.
 
-**Current behavior** (lines 3017–3019):
-```go
-if isWorkflowGraphCodeBridgeIntent(intent) {
-    return fmt.Errorf("workflow graph query does not handle code-structure intent %q; use 'dot-agents kg bridge query --intent %s' instead", intent, intent)
-}
-```
+**Code:** `commands/workflow.go`
 
-**New behavior:** replace the error with a subprocess routing call:
-```go
-if isWorkflowGraphCodeBridgeIntent(intent) {
-    dotAgents, err := os.Executable()
-    if err != nil {
-        dotAgents = "dot-agents"
-    }
-    kgArgs := []string{"kg", "bridge", "query", "--intent", intent}
-    if scope != "" {
-        kgArgs = append(kgArgs, "--scope", scope)
-    }
-    kgArgs = append(kgArgs, args...)  // positional query words
-    c := exec.Command(dotAgents, kgArgs...)
-    c.Stdout = os.Stdout
-    c.Stderr = os.Stderr
-    return c.Run()
-}
-```
+- `runWorkflowGraphQuery` — if `isWorkflowGraphCodeBridgeIntent(intent)`, delegates to `runWorkflowGraphQueryViaKGBridge` before loading `graph-bridge.yaml` (code-structure queries do not require the workflow-local bridge to be enabled).
+- `runWorkflowGraphQueryViaKGBridge` — resolves the `dot-agents` binary via `workflowDotAgentsExe` (tests swap this for a freshly built CLI), runs `kg bridge query --intent <intent> [<args...>]`, sets `cmd.Dir` to the project cwd, pipes stdout/stderr, and prepends `--json` to the child argv when the parent CLI has JSON output enabled (`Flags.JSON`).
 
-**New tests in `commands/workflow_test.go`:**
-- `TestWorkflowGraphQueryCodeStructureRoutesToKGBridge`: intent is a code-structure intent (use one from `isWorkflowGraphCodeBridgeIntent`); assert the error message is NOT the old "use dot-agents kg bridge query" text (the error should be from the subprocess, not the guard). Use a helper that captures stderr or checks exec behavior. If a full integration test is too heavy, at minimum add a unit test that confirms `isWorkflowGraphCodeBridgeIntent` returns true for all expected code-structure intents and false for all KG intents.
-- `TestWorkflowGraphQueryKGBridgeIntentsNotRouted`: for each valid KG intent (plan_context, decision_lookup, entity_context, workflow_memory, contradictions), confirm `isWorkflowGraphCodeBridgeIntent` returns false.
+**Tests:** `commands/workflow_test.go` — `TestWorkflowGraphQueryCodeStructureRoutesToKGBridge`, `TestWorkflowGraphQueryKGBridgeIntentsNotRouted`, plus `TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent` for the note-oriented path.
 
-**File:** `docs/LOOP_ORCHESTRATION_SPEC.md`
-
-Add a new section after the existing "Decision" section:
-
-```markdown
-## KG-First Query Routing
-
-`workflow graph query` is the single query entry point for orchestrator agents. It routes by intent type:
-
-| Intent | Routing | Backing system |
-|--------|---------|----------------|
-| plan_context | LocalGraphAdapter | ~/.agents knowledge notes |
-| decision_lookup | LocalGraphAdapter | ~/.agents knowledge notes |
-| entity_context | LocalGraphAdapter | ~/.agents knowledge notes |
-| workflow_memory | LocalGraphAdapter | ~/.agents knowledge notes |
-| contradictions | LocalGraphAdapter | ~/.agents knowledge notes |
-| symbol_lookup | kg bridge subprocess | CRG SQLite/Postgres |
-| impact_radius | kg bridge subprocess | CRG SQLite/Postgres |
-| call_graph | kg bridge subprocess | CRG SQLite/Postgres |
-| community_summary | kg bridge subprocess | CRG SQLite/Postgres |
-
-Agents should not use `grep` or `glob` to answer code-structure questions that are in the second tier of the table above. Call `workflow graph query --intent <intent> <query>` and let the routing layer handle dispatch.
-```
+**Spec:** `docs/LOOP_ORCHESTRATION_SPEC.md` — subsection **KG-First Query Routing** under **KG / CRG Direction**.
 
 ---
 
@@ -229,6 +184,7 @@ Add `foldBackCmd` to the final `cmd.AddCommand(...)` call at line 468.
 - archives processed active artifacts into history
 - advances the canonical task to `completed` or `failed`
 - closes the parent plan when the last task lands
+- retires the canonical plan bundle from `.agents/workflow/plans/<id>/` once the plan is fully complete
 - keeps `workflow orient` / `workflow status` from reporting already-processed merge-backs forever
 
 **Direction:**
@@ -242,8 +198,13 @@ dot-agents workflow delegation closeout --plan <id> --task <id> --decision rejec
 
 - treat the closeout step as the parent-agent acknowledgment that the delegated work was integrated
 - move processed artifacts out of `.agents/active/` into a durable history location
+- standardize the archive path under the owning plan instead of a repo-wide catchall:
+  `.agents/history/<plan-id>/<optional-subplan>/delegate-merge-back-archive/<yyyy-mm-dd>/<task-or-slice>/`
+- treat any legacy flat archive such as `.agents/history/delegation-merge-back-archive/...` as transitional maintenance debt to be folded into the owning plan history tree
 - update canonical task state from the closeout decision
 - if all tasks are complete, update `PLAN.yaml` status and clear or rewrite `current_focus_task`
+- distinguish `completed` from `archived`: `completed` stays in `.agents/workflow/plans/<id>/` until final verification, fold-back, and cleanup are done; `archived` means the canonical bundle has moved to `.agents/history/<plan-id>/plan-archive/<yyyy-mm-dd>/`
+- when archiving, preserve `PLAN.yaml`, `TASKS.yaml`, optional `SLICES.yaml`, and the narrative plan doc; stamp the archived copy `status: archived`; remove the source bundle from `.agents/workflow/plans/<id>/`
 
 **Acceptance shape:**
 
@@ -251,23 +212,42 @@ dot-agents workflow delegation closeout --plan <id> --task <id> --decision rejec
 - merge-back counts reflect unintegrated work only
 - completed plans do not retain stale active delegation state
 - history preserves the contract and merge-back trail for later review
+- closeout history is colocated with the relevant plan history so later review does not require cross-referencing a global delegation archive
+- fully retired plans no longer stay in `.agents/workflow/plans/`; plan-owned history contains the final archived canonical bundle
 
 ---
 
-## Phase 8: Per-delegate prompt and file inputs
+## Phase 8: Per-delegate prompt, context, and worker bundles
 
-**Goal:** the orchestrator/delegation flow should be able to hand each sub-agent not just a task and write scope, but also a prompt payload assembled from inline text and/or files.
+**Goal:** the orchestrator/delegation flow should hand each sub-agent a reproducible worker bundle: stable worker profile, repo-local project overlay, and task-specific prompt/context/verification payload.
 
-**Problem:** the current orchestration skill tells the parent how to select and fan out work, but it does not model how a prompt bundle is passed into the delegated sub-agent. That makes prompt shaping ad hoc and hard to reproduce.
+**Problem:** the current orchestration skill can select work and fan out a bounded task, but it does not model the handoff as a persisted artifact. That makes worker behavior, prompt shaping, verification expectations, and closeout steps too ad hoc to reuse across repos.
 
 **Direction:**
 
-Extend the delegation contract or a sibling bundle artifact so each fanout can persist:
+Adopt a 3-layer model:
 
-- inline prompt text
-- one or more prompt files
-- one or more context/resource files
-- optional per-delegate override data tied to the specific delegation owner
+1. **Global worker profile** under `~/.agents/`
+   - reusable `loop-worker` behavior: honor `write_scope`, trust canonical tasks, run focused tests first, record `workflow verify record`, `workflow checkpoint`, return `workflow merge-back`, and leave `workflow advance` / delegation closeout to the parent.
+2. **Project overlay** in the repo
+   - repo-local loop prompt / guidance file(s) that define plan locations, quality gates, regression matrix path, higher-layer validation queue path, and project-specific verification surfaces.
+3. **Delegation bundle** in repo artifacts
+   - sibling artifact to the delegation contract at `.agents/active/delegation-bundles/<delegation-id>.yaml`, backed by `schemas/workflow-delegation-bundle.schema.json`.
+
+The bundle should persist:
+
+- worker profile reference and project overlay file(s)
+- selected plan/task/slice and selection reason
+- inline prompt text and prompt files
+- context files
+- reusable testing metadata:
+  - `feedback_goal`
+  - `scenario_tags`
+  - `regression_artifacts`
+  - `higher_layer_validation_queue`
+  - evidence `classification` expectations
+  - `sandbox_mutations` policy
+- closeout expectations for worker vs parent responsibilities
 
 Candidate command shape:
 
@@ -277,22 +257,33 @@ dot-agents workflow fanout \
   --task <task-id> \
   --owner <delegate-name> \
   --write-scope "commands/,internal/platform/" \
-  --prompt "Focus on command readback only" \
-  --prompt-file .agents/prompts/command-readback.md \
-  --context-file docs/LOOP_ORCHESTRATION_SPEC.md \
-  --context-file .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml
+  --delegate-profile loop-worker \
+  --project-overlay .agents/active/active.loop.md \
+  --feedback-goal "Does fold-back create/list persist small and proposal routes cleanly?" \
+  --scenario-tag canonical-plan-present \
+  --scenario-tag workflow-fold-back-small \
+  --regression-artifact .agents/workflow/testing-matrix.yaml \
+  --validation-queue .agents/active/live-testing-queue.md \
+  --prompt "Implement only the selected task and keep write-scope tight" \
+  --prompt-file .agents/prompts/loop-worker.project.md \
+  --context-file .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml \
+  --context-file docs/LOOP_ORCHESTRATION_SPEC.md
 ```
 
 **Rules:**
 
-- prompt/file inputs must be delegation-specific so different sub-agents can receive different bundles
+- the stable worker profile should not be redefined per repo; repos should customize through project overlays
+- prompt/context inputs must be delegation-specific so different sub-agents can receive different bundles
 - repeatable file flags are preferable to one giant comma-separated string
-- the contract should store what was handed to the sub-agent so the parent can reproduce or audit the handoff later
-- skills should read from the persisted bundle, not reconstruct it from memory
+- the persisted bundle, not terminal memory, should be the source of truth for what the worker received
+- negative-path coverage is required when the delegated change introduces new failure modes
+- worker closeout must include `workflow verify record`, `workflow checkpoint`, and `workflow merge-back`
+- parent closeout must include canonical `workflow advance` and delegation closeout/archive once the merge-back is accepted
 
 **Acceptance shape:**
 
-- a parent can supply prompt text inline or by file
-- a parent can attach multiple context files
-- two different delegated sub-agents can receive different prompt/file inputs without colliding
-- the resulting bundle is inspectable from the repo artifacts
+- a parent can pick a reusable worker profile and attach repo-local overlays
+- a parent can supply prompt text inline or by file and attach multiple context files
+- a delegated worker receives reproducible verification metadata, not just prose instructions
+- two different delegated sub-agents can receive different prompt/context/testing bundles without colliding
+- the resulting bundle is inspectable from repo artifacts and backed by a schema embedded into the binary

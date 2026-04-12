@@ -7,7 +7,7 @@ Copy the prompt below into an agent as: `/loop 1hr <prompt>` (if `/loop` is avai
 ## Prompt
 
 ```
-For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md
+For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md, LOOP_ORCHESTRATION_SPEC.md, TYPESCRIPT_PORT_TDD_PLAN.md
 
 **Where workflow state lives (read this once):**
 - **Repo** `<project>/.agents/active/*.plan.md` — markdown waves/checklists; this is what `workflow orient` lists as active plans.

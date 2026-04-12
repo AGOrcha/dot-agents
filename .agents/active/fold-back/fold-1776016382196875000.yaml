@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016382196875000
+plan_id: platform-dir-unification
+task_id: phase-5-new-buckets
+observation: 'Fold-back: merge-back integrated — Stage 2 bucket expansion slice landed.'
+classification: small
+routed_to: task_note:platform-dir-unification/phase-5-new-buckets
+created_at: "2026-04-12T17:53:02Z"

@@ -9,6 +9,7 @@ This repo now has repo-local JSON Schemas under `schemas/`:
 | `PLUGIN.yaml` | `schemas/plugin.schema.json` | Canonical plugin bundle manifest under `~/.agents/plugins/<scope>/<name>/` |
 | Workflow plan | `schemas/workflow-plan.schema.json` | `.agents/workflow/plans/<id>/PLAN.yaml` |
 | Workflow tasks | `schemas/workflow-tasks.schema.json` | `.agents/workflow/plans/<id>/TASKS.yaml` |
+| Workflow delegation bundle | `schemas/workflow-delegation-bundle.schema.json` | `.agents/active/delegation-bundles/<delegation-id>.yaml` |
 
 Editor validation: point YAML language servers at these `$id` paths (see `# yaml-language-server: $schema=...` comments in generated bundles).
 

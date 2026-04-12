@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016382724387000
+plan_id: crg-kg-integration
+task_id: phase-f-go-mcp
+observation: 'Fold-back: merge-back integrated — Phase F Go MCP server slice.'
+classification: small
+routed_to: task_note:crg-kg-integration/phase-f-go-mcp
+created_at: "2026-04-12T17:53:02Z"

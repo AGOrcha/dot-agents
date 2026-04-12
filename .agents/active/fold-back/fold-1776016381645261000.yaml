@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016381645261000
+plan_id: plugin-resource-salvage
+task_id: phase-5-closeout
+observation: 'Fold-back: merge-back integrated — donor-branch ambiguity closed; plugin path baseline for Stage 2.'
+classification: small
+routed_to: task_note:plugin-resource-salvage/phase-5-closeout
+created_at: "2026-04-12T17:53:01Z"

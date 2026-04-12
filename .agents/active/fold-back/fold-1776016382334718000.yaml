@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016382334718000
+plan_id: plugin-resource-salvage
+task_id: phase-4-command-readback
+observation: 'Fold-back: merge-back integrated — plugin command readback slice complete.'
+classification: small
+routed_to: task_note:plugin-resource-salvage/phase-4-command-readback
+created_at: "2026-04-12T17:53:02Z"

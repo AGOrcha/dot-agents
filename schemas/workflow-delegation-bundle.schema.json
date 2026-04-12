@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-delegation-bundle.schema.json",
+  "title": "dot-agents workflow delegation bundle",
+  "description": "Repo-local JSON Schema for .agents/active/delegation-bundles/<delegation-id>.yaml. Models the persisted worker/profile/prompt/context/verification payload paired with a delegation contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "delegation_id",
+    "plan_id",
+    "task_id",
+    "owner",
+    "worker",
+    "scope",
+    "prompt",
+    "context",
+    "verification",
+    "closeout"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "delegation_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slice_id": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profile_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "project_overlay_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selected_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selected_at": {
+          "type": "string",
+          "description": "RFC3339 timestamp"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["write_scope"],
+      "properties": {
+        "write_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inline": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "prompt_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "optional_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feedback_goal"],
+      "properties": {
+        "feedback_goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scenario_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "regression_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "higher_layer_validation_queue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "focused_commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "regression_commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "require_negative_coverage": {
+              "type": "boolean"
+            },
+            "classification_required": {
+              "type": "boolean"
+            },
+            "sandbox_mutations": {
+              "type": "boolean"
+            },
+            "primary_chain_max": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "closeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "worker_must": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "workflow_verify_record",
+              "workflow_checkpoint",
+              "workflow_merge_back"
+            ]
+          }
+        },
+        "parent_must": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "workflow_advance",
+              "workflow_delegation_closeout"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

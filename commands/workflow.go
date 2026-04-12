@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -145,6 +146,26 @@ type CanonicalSlice struct {
 	WriteScope        []string `json:"write_scope" yaml:"write_scope"`
 	VerificationFocus string   `json:"verification_focus" yaml:"verification_focus"`
 	Owner             string   `json:"owner" yaml:"owner"`
+}
+
+// foldBackArtifact is stored at .agents/active/fold-back/{id}.yaml (Phase 6 fold-back reconciliation).
+type foldBackArtifact struct {
+	SchemaVersion  int    `json:"schema_version" yaml:"schema_version"`
+	ID             string `json:"id" yaml:"id"`
+	PlanID         string `json:"plan_id" yaml:"plan_id"`
+	TaskID         string `json:"task_id" yaml:"task_id"`
+	Observation    string `json:"observation" yaml:"observation"`
+	Classification string `json:"classification" yaml:"classification"` // small|proposal
+	RoutedTo       string `json:"routed_to" yaml:"routed_to"`
+	CreatedAt      string `json:"created_at" yaml:"created_at"`
+}
+
+type foldBackProposalFrontmatter struct {
+	Title       string `yaml:"title"`
+	Observation string `yaml:"observation"`
+	PlanID      string `yaml:"plan_id"`
+	TaskID      string `yaml:"task_id,omitempty"`
+	CreatedAt   string `yaml:"created_at"`
 }
 
 // workflowCanonicalPlanSummary is a compact view used in orient/status output
@@ -638,6 +659,42 @@ preferences, fanout artifacts, and bridge queries.`,
 	_ = mergeBackCmd.MarkFlagRequired("task")
 	_ = mergeBackCmd.MarkFlagRequired("summary")
 
+	// fold-back subcommand (Phase 6)
+	foldBackCmd := &cobra.Command{
+		Use:   "fold-back",
+		Short: "Route loop observations into durable plan artifacts or proposals",
+		Long:  `Records loop observations and routes them into TASKS.yaml notes, plan summary, or a ~/.agents proposal file.`,
+	}
+	foldBackCreateCmd := &cobra.Command{
+		Use:   "create",
+		Short: "Record and route a loop observation",
+		Example: ExampleBlock(
+			"  dot-agents workflow fold-back create --plan my-plan --task my-task --observation \"API edge case\"",
+			"  dot-agents workflow fold-back create --plan my-plan --observation \"plan-level note\"",
+			"  dot-agents workflow fold-back create --plan my-plan --task my-task --observation \"needs design\" --propose",
+		),
+		Args: NoArgsWithHints("Use `--plan` and `--observation` flags instead of positional arguments."),
+		RunE: runWorkflowFoldBackCreate,
+	}
+	foldBackCreateCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	foldBackCreateCmd.Flags().String("task", "", "Task ID to append note to (optional)")
+	foldBackCreateCmd.Flags().String("observation", "", "Observation text (required)")
+	foldBackCreateCmd.Flags().Bool("propose", false, "Route as proposal rather than inline task note")
+	_ = foldBackCreateCmd.MarkFlagRequired("plan")
+	_ = foldBackCreateCmd.MarkFlagRequired("observation")
+	foldBackListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List recorded fold-back observations",
+		Example: ExampleBlock(
+			"  dot-agents workflow fold-back list",
+			"  dot-agents workflow fold-back list --plan my-plan",
+		),
+		Args: NoArgsWithHints("Use `--plan` to filter by canonical plan ID."),
+		RunE: runWorkflowFoldBackList,
+	}
+	foldBackListCmd.Flags().String("plan", "", "Filter by canonical plan ID")
+	foldBackCmd.AddCommand(foldBackCreateCmd, foldBackListCmd)
+
 	// drift subcommand (Wave 7)
 	driftCmd := &cobra.Command{
 		Use:   "drift",
@@ -668,7 +725,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, driftCmd, sweepCmd)
 	return cmd
 }
 
@@ -3786,6 +3843,222 @@ func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
 		return nil, fmt.Errorf("parse merge-back %s: %w", taskID, err)
 	}
 	return &s, nil
+}
+
+// ── Fold-back (Phase 6) ───────────────────────────────────────────────────────
+
+func foldBackDir(projectPath string) string {
+	return filepath.Join(projectPath, ".agents", "active", "fold-back")
+}
+
+func appendFoldBackBullet(notes, observation string) string {
+	notes = strings.TrimRight(notes, "\n")
+	line := "- " + observation
+	if notes == "" {
+		return line
+	}
+	return notes + "\n" + line
+}
+
+func writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error {
+	dir := foldBackDir(projectPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(&artifact)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, artifact.ID+".yaml"), data, 0644)
+}
+
+func writeFoldBackProposalFile(path string, fm foldBackProposalFrontmatter, body string) error {
+	header, err := yaml.Marshal(fm)
+	if err != nil {
+		return err
+	}
+	content := fmt.Sprintf("---\n%s---\n\n%s\n", string(header), body)
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	planID, _ := cmd.Flags().GetString("plan")
+	taskID, _ := cmd.Flags().GetString("task")
+	observation, _ := cmd.Flags().GetString("observation")
+	propose, _ := cmd.Flags().GetBool("propose")
+
+	if strings.TrimSpace(observation) == "" {
+		return fmt.Errorf("observation text is required")
+	}
+
+	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
+		return fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	now := time.Now().UTC()
+	createdAt := now.Format(time.RFC3339)
+	ts := now.UnixNano()
+	foldID := fmt.Sprintf("fold-%d", ts)
+
+	artifact := foldBackArtifact{
+		SchemaVersion: 1,
+		ID:            foldID,
+		PlanID:        planID,
+		Observation:   observation,
+		CreatedAt:     createdAt,
+	}
+
+	if propose {
+		artifact.Classification = "proposal"
+		artifact.TaskID = taskID
+		proposalName := fmt.Sprintf("obs-%d.md", ts)
+		proposalsDir := filepath.Join(config.AgentsHome(), "proposals")
+		if err := os.MkdirAll(proposalsDir, 0755); err != nil {
+			return err
+		}
+		proposalPath := filepath.Join(proposalsDir, proposalName)
+		fm := foldBackProposalFrontmatter{
+			Title:       fmt.Sprintf("Fold-back: %s", planID),
+			Observation: observation,
+			PlanID:      planID,
+			CreatedAt:   createdAt,
+		}
+		if strings.TrimSpace(taskID) != "" {
+			fm.TaskID = taskID
+		}
+		if err := writeFoldBackProposalFile(proposalPath, fm, observation); err != nil {
+			return err
+		}
+		artifact.RoutedTo = "proposal:" + proposalName
+	} else {
+		artifact.Classification = "small"
+		if strings.TrimSpace(taskID) != "" {
+			tf, err := loadCanonicalTasks(project.Path, planID)
+			if err != nil {
+				return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+			}
+			var found bool
+			for i := range tf.Tasks {
+				if tf.Tasks[i].ID == taskID {
+					tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, observation)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+			}
+			if err := saveCanonicalTasks(project.Path, tf); err != nil {
+				return err
+			}
+			artifact.TaskID = taskID
+			artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
+		} else {
+			plan, err := loadCanonicalPlan(project.Path, planID)
+			if err != nil {
+				return err
+			}
+			plan.Summary = appendFoldBackBullet(plan.Summary, observation)
+			plan.UpdatedAt = createdAt
+			if err := saveCanonicalPlan(project.Path, plan); err != nil {
+				return err
+			}
+			artifact.TaskID = ""
+			artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+		}
+	}
+
+	if err := writeFoldBackArtifact(project.Path, artifact); err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	if Flags.JSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(artifact)
+	}
+
+	fmt.Fprintf(out, "  Recorded fold-back %s (%s) → %s\n", artifact.ID, artifact.Classification, artifact.RoutedTo)
+	return nil
+}
+
+func runWorkflowFoldBackList(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	planFilter, _ := cmd.Flags().GetString("plan")
+	out := cmd.OutOrStdout()
+
+	dir := foldBackDir(project.Path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if Flags.JSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode([]foldBackArtifact{})
+			}
+			fmt.Fprintf(out, "  %s\n", "No fold-back observations recorded.")
+			return nil
+		}
+		return err
+	}
+
+	var artifacts []foldBackArtifact
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return err
+		}
+		var a foldBackArtifact
+		if err := yaml.Unmarshal(data, &a); err != nil {
+			return fmt.Errorf("parse fold-back %s: %w", e.Name(), err)
+		}
+		if planFilter != "" && a.PlanID != planFilter {
+			continue
+		}
+		artifacts = append(artifacts, a)
+	}
+
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifacts[i].CreatedAt < artifacts[j].CreatedAt
+	})
+
+	if Flags.JSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(artifacts)
+	}
+
+	if len(artifacts) == 0 {
+		fmt.Fprintf(out, "  %s\n", "No fold-back observations recorded.")
+		return nil
+	}
+
+	fmt.Fprintf(out, ui.ThreeStringPlaceHolder, ui.Bold, "Fold-back observations", ui.Reset)
+	fmt.Fprintln(out, strings.Repeat("─", 40))
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tPLAN\tTASK\tCLASSIFICATION\tROUTED-TO\tCREATED-AT")
+	for _, a := range artifacts {
+		taskCol := a.TaskID
+		if taskCol == "" {
+			taskCol = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.ID, a.PlanID, taskCol, a.Classification, a.RoutedTo, a.CreatedAt)
+	}
+	_ = w.Flush()
+	fmt.Fprintln(out)
+	return nil
 }
 
 // ── workflow fanout subcommand (Wave 6 Step 5) ───────────────────────────────

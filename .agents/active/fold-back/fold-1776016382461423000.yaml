@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776016382461423000
+plan_id: loop-orchestrator-layer
+task_id: phase-4-fanout-from-slices
+observation: 'Fold-back: merge-back integrated — workflow fanout --slice resolves task/write_scope from SLICES.yaml.'
+classification: small
+routed_to: task_note:loop-orchestrator-layer/phase-4-fanout-from-slices
+created_at: "2026-04-12T17:53:02Z"
