@@ -552,6 +552,135 @@ func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.
 	}
 }
 
+func TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Directory blocks symlink creation; path is not under shared-mirror allowlist prefixes.
+	blocked := filepath.Join(repo, "vendor", "skills", "review")
+	if err := os.MkdirAll(blocked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "SKILL.md"), []byte("imported"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:    "skills.proj.review.non-allowlisted",
+		Project:     "proj",
+		Bucket:      "skills",
+		LogicalName: "review",
+		TargetPath:  filepath.Join("vendor", "skills", "review"),
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "skills",
+			RelativePath: "review",
+			Kind:         ResourceSourceCanonicalDir,
+		},
+		Shape:         ResourceShapeDirectDir,
+		Transport:     ResourceTransportSymlink,
+		Materializer:  "shared-skill-dir-symlink",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+		MarkerFiles:   []string{"SKILL.md"},
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	err = plan.Execute(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected error for non-allowlisted directory replacement")
+	}
+	if !strings.Contains(err.Error(), "not allowlisted for imported directory replacement") {
+		t.Fatalf("error = %q, want allowlisted refusal", err)
+	}
+}
+
+func TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarkers(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(repo, ".agents", "skills", "review")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Non-marker content only — executor must refuse (no imported SKILL.md to bless removal).
+	if err := os.WriteFile(filepath.Join(target, "notes.txt"), []byte("user"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	err = plan.Execute(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected error when allowlisted dir lacks imported marker files")
+	}
+	if !strings.Contains(err.Error(), "without imported markers") {
+		t.Fatalf("error = %q, want marker refusal", err)
+	}
+}
+
+func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPresent(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(repo, ".agents", "skills", "review")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("imported-body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink at %s after imported-dir replacement", target)
+	}
+}
+
 func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
