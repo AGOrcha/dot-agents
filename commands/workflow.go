@@ -69,27 +69,28 @@ type workflowCheckpoint struct {
 }
 
 type workflowOrientState struct {
-	Project            workflowProjectRef             `json:"project"`
-	Git                workflowGitSummary             `json:"git"`
-	ActivePlans        []workflowPlanSummary          `json:"active_plans"`
-	CanonicalPlans     []workflowCanonicalPlanSummary `json:"canonical_plans"`
-	Checkpoint         *workflowCheckpoint            `json:"checkpoint"`
-	Handoffs           []workflowHandoffSummary       `json:"handoffs"`
-	Lessons            []string                       `json:"lessons"`
-	Proposals          workflowProposalSummary        `json:"proposals"`
-	NextAction         string                         `json:"next_action"`
-	Warnings           []string                       `json:"warnings"`
-	Health             *WorkflowHealthSnapshot        `json:"health,omitempty"`
-	Preferences        *WorkflowPreferences           `json:"preferences,omitempty"`
-	ActiveDelegations  workflowDelegationSummary      `json:"active_delegations"`  // Wave 6 Step 7
-	PendingMergeBacks  int                            `json:"pending_merge_backs"`  // Wave 6 Step 7
-	LocalDrift         *RepoDriftReport               `json:"local_drift,omitempty"` // Wave 7 Step 7
+	Project           workflowProjectRef             `json:"project"`
+	Git               workflowGitSummary             `json:"git"`
+	ActivePlans       []workflowPlanSummary          `json:"active_plans"`
+	CanonicalPlans    []workflowCanonicalPlanSummary `json:"canonical_plans"`
+	Checkpoint        *workflowCheckpoint            `json:"checkpoint"`
+	Handoffs          []workflowHandoffSummary       `json:"handoffs"`
+	Lessons           []string                       `json:"lessons"`
+	Proposals         workflowProposalSummary        `json:"proposals"`
+	NextAction        string                         `json:"next_action"`
+	NextActionSource  string                         `json:"next_action_source"`
+	Warnings          []string                       `json:"warnings"`
+	Health            *WorkflowHealthSnapshot        `json:"health,omitempty"`
+	Preferences       *WorkflowPreferences           `json:"preferences,omitempty"`
+	ActiveDelegations workflowDelegationSummary      `json:"active_delegations"`    // Wave 6 Step 7
+	PendingMergeBacks int                            `json:"pending_merge_backs"`   // Wave 6 Step 7
+	LocalDrift        *RepoDriftReport               `json:"local_drift,omitempty"` // Wave 7 Step 7
 }
 
 // workflowDelegationSummary is a compact view of active delegation state for orient/status.
 type workflowDelegationSummary struct {
-	ActiveCount      int  `json:"active_count"`
-	PendingIntents   int  `json:"pending_intents"`   // delegations with a non-empty pending_intent
+	ActiveCount    int `json:"active_count"`
+	PendingIntents int `json:"pending_intents"` // delegations with a non-empty pending_intent
 }
 
 // CanonicalPlan is the PLAN.yaml schema for .agents/workflow/plans/<id>/PLAN.yaml
@@ -127,6 +128,26 @@ type CanonicalTask struct {
 	Notes                string   `json:"notes" yaml:"notes"`
 }
 
+// CanonicalSliceFile is the SLICES.yaml schema for .agents/workflow/plans/<id>/SLICES.yaml
+type CanonicalSliceFile struct {
+	SchemaVersion int              `json:"schema_version" yaml:"schema_version"`
+	PlanID        string           `json:"plan_id" yaml:"plan_id"`
+	Slices        []CanonicalSlice `json:"slices" yaml:"slices"`
+}
+
+// CanonicalSlice is one bounded sub-slice under a canonical task.
+type CanonicalSlice struct {
+	ID                string   `json:"id" yaml:"id"`
+	ParentTaskID      string   `json:"parent_task_id" yaml:"parent_task_id"`
+	Title             string   `json:"title" yaml:"title"`
+	Summary           string   `json:"summary" yaml:"summary"`
+	Status            string   `json:"status" yaml:"status"` // pending|in_progress|blocked|completed|cancelled
+	DependsOn         []string `json:"depends_on" yaml:"depends_on"`
+	WriteScope        []string `json:"write_scope" yaml:"write_scope"`
+	VerificationFocus string   `json:"verification_focus" yaml:"verification_focus"`
+	Owner             string   `json:"owner" yaml:"owner"`
+}
+
 // workflowCanonicalPlanSummary is a compact view used in orient/status output
 type workflowCanonicalPlanSummary struct {
 	ID               string `json:"id"`
@@ -142,10 +163,10 @@ type workflowCanonicalPlanSummary struct {
 type VerificationRecord struct {
 	SchemaVersion int      `json:"schema_version"`
 	Timestamp     string   `json:"timestamp"`
-	Kind          string   `json:"kind"`     // test|lint|build|format|custom
-	Status        string   `json:"status"`   // pass|fail|partial|unknown
+	Kind          string   `json:"kind"`   // test|lint|build|format|custom
+	Status        string   `json:"status"` // pass|fail|partial|unknown
 	Command       string   `json:"command"`
-	Scope         string   `json:"scope"`    // file|package|repo|custom
+	Scope         string   `json:"scope"` // file|package|repo|custom
 	Summary       string   `json:"summary"`
 	Artifacts     []string `json:"artifacts"`
 	RecordedBy    string   `json:"recorded_by"`
@@ -153,7 +174,7 @@ type VerificationRecord struct {
 
 // WorkflowHealthSnapshot is the health.json schema
 type WorkflowHealthSnapshot struct {
-	SchemaVersion int `json:"schema_version"`
+	SchemaVersion int    `json:"schema_version"`
 	Timestamp     string `json:"timestamp"`
 	Git           struct {
 		InsideRepo     bool   `json:"inside_repo"`
@@ -241,7 +262,19 @@ func NewWorkflowCmd() *cobra.Command {
 			return runWorkflowPlanShow(args[0])
 		},
 	}
-	planCmd.AddCommand(planShowCmd)
+	planGraphCmd := &cobra.Command{
+		Use:   "graph [plan-id]",
+		Short: "Render a derived graph of canonical plans and tasks",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			planID := ""
+			if len(args) == 1 {
+				planID = args[0]
+			}
+			return runWorkflowPlanGraph(planID)
+		},
+	}
+	planCmd.AddCommand(planShowCmd, planGraphCmd)
 
 	// tasks subcommand
 	tasksCmd := &cobra.Command{
@@ -250,6 +283,23 @@ func NewWorkflowCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTasks(args[0])
+		},
+	}
+
+	slicesCmd := &cobra.Command{
+		Use:   "slices <plan-id>",
+		Short: "Show slices for a canonical plan",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowSlices(args[0])
+		},
+	}
+
+	nextCmd := &cobra.Command{
+		Use:   "next",
+		Short: "Suggest the next actionable canonical task",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowNext()
 		},
 	}
 
@@ -415,7 +465,7 @@ func NewWorkflowCmd() *cobra.Command {
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
 	return cmd
 }
 
@@ -462,7 +512,8 @@ func runWorkflowStatus() error {
 	fmt.Fprintln(os.Stdout)
 
 	ui.Section("Next Action")
-	fmt.Fprintf(os.Stdout, "  %s\n", state.NextAction)
+	fmt.Fprintf(os.Stdout, "  recommended: %s\n", state.NextAction)
+	fmt.Fprintf(os.Stdout, "  source: %s\n", state.NextActionSource)
 
 	if len(state.Warnings) > 0 {
 		fmt.Fprintln(os.Stdout)
@@ -643,10 +694,14 @@ func collectWorkflowState() (*workflowOrientState, error) {
 		Proposals: workflowProposalSummary{
 			PendingCount: proposals,
 		},
-		NextAction:        deriveWorkflowNextAction(checkpoint, canonicalPlans, activePlans),
 		Warnings:          warnings,
 		ActiveDelegations: delegationSummary,
 		PendingMergeBacks: pendingMergebacks,
+	}
+	state.NextAction, state.NextActionSource = deriveWorkflowNextAction(gitSummary, checkpoint, canonicalPlans, activePlans)
+	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" && !isCheckpointCurrent(gitSummary, checkpoint) && state.NextActionSource != "checkpoint" {
+		warnings = append(warnings, fmt.Sprintf("checkpoint next action %q is stale relative to current git state; using %s", checkpoint.NextAction, state.NextActionSource))
+		state.Warnings = warnings
 	}
 
 	// Wave 7 Step 7: local drift check for current project
@@ -814,22 +869,34 @@ func countPendingWorkflowProposals() (int, error) {
 	return count, nil
 }
 
-func deriveWorkflowNextAction(checkpoint *workflowCheckpoint, canonicalPlans []workflowCanonicalPlanSummary, plans []workflowPlanSummary) string {
-	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" {
-		return strings.TrimSpace(checkpoint.NextAction)
+func deriveWorkflowNextAction(git workflowGitSummary, checkpoint *workflowCheckpoint, canonicalPlans []workflowCanonicalPlanSummary, plans []workflowPlanSummary) (string, string) {
+	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" && isCheckpointCurrent(git, checkpoint) {
+		return strings.TrimSpace(checkpoint.NextAction), "checkpoint"
 	}
-	// Prefer canonical plan focus task over legacy plan pending items
 	for _, cp := range canonicalPlans {
 		if cp.Status == "active" && strings.TrimSpace(cp.CurrentFocusTask) != "" {
-			return strings.TrimSpace(cp.CurrentFocusTask)
+			return strings.TrimSpace(cp.CurrentFocusTask), "canonical_plan"
 		}
 	}
 	for _, plan := range plans {
 		if len(plan.PendingItems) > 0 {
-			return plan.PendingItems[0]
+			return plan.PendingItems[0], "active_plan"
 		}
 	}
-	return workflowDefaultNextAction
+	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" {
+		return strings.TrimSpace(checkpoint.NextAction), "checkpoint_stale"
+	}
+	return workflowDefaultNextAction, "default"
+}
+
+func isCheckpointCurrent(git workflowGitSummary, checkpoint *workflowCheckpoint) bool {
+	if checkpoint == nil {
+		return false
+	}
+	if strings.TrimSpace(checkpoint.Git.Branch) == "" || strings.TrimSpace(checkpoint.Git.SHA) == "" {
+		return false
+	}
+	return checkpoint.Git.Branch == git.Branch && checkpoint.Git.SHA == git.SHA
 }
 
 func readWorkflowPlan(path string) (workflowPlanSummary, error) {
@@ -847,9 +914,17 @@ func readWorkflowPlan(path string) (workflowPlanSummary, error) {
 	}
 	var pending []string
 	var fallback []string
+	completed := false
 	for _, line := range lines[1:] {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Status:") {
+			status := strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
+			if strings.HasPrefix(strings.ToLower(status), "completed") {
+				completed = true
+			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, "- [ ] ") {
@@ -866,7 +941,9 @@ func readWorkflowPlan(path string) (workflowPlanSummary, error) {
 			fallback = append(fallback, trimmed)
 		}
 	}
-	if len(pending) == 0 {
+	if completed {
+		pending = nil
+	} else if len(pending) == 0 {
 		pending = fallback
 	}
 	return workflowPlanSummary{Path: path, Title: title, PendingItems: pending}, nil
@@ -995,6 +1072,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Next Action")
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "- %s\n", state.NextAction)
+	fmt.Fprintf(out, "- source: %s\n", state.NextActionSource)
 
 	if len(state.Git.RecentCommits) > 0 {
 		fmt.Fprintln(out)
@@ -1209,6 +1287,19 @@ func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) 
 	return &tf, nil
 }
 
+func loadCanonicalSlices(projectPath, planID string) (*CanonicalSliceFile, error) {
+	path := filepath.Join(plansBaseDir(projectPath), planID, "SLICES.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var sf CanonicalSliceFile
+	if err := yaml.Unmarshal(content, &sf); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return &sf, nil
+}
+
 func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 	dir := filepath.Join(plansBaseDir(projectPath), tf.PlanID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -1327,11 +1418,15 @@ func runWorkflowPlanShow(planID string) error {
 		return fmt.Errorf("plan %q not found: %w", planID, err)
 	}
 	tf, tasksErr := loadCanonicalTasks(project.Path, planID)
+	sf, slicesErr := loadCanonicalSlices(project.Path, planID)
 
 	if Flags.JSON {
 		out := map[string]interface{}{"plan": plan}
 		if tasksErr == nil {
 			out["tasks"] = tf
+		}
+		if slicesErr == nil {
+			out["slices"] = sf
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -1390,7 +1485,265 @@ func runWorkflowPlanShow(planID string) error {
 		fmt.Fprintf(os.Stdout, "  [%s] %s  %s\n", marker, t.ID, t.Title)
 	}
 	fmt.Fprintln(os.Stdout)
+	if slicesErr == nil {
+		ui.Section("Slices")
+		fmt.Fprintf(os.Stdout, "  total: %d\n\n", len(sf.Slices))
+		for _, slice := range sf.Slices {
+			fmt.Fprintf(os.Stdout, "  [%s] %s  (%s)  task: %s\n", slice.ID, slice.Title, slice.Status, slice.ParentTaskID)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+type workflowPlanGraphNode struct {
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	PlanID string `json:"plan_id,omitempty"`
+	TaskID string `json:"task_id,omitempty"`
+	Label  string `json:"label"`
+	Status string `json:"status,omitempty"`
+}
+
+type workflowPlanGraphEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type"`
+}
+
+type workflowPlanGraph struct {
+	PlanFilter string                  `json:"plan_filter,omitempty"`
+	Nodes      []workflowPlanGraphNode `json:"nodes"`
+	Edges      []workflowPlanGraphEdge `json:"edges"`
+	Warnings   []string                `json:"warnings,omitempty"`
+}
+
+func runWorkflowPlanGraph(planID string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	graph, err := buildWorkflowPlanGraph(project.Path, planID)
+	if err != nil {
+		return err
+	}
+
+	if Flags.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(graph)
+	}
+
+	title := "Canonical Plan Graph"
+	if planID != "" {
+		title += ": " + planID
+	}
+	ui.Header(title)
+
+	nodeByID := make(map[string]workflowPlanGraphNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		nodeByID[node.ID] = node
+	}
+
+	for _, node := range graph.Nodes {
+		if node.Kind != "plan" {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "  [%s] %s (%s)\n", strings.TrimPrefix(node.ID, "plan:"), node.Label, node.Status)
+		for _, edge := range graph.Edges {
+			if edge.Type != "contains" || edge.From != node.ID {
+				continue
+			}
+			taskNode := workflowPlanGraphNode{}
+			found := false
+			for _, candidate := range graph.Nodes {
+				if candidate.ID == edge.To {
+					taskNode = candidate
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+			fmt.Fprintf(os.Stdout, "      -> [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(taskNode.ID, "task:"+taskNode.PlanID+"/"), "task:"), taskNode.Label, taskNode.Status)
+			for _, taskEdge := range graph.Edges {
+				if taskEdge.From == taskNode.ID && taskEdge.Type == "contains" {
+					sliceNode, ok := nodeByID[taskEdge.To]
+					if ok && sliceNode.Kind == "slice" {
+						fmt.Fprintf(os.Stdout, "         => [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(sliceNode.ID, "slice:"+sliceNode.PlanID+"/"), "slice:"), sliceNode.Label, sliceNode.Status)
+						for _, sliceEdge := range graph.Edges {
+							if sliceEdge.From != sliceNode.ID || sliceEdge.Type != "depends_on" {
+								continue
+							}
+							targetLabel := sliceEdge.To
+							if targetNode, ok := nodeByID[sliceEdge.To]; ok {
+								targetLabel = targetNode.Label
+							}
+							fmt.Fprintf(os.Stdout, "            depends_on: %s\n", targetLabel)
+						}
+					}
+				}
+				if taskEdge.From != taskNode.ID || (taskEdge.Type != "depends_on" && taskEdge.Type != "blocks") {
+					continue
+				}
+				targetLabel := taskEdge.To
+				if targetNode, ok := nodeByID[taskEdge.To]; ok {
+					targetLabel = targetNode.Label
+				}
+				fmt.Fprintf(os.Stdout, "         %s: %s\n", taskEdge.Type, targetLabel)
+			}
+		}
+	}
+
+	for _, warning := range graph.Warnings {
+		ui.Warn(warning)
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if planID != "" {
+		found := false
+		for _, id := range ids {
+			if id == planID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("plan %q not found", planID)
+		}
+		ids = []string{planID}
+	}
+
+	graph := &workflowPlanGraph{
+		PlanFilter: planID,
+		Nodes:      []workflowPlanGraphNode{},
+		Edges:      []workflowPlanGraphEdge{},
+		Warnings:   []string{},
+	}
+
+	for _, id := range ids {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil {
+			return nil, fmt.Errorf("load plan %q: %w", id, err)
+		}
+		tf, err := loadCanonicalTasks(projectPath, id)
+		if err != nil {
+			return nil, fmt.Errorf("load tasks for plan %q: %w", id, err)
+		}
+		sf, slicesErr := loadCanonicalSlices(projectPath, id)
+		if slicesErr != nil && !os.IsNotExist(slicesErr) {
+			return nil, fmt.Errorf("load slices for plan %q: %w", id, slicesErr)
+		}
+
+		planNodeID := "plan:" + plan.ID
+		graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+			ID:     planNodeID,
+			Kind:   "plan",
+			Label:  plan.Title,
+			Status: plan.Status,
+		})
+
+		taskIDs := make(map[string]string, len(tf.Tasks))
+		for _, task := range tf.Tasks {
+			taskNodeID := "task:" + plan.ID + "/" + task.ID
+			taskIDs[task.ID] = taskNodeID
+			graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+				ID:     taskNodeID,
+				Kind:   "task",
+				PlanID: plan.ID,
+				Label:  task.Title,
+				Status: task.Status,
+			})
+			graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+				From: planNodeID,
+				To:   taskNodeID,
+				Type: "contains",
+			})
+		}
+
+		if slicesErr == nil {
+			sliceIDs := make(map[string]string, len(sf.Slices))
+			for _, slice := range sf.Slices {
+				parentTaskNodeID, ok := taskIDs[slice.ParentTaskID]
+				if !ok {
+					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s references unknown parent task %s", plan.ID, slice.ID, slice.ParentTaskID))
+					continue
+				}
+				sliceNodeID := "slice:" + plan.ID + "/" + slice.ID
+				sliceIDs[slice.ID] = sliceNodeID
+				graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+					ID:     sliceNodeID,
+					Kind:   "slice",
+					PlanID: plan.ID,
+					TaskID: slice.ParentTaskID,
+					Label:  slice.Title,
+					Status: slice.Status,
+				})
+				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+					From: parentTaskNodeID,
+					To:   sliceNodeID,
+					Type: "contains",
+				})
+			}
+			for _, slice := range sf.Slices {
+				fromID, ok := sliceIDs[slice.ID]
+				if !ok {
+					continue
+				}
+				for _, dep := range slice.DependsOn {
+					toID, ok := sliceIDs[dep]
+					if !ok {
+						graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s depends on unknown slice %s", plan.ID, slice.ID, dep))
+						continue
+					}
+					graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+						From: fromID,
+						To:   toID,
+						Type: "depends_on",
+					})
+				}
+			}
+		}
+
+		for _, task := range tf.Tasks {
+			fromID := taskIDs[task.ID]
+			for _, dep := range task.DependsOn {
+				toID, ok := taskIDs[dep]
+				if !ok {
+					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s depends on unknown task %s", plan.ID, task.ID, dep))
+					continue
+				}
+				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+					From: fromID,
+					To:   toID,
+					Type: "depends_on",
+				})
+			}
+			for _, blocked := range task.Blocks {
+				toID, ok := taskIDs[blocked]
+				if !ok {
+					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s blocks unknown task %s", plan.ID, task.ID, blocked))
+					continue
+				}
+				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+					From: fromID,
+					To:   toID,
+					Type: "blocks",
+				})
+			}
+		}
+	}
+
+	return graph, nil
 }
 
 func runWorkflowTasks(planID string) error {
@@ -1423,6 +1776,205 @@ func runWorkflowTasks(planID string) error {
 	}
 	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+func runWorkflowSlices(planID string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
+		return fmt.Errorf("plan %q not found: %w", planID, err)
+	}
+	sf, err := loadCanonicalSlices(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("slices for plan %q not found: %w", planID, err)
+	}
+	if Flags.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(sf)
+	}
+	ui.Header("Slices: " + planID)
+	for _, slice := range sf.Slices {
+		deps := ""
+		if len(slice.DependsOn) > 0 {
+			deps = "  depends: " + strings.Join(slice.DependsOn, ", ")
+		}
+		fmt.Fprintf(os.Stdout, "  [%s] %s  (%s)  task: %s%s\n", slice.ID, slice.Title, slice.Status, slice.ParentTaskID, deps)
+		if slice.Summary != "" {
+			fmt.Fprintf(os.Stdout, "      summary: %s\n", slice.Summary)
+		}
+		if len(slice.WriteScope) > 0 {
+			fmt.Fprintf(os.Stdout, "      write scope: %s\n", strings.Join(slice.WriteScope, ", "))
+		}
+		if slice.VerificationFocus != "" {
+			fmt.Fprintf(os.Stdout, "      verification: %s\n", slice.VerificationFocus)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+type workflowNextTaskSuggestion struct {
+	PlanID               string   `json:"plan_id"`
+	PlanTitle            string   `json:"plan_title"`
+	TaskID               string   `json:"task_id"`
+	TaskTitle            string   `json:"task_title"`
+	Status               string   `json:"status"`
+	Reason               string   `json:"reason"`
+	WriteScope           []string `json:"write_scope,omitempty"`
+	VerificationRequired bool     `json:"verification_required"`
+	DependsOn            []string `json:"depends_on,omitempty"`
+}
+
+func runWorkflowNext() error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	suggestion, err := selectNextCanonicalTask(project.Path)
+	if err != nil {
+		return err
+	}
+	if suggestion == nil {
+		fmt.Fprintln(os.Stdout, "No actionable canonical task found.")
+		fmt.Fprintln(os.Stdout, "  Active plans are completed, blocked by dependencies, already delegated, or missing TASKS.yaml.")
+		return nil
+	}
+
+	if Flags.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(suggestion)
+	}
+
+	ui.Header("Next Canonical Task")
+	fmt.Fprintf(os.Stdout, "  plan: %s  [%s]\n", suggestion.PlanTitle, suggestion.PlanID)
+	fmt.Fprintf(os.Stdout, "  task: %s  [%s]\n", suggestion.TaskTitle, suggestion.TaskID)
+	fmt.Fprintf(os.Stdout, "  status: %s\n", suggestion.Status)
+	fmt.Fprintf(os.Stdout, "  reason: %s\n", suggestion.Reason)
+	if len(suggestion.DependsOn) > 0 {
+		fmt.Fprintf(os.Stdout, "  depends on: %s\n", strings.Join(suggestion.DependsOn, ", "))
+	}
+	if len(suggestion.WriteScope) > 0 {
+		fmt.Fprintf(os.Stdout, "  write scope: %s\n", strings.Join(suggestion.WriteScope, ", "))
+	}
+	if suggestion.VerificationRequired {
+		fmt.Fprintln(os.Stdout, "  verification: required")
+	} else {
+		fmt.Fprintln(os.Stdout, "  verification: optional")
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+func selectNextCanonicalTask(projectPath string) (*workflowNextTaskSuggestion, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	delegations, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	activeDelegations := make(map[string]bool, len(delegations))
+	for _, c := range delegations {
+		if c.Status == "pending" || c.Status == "active" {
+			activeDelegations[c.ParentTaskID] = true
+		}
+	}
+
+	type candidate struct {
+		suggestion workflowNextTaskSuggestion
+		priority   int
+	}
+
+	var best *candidate
+	for _, id := range ids {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil || plan.Status != "active" {
+			continue
+		}
+		tf, err := loadCanonicalTasks(projectPath, id)
+		if err != nil {
+			return nil, fmt.Errorf("load tasks for plan %q: %w", id, err)
+		}
+		for _, task := range tf.Tasks {
+			if activeDelegations[task.ID] {
+				continue
+			}
+			if task.Status != "in_progress" && task.Status != "pending" {
+				continue
+			}
+			if len(incompleteCanonicalDependencies(tf.Tasks, task.DependsOn)) > 0 {
+				continue
+			}
+
+			c := candidate{
+				suggestion: workflowNextTaskSuggestion{
+					PlanID:               plan.ID,
+					PlanTitle:            plan.Title,
+					TaskID:               task.ID,
+					TaskTitle:            task.Title,
+					Status:               task.Status,
+					WriteScope:           append([]string(nil), task.WriteScope...),
+					VerificationRequired: task.VerificationRequired,
+					DependsOn:            append([]string(nil), task.DependsOn...),
+				},
+				priority: 3,
+			}
+
+			switch {
+			case task.Status == "in_progress" && plan.CurrentFocusTask == task.Title:
+				c.priority = 0
+				c.suggestion.Reason = "current focus task is already in progress"
+			case task.Status == "in_progress":
+				c.priority = 1
+				c.suggestion.Reason = "task is already in progress and unblocked"
+			case plan.CurrentFocusTask == task.Title:
+				c.priority = 2
+				c.suggestion.Reason = "current focus task is pending and all dependencies are complete"
+			default:
+				c.priority = 3
+				c.suggestion.Reason = "first pending unblocked task in an active canonical plan"
+			}
+
+			if best == nil || c.priority < best.priority {
+				tmp := c
+				best = &tmp
+			}
+		}
+	}
+
+	if best == nil {
+		return nil, nil
+	}
+	return &best.suggestion, nil
+}
+
+func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+
+	statusByID := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		statusByID[task.ID] = task.Status
+	}
+
+	var incomplete []string
+	for _, dep := range deps {
+		if statusByID[dep] != "completed" {
+			incomplete = append(incomplete, dep)
+		}
+	}
+	return incomplete
 }
 
 func runWorkflowAdvance(planID, taskID, newStatus string) error {
@@ -1759,7 +2311,7 @@ type WorkflowExecutionPrefs struct {
 
 // WorkflowPreferencesFile is the on-disk wrapper for preferences.yaml.
 type WorkflowPreferencesFile struct {
-	SchemaVersion       int                  `json:"schema_version" yaml:"schema_version"`
+	SchemaVersion       int `json:"schema_version" yaml:"schema_version"`
 	WorkflowPreferences `yaml:",inline"      json:",inline"`
 }
 
@@ -2145,10 +2697,10 @@ type ContextMapping struct {
 
 // GraphBridgeConfig is the schema for .agents/workflow/graph-bridge.yaml.
 type GraphBridgeConfig struct {
-	SchemaVersion  int              `json:"schema_version" yaml:"schema_version"`
-	Enabled        bool             `json:"enabled" yaml:"enabled"`
-	GraphHome      string           `json:"graph_home" yaml:"graph_home"`
-	AllowedIntents []string         `json:"allowed_intents" yaml:"allowed_intents"`
+	SchemaVersion   int              `json:"schema_version" yaml:"schema_version"`
+	Enabled         bool             `json:"enabled" yaml:"enabled"`
+	GraphHome       string           `json:"graph_home" yaml:"graph_home"`
+	AllowedIntents  []string         `json:"allowed_intents" yaml:"allowed_intents"`
 	ContextMappings []ContextMapping `json:"context_mappings" yaml:"context_mappings"`
 }
 
@@ -2220,15 +2772,15 @@ type GraphBridgeAdapter interface {
 
 // GraphBridgeHealth is the adapter availability and last-query status.
 type GraphBridgeHealth struct {
-	SchemaVersion   int      `json:"schema_version"`
-	Timestamp       string   `json:"timestamp"`
-	AdapterAvailable bool    `json:"adapter_available"`
-	GraphHomeExists bool     `json:"graph_home_exists"`
-	NoteCount       int      `json:"note_count"`
-	LastQueryTime   string   `json:"last_query_time,omitempty"`
-	LastQueryStatus string   `json:"last_query_status,omitempty"`
-	Status          string   `json:"status"` // healthy|warn|error
-	Warnings        []string `json:"warnings,omitempty"`
+	SchemaVersion    int      `json:"schema_version"`
+	Timestamp        string   `json:"timestamp"`
+	AdapterAvailable bool     `json:"adapter_available"`
+	GraphHomeExists  bool     `json:"graph_home_exists"`
+	NoteCount        int      `json:"note_count"`
+	LastQueryTime    string   `json:"last_query_time,omitempty"`
+	LastQueryStatus  string   `json:"last_query_status,omitempty"`
+	Status           string   `json:"status"` // healthy|warn|error
+	Warnings         []string `json:"warnings,omitempty"`
 }
 
 // writeGraphBridgeHealth writes health to ~/.agents/context/<project>/graph-bridge-health.json.
@@ -2265,8 +2817,8 @@ func readGraphBridgeHealth(project string) (*GraphBridgeHealth, error) {
 // This is intentionally independent of the kg package — agents use it without
 // needing the kg subcommand installed.
 type LocalGraphAdapter struct {
-	graphHome string
-	lastQuery string
+	graphHome  string
+	lastQuery  string
 	lastStatus string
 }
 
@@ -2557,21 +3109,21 @@ var validCoordinationIntents = map[CoordinationIntent]bool{
 // DelegationContract declares a bounded task delegation from parent to sub-agent.
 // Stored at .agents/active/delegation/<task-id>.yaml
 type DelegationContract struct {
-	SchemaVersion              int                `json:"schema_version" yaml:"schema_version"`
-	ID                         string             `json:"id" yaml:"id"`
-	ParentPlanID               string             `json:"parent_plan_id" yaml:"parent_plan_id"`
-	ParentTaskID               string             `json:"parent_task_id" yaml:"parent_task_id"`
-	Title                      string             `json:"title" yaml:"title"`
-	Summary                    string             `json:"summary" yaml:"summary"`
-	WriteScope                 []string           `json:"write_scope" yaml:"write_scope"` // immutable after creation
-	SuccessCriteria            string             `json:"success_criteria" yaml:"success_criteria"`
-	VerificationExpectations   string             `json:"verification_expectations" yaml:"verification_expectations"`
-	MayMutateWorkflowState     bool               `json:"may_mutate_workflow_state" yaml:"may_mutate_workflow_state"`
-	Owner                      string             `json:"owner" yaml:"owner"` // delegate agent identity
-	Status                     string             `json:"status" yaml:"status"` // pending|active|completed|failed|cancelled
-	PendingIntent              CoordinationIntent `json:"pending_intent,omitempty" yaml:"pending_intent,omitempty"`
-	CreatedAt                  string             `json:"created_at" yaml:"created_at"`
-	UpdatedAt                  string             `json:"updated_at" yaml:"updated_at"`
+	SchemaVersion            int                `json:"schema_version" yaml:"schema_version"`
+	ID                       string             `json:"id" yaml:"id"`
+	ParentPlanID             string             `json:"parent_plan_id" yaml:"parent_plan_id"`
+	ParentTaskID             string             `json:"parent_task_id" yaml:"parent_task_id"`
+	Title                    string             `json:"title" yaml:"title"`
+	Summary                  string             `json:"summary" yaml:"summary"`
+	WriteScope               []string           `json:"write_scope" yaml:"write_scope"` // immutable after creation
+	SuccessCriteria          string             `json:"success_criteria" yaml:"success_criteria"`
+	VerificationExpectations string             `json:"verification_expectations" yaml:"verification_expectations"`
+	MayMutateWorkflowState   bool               `json:"may_mutate_workflow_state" yaml:"may_mutate_workflow_state"`
+	Owner                    string             `json:"owner" yaml:"owner"`   // delegate agent identity
+	Status                   string             `json:"status" yaml:"status"` // pending|active|completed|failed|cancelled
+	PendingIntent            CoordinationIntent `json:"pending_intent,omitempty" yaml:"pending_intent,omitempty"`
+	CreatedAt                string             `json:"created_at" yaml:"created_at"`
+	UpdatedAt                string             `json:"updated_at" yaml:"updated_at"`
 }
 
 var validDelegationStatuses = map[string]bool{
@@ -2690,16 +3242,16 @@ func scopePathsOverlap(a, b string) bool {
 // MergeBackSummary is produced by the delegate and consumed by the parent.
 // Stored at .agents/active/merge-back/<task-id>.md with YAML frontmatter.
 type MergeBackSummary struct {
-	SchemaVersion      int                      `json:"schema_version" yaml:"schema_version"`
-	TaskID             string                   `json:"task_id" yaml:"task_id"`
-	ParentPlanID       string                   `json:"parent_plan_id" yaml:"parent_plan_id"`
-	Title              string                   `json:"title" yaml:"title"`
-	Summary            string                   `json:"summary" yaml:"summary"`
-	FilesChanged       []string                 `json:"files_changed" yaml:"files_changed"`
-	VerificationResult MergeBackVerification    `json:"verification_result" yaml:"verification_result"`
-	IntegrationNotes   string                   `json:"integration_notes" yaml:"integration_notes"`
-	BlockersEncountered []string                `json:"blockers_encountered,omitempty" yaml:"blockers_encountered,omitempty"`
-	CreatedAt          string                   `json:"created_at" yaml:"created_at"`
+	SchemaVersion       int                   `json:"schema_version" yaml:"schema_version"`
+	TaskID              string                `json:"task_id" yaml:"task_id"`
+	ParentPlanID        string                `json:"parent_plan_id" yaml:"parent_plan_id"`
+	Title               string                `json:"title" yaml:"title"`
+	Summary             string                `json:"summary" yaml:"summary"`
+	FilesChanged        []string              `json:"files_changed" yaml:"files_changed"`
+	VerificationResult  MergeBackVerification `json:"verification_result" yaml:"verification_result"`
+	IntegrationNotes    string                `json:"integration_notes" yaml:"integration_notes"`
+	BlockersEncountered []string              `json:"blockers_encountered,omitempty" yaml:"blockers_encountered,omitempty"`
+	CreatedAt           string                `json:"created_at" yaml:"created_at"`
 }
 
 // MergeBackVerification captures the delegate's self-reported verification.
@@ -2949,16 +3501,16 @@ func loadManagedProjects() ([]ManagedProject, error) {
 
 // RepoDriftReport captures drift conditions for one managed project.
 type RepoDriftReport struct {
-	Project               ManagedProject `json:"project"`
-	Reachable             bool           `json:"reachable"`             // false if path doesn't exist
-	MissingCheckpoint     bool           `json:"missing_checkpoint"`    // no checkpoint file
-	StaleCheckpoint       bool           `json:"stale_checkpoint"`      // checkpoint older than threshold
-	CheckpointAgeDays     int            `json:"checkpoint_age_days"`   // -1 if no checkpoint
-	StaleProposalCount    int            `json:"stale_proposal_count"`  // proposals older than threshold
-	MissingWorkflowDir    bool           `json:"missing_workflow_dir"`  // no .agents/workflow/
-	MissingPlanStructure  bool           `json:"missing_plan_structure"` // no .agents/workflow/plans/
-	Warnings              []string       `json:"warnings"`
-	Status                string         `json:"status"` // healthy|warn|unreachable
+	Project              ManagedProject `json:"project"`
+	Reachable            bool           `json:"reachable"`              // false if path doesn't exist
+	MissingCheckpoint    bool           `json:"missing_checkpoint"`     // no checkpoint file
+	StaleCheckpoint      bool           `json:"stale_checkpoint"`       // checkpoint older than threshold
+	CheckpointAgeDays    int            `json:"checkpoint_age_days"`    // -1 if no checkpoint
+	StaleProposalCount   int            `json:"stale_proposal_count"`   // proposals older than threshold
+	MissingWorkflowDir   bool           `json:"missing_workflow_dir"`   // no .agents/workflow/
+	MissingPlanStructure bool           `json:"missing_plan_structure"` // no .agents/workflow/plans/
+	Warnings             []string       `json:"warnings"`
+	Status               string         `json:"status"` // healthy|warn|unreachable
 }
 
 // detectRepoDrift inspects one managed project for workflow drift.
@@ -3038,14 +3590,14 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 
 // AggregateDriftReport summarizes drift across all managed projects.
 type AggregateDriftReport struct {
-	Timestamp       string            `json:"timestamp"`
-	TotalProjects   int               `json:"total_projects"`
-	ProjectsChecked int               `json:"projects_checked"`
-	Reports         []RepoDriftReport `json:"reports"`
-	HealthyCount    int               `json:"healthy_count"`
-	WarnCount       int               `json:"warn_count"`
-	UnreachableCount int              `json:"unreachable_count"`
-	TopWarnings     []string          `json:"top_warnings"`
+	Timestamp        string            `json:"timestamp"`
+	TotalProjects    int               `json:"total_projects"`
+	ProjectsChecked  int               `json:"projects_checked"`
+	Reports          []RepoDriftReport `json:"reports"`
+	HealthyCount     int               `json:"healthy_count"`
+	WarnCount        int               `json:"warn_count"`
+	UnreachableCount int               `json:"unreachable_count"`
+	TopWarnings      []string          `json:"top_warnings"`
 }
 
 // aggregateDrift combines per-repo reports into a summary.
@@ -3174,18 +3726,18 @@ func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
 type SweepActionType string
 
 const (
-	SweepActionScaffoldWorkflowDir    SweepActionType = "scaffold_workflow_dir"
-	SweepActionCreatePlanStructure    SweepActionType = "create_plan_structure"
+	SweepActionScaffoldWorkflowDir      SweepActionType = "scaffold_workflow_dir"
+	SweepActionCreatePlanStructure      SweepActionType = "create_plan_structure"
 	SweepActionCreateCheckpointReminder SweepActionType = "create_checkpoint_reminder"
-	SweepActionFlagStaleProposals     SweepActionType = "flag_stale_proposals"
+	SweepActionFlagStaleProposals       SweepActionType = "flag_stale_proposals"
 )
 
 // SweepActionItem is one actionable fix in a sweep plan.
 type SweepActionItem struct {
-	Project             ManagedProject  `json:"project"`
-	Action              SweepActionType `json:"action"`
-	Description         string          `json:"description"`
-	RequiresConfirmation bool           `json:"requires_confirmation"`
+	Project              ManagedProject  `json:"project"`
+	Action               SweepActionType `json:"action"`
+	Description          string          `json:"description"`
+	RequiresConfirmation bool            `json:"requires_confirmation"`
 }
 
 // SweepPlan is the collection of planned actions for a sweep run.

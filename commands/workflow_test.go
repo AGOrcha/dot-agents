@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,8 +146,11 @@ blockers: []
 	if state.Checkpoint == nil || state.Checkpoint.NextAction != "Resume implementation" {
 		t.Fatalf("unexpected checkpoint: %+v", state.Checkpoint)
 	}
-	if state.NextAction != "Resume implementation" {
-		t.Fatalf("next action = %q, want Resume implementation", state.NextAction)
+	if state.NextAction != "First pending task" {
+		t.Fatalf("next action = %q, want First pending task", state.NextAction)
+	}
+	if state.NextActionSource != "active_plan" {
+		t.Fatalf("next action source = %q, want active_plan", state.NextActionSource)
 	}
 	if len(state.Handoffs) != 1 || state.Handoffs[0].Title != "Next Handoff" {
 		t.Fatalf("unexpected handoffs: %+v", state.Handoffs)
@@ -295,6 +299,99 @@ tasks:
     write_scope: ["commands/workflow_test.go"]
     verification_required: false
     notes: "done"
+`)
+}
+
+func addCanonicalPendingPlanFixture(t *testing.T, repo string) {
+	t.Helper()
+	write := func(rel, content string) {
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(".agents/workflow/plans/wave-next/PLAN.yaml", `schema_version: 1
+id: "wave-next"
+title: "Pending-first fixture"
+status: "active"
+summary: "Canonical plan fixture for workflow next tests"
+created_at: "2026-04-10T10:00:00Z"
+updated_at: "2026-04-10T10:00:00Z"
+owner: "test"
+success_criteria: "all tasks complete"
+verification_strategy: "go test"
+current_focus_task: "finish planner"
+`)
+	write(".agents/workflow/plans/wave-next/TASKS.yaml", `schema_version: 1
+plan_id: "wave-next"
+tasks:
+  - id: "prep"
+    title: "prep docs"
+    status: "completed"
+    depends_on: []
+    blocks: ["planner"]
+    owner: "test"
+    write_scope: ["docs/"]
+    verification_required: false
+    notes: ""
+  - id: "planner"
+    title: "finish planner"
+    status: "pending"
+    depends_on: ["prep"]
+    blocks: ["tests"]
+    owner: "test"
+    write_scope: ["commands/"]
+    verification_required: true
+    notes: ""
+  - id: "tests"
+    title: "add tests"
+    status: "pending"
+    depends_on: ["planner"]
+    blocks: []
+    owner: "test"
+    write_scope: ["commands/workflow_test.go"]
+    verification_required: true
+    notes: ""
+`)
+}
+
+func addCanonicalSliceFixture(t *testing.T, repo, planID string) {
+	t.Helper()
+	write := func(rel, content string) {
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(".agents/workflow/plans/"+planID+"/SLICES.yaml", `schema_version: 1
+plan_id: "`+planID+`"
+slices:
+  - id: "slice-read-surface"
+    parent_task_id: "t1"
+    title: "Read surface"
+    summary: "Add a read-only CLI surface for slices."
+    status: "completed"
+    depends_on: []
+    write_scope: ["commands/workflow.go", "commands/workflow_test.go"]
+    verification_focus: "workflow slices and plan graph"
+    owner: "dot-agents"
+  - id: "slice-artifacts"
+    parent_task_id: "t2"
+    title: "Artifact docs"
+    summary: "Add canonical slice artifacts and docs."
+    status: "pending"
+    depends_on: ["slice-read-surface"]
+    write_scope: [".agents/workflow/plans/", "docs/"]
+    verification_focus: "fixture and CLI readback"
+    owner: "dot-agents"
 `)
 }
 
@@ -515,10 +612,298 @@ func TestRunWorkflowAdvanceMissingTask(t *testing.T) {
 	}
 }
 
+func TestBuildWorkflowPlanGraph(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalSliceFixture(t, repo, "wave-2")
+
+	graph, err := buildWorkflowPlanGraph(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 6 {
+		t.Fatalf("node count = %d, want 6", len(graph.Nodes))
+	}
+	if len(graph.Warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", graph.Warnings)
+	}
+
+	contains, dependsOn, blocks := 0, 0, 0
+	for _, edge := range graph.Edges {
+		switch edge.Type {
+		case "contains":
+			contains++
+		case "depends_on":
+			dependsOn++
+		case "blocks":
+			blocks++
+		}
+	}
+	if contains != 5 {
+		t.Fatalf("contains edges = %d, want 5", contains)
+	}
+	if dependsOn != 3 {
+		t.Fatalf("depends_on edges = %d, want 3", dependsOn)
+	}
+	if blocks != 2 {
+		t.Fatalf("blocks edges = %d, want 2", blocks)
+	}
+}
+
+func TestBuildWorkflowPlanGraphMissingPlan(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	_, err := buildWorkflowPlanGraph(repo, "missing")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `plan "missing" not found`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunWorkflowPlanGraphRendersPlanAndTasks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalSliceFixture(t, repo, "wave-2")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runWorkflowPlanGraph("wave-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = old
+
+	rendered := string(out)
+	for _, want := range []string{
+		"Canonical Plan Graph: wave-2",
+		"[wave-2] Wave 2 Test Plan",
+		"-> [t1] implement structs",
+		"=> [slice-read-surface] Read surface",
+		"depends_on: implement structs",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered graph missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestLoadCanonicalSlicesRoundTrip(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalSliceFixture(t, repo, "wave-2")
+
+	sf, err := loadCanonicalSlices(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.PlanID != "wave-2" {
+		t.Fatalf("plan_id = %q", sf.PlanID)
+	}
+	if len(sf.Slices) != 2 {
+		t.Fatalf("slice count = %d, want 2", len(sf.Slices))
+	}
+	if sf.Slices[1].DependsOn[0] != "slice-read-surface" {
+		t.Fatalf("unexpected slice dependency: %+v", sf.Slices[1].DependsOn)
+	}
+}
+
+func TestRunWorkflowSlicesRendersSlices(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalSliceFixture(t, repo, "wave-2")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runWorkflowSlices("wave-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = old
+
+	rendered := string(out)
+	for _, want := range []string{
+		"Slices: wave-2",
+		"[slice-read-surface] Read surface",
+		"task: t1",
+		"write scope: commands/workflow.go, commands/workflow_test.go",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered slices missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestSelectNextCanonicalTaskPrefersInProgressFocusTask(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	suggestion, err := selectNextCanonicalTask(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion == nil {
+		t.Fatal("expected suggestion, got nil")
+	}
+	if suggestion.PlanID != "wave-2" || suggestion.TaskID != "t1" {
+		t.Fatalf("unexpected suggestion: %+v", suggestion)
+	}
+	if suggestion.Reason != "current focus task is already in progress" {
+		t.Fatalf("unexpected reason: %q", suggestion.Reason)
+	}
+}
+
+func TestSelectNextCanonicalTaskChoosesUnblockedPendingTask(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPendingPlanFixture(t, repo)
+
+	suggestion, err := selectNextCanonicalTask(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion == nil {
+		t.Fatal("expected suggestion, got nil")
+	}
+	if suggestion.PlanID != "wave-next" || suggestion.TaskID != "planner" {
+		t.Fatalf("unexpected suggestion: %+v", suggestion)
+	}
+	if suggestion.Reason != "current focus task is pending and all dependencies are complete" {
+		t.Fatalf("unexpected reason: %q", suggestion.Reason)
+	}
+}
+
+func TestRunWorkflowNextPrintsHelpfulMessageWhenNoActionableTaskExists(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	contract := &DelegationContract{
+		SchemaVersion: 1,
+		ID:            "del-t1",
+		ParentPlanID:  "wave-2",
+		ParentTaskID:  "t1",
+		Title:         "implement structs",
+		Status:        "active",
+		CreatedAt:     "2026-04-10T10:00:00Z",
+		UpdatedAt:     "2026-04-10T10:00:00Z",
+	}
+	if err := saveDelegationContract(repo, contract); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runWorkflowNext(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = old
+
+	rendered := string(out)
+	if !strings.Contains(rendered, "No actionable canonical task found.") {
+		t.Fatalf("unexpected workflow next output:\n%s", rendered)
+	}
+}
+
 // ── Usage-flow scenario tests ─────────────────────────────────────────────────
 
 // writeCheckpointFixture writes a checkpoint.yaml into the AGENTS_HOME context dir for the given project.
 func writeCheckpointFixture(t *testing.T, agentsHome, projectName, repo string, nextAction, verStatus, timestamp string) {
+	t.Helper()
+	contextDir := filepath.Join(agentsHome, "context", projectName)
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	branch := strings.TrimSpace(gitOutput(repo, "rev-parse", "--abbrev-ref", "HEAD"))
+	sha := strings.TrimSpace(gitOutput(repo, "rev-parse", "--short", "HEAD"))
+	checkpoint := `schema_version: 1
+timestamp: "` + timestamp + `"
+project:
+  name: "` + projectName + `"
+  path: "` + repo + `"
+git:
+  branch: "` + branch + `"
+  sha: "` + sha + `"
+  dirty_file_count: 0
+files:
+  modified: []
+message: ""
+verification:
+  status: "` + verStatus + `"
+  summary: "tests passed"
+next_action: "` + nextAction + `"
+blockers: []
+`
+	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte(checkpoint), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCheckpointFixtureWithGitOverride(t *testing.T, agentsHome, projectName, repo string, nextAction, verStatus, timestamp, branch, sha string) {
 	t.Helper()
 	contextDir := filepath.Join(agentsHome, "context", projectName)
 	if err := os.MkdirAll(contextDir, 0755); err != nil {
@@ -530,8 +915,8 @@ project:
   name: "` + projectName + `"
   path: "` + repo + `"
 git:
-  branch: "main"
-  sha: "abc1234"
+  branch: "` + branch + `"
+  sha: "` + sha + `"
   dirty_file_count: 0
 files:
   modified: []
@@ -574,6 +959,9 @@ func TestWorkflow_CheckpointThenOrient(t *testing.T) {
 	}
 	if state.NextAction != "Continue wave-3 implementation" {
 		t.Fatalf("next action = %q, want 'Continue wave-3 implementation'", state.NextAction)
+	}
+	if state.NextActionSource != "checkpoint" {
+		t.Fatalf("next action source = %q, want checkpoint", state.NextActionSource)
 	}
 
 	// Orient output must include the checkpoint's next action
@@ -740,9 +1128,12 @@ func TestWorkflow_StaleCheckpointState(t *testing.T) {
 	if state.Checkpoint.Timestamp != "2026-04-01T00:00:00Z" {
 		t.Fatalf("checkpoint timestamp = %q, want 2026-04-01T00:00:00Z", state.Checkpoint.Timestamp)
 	}
-	// Next action still comes from checkpoint
+	// Next action still comes from checkpoint because the git state still matches.
 	if state.NextAction != "old task" {
 		t.Fatalf("next action = %q, want 'old task'", state.NextAction)
+	}
+	if state.NextActionSource != "checkpoint" {
+		t.Fatalf("next action source = %q, want checkpoint", state.NextActionSource)
 	}
 	// Orient renders cleanly with the old timestamp
 	var buf bytes.Buffer
@@ -750,6 +1141,64 @@ func TestWorkflow_StaleCheckpointState(t *testing.T) {
 	rendered := buf.String()
 	if !strings.Contains(rendered, "2026-04-01T00:00:00Z") {
 		t.Fatalf("orient output missing stale timestamp:\n%s", rendered)
+	}
+}
+
+func TestWorkflow_PrefersCanonicalWhenCheckpointGitStateIsStale(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	addCanonicalPlanFixture(t, repo)
+
+	writeCheckpointFixtureWithGitOverride(t, agentsHome, "workflow-proj", repo, "stale checkpoint task", "pass", "2026-04-10T10:00:00Z", "other-branch", "deadbee")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NextAction != "implement structs" {
+		t.Fatalf("next action = %q, want canonical focus task", state.NextAction)
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
+	}
+	found := false
+	for _, warning := range state.Warnings {
+		if strings.Contains(warning, "checkpoint next action") && strings.Contains(warning, "stale") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected stale-checkpoint warning, got %v", state.Warnings)
+	}
+}
+
+func TestReadWorkflowPlanCompletedStatusDoesNotCreatePendingFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "completed.plan.md")
+	content := `# Completed Plan
+
+Status: Completed (2026-04-11)
+Depends on: something else
+- [x] finished item
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := readWorkflowPlan(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.PendingItems) != 0 {
+		t.Fatalf("expected no pending items, got %+v", plan.PendingItems)
 	}
 }
 
@@ -988,6 +1437,9 @@ func TestCollectWorkflowStateIncludesCanonicalPlans(t *testing.T) {
 	// With no checkpoint, canonical plan's focus task should drive NextAction
 	if state.NextAction != "implement structs" {
 		t.Fatalf("next action = %q, want 'implement structs'", state.NextAction)
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
 	}
 }
 
@@ -1438,10 +1890,10 @@ func TestSaveLoadMergeBack_RoundTrip(t *testing.T) {
 	s := &MergeBackSummary{
 		SchemaVersion: 1, TaskID: "task-001", ParentPlanID: "plan-001",
 		Title: "Do the thing", Summary: "Implemented the feature.",
-		FilesChanged: []string{"commands/workflow.go"},
+		FilesChanged:       []string{"commands/workflow.go"},
 		VerificationResult: MergeBackVerification{Status: "pass", Summary: "tests green"},
-		IntegrationNotes: "No conflicts expected.",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		IntegrationNotes:   "No conflicts expected.",
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
 	}
 	if err := saveMergeBack(dir, s); err != nil {
 		t.Fatalf("save: %v", err)
@@ -1630,11 +2082,11 @@ func TestAggregateDrift_Summary(t *testing.T) {
 func TestPlanSweep_GeneratesActions(t *testing.T) {
 	reports := []RepoDriftReport{
 		{
-			Project:           ManagedProject{Name: "needs-workflow", Path: "/tmp/x"},
-			Reachable:         true,
+			Project:            ManagedProject{Name: "needs-workflow", Path: "/tmp/x"},
+			Reachable:          true,
 			MissingWorkflowDir: true,
-			MissingCheckpoint: true,
-			Status:            "warn",
+			MissingCheckpoint:  true,
+			Status:             "warn",
 		},
 	}
 	plan := planSweep(reports)
