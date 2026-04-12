@@ -118,7 +118,7 @@ Completed in this session:
 
 - [x] Add focused tests for shared-target intent dedupe and conflict detection. (2026-04-11 — `BuildSharedTargetPlan` aggregation path via `stubPlatform`: dedupe across platforms, conflicting intents error, `SharedTargetIntents` error wrap + `DryRunSharedTargetPlanLines` propagation; complements direct `BuildResourcePlan` tests)
 - [x] Add import conflict coverage for stable origin-prefixed fallback naming and advisory review-note creation. (2026-04-11 — `importOutput.Origin` from hook specs; `importConflictFirstFreeAlternateDestRel` + `importPreservedConflictCandidate`; `~/.agents/review-notes/import-conflicts/ic-*.yaml`; tests)
-- [ ] Add refresh/import regression tests for imported directory -> managed shared-target transition.
+- [x] Add refresh/import regression tests for imported directory -> managed shared-target transition. (2026-04-11 — `commands/refresh_test.go` `TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink`: import-from-refresh then `RunSharedTargetProjection` + Claude `CreateLinks` replaces repo `.agents/skills/<name>/` dir with symlink)
 - [ ] Add coverage proving non-empty directory replacement is executor-only and allowlisted.
 - [ ] Add status/explain coverage so the new registry remains the source of truth.
 - [ ] Run focused packages first, then `go test ./...`.
