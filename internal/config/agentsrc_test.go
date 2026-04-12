@@ -12,6 +12,7 @@ import (
 const (
 	testProject         = "myproject"
 	testSourceTypeLocal = "local"
+	testMCPJSONFile     = "mcp.json"
 	testHookPreToolUse  = "PreToolUse"
 	testHookPostToolUse = "PostToolUse"
 	errFmtGenerateRC    = "GenerateAgentsRC: %v"
@@ -472,7 +473,7 @@ func agentsHomeFixture(t *testing.T) string {
 	}`)
 
 	// MCP: project-scoped mcp.json with two servers
-	writeFile(filepath.Join(home, "mcp", testProject, "mcp.json"), `{
+	writeFile(filepath.Join(home, "mcp", testProject, testMCPJSONFile), `{
 		"servers": {
 			"server-a": {},
 			"server-b": {}
@@ -662,7 +663,7 @@ func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 	t.Setenv("AGENTS_HOME", home)
 
 	// Only global mcp, no project-scoped
-	mcpPath := filepath.Join(home, "mcp", "global", "mcp.json")
+	mcpPath := filepath.Join(home, "mcp", "global", testMCPJSONFile)
 	os.MkdirAll(filepath.Dir(mcpPath), 0755)
 	os.WriteFile(mcpPath, []byte(`{"servers":{"global-srv":{}}}`), 0644)
 
@@ -673,6 +674,80 @@ func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 
 	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
 		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	}
+}
+
+func TestGenerateAgentsRCMCPReadsDocumentedMCPServersShape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", testProject, testMCPJSONFile)
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{
+		"mcpServers": {
+			"code-review-graph": {},
+			"sonarqube": {}
+		}
+	}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	got := rc.MCP.Names
+	sort.Strings(got)
+	want := []string{"code-review-graph", "sonarqube"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MCP.Names: got %v, want %v", got, want)
+	}
+}
+
+func TestGenerateAgentsRCMCPFallsBackToGlobalDocumentedMCPServersShape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", "global", testMCPJSONFile)
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"global-srv":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
+		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	}
+}
+
+func TestGenerateAgentsRCMCPReadsDotMCPJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", testProject, ".mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"repo-srv":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if !reflect.DeepEqual(rc.MCP.Names, []string{"repo-srv"}) {
+		t.Errorf("MCP.Names: got %v, want [repo-srv]", rc.MCP.Names)
 	}
 }
 

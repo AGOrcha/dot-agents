@@ -1,0 +1,32 @@
+schema_version: 1
+id: del-phase-5-new-buckets-1776009673
+parent_plan_id: platform-dir-unification
+parent_task_id: phase-5-new-buckets
+title: Phase 5 — Add Stage 2 bucket expansion (commands, output-styles, modes, plugins, themes, prompts)
+summary: Delegated from plan Canonical ~/.agents Rollout Plan
+write_scope:
+    - internal/platform/
+    - commands/init.go
+    - commands/import.go
+    - commands/refresh.go
+    - commands/status.go
+    - commands/explain.go
+success_criteria: |
+    Coordinator first — extend the shared resource descriptor layer in internal/platform/ to declare new
+    bucket types: commands, output-styles, ignore, modes, plugins (fed by plugin-resource-salvage plan),
+    themes, prompts.
+    For each bucket: define CanonicalBucket constant, add listScopedResourceDirs call pattern,
+    add emitter to each applicable platform adapter (CreateLinks).
+    Extend init, import, refresh, status, explain for each new bucket following the Stage 1 pattern.
+    Worker split (can run after coordinator lands):
+      Worker A: Cursor + Claude additions
+      Worker B: OpenCode additions
+      Worker C: Copilot additions
+    Acceptance: go test ./...; dot-agents status shows new bucket entries; round-trip import/refresh
+    preserves new bucket files.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: stage2-buckets-coordinator
+status: completed
+created_at: "2026-04-12T16:01:13Z"
+updated_at: "2026-04-12T16:12:54Z"

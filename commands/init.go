@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -80,6 +81,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		config.AgentsContextDir(),
 		filepath.Join(agentsHome, "scripts"),
 		filepath.Join(agentsHome, "local"),
+	}
+	for _, bucket := range platform.CanonicalStoreBucketSpecs() {
+		dirs = append(dirs, platform.CanonicalBucketScopeRoot(agentsHome, bucket.Name, "global"))
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -211,16 +215,30 @@ func starterGitignoreContent() string {
 }
 
 func starterReadmeContent() string {
-	return "# ~/.agents/\n\nManaged by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n\n" +
-		"## Stage 1 Canonical Buckets\n\n" +
-		"- `rules/` for shared instructions\n" +
-		"- `settings/` for platform settings and current Cursor ignore support\n" +
-		"- `mcp/` for MCP configs\n" +
-		"- `skills/` for canonical skills\n" +
-		"- `agents/` for canonical agent definitions\n" +
-		"- `hooks/` for canonical hook configs\n" +
-		"- `context/` for local workflow checkpoint state\n" +
-		"- `resources/` for backups and restore state\n"
+	var b strings.Builder
+	b.WriteString("# ~/.agents/\n\n")
+	b.WriteString("Managed by [dot-agents](https://github.com/NikashPrakash/dot-agents).\n\n")
+	b.WriteString("## Canonical Buckets\n\n")
+	b.WriteString("### Stage 1\n")
+	for _, bucket := range platform.CanonicalStoreStage1BucketSpecs() {
+		desc := strings.ToLower(bucket.Description)
+		if bucket.Name == platform.CanonicalBucketSettings {
+			desc = "platform settings and current Cursor ignore support"
+		}
+		b.WriteString(fmt.Sprintf("- `%s/` for %s\n", bucket.Name, desc))
+	}
+	b.WriteString("- `context/` for local workflow checkpoint state\n")
+	b.WriteString("- `resources/` for backups and restore state\n\n")
+	b.WriteString("### Stage 2 scaffold\n")
+	for _, bucket := range platform.CanonicalStoreStage2BucketSpecs() {
+		desc := strings.ToLower(bucket.Description)
+		if bucket.Name == platform.CanonicalBucketIgnore {
+			desc = "cursorignore / cursorindexingignore files"
+		}
+		b.WriteString(fmt.Sprintf("- `%s/` for %s\n", bucket.Name, desc))
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 func scaffoldWorkflowAssets(agentsHome string) error {

@@ -4,8 +4,8 @@ title: Canonical ~/.agents Rollout Plan
 status: active
 summary: Stage 1+2+3 Go layer complete; Phase 4 deletes orphaned bash layer; Phase 5 adds new buckets.
 created_at: "2026-03-01T00:00:00Z"
-updated_at: "2026-04-12T15:22:13Z"
+updated_at: "2026-04-12T16:13:07Z"
 owner: dot-agents
 success_criteria: Bash layer deleted; canonical buckets stable; Stage 2 buckets added in Phase 5.
 verification_strategy: go test ./...; scripts/verify.sh; no src/lib command or platform shell files remain
-current_focus_task: Phase 5 — Add Stage 2 bucket expansion (commands, output-styles, modes, plugins, themes, prompts)
+current_focus_task: ""

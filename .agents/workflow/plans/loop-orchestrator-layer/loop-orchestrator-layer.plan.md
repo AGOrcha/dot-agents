@@ -25,9 +25,11 @@ Add a planner/orchestrator layer above the focused loop agent so work selection,
 - [x] Add `workflow plan graph` so the orchestrator can inspect cross-plan/task dependencies directly
 - [x] Phase 3B - add `SLICES.yaml` support for safe parallel sub-task decomposition
 - [x] Phase 3C - add fanout-from-slice support on top of existing delegation contracts
-- [ ] Phase 4 — Wire `workflow fanout --slice <id>` to resolve task and write-scope from SLICES.yaml
+- [x] Phase 4 — Wire `workflow fanout --slice <id>` to resolve task and write-scope from SLICES.yaml
 - [ ] Phase 5 — Auto-route code-structure intents in `workflow graph query` to kg bridge; add tests and spec doc
 - [ ] Phase 6 — Implement `workflow fold-back create/list` with small vs proposal routing
+- [ ] Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
+- [ ] Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
 
 ## Phase 4: Slice-based fanout
 
@@ -214,3 +216,83 @@ Add `foldBackCmd` to the final `cmd.AddCommand(...)` call at line 468.
 - Phase 3B/3C is the current plan/docs reconciliation lane: `SLICES.yaml` is the canonical slice artifact, and `workflow fanout` remains the readiness gate for non-overlapping delegation.
 - Write-scope conflict prevention already exists in `workflow fanout`; Phase 4 adds the missing slice-resolution layer.
 - Hooks should validate stale or drifting orchestration state, not choose work.
+
+---
+
+## Phase 7: Completed delegation and plan closeout
+
+**Goal:** completed delegations and merge-backs should not remain forever in active state, and plan completion should reconcile cleanly once a parent accepts the delegated result.
+
+**Problem:** today `workflow merge-back` writes a merge-back artifact and marks the delegation contract `completed`, but there is no parent-driven closeout step that:
+
+- consumes the merge-back as integrated
+- archives processed active artifacts into history
+- advances the canonical task to `completed` or `failed`
+- closes the parent plan when the last task lands
+- keeps `workflow orient` / `workflow status` from reporting already-processed merge-backs forever
+
+**Direction:**
+
+- add a closeout/reconcile command, for example:
+
+```bash
+dot-agents workflow delegation closeout --plan <id> --task <id> --decision accept
+dot-agents workflow delegation closeout --plan <id> --task <id> --decision reject --note "needs follow-up"
+```
+
+- treat the closeout step as the parent-agent acknowledgment that the delegated work was integrated
+- move processed artifacts out of `.agents/active/` into a durable history location
+- update canonical task state from the closeout decision
+- if all tasks are complete, update `PLAN.yaml` status and clear or rewrite `current_focus_task`
+
+**Acceptance shape:**
+
+- completed delegation contracts no longer show up as live operational clutter
+- merge-back counts reflect unintegrated work only
+- completed plans do not retain stale active delegation state
+- history preserves the contract and merge-back trail for later review
+
+---
+
+## Phase 8: Per-delegate prompt and file inputs
+
+**Goal:** the orchestrator/delegation flow should be able to hand each sub-agent not just a task and write scope, but also a prompt payload assembled from inline text and/or files.
+
+**Problem:** the current orchestration skill tells the parent how to select and fan out work, but it does not model how a prompt bundle is passed into the delegated sub-agent. That makes prompt shaping ad hoc and hard to reproduce.
+
+**Direction:**
+
+Extend the delegation contract or a sibling bundle artifact so each fanout can persist:
+
+- inline prompt text
+- one or more prompt files
+- one or more context/resource files
+- optional per-delegate override data tied to the specific delegation owner
+
+Candidate command shape:
+
+```bash
+dot-agents workflow fanout \
+  --plan <plan-id> \
+  --task <task-id> \
+  --owner <delegate-name> \
+  --write-scope "commands/,internal/platform/" \
+  --prompt "Focus on command readback only" \
+  --prompt-file .agents/prompts/command-readback.md \
+  --context-file docs/LOOP_ORCHESTRATION_SPEC.md \
+  --context-file .agents/workflow/plans/loop-orchestrator-layer/TASKS.yaml
+```
+
+**Rules:**
+
+- prompt/file inputs must be delegation-specific so different sub-agents can receive different bundles
+- repeatable file flags are preferable to one giant comma-separated string
+- the contract should store what was handed to the sub-agent so the parent can reproduce or audit the handoff later
+- skills should read from the persisted bundle, not reconstruct it from memory
+
+**Acceptance shape:**
+
+- a parent can supply prompt text inline or by file
+- a parent can attach multiple context files
+- two different delegated sub-agents can receive different prompt/file inputs without colliding
+- the resulting bundle is inspectable from the repo artifacts

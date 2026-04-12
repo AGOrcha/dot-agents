@@ -87,7 +87,7 @@ tasks:
         See plan.md Phase 4 section for exact code patterns.
     - id: phase-5-closeout
       title: Phase 5 — Close out duplicate branch artifacts and feed Stage 2 bucket expansion
-      status: pending
+      status: completed
       depends_on:
         - phase-4-command-readback
       blocks: []
@@ -98,4 +98,4 @@ tasks:
         - commands/
         - internal/platform/
       verification_required: true
-      notes: Do not merge the old branch wholesale. Capture only the rebuilt plugin-resource path and retire any duplicate docs-refresh/cache artifacts that would inflate duplication or Sonar noise.
+      notes: Closeout only. The rebuilt plugin-resource path is the baseline now; retire duplicate branch assumptions and stale docs/cache artifacts from the planning surface, and leave implementation follow-ons to later Stage 2 slices.

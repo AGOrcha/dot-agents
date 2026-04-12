@@ -224,6 +224,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/cursor.json"
 	case relCursorIgnore:
 		return "settings/" + project + "/cursorignore"
+	case relCursorIndexingIgnore:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore")
 	case relClaudeSettingsLocal:
 		return "settings/" + project + "/claude-code.json"
 	case relMCPJSON:
@@ -242,6 +244,20 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
+	case relCursorCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relCursorCommandsDir))
+	case relClaudeCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relClaudeCommandsDir))
+	case relOpenCodeCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relOpenCodeCommandsDir))
+	case relClaudeOutputStylesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketOutputStyles, project, strings.TrimPrefix(relPath, relClaudeOutputStylesDir))
+	case relOpenCodeModesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketModes, project, strings.TrimPrefix(relPath, relOpenCodeModesDir))
+	case relOpenCodeThemesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketThemes, project, strings.TrimPrefix(relPath, relOpenCodeThemesDir))
+	case relGitHubPromptsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketPrompts, project, strings.TrimPrefix(relPath, relGitHubPromptsDir))
 	}
 
 	// .cursor/rules/ → rules/
@@ -293,7 +309,21 @@ func mapResourceRelToDest(project, relPath string) string {
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+	for _, prefix := range []string{
+		"rules/",
+		"settings/",
+		"mcp/",
+		"skills/",
+		"agents/",
+		agentsHooksPrefix,
+		string(platform.CanonicalBucketCommands) + "/",
+		string(platform.CanonicalBucketOutputStyles) + "/",
+		string(platform.CanonicalBucketIgnore) + "/",
+		string(platform.CanonicalBucketModes) + "/",
+		string(platform.CanonicalBucketPlugins) + "/",
+		string(platform.CanonicalBucketThemes) + "/",
+		string(platform.CanonicalBucketPrompts) + "/",
+	} {
 		if strings.HasPrefix(relPath, prefix) {
 			return relPath
 		}

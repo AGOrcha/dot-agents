@@ -433,10 +433,10 @@ func detectMCPServers(agentsHome, projectName string) StringsOrBool {
 	return StringsOrBool{}
 }
 
-// readMCPScope tries claude.json then mcp.json for a single scope directory
+// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope directory
 // and returns the server list from the first readable file.
 func readMCPScope(agentsHome, scope string) StringsOrBool {
-	for _, fname := range []string{"claude.json", "mcp.json"} {
+	for _, fname := range []string{"claude.json", "mcp.json", ".mcp.json"} {
 		mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
 		data, err := os.ReadFile(mcpPath)
 		if err != nil {
@@ -447,6 +447,9 @@ func readMCPScope(agentsHome, scope string) StringsOrBool {
 			continue
 		}
 		servers, ok := mcpConfig["servers"].(map[string]any)
+		if !ok {
+			servers, ok = mcpConfig["mcpServers"].(map[string]any)
+		}
 		if !ok {
 			break
 		}
