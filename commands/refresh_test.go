@@ -272,3 +272,83 @@ func TestRefreshReplacesExistingCanonicalAgentsMarkdownFromUnmanagedRepoFile(t *
 		t.Fatalf("repo AGENTS.md linked to %q, want %q", linkTarget, projectCanonical)
 	}
 }
+
+// TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink ensures the full refresh
+// pipeline (import-from-refresh → RunSharedTargetProjection → per-platform CreateLinks)
+// replaces a non-symlink imported skill directory under .agents/skills/ with the managed
+// symlink to ~/.agents/skills/<project>/<name>/, matching the shared executor contract.
+func TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	agentsHome := filepath.Join(tmp, ".agents")
+	repo := filepath.Join(tmp, "repo")
+
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+	for _, dir := range []string{agentsHome, repo} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("mkdir canonical skill: %v", err)
+	}
+	canonicalSkill := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(canonicalSkill, []byte("---\nname: review\ndescription: canonical\n---\n"), 0644); err != nil {
+		t.Fatalf("write canonical SKILL.md: %v", err)
+	}
+
+	importedSkill := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(importedSkill), 0755); err != nil {
+		t.Fatalf("mkdir imported skill path: %v", err)
+	}
+	if err := os.WriteFile(importedSkill, []byte("---\nname: review\ndescription: imported copy\n---\n"), 0644); err != nil {
+		t.Fatalf("write imported SKILL.md: %v", err)
+	}
+
+	cfg := &config.Config{
+		Version: 1,
+		Projects: map[string]config.Project{
+			"proj": {Path: repo},
+		},
+		Agents: map[string]config.Agent{
+			"cursor":   {Enabled: false},
+			"claude":   {Enabled: true},
+			"codex":    {Enabled: false},
+			"opencode": {Enabled: false},
+			"copilot":  {Enabled: false},
+		},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	oldFlags := Flags
+	oldRefreshImport := refreshImport
+	Flags = GlobalFlags{}
+	Flags.DryRun = false
+	refreshImport = false
+	defer func() {
+		Flags = oldFlags
+		refreshImport = oldRefreshImport
+	}()
+
+	if err := runRefresh("proj"); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	repoSkillLink := filepath.Join(repo, ".agents", "skills", "review")
+	got, err := os.Readlink(repoSkillLink)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", repoSkillLink, err)
+	}
+	if got != skillDir {
+		t.Fatalf("symlink target = %q, want %q", got, skillDir)
+	}
+}
