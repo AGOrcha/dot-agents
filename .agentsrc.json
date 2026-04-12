@@ -16,7 +16,8 @@
     "split-reviewable-commits",
     "plan-wave-picker",
     "delegation-lifecycle",
-    "provider-consumer-pair"
+    "provider-consumer-pair",
+    "iteration-close"
   ],
   "rules": [
     "global",

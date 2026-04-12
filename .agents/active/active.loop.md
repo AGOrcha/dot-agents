@@ -17,7 +17,7 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
 **Dogfood operating rhythm:**
 - `workflow orient` = session-start context bundle
 - `workflow status` = checkpoint-backed readback of current runtime state and next action
-- `workflow plan` / `workflow tasks` = canonical machine-readable plan/task layer when it exists
+- `workflow plan` / `workflow tasks` / `workflow next` = canonical machine-readable plan/task layer when it exists
 - markdown `.agents/active/*.plan.md` = richer execution notes and checklist detail
 - `workflow checkpoint` / `workflow verify` = persist surfaces; use them in a temp sandbox by default unless real `~/.agents` writes are explicitly approved
 
@@ -25,56 +25,62 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
 1. Read `.agents/active/loop-state.md` for prior iteration context (skip if missing)
    - Start with `## Current Position`, `## Loop Health`, the last 2 entries in `## Iteration Log`, `## Next Iteration Playbook`, and the newest relevant `## CLI Observations` items
    - Only scan older coverage tables or traces when you need them to choose a genuinely new scenario or confirm whether a command/state is already covered
-2. Run `go run ./cmd/dot-agents workflow orient` — same session snapshot the CLI uses: git summary, active markdown plans, canonical plan summaries (if any), checkpoint pointer, proposals, delegation/merge-back hints, workflow health. Use it **together with** loop-state; do not treat CLI output as a substitute for the iteration log when loop-state has fresher detail.
+2. Run `go run ./cmd/dot-agents review` — check for pending improvement proposals from prior iterations. If any exist, run `review show <id>` to read them and `review approve <id>` / `review reject <id>` before starting new work.
+3. Run `go run ./cmd/dot-agents workflow orient` — same session snapshot the CLI uses: git summary, active markdown plans, canonical plan summaries (if any), checkpoint pointer, proposals, delegation/merge-back hints, workflow health. Use it **together with** loop-state; do not treat CLI output as a substitute for the iteration log when loop-state has fresher detail.
    - If orient warns about missing `.agents/workflow/` or lists zero canonical plans, continue using markdown `.agents/active/*.plan.md` via the plan-wave-picker — that is expected until YAML canonical plans exist for this repo.
-3. Run `go run ./cmd/dot-agents workflow status`
+4. Run `go run ./cmd/dot-agents workflow status`
    - Treat this as checkpoint-backed readback, not as the only source of truth.
    - If `workflow status` next action conflicts with loop-state, `workflow orient`, or canonical task status, assume the checkpoint is stale until proven otherwise. Do **not** silently follow the stale next action; log the mismatch under `## Loop Health` or `## CLI Observations`.
-4. Run `git status --short` to see current dirty state — if there are uncommitted changes from a prior iteration, review and commit them first
-5. Skim the two driving specs only if loop-state.md doesn't already summarize the current position
-6. Run `go run ./cmd/dot-agents workflow plan`
+5. Run `git status --short` to see current dirty state — if there are uncommitted changes from a prior iteration, review and commit them first
+6. Skim the two driving specs only if loop-state.md doesn't already summarize the current position
+7. Run `go run ./cmd/dot-agents workflow plan`
    - This is the canonical machine-readable inventory. Even if markdown remains the richer source, always check whether canonical plans now exist before picking work.
-7. Identify the current scenario tags before selecting work. Choose tags from the family buckets in `## Scenario Coverage`: workflow project state, workflow write paths, delegation lifecycle, cross-project workflow ops, KG lifecycle, KG maintenance/storage integrity, CRG/code-graph states, bridge/config states, cross-subsystem integration checks, and outcome-quality states
+8. Run `go run ./cmd/dot-agents workflow next`
+   - Treat this as the repo-wide canonical selector when canonical plans exist.
+   - If you are working on the loop/orchestrator system itself (for example editing `active.loop.md`, loop-state, workflow-orchestration commands, or the loop-orchestrator canonical plan), compare the repo-wide selector with the loop-local canonical plan and prefer the loop-local target for that session.
+   - If `workflow next` disagrees with `workflow status`, assume the checkpoint is stale and record the mismatch.
+9. Identify the current scenario tags before selecting work. Choose tags from the family buckets in `## Scenario Coverage`: workflow project state, workflow write paths, delegation lifecycle, cross-project workflow ops, KG lifecycle, KG maintenance/storage integrity, CRG/code-graph states, bridge/config states, cross-subsystem integration checks, and outcome-quality states
    - Reuse existing tags when possible; use the tag names exactly as written in `## Scenario Coverage`
    - Add a new tag only when it captures a genuinely different state transition, and add the matching coverage row before using the tag elsewhere in loop-state.md
    - Prefer paired scenarios when useful: uninitialized vs initialized, disabled vs enabled, dry-run vs apply, empty vs populated, raw vs postprocess-complete
    - For integration scenarios, choose a sub-bucket first: `bootstrap`, `mutation-and-reconciliation`, `analysis-and-readback`, or `closeout-and-evidence`
    - Good examples: `canonical-plan-present`, `workflow-advance-success`, `fanout-write-scope-conflict`, `kg-setup-complete`, `warm-layer-populated`, `crg-build-complete`, `workflow-graph-disabled`, `repo-health-stack`, `managed-file-restore-stack`, `kg-crg-postprocess-stack`, `verification-checkpoint-stack`, `ok-warning-ux-friction`
-8. Before implementing, write down one short **feedback goal** for the evidence command run
+10. Before implementing, write down one short **feedback goal** for the evidence command run
    - This is the concrete question the CLI exercise must answer for the current change
    - Good examples: "Do projected shared targets now dedupe cleanly?", "Does `workflow health` expose the new planner state?", "Can `kg build` now reach postprocess without a bridge mismatch?"
    - Bad examples: "make sure nothing broke", "run something relevant", "reconfirm repo health"
    - If the only candidate question is "does `workflow health` stay clean?", pick a closer or less-covered surface unless the changed code directly affects `workflow health`
 
 ## Wave Selection
-9. Use the plan-wave-picker skill (`.agents/skills/plan-wave-picker/`) to select the next wave from `.agents/active/*.plan.md`
+11. Use the plan-wave-picker skill (`.agents/skills/plan-wave-picker/`) to select the next wave from `.agents/active/*.plan.md`
    - Priority order: in-progress waves with unchecked items > waves with all dependencies complete > new waves
    - Skip plans tagged as blocked, waiting on external input, or listed in the skip-list section of loop-state.md
    - A plan's Status header (e.g., "Status: Completed") is authoritative — unchecked `- [ ]` items on a completed plan are stale, not real work
    - Prefer implementation waves over architectural/research waves
    - If no actionable wave exists, write that finding to loop-state.md and stop
-10. Align with the canonical workflow view: if a plan under `.agents/workflow/plans/<id>/` matches the wave you chose (same initiative / documented link in the markdown plan), run `go run ./cmd/dot-agents workflow tasks <id>` for that ID.
+12. Align with the canonical workflow view: if a plan under `.agents/workflow/plans/<id>/` matches the wave you chose (same initiative / documented link in the markdown plan), run `go run ./cmd/dot-agents workflow tasks <id>` for that ID.
    - When canonical tasks exist, use them for task ids, dependency/blocked state, and current focus.
    - Markdown still carries richer rationale and execution notes, but canonical task status is the machine-readable source of truth.
    - If there is no matching canonical plan, continue with markdown and record the missing canonical linkage as baseline context rather than a blocker.
+   - When the selected work is the loop/orchestrator system itself, prefer the matching loop-local canonical plan/task over an unrelated repo-wide `workflow next` result.
 
 ## Implementation (ONE item per iteration)
-11. Pick the next single unchecked item from the selected wave's plan
-12. Implement the code change — keep scope tight, touch minimal files
-13. Run focused tests first: `go test ./<changed-packages>`
+13. Pick the next single unchecked item from the selected wave's plan
+14. Implement the code change — keep scope tight, touch minimal files
+15. Run focused tests first: `go test ./<changed-packages>`
     - **Positive scenarios**: cover intended success paths — default inputs, happy-path behavior, and outputs the change is meant to guarantee.
     - **Negative scenarios**: cover intended failure paths — invalid or malformed input, missing prerequisites, out-of-range values, authorization/validation rejections, and error returns. For each new branch or guard, add or extend tests that assert the **correct** error (or `errors.Is` / sentinel), not only that “an error happened.”
     - Prefer table-driven or parallel subtests when one function has multiple success/failure combinations; do not ship behavior that is only asserted on the happy path unless the surface cannot fail.
     - If a change is test-only refactors, still run focused tests and confirm existing negative cases still pass.
-14. Run regression: `go test ./...` — must stay green for the full suite, including packages that encode negative-path behavior (flag parsing, config validation, planner conflicts, etc.).
-15. If tests pass, run the relevant `go run ./cmd/dot-agents ...` commands on the tested working tree before the final commit:
+16. Run regression: `go test ./...` — must stay green for the full suite, including packages that encode negative-path behavior (flag parsing, config validation, planner conflicts, etc.).
+17. If tests pass, run the relevant `go run ./cmd/dot-agents ...` commands on the tested working tree before the final commit:
    - Keep the evidence budget tight: one primary chain (1-3 commands) plus at most one secondary probe if it adds distinct evidence
    - Do not use `workflow health` or `status` as the primary evidence command in consecutive iterations unless it is the closest runnable surface, verifies a previous warning/bug, or proves a new state tag
-16. Update loop-state/history/lessons while the iteration details are fresh, then stage the full iteration and inspect `git diff --cached --stat`
-17. If everything is green, commit once with the implementation plus loop-state/history updates:
+18. Update loop-state/history/lessons while the iteration details are fresh, then stage the full iteration and inspect `git diff --cached --stat`
+19. If everything is green, commit once with the implementation plus loop-state/history updates:
    - Format: `<area>: <what changed>`
    - Example: `kg: add deterministic query for entity lookup`
-18. If tests fail, fix the failure before moving on — do not leave red tests uncommitted. If the only gap is missing **negative** coverage for new logic, add those tests in the same iteration before commit; treating “green on happy path only” as done when the change introduces new failure modes is not acceptable.
+20. If tests fail, fix the failure before moving on — do not leave red tests uncommitted. If the only gap is missing **negative** coverage for new logic, add those tests in the same iteration before commit; treating “green on happy path only” as done when the change introduces new failure modes is not acceptable.
 
 ## Exercising Workflow Commands (after tests, before the final commit)
 After validating the code change, exercise relevant `go run ./cmd/dot-agents` commands as a live integration test on the tested working tree. This is real product testing — treat the results seriously.
@@ -103,7 +109,9 @@ Read-only commands (always safe to run):
 - `go run ./cmd/dot-agents workflow status` — show current workflow state
 - `go run ./cmd/dot-agents workflow orient` — render session orient context
 - `go run ./cmd/dot-agents workflow plan` — list canonical plans
+- `go run ./cmd/dot-agents workflow next` — suggest the next actionable canonical task
 - `go run ./cmd/dot-agents workflow tasks <plan>` — show tasks for a plan
+- `go run ./cmd/dot-agents workflow plan graph [plan]` — render the derived plan/task graph
 - `go run ./cmd/dot-agents workflow verify log` — show recorded verification history
 - `go run ./cmd/dot-agents workflow health` — workflow health snapshot
 - `go run ./cmd/dot-agents workflow drift` — detect cross-repo drift (read-only)
@@ -111,14 +119,16 @@ Read-only commands (always safe to run):
 - `go run ./cmd/dot-agents kg query <intent>` — query the KG
 - `go run ./cmd/dot-agents kg lint` — check graph integrity
 
-Write commands (use when the wave you just implemented adds or changes these):
-- `go run ./cmd/dot-agents workflow checkpoint` — write a checkpoint
-- `go run ./cmd/dot-agents workflow advance <plan> <task> <status>` — advance a task
+Write commands (run these every iteration as part of normal closeout — not approval-gated):
+- `go run ./cmd/dot-agents workflow verify record --status pass --summary "<test results>"` — record test outcome; run after every successful test cycle
+- `go run ./cmd/dot-agents workflow checkpoint --message "<summary>" --verification-status pass` — persist current wave state; run after `verify record`
+- `go run ./cmd/dot-agents workflow advance <plan> <task> <status>` — advance a task when a YAML canonical task is completed
 - `go run ./cmd/dot-agents kg ingest <source>` — ingest a source
 - `go run ./cmd/dot-agents kg warm` — sync hot notes to warm layer
 
-Approval-gated or fixture-gated commands (high-value for coverage, but only run when the wave justifies them and the safety rules allow it):
-- `go run ./cmd/dot-agents workflow verify record` — writes verification history
+> **Use `/iteration-close`** to run the full closeout sequence (verify record → checkpoint → advance) in one step.
+
+Approval-gated or fixture-gated commands (only run when the wave justifies them and the safety rules allow it):
 - `go run ./cmd/dot-agents workflow prefs set-local <key> <value>` / `set-shared <key> <value>` — writes outside the repo or queues proposals
 - `go run ./cmd/dot-agents review approve <id>` / `reject <id>` — requires pending proposals
 - `go run ./cmd/dot-agents workflow fanout` / `workflow merge-back` — requires canonical plan/task fixtures and writes workflow artifacts
@@ -184,13 +194,25 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
 - Maximum 10 files changed per iteration — if scope grows beyond that, split the work and commit what you have
 
 ## Iteration End
-19. If the iteration produced meaningful progress, prefer the intended persist surfaces:
-   - if real `~/.agents` writes are approved, use `go run ./cmd/dot-agents workflow checkpoint --message ...` and `workflow verify record ...` where appropriate
-   - otherwise, dogfood them in a temp sandbox (`AGENTS_HOME`, optional `KG_HOME`) and log the sandbox paths in the trace
-   - if neither happened, record why the persist step was skipped; do not silently omit it
-20. Self-review: run `git diff` on any unstaged changes and `git diff --cached` on the staged iteration, then fix obvious issues before committing
-21. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
-22. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
+19. **Persist workflow state** — run `/iteration-close` (or the individual commands manually):
+   - `go run ./cmd/dot-agents workflow verify record --status pass --summary "<focused packages: N tests>"` 
+   - `go run ./cmd/dot-agents workflow checkpoint --message "<what was built and why>" --verification-status pass`
+   - If a YAML canonical task was completed: `go run ./cmd/dot-agents workflow advance <plan-id> <task-id> completed`
+   - This is **not** approval-gated — run it every iteration. Record `persisted_via_workflow_commands: yes` in self-assessment.
+   - Only use sandbox mode (`AGENTS_HOME=<tmp>`) when exercising the checkpoint/verify commands themselves as product test surfaces; for normal iteration closeout, write to the real `~/.agents`.
+20. **Queue an improvement proposal** if the iteration produced a worthy candidate:
+   - Scan `## CLI Observations` and this iteration's traces for: new gotchas, rule gaps, hook improvements, UX friction patterns
+   - If found, write a proposal to `~/.agents/proposals/<id>.yaml` using the `propose.sh` helper or directly:
+     - `type`: `skill` | `rule` | `hook` | `setting`
+     - `action`: `add` | `modify` | `remove`
+     - `target`: path relative to `~/.agents/` (e.g., `skills/dot-agents/iteration-close/instructions/gotchas.md`)
+     - `content`: **full updated file** (not just the new fragment — `modify` replaces the entire file)
+   - Only one proposal per iteration. Batch multiple small items into one `modify` on one file.
+   - Record `proposal_queued: yes (<id>)` or `proposal_queued: no` in the self-assessment.
+   - Do NOT propose CLI implementation changes — those go into plan items.
+21. Self-review: run `git diff` on any unstaged changes and `git diff --cached` on the staged iteration, then fix obvious issues before committing
+22. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
+23. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
     ```
     ### Iteration N — YYYY-MM-DD HH:MM
     - wave: <plan-name>
@@ -208,7 +230,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - summary: <one-line description of what was done>
     ```
     Get file/line counts from `git diff --cached --stat` before the final commit. Prefer one commit that includes code + loop-state/history updates; avoid standalone `loop-state:` follow-up commits.
-23. Append a self-assessment block to the same iteration entry:
+24. Append a self-assessment block to the same iteration entry:
     ```
     Self-assessment:
     - read_loop_state: yes/no
@@ -219,6 +241,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - used_workflow_orient_status: yes/no
     - aligned_with_canonical_tasks: yes/no/N/A
     - persisted_via_workflow_commands: yes/no/sandboxed
+    - proposal_queued: yes (<id>) | no
     - ran_cli_command: yes/no
     - exercised_new_scenario: yes/no
     - cli_produced_actionable_feedback: yes/no
@@ -227,7 +250,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - no_destructive_commands: yes/no
     ```
     Be honest — these are for post-hoc analysis, not grading.
-24. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
+25. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
     - A trace label, for example `Trace: workflow-status-clean-repo`
     - The exact command
     - Scenario tags
@@ -238,14 +261,14 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - Classification: `[ok]`, `[ok-empty]`, `[ok-warning]`, `[retry-recovered]`, `[impl-bug]`, `[tool-bug]`, `[missing-feature]`, or `[blocked]`
     - If multiple commands form one integration scenario, give them a shared scenario tag and note the chain in the trace labels or follow-on text
     - If commands in the chain had different outcomes, record per-command classifications explicitly instead of collapsing them into one label
-25. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
+26. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
     - Reconcile the table against the commands listed in this iteration's trace before finishing
-26. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
+27. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
     - Update the matching family bucket, not just the first row that seems close
     - When a scenario is one half of a useful pair, note which side was exercised and what still remains uncovered
     - Use tag names exactly as written in the table; if a new tag is needed, add the row first
     - For integration scenarios, describe the command chain, the stack sub-bucket, and whether the subsystems stayed coherent end-to-end
-27. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
+28. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
     ```
     ### Iteration N
     - type: test-failure | compile-error | cli-error
@@ -254,12 +277,12 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - retries: N
     ```
     - If `retries: N` is greater than 0 in the iteration log, an Error Log entry is mandatory
-28. Under `## CLI Observations` in loop-state.md, note any patterns:
+29. Under `## CLI Observations` in loop-state.md, note any patterns:
     - Commands that feel awkward or require too many steps
     - Output that is confusing or missing useful info
     - Features that would make the workflow smoother
     - UX friction (e.g., unnecessary prompts, unclear errors)
-29. Update `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
+30. Update `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
     - Rewrite these sections in place; do not append a second candidate-path block, duplicate priorities, or stale summary paragraphs
 
 ## What NOT to spend time on

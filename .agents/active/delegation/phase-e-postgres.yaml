@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-phase-e-postgres-1775967974
+parent_plan_id: crg-kg-integration
+parent_task_id: phase-e-postgres
+title: Phase E — Postgres graphstore backend
+summary: 'Delegated from plan CRG+KG Integration: Code-Review-Graph Into Knowledge Graph Subsystem'
+write_scope:
+    - internal/graphstore/
+success_criteria: See .agents/active/crg-kg-integration.plan.md Phase E
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: postgres-backend-worker
+status: active
+created_at: "2026-04-12T04:26:14Z"
+updated_at: "2026-04-12T04:26:14Z"
