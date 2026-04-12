@@ -120,7 +120,7 @@ Completed in this session:
 - [x] Add import conflict coverage for stable origin-prefixed fallback naming and advisory review-note creation. (2026-04-11 — `importOutput.Origin` from hook specs; `importConflictFirstFreeAlternateDestRel` + `importPreservedConflictCandidate`; `~/.agents/review-notes/import-conflicts/ic-*.yaml`; tests)
 - [x] Add refresh/import regression tests for imported directory -> managed shared-target transition. (2026-04-11 — `commands/refresh_test.go` `TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink`: import-from-refresh then `RunSharedTargetProjection` + Claude `CreateLinks` replaces repo `.agents/skills/<name>/` dir with symlink)
 - [x] Add coverage proving non-empty directory replacement is executor-only and allowlisted. (2026-04-11 — `internal/platform/resource_plan_test.go`: `TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory`, `TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarkers`, `TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPresent` lock `removeImportedDirIfAllowlisted` / `prepareIntentTargetForReplacement` refusal strings and success path)
-- [ ] Add status/explain coverage so the new registry remains the source of truth.
+- [x] Add status/explain coverage so the new registry remains the source of truth. (2026-04-11 — `commands/status_test.go` locks `sharedTargetRegistryPlanLines` ≡ `DryRunSharedTargetPlanLines` + collection-error propagation; `commands/explain_test.go` locks `explain links` registry diagnostics copy)
 - [ ] Run focused packages first, then `go test ./...`.
 
 ## Explicit Out Of Scope

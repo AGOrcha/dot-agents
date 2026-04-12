@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 28
+Iteration: 29
 
 ## Current Position
 
@@ -38,7 +38,7 @@ State summary:
 - Phase 6 (partial): **import conflict** — canonical hook `importOutput` carries `Origin` (platform id); when on-disk content differs, `processImportOutput` writes an origin-prefixed alternate under `hooks/<scope>/…` and an advisory YAML under `AGENTS_HOME/review-notes/import-conflicts/` (RFC §6–§7); replace-with-confirm remains when `Origin` is empty. Covered by unit + integration tests (`TestProcessImportOutput_preservesHookConflict`, dry-run branch).
 - Phase 6 (partial): **refresh/import regression** — `TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink` drives full `runRefresh` (import-from-refresh → `RunSharedTargetProjection` → Claude `CreateLinks`) and asserts repo `.agents/skills/review/` becomes a symlink to `~/.agents/skills/proj/review` when canonical skill exists and Claude is the sole installed+enabled platform (temp `HOME` + `.claude` stub).
 - Phase 6 (partial): **executor-only imported-dir replacement** — `TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory`, `TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarkers`, `TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPresent` lock `removeImportedDirIfAllowlisted` / `prepareIntentTargetForReplacement` behavior for `ResourceReplaceAllowlistedImportedDirOnly`.
-- Next slice: Phase 6 — status/explain registry coverage; optional adapter thinning; or `crg-kg-integration` Phase E incremental work.
+- Phase 6 status/explain: `sharedTargetRegistryPlanLines` extracted in `status.go`; `commands/status_test.go` + `explain_test.go` lock registry ≡ `DryRunSharedTargetPlanLines` and explain copy. Next slice: optional adapter thinning; `crg-kg-integration` Phase E Postgres; or reconcile canonical YAML `phase-6-verification` when batch-advancing TASKS.
 
 ## Loop Health
 
@@ -79,6 +79,37 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 29 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 6 — Add status/explain coverage so the new registry remains the source of truth
+- scenario_tags: [clean-repo, canonical-plan-present, status-explain-registry-unit-tests]
+- feedback_goal: Does `sharedTargetRegistryPlanLines` delegate to `DryRunSharedTargetPlanLines` for non-empty platforms (and propagate collection errors), and does `explain links` still mention `status --audit` / `Shared target registry` / `refresh --dry-run`?
+- files_changed: 5
+- lines_added: 188
+- lines_removed: 14
+- tests_added: 4
+- tests_total_pass: true
+- retries: 0
+- commit: a8e874c
+- scope_note: "on-target"
+- summary: Extracted `sharedTargetRegistryPlanLines`; added status + explain tests for registry/dry-run parity and explain copy
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (empty platforms, Codex parity success, SharedTargetIntents error propagation; explain asserts required substrings)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: partial (markdown Phase 6 status/explain done; YAML `phase-6-verification` still pending until TASKS batch reconcile)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes (`explain links`)
+- exercised_new_scenario: yes (`status-explain-registry-unit-tests`)
+- cli_produced_actionable_feedback: informative-nonblocking — reconfirms explain copy; primary proof is new tests
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 28 — 2026-04-11
 - wave: resource-intent-centralization
@@ -852,8 +883,8 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Preferred single item for iteration 29:
-- Phase **6** next unchecked bullet — status/explain coverage so the shared registry stays the source of truth; **or** `crg-kg-integration` Phase E Postgres slice; optional adapter thinning.
+Preferred single item for iteration 30:
+- **`crg-kg-integration` Phase E** (Postgres backend slice) **or** resource-intent optional adapter thinning **or** canonical TASKS advance/reconcile when closing Phase 6 in YAML.
 
 Loop closeout rules (iteration 21+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
@@ -862,11 +893,11 @@ Loop closeout rules (iteration 21+):
 - Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
-1. **resource-intent-centralization Phase 6 (remaining)**: refresh/import regression, non-empty dir replacement allowlist, status/explain registry tests.
-2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
+1. **crg-kg-integration Phase E**: Postgres backend slice (`internal/graphstore/postgres.go` + config).
+2. **resource-intent-centralization**: optional Phase 4 adapter thinning; YAML `workflow advance` when reconciling phase-6-verification with markdown completion.
 
-Primary feedback goal for iteration 29 (example):
-- Does a new test (or `status --audit` trace) prove registry/explain alignment after a change, or does Postgres graphstore code compile for Phase E?
+Primary feedback goal for iteration 30 (example):
+- Does a Postgres `GraphStore` implementation compile and pass the same tests as SQLite, or does adapter thinning remove duplicate agent projection logic without changing dry-run lines?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -908,7 +939,7 @@ Signals already captured:
 
 Signals still missing or too weak:
 - A live **apply** trace that proves the shared plan runs once at the command layer during a real `refresh`/`install` (guardrail limits direct `refresh` in loop; dry-run now proves merged plan visibility; iteration 25 adds `install --dry-run` parity vs refresh for shared rows)
-- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **mostly addressed in repo:** dir mirrors, Codex TOML, OpenCode/Copilot file symlinks centralized; **status/explain registry slice done (iter 21)**; **command-layer shared projection unified (iter 24: `RunSharedTargetProjection` + remove plan)**; **iter 27** adds automated `runRefresh` regression for imported skill dir → symlink (still not a manual live `refresh` apply trace under guardrails); remaining gap: live apply traces where allowed and Phase 6 executor-only + status/explain verification bullets
+- Evidence that the post-skills planner shape can absorb canonical `agents/` projections without another ownership-model fork — **mostly addressed in repo:** dir mirrors, Codex TOML, OpenCode/Copilot file symlinks centralized; **status/explain registry slice done (iter 21)** + **unit-test lock for commands-layer registry delegation (iter 29)**; **command-layer shared projection unified (iter 24: `RunSharedTargetProjection` + remove plan)**; **iter 27** adds automated `runRefresh` regression for imported skill dir → symlink (still not a manual live `refresh` apply trace under guardrails); remaining gap: live apply traces where allowed; optional YAML advance for `phase-6-verification`
 - Canonical workflow state transitions: `workflow advance`, `workflow verify`, sandboxed `workflow checkpoint`, and plan/task flows that update real `PLAN.yaml` + `TASKS.yaml` state (workflow log now covered; tasks readback works)
 - Delegation lifecycle: `workflow fanout` and `workflow merge-back`, including conflict/error paths
 - Cross-project remediation: `workflow sweep` dry-run/apply and drift cases that detect real stale state rather than empty/no-op results
@@ -950,7 +981,8 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `dry-run-shared-target-preview` | yes | 24 | Iteration 24: `refresh --dry-run dot-agents` after `RunSharedTargetProjection` — still six skill rows with duplicate merges; regression signal for unified entry |
 | `shared-target-plan-aggregation` | yes | 25 | `stubPlatform` tests: `BuildSharedTargetPlan` dedupe + conflict + wrapped collection error; `DryRunSharedTargetPlanLines` propagates plan error |
 | `remove-shared-target-plan` | yes | 23 | `RemoveSharedTargetPlan` after `CollectAndExecuteSharedTargetPlan` in tests removes `.agents/skills/*` symlink and `.codex/agents/*.toml`; live `remove` not traced (destructive) |
-| `status-audit-shared-registry` | yes | 21 | `status --audit` prints Shared target registry via same `DryRunSharedTargetPlanLines` + `InstalledEnabledPlatforms` as refresh dry-run; cross-checked merge counts vs iteration 20 dry-run semantics |
+| `status-audit-shared-registry` | yes | 29 | Iter 21 live audit trace; iter 29: `sharedTargetRegistryPlanLines` in `status.go` delegates to `DryRunSharedTargetPlanLines` — locked by `status_test.go` vs Codex fixture + error wrap |
+| `status-explain-registry-unit-tests` | yes | 29 | `TestSharedTargetRegistryPlanLines_*` + `TestExplainLinks_MentionsSharedTargetRegistryDiagnostics` — commands-layer contract + explain copy |
 | `agents-repo-symlink-centralized` | yes | 19 | `BuildSharedAgentMirrorIntents` + Claude/Cursor dedupe in tests; allowlist includes `.claude/agents/` for imported-dir replacement |
 | `agents-non-dir-outputs-centralized` | yes | 20 | `BuildSharedCodexAgentTomlIntents` + `BuildSharedAgentFileSymlinkIntents`; executor `RenderSingle`/`DirectFile`; tests for execute + allowlist negative |
 | `verification-log-recorded` | no | - | `workflow verify record/log` not exercised yet |
@@ -1091,10 +1123,21 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Phase **5** — shared-target **command entry** is unified (`RunSharedTargetProjection` for refresh/install/add); **`remove`** uses `RemoveSharedTargetPlan`; Phase **6** — aggregation tests, import conflict preserve-both, **refresh/import `runRefresh` regression** (iter 27), **executor-only allowlist tests** (iter 28); remaining Phase **6** bullet: status/explain registry tests; canonical YAML `phase-5-unify-commands` may advance when Phase 3/5 scope is reconciled with TASKS.
+- Phase **5** — shared-target **command entry** is unified (`RunSharedTargetProjection` for refresh/install/add); **`remove`** uses `RemoveSharedTargetPlan`; Phase **6** — aggregation, import conflict, refresh/import regression, executor-only allowlist, **status/explain registry unit tests** (iter 29) complete in markdown; canonical YAML `phase-6-verification` / `phase-5-unify-commands` may advance when Phase 3/5/6 scope is reconciled with TASKS.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 29 — 2026-04-11
+
+Trace: explain-links-registry-after-status-registry-tests
+Command: `go run ./cmd/dot-agents explain links`
+Scenario: [clean-repo, canonical-plan-present, status-explain-registry-unit-tests]
+Feedback goal: After adding `status_test`/`explain_test`, does live `explain links` still show CENTRALIZED SHARED TARGETS + `status --audit` / `Shared target registry` / `refresh --dry-run` (operator copy unchanged)?
+Output summary: Link Types header; CENTRALIZED SHARED TARGETS paragraph; Registry diagnostics line with `dot-agents status --audit` and `refresh --dry-run` (truncated after that block).
+Expectation: expected
+Follow-on: none — tests are primary evidence; CLI reconfirms baseline copy
+Classification: [ok]
 
 ### Iteration 28 — 2026-04-11
 
@@ -1735,7 +1778,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `install --dry-run` | yes | 25 | ok — six shared-target skill rows + per-platform dry-run; resolver shows missing global skills for three repo skills |
 | `status` | yes | 21 | ok (incl. `--audit` shared registry trace) |
 | `doctor` | yes | 7 | ok-warning |
-| `explain` | yes | 28 | ok (links topic: registry diagnostics cross-ref; reconfirm post–iter 28 tests) |
+| `explain` | yes | 29 | ok — iter 29 `explain_test.go` + live `explain links` trace |
 | `refresh` | yes | 24 | ok (dry-run merged skills; post–RunSharedTargetProjection wiring) |
 | `remove` | tests only | 23 | ok (RemoveSharedTargetPlan covered in `resource_plan_test`; live cmd guardrail) |
 | `workflow status` | yes | 24 | ok-warning (stale next-action baseline) |

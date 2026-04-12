@@ -521,6 +521,16 @@ func printAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) 
 	printSharedTargetRegistry(name, path, cfg)
 }
 
+// sharedTargetRegistryPlanLines returns merged shared-target lines for status/doctor audit.
+// It is the same builder path as refresh/install --dry-run (DryRunSharedTargetPlanLines).
+// When plats is empty, returns (nil, nil).
+func sharedTargetRegistryPlanLines(project, repo string, plats []platform.Platform) ([]string, error) {
+	if len(plats) == 0 {
+		return nil, nil
+	}
+	return platform.DryRunSharedTargetPlanLines(project, repo, plats)
+}
+
 // printSharedTargetRegistry lists the merged shared-target ResourcePlan lines using the same
 // code path as refresh/install dry-run (DryRunSharedTargetPlanLines).
 func printSharedTargetRegistry(project, repo string, cfg *config.Config) {
@@ -531,7 +541,7 @@ func printSharedTargetRegistry(project, repo string, cfg *config.Config) {
 		fmt.Fprintln(os.Stdout)
 		return
 	}
-	lines, err := platform.DryRunSharedTargetPlanLines(project, repo, plats)
+	lines, err := sharedTargetRegistryPlanLines(project, repo, plats)
 	fmt.Fprintf(os.Stdout, "    %sShared target registry%s %s(same merge rules as refresh --dry-run)%s\n", ui.Cyan, ui.Reset, ui.Dim, ui.Reset)
 	if err != nil {
 		fmt.Fprintf(os.Stdout, "      %s! %v%s\n", ui.Yellow, err, ui.Reset)
