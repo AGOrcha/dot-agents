@@ -1,0 +1,84 @@
+schema_version: 1
+plan_id: loop-orchestrator-layer
+tasks:
+    - id: phase-1-spec-and-operating-model
+      title: Phase 1 — Specify the orchestrator operating model
+      status: completed
+      depends_on: []
+      blocks:
+        - phase-3-plan-graph-and-slices
+        - phase-5-kg-first-understanding
+      owner: dot-agents
+      write_scope:
+        - docs/
+        - .agents/active/
+        - .agents/workflow/plans/
+      verification_required: false
+      notes: Write the architecture down before adding orchestration behavior.
+    - id: phase-2-workflow-next
+      title: Phase 2 — Add workflow next task selection
+      status: completed
+      depends_on:
+        - phase-1-spec-and-operating-model
+      blocks:
+        - phase-4-fanout-from-slices
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: Read-only selector that prefers canonical plan/task state over checkpoint text.
+    - id: phase-3-plan-graph-and-slices
+      title: Phase 3 — Derive plan/task dependency graph and slice model
+      status: in_progress
+      depends_on:
+        - phase-1-spec-and-operating-model
+      blocks:
+        - phase-4-fanout-from-slices
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/
+        - docs/
+      verification_required: true
+      notes: Phase 3A is complete; the remaining slice-artifact/readiness lane stays in the plan/doc surface and keeps the derived graph as the only source of truth.
+    - id: phase-4-fanout-from-slices
+      title: Phase 4 — Connect slices to delegation fanout
+      status: pending
+      depends_on:
+        - phase-2-workflow-next
+        - phase-3-plan-graph-and-slices
+      blocks:
+        - phase-6-fold-back-reconciliation
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - .agents/skills/
+      verification_required: true
+      notes: Reuse existing delegation contracts and write-scope overlap checks.
+    - id: phase-5-kg-first-understanding
+      title: Phase 5 — Expand graph-first understanding for orchestrator decisions
+      status: in_progress
+      depends_on:
+        - phase-1-spec-and-operating-model
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/kg.go
+        - docs/
+      verification_required: true
+      notes: Unify symbol and decision queries before agents fall back to grep.
+    - id: phase-6-fold-back-reconciliation
+      title: Phase 6 — Reconcile low-risk observations and proposal-worthy changes
+      status: pending
+      depends_on:
+        - phase-4-fanout-from-slices
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - .agents/active/
+        - .agents/skills/
+      verification_required: true
+      notes: Small items should update plans, lessons, or matrices; larger ones should enter proposal review.

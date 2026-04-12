@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-slices.schema.json
+schema_version: 1
+plan_id: "loop-orchestrator-layer"
+slices:
+  - id: "phase-3-read-surface"
+    parent_task_id: "phase-3-plan-graph-and-slices"
+    title: "Phase 3A — Slice read surface"
+    summary: "Add read-only loading and rendering for SLICES.yaml through workflow commands."
+    status: "completed"
+    depends_on: []
+    write_scope:
+      - "commands/workflow.go"
+      - "commands/workflow_test.go"
+    verification_focus: "workflow slices + plan graph readback"
+    owner: "dot-agents"
+
+  - id: "phase-3-canonical-artifact"
+    parent_task_id: "phase-3-plan-graph-and-slices"
+    title: "Phase 3B — Canonical slice artifact"
+    summary: "Model bounded slice metadata under the orchestrator plan as a read-first canonical artifact without adding mutation semantics yet."
+    status: "in_progress"
+    depends_on:
+      - "phase-3-read-surface"
+    write_scope:
+      - ".agents/workflow/plans/loop-orchestrator-layer/"
+      - "docs/"
+    verification_focus: "fixture and CLI parity for loop-orchestrator-layer"
+    owner: "dot-agents"
+
+  - id: "phase-3-fanout-readiness"
+    parent_task_id: "phase-3-plan-graph-and-slices"
+    title: "Phase 3C — Fanout readiness checks"
+    summary: "Use slice boundaries and the active delegation contract to choose a non-overlapping downstream task for task-level fanout."
+    status: "pending"
+    depends_on:
+      - "phase-3-canonical-artifact"
+    write_scope:
+      - ".agents/workflow/plans/loop-orchestrator-layer/"
+      - "docs/"
+    verification_focus: "delegation candidate is bounded, non-overlapping, and aligned with the contract write_scope"
+    owner: "dot-agents"

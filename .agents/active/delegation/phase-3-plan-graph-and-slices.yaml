@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-phase-3-plan-graph-and-slices-1775967395
+parent_plan_id: loop-orchestrator-layer
+parent_task_id: phase-3-plan-graph-and-slices
+title: Phase 3 — Derive plan/task dependency graph and slice model
+summary: Delegated from plan Loop Orchestrator Layer
+write_scope:
+    - .agents/workflow/plans/loop-orchestrator-layer/
+    - docs/
+success_criteria: Derived graph, not a second hand-maintained source of truth.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: slice-artifact-worker
+status: active
+created_at: "2026-04-12T04:16:35Z"
+updated_at: "2026-04-12T04:16:35Z"

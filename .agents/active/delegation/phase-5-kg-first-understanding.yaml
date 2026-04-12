@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-phase-5-kg-first-understanding-1775966644
+parent_plan_id: loop-orchestrator-layer
+parent_task_id: phase-5-kg-first-understanding
+title: Phase 5 — Expand graph-first understanding for orchestrator decisions
+summary: Delegated from plan Loop Orchestrator Layer
+write_scope:
+    - commands/kg.go
+success_criteria: Unify symbol and decision queries before agents fall back to grep.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: kg-bridge-worker
+status: active
+created_at: "2026-04-12T04:04:04Z"
+updated_at: "2026-04-12T04:04:04Z"
