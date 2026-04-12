@@ -1,0 +1,13 @@
+name: graph-orient
+description: Show code graph readiness at session start (pair with session-orient / workflow orient)
+when: session_start
+match:
+  tools: []
+  expression: ""
+run:
+  command: dot-agents kg status
+  timeout_ms: 3000
+enabled_on:
+  - claude
+  - codex
+  - cursor

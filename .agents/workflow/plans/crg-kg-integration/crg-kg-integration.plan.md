@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phases A–F complete in canonical TASKS (2026-04-12). Phase G (skill integration) is **in progress**: CRG skills are embedded as tracked templates under `src/share/templates/standard/skills/global/` (build-graph, review-delta, review-pr) with self-review/agent-start touch-ups; global hook YAML under `~/.agents/hooks/global/` remains to align for full Phase G closeout.
+Status: **Complete** (2026-04-12). Phases A–G done in canonical TASKS: skills live under `src/share/templates/standard/skills/global/`; global hook bundles ship as `internal/scaffold/hooks/global/{graph-update,graph-orient,graph-precommit}/` (copied to `~/.agents/hooks/global/` on init when missing). Pre-commit behavior uses Claude `PreToolUse`/`Bash` + script (Claude Code has no `PreCommit` event).
 Created: 2026-04-10
 
 ## Problem
