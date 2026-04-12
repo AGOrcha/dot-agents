@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-11
-Iteration: 27
+Iteration: 28
 
 ## Current Position
 
@@ -10,7 +10,7 @@ Driving specs:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
 
 Active waves:
-- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 in_progress — shared-target plan covers skills, `.claude/agents/*` dir mirrors, Codex `.codex/agents/*.toml` renders, OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` file symlinks. Phase 5 — refresh/install/add use `RunSharedTargetProjection`; Phase 6 — dedupe/conflict aggregation tests, import conflict preserve-both, and **full `runRefresh` regression** for imported skill dir → managed symlink (`TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink`); executor-only allowlist + status/explain registry bullets remain.
+- `resource-intent-centralization`: Phase 4 COMPLETE. Phase 3 in_progress — shared-target plan covers skills, `.claude/agents/*` dir mirrors, Codex `.codex/agents/*.toml` renders, OpenCode `.opencode/agent/*.md` and Copilot `.github/agents/*.agent.md` file symlinks. Phase 5 — refresh/install/add use `RunSharedTargetProjection`; Phase 6 — dedupe/conflict aggregation tests, import conflict preserve-both, **full `runRefresh` regression** (`TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink`), and **executor-only allowlist tests** (`TestExecuteDirSymlinkIntent*`); remaining: status/explain registry coverage.
 - `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active.
 
@@ -37,7 +37,8 @@ State summary:
 - Phase 6 (partial): `internal/platform/resource_plan_test.go` adds `stubPlatform` and tests that `BuildSharedTargetPlan` / `DryRunSharedTargetPlanLines` surface dedupe, `conflicting intents`, and platform `SharedTargetIntents` failures on the aggregation path (not only direct `BuildResourcePlan`).
 - Phase 6 (partial): **import conflict** — canonical hook `importOutput` carries `Origin` (platform id); when on-disk content differs, `processImportOutput` writes an origin-prefixed alternate under `hooks/<scope>/…` and an advisory YAML under `AGENTS_HOME/review-notes/import-conflicts/` (RFC §6–§7); replace-with-confirm remains when `Origin` is empty. Covered by unit + integration tests (`TestProcessImportOutput_preservesHookConflict`, dry-run branch).
 - Phase 6 (partial): **refresh/import regression** — `TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink` drives full `runRefresh` (import-from-refresh → `RunSharedTargetProjection` → Claude `CreateLinks`) and asserts repo `.agents/skills/review/` becomes a symlink to `~/.agents/skills/proj/review` when canonical skill exists and Claude is the sole installed+enabled platform (temp `HOME` + `.claude` stub).
-- Next slice: Phase 6 remaining bullets (executor-only replacement allowlist tests, status/explain registry tests); optional adapter thinning; or `crg-kg-integration` Phase E incremental work.
+- Phase 6 (partial): **executor-only imported-dir replacement** — `TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory`, `TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarkers`, `TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPresent` lock `removeImportedDirIfAllowlisted` / `prepareIntentTargetForReplacement` behavior for `ResourceReplaceAllowlistedImportedDirOnly`.
+- Next slice: Phase 6 — status/explain registry coverage; optional adapter thinning; or `crg-kg-integration` Phase E incremental work.
 
 ## Loop Health
 
@@ -78,6 +79,37 @@ Dogfood implications:
 - Persist surfaces (`workflow checkpoint`, `workflow verify`) are still underused in the loop and should be exercised in a temp sandbox unless real writes are explicitly approved.
 
 ## Iteration Log
+
+### Iteration 28 — 2026-04-11
+- wave: resource-intent-centralization
+- item: Phase 6 — coverage proving non-empty directory replacement is executor-only and allowlisted
+- scenario_tags: [clean-repo, canonical-plan-present, executor-only-dir-replacement-allowlist]
+- feedback_goal: Do `ResourcePlan.Execute` paths refuse non-allowlisted dirs and allowlisted dirs without imported markers with the intended error strings, and succeed when `SKILL.md` marks an imported dir?
+- files_changed: 3
+- lines_added: 194
+- lines_removed: 11
+- tests_added: 3
+- tests_total_pass: true
+- retries: 0
+- commit: 502b4f2
+- scope_note: "on-target"
+- summary: Added three `internal/platform` tests for `removeImportedDirIfAllowlisted` / `prepareIntentTargetForReplacement`; marked Phase 6 allowlist checkbox in markdown plan
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (two refusal paths with distinct errors + success replacement path)
+- tests_used_sandbox: n/a
+- used_workflow_orient_status: yes
+- aligned_with_canonical_tasks: partial (phase-6-verification still pending in YAML until phase-5 task dep reconciled)
+- persisted_via_workflow_commands: no
+- ran_cli_command: yes (`explain links`, `workflow tasks resource-intent-centralization`)
+- exercised_new_scenario: yes (`executor-only-dir-replacement-allowlist`)
+- cli_produced_actionable_feedback: informative-nonblocking — `explain links` reconfirms registry diagnostics baseline; tasks unchanged
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
 
 ### Iteration 27 — 2026-04-11
 - wave: resource-intent-centralization
@@ -820,8 +852,8 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Preferred single item for iteration 28:
-- Phase **6** next unchecked bullet — non-empty directory replacement is executor-only and allowlisted (`removeImportedDirIfAllowlisted` / refusal paths), or status/explain registry tests; **or** `crg-kg-integration` Phase E Postgres slice.
+Preferred single item for iteration 29:
+- Phase **6** next unchecked bullet — status/explain coverage so the shared registry stays the source of truth; **or** `crg-kg-integration` Phase E Postgres slice; optional adapter thinning.
 
 Loop closeout rules (iteration 21+):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
@@ -833,8 +865,8 @@ Candidate paths (priority order):
 1. **resource-intent-centralization Phase 6 (remaining)**: refresh/import regression, non-empty dir replacement allowlist, status/explain registry tests.
 2. **crg-kg-integration Phase E**: Postgres backend slice matching the plan's next focus.
 
-Primary feedback goal for iteration 28 (example):
-- Does a new test lock executor-only refusal for a non-allowlisted path, or does `status --audit` stay aligned with `DryRunSharedTargetPlanLines` after a registry tweak?
+Primary feedback goal for iteration 29 (example):
+- Does a new test (or `status --audit` trace) prove registry/explain alignment after a change, or does Postgres graphstore code compile for Phase E?
 
 Command-feedback priorities:
 - Session start: `workflow orient` -> `workflow status` -> `workflow plan`; add `workflow tasks resource-intent-centralization` when picking that wave.
@@ -928,6 +960,7 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `promote-preserves-extra-manifest` | yes | 17 | `TestPromoteSkillIn_PreservesManifestUnknownFields`: promote path keeps `refresh`/`myteam` ExtraFields and multi-source `sources` after `Save()` |
 | `import-conflict-preserve-both` | yes | 26 | `TestProcessImportOutput_preservesHookConflict` + dry-run test: alternate `hooks/…/HOOK.yaml`, `review-notes/import-conflicts/ic-*.yaml`; `Origin` empty still uses replace path |
 | `imported-dir-to-managed-symlink` | yes | 27 | Full `runRefresh` test: import-from-refresh updates canonical SKILL.md then shared projection replaces imported `.agents/skills/review/` dir with symlink to `AGENTS_HOME/skills/proj/review` |
+| `executor-only-dir-replacement-allowlist` | yes | 28 | `TestExecuteDirSymlinkIntent*`: non-allowlisted `vendor/skills/review` dir refused; `.agents/skills/review` without `SKILL.md` refused; with `SKILL.md` removes dir and symlinks — locks `removeImportedDirIfAllowlisted` |
 
 ### Delegation Lifecycle
 
@@ -1058,10 +1091,31 @@ Plans to skip (blocked, requires architectural work, completed, or out of scope 
 
 ## Blockers
 
-- Phase **5** — shared-target **command entry** is unified (`RunSharedTargetProjection` for refresh/install/add); **`remove`** uses `RemoveSharedTargetPlan`; Phase **6** — aggregation tests, import conflict preserve-both, **refresh/import `runRefresh` regression** (iter 27); remaining Phase **6** bullets: executor-only replacement coverage, status/explain registry tests; canonical YAML `phase-5-unify-commands` may advance when Phase 3/5 scope is reconciled with TASKS.
+- Phase **5** — shared-target **command entry** is unified (`RunSharedTargetProjection` for refresh/install/add); **`remove`** uses `RemoveSharedTargetPlan`; Phase **6** — aggregation tests, import conflict preserve-both, **refresh/import `runRefresh` regression** (iter 27), **executor-only allowlist tests** (iter 28); remaining Phase **6** bullet: status/explain registry tests; canonical YAML `phase-5-unify-commands` may advance when Phase 3/5 scope is reconciled with TASKS.
 - `plan-wave-picker` SKILL.md at `~/.agents/skills/dot-agents/plan-wave-picker/SKILL.md` has invalid frontmatter (missing `---` delimiters). Codex warns on load.
 
 ## CLI Traces
+
+### Iteration 28 — 2026-04-11
+
+Trace: explain-links-registry-baseline-after-executor-allowlist-tests
+Command: `go run ./cmd/dot-agents explain links`
+Scenario: [clean-repo, canonical-plan-present, executor-only-dir-replacement-allowlist]
+Feedback goal: After planner executor tests only, does `explain links` still point at `status --audit` for merged shared-target registry lines (no regression in operator-facing text)?
+Output summary: Link Types — HARD LINKS (Cursor), SYMLINKS; CENTRALIZED SHARED TARGETS section with `status --audit` / `refresh --dry-run` cross-reference (truncated after registry diagnostics block).
+Expectation: expected
+Follow-on: none — low-signal reconfirm; primary evidence is unit tests
+Classification: [ok]
+
+Trace: workflow-tasks-resource-intent-after-allowlist-tests
+Command: `go run ./cmd/dot-agents workflow tasks resource-intent-centralization`
+Scenario: [clean-repo, canonical-plan-present]
+Commands: `workflow tasks` — [ok] (unchanged task graph; phase-6-verification still pending)
+Feedback goal: Does canonical YAML still show phase-6-verification pending after markdown Phase 6 allowlist checkbox closed?
+Output summary: phase-3 in_progress; phase-4/5/6 pending; dependency chain unchanged.
+Expectation: expected
+Follow-on: none — reconcile YAML when batch-advancing phases
+Classification: [ok]
 
 ### Iteration 27 — 2026-04-11
 
@@ -1681,7 +1735,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `install --dry-run` | yes | 25 | ok — six shared-target skill rows + per-platform dry-run; resolver shows missing global skills for three repo skills |
 | `status` | yes | 21 | ok (incl. `--audit` shared registry trace) |
 | `doctor` | yes | 7 | ok-warning |
-| `explain` | yes | 21 | ok (links topic: registry diagnostics cross-ref) |
+| `explain` | yes | 28 | ok (links topic: registry diagnostics cross-ref; reconfirm post–iter 28 tests) |
 | `refresh` | yes | 24 | ok (dry-run merged skills; post–RunSharedTargetProjection wiring) |
 | `remove` | tests only | 23 | ok (RemoveSharedTargetPlan covered in `resource_plan_test`; live cmd guardrail) |
 | `workflow status` | yes | 24 | ok-warning (stale next-action baseline) |
@@ -1689,7 +1743,7 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `workflow plan` | yes | 14 | ok |
 | `workflow checkpoint` | yes | 5 | ok |
 | `workflow log` | yes | 6 | ok |
-| `workflow tasks` | yes | 27 | ok |
+| `workflow tasks` | yes | 28 | ok |
 | `workflow advance` | yes | 17 | ok |
 | `workflow health` | yes | 13 | ok |
 | `workflow verify` | no | - | - |
