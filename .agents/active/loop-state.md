@@ -90,7 +90,7 @@ Dogfood implications:
 - tests_added: 1
 - tests_total_pass: true
 - retries: 0
-- commit: a2ea3ce
+- commit: ae29a92
 - scope_note: "on-target"
 - summary: Added `TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink`; marked Phase 6 refresh/import regression checkbox in markdown plan
 
