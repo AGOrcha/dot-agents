@@ -629,6 +629,15 @@ func runKGHealth() error {
 	return nil
 }
 
+func runKGServe(_ *cobra.Command, _ []string) error {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	srv := graphstore.NewMCPServer(workDir)
+	return srv.Serve(os.Stdin, os.Stdout)
+}
+
 // walkNoteFiles calls fn for every .md file under kgHomeDir/notes/*/.
 func walkNoteFiles(kgHomeDir string, fn func(path string, info fs.DirEntry) error) error {
 	notesDir := filepath.Join(kgHomeDir, "notes")
@@ -3589,6 +3598,12 @@ func NewKGCmd() *cobra.Command {
 		},
 	}
 
+	kgServeCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the MCP server (stdio transport, JSON-RPC 2.0)",
+		RunE:  runKGServe,
+	}
+
 	kgIngestCmd := &cobra.Command{
 		Use:   "ingest [file]",
 		Short: "Ingest a raw source into the knowledge graph",
@@ -3803,7 +3818,7 @@ func NewKGCmd() *cobra.Command {
 	kgPostprocessCmd.Flags().Bool("no-fts", false, "Skip FTS rebuild")
 
 	kgCmd.AddCommand(
-		kgSetupCmd, kgHealthCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd,
+		kgSetupCmd, kgHealthCmd, kgServeCmd, kgIngestCmd, kgQueueCmd, kgQueryCmd,
 		kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd,
 		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgChangesCmd,
 		kgImpactCmd, kgFlowsCmd, kgCommunitiesCmd, kgPostprocessCmd,

@@ -1,13 +1,60 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
-plan_id: "platform-dir-unification"
+plan_id: platform-dir-unification
 tasks:
-  - id: "resume-phases-4-5"
-    title: "Resume Phase 4 (bash parity) and Phase 5 (new buckets) when resource-intent unblocks"
-    status: "blocked"
-    depends_on: []
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["src/lib/", "internal/platform/", "commands/"]
-    verification_required: false
-    notes: "Blocked per plan Status header — see resource-intent-centralization"
+    - id: phase-4-bash-deprecation
+      title: Phase 4 — Delete orphaned bash command and platform files
+      status: completed
+      depends_on: []
+      blocks:
+        - phase-5-new-buckets
+      owner: dot-agents
+      write_scope:
+        - src/lib/commands/
+        - src/lib/platforms/
+        - src/lib/utils/resource-restore-map.sh
+        - src/bin/
+        - scripts/
+        - tests/
+      verification_required: true
+      notes: |
+        Delete these files in a single commit:
+          src/lib/commands/init.sh
+          src/lib/commands/import.sh
+          src/lib/commands/refresh.sh
+          src/lib/commands/status.sh
+          src/lib/commands/explain.sh
+          src/lib/utils/resource-restore-map.sh
+          src/lib/platforms/cursor.sh
+          src/lib/platforms/claude-code.sh
+          src/lib/platforms/codex.sh
+          src/lib/platforms/opencode.sh
+          src/lib/platforms/github-copilot.sh
+        Before deleting: confirm src/bin/dot-agents does not delegate any of init/import/refresh/status/explain to these files.
+        If it does, replace the delegation with a direct exec of the Go binary.
+        After deletion: grep src/ scripts/ tests/ for any remaining `source` or `.` references to the deleted paths and remove them.
+        Acceptance: go test ./... passes; scripts/verify.sh passes; no source/. references to deleted files remain.
+    - id: phase-5-new-buckets
+      title: Phase 5 — Add Stage 2 bucket expansion (commands, output-styles, modes, plugins, themes, prompts)
+      status: pending
+      depends_on:
+        - phase-4-bash-deprecation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+        - commands/
+        - docs/
+      verification_required: true
+      notes: |
+        Coordinator first — extend the shared resource descriptor layer in internal/platform/ to declare new
+        bucket types: commands, output-styles, ignore, modes, plugins (fed by plugin-resource-salvage plan),
+        themes, prompts.
+        For each bucket: define CanonicalBucket constant, add listScopedResourceDirs call pattern,
+        add emitter to each applicable platform adapter (CreateLinks).
+        Extend init, import, refresh, status, explain for each new bucket following the Stage 1 pattern.
+        Worker split (can run after coordinator lands):
+          Worker A: Cursor + Claude additions
+          Worker B: OpenCode additions
+          Worker C: Copilot additions
+        Acceptance: go test ./...; dot-agents status shows new bucket entries; round-trip import/refresh
+        preserves new bucket files.

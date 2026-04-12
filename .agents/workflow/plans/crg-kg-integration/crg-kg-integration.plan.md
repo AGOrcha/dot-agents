@@ -348,12 +348,116 @@ Add Postgres as alternative backend.
 
 ### Phase F: MCP server in Go
 
-Replace Python MCP server with Go native.
+Replace the Python `code-review-graph serve` MCP server with a Go-native stdio MCP server embedded in the `dot-agents` binary. Clients (Claude Code, Cursor, etc.) configure it as `dot-agents kg serve` instead of the Python `uvx` invocation.
 
-1. Go MCP server using stdio transport
-2. All CRG MCP tools re-implemented against Go `GraphStore`
-3. `dot-agents kg serve` command
-4. Auto-registration via `dot-agents init`/`dot-agents add`
+#### Deployment model
+
+Embedded in `dot-agents` binary as `dot-agents kg serve`. NOT a separate binary. Stdio transport only (JSON-RPC 2.0 over stdin/stdout). HTTP/SSE transport is out of scope for this phase.
+
+#### Tool catalog
+
+The Go MCP server exposes exactly these eight tools (drop-in replacement for existing Python server):
+
+| Tool name | Input schema | Output schema |
+|-----------|-------------|---------------|
+| `build_or_update_graph_tool` | `{}` | `{nodes: int, edges: int, files: int, duration_ms: int}` |
+| `embed_graph_tool` | `{}` | `{status: "ok"\|"error", message: string}` |
+| `list_graph_stats_tool` | `{}` | `{nodes: int, edges: int, languages: {[lang]: int}, communities: int}` |
+| `get_impact_radius_tool` | `{symbol: string, depth?: int}` (depth default 2) | `{nodes: [{name: string, type: string, file: string, risk_score?: float64}]}` |
+| `semantic_search_nodes_tool` | `{query: string, limit?: int}` (limit default 20) | `{results: [{name: string, type: string, file: string, summary?: string}]}` |
+| `query_graph_tool` | `{intent: string, query: string, scope?: string}` | `{results: [{type: string, title: string, summary: string}], warnings?: [string]}` |
+| `get_review_context_tool` | `{files: [string]}` | `{changed_symbols: [...], impact_radius: [...], risk_summary: string}` |
+| `get_docs_section_tool` | `{section: string}` | `{content: string, source: string}` |
+
+All input types are JSON objects. All output types are JSON objects. Tools that require the graph to be built first return `{error: "graph not built — run build_or_update_graph_tool first"}` as the result (not as a JSON-RPC error).
+
+#### New file: `internal/graphstore/mcp_server.go`
+
+```go
+type MCPServer struct {
+    bridge  *CRGBridge   // Phase B bridge — delegates heavy lifting to Python CRG binary
+    workDir string
+}
+
+func NewMCPServer(workDir string) *MCPServer
+
+// Serve reads JSON-RPC 2.0 requests from r and writes responses to w until r returns EOF.
+func (s *MCPServer) Serve(r io.Reader, w io.Writer) error
+
+// dispatch routes a single JSON-RPC call to the appropriate handler.
+func (s *MCPServer) dispatch(method string, id json.RawMessage, params json.RawMessage) (json.RawMessage, error)
+
+// One handler per tool:
+func (s *MCPServer) handleBuildOrUpdateGraph(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleEmbedGraph(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleListGraphStats(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleSemanticSearchNodes(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleQueryGraph(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMessage, error)
+func (s *MCPServer) handleGetDocsSection(params json.RawMessage) (json.RawMessage, error)
+```
+
+The MCP protocol method for tool-call is `tools/call`. The `method` in the JSON-RPC request is `tools/call`; the tool name is inside the `params` object as `params.name`. The `dispatch` function routes by `params.name` after confirming `method == "tools/call"`. Also handle `tools/list` to return the tool catalog (for MCP client capability negotiation).
+
+#### New subcommand in `commands/kg.go`
+
+Add `kgServeCmd` alongside existing kg subcommands:
+```go
+kgServeCmd := &cobra.Command{
+    Use:   "serve",
+    Short: "Start the MCP server (stdio transport, JSON-RPC 2.0)",
+    RunE:  runKGServe,
+}
+```
+
+`runKGServe` implementation:
+```go
+func runKGServe(_ *cobra.Command, _ []string) error {
+    workDir, err := os.Getwd()
+    if err != nil {
+        return err
+    }
+    srv := graphstore.NewMCPServer(workDir)
+    return srv.Serve(os.Stdin, os.Stdout)
+}
+```
+
+#### `dot-agents add` changes (auto-registration)
+
+In `commands/add.go`, when registering an MCP server for a platform that supports it (Claude Code, Cursor, Copilot), check if `dot-agents kg serve` is available (i.e., `os.Executable()` succeeds). If so, include a `dot-agents-kg` MCP entry alongside any existing entries:
+
+```json
+{
+  "mcpServers": {
+    "dot-agents-kg": {
+      "command": "<path-to-dot-agents>",
+      "args": ["kg", "serve"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+Use `os.Executable()` to resolve the exact binary path. Do not hardcode `"dot-agents"`.
+
+#### `dot-agents init` changes
+
+In the generated platform config templates for Claude Code (`.claude/settings*.json`) and Cursor (`.cursor/mcp.json`), add the `dot-agents-kg` MCP server entry using the same pattern as `dot-agents add` above. Only add it when `agentsrc.json` has a `kg` block (indicating the user has configured the KG subsystem).
+
+#### Tests in `commands/kg_test.go`
+
+- `TestKGServeToolsList`: write a JSON-RPC `tools/list` request to a pipe; assert the response includes all eight tool names.
+- `TestKGServeBuildOrUpdateGraph`: write a `tools/call` request with `name: "build_or_update_graph_tool"`; assert the response is a valid JSON object with `nodes`, `edges`, `files`, `duration_ms` fields (mock the CRGBridge to return a canned result).
+- `TestKGServeGetImpactRadius`: write a `tools/call` request with `name: "get_impact_radius_tool"` and `arguments: {symbol: "main.run", depth: 1}`; assert the response has a `nodes` array.
+- `TestKGServeUnknownTool`: write `tools/call` with an unknown `name`; assert the JSON-RPC response has an `error` field with code -32601 (method not found).
+
+#### Open questions resolved for this phase
+
+- **Separate binary vs embedded**: embedded in `dot-agents` as `dot-agents kg serve`. No separate binary.
+- **HTTP/SSE transport**: out of scope; stdio only.
+- **Multi-repo with Postgres**: out of scope for Phase F; the server uses the current working directory's graph DB.
+- **Tree-sitter binding**: unchanged — Phase B subprocess bridge handles all parsing; Phase F MCP server delegates to the same CRGBridge.
 
 ### Phase G: Skill integration
 

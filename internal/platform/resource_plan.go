@@ -69,6 +69,10 @@ func BuildResourcePlan(intents []ResourceIntent) (ResourcePlan, error) {
 	return plan, nil
 }
 
+// resourceIntentCompatible reports whether two intents with the same conflict key are
+// identical in every field that affects execution. All struct fields are compared
+// explicitly; if ResourceIntent gains a new field, this function must be updated to
+// include it — otherwise two semantically different intents could be silently merged.
 func resourceIntentCompatible(left, right ResourceIntent) bool {
 	if left.TargetPath != right.TargetPath ||
 		left.Ownership != right.Ownership ||
@@ -242,6 +246,7 @@ func isAllowlistedSharedMirrorTarget(targetPath string) bool {
 		strings.HasPrefix(normalized, ".claude/skills/") ||
 		strings.HasPrefix(normalized, ".claude/agents/") ||
 		strings.HasPrefix(normalized, ".codex/agents/") ||
+		strings.HasPrefix(normalized, ".opencode/plugins/") ||
 		strings.HasPrefix(normalized, ".opencode/agent/") ||
 		strings.HasPrefix(normalized, ".github/agents/")
 }
@@ -288,6 +293,61 @@ func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []Resource
 			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 			PrunePolicy:   ResourcePruneTarget,
 			MarkerFiles:   []string{"SKILL.md"},
+		})
+	}
+	return intents
+}
+
+const pluginManifestName = "PLUGIN.yaml"
+
+// BuildSharedPluginBundleIntents returns ResourceIntents for each canonical plugin bundle
+// under ~/.agents/plugins/{scope}/ pointing at the given target roots. Each platform's
+// SharedTargetIntents calls this with its own native plugin target path (e.g. OpenCode uses
+// .opencode/plugins/, Cursor uses .cursor-plugin/, Claude uses .claude-plugin/, etc.).
+// Platforms that do not yet have an emitter for their native plugin format simply omit this
+// call from their SharedTargetIntents implementation — add it there when the emitter lands.
+func BuildSharedPluginBundleIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
+	intents := make([]ResourceIntent, 0)
+	for _, root := range targetRoots {
+		root = filepath.Clean(root)
+		if root == "." {
+			continue
+		}
+		intents = append(intents, buildSharedPluginBundleIntentsForRoot(project, root)...)
+	}
+	return intents, nil
+}
+
+func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []ResourceIntent {
+	agentsHome := config.AgentsHome()
+	entries, err := listScopedResourceDirs(agentsHome, "plugins", project, pluginManifestName)
+	if err != nil {
+		return nil
+	}
+
+	intents := make([]ResourceIntent, 0, len(entries))
+	for _, entry := range entries {
+		targetPath := filepath.Join(targetRoot, entry.Name)
+		intents = append(intents, ResourceIntent{
+			IntentID:    fmt.Sprintf("plugins.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			Project:     project,
+			Bucket:      "plugins",
+			LogicalName: entry.Name,
+			TargetPath:  targetPath,
+			Ownership:   ResourceOwnershipSharedRepo,
+			SourceRef: ResourceSourceRef{
+				Scope:        project,
+				Bucket:       "plugins",
+				RelativePath: entry.Name,
+				Kind:         ResourceSourceCanonicalBundle,
+				Origin:       "shared-plugin-bundle",
+			},
+			Shape:         ResourceShapeDirectDir,
+			Transport:     ResourceTransportSymlink,
+			Materializer:  "shared-plugin-dir-symlink",
+			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+			PrunePolicy:   ResourcePruneTarget,
+			MarkerFiles:   []string{pluginManifestName},
 		})
 	}
 	return intents
@@ -508,6 +568,10 @@ func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome strin
 			return fmt.Errorf("unsupported materializer %q for remove", intent.Materializer)
 		}
 	default:
+		// Unknown shape/transport combos are intentionally a no-op during removal (unlike
+		// Execute, which errors). The planner prevents unknown combos from being created;
+		// if one somehow reaches here the safest outcome is to leave the target in place
+		// rather than error-loop on every refresh.
 		return nil
 	}
 }

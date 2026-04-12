@@ -10,6 +10,6 @@ success_criteria: Unify symbol and decision queries before agents fall back to g
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: kg-bridge-worker
-status: active
+status: completed
 created_at: "2026-04-12T04:04:04Z"
-updated_at: "2026-04-12T04:04:04Z"
+updated_at: "2026-04-12T04:50:40Z"

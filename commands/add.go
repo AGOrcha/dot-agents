@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -464,6 +465,10 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
 	}
 
+	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {
+		return fmt.Errorf("writing KG MCP configs: %w", err)
+	}
+
 	// Step 5: Create links
 	ui.Step("Creating links...")
 	config.SetWindowsMirrorContext(projectPath)
@@ -632,4 +637,66 @@ func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
 		projectsync.CopyFile(srcFile, tsTarget) //nolint:errcheck
 	}
+}
+
+func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) error {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return nil
+	}
+	if _, ok := rc.ExtraFields["kg"]; !ok {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName))
+}
+
+func ensureGlobalKGMCPConfigs(agentsHome string) error {
+	if _, err := os.Stat(kgConfigPath()); err != nil {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"))
+}
+
+func writeKGMCPConfigs(scopeDir string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+		exe = resolved
+	}
+	server := map[string]any{
+		"command": exe,
+		"args":    []string{"kg", "serve"},
+		"type":    "stdio",
+	}
+	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
+		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeKGMCPConfigFile(path string, server map[string]any) error {
+	configMap := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &configMap)
+	}
+	servers, _ := configMap["servers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	servers["dot-agents-kg"] = server
+	configMap["servers"] = servers
+
+	data, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }

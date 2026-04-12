@@ -18,7 +18,7 @@ slices:
     parent_task_id: "phase-3-plan-graph-and-slices"
     title: "Phase 3B — Canonical slice artifact"
     summary: "Model bounded slice metadata under the orchestrator plan as a read-first canonical artifact without adding mutation semantics yet."
-    status: "in_progress"
+    status: "completed"
     depends_on:
       - "phase-3-read-surface"
     write_scope:
@@ -31,7 +31,7 @@ slices:
     parent_task_id: "phase-3-plan-graph-and-slices"
     title: "Phase 3C — Fanout readiness checks"
     summary: "Use slice boundaries and the active delegation contract to choose a non-overlapping downstream task for task-level fanout."
-    status: "pending"
+    status: "completed"
     depends_on:
       - "phase-3-canonical-artifact"
     write_scope:

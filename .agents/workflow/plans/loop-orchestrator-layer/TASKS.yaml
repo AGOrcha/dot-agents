@@ -30,7 +30,7 @@ tasks:
       notes: Read-only selector that prefers canonical plan/task state over checkpoint text.
     - id: phase-3-plan-graph-and-slices
       title: Phase 3 — Derive plan/task dependency graph and slice model
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-spec-and-operating-model
       blocks:
@@ -42,7 +42,7 @@ tasks:
       verification_required: true
       notes: Phase 3A is complete; the remaining slice-artifact/readiness lane stays in the plan/doc surface and keeps the derived graph as the only source of truth.
     - id: phase-4-fanout-from-slices
-      title: Phase 4 — Connect slices to delegation fanout
+      title: Phase 4 — Wire workflow fanout --slice flag to resolve task and write-scope from SLICES.yaml
       status: pending
       depends_on:
         - phase-2-workflow-next
@@ -53,11 +53,17 @@ tasks:
       write_scope:
         - commands/workflow.go
         - commands/workflow_test.go
-        - .agents/skills/
       verification_required: true
-      notes: Reuse existing delegation contracts and write-scope overlap checks.
+      notes: |
+        Add --slice flag to fanoutCmd in NewWorkflowCmd(). Remove MarkFlagRequired("task"); replace with
+        runtime mutual-exclusion: error if both --slice and --task set; error if neither set after slice
+        resolution. In runWorkflowFanout: when --slice provided, call loadCanonicalSlices(project.Path,
+        planID), find by slice.ID, set taskID = slice.ParentTaskID and writeScope = slice.WriteScope (when
+        --write-scope not explicitly passed). Error if slice.Status == "completed".
+        Tests: TestFanoutFromSlice, TestFanoutSliceAndTaskMutuallyExclusive, TestFanoutSliceNotFound,
+        TestFanoutSliceAlreadyCompleted. See plan.md Phase 4 section for full code sketch and test shapes.
     - id: phase-5-kg-first-understanding
-      title: Phase 5 — Expand graph-first understanding for orchestrator decisions
+      title: Phase 5 — Auto-route code-structure intents in workflow graph query to kg bridge
       status: in_progress
       depends_on:
         - phase-1-spec-and-operating-model
@@ -65,20 +71,41 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/kg.go
-        - docs/
+        - commands/workflow_test.go
+        - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Unify symbol and decision queries before agents fall back to grep.
+      notes: |
+        commands/kg.go slice is complete (per delegation merge-back). Remaining work:
+        1. commands/workflow.go — runWorkflowGraphQuery (line ~3017): replace the error-on-code-structure-intent
+           guard with an exec.Command subprocess call to "dot-agents kg bridge query --intent <intent>
+           [--scope <scope>] <query>". Pipe stdout/stderr directly. Pass --json when Flags.JSON is true.
+        2. commands/workflow_test.go — TestWorkflowGraphQueryCodeStructureRoutesToKGBridge: confirm the old
+           error message is gone; TestWorkflowGraphQueryKGBridgeIntentsNotRouted: confirm isWorkflowGraphCode-
+           BridgeIntent returns false for all KG intents.
+        3. docs/LOOP_ORCHESTRATION_SPEC.md — add "KG-First Query Routing" section with routing table mapping
+           each intent to its backing system (LocalGraphAdapter vs kg bridge subprocess). See plan.md Phase 5
+           section for full detail.
     - id: phase-6-fold-back-reconciliation
-      title: Phase 6 — Reconcile low-risk observations and proposal-worthy changes
+      title: Phase 6 — Implement workflow fold-back create/list with small vs proposal routing
       status: pending
       depends_on:
         - phase-4-fanout-from-slices
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/
-        - .agents/active/
-        - .agents/skills/
+        - commands/workflow.go
+        - commands/workflow_test.go
       verification_required: true
-      notes: Small items should update plans, lessons, or matrices; larger ones should enter proposal review.
+      notes: |
+        Add "workflow fold-back" subcommand with two sub-subcommands: "create" and "list".
+        "create" flags: --plan (required), --task (optional), --observation (required), --propose (bool).
+        Routing: without --propose → append observation to task Notes in TASKS.yaml via saveCanonicalTasks;
+        write .agents/active/fold-back/{id}.yaml artifact (classification: small). With --propose → write
+        ~/.agents/proposals/obs-{timestamp}.md with YAML frontmatter; do NOT modify TASKS.yaml; artifact
+        classification: proposal.
+        "list" flags: --plan (optional filter). Reads .agents/active/fold-back/*.yaml; renders table:
+        ID | Plan | Task | Classification | Routed-to | Created-at.
+        New types: foldBackArtifact struct; new functions: runWorkflowFoldBackCreate, runWorkflowFoldBackList,
+        writeFoldBackArtifact. Register foldBackCmd in cmd.AddCommand(...) at line ~468.
+        Tests: TestFoldBackCreateSmall, TestFoldBackCreateNoTask, TestFoldBackCreatePropose, TestFoldBackList.
+        See plan.md Phase 6 section for full struct definition, flag registration snippet, and test shapes.

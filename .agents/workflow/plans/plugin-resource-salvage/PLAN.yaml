@@ -1,0 +1,11 @@
+schema_version: 1
+id: plugin-resource-salvage
+title: Plugin Resource Salvage And Rebuild
+status: active
+summary: Salvage the useful plugin-as-resource architecture from claude/scalable-skill-syncing-sfxOd and rebuild it on top of the shared resource-intent planner/executor without reviving the duplicate docs/cache payload.
+created_at: "2026-04-12T00:00:00Z"
+updated_at: "2026-04-12T05:42:45Z"
+owner: dot-agents
+success_criteria: Canonical plugin manifests and at least one low-conflict plugin emission/import path land through the current shared planner, while the old docs-refresh/cache approach stays retired.
+verification_strategy: go test ./commands ./internal/platform ./internal/config; focused workflow/status/explain readback for plugin resources
+current_focus_task: Phase 4 — Add import, status, explain, and doctor readback for plugin resources

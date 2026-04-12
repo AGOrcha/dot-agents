@@ -4,8 +4,8 @@ title: Loop Orchestrator Layer
 status: active
 summary: 'Planner layer above focused loop workers: next-task selection, dependency graphing, safe slicing, and observation fold-back.'
 created_at: "2026-04-11T00:00:00Z"
-updated_at: "2026-04-12T04:18:20Z"
+updated_at: "2026-04-12T05:42:45Z"
 owner: dot-agents
 success_criteria: An orchestrator can choose the next safe task, derive non-conflicting slices, and route observations into durable artifacts or proposal review.
 verification_strategy: go test ./commands ./internal/...; workflow command smoke; docs alignment with orchestration spec
-current_focus_task: Phase 3B/3C — Canonical slice artifact and fanout readiness
+current_focus_task: Phase 4 — Connect slices to delegation fanout

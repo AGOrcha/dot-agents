@@ -4,8 +4,8 @@ title: 'CRG+KG Integration: Code-Review-Graph Into Knowledge Graph Subsystem'
 status: active
 summary: 'Unified graph store: knowledge notes + code-structure layer; Postgres (E), Go MCP (F), skills (G).'
 created_at: "2026-04-10T00:00:00Z"
-updated_at: "2026-04-12T04:31:46Z"
+updated_at: "2026-04-12T15:22:13Z"
 owner: dot-agents
 success_criteria: CRG semantics available through dot-agents kg surfaces with bridge and query paths defined in spec.
 verification_strategy: go test ./...; kg subcommand smoke; docs alignment with KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md
-current_focus_task: 'Phase E: Postgres backend'
+current_focus_task: Phase G — Wire build-graph / review-delta / review-pr skills to native dot-agents kg commands
