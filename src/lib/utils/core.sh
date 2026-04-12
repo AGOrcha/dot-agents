@@ -19,23 +19,12 @@ source "$UTILS_DIR/colors.sh"
 source "$UTILS_DIR/logging.sh"
 source "$UTILS_DIR/paths.sh"
 source "$UTILS_DIR/symlink.sh"
-source "$UTILS_DIR/resource-restore-map.sh"
 source "$UTILS_DIR/json.sh"
 source "$UTILS_DIR/interactive.sh"
 source "$UTILS_DIR/install-detect.sh"
 source "$UTILS_DIR/platform-registry.sh"
 
-# Source platform modules (if they exist)
-PLATFORMS_DIR="$LIB_DIR/platforms"
-if [ -d "$PLATFORMS_DIR" ]; then
-  [ -f "$PLATFORMS_DIR/cursor.sh" ] && source "$PLATFORMS_DIR/cursor.sh"
-  [ -f "$PLATFORMS_DIR/claude-code.sh" ] && source "$PLATFORMS_DIR/claude-code.sh"
-  [ -f "$PLATFORMS_DIR/codex.sh" ] && source "$PLATFORMS_DIR/codex.sh"
-  [ -f "$PLATFORMS_DIR/opencode.sh" ] && source "$PLATFORMS_DIR/opencode.sh"
-  [ -f "$PLATFORMS_DIR/github-copilot.sh" ] && source "$PLATFORMS_DIR/github-copilot.sh"
-fi
-
-# Validate platform contract once modules are loaded
+# Validate platform contract after utility helpers load
 if ! platform_validate_registry; then
   log_warn "Some platform modules are missing required hooks; command behavior may be limited."
 fi

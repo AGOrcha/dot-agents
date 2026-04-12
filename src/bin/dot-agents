@@ -1,12 +1,8 @@
 #!/bin/bash
-# dot-agents - Unified config layer for AI coding agents
-# https://github.com/NikashPrakash/dot-agents
-#
-# Usage: dot-agents <command> [options]
+# dot-agents launcher
 
 set -euo pipefail
 
-# Resolve symlinks and find the real location
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 while [ -L "$SCRIPT_PATH" ]; do
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
@@ -14,135 +10,16 @@ while [ -L "$SCRIPT_PATH" ]; do
   [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Set up paths
-BIN_DIR="$SCRIPT_DIR"
-SRC_DIR="$(dirname "$BIN_DIR")"
-LIB_DIR="$SRC_DIR/lib"
-SHARE_DIR="$SRC_DIR/share"
+if [ -x "$REPO_ROOT/bin/dot-agents" ]; then
+  exec "$REPO_ROOT/bin/dot-agents" "$@"
+fi
 
-# Source core utilities
-source "$LIB_DIR/utils/core.sh"
+if command -v go >/dev/null 2>&1; then
+  cd "$REPO_ROOT"
+  exec go run ./cmd/dot-agents "$@"
+fi
 
-# Help text
-show_help() {
-  cat << EOF
-${BOLD}dot-agents${NC} - Unified config layer for AI coding agents
-
-${BOLD}USAGE${NC}
-    dot-agents <command> [options]
-
-${BOLD}CORE COMMANDS${NC}
-    init                 Initialize ~/.agents/ directory structure
-    add <project>        Add a project to dot-agents management
-    remove <project>     Remove a project from dot-agents management
-    status               Show managed projects and their status
-                           --audit     Detailed link/config info
-    doctor               Check health of dot-agents installation
-                           --redundancy  Check for duplicate rules
-                           --migrate     Detect deprecated formats
-    refresh (<project>)  Refresh managed setup in project(s) from ~/.agents
-    install              Set up project from .agentsrc.json manifest
-                           --generate   Create .agentsrc.json from current state
-
-${BOLD}SKILLS, AGENTS & HOOKS${NC}
-    skills            Manage skills (list, new, edit, migrate)
-    agents            Manage subagents (list, new, edit, show)
-    hooks             Manage Claude Code hooks configuration
-
-${BOLD}UTILITIES${NC}
-    sync              Git sync utilities for ~/.agents/
-    explain           Self-documenting system descriptions
-
-${BOLD}GLOBAL OPTIONS${NC}
-    --help, -h           Show help for a command
-    --version            Show version information
-    --verbose, -v        Show detailed output
-    --json               Output in JSON format (where supported)
-    --dry-run            Show what would be done without making changes
-    --force, -f          Force overwrite existing files
-    --yes, -y            Auto-confirm prompts (non-interactive mode)
-
-${BOLD}EXAMPLES${NC}
-    dot-agents init                     # Set up ~/.agents/
-    dot-agents add ~/Github/myproject   # Add a project
-    dot-agents status                   # Show all projects
-    dot-agents status --audit           # Detailed config info
-    dot-agents doctor                   # Check for issues
-    dot-agents doctor --redundancy      # Check for duplicates
-    dot-agents refresh myproject        # Refresh setup for project
-    dot-agents refresh                  # Refresh all projects
-
-${BOLD}DOCUMENTATION${NC}
-    https://github.com/NikashPrakash/dot-agents
-    dot-agents <command> --help   Command-specific help (e.g. refresh --help)
-
-EOF
-}
-
-show_version() {
-  if [ "$JSON_OUTPUT" = true ]; then
-    cat << EOF
-{"version": "$DOT_AGENTS_VERSION", "date": "$DOT_AGENTS_VERSION_DATE"}
-EOF
-  else
-    echo "dot-agents $DOT_AGENTS_VERSION ($DOT_AGENTS_VERSION_DATE)"
-  fi
-}
-
-# Command router
-run_command() {
-  local cmd="$1"
-  shift
-
-  local cmd_file="$LIB_DIR/commands/${cmd}.sh"
-
-  if [ -f "$cmd_file" ]; then
-    source "$cmd_file"
-    "cmd_${cmd}" "$@"
-  else
-    log_error "Unknown command: $cmd"
-    echo ""
-    echo "Run 'dot-agents --help' for usage."
-    exit 1
-  fi
-}
-
-# Main entry point
-main() {
-  # No arguments - show help
-  if [ $# -eq 0 ]; then
-    show_help
-    exit 0
-  fi
-
-  # Parse first argument
-  case "$1" in
-    --help|-h|help)
-      show_help
-      exit 0
-      ;;
-    --version|-V|version)
-      shift
-      # Check for --json flag
-      if [ "${1:-}" = "--json" ]; then
-        JSON_OUTPUT=true
-      fi
-      show_version
-      exit 0
-      ;;
-    -*)
-      # Flag without command
-      log_error "No command specified"
-      echo ""
-      show_help
-      exit 1
-      ;;
-    *)
-      # Command
-      run_command "$@"
-      ;;
-  esac
-}
-
-main "$@"
+echo "dot-agents: no Go binary found and 'go' is unavailable" >&2
+exit 1

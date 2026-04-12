@@ -74,6 +74,8 @@ CLAUDE.md
 AGENTS.md
 .agents-refresh
 .mcp.json
+# skill symlinks created by dot-agents refresh/install — not committed
+.agents/skills/
 
 # macOS
 .AppleDouble

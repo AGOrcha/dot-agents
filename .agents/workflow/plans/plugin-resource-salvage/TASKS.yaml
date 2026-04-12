@@ -1,0 +1,101 @@
+schema_version: 1
+plan_id: plugin-resource-salvage
+tasks:
+    - id: phase-1-salvage-audit
+      title: Phase 1 — Audit claude/scalable-skill-syncing-sfxOd into keep, rebuild, and drop buckets
+      status: completed
+      depends_on: []
+      blocks:
+        - phase-2-plugin-contract
+        - phase-3-planner-integration
+        - phase-4-command-readback
+      owner: dot-agents
+      write_scope:
+        - .agents/active/
+        - .agents/workflow/plans/
+        - docs/
+      verification_required: true
+      notes: Keep the plugin manifest and marketplace ideas; rebuild them on top of resource-intent; drop the platform-docs-refresh cache payload and old branch-specific command wiring. Verification should be of dot-agents command usage and outputs to help collect traces and evidence of product stability and benefits.
+    - id: phase-2-plugin-contract
+      title: Phase 2 — Canonical plugin contract on current architecture
+      status: completed
+      depends_on:
+        - phase-1-salvage-audit
+      blocks:
+        - phase-3-planner-integration
+      owner: dot-agents
+      write_scope:
+        - internal/config/
+        - internal/platform/
+        - schemas/
+        - docs/
+      verification_required: true
+      notes: Defined the canonical PLUGIN.yaml schema, bundle ownership boundaries, and platform override semantics in terms that fit the current shared planner/executor and documented canonical storage model.
+    - id: phase-3-planner-integration
+      title: Phase 3 — Integrate plugin resources with the shared planner and first emitter path
+      status: completed
+      depends_on:
+        - phase-2-plugin-contract
+      blocks:
+        - phase-4-command-readback
+        - phase-5-closeout
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+        - commands/
+      verification_required: true
+      notes: Use the existing resource-intent planner/executor. Start with the lowest-conflict plugin target rather than reviving all package-platform emitters at once.
+    - id: phase-4-command-readback
+      title: Phase 4 — Add import, status, explain, and doctor readback for plugin resources
+      status: pending
+      depends_on:
+        - phase-3-planner-integration
+      blocks:
+        - phase-5-closeout
+      owner: dot-agents
+      write_scope:
+        - commands/status.go
+        - commands/import.go
+        - commands/explain.go
+        - commands/doctor.go
+        - commands/status_test.go
+        - commands/import_test.go
+        - commands/doctor_test.go
+      verification_required: true
+      notes: |
+        SCHEMA WIRING: create schemas/schemas.go embed package (see docs/SCHEMA_FOLLOWUPS.md); go get
+        github.com/santhosh-tekuri/jsonschema/v5; wire LoadPluginSpec to validate via schemas.Plugin
+        before unmarshal into typed struct; drop validatePluginSpec manual validator; add PluginManifestSchema
+        var + schema contract doc comment on PluginSpec struct.
+        DONOR PORT: port plugins.go (PluginSpec/LoadPluginSpec/ListPluginSpecs), package_plugins.go
+        (syncPluginOverlayTree), and import.go (canonicalPluginOutputsFromOpenCodeFile,
+        canonicalPackagePluginManifestOutputs, packagePluginLayout, directPackagePluginRefs) from
+        origin/claude/scalable-skill-syncing-sfxOd rather than rewriting. Schema alignment needed first:
+        rename plugin_type→kind, enabled_on→platforms (see schemas/plugin.schema.json).
+        import.go: ALWAYS scaffold PLUGIN.yaml during import — never copy raw files without a manifest.
+        For opencode: kind=native, platforms=[opencode], files go under files/. For package platforms:
+        kind=package, map plugin.json fields to PLUGIN.yaml, preserve native file at platforms/{id}/plugin.json.
+        Detection paths: .opencode/plugins/* (walk), .cursor-plugin/plugin.json, .claude-plugin/plugin.json,
+        .codex-plugin/plugin.json, .github/plugin/plugin.json, root plugin.json.
+        status.go: call platform.ListPluginSpecs or BuildSharedPluginBundleIntents; render Plugins section.
+        explain.go: add resources/files/platforms/ layout block to canonical storage section.
+        doctor.go: add plugins check group; LoadPluginSpec → ERROR if malformed; each platform in
+        spec.Platforms checked for implemented emitter → WARN if pending; .opencode/plugins/{name}
+        symlink → ERROR if broken.
+        Tests: TestStatusShowsPluginsSection, TestImportFromOpencodePluginDir,
+        TestImportFromCursorPluginManifest, TestDoctorPluginBrokenSymlink.
+        See plan.md Phase 4 section for exact code patterns.
+    - id: phase-5-closeout
+      title: Phase 5 — Close out duplicate branch artifacts and feed Stage 2 bucket expansion
+      status: pending
+      depends_on:
+        - phase-4-command-readback
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/
+        - docs/
+        - commands/
+        - internal/platform/
+      verification_required: true
+      notes: Do not merge the old branch wholesale. Capture only the rebuilt plugin-resource path and retire any duplicate docs-refresh/cache artifacts that would inflate duplication or Sonar noise.

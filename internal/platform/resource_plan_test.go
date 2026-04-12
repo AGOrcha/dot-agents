@@ -392,6 +392,32 @@ func TestCollectAndExecuteSharedTargetPlanWritesOpenCodeAndCopilotAgentFiles(t *
 	assertSymlinkTarget(t, copilotLink, agentMD)
 }
 
+func TestCollectAndExecuteSharedTargetPlanWritesOpenCodePluginBundles(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	pluginDir := filepath.Join(agentsHome, "plugins", "proj", "runtime-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pluginManifest := filepath.Join(pluginDir, "PLUGIN.yaml")
+	if err := os.WriteFile(pluginManifest, []byte("schema_version: 1\nname: runtime-plugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "manifest.json"), []byte(`{"name":"runtime-plugin"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewOpenCode()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+
+	assertSymlinkTarget(t, filepath.Join(repo, ".opencode", "plugins", "runtime-plugin"), pluginDir)
+}
+
 func TestCollectAndExecuteSharedTargetPlanWritesCodexAgentToml(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
@@ -426,6 +452,74 @@ Ship it.
 	}
 	if !strings.Contains(string(b), `name = "implementer"`) || !strings.Contains(string(b), "Ship it.") {
 		t.Fatalf("unexpected toml: %s", b)
+	}
+}
+
+func TestExecutePluginBundleIntentReplacesAllowlistedImportedPluginDir(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	pluginDir := filepath.Join(agentsHome, "plugins", "proj", "runtime-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"), []byte("schema_version: 1\nname: runtime-plugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(repo, ".opencode", "plugins", "runtime-plugin")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "PLUGIN.yaml"), []byte("schema_version: 1\nname: imported-runtime-plugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedPluginIntent(".opencode/plugins/runtime-plugin", "opencode")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	assertSymlinkTarget(t, target, pluginDir)
+}
+
+func TestExecutePluginBundleIntentRejectsAllowlistedDirectoryWithoutImportedMarker(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	pluginDir := filepath.Join(agentsHome, "plugins", "proj", "runtime-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"), []byte("schema_version: 1\nname: runtime-plugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(repo, ".opencode", "plugins", "runtime-plugin")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "notes.txt"), []byte("imported"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedPluginIntent(".opencode/plugins/runtime-plugin", "opencode")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	err = plan.Execute(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected error when allowlisted plugin dir lacks imported marker files")
+	}
+	if !strings.Contains(err.Error(), "without imported markers") {
+		t.Fatalf("error = %q, want marker refusal", err)
 	}
 }
 
@@ -764,6 +858,33 @@ func validSharedAgentIntent(targetPath, emitter string) ResourceIntent {
 		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 		PrunePolicy:   ResourcePruneTarget,
 		MarkerFiles:   []string{"AGENT.md"},
+		Provenance: ResourceProvenance{
+			Emitter: emitter,
+		},
+	}
+}
+
+func validSharedPluginIntent(targetPath, emitter string) ResourceIntent {
+	return ResourceIntent{
+		IntentID:    "plugins.proj.runtime-plugin." + emitter,
+		Project:     "proj",
+		Bucket:      "plugins",
+		LogicalName: "runtime-plugin",
+		TargetPath:  targetPath,
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "plugins",
+			RelativePath: "runtime-plugin",
+			Kind:         ResourceSourceCanonicalBundle,
+			Origin:       "shared-plugin-bundle",
+		},
+		Shape:         ResourceShapeDirectDir,
+		Transport:     ResourceTransportSymlink,
+		Materializer:  "shared-plugin-dir-symlink",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+		MarkerFiles:   []string{"PLUGIN.yaml"},
 		Provenance: ResourceProvenance{
 			Emitter: emitter,
 		},

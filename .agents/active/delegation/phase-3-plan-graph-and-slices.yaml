@@ -11,6 +11,6 @@ success_criteria: Derived graph, not a second hand-maintained source of truth.
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: slice-artifact-worker
-status: active
+status: completed
 created_at: "2026-04-12T04:16:35Z"
-updated_at: "2026-04-12T04:16:35Z"
+updated_at: "2026-04-12T04:50:40Z"

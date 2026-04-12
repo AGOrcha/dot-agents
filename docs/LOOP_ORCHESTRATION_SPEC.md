@@ -102,7 +102,7 @@ The orchestrator should reuse existing canonical artifacts where possible.
 
 | Path | Purpose |
 |------|---------|
-| `.agents/workflow/plans/<plan-id>/SLICES.yaml` | read-first canonical slice artifact plus optional sub-task decomposition for safe parallel work |
+| `.agents/workflow/plans/<plan-id>/SLICES.yaml` | read-first canonical slice artifact for Phase 3B, plus optional sub-task decomposition and fanout-readiness inputs for safe parallel work |
 | `.agents/workflow/testing-matrix.yaml` | canonical verification targets and scenario coverage |
 | `.agents/active/fold-back/<id>.yaml` | pending low-risk observation to reconcile into plans, matrix, or lessons |
 
@@ -216,6 +216,8 @@ Practical rule:
 - fall back to `rg` only when the graph is absent, stale, or the question is raw text shaped
 
 ## Initial Product Slices
+
+Phase 3B/3C correspond to items 4 and 5 below: define the canonical slice artifact first, then gate delegation on fanout readiness checks.
 
 1. Ship `workflow next` as the first deterministic selection primitive.
 2. Add `orchestrator-session-start` skill that chains orient -> next -> graph readback -> fanout decision.

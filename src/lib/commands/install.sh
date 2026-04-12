@@ -8,10 +8,24 @@ _INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! declare -F create_project_dirs_silent >/dev/null 2>&1; then
   source "$_INSTALL_DIR/add.sh"
 fi
-# shellcheck source=refresh.sh
-if ! declare -F write_refresh_marker >/dev/null 2>&1; then
-  source "$_INSTALL_DIR/refresh.sh"
-fi
+
+REFRESH_MARKER_BASENAME=".agents-refresh"
+
+write_refresh_marker() {
+  local project_path="$1"
+  local commit="${2:-}"
+  local describe="${3:-}"
+  local marker="$project_path/$REFRESH_MARKER_BASENAME"
+  local refreshed_at
+  refreshed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null) || refreshed_at=$(date +"%Y-%m-%dT%H:%M:%S")
+  {
+    echo "# dot-agents refresh marker — do not edit"
+    echo "version=${DOT_AGENTS_VERSION:-unknown}"
+    [ -n "$commit" ] && echo "commit=$commit"
+    [ -n "$describe" ] && echo "describe=$describe"
+    echo "refreshed_at=$refreshed_at"
+  } > "$marker"
+}
 
 AGENTSRC_FILE=".agentsrc.json"
 

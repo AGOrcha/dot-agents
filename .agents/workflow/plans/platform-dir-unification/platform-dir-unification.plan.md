@@ -1,15 +1,17 @@
 # Canonical `~/.agents` Rollout Plan
 
-Status: Blocked — Phases 1+2+3 complete (Go layer). Phases 4+5 (bash parity, new bucket expansion) are blocked on resource-intent-centralization implementation rollout.
+Status: Active — Phases 1+2+3 complete (Go layer). Phase 4 (bash deprecation/deletion) is now the next action; no longer blocked. Phase 5 (new bucket expansion) follows after Phase 4 merges.
 Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus the resulting resource-intent-centralization implementation
 
 
 
 ## Summary
 
-Implement this in two stages with `Go-first, bash-later` scope.
+Implement this in two stages with a `Go-only` scope. The bash layer will be deleted rather than kept in parity.
 
 Stage 1 refactors only the currently supported resource set to the documented canonical-storage model: `rules`, `settings`, `mcp`, `skills`, `agents`, `hooks`, and current Cursor ignore support. Stage 2 adds the newly documented buckets: `commands`, `output-styles`, `ignore`, `modes`, `plugins`, `themes`, and `prompts`.
+
+For `plugins`, use the dedicated `plugin-resource-salvage` workflow plan to salvage the old branch architecture and rebuild it on the current shared planner before reopening this stage.
 
 The parallelization strategy is: one coordinator owns the shared schema and command/mapping layer, then platform workers modify disjoint platform files only. Bash parity is a separate later phase so the first rollout is not blocked by shell-path collisions.
 
@@ -212,12 +214,18 @@ Completed in this session:
 Still open in this phase:
 - Additional coverage is now optional rather than required. The main remaining opportunities are deeper transition cleanup edge cases for more complex multi-hook renames and deletions, better naming heuristics for highly ambiguous aggregate imports that still lack stable logical names, and any future bash-parity validation once Phase 4 starts.
 
-### Phase 4: Bash parity wave
+### Phase 4: Bash layer deprecation and deletion
 Status: Not started
 
-Start only after Stage 1 Go behavior is stable.
+The bash command and platform files under `src/lib/commands/` and `src/lib/platforms/` are orphaned. The Go CLI is the sole supported path. These files have not been updated to reflect the canonical Stage 1 resource model and diverge from Go behavior in ways that would require full parallel re-implementation. Rather than achieve parity, deprecate and delete them.
 
-Coordinator-owned bash files:
+**Step 1 — Confirm no active invocation path:**
+- Verify `src/bin/dot-agents` wrapper does not source or delegate to any `src/lib/commands/*.sh` or `src/lib/platforms/*.sh` for the following subcommands: `init`, `import`, `refresh`, `status`, `explain`.
+- If any delegation still exists in `src/bin/dot-agents`, route it to the Go binary instead and remove the shell delegation.
+
+**Step 2 — Delete orphaned bash files:**
+
+Coordinator-owned (delete in a single commit):
 - `src/lib/commands/init.sh`
 - `src/lib/commands/import.sh`
 - `src/lib/commands/refresh.sh`
@@ -225,19 +233,28 @@ Coordinator-owned bash files:
 - `src/lib/commands/explain.sh`
 - `src/lib/utils/resource-restore-map.sh`
 
-Parallel workers:
-- Worker A: `src/lib/platforms/cursor.sh`, `src/lib/platforms/claude-code.sh`
-- Worker B: `src/lib/platforms/codex.sh`, `src/lib/platforms/opencode.sh`
-- Worker C: `src/lib/platforms/github-copilot.sh`
+Platform-owned (same commit or immediately after):
+- `src/lib/platforms/cursor.sh`
+- `src/lib/platforms/claude-code.sh`
+- `src/lib/platforms/codex.sh`
+- `src/lib/platforms/opencode.sh`
+- `src/lib/platforms/github-copilot.sh`
 
-No-collision rule:
-- Same ownership split as the Go wave.
-- Bash workers do not touch `src/lib/commands/*` or shared utils.
+**Step 3 — Clean up references:**
+- Search `src/` and `scripts/` for any `source` or `.` invocations of the deleted files; remove those lines.
+- Update `scripts/verify.sh` to remove any bash smoke-test steps that invoke `src/lib/` command paths.
+- Update `tests/test-claude-configs.sh` if it references any deleted file.
+
+**Acceptance criteria:**
+- `go test ./...` still passes.
+- `scripts/verify.sh` passes.
+- No file in `src/bin/` or `scripts/` sources a now-deleted `src/lib/commands/*.sh` or `src/lib/platforms/*.sh`.
+- `git status` shows only deletions under `src/lib/commands/`, `src/lib/platforms/`, and `src/lib/utils/resource-restore-map.sh` plus the minimal reference-cleanup edits.
 
 ### Phase 5: New bucket expansion
 Status: Not started
 
-After current resources are stable in both Go and bash.
+After Stage 1 Go behavior is stable and Phase 4 deletion is merged.
 
 Coordinator first:
 - extend the shared contract for `commands`, `output-styles`, `ignore`, `modes`, `plugins`, `themes`, `prompts`
@@ -278,7 +295,7 @@ Ownership rules for parallel work:
   - Cursor hardlink creation for rules and ignore files
   - hook emission and reserved-name handling
 - Run `go test ./...` at the end of Phases 1, 3, and 5.
-- Run bash-path verification only in Phase 4 and Phase 5 after shell parity work lands.
+- Phase 4 produces only deletions; no bash-path verification step is needed.
 
 ## Assumptions
 

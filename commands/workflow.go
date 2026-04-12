@@ -274,7 +274,78 @@ func NewWorkflowCmd() *cobra.Command {
 			return runWorkflowPlanGraph(planID)
 		},
 	}
-	planCmd.AddCommand(planShowCmd, planGraphCmd)
+	var planCreateTitle, planCreateSummary, planCreateOwner string
+	planCreateCmd := &cobra.Command{
+		Use:   "create <plan-id>",
+		Short: "Create a new canonical plan directory with PLAN.yaml and TASKS.yaml stubs",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowPlanCreate(args[0], planCreateTitle, planCreateSummary, planCreateOwner)
+		},
+	}
+	planCreateCmd.Flags().StringVar(&planCreateTitle, "title", "", "Plan title (required)")
+	planCreateCmd.Flags().StringVar(&planCreateSummary, "summary", "", "Short summary of the plan goal")
+	planCreateCmd.Flags().StringVar(&planCreateOwner, "owner", "dot-agents", "Plan owner")
+	_ = planCreateCmd.MarkFlagRequired("title")
+
+	var planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus string
+	planUpdateCmd := &cobra.Command{
+		Use:   "update <plan-id>",
+		Short: "Update PLAN.yaml metadata fields",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowPlanUpdate(args[0], planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus)
+		},
+	}
+	planUpdateCmd.Flags().StringVar(&planUpdateStatus, "status", "", "New plan status (draft|active|paused|completed|archived)")
+	planUpdateCmd.Flags().StringVar(&planUpdateTitle, "title", "", "New plan title")
+	planUpdateCmd.Flags().StringVar(&planUpdateSummary, "summary", "", "New plan summary")
+	planUpdateCmd.Flags().StringVar(&planUpdateFocus, "focus", "", "New current_focus_task value")
+
+	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd)
+
+	// task subcommand tree
+	taskCmd := &cobra.Command{
+		Use:   "task",
+		Short: "Add or update tasks within a canonical plan",
+	}
+	var taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope string
+	var taskAddVerification bool
+	taskAddCmd := &cobra.Command{
+		Use:   "add <plan-id>",
+		Short: "Append a new task to a canonical plan's TASKS.yaml",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowTaskAdd(args[0], taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddVerification)
+		},
+	}
+	taskAddCmd.Flags().StringVar(&taskAddID, "id", "", "Task ID (required)")
+	taskAddCmd.Flags().StringVar(&taskAddTitle, "title", "", "Task title (required)")
+	taskAddCmd.Flags().StringVar(&taskAddNotes, "notes", "", "Implementation notes")
+	taskAddCmd.Flags().StringVar(&taskAddOwner, "owner", "dot-agents", "Task owner")
+	taskAddCmd.Flags().StringVar(&taskAddDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on")
+	taskAddCmd.Flags().StringVar(&taskAddBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks")
+	taskAddCmd.Flags().StringVar(&taskAddWriteScope, "write-scope", "", "Comma-separated file/dir patterns this task may touch")
+	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
+	_ = taskAddCmd.MarkFlagRequired("id")
+	_ = taskAddCmd.MarkFlagRequired("title")
+
+	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
+	taskUpdateCmd := &cobra.Command{
+		Use:   "update <plan-id>",
+		Short: "Update notes, write-scope, or title for an existing task",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope)
+		},
+	}
+	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateTitle, "title", "", "New task title")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateNotes, "notes", "", "New implementation notes (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, "write-scope", "", "New comma-separated write-scope patterns (replaces existing)")
+	_ = taskUpdateCmd.MarkFlagRequired("task")
+
+	taskCmd.AddCommand(taskAddCmd, taskUpdateCmd)
 
 	// tasks subcommand
 	tasksCmd := &cobra.Command{
@@ -409,7 +480,7 @@ func NewWorkflowCmd() *cobra.Command {
 		Short: "Query graph context by bridge intent",
 		RunE:  runWorkflowGraphQuery,
 	}
-	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions")
+	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions; code-structure intents use dot-agents kg bridge query")
 	graphQueryCmd.Flags().String("scope", "", "Optional scope filter")
 
 	graphHealthCmd := &cobra.Command{
@@ -465,7 +536,7 @@ func NewWorkflowCmd() *cobra.Command {
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, driftCmd, sweepCmd)
 	return cmd
 }
 
@@ -1332,6 +1403,7 @@ func collectCanonicalPlans(projectPath string) ([]workflowCanonicalPlanSummary, 
 			CurrentFocusTask: plan.CurrentFocusTask,
 		}
 		if tf, err := loadCanonicalTasks(projectPath, id); err == nil {
+			summary.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
 			for _, t := range tf.Tasks {
 				switch t.Status {
 				case "pending", "in_progress":
@@ -1977,6 +2049,32 @@ func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []str
 	return incomplete
 }
 
+// effectivePlanFocusTask returns the title that should represent plan focus for orient/status:
+// last in-progress task in file order (matches the most recently advanced in typical linear plans),
+// else first actionable pending task (dependencies complete), else empty.
+// This supersedes PLAN.yaml current_focus_task when it still names a completed task.
+func effectivePlanFocusTask(tasks []CanonicalTask) string {
+	var lastInProgress string
+	for _, t := range tasks {
+		if t.Status == "in_progress" {
+			lastInProgress = strings.TrimSpace(t.Title)
+		}
+	}
+	if lastInProgress != "" {
+		return lastInProgress
+	}
+	for _, t := range tasks {
+		if t.Status != "pending" {
+			continue
+		}
+		if len(incompleteCanonicalDependencies(tasks, t.DependsOn)) > 0 {
+			continue
+		}
+		return strings.TrimSpace(t.Title)
+	}
+	return ""
+}
+
 func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if !isValidTaskStatus(newStatus) {
 		return fmt.Errorf("invalid task status %q: must be pending, in_progress, blocked, completed, or cancelled", newStatus)
@@ -2012,12 +2110,186 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	}
 	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if newStatus == "in_progress" {
-		plan.CurrentFocusTask = taskTitle
+		plan.CurrentFocusTask = strings.TrimSpace(taskTitle)
+	} else {
+		plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
 	}
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
 		return err
 	}
 	ui.Success(fmt.Sprintf("Task %q advanced to %q", taskTitle, newStatus))
+	return nil
+}
+
+func runWorkflowPlanCreate(planID, title, summary, owner string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(plansBaseDir(project.Path), planID)
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("plan %q already exists at %s", planID, config.DisplayPath(dir))
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	plan := &CanonicalPlan{
+		SchemaVersion: 1,
+		ID:            planID,
+		Title:         title,
+		Status:        "draft",
+		Summary:       summary,
+		Owner:         owner,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := saveCanonicalPlan(project.Path, plan); err != nil {
+		return err
+	}
+	tf := &CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        planID,
+		Tasks:         []CanonicalTask{},
+	}
+	if err := saveCanonicalTasks(project.Path, tf); err != nil {
+		return err
+	}
+	ui.Success(fmt.Sprintf("Created plan %q at %s", planID, config.DisplayPath(dir)))
+	return nil
+}
+
+func runWorkflowPlanUpdate(planID, status, title, summary, focus string) error {
+	if status != "" && !isValidPlanStatus(status) {
+		return fmt.Errorf("invalid plan status %q: must be draft, active, paused, completed, or archived", status)
+	}
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	plan, err := loadCanonicalPlan(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("plan %q not found: %w", planID, err)
+	}
+	if status != "" {
+		plan.Status = status
+	}
+	if title != "" {
+		plan.Title = title
+	}
+	if summary != "" {
+		plan.Summary = summary
+	}
+	if focus != "" {
+		plan.CurrentFocusTask = focus
+	}
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := saveCanonicalPlan(project.Path, plan); err != nil {
+		return err
+	}
+	ui.Success(fmt.Sprintf("Updated plan %q", planID))
+	return nil
+}
+
+func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, writeScope string, verificationRequired bool) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	tf, err := loadCanonicalTasks(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+	}
+	for _, t := range tf.Tasks {
+		if t.ID == taskID {
+			return fmt.Errorf("task %q already exists in plan %q", taskID, planID)
+		}
+	}
+	task := CanonicalTask{
+		ID:                   taskID,
+		Title:                title,
+		Status:               "pending",
+		Owner:                owner,
+		Notes:                notes,
+		VerificationRequired: verificationRequired,
+	}
+	if dependsOn != "" {
+		for _, id := range strings.Split(dependsOn, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				task.DependsOn = append(task.DependsOn, id)
+			}
+		}
+	}
+	if blocks != "" {
+		for _, id := range strings.Split(blocks, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				task.Blocks = append(task.Blocks, id)
+			}
+		}
+	}
+	if writeScope != "" {
+		for _, p := range strings.Split(writeScope, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				task.WriteScope = append(task.WriteScope, p)
+			}
+		}
+	}
+	tf.Tasks = append(tf.Tasks, task)
+	if err := saveCanonicalTasks(project.Path, tf); err != nil {
+		return err
+	}
+	plan, err := loadCanonicalPlan(project.Path, planID)
+	if err != nil {
+		return err
+	}
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	_ = saveCanonicalPlan(project.Path, plan)
+	ui.Success(fmt.Sprintf("Added task %q to plan %q", taskID, planID))
+	return nil
+}
+
+func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	tf, err := loadCanonicalTasks(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+	}
+	found := false
+	for i, t := range tf.Tasks {
+		if t.ID != taskID {
+			continue
+		}
+		if title != "" {
+			tf.Tasks[i].Title = title
+		}
+		if notes != "" {
+			tf.Tasks[i].Notes = notes
+		}
+		if writeScope != "" {
+			var scope []string
+			for _, p := range strings.Split(writeScope, ",") {
+				if p = strings.TrimSpace(p); p != "" {
+					scope = append(scope, p)
+				}
+			}
+			tf.Tasks[i].WriteScope = scope
+		}
+		found = true
+		break
+	}
+	if !found {
+		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+	}
+	if err := saveCanonicalTasks(project.Path, tf); err != nil {
+		return err
+	}
+	plan, err := loadCanonicalPlan(project.Path, planID)
+	if err != nil {
+		return err
+	}
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	_ = saveCanonicalPlan(project.Path, plan)
+	ui.Success(fmt.Sprintf("Updated task %q in plan %q", taskID, planID))
 	return nil
 }
 
@@ -2714,6 +2986,22 @@ var validWorkflowBridgeIntents = map[string]bool{
 
 func isValidWorkflowBridgeIntent(intent string) bool { return validWorkflowBridgeIntents[intent] }
 
+var workflowGraphCodeBridgeIntents = map[string]bool{
+	"symbol_lookup":     true,
+	"impact_radius":     true,
+	"change_analysis":   true,
+	"tests_for":         true,
+	"callers_of":        true,
+	"callees_of":        true,
+	"community_context": true,
+	"symbol_decisions":  true,
+	"decision_symbols":  true,
+}
+
+func isWorkflowGraphCodeBridgeIntent(intent string) bool {
+	return workflowGraphCodeBridgeIntents[intent]
+}
+
 // loadGraphBridgeConfig reads .agents/workflow/graph-bridge.yaml. If absent, bridge is disabled.
 func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 	p := filepath.Join(projectPath, ".agents", "workflow", "graph-bridge.yaml")
@@ -2965,6 +3253,13 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	intent, _ := cmd.Flags().GetString("intent")
+	if intent == "" {
+		return fmt.Errorf("--intent is required")
+	}
+	if isWorkflowGraphCodeBridgeIntent(intent) {
+		return fmt.Errorf("workflow graph query does not handle code-structure intent %q; use 'dot-agents kg bridge query --intent %s' instead", intent, intent)
+	}
 	cfg, err := loadGraphBridgeConfig(projectPath)
 	if err != nil {
 		return fmt.Errorf("load bridge config: %w", err)
@@ -2973,10 +3268,6 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("graph bridge not configured — create .agents/workflow/graph-bridge.yaml with enabled: true")
 	}
 
-	intent, _ := cmd.Flags().GetString("intent")
-	if intent == "" {
-		return fmt.Errorf("--intent is required")
-	}
 	if !isValidWorkflowBridgeIntent(intent) {
 		return fmt.Errorf("unknown intent %q — valid: plan_context, decision_lookup, entity_context, workflow_memory, contradictions", intent)
 	}

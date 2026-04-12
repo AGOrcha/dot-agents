@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/plugin.schema.json",
+  "title": "dot-agents canonical plugin bundle manifest",
+  "description": "Repo-local JSON Schema for ~/.agents/plugins/<scope>/<name>/PLUGIN.yaml. All five platforms have first-class plugin support. kind=native is for OpenCode runtime JS/TS plugins; kind=package is for Cursor/Claude/Codex/Copilot installable bundles. platforms lists the platform IDs this bundle targets. Resources are shared canonical components; files/ holds native assets (OpenCode); platforms/{id}/ holds platform-specific passthrough files (e.g. plugin.json). Runtime validation in the CLI is intentionally out of scope for this slice.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "name", "platforms"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Canonical plugin manifest schema version"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["native", "package"],
+      "description": "native = runtime JS/TS plugin (OpenCode); package = installable bundle with plugin.json manifest (Cursor/Claude/Codex/Copilot)"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable logical plugin id; should match the bundle directory name under plugins/<scope>/"
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["claude", "cursor", "codex", "copilot", "opencode"]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Platform IDs this plugin targets. Emission paths: opencode → .opencode/plugins/ (implemented); cursor → .cursor-plugin/ (pending); claude → .claude-plugin/ (pending); codex → .codex-plugin/ (pending); copilot → plugin.json/.github/plugin/ (pending)"
+    },
+    "version": {
+      "type": "string",
+      "description": "Optional semantic version string; surfaced in marketplace.json listings and platform manifest generation"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Optional human-friendly display name; used in marketplace listings when present"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable summary of the plugin bundle"
+    },
+    "authors": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Optional list of author names; first entry is used as the primary author in generated manifests"
+    },
+    "homepage": {
+      "type": "string",
+      "description": "Optional URL for the plugin homepage or documentation"
+    },
+    "license": {
+      "type": "string",
+      "description": "Optional SPDX license identifier"
+    },
+    "resources": {
+      "type": "object",
+      "description": "Optional canonical shared resources bundled with this plugin. Each field lists relative paths under resources/{component}/ within the bundle directory.",
+      "additionalProperties": false,
+      "properties": {
+        "agents":   { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "skills":   { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "commands": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "hooks":    { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "mcp":      { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "marketplace": {
+      "type": "object",
+      "description": "Optional marketplace registration hints used when generating marketplace.json files",
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string", "description": "Git repository URL for marketplace listing" },
+        "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "description": "Discovery tags for marketplace listings" }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "Optional platform-native dependency declarations (e.g. npm packages for OpenCode runtime plugins)"
+    },
+    "platform_overrides": {
+      "type": "object",
+      "description": "Platform-specific render hints. Keep narrow — only use for values that cannot be represented in the shared fields. Allowed keys: claude, cursor, codex, copilot, opencode.",
+      "properties": {
+        "claude":   { "$ref": "#/$defs/platformOverride" },
+        "cursor":   { "$ref": "#/$defs/platformOverride" },
+        "codex":    { "$ref": "#/$defs/platformOverride" },
+        "copilot":  { "$ref": "#/$defs/platformOverride" },
+        "opencode": { "$ref": "#/$defs/platformOverride" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "platformOverride": {
+      "type": "object",
+      "description": "Arbitrary platform-native metadata. Common keys: path (output path override), file (filename override), category (marketplace category), marketplace_name (marketplace display name).",
+      "additionalProperties": true
+    }
+  }
+}

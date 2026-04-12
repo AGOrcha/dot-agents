@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -1180,6 +1181,90 @@ func TestWorkflow_PrefersCanonicalWhenCheckpointGitStateIsStale(t *testing.T) {
 	}
 }
 
+// TestWorkflow_DerivedFocusIgnoresStaleCurrentFocusTask verifies that orient NextAction
+// and canonical plan summaries derive focus from TASKS.yaml when PLAN.yaml current_focus_task
+// still names a completed task (common after workflow advance ... completed).
+func TestWorkflow_DerivedFocusIgnoresStaleCurrentFocusTask(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(".agents/workflow/plans/z-stale-focus/PLAN.yaml", `schema_version: 1
+id: "z-stale-focus"
+title: "Stale focus fixture"
+status: "active"
+summary: "x"
+created_at: "2026-04-10T10:00:00Z"
+updated_at: "2026-04-10T10:00:00Z"
+owner: "test"
+success_criteria: ""
+verification_strategy: ""
+current_focus_task: "Phase A — done work"
+`)
+	write(".agents/workflow/plans/z-stale-focus/TASKS.yaml", `schema_version: 1
+plan_id: "z-stale-focus"
+tasks:
+  - id: "a1"
+    title: "Phase A — done work"
+    status: "completed"
+    depends_on: []
+    blocks: ["a2"]
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+  - id: "a2"
+    title: "Phase B — next work"
+    status: "pending"
+    depends_on: ["a1"]
+    blocks: []
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+`)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NextAction != "Phase B — next work" {
+		t.Fatalf("next action = %q, want %q", state.NextAction, "Phase B — next work")
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
+	}
+	var found bool
+	for _, cp := range state.CanonicalPlans {
+		if cp.ID == "z-stale-focus" {
+			found = true
+			if cp.CurrentFocusTask != "Phase B — next work" {
+				t.Fatalf("canonical plan summary focus = %q, want derived Phase B title", cp.CurrentFocusTask)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected z-stale-focus in canonical plans")
+	}
+}
+
 func TestReadWorkflowPlanCompletedStatusDoesNotCreatePendingFallback(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "completed.plan.md")
@@ -1676,6 +1761,68 @@ func TestIsValidWorkflowBridgeIntent(t *testing.T) {
 	}
 	if isValidWorkflowBridgeIntent("unknown") {
 		t.Error("'unknown' should not be valid")
+	}
+}
+
+func TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent(t *testing.T) {
+	project := t.TempDir()
+	kgHome := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("KG_HOME", kgHome)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("kg setup: %v", err)
+	}
+
+	cfgDir := filepath.Join(project, ".agents", "workflow")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := []byte("schema_version: 1\nenabled: true\ngraph_home: \"" + kgHome + "\"\n")
+	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), cfg, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "decision_lookup", "")
+	cmd.Flags().String("scope", "", "")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowGraphQuery(cmd, nil); err != nil {
+		t.Fatalf("runWorkflowGraphQuery: %v", err)
+	}
+}
+
+func TestRunWorkflowGraphQueryRejectsCodeStructureIntent(t *testing.T) {
+	project := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "symbol_lookup", "")
+	cmd.Flags().String("scope", "", "")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowGraphQuery(cmd, nil)
+	if err == nil {
+		t.Fatal("expected code-structure intent to be rejected")
+	}
+	if !strings.Contains(err.Error(), "code-structure intent") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kg bridge query") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

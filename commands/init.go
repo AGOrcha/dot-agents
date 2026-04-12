@@ -142,6 +142,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Bullet("ok", "Scaffolded starter workflow hook bundles")
 
+	if err := ensureGlobalKGMCPConfigs(agentsHome); err != nil {
+		return fmt.Errorf("scaffolding starter KG MCP configs: %w", err)
+	}
+
 	// Global Claude Code settings symlink — hooks/ takes priority over settings/
 	claudeHooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
 	if _, err := os.Stat(claudeHooksSrc); err == nil {
@@ -216,4 +220,3 @@ func scaffoldWorkflowAssets(agentsHome string) error {
 	}
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
 }
-
