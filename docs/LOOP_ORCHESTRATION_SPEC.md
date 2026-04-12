@@ -51,6 +51,8 @@ The orchestrator should be a mixed system, not a single new super-agent.
   - keep as the delegate return artifact writer
 - `workflow fold-back`
   - fold approved low-risk observations into plan notes, matrices, or lessons
+- future: `workflow delegation closeout` / reconciliation surface
+  - consume completed merge-backs, archive processed active artifacts, and reconcile canonical task/plan state
 
 ### 2. Skill layer
 
@@ -60,6 +62,7 @@ Skills should compose the command surfaces into repeatable behavior:
   - orient, compute next task, inspect graph context, decide whether to run directly or fan out
 - `delegation-lifecycle`
   - remains the bounded fanout and merge-back flow
+  - future: consume delegation-specific prompt/context bundle inputs instead of reconstructing handoff text ad hoc
 - `iteration-close`
   - remains the persist and proposal closeout flow
 
@@ -105,6 +108,7 @@ The orchestrator should reuse existing canonical artifacts where possible.
 | `.agents/workflow/plans/<plan-id>/SLICES.yaml` | read-first canonical slice artifact for Phase 3B, plus optional sub-task decomposition and fanout-readiness inputs for safe parallel work |
 | `.agents/workflow/testing-matrix.yaml` | canonical verification targets and scenario coverage |
 | `.agents/active/fold-back/<id>.yaml` | pending low-risk observation to reconcile into plans, matrix, or lessons |
+| future: delegation prompt bundle artifact or contract fields | inspectable prompt/context payload handed to one delegated sub-agent |
 
 ### Graph model
 
@@ -226,3 +230,5 @@ Phase 3B/3C correspond to items 4 and 5 below: define the canonical slice artifa
 5. Add slice artifacts and fanout-from-slice readiness checks.
 6. Add fold-back reconciliation for loop observations and testing-matrix updates.
 7. Expand workflow graph bridge to code-structure intents so the orchestrator can ask richer questions without repo spelunking.
+8. Add delegation closeout so completed delegation and merge-back artifacts reconcile cleanly into task and plan state.
+9. Add per-delegate prompt/context bundle inputs so fanout can hand sub-agents reproducible prompts and files.

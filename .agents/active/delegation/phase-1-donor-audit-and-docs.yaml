@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-phase-1-donor-audit-and-docs-1776009652
+parent_plan_id: typescript-port
+parent_task_id: phase-1-donor-audit-and-docs
+title: Phase 1 — Audit donor branch and write the current-contract port plan
+summary: Delegated from plan TypeScript Port Plan
+write_scope:
+    - .agents/workflow/plans/typescript-port/
+    - docs/TYPESCRIPT_PORT_TDD_PLAN.md
+success_criteria: |
+    Capture the office-machine donor branch (`origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines`)
+    as source material, not as a merge target. Rewrite the port plan around the current repo:
+    1. `.agentsrc.json` unknown-field preservation
+    2. Codex `developer_instructions` TOML output
+    3. current hook renderer shapes
+    4. workflow command surface
+    5. Stage 2 bucket and plugin-roadmap boundaries
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: typescript-port-plan-worker
+status: completed
+created_at: "2026-04-12T16:00:52Z"
+updated_at: "2026-04-12T16:12:54Z"

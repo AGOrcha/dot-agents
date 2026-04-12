@@ -298,29 +298,14 @@ func printCanonicalStoreSection(agentsHome string) {
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, "  Canonical Store")
 
-	type bucket struct {
-		name       string
-		path       string
-		countDirs  bool
-		markerFile string
-	}
-
-	buckets := []bucket{
-		{name: "rules", path: filepath.Join(agentsHome, "rules")},
-		{name: "settings", path: filepath.Join(agentsHome, "settings")},
-		{name: "mcp", path: filepath.Join(agentsHome, "mcp")},
-		{name: "skills", path: filepath.Join(agentsHome, "skills"), countDirs: true, markerFile: "SKILL.md"},
-		{name: "agents", path: filepath.Join(agentsHome, "agents"), countDirs: true, markerFile: "AGENT.md"},
-		{name: "hooks", path: filepath.Join(agentsHome, "hooks")},
-	}
-
-	for _, bucket := range buckets {
-		scopes, entries := summarizeCanonicalBucket(bucket.path, bucket.countDirs, bucket.markerFile)
+	for _, bucket := range platform.CanonicalStoreBucketSpecs() {
+		root := platform.CanonicalBucketRoot(agentsHome, bucket.Name)
+		scopes, entries := summarizeCanonicalBucket(root, bucket.CountDirs, bucket.MarkerFile)
 		if scopes == 0 && entries == 0 {
-			fmt.Fprintf(os.Stdout, "  %s-%s %-9s %s(empty)%s\n", ui.Dim, ui.Reset, bucket.name, ui.Dim, ui.Reset)
+			fmt.Fprintf(os.Stdout, "  %s-%s %-14s %s(empty)%s\n", ui.Dim, ui.Reset, bucket.Name, ui.Dim, ui.Reset)
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "  %s✓%s %-9s %s%d scope(s), %d item(s)%s\n", ui.Green, ui.Reset, bucket.name, ui.Dim, scopes, entries, ui.Reset)
+		fmt.Fprintf(os.Stdout, "  %s✓%s %-14s %s%d scope(s), %d item(s)%s\n", ui.Green, ui.Reset, bucket.Name, ui.Dim, scopes, entries, ui.Reset)
 	}
 
 	printPluginsSection(agentsHome)

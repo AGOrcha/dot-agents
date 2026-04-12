@@ -109,3 +109,55 @@ tasks:
         writeFoldBackArtifact. Register foldBackCmd in cmd.AddCommand(...) at line ~468.
         Tests: TestFoldBackCreateSmall, TestFoldBackCreateNoTask, TestFoldBackCreatePropose, TestFoldBackList.
         See plan.md Phase 6 section for full struct definition, flag registration snippet, and test shapes.
+    - id: phase-7-delegation-closeout-and-plan-reconcile
+      title: Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
+      status: pending
+      depends_on:
+        - phase-6-fold-back-reconciliation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+        - .agents/active/
+        - .agents/history/
+      verification_required: true
+      notes: |
+        Add a parent-driven closeout/reconcile surface after merge-back so completed delegation artifacts do not
+        stay in `.agents/active/` forever. Scope:
+        1. consume a completed delegation contract + merge-back artifact as one closeout unit
+        2. archive or relocate processed artifacts out of active state into durable history
+        3. advance the canonical task to completed/failed based on parent decision
+        4. if the closed task completes the plan, update PLAN.yaml status/current_focus_task coherently
+        5. make orient/status pending-merge-back counts reflect unintegrated artifacts only
+        6. document stale-active-contract cleanup rules for already-completed plans
+        Candidate surface: `workflow delegation closeout` or `workflow reconcile delegation`.
+        Tests should cover completed-contract archival, merge-back consumption, task completion, plan completion,
+        and stale completed-plan cleanup.
+    - id: phase-8-delegate-prompt-and-file-inputs
+      title: Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
+      status: pending
+      depends_on:
+        - phase-4-fanout-from-slices
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+        - .agents/skills/
+      verification_required: true
+      notes: |
+        Extend the orchestration/delegation contract so a parent can give each sub-agent an explicit prompt via:
+        1. inline argument text
+        2. one or more prompt/context files
+        3. optional per-owner overrides when multiple delegates are spun up separately
+        Direction:
+        - add repeatable fanout flags such as `--prompt`, `--prompt-file`, and `--context-file`
+        - persist those inputs on the delegation contract or a sibling bundle artifact instead of leaving them
+          only in transient terminal history
+        - teach `orchestrator-session-start` / `delegation-lifecycle` how to pass the bundle forward
+        - allow different prompt/file sets per sub-agent by making the inputs delegation-specific, not plan-global
+        Tests should cover inline prompt capture, prompt-file loading, repeated context files, and no-leak
+        behavior when multiple delegation contracts for different tasks use different prompt bundles.

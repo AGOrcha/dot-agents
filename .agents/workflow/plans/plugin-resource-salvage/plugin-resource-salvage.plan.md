@@ -18,20 +18,27 @@ Salvage the useful "plugins as a first-class resource" ideas from the old Claude
 - Rebuild plugin support through the current shared planner/executor and canonical storage model.
 - Start with one low-conflict plugin emission/import path before expanding package-platform emitters.
 - The `platform-docs-refresh` skill was copied from the donor branch and promoted — it is live under `.agents/skills/platform-docs-refresh/`.
+- The Phase 4 readback path already landed in the current tree; Phase 5 is closeout-only and feeds Stage 2 planning from that rebuilt baseline.
 
 ## Current Slice
 
 - [x] Audit `claude/scalable-skill-syncing-sfxOd` into keep, rebuild, and drop buckets
 - [x] Define canonical `PLUGIN.yaml` schema and ownership boundaries on the current architecture
 - [x] Integrate plugin resources into the shared planner and one low-conflict emitter path
-- [ ] Phase 4 — Add import, status, explain, and doctor readback for plugin resources
-- [ ] Phase 5 — Feed rebuilt plugin path into Stage 2 bucket expansion; retire duplicate branch artifacts
+- [x] Phase 4 — Add import, status, explain, and doctor readback for plugin resources
+- [x] Phase 5 — Feed rebuilt plugin path into Stage 2 bucket expansion; retire duplicate branch artifacts
+
+## Phase 5: Closeout
+
+- Plugin readback landed in the current tree and is now the baseline for the plugin resource path.
+- The remaining follow-on work is Stage 2 alignment for bucket expansion and any later emitter/runtime slices.
+- Duplicate donor-branch and stale docs/cache assumptions are retired from this plan surface; do not reopen them here.
 
 ## Phase 4: Command readback for plugin resources
 
 **Goal:** `import`, `status`, `explain`, and `doctor` surface canonical plugin bundles using the same patterns already established for skills, hooks, and agents.
 
-**Donor reference:** `claude/scalable-skill-syncing-sfxOd` has a largely complete implementation. Port rather than rewrite:
+**Donor reference:** `claude/scalable-skill-syncing-sfxOd` is historical provenance only. The readback path already landed in the current tree, so keep the donor list as a reference for the original shapes rather than as active work:
 - `internal/platform/plugins.go` — `PluginSpec`, `LoadPluginSpec`, `ListPluginSpecs`, `validatePluginSpec`
   - **Schema wiring required on port:** replace `validatePluginSpec` with `schemas.Validate(PluginManifestSchema, jsonBytes)` per `docs/SCHEMA_FOLLOWUPS.md`; add `var PluginManifestSchema = schemas.Plugin` and doc comment anchor to `PluginSpec`; see SCHEMA_FOLLOWUPS.md for full loader pattern and the `schemas/` embed package spec
 - `internal/platform/package_plugins.go` — `syncPluginOverlayTree`, `collectPluginOverlayFiles`, `pruneStalePluginOverlayTree`
@@ -204,3 +211,4 @@ After existing check groups, add a `"plugins"` check group. For each canonical p
 - This plan is the plugin-specific feeder for Stage 2 bucket expansion in `platform-dir-unification`.
 - `feature/PA-cursor-kg-build-update-commands-1b58` is already absorbed into the current stack and is not part of this salvage work.
 - Sonar duplicate pressure is a reason to rebuild selectively rather than merge the old branch.
+- The old donor branch is historical reference only; do not carry forward duplicate branch-path assumptions or stale cache/doc artifacts into Stage 2 planning.

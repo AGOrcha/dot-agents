@@ -131,6 +131,7 @@ const (
 	relCursorMCPJSON         = ".cursor/mcp.json"
 	relCursorHooksJSON       = ".cursor/hooks.json"
 	relCursorIgnore          = ".cursorignore"
+	relCursorIndexingIgnore  = ".cursorindexingignore"
 	relClaudeSettingsLocal   = ".claude/settings.local.json"
 	relMCPJSON               = ".mcp.json"
 	relVSCodeMCPJSON         = ".vscode/mcp.json"
@@ -147,6 +148,13 @@ const (
 	relCopilotPluginMarket   = ".github/plugin/marketplace.json"
 	relCodexPluginMarket     = ".agents/plugins/marketplace.json"
 	relOpenCodePluginsDir    = ".opencode/plugins/"
+	relCursorCommandsDir     = ".cursor/commands/"
+	relClaudeCommandsDir     = ".claude/commands/"
+	relOpenCodeCommandsDir   = ".opencode/commands/"
+	relClaudeOutputStylesDir = ".claude/output-styles/"
+	relOpenCodeModesDir      = ".opencode/modes/"
+	relOpenCodeThemesDir     = ".opencode/themes/"
+	relGitHubPromptsDir      = ".github/prompts/"
 	relClaudePluginDir       = ".claude-plugin/"
 	relCursorPluginDir       = ".cursor-plugin/"
 	relCodexPluginDir        = ".codex-plugin/"
@@ -168,6 +176,7 @@ var projectImportSingles = []string{
 	relCursorMCPJSON,
 	relCursorHooksJSON,
 	relCursorIgnore,
+	relCursorIndexingIgnore,
 	relClaudeSettingsLocal,
 	relMCPJSON,
 	relVSCodeMCPJSON,
@@ -185,18 +194,32 @@ var projectImportSingles = []string{
 }
 
 var projectImportWalkDirs = []string{
+	"commands",
+	"output-styles",
+	"ignore",
+	"modes",
+	"plugins",
+	"themes",
+	"prompts",
 	".cursor/rules",
+	".cursor/commands",
 	".agents/skills",
 	".claude/skills",
+	".claude/commands",
+	".claude/output-styles",
 	".github/agents",
 	".codex/agents",
+	".opencode/commands",
 	".opencode/agent",
+	".opencode/modes",
+	".opencode/themes",
 	".opencode/plugins",
 	".claude-plugin",
 	".cursor-plugin",
 	".codex-plugin",
 	".github/plugin",
 	".github/hooks",
+	".github/prompts",
 }
 
 var globalImportSingles = []string{
@@ -204,9 +227,21 @@ var globalImportSingles = []string{
 	relCursorSettingsJSON,
 	relCursorMCPJSON,
 	relCursorHooksJSON,
+	relCursorIgnore,
+	relCursorIndexingIgnore,
 	relClaudeREADME,
 	relCodexConfigTOML,
 	relCodexHooksJSON,
+}
+
+var globalImportWalkDirs = []string{
+	".cursor/commands",
+	".claude/commands",
+	".claude/output-styles",
+	".opencode/commands",
+	".opencode/modes",
+	".opencode/themes",
+	".github/prompts",
 }
 
 func NewImportCmd() *cobra.Command {
@@ -566,6 +601,22 @@ func scanGlobalImportCandidates() []importCandidate {
 			destRel:    destRel,
 		})
 	}
+	for _, relDir := range globalImportWalkDirs {
+		out = append(out, walkGlobalImportCandidates(home, relDir)...)
+	}
+	return out
+}
+
+func walkGlobalImportCandidates(sourceRoot, relDir string) []importCandidate {
+	root := filepath.Join(sourceRoot, relDir)
+	out := []importCandidate{}
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		candidate, ok := walkedImportCandidate("global", sourceRoot, path, d, err)
+		if ok {
+			out = append(out, candidate)
+		}
+		return nil
+	})
 	return out
 }
 
@@ -579,12 +630,16 @@ func mapGlobalRelToDest(rel string) string {
 		return "mcp/global/mcp.json"
 	case relCursorHooksJSON:
 		return "hooks/global/cursor.json"
+	case relCursorIgnore:
+		return "settings/global/cursorignore"
 	case relClaudeREADME:
 		return "rules/global/agents.md"
 	case relCodexConfigTOML:
 		return "settings/global/codex.toml"
 	case relCodexHooksJSON:
 		return "hooks/global/codex.json"
+	case relCursorIndexingIgnore:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, "global", "cursorindexingignore")
 	default:
 		return ""
 	}

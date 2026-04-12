@@ -35,7 +35,7 @@ tasks:
         Acceptance: go test ./... passes; scripts/verify.sh passes; no source/. references to deleted files remain.
     - id: phase-5-new-buckets
       title: Phase 5 — Add Stage 2 bucket expansion (commands, output-styles, modes, plugins, themes, prompts)
-      status: pending
+      status: completed
       depends_on:
         - phase-4-bash-deprecation
       blocks: []

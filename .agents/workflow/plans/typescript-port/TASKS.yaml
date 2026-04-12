@@ -3,7 +3,7 @@ plan_id: typescript-port
 tasks:
     - id: phase-1-donor-audit-and-docs
       title: Phase 1 — Audit donor branch and write the current-contract port plan
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - phase-2-foundations-on-current-contracts
@@ -14,7 +14,8 @@ tasks:
         - docs/
       verification_required: false
       notes: |
-        Capture the office-machine donor branch (`origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines`)
+        Phase 1 is the planning checkpoint. Capture the office-machine donor branch
+        (`origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines`)
         as source material, not as a merge target. Rewrite the port plan around the current repo:
         1. `.agentsrc.json` unknown-field preservation
         2. Codex `developer_instructions` TOML output

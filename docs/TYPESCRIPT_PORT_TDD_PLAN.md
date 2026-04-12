@@ -2,19 +2,20 @@
 
 ## Purpose
 
-Build a native Windows-friendly TypeScript port for machines that cannot run the Go toolchain locally, while keeping the Go CLI as the behavioral source of truth.
+Build a native Windows-friendly TypeScript port for machines that cannot run the Go toolchain locally, while keeping the current Go CLI and docs as the behavioral source of truth.
 
-The office-machine branch `origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines` is donor material, not a merge target. The current repo has moved substantially since that branch split from `master`, so the port must be rebased onto today's contracts rather than merged wholesale.
+The office-machine branch `origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines` is donor material only. It is useful for implementation hints, but the current repo has moved enough that the TypeScript port must be rewritten against current contracts rather than merged as-is.
 
-## Current Branch Reality
+## Current Contract Model
 
-The donor branch started useful work in `ports/typescript/`, but it predates several current-repo behaviors and conventions:
+The plan is anchored on the current repository behavior, not the donor branch shape:
 
-- `.agentsrc.json` now preserves unknown fields on round-trip; the donor TypeScript `AgentsRC` does not.
-- Codex agent TOML now emits `developer_instructions`; the donor TypeScript code still renders `is_background`.
-- The current CLI has a large `workflow` surface, while the donor TypeScript CLI only covers the core resource-management commands.
-- Stage 2 bucket expansion and plugin-resource work are active canonical plans, so the TypeScript port must not assume the current Stage 1 bucket set is the final shape.
-- The donor branch doc said "Vitest", but the donor package actually used the Node built-in test runner. The plan should follow the actual runtime and keep tooling minimal unless there is a strong reason to change it.
+- `.agentsrc.json` must preserve unknown fields on round-trip and source merge.
+- Codex agent TOML must emit `developer_instructions`, not the donor-era `is_background`.
+- Hook renderer expectations come from current Go tests and renderer shapes.
+- The current CLI surface includes `workflow` and KG-adjacent commands, but those are not automatically part of the TypeScript MVP.
+- Stage 2 bucket expansion and plugin-resource work are active canonical plans, so the TypeScript port must treat them as deferred unless a later phase explicitly opts in.
+- The donor branch used the Node built-in test runner, not Vitest; keep the test toolchain minimal unless a stronger need appears.
 
 ## Porting Rules
 
@@ -31,11 +32,11 @@ The donor branch started useful work in `ports/typescript/`, but it predates sev
 
 Do not merge donor commit `d1b1e46` wholesale.
 
-Instead:
+Use the donor branch as source material only:
 
 1. Copy the `ports/typescript/` subtree in controlled slices onto the current branch.
-2. Rework the copied code against current contracts before claiming parity.
-3. Salvage only the compatible Go-side donor ideas:
+2. Rework copied code against current contracts before claiming parity.
+3. Salvage only the compatible ideas that still match current behavior:
    - MCP detection support for `.mcp.json` and `mcpServers`
    - extra hook-renderer shape assertions
 4. Drop stale donor assumptions instead of carrying them forward:
@@ -66,6 +67,17 @@ The following are explicitly deferred until later waves:
 - plugin import and emission
 - Stage 2 buckets: commands, output-styles, modes, themes, prompts, and finalized plugin buckets
 
+## Phase 1 Checkpoint
+
+Phase 1 is complete when this document and the canonical plan artifacts reflect current contracts instead of donor-branch assumptions.
+
+Checkpoint criteria:
+
+- The donor branch has been reviewed as source material, not as a merge target.
+- The MVP and deferred boundaries are explicit.
+- The canonical plan files point at the next implementation phase rather than continuing to describe phase 1 as active work.
+- The current Go contracts are the reference point for `.agentsrc.json`, Codex TOML, hook rendering, workflow boundaries, and Stage 2/plugin deferral.
+
 ## Phase Order
 
 ### Phase 1: Donor Audit And Plan Rewrite
@@ -75,6 +87,7 @@ Acceptance gate:
 - The donor branch has been compared to the current branch.
 - This plan and the canonical `typescript-port` plan artifacts exist.
 - The MVP and deferred scope are explicit.
+- The plan is framed around current Go contracts, not donor-branch defaults.
 
 ### Phase 2: Foundations On Current Contracts
 
