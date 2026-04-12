@@ -2,11 +2,13 @@ package commands
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
@@ -80,5 +82,52 @@ func TestSharedTargetRegistryPlanLines_PropagatesSharedIntentError(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "bad shared intents") {
 		t.Fatalf("error = %q, want platform wrap", err.Error())
+	}
+}
+
+func TestStatusShowsPluginsSection(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.MkdirAll(filepath.Join(agentsHome, "plugins", "global", "my-plugin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "plugins", "global", "my-plugin", platform.PluginManifestName), []byte(`schema_version: 1
+kind: native
+name: my-plugin
+platforms: [opencode]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runStatus(false, ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	os.Stdout = oldStdout
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(out)
+	if !strings.Contains(rendered, "Plugins") {
+		t.Fatalf("status output missing Plugins section:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "my-plugin") {
+		t.Fatalf("status output missing plugin name:\n%s", rendered)
 	}
 }

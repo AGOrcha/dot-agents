@@ -47,7 +47,7 @@ tasks:
       notes: Use the existing resource-intent planner/executor. Start with the lowest-conflict plugin target rather than reviving all package-platform emitters at once.
     - id: phase-4-command-readback
       title: Phase 4 — Add import, status, explain, and doctor readback for plugin resources
-      status: pending
+      status: completed
       depends_on:
         - phase-3-planner-integration
       blocks:

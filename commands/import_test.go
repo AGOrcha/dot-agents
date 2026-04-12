@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -814,5 +815,102 @@ func TestProcessImportOutput_hookConflictDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(agentsHome, "hooks", "proj", "cursor-x", "HOOK.yaml")); !os.IsNotExist(err) {
 		t.Fatal("dry-run should not write alternate")
+	}
+}
+
+func TestImportFromOpencodePluginDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	sourceRoot := filepath.Join(tmp, "repo")
+	sourcePath := filepath.Join(sourceRoot, relOpenCodePluginsDir, "my-plugin", "index.js")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("console.log('hello')\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := processImportCandidate(importCandidate{
+		project:    "proj",
+		sourceRoot: sourceRoot,
+		sourcePath: sourcePath,
+	}, agentsHome, "20260412-120000")
+	if result.imported != 2 {
+		t.Fatalf("expected 2 imported outputs, got %+v", result)
+	}
+
+	manifestPath := filepath.Join(agentsHome, "plugins", "proj", "my-plugin", platform.PluginManifestName)
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	manifest := mustUnmarshalYAMLMap(t, content)
+	if got := manifest["kind"]; got != "native" {
+		t.Fatalf("kind = %#v, want native", got)
+	}
+	if got := manifest["name"]; got != "my-plugin" {
+		t.Fatalf("name = %#v, want my-plugin", got)
+	}
+	if got := manifest["schema_version"]; got != 1 {
+		t.Fatalf("schema_version = %#v, want 1", got)
+	}
+	filesPath := filepath.Join(agentsHome, "plugins", "proj", "my-plugin", "files", "index.js")
+	fileContent, err := os.ReadFile(filesPath)
+	if err != nil {
+		t.Fatalf("read plugin file: %v", err)
+	}
+	if string(fileContent) != "console.log('hello')\n" {
+		t.Fatalf("plugin file content mismatch: %q", string(fileContent))
+	}
+}
+
+func TestImportFromCursorPluginManifest(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	sourceRoot := filepath.Join(tmp, "repo")
+	sourcePath := filepath.Join(sourceRoot, relCursorPluginDir, "plugin.json")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(`{"name":"my-plugin","version":"1.0.0"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := processImportCandidate(importCandidate{
+		project:    "proj",
+		sourceRoot: sourceRoot,
+		sourcePath: sourcePath,
+	}, agentsHome, "20260412-120000")
+	if result.imported != 2 {
+		t.Fatalf("expected 2 imported outputs, got %+v", result)
+	}
+
+	manifestPath := filepath.Join(agentsHome, "plugins", "proj", "my-plugin", platform.PluginManifestName)
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	manifest := mustUnmarshalYAMLMap(t, content)
+	if got := manifest["kind"]; got != "package" {
+		t.Fatalf("kind = %#v, want package", got)
+	}
+	if got := manifest["version"]; got != "1.0.0" {
+		t.Fatalf("version = %#v, want 1.0.0", got)
+	}
+	platforms, ok := manifest["platforms"].([]any)
+	if !ok || len(platforms) != 1 || platforms[0] != "cursor" {
+		t.Fatalf("platforms = %#v, want [cursor]", manifest["platforms"])
+	}
+	platformJSONPath := filepath.Join(agentsHome, "plugins", "proj", "my-plugin", "platforms", "cursor", "plugin.json")
+	platformJSON, err := os.ReadFile(platformJSONPath)
+	if err != nil {
+		t.Fatalf("read platform plugin.json: %v", err)
+	}
+	if string(platformJSON) != `{"name":"my-plugin","version":"1.0.0"}` {
+		t.Fatalf("platform plugin.json mismatch: %s", string(platformJSON))
 	}
 }

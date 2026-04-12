@@ -19,7 +19,12 @@ func NewRemoveCmd() *cobra.Command {
 		Long: `Unregisters a project from dot-agents and removes config symlinks.
 
 With --clean, also removes project directories from ~/.agents/.`,
-		Args: cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents remove billing-api",
+			"  dot-agents remove billing-api --clean",
+			"  dot-agents status",
+		),
+		Args: ExactArgsWithHints(1, "Use the managed project name from `dot-agents status`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemove(args[0], cleanDirs)
 		},
@@ -36,7 +41,10 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	projectPath := cfg.GetProjectPath(projectName)
 	if projectPath == "" {
-		return fmt.Errorf("project not found: %s\n\nRun 'dot-agents status' to see registered projects", projectName)
+		return ErrorWithHints(
+			fmt.Sprintf("project not found: %s", projectName),
+			"Run `dot-agents status` to see registered projects.",
+		)
 	}
 
 	displayPath := config.DisplayPath(projectPath)

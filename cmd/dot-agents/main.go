@@ -3,16 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/NikashPrakash/dot-agents/commands"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	root := buildRoot()
 	if err := root.Execute(); err != nil {
-		ui.Error(err.Error())
+		commands.RenderCommandError(os.Stderr, root, os.Args[1:], err)
 		os.Exit(1)
 	}
 }
@@ -21,10 +21,20 @@ func buildRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "dot-agents",
 		Short: "Manage AI agent configurations across projects",
-		Long: `dot-agents keeps your AI agent rules, settings, and skills in a single
-~/.agents/ directory and links them into each project you work on.
-
-It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.`,
+		Long: "dot-agents keeps your AI agent rules, settings, and skills in a single\n" +
+			"~/.agents/ directory and links them into each project you work on.\n\n" +
+			"It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.\n\n" +
+			"Use it to bootstrap shared agent configuration, keep project links healthy,\n" +
+			"capture workflow state, and generate reproducible .agentsrc.json manifests\n" +
+			"that both humans and AI agents can follow.",
+		Example: strings.Join([]string{
+			"  dot-agents init",
+			"  dot-agents add .",
+			"  dot-agents status --audit",
+			"  dot-agents workflow orient",
+			"  dot-agents install --generate",
+			"  dot-agents sync status",
+		}, "\n"),
 		Version:       commands.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -58,6 +68,7 @@ It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.`,
 	// Override Execute error handling for better UX
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)
+	commands.ConfigureRootCommandUX(root)
 
 	// Custom error display
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {

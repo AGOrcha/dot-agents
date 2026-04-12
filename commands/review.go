@@ -18,6 +18,15 @@ func NewReviewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Review pending workflow proposals",
+		Long: `Lists and applies queued shared-workflow proposals stored under ~/.agents/proposals.
+This is the approval surface for shared preference and rule changes that should
+not be applied silently.`,
+		Example: ExampleBlock(
+			"  dot-agents review",
+			"  dot-agents review show pref-default-model",
+			"  dot-agents review approve pref-default-model",
+		),
+		Args: NoArgsWithHints("Use `dot-agents review` with no positional args to list pending proposals."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewList()
 		},
@@ -26,7 +35,10 @@ func NewReviewCmd() *cobra.Command {
 	showCmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show a pending proposal",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents review show pref-default-model",
+		),
+		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewShow(args[0])
 		},
@@ -35,7 +47,10 @@ func NewReviewCmd() *cobra.Command {
 	approveCmd := &cobra.Command{
 		Use:   "approve <id>",
 		Short: "Approve and apply a pending proposal",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents review approve pref-default-model",
+		),
+		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewApprove(args[0])
 		},
@@ -44,7 +59,10 @@ func NewReviewCmd() *cobra.Command {
 	rejectCmd := &cobra.Command{
 		Use:   "reject <id>",
 		Short: "Reject a pending proposal",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents review reject pref-default-model --reason \"not ready\"",
+		),
+		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewReject(args[0], rejectReason)
 		},

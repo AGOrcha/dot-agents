@@ -1944,6 +1944,84 @@ func setupTestProject(t *testing.T) string {
 	return dir
 }
 
+func setupFanoutSliceProject(t *testing.T, sliceStatus string) string {
+	t.Helper()
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "p1")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+
+	plan := CanonicalPlan{
+		SchemaVersion: 1,
+		ID:            "p1",
+		Title:         "Fanout Test Plan",
+		Status:        "active",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		UpdatedAt:     "2026-04-10T00:00:00Z",
+	}
+	planData, err := yaml.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatalf("write PLAN.yaml: %v", err)
+	}
+
+	tasks := CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        "p1",
+		Tasks: []CanonicalTask{
+			{ID: "t1", Title: "Fanout Task", Status: "pending", WriteScope: []string{"commands/"}},
+		},
+	}
+	tasksData, err := yaml.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("marshal tasks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), tasksData, 0644); err != nil {
+		t.Fatalf("write TASKS.yaml: %v", err)
+	}
+
+	slices := CanonicalSliceFile{
+		SchemaVersion: 1,
+		PlanID:        "p1",
+		Slices: []CanonicalSlice{
+			{
+				ID:           "s1",
+				ParentTaskID: "t1",
+				Title:        "Fanout Slice",
+				Summary:      "Resolve fanout from slice metadata.",
+				Status:       sliceStatus,
+				WriteScope:   []string{"commands/"},
+			},
+		},
+	}
+	slicesData, err := yaml.Marshal(slices)
+	if err != nil {
+		t.Fatalf("marshal slices: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "SLICES.yaml"), slicesData, 0644); err != nil {
+		t.Fatalf("write SLICES.yaml: %v", err)
+	}
+
+	return dir
+}
+
+func executeWorkflowCommand(t *testing.T, repo string, args ...string) error {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewWorkflowCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
 func TestLoadSaveDelegationContract_RoundTrip(t *testing.T) {
 	dir := setupTestProject(t)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -2029,6 +2107,63 @@ func TestWriteScopeOverlaps_SkipsCompletedDelegation(t *testing.T) {
 	conflicts := writeScopeOverlaps(existing, []string{"commands/"}, "task-002")
 	if len(conflicts) != 0 {
 		t.Errorf("completed delegation should not block, got: %v", conflicts)
+	}
+}
+
+func TestFanoutFromSlice(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	contract, err := loadDelegationContract(repo, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.ParentTaskID != "t1" {
+		t.Fatalf("parent_task_id = %q, want t1", contract.ParentTaskID)
+	}
+	if contract.Owner != "test" {
+		t.Fatalf("owner = %q, want test", contract.Owner)
+	}
+	if !strings.HasPrefix(contract.ID, "del-t1-") {
+		t.Fatalf("contract id = %q, want prefix del-t1-", contract.ID)
+	}
+	if len(contract.WriteScope) != 1 || contract.WriteScope[0] != "commands/" {
+		t.Fatalf("write_scope = %+v, want [commands/]", contract.WriteScope)
+	}
+}
+
+func TestFanoutSliceAndTaskMutuallyExclusive(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--task", "t1", "--owner", "test")
+	if err == nil {
+		t.Fatal("expected error for mutually exclusive flags, got nil")
+	}
+	if !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFanoutSliceNotFound(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "missing", "--owner", "test")
+	if err == nil {
+		t.Fatal("expected error for missing slice, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFanoutSliceAlreadyCompleted(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "completed")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "test")
+	if err == nil {
+		t.Fatal("expected error for completed slice, got nil")
+	}
+	if !strings.Contains(err.Error(), "already completed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

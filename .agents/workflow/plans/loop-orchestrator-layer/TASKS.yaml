@@ -43,7 +43,7 @@ tasks:
       notes: Phase 3A is complete; the remaining slice-artifact/readiness lane stays in the plan/doc surface and keeps the derived graph as the only source of truth.
     - id: phase-4-fanout-from-slices
       title: Phase 4 — Wire workflow fanout --slice flag to resolve task and write-scope from SLICES.yaml
-      status: pending
+      status: completed
       depends_on:
         - phase-2-workflow-next
         - phase-3-plan-graph-and-slices

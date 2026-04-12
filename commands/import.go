@@ -141,6 +141,15 @@ const (
 	relCodexConfigTOML       = ".codex/config.toml"
 	relCodexHooksJSON        = ".codex/hooks.json"
 	relCopilotInstructionsMD = ".github/copilot-instructions.md"
+	relCopilotPluginManifest = "plugin.json"
+	relGitHubPluginManifest  = ".github/plugin/plugin.json"
+	relGitHubPluginDir       = ".github/plugin/"
+	relCopilotPluginMarket   = ".github/plugin/marketplace.json"
+	relCodexPluginMarket     = ".agents/plugins/marketplace.json"
+	relOpenCodePluginsDir    = ".opencode/plugins/"
+	relClaudePluginDir       = ".claude-plugin/"
+	relCursorPluginDir       = ".cursor-plugin/"
+	relCodexPluginDir        = ".codex-plugin/"
 	relClaudeREADME          = ".claude/CLAUDE.md"
 	relCursorRulesDir        = ".cursor/rules/"
 	relAgentsSkillsDir       = ".agents/skills/"
@@ -169,6 +178,10 @@ var projectImportSingles = []string{
 	relCodexConfigTOML,
 	relCodexHooksJSON,
 	relCopilotInstructionsMD,
+	relCopilotPluginManifest,
+	relGitHubPluginManifest,
+	relCopilotPluginMarket,
+	relCodexPluginMarket,
 }
 
 var projectImportWalkDirs = []string{
@@ -178,6 +191,11 @@ var projectImportWalkDirs = []string{
 	".github/agents",
 	".codex/agents",
 	".opencode/agent",
+	".opencode/plugins",
+	".claude-plugin",
+	".cursor-plugin",
+	".codex-plugin",
+	".github/plugin",
 	".github/hooks",
 }
 
@@ -196,7 +214,18 @@ func NewImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import [project]",
 		Short: "Import configs from project/global scope into ~/.agents/",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Scans project-managed files and user-level AI configuration, then copies
+those artifacts into the canonical ~/.agents/ layout so future refresh and install
+operations can treat them as shared source of truth.
+
+This is most useful when adopting dot-agents in an existing setup or when you want
+to normalize hand-edited config back into the managed store.`,
+		Example: ExampleBlock(
+			"  dot-agents import",
+			"  dot-agents import billing-api --scope project",
+			"  dot-agents import --scope global --dry-run",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to restrict project-scope imports."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectFilter := ""
 			if len(args) > 0 {
@@ -269,7 +298,10 @@ func normalizeImportScope(scope string) (string, error) {
 	case importScopeProject, importScopeGlobal, importScopeAll:
 		return scope, nil
 	default:
-		return "", fmt.Errorf("invalid scope %q (expected: project|global|all)", scope)
+		return "", UsageError(
+			fmt.Sprintf("invalid scope %q", scope),
+			"Supported values are `project`, `global`, and `all`.",
+		)
 	}
 }
 
@@ -303,6 +335,18 @@ func sortImportCandidates(candidates []importCandidate) {
 
 func processImportCandidate(c importCandidate, agentsHome, timestamp string) importResult {
 	if isManagedImportSource(c, agentsHome) {
+		return importResult{}
+	}
+
+	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
+	if err == nil && supportsCanonicalImportPath(filepath.ToSlash(rel)) {
+		srcInfo, statErr := os.Stat(c.sourcePath)
+		if statErr != nil || srcInfo.IsDir() {
+			return importResult{}
+		}
+		if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo); ok {
+			return result
+		}
 		return importResult{}
 	}
 
@@ -412,7 +456,10 @@ func scanProjectImportCandidates(cfg *config.Config, projectFilter string) ([]im
 	if projectFilter != "" {
 		path := cfg.GetProjectPath(projectFilter)
 		if path == "" {
-			return nil, fmt.Errorf("project not found: %s", projectFilter)
+			return nil, ErrorWithHints(
+				fmt.Sprintf("project not found: %s", projectFilter),
+				"Run `dot-agents status` to list the managed project names.",
+			)
 		}
 		projects = []string{projectFilter}
 	}
@@ -439,6 +486,7 @@ func gatherProjectCandidates(project, projectPath string) []importCandidate {
 	for _, relDir := range projectImportWalkDirs {
 		out = append(out, walkProjectImportCandidates(project, projectPath, relDir)...)
 	}
+	out = append(out, gatherDirectPackagePluginCandidates(project, projectPath)...)
 	return out
 }
 
@@ -451,7 +499,7 @@ func projectImportCandidate(project, projectPath, rel string) (importCandidate, 
 		return importCandidate{}, false
 	}
 	destRel := mapResourceRelToDest(project, rel)
-	if destRel == "" {
+	if destRel == "" && !supportsCanonicalImportPath(rel) {
 		return importCandidate{}, false
 	}
 	return importCandidate{
@@ -485,7 +533,7 @@ func walkedImportCandidate(project, projectPath, path string, d os.DirEntry, err
 	}
 	rel = filepath.ToSlash(rel)
 	destRel := mapResourceRelToDest(project, rel)
-	if destRel == "" {
+	if destRel == "" && !supportsCanonicalImportPath(rel) {
 		return importCandidate{}, false
 	}
 	return importCandidate{
@@ -770,6 +818,9 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	}
 	rel = filepath.ToSlash(rel)
 
+	if outputs, ok, err := canonicalPluginOutputs(c, rel); ok {
+		return outputs, true, err
+	}
 	switch rel {
 	case relCursorHooksJSON:
 		return canonicalHookBundleOutputsFromCursorFile(c.project, c.sourcePath)

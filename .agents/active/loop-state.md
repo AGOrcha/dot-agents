@@ -13,6 +13,7 @@ Active waves:
 - `resource-intent-centralization`: **ALL PHASES COMPLETE (2026-04-12).** Phase 3 checkboxes reconciled — all items were already implemented; YAML tasks advanced to `completed` for phases 3–6; plan status updated. Focused tests (`go test ./internal/platform/...`) green. `go test ./...` fails due to pre-existing pgx dependency absence in `internal/graphstore/postgres.go` (Phase E work not yet `go get`'d) — classified as pre-existing `[tool-bug]`, not regression from this wave.
 - `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active. **Pre-existing blocker:** `postgres.go` imports `github.com/jackc/pgx/v5` which is not in `go.mod`; `go get` required before `go test ./...` passes.
+- `typescript-port`: **Planning wave opened (2026-04-12).** Donor branch `origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines` audited as source material only. Canonical plan + rewritten docs added. Do not merge donor commit wholesale; rebuild `ports/typescript/` against current contracts (`.agentsrc.json` unknown-field preservation, Codex `developer_instructions`, current hook shapes) and keep workflow/plugin/Stage 2 parity explicitly deferred until the relevant Go-side plans settle.
 
 Blocked waves (reassessed):
 - `platform-dir-unification`: Phase 4 (bash parity) is still deferrable — no urgency, bash path is orthogonal.
@@ -22,6 +23,7 @@ State summary:
 - `resource-intent-centralization` is fully complete. All 4 platform adapters have `SharedTargetIntents` implemented. `BuildResourcePlan` dedupes and conflicts. `CollectAndExecuteSharedTargetPlan`, `DryRunSharedTargetPlanLines`, `RunSharedTargetProjection`, `RemoveSharedTargetPlan` all implemented. All agents/ projections centralized. Status/explain wired to same registry.
 - YAML canonical tasks for `resource-intent-centralization`: phases 3–6 all advanced to `completed`; PLAN.yaml status = `completed`.
 - **Pre-existing build break**: `internal/graphstore/postgres.go` imports `pgx/v5` which is missing from `go.mod`. This was introduced by Phase E (crg-kg-integration) work. Requires `go get github.com/jackc/pgx/v5 github.com/jackc/pgx/v5/pgxpool` to fix. Classified as `[tool-bug]`, not a regression from platform work.
+- New canonical plan added: `typescript-port`. This is a planning-only fold-in of the office-machine donor branch. The immediate rule is selective salvage, not cherry-picking `d1b1e46`.
 - Next active wave: `crg-kg-integration` Phase E Postgres backend (after pgx dependency is resolved).
 
 ## Loop Health

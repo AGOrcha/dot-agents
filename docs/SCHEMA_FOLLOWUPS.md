@@ -173,9 +173,9 @@ Drop the manual `validatePluginSpec` function — the schema covers all the same
 
 ### Status
 
-- [ ] `schemas/schemas.go` — new embed + validator package
+- [x] `schemas/schemas.go` — new embed + validator package
 - [ ] `go get github.com/santhosh-tekuri/jsonschema/v5`
-- [ ] Wire `LoadPluginSpec` (implement as part of `plugin-resource-salvage` Phase 4)
+- [x] Wire `LoadPluginSpec` (implement as part of `plugin-resource-salvage` Phase 4)
 - [ ] Wire `loadHookBundleSpec`
 - [ ] Wire `loadCanonicalPlan` / `loadCanonicalTasks` in `commands/workflow.go`
 - [ ] Wire `config.Load` for `.agentsrc.json`

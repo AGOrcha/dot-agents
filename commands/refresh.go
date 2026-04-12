@@ -25,7 +25,12 @@ func NewRefreshCmd() *cobra.Command {
 		Short: "Refresh managed setup in projects from ~/.agents/",
 		Long: `Re-applies links and config from ~/.agents/ into project directories.
 Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
-		Args: cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents refresh",
+			"  dot-agents refresh billing-api",
+			"  dot-agents refresh --import --dry-run",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filter := ""
 			if len(args) > 0 {
@@ -93,7 +98,10 @@ func runRefresh(projectFilter string) error {
 	if projectFilter != "" {
 		path := cfg.GetProjectPath(projectFilter)
 		if path == "" {
-			return fmt.Errorf("project not found: %s", projectFilter)
+			return ErrorWithHints(
+				fmt.Sprintf("project not found: %s", projectFilter),
+				"Run `dot-agents status` to see the registered project names.",
+			)
 		}
 		projects = []string{projectFilter}
 	}

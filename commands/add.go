@@ -201,8 +201,16 @@ func NewAddCmd() *cobra.Command {
 		Use:   "add <path>",
 		Short: "Add a project to dot-agents management",
 		Long: `Registers a project with dot-agents and sets up configuration links.
-Existing config files are backed up before being replaced.`,
-		Args: cobra.ExactArgs(1),
+Existing config files are backed up before being replaced.
+
+Use this when a project should consume shared configuration from ~/.agents/
+and stay refreshable by both human operators and AI agents.`,
+		Example: ExampleBlock(
+			"  dot-agents add .",
+			"  dot-agents add ~/src/my-repo --name billing-api",
+			"  dot-agents add . --dry-run",
+		),
+		Args: ExactArgsWithHints(1, "Pass a project directory such as `.` or `~/src/my-repo`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdd(args[0], name)
 		},

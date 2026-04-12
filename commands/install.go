@@ -32,6 +32,13 @@ Use --generate to create or refresh .agentsrc.json from the current ~/.agents/ s
 If a manifest already exists, generated skill and platform lists replace stale values,
 but existing source entries (for example git remotes), a non-empty project name, and
 unknown JSON keys are preserved.`,
+		Example: ExampleBlock(
+			"  dot-agents install",
+			"  dot-agents install --strict",
+			"  dot-agents install --generate",
+			"  dot-agents install --generate --force",
+		),
+		Args: NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if generate {
 				return runInstallGenerate()
@@ -97,17 +104,21 @@ func loadInstallManifest(projectPath string) (*config.AgentsRC, error) {
 		return rc, nil
 	}
 	if os.IsNotExist(err) {
-		ui.Error(config.AgentsRCFile + " not found in current directory")
-		fmt.Fprintln(os.Stdout, "  Run 'dot-agents install --generate' to create one, or")
-		fmt.Fprintln(os.Stdout, "  run 'dot-agents add .' to register this project first.")
-		return nil, fmt.Errorf("manifest not found")
+		return nil, ErrorWithHints(
+			config.AgentsRCFile+" not found in current directory",
+			"Run `dot-agents install --generate` to create one from the current shared state.",
+			"If this project is not managed yet, run `dot-agents add .` first.",
+		)
 	}
 	return nil, fmt.Errorf("reading %s: %w", config.AgentsRCFile, err)
 }
 
 func ensureAgentsHomeInitialized() error {
 	if _, err := os.Stat(filepath.Join(config.AgentsHome(), "config.json")); err != nil {
-		return fmt.Errorf("~/.agents/ not initialized — run 'dot-agents init' first")
+		return ErrorWithHints(
+			"~/.agents/ not initialized",
+			"Run `dot-agents init` once on this machine before using install.",
+		)
 	}
 	return nil
 }

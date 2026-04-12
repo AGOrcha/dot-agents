@@ -18,6 +18,13 @@ func NewHooksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hooks",
 		Short: "Manage ~/.agents/settings/*/claude-code.json hooks",
+		Long: `Inspects canonical hook definitions stored in ~/.agents. Hook listings help
+both humans and AI agents understand what will run before or after tool actions
+without opening the raw hook files by hand.`,
+		Example: ExampleBlock(
+			"  dot-agents hooks list",
+			"  dot-agents hooks list billing-api",
+		),
 	}
 	cmd.AddCommand(newHooksListCmd())
 	return cmd
@@ -27,7 +34,11 @@ func newHooksListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [project]",
 		Short: "List configured hooks",
-		Args:  cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents hooks list",
+			"  dot-agents hooks list billing-api",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass a project scope to inspect project-local hooks."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scope := "global"
 			if len(args) > 0 {

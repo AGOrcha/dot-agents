@@ -12,8 +12,17 @@ func NewExplainCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "explain [topic]",
 		Short: "Explain dot-agents concepts",
-		Args:  cobra.MaximumNArgs(1),
-		RunE:  runExplain,
+		Long: `Prints operator-facing documentation for the concepts that matter when
+setting up or debugging dot-agents. The output is intentionally compact enough
+for a human to scan and structured enough for an AI agent to quote or reason over.`,
+		Example: ExampleBlock(
+			"  dot-agents explain",
+			"  dot-agents explain manifest",
+			"  dot-agents explain structure",
+			"  dot-agents explain links",
+		),
+		Args: MaximumNArgsWithHints(1, "Supported topics include `manifest`, `structure`, `links`, and `platforms`."),
+		RunE: runExplain,
 	}
 }
 
@@ -197,6 +206,9 @@ func printStructureExplanation() {
 		{"  ├── ", "hooks/", ""},
 		{"  │   ├── ", "global/", "Global hook configs"},
 		{"  │   └── ", "{project}/", "Project-specific hook configs"},
+		{"  ├── ", "plugins/", ""},
+		{"  │   ├── ", "global/", "Plugin bundles"},
+		{"  │   └── ", "{project}/", "Project-specific plugin bundles"},
 		{"  ├── ", "scripts/", "Helper scripts"},
 		{"  ├── ", "local/", "Machine-specific local files"},
 		{"  └── ", "resources/", "Backup files (auto-managed)"},
@@ -208,5 +220,13 @@ func printStructureExplanation() {
 			fmt.Fprintf(os.Stdout, "%s%s%s%s%s\n", l.indent, ui.Cyan, ui.Bold, l.name, ui.Reset)
 		}
 	}
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Plugins")
+	fmt.Fprintf(os.Stdout, "  ~/.agents/plugins/{scope}/{name}/   Plugin bundles\n")
+	fmt.Fprintf(os.Stdout, "    PLUGIN.yaml                      Manifest: kind, name, platforms, resources, platform_overrides\n")
+	fmt.Fprintf(os.Stdout, "    resources/{agents,skills,...}/   Canonical shared components\n")
+	fmt.Fprintf(os.Stdout, "    files/                           Native runtime files (OpenCode JS/TS)\n")
+	fmt.Fprintf(os.Stdout, "    platforms/{id}/                  Platform-specific passthrough (e.g. plugin.json)\n")
 	fmt.Fprintln(os.Stdout)
 }

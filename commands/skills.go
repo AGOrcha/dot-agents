@@ -18,6 +18,14 @@ func NewSkillsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skills",
 		Short: "Manage skills in ~/.agents/skills/",
+		Long: `Lists, creates, and promotes reusable skills stored in the canonical
+~/.agents/skills tree. Skills created here can be linked into projects and consumed
+by supported AI platforms through refresh or install.`,
+		Example: ExampleBlock(
+			"  dot-agents skills list",
+			"  dot-agents skills new agent-start",
+			"  dot-agents skills promote session-start",
+		),
 	}
 	cmd.AddCommand(newSkillsListCmd())
 	cmd.AddCommand(newSkillsNewCmd())
@@ -29,7 +37,11 @@ func newSkillsListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [project]",
 		Short: "List skills",
-		Args:  cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents skills list",
+			"  dot-agents skills list billing-api",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass a project scope to list project-local skills."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scope := "global"
 			if len(args) > 0 {
@@ -142,7 +154,11 @@ func newSkillsNewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "new <name> [project]",
 		Short: "Create a new skill",
-		Args:  cobra.RangeArgs(1, 2),
+		Example: ExampleBlock(
+			"  dot-agents skills new self-review",
+			"  dot-agents skills new repo-bootstrap billing-api",
+		),
+		Args: RangeArgsWithHints(1, 2, "Pass a skill name and optionally a project scope."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			scope := "global"
@@ -226,7 +242,11 @@ func newSkillsPromoteCmd() *cobra.Command {
 		Long: `Promotes a skill from .agents/skills/<name>/ in the current repo to
 ~/.agents/skills/<project>/<name>/, registers it in .agentsrc.json, and
 refreshes shared skill mirrors for all platforms.`,
-		Args: cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents skills promote session-start",
+			"  dot-agents status --audit",
+		),
+		Args: ExactArgsWithHints(1, "Run this from the project repository that owns `.agents/skills/<name>/`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, err := os.Getwd()
 			if err != nil {

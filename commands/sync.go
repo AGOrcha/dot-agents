@@ -15,6 +15,14 @@ func NewSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Git operations on ~/.agents/",
+		Long: `Wraps the most common git workflows for the shared ~/.agents store so you can
+version, inspect, and distribute configuration changes without manually changing
+directories first.`,
+		Example: ExampleBlock(
+			"  dot-agents sync init",
+			"  dot-agents sync status",
+			"  dot-agents sync push",
+		),
 	}
 	cmd.AddCommand(newSyncInitCmd())
 	cmd.AddCommand(newSyncCommitCmd())
@@ -29,6 +37,10 @@ func newSyncInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize git repo in ~/.agents/",
+		Example: ExampleBlock(
+			"  dot-agents sync init",
+			"  dot-agents sync init --dry-run",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
 			gitDir := agentsHome + "/.git"
@@ -103,6 +115,11 @@ func newSyncCommitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "commit [message]",
 		Short: "Commit all changes in ~/.agents/",
+		Example: ExampleBlock(
+			"  dot-agents sync commit",
+			"  dot-agents sync commit \"Update Codex rules\"",
+			"  dot-agents sync commit -m \"Refresh shared hooks\"",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
 

@@ -18,7 +18,16 @@ func NewInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize ~/.agents/ directory structure",
 		Long: `Creates the ~/.agents/ directory structure with starter templates.
-Safe to run multiple times - existing files are preserved unless --force.`,
+Safe to run multiple times - existing files are preserved unless --force.
+
+Run this once per machine before using add, install, refresh, or workflow
+commands that expect the shared store to exist.`,
+		Example: ExampleBlock(
+			"  dot-agents init",
+			"  dot-agents init --dry-run",
+			"  dot-agents init --force",
+		),
+		Args: NoArgsWithHints("`dot-agents init` bootstraps the shared store and does not take a project path."),
 		RunE: runInit,
 	}
 	return cmd

@@ -3,7 +3,6 @@ package commands
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -207,11 +206,25 @@ func NewWorkflowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workflow",
 		Short: "Inspect and persist workflow state",
+		Long: `Captures the repository-local workflow state that helps both humans and
+AI agents resume work safely: canonical plans, checkpoints, verification logs,
+preferences, fanout artifacts, and bridge queries.`,
+		Example: ExampleBlock(
+			"  dot-agents workflow status",
+			"  dot-agents workflow orient",
+			"  dot-agents workflow next",
+			"  dot-agents workflow checkpoint --message \"Resume transport slice\"",
+		),
 	}
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show workflow state for the current project",
+		Example: ExampleBlock(
+			"  dot-agents workflow status",
+			"  dot-agents workflow status --json",
+		),
+		Args: NoArgsWithHints("Run workflow status from inside the project repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowStatus()
 		},
@@ -221,6 +234,10 @@ func NewWorkflowCmd() *cobra.Command {
 	orientCmd := &cobra.Command{
 		Use:   "orient",
 		Short: "Render session orient context for the current project",
+		Example: ExampleBlock(
+			"  dot-agents workflow orient",
+		),
+		Args: NoArgsWithHints("Run workflow orient from inside the project repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowOrient()
 		},
@@ -229,6 +246,11 @@ func NewWorkflowCmd() *cobra.Command {
 	checkpointCmd := &cobra.Command{
 		Use:   "checkpoint",
 		Short: "Write a checkpoint for the current project",
+		Example: ExampleBlock(
+			"  dot-agents workflow checkpoint --message \"Resume plan graph work\"",
+			"  dot-agents workflow checkpoint --verification-status pass --verification-summary \"go test ./...\"",
+		),
+		Args: NoArgsWithHints("Use flags such as `--message` instead of positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowCheckpoint(checkpointMessage, checkpointVerificationState, checkpointVerificationText)
 		},
@@ -240,6 +262,11 @@ func NewWorkflowCmd() *cobra.Command {
 	logCmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show recent checkpoint log entries",
+		Example: ExampleBlock(
+			"  dot-agents workflow log",
+			"  dot-agents workflow log --all",
+		),
+		Args: NoArgsWithHints("Use `--all` to expand the log instead of passing a positional argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowLog(logAll)
 		},
@@ -250,6 +277,11 @@ func NewWorkflowCmd() *cobra.Command {
 	planCmd := &cobra.Command{
 		Use:   "plan",
 		Short: "List canonical plans",
+		Example: ExampleBlock(
+			"  dot-agents workflow plan",
+			"  dot-agents workflow plan show loop-orchestrator-layer",
+			"  dot-agents workflow plan graph",
+		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanList()
 		},
@@ -257,7 +289,10 @@ func NewWorkflowCmd() *cobra.Command {
 	planShowCmd := &cobra.Command{
 		Use:   "show <plan-id>",
 		Short: "Show details of a canonical plan",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow plan show loop-orchestrator-layer",
+		),
+		Args: ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanShow(args[0])
 		},
@@ -265,7 +300,11 @@ func NewWorkflowCmd() *cobra.Command {
 	planGraphCmd := &cobra.Command{
 		Use:   "graph [plan-id]",
 		Short: "Render a derived graph of canonical plans and tasks",
-		Args:  cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow plan graph",
+			"  dot-agents workflow plan graph loop-orchestrator-layer",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass one plan ID to limit the graph output."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planID := ""
 			if len(args) == 1 {
@@ -278,7 +317,10 @@ func NewWorkflowCmd() *cobra.Command {
 	planCreateCmd := &cobra.Command{
 		Use:   "create <plan-id>",
 		Short: "Create a new canonical plan directory with PLAN.yaml and TASKS.yaml stubs",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow plan create repo-cleanup --title \"Repository cleanup\" --summary \"Normalize stale plans\"",
+		),
+		Args: ExactArgsWithHints(1, "Pass a new canonical plan ID such as `repo-cleanup`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanCreate(args[0], planCreateTitle, planCreateSummary, planCreateOwner)
 		},
@@ -292,7 +334,10 @@ func NewWorkflowCmd() *cobra.Command {
 	planUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
 		Short: "Update PLAN.yaml metadata fields",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow plan update repo-cleanup --status active --focus task-triage",
+		),
+		Args: ExactArgsWithHints(1, "Pass an existing canonical plan ID."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanUpdate(args[0], planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus)
 		},
@@ -308,13 +353,20 @@ func NewWorkflowCmd() *cobra.Command {
 	taskCmd := &cobra.Command{
 		Use:   "task",
 		Short: "Add or update tasks within a canonical plan",
+		Example: ExampleBlock(
+			"  dot-agents workflow task add loop-orchestrator-layer --id phase-5 --title \"Transport cleanup\"",
+			"  dot-agents workflow task update loop-orchestrator-layer --task phase-5 --write-scope internal/platform",
+		),
 	}
 	var taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope string
 	var taskAddVerification bool
 	taskAddCmd := &cobra.Command{
 		Use:   "add <plan-id>",
 		Short: "Append a new task to a canonical plan's TASKS.yaml",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow task add loop-orchestrator-layer --id phase-5 --title \"Transport cleanup\"",
+		),
+		Args: ExactArgsWithHints(1, "Pass the canonical plan ID that should receive the new task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTaskAdd(args[0], taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddVerification)
 		},
@@ -334,7 +386,10 @@ func NewWorkflowCmd() *cobra.Command {
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
 		Short: "Update notes, write-scope, or title for an existing task",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow task update loop-orchestrator-layer --task phase-5 --notes \"Needs provider-consumer pairing\"",
+		),
+		Args: ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope)
 		},
@@ -351,7 +406,10 @@ func NewWorkflowCmd() *cobra.Command {
 	tasksCmd := &cobra.Command{
 		Use:   "tasks <plan-id>",
 		Short: "Show tasks for a canonical plan",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow tasks loop-orchestrator-layer",
+		),
+		Args: ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTasks(args[0])
 		},
@@ -360,7 +418,10 @@ func NewWorkflowCmd() *cobra.Command {
 	slicesCmd := &cobra.Command{
 		Use:   "slices <plan-id>",
 		Short: "Show slices for a canonical plan",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow slices loop-orchestrator-layer",
+		),
+		Args: ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowSlices(args[0])
 		},
@@ -369,6 +430,10 @@ func NewWorkflowCmd() *cobra.Command {
 	nextCmd := &cobra.Command{
 		Use:   "next",
 		Short: "Suggest the next actionable canonical task",
+		Example: ExampleBlock(
+			"  dot-agents workflow next",
+		),
+		Args: NoArgsWithHints("`dot-agents workflow next` works on the current repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowNext()
 		},
@@ -379,7 +444,10 @@ func NewWorkflowCmd() *cobra.Command {
 	advanceCmd := &cobra.Command{
 		Use:   "advance <plan-id>",
 		Short: "Advance a task's status within a canonical plan",
-		Args:  cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents workflow advance loop-orchestrator-layer --task phase-5 --status in_progress",
+		),
+		Args: ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowAdvance(args[0], advanceTask, advanceStatus)
 		},
@@ -393,6 +461,10 @@ func NewWorkflowCmd() *cobra.Command {
 	healthCmd := &cobra.Command{
 		Use:   "health",
 		Short: "Show workflow health snapshot",
+		Example: ExampleBlock(
+			"  dot-agents workflow health",
+		),
+		Args: NoArgsWithHints("`dot-agents workflow health` works on the current repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowHealth()
 		},
@@ -402,11 +474,19 @@ func NewWorkflowCmd() *cobra.Command {
 	verifyCmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Manage verification log",
+		Example: ExampleBlock(
+			"  dot-agents workflow verify record --kind test --status pass --summary \"go test ./...\"",
+			"  dot-agents workflow verify log",
+		),
 	}
 	var verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary string
 	verifyRecordCmd := &cobra.Command{
 		Use:   "record",
 		Short: "Record a verification run",
+		Example: ExampleBlock(
+			"  dot-agents workflow verify record --kind test --status pass --command \"go test ./...\" --summary \"all packages passed\"",
+		),
+		Args: NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary)
 		},
@@ -424,6 +504,11 @@ func NewWorkflowCmd() *cobra.Command {
 	verifyLogCmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show verification log entries",
+		Example: ExampleBlock(
+			"  dot-agents workflow verify log",
+			"  dot-agents workflow verify log --all",
+		),
+		Args: NoArgsWithHints("Use `--all` to expand the log instead of passing a positional argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowVerifyLog(verifyLogAll)
 		},
@@ -436,6 +521,12 @@ func NewWorkflowCmd() *cobra.Command {
 	prefsCmd := &cobra.Command{
 		Use:   "prefs",
 		Short: "Show resolved workflow preferences",
+		Example: ExampleBlock(
+			"  dot-agents workflow prefs",
+			"  dot-agents workflow prefs set-local review.depth high",
+			"  dot-agents workflow prefs set-shared model.default gpt-5.4",
+		),
+		Args: NoArgsWithHints("Use `set-local` or `set-shared` subcommands to change values."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPrefs()
 		},
@@ -445,6 +536,10 @@ func NewWorkflowCmd() *cobra.Command {
 	prefsShowCmd := &cobra.Command{
 		Use:   "show",
 		Short: "Show resolved workflow preferences (alias for prefs)",
+		Example: ExampleBlock(
+			"  dot-agents workflow prefs show",
+		),
+		Args: NoArgsWithHints("`dot-agents workflow prefs show` does not accept positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPrefs()
 		},
@@ -453,7 +548,10 @@ func NewWorkflowCmd() *cobra.Command {
 	prefsSetLocalCmd := &cobra.Command{
 		Use:   "set-local <key> <value>",
 		Short: "Set a user-local workflow preference override",
-		Args:  cobra.ExactArgs(2),
+		Example: ExampleBlock(
+			"  dot-agents workflow prefs set-local review.depth high",
+		),
+		Args: ExactArgsWithHints(2, "Pass a preference key and the value to store locally."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPrefsSetLocal(args[0], args[1])
 		},
@@ -462,7 +560,10 @@ func NewWorkflowCmd() *cobra.Command {
 	prefsSetSharedCmd := &cobra.Command{
 		Use:   "set-shared <key> <value>",
 		Short: "Propose a shared workflow preference change (queued for review)",
-		Args:  cobra.ExactArgs(2),
+		Example: ExampleBlock(
+			"  dot-agents workflow prefs set-shared model.default gpt-5.4",
+		),
+		Args: ExactArgsWithHints(2, "Pass a preference key and the value to propose for the shared config."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPrefsSetShared(args[0], args[1])
 		},
@@ -474,11 +575,19 @@ func NewWorkflowCmd() *cobra.Command {
 	graphCmd := &cobra.Command{
 		Use:   "graph",
 		Short: "Query knowledge graph context",
+		Example: ExampleBlock(
+			"  dot-agents workflow graph query --intent plan_context \"loop orchestrator\"",
+			"  dot-agents workflow graph health",
+		),
 	}
 	graphQueryCmd := &cobra.Command{
 		Use:   "query [query string]",
 		Short: "Query graph context by bridge intent",
-		RunE:  runWorkflowGraphQuery,
+		Example: ExampleBlock(
+			"  dot-agents workflow graph query --intent plan_context \"loop orchestrator\"",
+			"  dot-agents workflow graph query --intent contradictions \"resource plan\"",
+		),
+		RunE: runWorkflowGraphQuery,
 	}
 	graphQueryCmd.Flags().String("intent", "", "Bridge intent: plan_context|decision_lookup|entity_context|workflow_memory|contradictions; code-structure intents use dot-agents kg bridge query")
 	graphQueryCmd.Flags().String("scope", "", "Optional scope filter")
@@ -486,7 +595,11 @@ func NewWorkflowCmd() *cobra.Command {
 	graphHealthCmd := &cobra.Command{
 		Use:   "health",
 		Short: "Show graph bridge adapter health",
-		RunE:  runWorkflowGraphHealth,
+		Example: ExampleBlock(
+			"  dot-agents workflow graph health",
+		),
+		Args: NoArgsWithHints("`dot-agents workflow graph health` reports the current repository bridge state."),
+		RunE: runWorkflowGraphHealth,
 	}
 	graphCmd.AddCommand(graphQueryCmd, graphHealthCmd)
 
@@ -494,20 +607,29 @@ func NewWorkflowCmd() *cobra.Command {
 	fanoutCmd := &cobra.Command{
 		Use:   "fanout",
 		Short: "Delegate a task to a sub-agent with a bounded write scope",
-		RunE:  runWorkflowFanout,
+		Example: ExampleBlock(
+			"  dot-agents workflow fanout --plan loop-orchestrator-layer --task phase-5 --owner transport-worker --write-scope internal/platform",
+			"  dot-agents workflow fanout --plan loop-orchestrator-layer --slice phase-5-transport",
+		),
+		Args: NoArgsWithHints("Use `--plan`, `--task`, and related flags instead of positional arguments."),
+		RunE: runWorkflowFanout,
 	}
 	fanoutCmd.Flags().String("plan", "", "Canonical plan ID (required)")
 	fanoutCmd.Flags().String("task", "", "Task ID to delegate (required)")
+	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
 	fanoutCmd.Flags().String("write-scope", "", "Comma-separated file/dir patterns this delegate may touch")
 	_ = fanoutCmd.MarkFlagRequired("plan")
-	_ = fanoutCmd.MarkFlagRequired("task")
 
 	// merge-back subcommand (Wave 6)
 	mergeBackCmd := &cobra.Command{
 		Use:   "merge-back",
 		Short: "Record a sub-agent's completed work as a merge-back artifact",
-		RunE:  runWorkflowMergeBack,
+		Example: ExampleBlock(
+			"  dot-agents workflow merge-back --task phase-5 --summary \"worker finished transport slice\" --verification-status pass",
+		),
+		Args: NoArgsWithHints("Use `--task` and `--summary` flags instead of positional arguments."),
+		RunE: runWorkflowMergeBack,
 	}
 	mergeBackCmd.Flags().String("task", "", "Task ID that was delegated (required)")
 	mergeBackCmd.Flags().String("summary", "", "Summary of what was done (required)")
@@ -520,7 +642,12 @@ func NewWorkflowCmd() *cobra.Command {
 	driftCmd := &cobra.Command{
 		Use:   "drift",
 		Short: "Detect workflow drift across managed repos (read-only)",
-		RunE:  runWorkflowDrift,
+		Example: ExampleBlock(
+			"  dot-agents workflow drift",
+			"  dot-agents workflow drift --project billing-api",
+		),
+		Args: NoArgsWithHints("Use flags such as `--project` instead of positional arguments."),
+		RunE: runWorkflowDrift,
 	}
 	driftCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
 	driftCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
@@ -530,7 +657,12 @@ func NewWorkflowCmd() *cobra.Command {
 	sweepCmd := &cobra.Command{
 		Use:   "sweep",
 		Short: "Plan and optionally apply fixes for workflow drift across managed repos",
-		RunE:  runWorkflowSweep,
+		Example: ExampleBlock(
+			"  dot-agents workflow sweep",
+			"  dot-agents workflow sweep --apply",
+		),
+		Args: NoArgsWithHints("Use flags such as `--apply` instead of positional arguments."),
+		RunE: runWorkflowSweep,
 	}
 	sweepCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
@@ -1293,7 +1425,13 @@ func isValidVerificationStatus(status string) bool {
 	}
 }
 
-var errNoWorkflowProject = errors.New("workflow commands must run inside a project directory")
+var errNoWorkflowProject = &CLIError{
+	Message: "workflow commands must run inside a project directory",
+	Hints: []string{
+		"Run workflow commands from a repository that already contains `.agents/` or `.agentsrc.json`.",
+		"If this repo is not managed yet, start with `dot-agents add .` or `dot-agents install --generate`.",
+	},
+}
 
 // ── Canonical plan I/O ───────────────────────────────────────────────────────
 
@@ -2077,7 +2215,10 @@ func effectivePlanFocusTask(tasks []CanonicalTask) string {
 
 func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if !isValidTaskStatus(newStatus) {
-		return fmt.Errorf("invalid task status %q: must be pending, in_progress, blocked, completed, or cancelled", newStatus)
+		return ErrorWithHints(
+			fmt.Sprintf("invalid task status %q", newStatus),
+			"Valid values: `pending`, `in_progress`, `blocked`, `completed`, `cancelled`.",
+		)
 	}
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2158,7 +2299,10 @@ func runWorkflowPlanCreate(planID, title, summary, owner string) error {
 
 func runWorkflowPlanUpdate(planID, status, title, summary, focus string) error {
 	if status != "" && !isValidPlanStatus(status) {
-		return fmt.Errorf("invalid plan status %q: must be draft, active, paused, completed, or archived", status)
+		return ErrorWithHints(
+			fmt.Sprintf("invalid plan status %q", status),
+			"Valid values: `draft`, `active`, `paused`, `completed`, `archived`.",
+		)
 	}
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2478,13 +2622,22 @@ func runWorkflowHealth() error {
 
 func runWorkflowVerifyRecord(kind, status, command, scope, summary string) error {
 	if !isValidVerificationKind(kind) {
-		return fmt.Errorf("invalid kind %q: must be test, lint, build, format, or custom", kind)
+		return ErrorWithHints(
+			fmt.Sprintf("invalid kind %q", kind),
+			"Valid verification kinds: `test`, `lint`, `build`, `format`, `custom`.",
+		)
 	}
 	if !isValidVerificationStatus(status) {
-		return fmt.Errorf("invalid status %q: must be pass, fail, partial, or unknown", status)
+		return ErrorWithHints(
+			fmt.Sprintf("invalid status %q", status),
+			"Valid verification statuses: `pass`, `fail`, `partial`, `unknown`.",
+		)
 	}
 	if !isValidVerificationScope(scope) {
-		return fmt.Errorf("invalid scope %q: must be file, package, repo, or custom", scope)
+		return ErrorWithHints(
+			fmt.Sprintf("invalid scope %q", scope),
+			"Valid verification scopes: `file`, `package`, `repo`, `custom`.",
+		)
 	}
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2796,7 +2949,10 @@ func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 	case "execution.formatter":
 		p.Execution.Formatter = &value
 	default:
-		return fmt.Errorf("unknown preference key %q", key)
+		return ErrorWithHints(
+			fmt.Sprintf("unknown preference key %q", key),
+			"Run `dot-agents workflow prefs` to list valid preference keys.",
+		)
 	}
 	return nil
 }
@@ -2904,7 +3060,10 @@ func runWorkflowPrefs() error {
 
 func runWorkflowPrefsSetLocal(key, value string) error {
 	if !isValidPreferenceKey(key) {
-		return fmt.Errorf("unknown preference key %q; run 'workflow prefs' to see valid keys", key)
+		return ErrorWithHints(
+			fmt.Sprintf("unknown preference key %q", key),
+			"Run `dot-agents workflow prefs` to see valid preference keys.",
+		)
 	}
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2919,7 +3078,10 @@ func runWorkflowPrefsSetLocal(key, value string) error {
 
 func runWorkflowPrefsSetShared(key, value string) error {
 	if !isValidPreferenceKey(key) {
-		return fmt.Errorf("unknown preference key %q; run 'workflow prefs' to see valid keys", key)
+		return ErrorWithHints(
+			fmt.Sprintf("unknown preference key %q", key),
+			"Run `dot-agents workflow prefs` to see valid preference keys.",
+		)
 	}
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -3255,21 +3417,33 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	}
 	intent, _ := cmd.Flags().GetString("intent")
 	if intent == "" {
-		return fmt.Errorf("--intent is required")
+		return UsageError(
+			"`--intent` is required",
+			"Workflow graph queries require a bridge intent such as `plan_context` or `decision_lookup`.",
+		)
 	}
 	if isWorkflowGraphCodeBridgeIntent(intent) {
-		return fmt.Errorf("workflow graph query does not handle code-structure intent %q; use 'dot-agents kg bridge query --intent %s' instead", intent, intent)
+		return ErrorWithHints(
+			fmt.Sprintf("workflow graph query does not handle code-structure intent %q", intent),
+			fmt.Sprintf("Use `dot-agents kg bridge query --intent %s` instead.", intent),
+		)
 	}
 	cfg, err := loadGraphBridgeConfig(projectPath)
 	if err != nil {
 		return fmt.Errorf("load bridge config: %w", err)
 	}
 	if !cfg.Enabled {
-		return fmt.Errorf("graph bridge not configured — create .agents/workflow/graph-bridge.yaml with enabled: true")
+		return ErrorWithHints(
+			"graph bridge not configured",
+			"Create `.agents/workflow/graph-bridge.yaml` with `enabled: true` to enable workflow graph queries.",
+		)
 	}
 
 	if !isValidWorkflowBridgeIntent(intent) {
-		return fmt.Errorf("unknown intent %q — valid: plan_context, decision_lookup, entity_context, workflow_memory, contradictions", intent)
+		return ErrorWithHints(
+			fmt.Sprintf("unknown intent %q", intent),
+			"Valid workflow bridge intents: `plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions`.",
+		)
 	}
 	// Validate against allowed intents
 	allowed := cfg.AllowedIntents
@@ -3599,13 +3773,47 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 
 	planID, _ := cmd.Flags().GetString("plan")
 	taskID, _ := cmd.Flags().GetString("task")
+	sliceID, _ := cmd.Flags().GetString("slice")
 	owner, _ := cmd.Flags().GetString("owner")
 	writeScopeCSV, _ := cmd.Flags().GetString("write-scope")
+	writeScopeExplicit := cmd.Flags().Changed("write-scope")
 
 	// Validate plan exists
 	plan, err := loadCanonicalPlan(project.Path, planID)
 	if err != nil {
 		return fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	if sliceID != "" && taskID != "" {
+		return fmt.Errorf("provide --slice or --task, not both")
+	}
+
+	var writeScope []string
+	if sliceID != "" {
+		sf, err := loadCanonicalSlices(project.Path, planID)
+		if err != nil {
+			return fmt.Errorf("load slices for plan %s: %w", planID, err)
+		}
+		var found *CanonicalSlice
+		for i := range sf.Slices {
+			if sf.Slices[i].ID == sliceID {
+				found = &sf.Slices[i]
+				break
+			}
+		}
+		if found == nil {
+			return fmt.Errorf("slice %q not found in plan %s", sliceID, planID)
+		}
+		if found.Status == "completed" {
+			return fmt.Errorf("slice %q is already completed", sliceID)
+		}
+		taskID = found.ParentTaskID
+		if !writeScopeExplicit {
+			writeScope = append(writeScope, found.WriteScope...)
+		}
+	}
+	if taskID == "" {
+		return fmt.Errorf("provide --slice <slice-id> or --task <task-id>")
 	}
 
 	// Validate task exists in plan
@@ -3633,8 +3841,8 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Parse write scope
-	var writeScope []string
-	if writeScopeCSV != "" {
+	if writeScopeExplicit {
+		writeScope = writeScope[:0]
 		for _, p := range strings.Split(writeScopeCSV, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {

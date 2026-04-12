@@ -14,6 +14,14 @@ func NewAgentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "Manage agents in ~/.agents/agents/",
+		Long: `Lists and creates reusable agent definitions inside the canonical
+~/.agents/agents tree. These definitions can then be distributed into projects
+through refresh or install flows.`,
+		Example: ExampleBlock(
+			"  dot-agents agents list",
+			"  dot-agents agents new reviewer",
+			"  dot-agents agents new repo-owner billing-api",
+		),
 	}
 	cmd.AddCommand(newAgentsListCmd())
 	cmd.AddCommand(newAgentsNewCmd())
@@ -24,7 +32,11 @@ func newAgentsListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [project]",
 		Short: "List agents",
-		Args:  cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  dot-agents agents list",
+			"  dot-agents agents list billing-api",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass a project scope to list project-local agents."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return listAgents(scopeFromArgs(args))
 		},
@@ -69,7 +81,11 @@ func newAgentsNewCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "new <name> [project]",
 		Short: "Create a new agent",
-		Args:  cobra.RangeArgs(1, 2),
+		Example: ExampleBlock(
+			"  dot-agents agents new reviewer",
+			"  dot-agents agents new doc-writer billing-api",
+		),
+		Args: RangeArgsWithHints(1, 2, "Pass an agent name and optionally a project scope."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return createAgent(args[0], scopeFromArgs(args[1:]))
 		},

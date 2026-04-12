@@ -46,6 +46,17 @@ func NewStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show managed projects and link health",
+		Long: `Summarizes the shared ~/.agents/ store, managed projects, and per-platform
+link health so you can quickly see whether configuration is present, stale, or broken.
+
+Use --audit when you need file-level detail suitable for debugging or for an AI
+agent that must reason about the exact managed outputs.`,
+		Example: ExampleBlock(
+			"  dot-agents status",
+			"  dot-agents status --audit",
+			"  dot-agents status --agent codex",
+		),
+		Args: NoArgsWithHints("Use `--agent` to filter by platform instead of passing a positional argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(audit, agentFilter)
 		},
@@ -310,6 +321,24 @@ func printCanonicalStoreSection(agentsHome string) {
 			continue
 		}
 		fmt.Fprintf(os.Stdout, "  %s✓%s %-9s %s%d scope(s), %d item(s)%s\n", ui.Green, ui.Reset, bucket.name, ui.Dim, scopes, entries, ui.Reset)
+	}
+
+	printPluginsSection(agentsHome)
+}
+
+func printPluginsSection(agentsHome string) {
+	specs, err := platform.ListPluginSpecs(agentsHome, "")
+	if err != nil || len(specs) == 0 {
+		return
+	}
+
+	ui.Section("Plugins")
+	for _, spec := range specs {
+		scope := spec.Scope
+		if scope == "" {
+			scope = "global"
+		}
+		fmt.Fprintf(os.Stdout, "  %s  [%s]\n", spec.Name, scope)
 	}
 }
 
