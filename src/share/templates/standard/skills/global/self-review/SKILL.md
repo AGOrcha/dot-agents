@@ -18,6 +18,7 @@ Review your own changes before committing or creating a pull request.
 
 1. **Review the diff**
    - Run `git diff` to see all changes
+   - Optional graph-backed context: `dot-agents kg changes --brief` (same code graph as `kg update` / review skills) when the change touches structural risk
    - Check each file for unintended modifications
    - Look for debugging code or console.logs to remove
 

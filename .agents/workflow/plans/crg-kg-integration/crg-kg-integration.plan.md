@@ -5,7 +5,7 @@ Spec references:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - `.agents/active/kg-phase-5-bridge-readiness.plan.md`
 
-Status: Phase A + Phase B + Phase C + Phase D complete (2026-04-11). Phase E (Postgres backend) is next; Phase F (Go MCP server) remains active after Phase E; Phase G (skill integration) is deferred until E/F land and the new graph surfaces are exercised.
+Status: Phases A–F complete in canonical TASKS (2026-04-12). Phase G (skill integration) is **in progress**: CRG skills are embedded as tracked templates under `src/share/templates/standard/skills/global/` (build-graph, review-delta, review-pr) with self-review/agent-start touch-ups; global hook YAML under `~/.agents/hooks/global/` remains to align for full Phase G closeout.
 Created: 2026-04-10
 
 ## Problem

@@ -64,7 +64,7 @@ tasks:
         TestFanoutSliceAlreadyCompleted. See plan.md Phase 4 section for full code sketch and test shapes.
     - id: phase-5-kg-first-understanding
       title: Phase 5 — Auto-route code-structure intents in workflow graph query to kg bridge
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-spec-and-operating-model
       blocks: []

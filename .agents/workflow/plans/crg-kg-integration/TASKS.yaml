@@ -46,12 +46,17 @@ tasks:
         See plan.md Phase F for full struct definitions, tool catalog table, and test shapes.
     - id: phase-g-skill-integration
       title: Phase G — Wire build-graph / review-delta / review-pr skills to native dot-agents kg commands
-      status: pending
+      status: in_progress
       depends_on:
         - phase-f-go-mcp
       blocks: []
       owner: dot-agents
       write_scope:
+        - src/share/templates/standard/skills/global/build-graph/
+        - src/share/templates/standard/skills/global/review-delta/
+        - src/share/templates/standard/skills/global/review-pr/
+        - src/share/templates/standard/skills/global/self-review/
+        - src/share/templates/standard/skills/global/agent-start/
         - .agents/skills/build-graph/
         - .agents/skills/review-delta/
         - .agents/skills/review-pr/
@@ -76,3 +81,8 @@ tasks:
           graph-orient/HOOK.yaml (session_start, "dot-agents kg status")
           graph-precommit/HOOK.yaml (pre_commit, "dot-agents kg changes --brief")
         See plan.md Hooks Integration section for exact HOOK.yaml content.
+
+        Merge-back 2026-04-12: Canonical embedded copies added under
+        src/share/templates/standard/skills/global/ for build-graph, review-delta, review-pr; self-review and
+        agent-start templates updated for kg/workflow readback. Global ~/.agents/skills/global remains the
+        runtime mirror; hooks under ~/.agents/hooks/global/ still TODO for full Phase G closeout.
