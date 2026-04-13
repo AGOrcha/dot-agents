@@ -498,9 +498,6 @@ func runAdd(pathArg, nameArg string) error {
 		}
 	}
 
-	// Add .agents-refresh to .gitignore
-	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
-
 	// Step 6: Register
 	cfg.AddProject(projectName, projectPath)
 	if err := cfg.Save(); err != nil {

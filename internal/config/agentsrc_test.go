@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 const (
@@ -293,6 +294,7 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
 		},
 	}
+	orig.SetRefreshMetadata("1.2.3", "abcdef12", "v1.2.3", time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC))
 
 	if err := orig.Save(tmp); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -326,6 +328,12 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	}
 	if len(got.Sources) != 2 || got.Sources[1].URL != orig.Sources[1].URL {
 		t.Errorf("Sources: got %+v, want %+v", got.Sources, orig.Sources)
+	}
+	if got.Refresh == nil {
+		t.Fatal("Refresh: got nil, want metadata")
+	}
+	if !reflect.DeepEqual(got.Refresh, orig.Refresh) {
+		t.Errorf("Refresh: got %+v, want %+v", got.Refresh, orig.Refresh)
 	}
 }
 
@@ -414,7 +422,7 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 	existing := &AgentsRC{
 		Version:     1,
 		Sources:     []Source{{Type: "git", URL: "https://x.test/r.git"}},
-		ExtraFields: map[string]json.RawMessage{"refresh": legacy},
+		ExtraFields: map[string]json.RawMessage{"customExtension": legacy},
 	}
 	generated := &AgentsRC{
 		Version: 1,
@@ -422,8 +430,25 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 		Skills:  []string{"s"},
 	}
 	out := MergeGenerateAgentsRC(existing, generated)
-	if len(out.ExtraFields) != 1 || string(out.ExtraFields["refresh"]) != string(legacy) {
+	if len(out.ExtraFields) != 1 || string(out.ExtraFields["customExtension"]) != string(legacy) {
 		t.Errorf("ExtraFields not preserved: %#v", out.ExtraFields)
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesRefresh(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	existing.SetRefreshMetadata("1.0.0", "abc", "v1.0.0", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
+	generated := &AgentsRC{
+		Version: 1,
+		Skills:  []string{"s"},
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.Refresh == nil || out.Refresh.Version != "1.0.0" || out.Refresh.RefreshedAt == "" {
+		t.Fatalf("Refresh not preserved: %+v", out.Refresh)
 	}
 }
 
@@ -844,8 +869,8 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
 
-	// Write a manifest that contains a legacy "refresh" block and a custom
-	// "myteam" key that AgentsRC does not model.
+	// Write a manifest that contains custom keys that AgentsRC does not model.
+	// ("refresh" is now a first-class field; use a different key for unknown JSON.)
 	input := `{
   "version": 1,
   "project": "myproject",
@@ -853,7 +878,7 @@ func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
   "hooks": false,
   "mcp": false,
   "settings": false,
-  "refresh": {"interval": "daily", "auto": true},
+  "customPolicy": {"interval": "daily", "auto": true},
   "myteam": "platform"
 }`
 	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
@@ -873,8 +898,8 @@ func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
 	if len(rc.ExtraFields) != 2 {
 		t.Fatalf("ExtraFields: got %d keys, want 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
 	}
-	if _, ok := rc.ExtraFields["refresh"]; !ok {
-		t.Error("ExtraFields missing 'refresh'")
+	if _, ok := rc.ExtraFields["customPolicy"]; !ok {
+		t.Error("ExtraFields missing 'customPolicy'")
 	}
 	if _, ok := rc.ExtraFields["myteam"]; !ok {
 		t.Error("ExtraFields missing 'myteam'")
@@ -897,16 +922,15 @@ func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
 	if len(rc2.ExtraFields) != 2 {
 		t.Fatalf("ExtraFields after save: got %d keys, want 2; keys: %v", len(rc2.ExtraFields), rc2.ExtraFields)
 	}
-	if _, ok := rc2.ExtraFields["refresh"]; !ok {
-		t.Error("ExtraFields after save missing 'refresh'")
+	if _, ok := rc2.ExtraFields["customPolicy"]; !ok {
+		t.Error("ExtraFields after save missing 'customPolicy'")
 	}
-	// Verify the refresh block value is intact
-	var refreshVal map[string]any
-	if err := json.Unmarshal(rc2.ExtraFields["refresh"], &refreshVal); err != nil {
-		t.Fatalf("unmarshal refresh extra field: %v", err)
+	var policyVal map[string]any
+	if err := json.Unmarshal(rc2.ExtraFields["customPolicy"], &policyVal); err != nil {
+		t.Fatalf("unmarshal customPolicy extra field: %v", err)
 	}
-	if refreshVal["interval"] != "daily" {
-		t.Errorf("refresh.interval: got %v, want 'daily'", refreshVal["interval"])
+	if policyVal["interval"] != "daily" {
+		t.Errorf("customPolicy.interval: got %v, want 'daily'", policyVal["interval"])
 	}
 }
 

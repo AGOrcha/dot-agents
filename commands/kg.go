@@ -1098,7 +1098,8 @@ func runKGIngest(cmd *cobra.Command, args []string) error {
 	}
 
 	ingestAll, _ := cmd.Flags().GetBool("all")
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	localDryRun, _ := cmd.Flags().GetBool("dry-run")
+	dryRun := Flags.DryRun || localDryRun
 	sourceTitle, _ := cmd.Flags().GetString("title")
 	sourceType, _ := cmd.Flags().GetString("type")
 	if sourceType == "" {

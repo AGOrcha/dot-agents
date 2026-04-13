@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -183,5 +184,34 @@ func TestStatusJSONOutput(t *testing.T) {
 	}
 	if !report.Projects[0].PathExists {
 		t.Fatalf("expected project path to exist in report: %#v", report.Projects[0])
+	}
+}
+
+func TestReadRefreshTimestampPrefersAgentsRCMetadata(t *testing.T) {
+	projectPath := t.TempDir()
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "proj",
+		Sources: []config.Source{{Type: "local"}},
+	}
+	rc.SetRefreshMetadata("1.0.0", "abc123", "v1.0.0", time.Date(2026, 3, 31, 5, 18, 11, 0, time.UTC))
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectPath, ".agents-refresh"), []byte("refreshed_at=2020-01-01T00:00:00Z\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readRefreshTimestamp(projectPath); got != "2026-03-31 05:18 UTC" {
+		t.Fatalf("readRefreshTimestamp() = %q, want %q", got, "2026-03-31 05:18 UTC")
+	}
+}
+
+func TestReadRefreshTimestampFallsBackToLegacyMarker(t *testing.T) {
+	projectPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectPath, ".agents-refresh"), []byte("refreshed_at=2026-03-31T07:45:00Z\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readRefreshTimestamp(projectPath); got != "2026-03-31 07:45 UTC" {
+		t.Fatalf("readRefreshTimestamp() = %q, want %q", got, "2026-03-31 07:45 UTC")
 	}
 }

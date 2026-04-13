@@ -295,6 +295,9 @@ func newSyncPullCmd() *cobra.Command {
 		Use:   "pull",
 		Short: "Pull latest changes from remote",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if Flags.DryRun {
+				return fmt.Errorf("sync pull: --dry-run is not supported (git pull would still run); omit --dry-run for this subcommand")
+			}
 			agentsHome := config.AgentsHome()
 			out, err := exec.Command("git", "-C", agentsHome, "pull").CombinedOutput()
 			fmt.Fprint(os.Stdout, string(out))

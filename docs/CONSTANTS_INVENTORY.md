@@ -173,7 +173,7 @@ scripts/install.sh:28:LOCAL_SRC="${DOT_AGENTS_LOCAL_SRC:-}"  # Set to local src/
 src/lib/platforms/opencode.sh:24:OPENCODE_USER_AGENTS="${OPENCODE_USER_AGENTS:-$HOME/.opencode/agent}"
 src/lib/platforms/codex.sh:23:CODEX_USER_AGENTS="${CODEX_USER_AGENTS:-$HOME/.codex/agents}"
 src/lib/platforms/codex.sh:24:CODEX_USER_SKILLS="${CODEX_USER_SKILLS:-$HOME/.agents/skills}"
-src/lib/commands/refresh.sh:49:REFRESH_MARKER_BASENAME=".agents-refresh"
+internal/projectsync/projectsync.go:WriteRefreshToAgentsRC
 src/lib/utils/platform-registry.sh:6:PLATFORM_IDS=(cursor claude codex opencode copilot)
-src/lib/commands/install.sh:16:AGENTSRC_FILE=".agentsrc.json"
+src/lib/commands/install.sh:AGENTSRC_FILE=".agentsrc.json"
 ```

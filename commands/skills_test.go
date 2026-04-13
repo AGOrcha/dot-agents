@@ -111,8 +111,8 @@ func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 }
 
 // TestPromoteSkillIn_PreservesManifestUnknownFields regression-tests that promote's
-// LoadAgentsRC → append Skills → Save path keeps ExtraFields (legacy refresh block,
-// custom keys) and known multi-source declarations — not only the isolated marshal tests.
+// LoadAgentsRC → append Skills → Save path keeps ExtraFields (custom keys) and known
+// multi-source declarations — not only the isolated marshal tests.
 func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, "agents")
@@ -132,7 +132,7 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
   "hooks": false,
   "mcp": false,
   "settings": false,
-  "refresh": {"interval": "daily", "auto": true},
+  "customPolicy": {"interval": "daily", "auto": true},
   "myteam": "platform"
 }`
 	if err := os.WriteFile(filepath.Join(projectPath, config.AgentsRCFile), []byte(manifest), 0644); err != nil {
@@ -152,18 +152,18 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 	if len(rc.ExtraFields) < 2 {
 		t.Fatalf("ExtraFields: got %d keys, want at least 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
 	}
-	if _, ok := rc.ExtraFields["refresh"]; !ok {
-		t.Error("ExtraFields missing 'refresh' after promote")
+	if _, ok := rc.ExtraFields["customPolicy"]; !ok {
+		t.Error("ExtraFields missing 'customPolicy' after promote")
 	}
 	if _, ok := rc.ExtraFields["myteam"]; !ok {
 		t.Error("ExtraFields missing 'myteam' after promote")
 	}
-	var refreshVal map[string]any
-	if err := json.Unmarshal(rc.ExtraFields["refresh"], &refreshVal); err != nil {
-		t.Fatalf("unmarshal refresh: %v", err)
+	var policyVal map[string]any
+	if err := json.Unmarshal(rc.ExtraFields["customPolicy"], &policyVal); err != nil {
+		t.Fatalf("unmarshal customPolicy: %v", err)
 	}
-	if refreshVal["interval"] != "daily" {
-		t.Errorf("refresh.interval: got %v, want daily", refreshVal["interval"])
+	if policyVal["interval"] != "daily" {
+		t.Errorf("customPolicy.interval: got %v, want daily", policyVal["interval"])
 	}
 	if len(rc.Sources) < 2 {
 		t.Errorf("Sources: want at least 2 entries preserved, got %+v", rc.Sources)

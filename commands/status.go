@@ -720,8 +720,26 @@ func printBadgeRow(badges []platformBadge) {
 	fmt.Fprintln(os.Stdout)
 }
 
-// readRefreshTimestamp reads the refreshed_at field from .agents-refresh
+// readRefreshTimestamp prefers refresh metadata in .agentsrc.json and falls back to
+// the legacy .agents-refresh marker.
 func readRefreshTimestamp(projectPath string) string {
+	if rc, err := config.LoadAgentsRC(projectPath); err == nil && rc.Refresh != nil && rc.Refresh.RefreshedAt != "" {
+		return formatRefreshDisplay(rc.Refresh.RefreshedAt)
+	}
+	return readLegacyRefreshTimestamp(projectPath)
+}
+
+func formatRefreshDisplay(ts string) string {
+	// Simplify ISO timestamp: 2026-03-12T05:18:11Z → 2026-03-12 05:18 UTC
+	ts = strings.Replace(ts, "T", " ", 1)
+	ts = strings.TrimSuffix(ts, "Z")
+	if len(ts) >= 16 {
+		ts = ts[:16] + " UTC"
+	}
+	return ts
+}
+
+func readLegacyRefreshTimestamp(projectPath string) string {
 	markerPath := filepath.Join(projectPath, ".agents-refresh")
 	f, err := os.Open(markerPath)
 	if err != nil {
@@ -732,14 +750,7 @@ func readRefreshTimestamp(projectPath string) string {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "refreshed_at=") {
-			ts := strings.TrimPrefix(line, "refreshed_at=")
-			// Simplify ISO timestamp: 2026-03-12T05:18:11Z → 2026-03-12 05:18 UTC
-			ts = strings.Replace(ts, "T", " ", 1)
-			ts = strings.TrimSuffix(ts, "Z")
-			if len(ts) >= 16 {
-				ts = ts[:16] + " UTC"
-			}
-			return ts
+			return formatRefreshDisplay(strings.TrimPrefix(line, "refreshed_at="))
 		}
 	}
 	return ""

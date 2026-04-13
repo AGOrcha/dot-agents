@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // isDirEntry reports whether the path is a directory, following symlinks.
@@ -96,20 +97,42 @@ func (s *StringsOrBool) UnmarshalJSON(data []byte) error {
 
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
 type AgentsRC struct {
-	Schema   string        `json:"$schema,omitempty"`
-	Version  int           `json:"version"`
-	Project  string        `json:"project,omitempty"`
-	Skills   []string      `json:"skills,omitempty"`
-	Rules    []string      `json:"rules,omitempty"`
-	Agents   []string      `json:"agents,omitempty"`
-	Hooks    StringsOrBool `json:"hooks"`
-	MCP      StringsOrBool `json:"mcp"`
-	Settings bool          `json:"settings"`
-	Sources  []Source      `json:"sources"`
+	Schema   string           `json:"$schema,omitempty"`
+	Version  int              `json:"version"`
+	Project  string           `json:"project,omitempty"`
+	Skills   []string         `json:"skills,omitempty"`
+	Rules    []string         `json:"rules,omitempty"`
+	Agents   []string         `json:"agents,omitempty"`
+	Hooks    StringsOrBool    `json:"hooks"`
+	MCP      StringsOrBool    `json:"mcp"`
+	Settings bool             `json:"settings"`
+	Sources  []Source         `json:"sources"`
+	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// RefreshMetadata records the latest dot-agents install/refresh that updated a project.
+type RefreshMetadata struct {
+	Version     string `json:"version,omitempty"`
+	Commit      string `json:"commit,omitempty"`
+	Describe    string `json:"describe,omitempty"`
+	RefreshedAt string `json:"refreshedAt,omitempty"`
+}
+
+// SetRefreshMetadata stores the latest refresh details in the manifest.
+func (a *AgentsRC) SetRefreshMetadata(version, commit, describe string, refreshedAt time.Time) {
+	if a == nil {
+		return
+	}
+	a.Refresh = &RefreshMetadata{
+		Version:     version,
+		Commit:      commit,
+		Describe:    describe,
+		RefreshedAt: refreshedAt.UTC().Format(time.RFC3339),
+	}
 }
 
 // agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
@@ -117,21 +140,23 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
+	"refresh": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
 // infinite recursion while still using the standard json encoder.
 type agentsRCCore struct {
-	Schema   string        `json:"$schema,omitempty"`
-	Version  int           `json:"version"`
-	Project  string        `json:"project,omitempty"`
-	Skills   []string      `json:"skills,omitempty"`
-	Rules    []string      `json:"rules,omitempty"`
-	Agents   []string      `json:"agents,omitempty"`
-	Hooks    StringsOrBool `json:"hooks"`
-	MCP      StringsOrBool `json:"mcp"`
-	Settings bool          `json:"settings"`
-	Sources  []Source      `json:"sources"`
+	Schema   string           `json:"$schema,omitempty"`
+	Version  int              `json:"version"`
+	Project  string           `json:"project,omitempty"`
+	Skills   []string         `json:"skills,omitempty"`
+	Rules    []string         `json:"rules,omitempty"`
+	Agents   []string         `json:"agents,omitempty"`
+	Hooks    StringsOrBool    `json:"hooks"`
+	MCP      StringsOrBool    `json:"mcp"`
+	Settings bool             `json:"settings"`
+	Sources  []Source         `json:"sources"`
+	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -149,6 +174,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.MCP = core.MCP
 	a.Settings = core.Settings
 	a.Sources = core.Sources
+	a.Refresh = core.Refresh
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -177,6 +203,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		MCP:      a.MCP,
 		Settings: a.Settings,
 		Sources:  a.Sources,
+		Refresh:  a.Refresh,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -304,6 +331,9 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	}
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
+	}
+	if existing.Refresh != nil {
+		out.Refresh = existing.Refresh
 	}
 	return &out
 }

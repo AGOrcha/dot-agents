@@ -83,11 +83,26 @@ func RefreshMarkerContent(version, commit, describe string) []byte {
 	return []byte(content)
 }
 
-// WriteRefreshMarker writes a .agents-refresh marker into projectPath and
-// ensures the path is listed in .gitignore.
-func WriteRefreshMarker(projectPath, version, commit, describe string) {
-	markerPath := filepath.Join(projectPath, ".agents-refresh")
-	content := RefreshMarkerContent(version, commit, describe)
-	os.WriteFile(markerPath, content, 0644) //nolint:errcheck
-	EnsureGitignoreEntry(projectPath, ".agents-refresh")
+// WriteRefreshToAgentsRC updates or creates .agentsrc.json with refresh metadata
+// (version, commit, describe, refreshedAt) and removes a legacy .agents-refresh file if present.
+func WriteRefreshToAgentsRC(projectName, projectPath, version, commit, describe string) error {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		rc, err = config.GenerateAgentsRC(projectName, projectPath)
+		if err != nil {
+			return err
+		}
+	}
+	rc.SetRefreshMetadata(version, commit, describe, time.Now())
+	if err := rc.Save(projectPath); err != nil {
+		return err
+	}
+	legacy := filepath.Join(projectPath, ".agents-refresh")
+	if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

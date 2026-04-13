@@ -88,7 +88,7 @@ func runInstall(strict bool) error {
 	}
 
 	createInstallPlatformLinks(projectName, projectPath)
-	finalizeInstall(projectPath)
+	finalizeInstall(projectName, projectPath)
 
 	ui.SuccessBox(
 		fmt.Sprintf("Project '%s' installed successfully!", projectName),
@@ -237,12 +237,15 @@ func createInstallPlatformLinks(projectName, projectPath string) {
 	}
 }
 
-func finalizeInstall(projectPath string) {
+func finalizeInstall(projectName, projectPath string) {
 	if Flags.DryRun {
 		return
 	}
-	projectsync.WriteRefreshMarker(projectPath, Version, Commit, Describe)
-	ui.Bullet("ok", "Wrote .agents-refresh marker")
+	if err := projectsync.WriteRefreshToAgentsRC(projectName, projectPath, Version, Commit, Describe); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+		return
+	}
+	ui.Bullet("ok", "Updated .agentsrc.json refresh details")
 }
 
 // ─── runInstallGenerate ──────────────────────────────────────────────────────

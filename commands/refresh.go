@@ -174,9 +174,11 @@ func runRefresh(projectFilter string) error {
 		}
 
 		if !Flags.DryRun {
-			projectsync.WriteRefreshMarker(path, Version, refreshCommit, refreshDescribe)
+			if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+				ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+			}
 		} else {
-			msg := "Write .agents-refresh"
+			msg := "Update .agentsrc.json refresh details"
 			if refreshCommit != "" {
 				msg += " (commit=" + refreshCommit[:8] + ")"
 			}

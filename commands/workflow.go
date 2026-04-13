@@ -307,14 +307,13 @@ preferences, fanout artifacts, and bridge queries.`,
 		Short: "Show workflow state for the current project",
 		Example: ExampleBlock(
 			"  dot-agents workflow status",
-			"  dot-agents workflow status --json",
+			"  dot-agents --json workflow status",
 		),
 		Args: NoArgsWithHints("Run workflow status from inside the project repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowStatus()
 		},
 	}
-	statusCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 
 	orientCmd := &cobra.Command{
 		Use:   "orient",
@@ -616,7 +615,6 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPrefs()
 		},
 	}
-	prefsCmd.Flags().BoolP("json", "j", false, "Output as JSON")
 
 	prefsShowCmd := &cobra.Command{
 		Use:   "show",

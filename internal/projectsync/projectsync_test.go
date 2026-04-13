@@ -84,3 +84,34 @@ func TestRefreshMarkerContent_EmptyOptionals(t *testing.T) {
 		t.Error("should include version")
 	}
 }
+
+func TestWriteRefreshToAgentsRC_CreatesManifestAndRemovesLegacy(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(projectPath, ".agents-refresh")
+	if err := os.WriteFile(legacy, []byte("legacy\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectsync.WriteRefreshToAgentsRC("myproj", projectPath, "1.0.0", "deadbeef", "v1"); err != nil {
+		t.Fatalf("WriteRefreshToAgentsRC: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"refresh"`) || !strings.Contains(s, "deadbeef") {
+		t.Fatalf("manifest missing refresh metadata: %s", s)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy .agents-refresh should be removed: stat err=%v", err)
+	}
+}
