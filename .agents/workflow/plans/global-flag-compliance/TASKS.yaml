@@ -31,7 +31,7 @@ tasks:
       notes: Decide where flags should work semantically versus where the CLI should reject them with a usage error.
     - id: implement-command-fixes
       title: Implement compliance fixes or explicit rejections for mismatched commands
-      status: pending
+      status: completed
       depends_on:
         - inventory-global-flag-behavior
         - define-supported-flag-contract
