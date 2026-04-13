@@ -25,7 +25,7 @@ tasks:
         - Fold-back: merge-back integrated — TS port Phase 1 donor audit complete; plan aligned to current Go contracts.
     - id: phase-2-foundations-on-current-contracts
       title: Phase 2 — Rebuild core config, path, link, and hook foundations on current contracts
-      status: pending
+      status: in_progress
       depends_on:
         - phase-1-donor-audit-and-docs
       blocks:
@@ -42,6 +42,16 @@ tasks:
         - MCP detection compatibility (`servers`, documented `mcpServers`, and `.mcp.json` inputs)
         - Codex TOML `developer_instructions` emission instead of `is_background`
         - hook render/import expectations proven by current Go tests
+
+        CONSTRAINTS (as of 2026-04-13):
+        - Pre-existing build break: `internal/graphstore/postgres.go` imports `pgx/v5` which is absent
+          from go.mod. This breaks `go run ./cmd/dot-agents` and `go test ./...` for the whole repo.
+          Fix before any Go CLI verification: `go get github.com/jackc/pgx/v5 github.com/jackc/pgx/v5/pgxpool`.
+          TypeScript tests (`ports/typescript/`) are unaffected — run those with the TS test runner only.
+        - Do NOT cherry-pick donor commit d1b1e46 wholesale. Rebuild against current contracts.
+        - Workflow/plugin/Stage 2 parity is explicitly deferred until platform-dir-unification and
+          plugin-resource-salvage settle. Do not pull those surfaces into this phase.
+        - Write scope is strict: ports/typescript/src/core/, ports/typescript/src/platforms/, ports/typescript/tests/
     - id: phase-3-stage1-command-mvp
       title: Phase 3 — Land a bounded Stage 1 command MVP for restricted machines
       status: pending
