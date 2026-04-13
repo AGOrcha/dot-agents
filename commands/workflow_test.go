@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,28 @@ import (
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
+
+// dotAgentsRepoRoot returns the module root (directory containing go.mod) by walking
+// up from this test file. It does not depend on process working directory, which can
+// be stale or under a deleted t.TempDir() after other tests use os.Chdir.
+func dotAgentsRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("go.mod not found walking up from %s", file)
+		}
+		dir = parent
+	}
+}
 
 func initWorkflowTestRepo(t *testing.T) string {
 	t.Helper()
@@ -1803,11 +1826,7 @@ func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
 	oldExe := workflowDotAgentsExe
 	t.Cleanup(func() { workflowDotAgentsExe = oldExe })
 
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	repoRoot := filepath.Clean(filepath.Join(wd, ".."))
+	repoRoot := dotAgentsRepoRoot(t)
 	bin := filepath.Join(t.TempDir(), "dot-agents")
 	build := exec.Command("go", "build", "-o", bin, "./cmd/dot-agents")
 	build.Dir = repoRoot
@@ -1829,7 +1848,7 @@ func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runWorkflowGraphQuery(cmd, []string{"SomeQuery"})
+	err := runWorkflowGraphQuery(cmd, []string{"SomeQuery"})
 	if err == nil {
 		t.Fatal("expected error from kg bridge when graph is not initialized")
 	}

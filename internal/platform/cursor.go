@@ -1,10 +1,12 @@
 package platform
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -17,6 +19,12 @@ const (
 	cursorJSON        = "cursor.json"
 	cursorDir         = ".cursor"
 	globalRulesPrefix = "global--"
+
+	// cliVersionProbeTimeout bounds subprocess wall time for --version / defaults probes.
+	cliVersionProbeTimeout = 5 * time.Second
+	// cliExecPipeWaitDelay is exec.Cmd.WaitDelay: without this, Cmd.Output can block forever
+	// in awaitGoroutines after the process is killed if pipe copy goroutines stall (Go 1.20+).
+	cliExecPipeWaitDelay = 3 * time.Second
 )
 
 func NewCursor() Platform { return &cursor{} }
@@ -28,35 +36,69 @@ func (c *cursor) IsInstalled() bool {
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
 		return true
 	}
+	if _, err := exec.LookPath("agent"); err == nil {
+		return true
+	}
 	_, err := exec.LookPath("cursor")
 	return err == nil
 }
 
 func (c *cursor) Version() string {
-	// Try app version on macOS
+	// macOS app bundle version via defaults; bounded so tests/doctor never hang.
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
-		out, err := exec.Command("defaults", "read",
-			"/Applications/Cursor.app/Contents/Info.plist",
-			"CFBundleShortVersionString").Output()
-		if err == nil {
-			appVer := strings.TrimSpace(string(out))
-			if path, err := exec.LookPath("cursor"); err == nil {
-				cliOut, err := exec.Command(path, "--version").Output()
-				if err == nil {
-					cliVer := strings.TrimSpace(strings.Split(string(cliOut), "\n")[0])
-					return appVer + " (CLI: " + cliVer + ")"
-				}
+		appVer, err := macOSCursorAppShortVersion()
+		if err == nil && appVer != "" {
+			if cli := firstCLIPeekVersion("agent", "cursor"); cli != "" {
+				return appVer + " (CLI: " + cli + ")"
 			}
 			return appVer + " (App)"
 		}
 	}
-	if path, err := exec.LookPath("cursor"); err == nil {
-		out, err := exec.Command(path, "--version").Output()
-		if err == nil {
-			return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return firstCLIPeekVersion("agent", "cursor")
+}
+
+func macOSCursorAppShortVersion() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "defaults", "read",
+		"/Applications/Cursor.app/Contents/Info.plist",
+		"CFBundleShortVersionString")
+	cmd.WaitDelay = cliExecPipeWaitDelay
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// firstCLIPeekVersion runs `<name> --version` for the first resolvable binary in order.
+// Official Cursor CLI uses `agent` (see install docs); `cursor` remains a fallback.
+func firstCLIPeekVersion(binNames ...string) string {
+	for _, name := range binNames {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		v, err := peekCLIVersionLine(path)
+		if err == nil && v != "" {
+			return v
 		}
 	}
 	return ""
+}
+
+// peekCLIVersionLine runs a CLI `--version` probe with a wall-clock bound so doctor and
+// tests cannot hang when a shim blocks (e.g. TTY/GUI interaction).
+func peekCLIVersionLine(path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	cmd.WaitDelay = cliExecPipeWaitDelay
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.Split(string(out), "\n")[0]), nil
 }
 
 func (c *cursor) HasDeprecatedFormat(repoPath string) bool {
