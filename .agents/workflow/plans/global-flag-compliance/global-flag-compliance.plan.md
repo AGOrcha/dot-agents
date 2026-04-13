@@ -1,6 +1,6 @@
 # Global Flag Compliance Plan
 
-Status: Active
+Status: Completed
 
 ## Problem
 
