@@ -1,45 +1,58 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
-plan_id: "global-flag-compliance"
+plan_id: global-flag-compliance
 tasks:
-  - id: "inventory-global-flag-behavior"
-    title: "Inventory root-level global flag behavior across top-level and nested commands"
-    status: "in_progress"
-    depends_on: []
-    blocks:
-      - "define-supported-flag-contract"
-      - "implement-command-fixes"
-    owner: "dot-agents"
-    write_scope: ["cmd/dot-agents/", "commands/"]
-    verification_required: false
-    notes: "Prompted by CI review: status advertised --json globally but emitted human-formatted output. Need a command-by-command matrix before broad fixes."
-  - id: "define-supported-flag-contract"
-    title: "Define the supported/unsupported contract for each global flag"
-    status: "pending"
-    depends_on: ["inventory-global-flag-behavior"]
-    blocks:
-      - "implement-command-fixes"
-      - "add-regression-coverage"
-    owner: "dot-agents"
-    write_scope: ["cmd/dot-agents/", "commands/", "docs/"]
-    verification_required: false
-    notes: "Decide where flags should work semantically versus where the CLI should reject them with a usage error."
-  - id: "implement-command-fixes"
-    title: "Implement compliance fixes or explicit rejections for mismatched commands"
-    status: "pending"
-    depends_on: ["inventory-global-flag-behavior", "define-supported-flag-contract"]
-    blocks:
-      - "add-regression-coverage"
-    owner: "dot-agents"
-    write_scope: ["commands/", "internal/ui/"]
-    verification_required: true
-    notes: "Prioritize commands that currently advertise support indirectly via persistent flags but do not branch on them."
-  - id: "add-regression-coverage"
-    title: "Add regression coverage for global flag behavior"
-    status: "pending"
-    depends_on: ["define-supported-flag-contract", "implement-command-fixes"]
-    blocks: []
-    owner: "dot-agents"
-    write_scope: ["commands/*_test.go", "cmd/dot-agents/"]
-    verification_required: true
-    notes: "Cover both success cases and explicit unsupported-flag UX so future commands do not silently drift."
+    - id: inventory-global-flag-behavior
+      title: Inventory root-level global flag behavior across top-level and nested commands
+      status: completed
+      depends_on: []
+      blocks:
+        - define-supported-flag-contract
+        - implement-command-fixes
+      owner: dot-agents
+      write_scope:
+        - cmd/dot-agents/
+        - commands/
+      verification_required: false
+      notes: 'Matrix recorded in global-flag-compliance.plan.md § Inventory (2026-04-13). Key finding: workflow status local --json shadows root persistent --json; kg ingest uses local --dry-run not Flags.DryRun.'
+    - id: define-supported-flag-contract
+      title: Define the supported/unsupported contract for each global flag
+      status: completed
+      depends_on:
+        - inventory-global-flag-behavior
+      blocks:
+        - implement-command-fixes
+        - add-regression-coverage
+      owner: dot-agents
+      write_scope:
+        - cmd/dot-agents/
+        - commands/
+        - docs/
+      verification_required: false
+      notes: Decide where flags should work semantically versus where the CLI should reject them with a usage error.
+    - id: implement-command-fixes
+      title: Implement compliance fixes or explicit rejections for mismatched commands
+      status: pending
+      depends_on:
+        - inventory-global-flag-behavior
+        - define-supported-flag-contract
+      blocks:
+        - add-regression-coverage
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/ui/
+      verification_required: true
+      notes: Prioritize commands that currently advertise support indirectly via persistent flags but do not branch on them.
+    - id: add-regression-coverage
+      title: Add regression coverage for global flag behavior
+      status: pending
+      depends_on:
+        - define-supported-flag-contract
+        - implement-command-fixes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/*_test.go
+        - cmd/dot-agents/
+      verification_required: true
+      notes: Cover both success cases and explicit unsupported-flag UX so future commands do not silently drift.

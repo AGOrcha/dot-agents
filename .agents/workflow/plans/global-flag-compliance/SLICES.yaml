@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-slices.schema.json
+schema_version: 1
+plan_id: "global-flag-compliance"
+slices:
+  - id: "gfc-contract"
+    parent_task_id: "define-supported-flag-contract"
+    title: "Contract — global flag semantics per command"
+    summary: "Write the supported/unsupported contract (docs + plan notes). No code fixes in this slice."
+    status: "completed"
+    depends_on: []
+    write_scope:
+      - "docs/"
+      - ".agents/workflow/plans/global-flag-compliance/"
+    verification_focus: "Contract covers § Inventory findings; explicit rules for shadowing flags and kg ingest dry-run"
+    owner: "dot-agents"
+
+  - id: "gfc-implement"
+    parent_task_id: "implement-command-fixes"
+    title: "Implement fixes or explicit rejections"
+    summary: "Apply code changes per contract: fix workflow status --json shadowing, tighten UX, etc."
+    status: "pending"
+    depends_on:
+      - "gfc-contract"
+    write_scope:
+      - "commands/"
+      - "internal/ui/"
+      - "cmd/dot-agents/"
+    verification_focus: "go test ./commands ./internal/... ; targeted workflow/kg/status probes"
+    owner: "dot-agents"
+
+  - id: "gfc-regression"
+    parent_task_id: "add-regression-coverage"
+    title: "Regression tests for global flags"
+    summary: "Table-driven or focused tests for JSON/dry-run/yes paths called out in contract."
+    status: "pending"
+    depends_on:
+      - "gfc-implement"
+    write_scope:
+      - "commands/"
+      - "cmd/dot-agents/"
+    verification_focus: "go test ./... green; new cases for unsupported vs supported combinations"
+    owner: "dot-agents"
