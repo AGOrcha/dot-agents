@@ -45,7 +45,7 @@ tasks:
       notes: Prioritize commands that currently advertise support indirectly via persistent flags but do not branch on them.
     - id: add-regression-coverage
       title: Add regression coverage for global flag behavior
-      status: pending
+      status: completed
       depends_on:
         - define-supported-flag-contract
         - implement-command-fixes
