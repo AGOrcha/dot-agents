@@ -1,7 +1,7 @@
 # Loop Orchestrator Layer
 
-Status: In Progress
-Last updated: 2026-04-12
+Status: Completed
+Last updated: 2026-04-13
 Depends on:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md`
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`
@@ -27,9 +27,9 @@ Add a planner/orchestrator layer above the focused loop agent so work selection,
 - [x] Phase 3C - add fanout-from-slice support on top of existing delegation contracts
 - [x] Phase 4 — Wire `workflow fanout --slice <id>` to resolve task and write-scope from SLICES.yaml
 - [x] Phase 5 — Auto-route code-structure intents in `workflow graph query` to kg bridge; add tests and spec doc
-- [ ] Phase 6 — Implement `workflow fold-back create/list` with small vs proposal routing
-- [ ] Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
-- [ ] Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
+- [x] Phase 6 — Implement `workflow fold-back create/list` with small vs proposal routing
+- [x] Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
+- [x] Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
 
 ## Phase 4: Slice-based fanout
 
@@ -171,6 +171,7 @@ Add `foldBackCmd` to the final `cmd.AddCommand(...)` call at line 468.
 - Phase 3B/3C is the current plan/docs reconciliation lane: `SLICES.yaml` is the canonical slice artifact, and `workflow fanout` remains the readiness gate for non-overlapping delegation.
 - Write-scope conflict prevention already exists in `workflow fanout`; Phase 4 adds the missing slice-resolution layer.
 - Hooks should validate stale or drifting orchestration state, not choose work.
+- **Phase 8 follow-ups** (see `TASKS.yaml` phase-8 notes): optional bundle JSON-schema at save; optional CLI tie-in for `~/.agents/profiles/<profile>.md`; optional repo example files for spec parity; global `loop-worker` profile lives at `~/.agents/profiles/loop-worker.md` (operator-local). Skills `orchestrator-session-start`, `delegation-lifecycle`, and symlinked `iteration-close` align with bundle-first and delegated closeout.
 
 ---
 

@@ -2,6 +2,12 @@
 
 Copy the prompt below into an agent as: `/loop 1hr <prompt>` (if `/loop` is available else just paste `<prompt>`)
 
+## Project overlay metadata
+
+- **Role:** Repo-local overlay for this repository — plans, specs, CLI inventory, and dogfood rhythm. It is **not** the global worker profile.
+- **Global `loop-worker` profile:** `~/.agents/profiles/loop-worker.md` (use `--delegate-profile loop-worker` with `workflow fanout`).
+- **Valid fanout reference:** `--project-overlay .agents/active/active.loop.md` (path must stay inside the repo).
+
 ---
 
 ## Prompt
@@ -122,11 +128,12 @@ Read-only commands (always safe to run):
 Write commands (run these every iteration as part of normal closeout — not approval-gated):
 - `go run ./cmd/dot-agents workflow verify record --status pass --summary "<test results>"` — record test outcome; run after every successful test cycle
 - `go run ./cmd/dot-agents workflow checkpoint --message "<summary>" --verification-status pass` — persist current wave state; run after `verify record`
-- `go run ./cmd/dot-agents workflow advance <plan> <task> <status>` — advance a task when a YAML canonical task is completed
+- **Direct work** (no active delegation on this task): `go run ./cmd/dot-agents workflow advance <plan> <task> <status>` when the YAML canonical task is completed.
+- **Delegated work** (parent used `workflow fanout`): after verify + checkpoint, use `workflow merge-back` — not `advance`. Parent runs `advance` / `workflow delegation closeout`. See `~/.agents/profiles/loop-worker.md` and `.agents/active/delegation-bundles/<delegation_id>.yaml`.
 - `go run ./cmd/dot-agents kg ingest <source>` — ingest a source
 - `go run ./cmd/dot-agents kg warm` — sync hot notes to warm layer
 
-> **Use `/iteration-close`** to run the full closeout sequence (verify record → checkpoint → advance) in one step.
+> **Use `/iteration-close`** for verify → checkpoint → **merge-back** (delegated) or **advance** (direct). See `iteration-close` skill and `~/.agents/profiles/loop-worker.md`.
 
 Approval-gated or fixture-gated commands (only run when the wave justifies them and the safety rules allow it):
 - `go run ./cmd/dot-agents workflow prefs set-local <key> <value>` / `set-shared <key> <value>` — writes outside the repo or queues proposals
@@ -197,8 +204,9 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
 19. **Persist workflow state** — run `/iteration-close` (or the individual commands manually):
    - `go run ./cmd/dot-agents workflow verify record --status pass --summary "<focused packages: N tests>"` 
    - `go run ./cmd/dot-agents workflow checkpoint --message "<what was built and why>" --verification-status pass`
-   - If a YAML canonical task was completed: `go run ./cmd/dot-agents workflow advance <plan-id> <task-id> completed`
-   - This is **not** approval-gated — run it every iteration. Record `persisted_via_workflow_commands: yes` in self-assessment.
+   - **Direct:** if you completed a YAML canonical task and you are **not** under an active delegation: `go run ./cmd/dot-agents workflow advance <plan-id> <task-id> completed`
+   - **Delegated:** if `.agents/active/delegation/<task-id>.yaml` is active for your work: `go run ./cmd/dot-agents workflow merge-back …` instead of `advance`
+   - This is **not** approval-gated for verify/checkpoint — run every iteration. Record `persisted_via_workflow_commands: yes` in self-assessment.
    - Only use sandbox mode (`AGENTS_HOME=<tmp>`) when exercising the checkpoint/verify commands themselves as product test surfaces; for normal iteration closeout, write to the real `~/.agents`.
 20. **Queue an improvement proposal** if the iteration produced a worthy candidate:
    - Scan `## CLI Observations` and this iteration's traces for: new gotchas, rule gaps, hook improvements, UX friction patterns

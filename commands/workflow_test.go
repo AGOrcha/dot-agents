@@ -2156,6 +2156,213 @@ func TestFanoutFromSlice(t *testing.T) {
 	if len(contract.WriteScope) != 1 || contract.WriteScope[0] != "commands/" {
 		t.Fatalf("write_scope = %+v, want [commands/]", contract.WriteScope)
 	}
+
+	bundlePath := filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml")
+	data, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("delegation bundle: %v", err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.DelegationID != contract.ID || bundle.PlanID != "p1" || bundle.TaskID != "t1" {
+		t.Fatalf("bundle ids: %+v", bundle)
+	}
+	if bundle.SliceID != "s1" {
+		t.Fatalf("slice_id = %q, want s1", bundle.SliceID)
+	}
+	if bundle.Worker.Profile != defaultDelegateProfile {
+		t.Fatalf("profile = %q", bundle.Worker.Profile)
+	}
+	if bundle.Verification.FeedbackGoal == "" {
+		t.Fatal("expected default feedback_goal")
+	}
+	if len(bundle.Closeout.WorkerMust) == 0 || len(bundle.Closeout.ParentMust) == 0 {
+		t.Fatal("expected closeout defaults")
+	}
+}
+
+func setupFanoutTwoTaskProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "p1")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatalf("mkdir plans: %v", err)
+	}
+	plan := CanonicalPlan{
+		SchemaVersion: 1,
+		ID:            "p1",
+		Title:         "Two-task fanout",
+		Status:        "active",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		UpdatedAt:     "2026-04-10T00:00:00Z",
+	}
+	planData, err := yaml.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatalf("write PLAN.yaml: %v", err)
+	}
+	tasks := CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        "p1",
+		Tasks: []CanonicalTask{
+			{ID: "t1", Title: "First", Status: "pending", WriteScope: []string{"commands/"}},
+			{ID: "t2", Title: "Second", Status: "pending", WriteScope: []string{"internal/"}},
+		},
+	}
+	tasksData, err := yaml.Marshal(tasks)
+	if err != nil {
+		t.Fatalf("marshal tasks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), tasksData, 0644); err != nil {
+		t.Fatalf("write TASKS.yaml: %v", err)
+	}
+	slices := CanonicalSliceFile{
+		SchemaVersion: 1,
+		PlanID:        "p1",
+		Slices: []CanonicalSlice{
+			{
+				ID:           "s1",
+				ParentTaskID: "t1",
+				Title:        "Slice",
+				Status:       "in_progress",
+				WriteScope:   []string{"commands/"},
+			},
+		},
+	}
+	slicesData, err := yaml.Marshal(slices)
+	if err != nil {
+		t.Fatalf("marshal slices: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "SLICES.yaml"), slicesData, 0644); err != nil {
+		t.Fatalf("write SLICES.yaml: %v", err)
+	}
+	return dir
+}
+
+func TestFanoutTwoTasksDistinctBundles(t *testing.T) {
+	repo := setupFanoutTwoTaskProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--task", "t2", "--owner", "b", "--write-scope", "internal/"); err != nil {
+		t.Fatal(err)
+	}
+	c1, err := loadDelegationContract(repo, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := loadDelegationContract(repo, "t2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c1.ID == c2.ID {
+		t.Fatalf("expected distinct delegation ids: %s", c1.ID)
+	}
+	b1, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c1.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c2.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var x1, x2 delegationBundleYAML
+	if err := yaml.Unmarshal(b1, &x1); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(b2, &x2); err != nil {
+		t.Fatal(err)
+	}
+	if x1.TaskID != "t1" || x2.TaskID != "t2" {
+		t.Fatalf("task mismatch: %s / %s", x1.TaskID, x2.TaskID)
+	}
+	if x1.Owner != "a" || x2.Owner != "b" {
+		t.Fatalf("owner leak: %s / %s", x1.Owner, x2.Owner)
+	}
+	if x2.SliceID != "" {
+		t.Fatalf("t2 bundle should not set slice_id, got %q", x2.SliceID)
+	}
+}
+
+func TestFanoutDelegationBundlePromptAndFiles(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	promptPath := filepath.Join(repo, ".agents", "ctx", "prompt.md")
+	if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(promptPath, []byte("# hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w",
+		"--delegate-profile", "custom-worker",
+		"--prompt", "line one", "--prompt", "line two",
+		"--prompt-file", ".agents/ctx/prompt.md",
+		"--context-file", ".agents/ctx/prompt.md",
+		"--feedback-goal", "Prove fanout bundles persist.",
+		"--scenario-tag", "a", "--scenario-tag", "b",
+		"--regression-artifact", ".agents/workflow/plans/p1/TASKS.yaml",
+		"--selection-reason", "integration test",
+		"--require-negative-coverage", "--sandbox-mutations",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract, err := loadDelegationContract(repo, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Worker.Profile != "custom-worker" {
+		t.Fatalf("profile %q", bundle.Worker.Profile)
+	}
+	if len(bundle.Prompt.Inline) != 2 || bundle.Prompt.Inline[0] != "line one" {
+		t.Fatalf("inline prompt: %+v", bundle.Prompt.Inline)
+	}
+	if len(bundle.Prompt.PromptFiles) != 1 || bundle.Prompt.PromptFiles[0] != ".agents/ctx/prompt.md" {
+		t.Fatalf("prompt_files: %+v", bundle.Prompt.PromptFiles)
+	}
+	if len(bundle.Context.RequiredFiles) != 1 {
+		t.Fatalf("context: %+v", bundle.Context.RequiredFiles)
+	}
+	if bundle.Verification.FeedbackGoal != "Prove fanout bundles persist." {
+		t.Fatalf("feedback_goal %q", bundle.Verification.FeedbackGoal)
+	}
+	if len(bundle.Verification.ScenarioTags) != 2 {
+		t.Fatalf("scenario_tags: %+v", bundle.Verification.ScenarioTags)
+	}
+	if len(bundle.Verification.RegressionArtifacts) != 1 || !strings.HasSuffix(bundle.Verification.RegressionArtifacts[0], "TASKS.yaml") {
+		t.Fatalf("regression: %+v", bundle.Verification.RegressionArtifacts)
+	}
+	if bundle.Selection == nil || bundle.Selection.Reason != "integration test" {
+		t.Fatalf("selection: %+v", bundle.Selection)
+	}
+	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.RequireNegativeCoverage == nil || !*bundle.Verification.EvidencePolicy.RequireNegativeCoverage {
+		t.Fatal("expected require_negative_coverage")
+	}
+}
+
+func TestFanoutDelegationBundleRejectsEscapePath(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w",
+		"--prompt-file", "../../../etc/passwd",
+	)
+	if err == nil {
+		t.Fatal("expected error for path escape")
+	}
+	if !strings.Contains(err.Error(), "prompt-file") {
+		t.Fatalf("unexpected err: %v", err)
+	}
 }
 
 func TestFanoutSliceAndTaskMutuallyExclusive(t *testing.T) {
@@ -2660,6 +2867,73 @@ func TestFoldBackCreatePropose(t *testing.T) {
 	}
 	if a.Classification != "proposal" || !strings.HasPrefix(a.RoutedTo, "proposal:obs-") {
 		t.Fatalf("artifact: %+v", a)
+	}
+}
+
+func TestDelegationCloseoutAccept(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "merge-back", "--task", "t1", "--summary", "done", "--verification-status", "pass"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "delegation", "closeout", "--plan", "p1", "--task", "t1", "--decision", "accept"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".agents", "active", "delegation", "t1.yaml")); !os.IsNotExist(err) {
+		t.Fatal("expected active delegation removed")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".agents", "active", "merge-back", "t1.md")); !os.IsNotExist(err) {
+		t.Fatal("expected active merge-back removed")
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tf.Tasks[0].Status != "completed" {
+		t.Fatalf("task status = %q, want completed", tf.Tasks[0].Status)
+	}
+	plan, err := loadCanonicalPlan(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "completed" {
+		t.Fatalf("plan status = %q, want completed", plan.Status)
+	}
+	matches, _ := filepath.Glob(filepath.Join(repo, ".agents", "history", "p1", "delegate-merge-back-archive", "*", "t1", "closeout.yaml"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one closeout record, got %v", matches)
+	}
+}
+
+func TestDelegationCloseoutReject(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "merge-back", "--task", "t1", "--summary", "try", "--verification-status", "fail"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "delegation", "closeout", "--plan", "p1", "--task", "t1", "--decision", "reject", "--note", "fix tests"); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tf.Tasks[0].Status != "blocked" {
+		t.Fatalf("task status = %q, want blocked", tf.Tasks[0].Status)
+	}
+	if !strings.Contains(tf.Tasks[0].Notes, "delegation closeout reject: fix tests") {
+		t.Fatalf("expected reject note in task notes: %q", tf.Tasks[0].Notes)
+	}
+	plan, err := loadCanonicalPlan(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("plan status = %q, want active", plan.Status)
 	}
 }
 

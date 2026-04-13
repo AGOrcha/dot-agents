@@ -2,13 +2,15 @@
 
 Repo-local YAML files model the **per-delegation** worker handoff (profile reference, prompts, context files, verification metadata, closeout expectations). Schema: `schemas/workflow-delegation-bundle.schema.json` at the repository root.
 
+The **`loop-worker`** label in `worker.profile` refers to the global habits documented at **`~/.agents/profiles/loop-worker.md`** (not loaded automatically by the CLI — agents read it). Repo-specific guidance goes in **`--project-overlay`** files (e.g. `.agents/active/*.loop.md`).
+
 ## Naming
 
 - One file per delegation: `.agents/active/delegation-bundles/<delegation_id>.yaml`.
 - **`delegation_id` must match the contract’s `id` field** inside `.agents/active/delegation/<parent_task_id>.yaml` (the contract **filename** is the canonical `parent_task_id`, not the delegation id).
 - After `workflow fanout`, copy the new contract’s `id` into both the bundle filename stem and the `delegation_id` YAML field so the bundle stays paired with that contract.
 
-The Go CLI does **not** yet write these files from `workflow fanout` (no `--prompt-file` or related flags). Create or update bundles manually until that wiring exists.
+`workflow fanout` **creates** the bundle automatically (Phase 8). You can still edit the YAML by hand afterward for edge cases the flags do not cover.
 
 ## Minimal example (valid against the schema)
 
