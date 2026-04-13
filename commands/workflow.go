@@ -22,6 +22,9 @@ import (
 const (
 	workflowDefaultNextAction        = "Review active plan"
 	workflowDefaultVerificationState = "unknown"
+
+	defaultDelegateProfile        = "loop-worker"
+	defaultDelegationFeedbackGoal = "Complete the delegated task within write scope with verification and merge-back."
 )
 
 type workflowProjectRef struct {
@@ -158,6 +161,67 @@ type foldBackArtifact struct {
 	Classification string `json:"classification" yaml:"classification"` // small|proposal
 	RoutedTo       string `json:"routed_to" yaml:"routed_to"`
 	CreatedAt      string `json:"created_at" yaml:"created_at"`
+}
+
+// workflowDelegationCloseoutRecord is stored next to archived delegation + merge-back artifacts (Phase 7).
+type workflowDelegationCloseoutRecord struct {
+	SchemaVersion int    `json:"schema_version" yaml:"schema_version"`
+	PlanID        string `json:"plan_id" yaml:"plan_id"`
+	TaskID        string `json:"task_id" yaml:"task_id"`
+	DelegationID  string `json:"delegation_id" yaml:"delegation_id"`
+	Decision      string `json:"decision" yaml:"decision"` // accept|reject
+	Note          string `json:"note,omitempty" yaml:"note,omitempty"`
+	ClosedAt      string `json:"closed_at" yaml:"closed_at"`
+}
+
+// delegationBundleYAML matches schemas/workflow-delegation-bundle.schema.json (Phase 8).
+type delegationBundleYAML struct {
+	SchemaVersion int    `yaml:"schema_version"`
+	DelegationID  string `yaml:"delegation_id"`
+	PlanID        string `yaml:"plan_id"`
+	TaskID        string `yaml:"task_id"`
+	SliceID       string `yaml:"slice_id,omitempty"`
+	Owner         string `yaml:"owner"`
+	Worker        struct {
+		Profile             string   `yaml:"profile"`
+		ProfileVersion      *int     `yaml:"profile_version,omitempty"`
+		ProjectOverlayFiles []string `yaml:"project_overlay_files,omitempty"`
+	} `yaml:"worker"`
+	Selection *struct {
+		SelectedBy string `yaml:"selected_by"`
+		SelectedAt string `yaml:"selected_at"`
+		Reason     string `yaml:"reason,omitempty"`
+	} `yaml:"selection,omitempty"`
+	Scope struct {
+		WriteScope  []string `yaml:"write_scope"`
+		Constraints []string `yaml:"constraints,omitempty"`
+	} `yaml:"scope"`
+	Prompt struct {
+		Inline      []string `yaml:"inline,omitempty"`
+		PromptFiles []string `yaml:"prompt_files,omitempty"`
+	} `yaml:"prompt"`
+	Context struct {
+		RequiredFiles []string `yaml:"required_files,omitempty"`
+		OptionalFiles []string `yaml:"optional_files,omitempty"`
+	} `yaml:"context"`
+	Verification struct {
+		FeedbackGoal               string   `yaml:"feedback_goal"`
+		ScenarioTags               []string `yaml:"scenario_tags,omitempty"`
+		RegressionArtifacts        []string `yaml:"regression_artifacts,omitempty"`
+		HigherLayerValidationQueue string   `yaml:"higher_layer_validation_queue,omitempty"`
+		FocusedCommands            []string `yaml:"focused_commands,omitempty"`
+		RegressionCommands         []string `yaml:"regression_commands,omitempty"`
+		EvidencePolicy             *struct {
+			RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+			ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+			SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+			PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+		} `yaml:"evidence_policy,omitempty"`
+	} `yaml:"verification"`
+	Closeout struct {
+		WorkerMust []string `yaml:"worker_must,omitempty"`
+		ParentMust []string `yaml:"parent_must,omitempty"`
+	} `yaml:"closeout"`
 }
 
 type foldBackProposalFrontmatter struct {
@@ -640,6 +704,19 @@ preferences, fanout artifacts, and bridge queries.`,
 	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
 	fanoutCmd.Flags().String("write-scope", "", "Comma-separated file/dir patterns this delegate may touch")
+	// Phase 8 — persisted delegation bundle (schemas/workflow-delegation-bundle.schema.json)
+	fanoutCmd.Flags().String("delegate-profile", defaultDelegateProfile, "Worker profile label stored in the delegation bundle")
+	fanoutCmd.Flags().StringSlice("project-overlay", nil, "Repeatable repo-relative project overlay guidance files")
+	fanoutCmd.Flags().StringSlice("prompt", nil, "Repeatable inline prompt lines for the delegate")
+	fanoutCmd.Flags().StringSlice("prompt-file", nil, "Repeatable repo-relative prompt files")
+	fanoutCmd.Flags().StringSlice("context-file", nil, "Repeatable repo-relative context files (bundle context.required_files)")
+	fanoutCmd.Flags().String("feedback-goal", "", "Verification question this delegation must answer (default if empty)")
+	fanoutCmd.Flags().StringSlice("scenario-tag", nil, "Repeatable scenario / coverage tags")
+	fanoutCmd.Flags().StringSlice("regression-artifact", nil, "Repeatable regression matrix or artifact paths")
+	fanoutCmd.Flags().String("validation-queue", "", "Higher-layer validation queue file path")
+	fanoutCmd.Flags().String("selection-reason", "", "Optional human-readable reason this task was delegated")
+	fanoutCmd.Flags().Bool("require-negative-coverage", false, "Set verification.evidence_policy.require_negative_coverage in the bundle")
+	fanoutCmd.Flags().Bool("sandbox-mutations", false, "Set verification.evidence_policy.sandbox_mutations in the bundle")
 	_ = fanoutCmd.MarkFlagRequired("plan")
 
 	// merge-back subcommand (Wave 6)
@@ -695,6 +772,30 @@ preferences, fanout artifacts, and bridge queries.`,
 	foldBackListCmd.Flags().String("plan", "", "Filter by canonical plan ID")
 	foldBackCmd.AddCommand(foldBackCreateCmd, foldBackListCmd)
 
+	// delegation subcommand (Phase 7 closeout)
+	delegationCmd := &cobra.Command{
+		Use:   "delegation",
+		Short: "Parent-driven delegation lifecycle helpers",
+	}
+	delegationCloseoutCmd := &cobra.Command{
+		Use:   "closeout",
+		Short: "Archive completed merge-back artifacts and reconcile canonical task state",
+		Example: ExampleBlock(
+			"  dot-agents workflow delegation closeout --plan my-plan --task my-task --decision accept",
+			"  dot-agents workflow delegation closeout --plan my-plan --task my-task --decision reject --note \"rework error handling\"",
+		),
+		Args: NoArgsWithHints("Use `--plan`, `--task`, and `--decision` flags instead of positional arguments."),
+		RunE: runWorkflowDelegationCloseout,
+	}
+	delegationCloseoutCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	delegationCloseoutCmd.Flags().String("task", "", "Delegated task ID (required)")
+	delegationCloseoutCmd.Flags().String("decision", "", "accept|reject — parent integration decision (required)")
+	delegationCloseoutCmd.Flags().String("note", "", "Optional note (typically used with --decision reject)")
+	_ = delegationCloseoutCmd.MarkFlagRequired("plan")
+	_ = delegationCloseoutCmd.MarkFlagRequired("task")
+	_ = delegationCloseoutCmd.MarkFlagRequired("decision")
+	delegationCmd.AddCommand(delegationCloseoutCmd)
+
 	// drift subcommand (Wave 7)
 	driftCmd := &cobra.Command{
 		Use:   "drift",
@@ -725,7 +826,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, driftCmd, sweepCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd)
 	return cmd
 }
 
@@ -4161,7 +4262,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
 	}
 
-	// Create delegation contract
+	// Create delegation contract + Phase 8 bundle (schemas/workflow-delegation-bundle.schema.json)
 	now := time.Now().UTC().Format(time.RFC3339)
 	contract := &DelegationContract{
 		SchemaVersion:   1,
@@ -4177,8 +4278,17 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	bundle, err := buildDelegationBundleForFanout(project.Path, cmd, planID, taskID, sliceID, contract, writeScope, now)
+	if err != nil {
+		return err
+	}
+	contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
 	if err := saveDelegationContract(project.Path, contract); err != nil {
 		return fmt.Errorf("save delegation contract: %w", err)
+	}
+	if err := saveDelegationBundle(project.Path, bundle); err != nil {
+		_ = os.Remove(contractPath)
+		return fmt.Errorf("save delegation bundle: %w", err)
 	}
 
 	// Advance task to in_progress
@@ -4192,6 +4302,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	ui.SuccessBox(
 		fmt.Sprintf("Delegation created for task %s", taskID),
 		fmt.Sprintf("Contract: .agents/active/delegation/%s.yaml", taskID),
+		fmt.Sprintf("Bundle: .agents/active/delegation-bundles/%s.yaml", contract.ID),
 		fmt.Sprintf("Write scope: %s", strings.Join(writeScope, ", ")),
 	)
 	return nil
@@ -4260,6 +4371,374 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Merge-back created for task %s", taskID),
 		fmt.Sprintf("Artifact: .agents/active/merge-back/%s.md", taskID),
 		"Parent agent should review this artifact before advancing task to completed",
+	)
+	return nil
+}
+
+func delegationBundlesDir(projectPath string) string {
+	return filepath.Join(projectPath, ".agents", "active", "delegation-bundles")
+}
+
+func trimStringSlice(in []string) []string {
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// validateInsideProjectPath ensures rel stays within projectPath (no Stat).
+func validateInsideProjectPath(projectPath, rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("invalid path %q", rel)
+	}
+	abs := filepath.Join(projectPath, filepath.FromSlash(rel))
+	base := filepath.Clean(projectPath)
+	cleanAbs := filepath.Clean(abs)
+	if cleanAbs != base && !strings.HasPrefix(cleanAbs+string(filepath.Separator), base+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes project: %s", rel)
+	}
+	return rel, nil
+}
+
+// validateProjectFileRef ensures rel is inside projectPath and points to an existing regular file.
+func validateProjectFileRef(projectPath, rel string) (string, error) {
+	rel, err := validateInsideProjectPath(projectPath, rel)
+	if err != nil {
+		return "", err
+	}
+	abs := filepath.Join(projectPath, filepath.FromSlash(rel))
+	st, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("cannot access %s: %w", rel, err)
+	}
+	if st.IsDir() {
+		return "", fmt.Errorf("not a regular file: %s", rel)
+	}
+	return rel, nil
+}
+
+func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
+	if strings.TrimSpace(b.DelegationID) == "" {
+		return fmt.Errorf("delegation bundle: empty delegation_id")
+	}
+	dir := delegationBundlesDir(projectPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
+}
+
+func buildDelegationBundleForFanout(
+	projectPath string,
+	cmd *cobra.Command,
+	planID, taskID, sliceID string,
+	contract *DelegationContract,
+	writeScope []string,
+	createdAtRFC3339 string,
+) (*delegationBundleYAML, error) {
+	profile, _ := cmd.Flags().GetString("delegate-profile")
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		profile = defaultDelegateProfile
+	}
+	feedbackGoal, _ := cmd.Flags().GetString("feedback-goal")
+	feedbackGoal = strings.TrimSpace(feedbackGoal)
+	if feedbackGoal == "" {
+		feedbackGoal = defaultDelegationFeedbackGoal
+	}
+	validationQueue, _ := cmd.Flags().GetString("validation-queue")
+	validationQueue = strings.TrimSpace(validationQueue)
+	selReason, _ := cmd.Flags().GetString("selection-reason")
+
+	overlays := trimStringSlice(mustGetStringSlice(cmd, "project-overlay"))
+	promptLines := trimStringSlice(mustGetStringSlice(cmd, "prompt"))
+	promptFiles := trimStringSlice(mustGetStringSlice(cmd, "prompt-file"))
+	contextFiles := trimStringSlice(mustGetStringSlice(cmd, "context-file"))
+	scenarioTags := trimStringSlice(mustGetStringSlice(cmd, "scenario-tag"))
+	regressionArts := trimStringSlice(mustGetStringSlice(cmd, "regression-artifact"))
+
+	for _, p := range overlays {
+		if _, err := validateProjectFileRef(projectPath, p); err != nil {
+			return nil, fmt.Errorf("--project-overlay %w", err)
+		}
+	}
+	for _, p := range promptFiles {
+		if _, err := validateProjectFileRef(projectPath, p); err != nil {
+			return nil, fmt.Errorf("--prompt-file %w", err)
+		}
+	}
+	for _, p := range contextFiles {
+		if _, err := validateProjectFileRef(projectPath, p); err != nil {
+			return nil, fmt.Errorf("--context-file %w", err)
+		}
+	}
+	if validationQueue != "" {
+		if _, err := validateProjectFileRef(projectPath, validationQueue); err != nil {
+			return nil, fmt.Errorf("--validation-queue %w", err)
+		}
+	}
+	for _, p := range regressionArts {
+		if _, err := validateInsideProjectPath(projectPath, p); err != nil {
+			return nil, fmt.Errorf("--regression-artifact %w", err)
+		}
+	}
+
+	owner := strings.TrimSpace(contract.Owner)
+	if owner == "" {
+		owner = "unspecified"
+	}
+
+	var b delegationBundleYAML
+	b.SchemaVersion = 1
+	b.DelegationID = contract.ID
+	b.PlanID = planID
+	b.TaskID = taskID
+	if sliceID != "" {
+		b.SliceID = sliceID
+	}
+	b.Owner = owner
+
+	b.Worker.Profile = profile
+	if len(overlays) > 0 {
+		b.Worker.ProjectOverlayFiles = overlays
+	}
+
+	b.Selection = &struct {
+		SelectedBy string `yaml:"selected_by"`
+		SelectedAt string `yaml:"selected_at"`
+		Reason     string `yaml:"reason,omitempty"`
+	}{
+		SelectedBy: "workflow fanout",
+		SelectedAt: createdAtRFC3339,
+		Reason:     strings.TrimSpace(selReason),
+	}
+
+	b.Scope.WriteScope = append([]string(nil), writeScope...)
+
+	if len(promptLines) > 0 {
+		b.Prompt.Inline = promptLines
+	}
+	if len(promptFiles) > 0 {
+		b.Prompt.PromptFiles = promptFiles
+	}
+	if len(contextFiles) > 0 {
+		b.Context.RequiredFiles = contextFiles
+	}
+
+	b.Verification.FeedbackGoal = feedbackGoal
+	if len(scenarioTags) > 0 {
+		b.Verification.ScenarioTags = scenarioTags
+	}
+	if len(regressionArts) > 0 {
+		b.Verification.RegressionArtifacts = regressionArts
+	}
+	if validationQueue != "" {
+		b.Verification.HigherLayerValidationQueue = validationQueue
+	}
+
+	reqNeg, _ := cmd.Flags().GetBool("require-negative-coverage")
+	sandbox, _ := cmd.Flags().GetBool("sandbox-mutations")
+	if reqNeg || sandbox {
+		b.Verification.EvidencePolicy = &struct {
+			RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+			ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+			SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+			PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+		}{}
+		if reqNeg {
+			v := true
+			b.Verification.EvidencePolicy.RequireNegativeCoverage = &v
+		}
+		if sandbox {
+			v := true
+			b.Verification.EvidencePolicy.SandboxMutations = &v
+		}
+	}
+
+	b.Closeout.WorkerMust = []string{"workflow_verify_record", "workflow_checkpoint", "workflow_merge_back"}
+	b.Closeout.ParentMust = []string{"workflow_advance", "workflow_delegation_closeout"}
+
+	return &b, nil
+}
+
+// mustGetStringSlice reads a StringSlice flag, tolerating missing definitions.
+func mustGetStringSlice(cmd *cobra.Command, name string) []string {
+	if f := cmd.Flags().Lookup(name); f == nil {
+		return nil
+	}
+	s, err := cmd.Flags().GetStringSlice(name)
+	if err != nil {
+		return nil
+	}
+	return s
+}
+
+func copyWorkflowArtifact(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return nil
+}
+
+func allCanonicalTasksTerminal(tasks []CanonicalTask) bool {
+	if len(tasks) == 0 {
+		return false
+	}
+	for _, t := range tasks {
+		switch t.Status {
+		case "completed", "cancelled":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ── workflow delegation closeout (Phase 7) ───────────────────────────────────
+
+func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	planID, _ := cmd.Flags().GetString("plan")
+	taskID, _ := cmd.Flags().GetString("task")
+	decision, _ := cmd.Flags().GetString("decision")
+	note, _ := cmd.Flags().GetString("note")
+
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if decision != "accept" && decision != "reject" {
+		return fmt.Errorf(`--decision must be "accept" or "reject"`)
+	}
+
+	if _, err := loadMergeBack(project.Path, taskID); err != nil {
+		return fmt.Errorf("merge-back for task %s is required before closeout: %w", taskID, err)
+	}
+
+	contract, err := loadDelegationContract(project.Path, taskID)
+	if err != nil {
+		return fmt.Errorf("delegation contract for task %s not found: %w", taskID, err)
+	}
+	if contract.ParentPlanID != planID {
+		return fmt.Errorf("delegation plan_id %q does not match --plan %q", contract.ParentPlanID, planID)
+	}
+	if contract.Status != "completed" {
+		return fmt.Errorf("delegation for task %s must be completed (run merge-back first); status is %q", taskID, contract.Status)
+	}
+
+	dateStr := time.Now().UTC().Format("2006-01-02")
+	archiveDir := filepath.Join(project.Path, ".agents", "history", planID, "delegate-merge-back-archive", dateStr, taskID)
+	mergeBackSrc := filepath.Join(mergeBackDir(project.Path), taskID+".md")
+	delegationSrc := filepath.Join(delegationDir(project.Path), taskID+".yaml")
+
+	if err := copyWorkflowArtifact(mergeBackSrc, filepath.Join(archiveDir, "merge-back.md")); err != nil {
+		return fmt.Errorf("archive merge-back: %w", err)
+	}
+	if err := copyWorkflowArtifact(delegationSrc, filepath.Join(archiveDir, "delegation.yaml")); err != nil {
+		return fmt.Errorf("archive delegation contract: %w", err)
+	}
+
+	closeout := workflowDelegationCloseoutRecord{
+		SchemaVersion: 1,
+		PlanID:        planID,
+		TaskID:        taskID,
+		DelegationID:  contract.ID,
+		Decision:      decision,
+		Note:          strings.TrimSpace(note),
+		ClosedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+	closeoutData, err := yaml.Marshal(closeout)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
+		return fmt.Errorf("write closeout record: %w", err)
+	}
+
+	_ = os.Remove(mergeBackSrc)
+	_ = os.Remove(delegationSrc)
+	bundlePath := filepath.Join(delegationBundlesDir(project.Path), contract.ID+".yaml")
+	if _, err := os.Stat(bundlePath); err == nil {
+		_ = os.Remove(bundlePath)
+	}
+
+	tf, err := loadCanonicalTasks(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("load canonical tasks: %w", err)
+	}
+	found := false
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID != taskID {
+			continue
+		}
+		found = true
+		switch decision {
+		case "accept":
+			tf.Tasks[i].Status = "completed"
+		case "reject":
+			tf.Tasks[i].Status = "blocked"
+			if closeout.Note != "" {
+				tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, fmt.Sprintf("delegation closeout reject: %s", closeout.Note))
+			}
+		}
+		break
+	}
+	if !found {
+		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+	}
+	if err := saveCanonicalTasks(project.Path, tf); err != nil {
+		return fmt.Errorf("save tasks: %w", err)
+	}
+
+	plan, err := loadCanonicalPlan(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("load plan: %w", err)
+	}
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
+	if allCanonicalTasksTerminal(tf.Tasks) {
+		plan.Status = "completed"
+	}
+	if err := saveCanonicalPlan(project.Path, plan); err != nil {
+		return fmt.Errorf("save plan: %w", err)
+	}
+
+	if Flags.JSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(closeout)
+	}
+
+	ui.SuccessBox(
+		fmt.Sprintf("Delegation closeout %s for task %s", decision, taskID),
+		fmt.Sprintf("Archived under .agents/history/%s/delegate-merge-back-archive/%s/%s/", planID, dateStr, taskID),
 	)
 	return nil
 }

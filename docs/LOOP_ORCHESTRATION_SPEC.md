@@ -51,8 +51,9 @@ The orchestrator should be a mixed system, not a single new super-agent.
   - keep as the delegate return artifact writer
 - `workflow fold-back`
   - fold approved low-risk observations into plan notes, matrices, or lessons
-- future: `workflow delegation closeout` / reconciliation surface
-  - consume completed merge-backs, archive processed active artifacts, and reconcile canonical task/plan state
+- `workflow delegation closeout`
+  - after `workflow merge-back`, parent archives delegation + merge-back under `.agents/history/<plan-id>/delegate-merge-back-archive/…`, removes active clutter, and reconciles canonical task/plan state (`accept` completes the task; `reject` blocks the task with an optional note)
+  - plan-bundle retirement under `.agents/history/<plan-id>/plan-archive/…` remains a separate follow-up (see plan Phase 7 notes)
 
 ### 2. Skill layer
 
@@ -61,8 +62,8 @@ Skills should compose the command surfaces into repeatable behavior:
 - `orchestrator-session-start`
   - orient, compute next task, inspect graph context, decide whether to run directly or fan out
 - `delegation-lifecycle`
-  - remains the bounded fanout and merge-back flow
-  - future: consume delegation-specific prompt/context bundle inputs instead of reconstructing handoff text ad hoc
+  - bounded fanout, merge-back, and parent closeout flow
+  - reads `.agents/active/delegation-bundles/<delegation_id>.yaml` as the persisted prompt/context/verification handoff (not ad hoc chat reconstruction)
 - `iteration-close`
   - remains the persist and proposal closeout flow
 
@@ -118,13 +119,9 @@ Phase 8 models handoff as three layers (do not collapse into a single ad hoc pro
 2. **Project overlay** — repo-local files (plan locations, regression matrix, validation queue, project loop guidance).
 3. **Per-delegation bundle** — `.agents/active/delegation-bundles/<delegation_id>.yaml`, validated by [`schemas/workflow-delegation-bundle.schema.json`](../schemas/workflow-delegation-bundle.schema.json).
 
-**CLI status:** the Go CLI does **not** yet write delegation bundles from `workflow fanout`. Flags such as `--prompt`, `--prompt-file`, `--delegate-profile`, and `--context-file` are **not** wired. Fanout today only creates the delegation contract under `.agents/active/delegation/`. Until bundle persistence lands, author the bundle YAML by hand (or via skills) after fanout so the worker payload stays a durable repo artifact.
+**CLI status:** `workflow fanout` **writes** the delegation bundle to `.agents/active/delegation-bundles/<delegation_id>.yaml` (same `delegation_id` as the contract’s `id` field). Repeatable flags include `--delegate-profile`, `--project-overlay`, `--prompt`, `--prompt-file`, `--context-file`, `--feedback-goal`, `--scenario-tag`, `--regression-artifact`, `--validation-queue`, `--selection-reason`, plus optional `--require-negative-coverage` / `--sandbox-mutations` for `verification.evidence_policy`. File-backed flags must refer to paths inside the repo; `--regression-artifact` may name a not-yet-created file as long as it stays under the project tree.
 
-**Manual workflow (today):**
-
-1. Run `workflow fanout` (and `--slice` when using `SLICES.yaml`) to create `.agents/active/delegation/<parent_task_id>.yaml`.
-2. Read the contract’s `id` field (for example `del-<task-id>-<unix>`).
-3. Write `.agents/active/delegation-bundles/<delegation_id>.yaml` using the same `delegation_id` value as the contract `id`, then fill `worker`, `prompt`, `context`, `verification`, and `closeout` per the schema.
+**Manual workflow (optional):** you can still hand-edit a bundle after fanout if you need content the CLI does not yet model; prefer re-running fanout when possible so the contract and bundle stay aligned.
 
 **Closeout responsibilities** — bundle `closeout.worker_must` / `closeout.parent_must` line up with workflow commands as follows:
 
@@ -134,7 +131,7 @@ Phase 8 models handoff as three layers (do not collapse into a single ad hoc pro
 | Worker | `workflow_checkpoint` | `dot-agents workflow checkpoint …` |
 | Worker | `workflow_merge_back` | `dot-agents workflow merge-back …` |
 | Parent | `workflow_advance` | `dot-agents workflow advance …` |
-| Parent | `workflow_delegation_closeout` | `dot-agents workflow delegation closeout …` (planned in Phase 7; not implemented yet) |
+| Parent | `workflow_delegation_closeout` | `dot-agents workflow delegation closeout --plan <id> --task <id> --decision accept|reject [--note …]` |
 
 ### Plan lifecycle
 
@@ -336,7 +333,7 @@ This is where files like `.agents/active/active.loop.md` or repo-specific loop p
 
 #### 3. Delegation bundle
 
-Per-delegation persisted payload at `.agents/active/delegation-bundles/<delegation_id>.yaml` (intended to be written by `workflow fanout` once Phase 8 flags exist; **manual until then** — see **Delegation bundle workflow** under *Canonical Artifact Direction*):
+Per-delegation persisted payload at `.agents/active/delegation-bundles/<delegation_id>.yaml` (written by `workflow fanout` with Phase 8 flags — see **Delegation bundle workflow** under *Canonical Artifact Direction*):
 
 - chosen plan/task/slice and selection reason
 - owner plus worker profile reference

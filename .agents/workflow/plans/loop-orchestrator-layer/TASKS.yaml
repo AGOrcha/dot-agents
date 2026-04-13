@@ -91,7 +91,7 @@ tasks:
         - Fold-back: merge-back integrated — workflow graph query forwards code-structure intents to kg bridge.
     - id: phase-6-fold-back-reconciliation
       title: Phase 6 — Implement workflow fold-back create/list with small vs proposal routing
-      status: pending
+      status: completed
       depends_on:
         - phase-4-fanout-from-slices
       blocks: []
@@ -115,7 +115,7 @@ tasks:
         See plan.md Phase 6 section for full struct definition, flag registration snippet, and test shapes.
     - id: phase-7-delegation-closeout-and-plan-reconcile
       title: Phase 7 — Reconcile completed delegations, merge-backs, and completed plans
-      status: pending
+      status: completed
       depends_on:
         - phase-6-fold-back-reconciliation
       blocks: []
@@ -142,15 +142,17 @@ tasks:
         6. archive the final bundle by preserving PLAN/TASKS/(optional) SLICES/narrative plan doc in the
            history tree, stamping the archived copy `status: archived`, and removing the source bundle from
            `.agents/workflow/plans/<plan-id>/`
-        7. make orient/status pending-merge-back counts reflect unintegrated artifacts only
+        7. make orient/status pending-merge-back counts reflect unintegrated artifacts only (merge-back files are
+           removed from `.agents/active/merge-back/` on closeout, so counts track un-integrated work)
         8. document stale-active-contract cleanup rules for already-completed plans, including migration of legacy
-           flat archives like `.agents/history/delegation-merge-back-archive/...`
-        Candidate surface: `workflow delegation closeout` or `workflow reconcile delegation`.
-        Tests should cover completed-contract archival, merge-back consumption, task completion, plan completion,
-        completed-plan archive/removal from `.agents/workflow/plans/`, and stale completed-plan cleanup.
+           flat archives like `.agents/history/delegation-merge-back-archive/...` — follow-up
+        Implemented: `workflow delegation closeout --plan <id> --task <id> --decision accept|reject [--note …]`
+        archives under `.agents/history/<plan-id>/delegate-merge-back-archive/<yyyy-mm-dd>/<task-id>/`.
+        Follow-up: plan-bundle retirement to `.agents/history/<plan-id>/plan-archive/…`, legacy archive migration.
+        Tests: TestDelegationCloseoutAccept, TestDelegationCloseoutReject.
     - id: phase-8-delegate-prompt-and-file-inputs
       title: Phase 8 — Add per-delegate prompt and prompt-file inputs to orchestrator fanout bundles
-      status: pending
+      status: completed
       depends_on:
         - phase-4-fanout-from-slices
       blocks: []
@@ -182,6 +184,15 @@ tasks:
         - require negative-path coverage metadata when new failure modes are introduced
         - model worker closeout (`workflow verify record`, `workflow checkpoint`, `workflow merge-back`) separately
           from parent closeout (`workflow advance`, delegation closeout/archive)
-        Tests should cover bundle persistence, inline prompt capture, prompt-file loading, repeated context files,
-        reusable verification metadata capture, and no-leak behavior when multiple delegation contracts for
-        different tasks use different bundles.
+        Implemented: fanout persists `.agents/active/delegation-bundles/<delegation_id>.yaml` with repeatable
+        `--delegate-profile`, `--project-overlay`, `--prompt`, `--prompt-file`, `--context-file`,
+        `--feedback-goal`, `--scenario-tag`, `--regression-artifact`, `--validation-queue`, `--selection-reason`,
+        `--require-negative-coverage`, `--sandbox-mutations`. Tests: TestFanoutFromSlice (bundle),
+        TestFanoutTwoTasksDistinctBundles, TestFanoutDelegationBundlePromptAndFiles, TestFanoutDelegationBundleRejectsEscapePath.
+        Follow-up: done — `.claude/skills/orchestrator-session-start` and `delegation-lifecycle` instructions teach bundle-first handoff and align with `docs/LOOP_ORCHESTRATION_SPEC.md`. `iteration-close` skill (user `~/.agents/skills/dot-agents/`) updated for delegated vs direct closeout.
+        Remaining follow-ups (non-blocking):
+        - Optional: JSON-schema validation when saving bundles (`docs/SCHEMA_FOLLOWUPS.md`; `schemas.Validate` no-ops for this schema today).
+        - Optional product: resolve `--delegate-profile` beyond a bundle label (e.g. load or validate `~/.agents/profiles/<name>.md`).
+        - Optional repo-local example files for spec/demo parity: `.agents/prompts/loop-worker.project.md`, `.agents/active/live-testing-queue.md` (spec examples; create if missing).
+        - Optional: vendor a template of the global profile under `docs/` or `src/share/templates` for copying to `~/.agents/profiles/loop-worker.md` (home profile is not git-tracked).
+        - Project overlays validated: `.agents/active/active.loop.md` documents overlay + delegation vs direct; `~/.agents/README.md` lists `profiles/` (user home).
