@@ -62,8 +62,8 @@ The initial TypeScript MVP should stay narrow and useful for restricted machines
 
 The following are explicitly deferred until later waves:
 
-- `workflow` parity
-- KG bridge / MCP server features
+- **Workflow / KG boundary (Phase 4):** see **`docs/TYPESCRIPT_PORT_BOUNDARY.md`**. Chosen stance: optional future **read-only `workflow`** surfaces in TS; **`kg/*`**, **workflow writes**, and **full orchestration** remain **Go-only**.
+- KG bridge / MCP server features (beyond what Stage 1 already covers for detection)
 - plugin import and emission
 - Stage 2 buckets: commands, output-styles, modes, themes, prompts, and finalized plugin buckets
 

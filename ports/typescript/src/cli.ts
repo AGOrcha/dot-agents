@@ -6,10 +6,14 @@
  * into a minimal command dispatcher. No external CLI framework dependency — uses
  * plain process.argv parsing to stay lightweight on restricted machines.
  *
+ * Phase 4 boundary (workflow / KG / orchestration) is documented in CLI --help and
+ * docs/TYPESCRIPT_PORT_BOUNDARY.md — TS does not implement kg/* or workflow writes.
+ *
  * Usage:
  *   dot-agents-ts <command> [subcommand] [args...] [flags]
  */
 
+import { boundaryHelpLines } from "./boundary.js";
 import { runInit } from "./commands/init.js";
 import { runAdd } from "./commands/add.js";
 import { runRefresh } from "./commands/refresh.js";
@@ -272,6 +276,9 @@ function printHelp(): void {
   printLine("  --dry-run             Print what would be done without changes (init)");
   printLine("  --force               Overwrite existing entries");
   printLine("  --verbose, -v         Show more detail (doctor)");
+  for (const line of boundaryHelpLines()) {
+    printLine(line);
+  }
 }
 
 // ---- Main dispatcher ----
