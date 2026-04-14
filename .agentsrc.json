@@ -41,5 +41,9 @@
       "url": "git@github.com:NikashPrakash/agents-config.git",
       "ref": "main"
     }
-  ]
+  ],
+  "refresh": {
+    "version": "dev",
+    "refreshedAt": "2026-04-13T12:59:35Z"
+  }
 }

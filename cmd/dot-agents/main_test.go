@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/commands"
 )
 
 func TestRootHelpIncludesExamples(t *testing.T) {
-	root := buildRoot()
+	root := commands.NewRootCommand()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
