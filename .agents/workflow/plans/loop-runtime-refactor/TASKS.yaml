@@ -327,7 +327,7 @@ tasks:
         Full run with at least one unblocked task → all three phases complete, log dir populated.
     - id: phase-4a-loop-worker-skill
       title: Phase 4a — Create loop-worker skill (.agents/skills/loop-worker/)
-      status: pending
+      status: completed
       depends_on:
         - phase-2a-refactor-active-loop-overlay
       blocks:
@@ -373,7 +373,7 @@ tasks:
             "Do not update loop-state ## Current Position — that is orchestrator scope"
     - id: phase-4b-orchestrator-pattern-e-docs
       title: Phase 4b — Document Pattern E invocation in orchestrator-session-start
-      status: pending
+      status: completed
       depends_on:
         - phase-4a-loop-worker-skill
       blocks:
@@ -417,7 +417,7 @@ tasks:
           - Running headless/batch without an interactive Claude Code session
     - id: phase-4c-metrics-capture
       title: Phase 4c — Add metrics.json capture to pipeline and Pattern E runs
-      status: pending
+      status: completed
       depends_on:
         - phase-3d-ralph-pipeline
         - phase-4b-orchestrator-pattern-e-docs

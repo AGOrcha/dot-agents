@@ -172,31 +172,43 @@ fi
 
 # Write metrics
 if [[ -n "$BASE_LOG_DIR" ]]; then
-  merge_back_status="{}"
-  if [[ -d "$REPO_ROOT/.agents/active/merge-back" ]]; then
-    merge_back_entries=""
-    for bundle_path in "${BUNDLES[@]}"; do
-      # Extract task_id from bundle filename (delegation-bundles/<did>.yaml) via contract
-      task_id=""
-      for contract in "$REPO_ROOT/.agents/active/delegation/"*.yaml; do
-        [[ -f "$contract" ]] || continue
-        did="$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')"
-        [[ "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml" == "$bundle_path" ]] || continue
-        task_id="$(basename "$contract" .yaml)"
-        break
-      done
-      [[ -z "$task_id" ]] && continue
-      mb="$REPO_ROOT/.agents/active/merge-back/${task_id}.md"
-      if [[ -f "$mb" ]]; then
-        status="present"
-      else
-        status="missing"
-      fi
-      [[ -n "$merge_back_entries" ]] && merge_back_entries+=","
-      merge_back_entries+="\"${task_id}\": \"${status}\""
+  merge_back_entries=""
+  worker_iter_entries=""
+
+  for bundle_path in "${BUNDLES[@]}"; do
+    bundle_base="$(basename "$bundle_path" .yaml)"
+
+    # Resolve task_id from delegation contract (contract filename = task_id.yaml)
+    task_id=""
+    for contract in "$REPO_ROOT/.agents/active/delegation/"*.yaml; do
+      [[ -f "$contract" ]] || continue
+      did="$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')"
+      [[ "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml" == "$bundle_path" ]] || continue
+      task_id="$(basename "$contract" .yaml)"
+      break
     done
-    [[ -n "$merge_back_entries" ]] && merge_back_status="{${merge_back_entries}}"
-  fi
+    [[ -z "$task_id" ]] && continue
+
+    # Count worker iterations from log files
+    wlog="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}}"
+    iter_count=0
+    if [[ -n "$wlog" && -d "$wlog" ]]; then
+      iter_count="$(ls "$wlog"/worker-iter-*.{ndjson,json,txt} 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+
+    # merge-back status
+    mb="$REPO_ROOT/.agents/active/merge-back/${task_id}.md"
+    if [[ -f "$mb" ]]; then mb_status="present"; else mb_status="missing"; fi
+
+    [[ -n "$merge_back_entries" ]] && merge_back_entries+=","
+    merge_back_entries+="\"${task_id}\": \"${mb_status}\""
+
+    [[ -n "$worker_iter_entries" ]] && worker_iter_entries+=","
+    worker_iter_entries+="\"${task_id}\": ${iter_count}"
+  done
+
+  merge_back_status="{${merge_back_entries}}"
+  worker_iterations="{${worker_iter_entries}}"
 
   cat >"$BASE_LOG_DIR/metrics.json" <<EOF
 {
@@ -205,7 +217,7 @@ if [[ -n "$BASE_LOG_DIR" ]]; then
   "worker_mode": "script",
   "bundles_created": ${#BUNDLES[@]},
   "workers_spawned": ${#BUNDLES[@]},
-  "worker_iterations": {},
+  "worker_iterations": ${worker_iterations},
   "merge_back_status": ${merge_back_status},
   "persisted_via_workflow_commands": {},
   "context_tokens_approx": null
