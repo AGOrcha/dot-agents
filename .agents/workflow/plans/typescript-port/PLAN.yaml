@@ -4,8 +4,8 @@ title: TypeScript Port Plan
 status: active
 summary: Rebase the office-machine TypeScript port onto the current Go contracts and roadmap without merging stale assumptions from the donor branch wholesale.
 created_at: "2026-04-12T00:00:00Z"
-updated_at: "2026-04-13T13:13:47Z"
+updated_at: "2026-04-14T12:34:44Z"
 owner: dot-agents
 success_criteria: The `ports/typescript/` port has a bounded Windows-friendly MVP on current contracts, and deferred workflow/plugin/Stage 2 scope is explicit rather than implied.
 verification_strategy: TypeScript tests under `ports/typescript/tests`; targeted Go regression checks for copied contract behavior; docs and canonical plan alignment
-current_focus_task: Phase 3 — Land a bounded Stage 1 command MVP for restricted machines
+current_focus_task: Phase 4 — Decide and document the TS boundary for workflow and KG features
