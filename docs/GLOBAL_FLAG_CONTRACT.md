@@ -156,5 +156,6 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 
 ## Related documents
 
+- [Generated coverage matrix](../generated/GLOBAL_FLAG_COVERAGE.md) — **machine-generated** table of `commands.Flags` reads per CLI command (`go run ./cmd/globalflag-coverage -markdown -o docs/generated/GLOBAL_FLAG_COVERAGE.md`).
 - [Global Flag Compliance plan (inventory)](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
 - [Loop Orchestration Spec](./LOOP_ORCHESTRATION_SPEC.md) — delegation bundles, `workflow graph query` + `--json` forwarding to `kg bridge query`

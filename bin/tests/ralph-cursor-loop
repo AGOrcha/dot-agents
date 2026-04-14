@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# Ralph-style orchestration loop: dot-agents workflow snapshot + Cursor Agent (--print).
+# Not for CI. Copy to scripts/local/ for private tweaks (that path is gitignored).
+#
+# Requires: Cursor `agent` on PATH (see `agent --help`), dot-agents CLI or this repo checkout.
+#   From this repo, the script prefers `go run ./cmd/dot-agents` so `workflow fanout` has Phase-8 flags.
+#   Override: DOT_AGENTS="dot-agents" (or a path) to force a specific binary.
+#
+# Output format (--print): default stream-json (NDJSON: tools + assistant events for offline analysis).
+#   Adds --stream-partial-output (text deltas) unless RALPH_STREAM_PARTIAL=0.
+#   RALPH_AGENT_OUTPUT_FORMAT=json  single final JSON (smaller, not a full tool trace)
+#   RALPH_AGENT_OUTPUT_FORMAT=text    plain transcript
+#
+# Logs: each run defaults to REPO_ROOT/.ralph-loop-streams/run-<timestamp>/ (prompt + workflow JSON + agent stream).
+#   RALPH_LOG_DIR=/path     override directory
+#   RALPH_NO_LOG=1          stdout only, no files
+#
+# Profile stack (same contract as workflow fanout):
+#   Global:  ~/.agents/profiles/loop-worker.md     (override: RALPH_LOOP_PROFILE)
+#   Overlay: <repo>/.agents/active/active.loop.md (override: RALPH_PROJECT_OVERLAY)
+#
+# Delegation bundle preflight (default on): runs *once* before the agent loop:
+#   dot-agents workflow fanout ... --delegate-profile loop-worker \
+#     --project-overlay … --prompt-file …   (loop prompt files live in the bundle)
+#   Uses `workflow next` JSON for plan/task/write_scope unless you set:
+#     RALPH_FANOUT_PLAN  RALPH_FANOUT_TASK  RALPH_FANOUT_WRITE_SCOPE (comma-separated paths)
+#   If a delegation already exists for that task, reuses its bundle (no second fanout).
+#   RALPH_PREFANOUT=0  skip fanout entirely (prompt still references profile paths only)
+#
+# This script’s agent prompt is orchestrator-shaped (orchestrator-session-start). For implementation
+# after a bundle exists, use skill delegation-lifecycle → instructions/bundle-to-execution.md with
+# ~/.agents/profiles/loop-worker.md + .agents/active/active.loop.md, then verify/checkpoint/merge-back.
+#
+# Usage:
+#   ./scripts/ralph-cursor-loop.sh
+#   RALPH_ITERATIONS=10 ./scripts/ralph-cursor-loop.sh
+#   RALPH_ITERATIONS=3 RALPH_MODEL=sonnet-4 ./scripts/ralph-cursor-loop.sh
+#   RALPH_FORCE=1 ./scripts/ralph-cursor-loop.sh   # maps to agent -f (broader command allow)
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+AGENT_BIN="${AGENT_BIN:-agent}"
+ITERATIONS="${RALPH_ITERATIONS:-1}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  LOG_DIR="$RALPH_LOG_DIR"
+else
+  LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)"
+fi
+
+# Matches `workflow fanout --delegate-profile loop-worker --project-overlay .agents/active/active.loop.md`
+LOOP_PROFILE_FILE="${RALPH_LOOP_PROFILE:-$HOME/.agents/profiles/loop-worker.md}"
+PROJECT_OVERLAY_FILE="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.md}"
+
+[[ -f "$LOOP_PROFILE_FILE" ]] || echo "warning: loop-worker profile missing: $LOOP_PROFILE_FILE" >&2
+[[ -f "$PROJECT_OVERLAY_FILE" ]] || echo "warning: project overlay missing: $PROJECT_OVERLAY_FILE" >&2
+
+# Prefer repo checkout (Phase-8 fanout flags); PATH dot-agents may be an older binary.
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v dot-agents >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(dot-agents)
+else
+  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+delegation_bundle_path_for_task() {
+  local task_id="$1"
+  local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
+  [[ -f "$contract" ]] || return 1
+  local did
+  did=$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+  [[ -n "$did" ]] || return 1
+  printf '%s' "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml"
+}
+
+# Sets BUNDLE_PATH (absolute) and FANOUT_TASK_ID when preflight succeeds or reuses an existing delegation.
+run_fanout_preflight() {
+  BUNDLE_PATH=""
+  FANOUT_TASK_ID=""
+  if [[ "${RALPH_PREFANOUT:-1}" != "1" ]]; then
+    echo "ralph-cursor-loop: skipping workflow fanout (RALPH_PREFANOUT=0)" >&2
+    return 0
+  fi
+
+  local plan_id task_id write_scope_csv
+  if [[ -n "${RALPH_FANOUT_PLAN:-}" && -n "${RALPH_FANOUT_TASK:-}" ]]; then
+    plan_id="$RALPH_FANOUT_PLAN"
+    task_id="$RALPH_FANOUT_TASK"
+    write_scope_csv="${RALPH_FANOUT_WRITE_SCOPE:-}"
+    if [[ -z "$write_scope_csv" ]]; then
+      echo "error: set RALPH_FANOUT_WRITE_SCOPE (comma-separated) when using RALPH_FANOUT_PLAN/TASK" >&2
+      return 1
+    fi
+  else
+    local raw
+    raw="$(da --json workflow next 2>&1 || true)"
+    if [[ "${raw:0:1}" != "{" ]]; then
+      echo "warning: workflow next has no JSON suggestion — fanout preflight skipped (no canonical task or CLI text output)." >&2
+      return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "error: python3 required to parse workflow next JSON for fanout preflight" >&2
+      return 1
+    fi
+    IFS=$'\t' read -r plan_id task_id write_scope_csv < <(printf '%s' "$raw" | python3 -c "import json,sys; d=json.load(sys.stdin); w=d.get('write_scope') or []; print(d['plan_id'], d['task_id'], ','.join(w), sep='\t')")
+  fi
+
+  FANOUT_TASK_ID="$task_id"
+
+  local existing
+  if existing="$(delegation_bundle_path_for_task "$task_id")" && [[ -f "$existing" ]]; then
+    BUNDLE_PATH="$existing"
+    echo "ralph-cursor-loop: existing delegation for task $task_id — using $(basename "$BUNDLE_PATH")" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$BUNDLE_PATH" "$LOG_DIR/delegation-bundle.snapshot.yaml"
+    return 0
+  fi
+
+  local -a fanout_args=( workflow fanout
+    --plan "$plan_id"
+    --task "$task_id"
+    --owner "${RALPH_FANOUT_OWNER:-cursor-ralph-loop}"
+    --delegate-profile "${RALPH_DELEGATE_PROFILE:-loop-worker}"
+    --selection-reason "${RALPH_FANOUT_SELECTION_REASON:-ralph-cursor-loop preflight}"
+  )
+  if [[ -n "$write_scope_csv" ]]; then
+    fanout_args+=( --write-scope "$write_scope_csv" )
+  fi
+
+  local f
+  IFS=',' read -ra _overlays <<< "${RALPH_FANOUT_PROJECT_OVERLAYS:-.agents/active/active.loop.md}"
+  for f in "${_overlays[@]}"; do
+    f="${f#"${f%%[![:space:]]*}"}"
+    f="${f%"${f##*[![:space:]]}"}"
+    [[ -n "$f" ]] && fanout_args+=( --project-overlay "$f" )
+  done
+  IFS=',' read -ra _pfiles <<< "${RALPH_FANOUT_PROMPT_FILES:-.agents/active/active.loop.md}"
+  for f in "${_pfiles[@]}"; do
+    f="${f#"${f%%[![:space:]]*}"}"
+    f="${f%"${f##*[![:space:]]}"}"
+    [[ -n "$f" ]] && fanout_args+=( --prompt-file "$f" )
+  done
+  if [[ -f "$REPO_ROOT/.agents/active/loop-state.md" ]]; then
+    fanout_args+=( --context-file .agents/active/loop-state.md )
+  fi
+
+  echo "ralph-cursor-loop: running workflow fanout for plan=$plan_id task=$task_id …" >&2
+  local fanout_log
+  fanout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-fanout.XXXXXX")"
+  if da "${fanout_args[@]}" >"$fanout_log" 2>&1; then
+    cat "$fanout_log"
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$fanout_log" "$LOG_DIR/fanout-preflight.log"
+    rm -f "$fanout_log"
+  else
+    cat "$fanout_log" >&2
+    rm -f "$fanout_log"
+    echo "error: workflow fanout failed (set RALPH_PREFANOUT=0 to run without bundle)" >&2
+    return 1
+  fi
+
+  if BUNDLE_PATH="$(delegation_bundle_path_for_task "$task_id")" && [[ -f "$BUNDLE_PATH" ]]; then
+    echo "ralph-cursor-loop: delegation bundle: $BUNDLE_PATH" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$BUNDLE_PATH" "$LOG_DIR/delegation-bundle.snapshot.yaml"
+  else
+    echo "warning: fanout reported success but bundle path not found for task $task_id" >&2
+  fi
+}
+
+if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+  echo "error: '$AGENT_BIN' not found on PATH (install Cursor Agent CLI or set AGENT_BIN)" >&2
+  exit 1
+fi
+
+case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
+  echo "error: RALPH_AGENT_OUTPUT_FORMAT must be text, json, or stream-json (got $OUTPUT_FORMAT)" >&2
+  exit 1
+esac
+
+find_skill_dir() {
+  local name="$1"
+  local p
+  for p in \
+    "$REPO_ROOT/.claude/skills/$name" \
+    "$HOME/.claude/skills/$name" \
+    "$HOME/.agents/skills/dot-agents/$name" \
+    "$REPO_ROOT/.agents/skills/dot-agents/$name"; do
+    if [[ -f "$p/SKILL.md" ]]; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ORCH_DIR="$(find_skill_dir orchestrator-session-start || true)"
+if [[ -z "${ORCH_DIR:-}" ]]; then
+  echo "warning: orchestrator-session-start skill not found; agent should still follow prompt" >&2
+fi
+
+ITER_CLOSE_DIR="$(find_skill_dir iteration-close || true)"
+
+if [[ -n "$LOG_DIR" ]]; then
+  mkdir -p "$LOG_DIR"
+  echo "ralph-cursor-loop: streaming log dir: $LOG_DIR" >&2
+  {
+    echo "loop_profile_path=$LOOP_PROFILE_FILE"
+    echo "project_overlay_path=$PROJECT_OVERLAY_FILE"
+  } >"$LOG_DIR/profile-paths.env"
+  [[ -f "$LOOP_PROFILE_FILE" ]] && cp -f "$LOOP_PROFILE_FILE" "$LOG_DIR/loop-worker-profile.md"
+  [[ -f "$PROJECT_OVERLAY_FILE" ]] && cp -f "$PROJECT_OVERLAY_FILE" "$LOG_DIR/active.loop-overlay.md"
+fi
+
+run_fanout_preflight
+if [[ -n "${LOG_DIR:-}" && -n "${BUNDLE_PATH:-}" ]]; then
+  {
+    echo "delegation_bundle_path=$BUNDLE_PATH"
+    echo "fanout_task_id=$FANOUT_TASK_ID"
+  } >>"$LOG_DIR/profile-paths.env"
+fi
+
+agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+if [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]]; then
+  agent_inv+=( --stream-partial-output )
+fi
+if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+  agent_inv+=( -f )
+fi
+if [[ -n "${RALPH_MODEL:-}" ]]; then
+  agent_inv+=( --model "$RALPH_MODEL" )
+fi
+
+for ((i = 1; i <= ITERATIONS; i++)); do
+  snapshot="$(mktemp -d "${TMPDIR:-/tmp}/ralph-wf.XXXXXX")"
+  prompt_file=""
+  cleanup_iter() {
+    rm -f "${prompt_file:-}" 2>/dev/null || true
+    rm -rf "${snapshot:-}" 2>/dev/null || true
+  }
+  trap cleanup_iter EXIT
+
+  da --json workflow orient >"$snapshot/orient.json"
+  da --json workflow status >"$snapshot/status.json"
+  da --json workflow next >"$snapshot/next.json"
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/ralph-prompt.XXXXXX")"
+
+  {
+    cat <<EOF
+You are the loop orchestrator for this repository (dot-agents workflow).
+
+EOF
+    if [[ -n "${BUNDLE_PATH:-}" ]]; then
+      cat <<EOF
+## Delegation bundle (preflight — read first)
+This shell run already executed \`workflow fanout\` so a Phase-8 bundle exists (prompt_files, overlays, write_scope, verification). Same handoff model as \`delegation-lifecycle\` / \`docs/LOOP_ORCHESTRATION_SPEC.md\`.
+
+- **Bundle YAML:** ${BUNDLE_PATH}
+- **Task id:** ${FANOUT_TASK_ID}
+- **Delegation contract:** .agents/active/delegation/${FANOUT_TASK_ID}.yaml
+
+Parse the bundle before re-deriving fanout flags; it already encodes the loop prompt paths and profile label.
+
+EOF
+    fi
+    cat <<EOF
+## Profile stack (global + overlay — still load for habits)
+Pairs **loop-worker** with the repo overlay (fanout also recorded these on the bundle):
+
+- **Global loop-worker profile:** ${LOOP_PROFILE_FILE}
+- **Project overlay (active.loop):** ${PROJECT_OVERLAY_FILE}
+
+## Required: orchestrator-session-start
+EOF
+    if [[ -n "${ORCH_DIR:-}" ]]; then
+      cat <<EOF
+Skill root (read SKILL.md, then instructions/workflow.md and instructions/gotchas.md using your file tools):
+${ORCH_DIR}
+
+EOF
+    else
+      cat <<'EOF'
+The orchestrator-session-start skill was not found on disk. Follow the same flow from memory:
+1) workflow orient → status → next; trust `workflow next` over stale checkpoint text.
+2) workflow plan + workflow tasks <plan-id> for the chosen plan.
+3) Prefer workflow graph / kg commands before broad rg scans.
+4) Decide direct work vs workflow fanout; if fanout, honor delegation bundles under .agents/active/delegation-bundles/
+
+EOF
+    fi
+    if [[ -n "${ITER_CLOSE_DIR:-}" ]]; then
+      cat <<EOF
+
+## After implementation iterations (worker follow-up)
+iteration-close skill root (for workers closing verify/checkpoint/advance or merge-back):
+${ITER_CLOSE_DIR}
+EOF
+    fi
+    cat <<EOF
+
+## Injected workflow snapshot (JSON)
+These were captured just before this prompt — parse them; do not assume fresher state without re-running commands.
+
+### workflow orient
+$(cat "$snapshot/orient.json")
+
+### workflow status
+$(cat "$snapshot/status.json")
+
+### workflow next
+$(cat "$snapshot/next.json")
+
+## Deliverables for this response
+1. Summarize current situation from the JSON above and the skill workflow.
+2. Name the next actionable unit of work (plan/task/slice) and whether it should be executed directly, delegated via workflow fanout, or blocked (and why).
+3. If a preflight bundle exists above, reference it; otherwise list the exact fanout flags you would use (plan, task, write-scope, owner) and bundle/profile paths.
+4. Keep the answer concise; use markdown sections.
+
+Iteration ${i} of ${ITERATIONS} for this shell loop.
+EOF
+  } >"$prompt_file"
+
+  if [[ -n "$LOG_DIR" ]]; then
+    cp "$prompt_file" "$LOG_DIR/prompt-${i}.txt"
+    cp "$snapshot/orient.json" "$LOG_DIR/orient-${i}.json"
+    cp "$snapshot/status.json" "$LOG_DIR/status-${i}.json"
+    cp "$snapshot/next.json" "$LOG_DIR/next-${i}.json"
+  fi
+
+  echo "=== ralph-cursor-loop: iteration $i/$ITERATIONS (agent stream follows) ===" >&2
+  if [[ -n "$LOG_DIR" ]]; then
+    case "$OUTPUT_FORMAT" in
+      stream-json) log_agent="$LOG_DIR/agent-${i}.ndjson" ;;
+      json)        log_agent="$LOG_DIR/agent-${i}.json" ;;
+      *)           log_agent="$LOG_DIR/agent-${i}.txt" ;;
+    esac
+    "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+  else
+    "${agent_inv[@]}" "$(cat "$prompt_file")"
+  fi
+
+  trap - EXIT
+  cleanup_iter
+done
+
+echo "ralph-cursor-loop: done (${ITERATIONS} iteration(s))." >&2

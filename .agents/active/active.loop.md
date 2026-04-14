@@ -201,14 +201,14 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
 - Maximum 10 files changed per iteration — if scope grows beyond that, split the work and commit what you have
 
 ## Iteration End
-19. **Persist workflow state** — run `/iteration-close` (or the individual commands manually):
+21. **Persist workflow state** — run `/iteration-close` (or the individual commands manually):
    - `go run ./cmd/dot-agents workflow verify record --status pass --summary "<focused packages: N tests>"` 
    - `go run ./cmd/dot-agents workflow checkpoint --message "<what was built and why>" --verification-status pass`
    - **Direct:** if you completed a YAML canonical task and you are **not** under an active delegation: `go run ./cmd/dot-agents workflow advance <plan-id> <task-id> completed`
    - **Delegated:** if `.agents/active/delegation/<task-id>.yaml` is active for your work: `go run ./cmd/dot-agents workflow merge-back …` instead of `advance`
    - This is **not** approval-gated for verify/checkpoint — run every iteration. Record `persisted_via_workflow_commands: yes` in self-assessment.
    - Only use sandbox mode (`AGENTS_HOME=<tmp>`) when exercising the checkpoint/verify commands themselves as product test surfaces; for normal iteration closeout, write to the real `~/.agents`.
-20. **Queue an improvement proposal** if the iteration produced a worthy candidate:
+22. **Queue an improvement proposal** if the iteration produced a worthy candidate:
    - Scan `## CLI Observations` and this iteration's traces for: new gotchas, rule gaps, hook improvements, UX friction patterns
    - If found, write a proposal to `~/.agents/proposals/<id>.yaml` using the `propose.sh` helper or directly:
      - `type`: `skill` | `rule` | `hook` | `setting`
@@ -218,9 +218,9 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
    - Only one proposal per iteration. Batch multiple small items into one `modify` on one file.
    - Record `proposal_queued: yes (<id>)` or `proposal_queued: no` in the self-assessment.
    - Do NOT propose CLI implementation changes — those go into plan items.
-21. Self-review: run `git diff` on any unstaged changes and `git diff --cached` on the staged iteration, then fix obvious issues before committing
-22. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
-23. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
+23. Self-review: run `git diff` on any unstaged changes and `git diff --cached` on the staged iteration, then fix obvious issues before committing
+24. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
+25. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
     ```
     ### Iteration N — YYYY-MM-DD HH:MM
     - wave: <plan-name>
@@ -238,7 +238,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - summary: <one-line description of what was done>
     ```
     Get file/line counts from `git diff --cached --stat` before the final commit. Prefer one commit that includes code + loop-state/history updates; avoid standalone `loop-state:` follow-up commits.
-24. Append a self-assessment block to the same iteration entry:
+26. Append a self-assessment block to the same iteration entry:
     ```
     Self-assessment:
     - read_loop_state: yes/no
@@ -258,7 +258,7 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - no_destructive_commands: yes/no
     ```
     Be honest — these are for post-hoc analysis, not grading.
-25. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
+27. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
     - A trace label, for example `Trace: workflow-status-clean-repo`
     - The exact command
     - Scenario tags
@@ -269,14 +269,14 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - Classification: `[ok]`, `[ok-empty]`, `[ok-warning]`, `[retry-recovered]`, `[impl-bug]`, `[tool-bug]`, `[missing-feature]`, or `[blocked]`
     - If multiple commands form one integration scenario, give them a shared scenario tag and note the chain in the trace labels or follow-on text
     - If commands in the chain had different outcomes, record per-command classifications explicitly instead of collapsing them into one label
-26. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
+28. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
     - Reconcile the table against the commands listed in this iteration's trace before finishing
-27. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
+29. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
     - Update the matching family bucket, not just the first row that seems close
     - When a scenario is one half of a useful pair, note which side was exercised and what still remains uncovered
     - Use tag names exactly as written in the table; if a new tag is needed, add the row first
     - For integration scenarios, describe the command chain, the stack sub-bucket, and whether the subsystems stayed coherent end-to-end
-28. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
+30. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
     ```
     ### Iteration N
     - type: test-failure | compile-error | cli-error
@@ -285,12 +285,12 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
     - retries: N
     ```
     - If `retries: N` is greater than 0 in the iteration log, an Error Log entry is mandatory
-29. Under `## CLI Observations` in loop-state.md, note any patterns:
+31. Under `## CLI Observations` in loop-state.md, note any patterns:
     - Commands that feel awkward or require too many steps
     - Output that is confusing or missing useful info
     - Features that would make the workflow smoother
     - UX friction (e.g., unnecessary prompts, unclear errors)
-30. Update `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
+32. Update `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
     - Rewrite these sections in place; do not append a second candidate-path block, duplicate priorities, or stale summary paragraphs
 
 ## What NOT to spend time on

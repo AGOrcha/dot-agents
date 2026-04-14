@@ -25,7 +25,7 @@ tasks:
         - Fold-back: merge-back integrated — TS port Phase 1 donor audit complete; plan aligned to current Go contracts.
     - id: phase-2-foundations-on-current-contracts
       title: Phase 2 — Rebuild core config, path, link, and hook foundations on current contracts
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-donor-audit-and-docs
       blocks:

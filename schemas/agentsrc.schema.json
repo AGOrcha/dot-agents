@@ -52,6 +52,39 @@
       "items": {
         "$ref": "#/$defs/source"
       }
+    },
+    "refresh": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "required": true,
+          "example": "v1.0.0"
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "required": true,
+          "example": "ad213s5e"
+        },
+        "describe": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "required": true,
+          "example": "Refreshed dot-agents project from ~/.agents/ into project directories."
+        },
+        "refreshedAt": {
+          "type": "string",
+          "minLength": 1,
+          "required": true,
+          "format": "datetime",
+          "example": "2026-04-13T12:59:35Z"
+        }
+      }
     }
   },
   "$defs": {
