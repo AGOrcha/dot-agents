@@ -54,7 +54,7 @@ tasks:
         - Write scope is strict: ports/typescript/src/core/, ports/typescript/src/platforms/, ports/typescript/tests/
     - id: phase-3-stage1-command-mvp
       title: Phase 3 — Land a bounded Stage 1 command MVP for restricted machines
-      status: pending
+      status: completed
       depends_on:
         - phase-2-foundations-on-current-contracts
       blocks:
@@ -70,6 +70,19 @@ tasks:
         `init`, `add`, `refresh`, `status`, `doctor`, `skills`, `agents`, `hooks`.
         `import` may join the MVP only if its canonicalization logic can be kept aligned with current Go tests without
         pulling in Stage 2/plugin assumptions prematurely.
+
+        PATTERN E TEST RUN (2026-04-14):
+        Bundle: .agents/active/delegation-bundles/del-phase-3-stage1-command-mvp-1776169635.yaml
+        Worker mode: Pattern E (Claude Code Agent tool subagent)
+        Feedback goal: Do the 8 Stage 1 MVP commands wire correctly through the CLI entry point with passing TypeScript tests?
+
+        CONSTRAINTS:
+        - write_scope: ports/typescript/src/cli.ts, ports/typescript/src/commands/, ports/typescript/tests/
+        - Do NOT touch Go source — pre-existing pgx/v5 build break in internal/graphstore/postgres.go
+        - Run TypeScript tests only: cd ports/typescript && npm test (or equivalent TS test runner)
+        - Do NOT run go test ./... — it will fail due to the pgx dependency missing from go.mod
+        - Do NOT pull Stage 2/plugin assumptions into this phase
+        - workflow/KG surfaces are deferred to phase-4
     - id: phase-4-advanced-surface-decision
       title: Phase 4 — Decide and document the TS boundary for workflow and KG features
       status: pending
