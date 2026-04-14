@@ -109,5 +109,88 @@ Run both modes on the **same task** (same plan_id + task_id, same write_scope) f
 - Task nature matters: phase-3 (bounded implementation) vs phase-4 (architecture + docs) — not an apples-to-apples comparison for throughput; choose same task type for future A/B
 
 **To-do for complete comparison:**
-- Re-run script worker on a bounded implementation task (same write_scope size as phase-3) with `RALPH_NO_LOG=0` to capture token/timing metrics
-- Compare context_tokens_approx between Pattern E (~77.7k) vs script worker on equivalent task
+- ~~Re-run script worker on a bounded implementation task (same write_scope size as phase-3) with `RALPH_NO_LOG=0` to capture token/timing metrics~~ **DONE** — A/B run on 2026-04-14, see Run 3 below
+- ~~Compare context_tokens_approx between Pattern E (~77.7k) vs script worker on equivalent task~~ **DONE** — results stark: see A/B table below
+
+## A/B Direct Comparison — 2026-04-14 (same plan, same iteration budget, non-overlapping tasks)
+
+### Setup
+Both workers ran **in parallel** on the `typescript-port` plan. Tasks were designed to be equivalent in scope and complexity:
+- **Pattern E** → `ts-ab-workflow-commands` (write: `commands/workflow.ts`, `tests/workflow.test.ts`)
+- **Script worker** → `ts-ab-kg-commands` (write: `commands/kg.ts`, `tests/kg.test.ts`)
+
+Both tasks: implement read-only TS command stubs with positive + negative tests. Same write_scope size (2 files), same task type (bounded implementation).
+
+### Pattern E run — 2026-04-14T19:27:37Z
+
+- plan_id: typescript-port
+- task_id: ts-ab-workflow-commands
+- worker_iterations: 1
+- merge_back_status: present (pass)
+- persisted_via_workflow_commands: yes
+- total_tokens: 59,993 (approx — reported by subagent)
+- tool_uses: 44
+- duration_ms: 376,772 (~6.3 min)
+- task_result: `runWorkflowOrient`, `runWorkflowTasks`, `runWorkflowHealth` implemented; 18 new tests; suite 92/92 passing
+- commit: b467cc0
+- metrics_file: .ralph-loop-streams/pattern-e-ab-20260414-192737/metrics.json
+
+### Script worker run — 2026-04-14T19:27:37Z (parallel to Pattern E)
+
+- plan_id: typescript-port
+- task_id: ts-ab-kg-commands
+- worker_iterations: 1
+- merge_back_status: present (pass)
+- persisted_via_workflow_commands: yes
+- total_tokens: 2,710,560 (207,026 input + 2,503,534 cache read)
+- tool_uses: 63
+- duration_ms: 263,614 (~4.4 min)
+- task_result: `runKgHealth`, `runKgQuery` stub implemented; 8 new tests; suite 74/74 passing
+- commit: 9f9532e + eecf77b
+- metrics_file: .ralph-loop-streams/script-ab-20260414-*/metrics.json
+
+### A/B Comparison Table
+
+| Metric | Pattern E | Script worker |
+|--------|-----------|---------------|
+| task | ts-ab-workflow-commands | ts-ab-kg-commands |
+| write_scope files | 2 | 2 |
+| task type | bounded implementation | bounded implementation |
+| iterations to merge-back | 1 | 1 |
+| **total tokens** | **~60k** | **~2.71M** |
+| input tokens | ~60k | ~207k |
+| cache read tokens | (included above) | ~2.5M |
+| tool uses | 44 | 63 |
+| wall time | ~6.3 min | ~4.4 min |
+| merge_back_status | present/pass | present/pass |
+| persisted_via_workflow_commands | yes | yes |
+| tests added | 18 | 8 |
+| suite passing | 92/92 | 74/74 |
+
+### Key Findings
+
+1. **Token efficiency**: Pattern E used ~45x fewer tokens than script worker (60k vs 2.71M). The dominant cost in script worker is cache read — the `loop-state.md` file and full project overlay are loaded verbatim into every agent call, inflating context by ~2.5M tokens per iteration.
+
+2. **Implementation density**: Pattern E produced 18 tests vs script worker's 8 — more thorough coverage per token spent.
+
+3. **Wall time**: Script worker was slightly faster (~4.4 min vs ~6.3 min) despite 45x more tokens, likely because cache hits are cheaper per wall-clock ms than fresh computation.
+
+4. **Role isolation**: Both modes correctly honored write_scope. Neither crossed into the other task's files.
+
+5. **Merge-back quality**: Both submitted clean merge-backs via `workflow merge-back` CLI. No anti-pattern detected in either mode.
+
+### Root cause of script worker token bloat
+
+`ralph-cursor-loop` builds a prompt that inlines the full content of:
+- `$WORKER_OVERLAY` (`active.loop.md`) — this is the project overlay passed verbatim
+- `$LOOP_PROFILE_FILE` (`loop-worker.md`) — global worker profile
+
+The `active.loop.md` file includes a copy of `loop-state.md` which contains the entire orchestration history. On this repo that file is large (~2500+ lines), which dominates the context window on every iteration. Pattern E workers receive a lean bundle reference and read only what they need via tool calls.
+
+### Recommendation
+
+For bounded implementation tasks (≤5 files, single directory):
+- **Pattern E preferred** — ~45x token savings, higher test coverage, no context bloat
+- Script worker suitable when Pattern E is unavailable (no interactive session) or for tasks where wall time matters more than cost
+
+Mitigation for script worker token bloat: trim `active.loop.md` to a minimal overlay (remove full loop-state.md inclusion), or use `--context-file` selectively rather than full overlay injection. This could reduce script worker context to ~200k-500k, closing most of the gap.

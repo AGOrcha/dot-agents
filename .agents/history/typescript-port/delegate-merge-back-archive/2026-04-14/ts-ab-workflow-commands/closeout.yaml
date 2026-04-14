@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: typescript-port
+task_id: ts-ab-workflow-commands
+delegation_id: del-ts-ab-workflow-commands-1776194470
+decision: accept
+closed_at: "2026-04-14T19:34:39Z"

@@ -136,7 +136,7 @@ tasks:
         `go test ./...` until pgx blocker is resolved.
     - id: ts-ab-workflow-commands
       title: AB-test A — Implement read-only workflow commands in TS port (orient, tasks, health)
-      status: in_progress
+      status: completed
       depends_on:
         - phase-4-advanced-surface-decision
       blocks: []
@@ -158,7 +158,7 @@ tasks:
         structured results matching the Go CLI shape?
     - id: ts-ab-kg-commands
       title: AB-test B — Implement read-only kg commands in TS port (health, query stub)
-      status: in_progress
+      status: completed
       depends_on:
         - phase-4-advanced-surface-decision
       blocks: []
