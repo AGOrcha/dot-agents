@@ -1919,3 +1919,40 @@ Format:
 - `workflow drift` flags all 3 registered projects as warn because none have `.agents/workflow/` directories. This is by design (PLAN.yaml workflow not used), but operators would see this as noisy on every run. Consider filtering or suppressing for projects without canonical workflow initialization.
 - `workflow checkpoint` and `workflow health` work well as a write→verify pair: checkpoint clears the "no checkpoint" warning in health. Good UX feedback loop.
 - **Pre-existing pgx build break (2026-04-12):** `internal/graphstore/postgres.go` imports `github.com/jackc/pgx/v5` and `github.com/jackc/pgx/v5/pgxpool` which are not in `go.mod`. This blocks `go build ./cmd/dot-agents`, `go run ./cmd/dot-agents ...`, and `go test ./...` (commands and graphstore packages). Fix: `go get github.com/jackc/pgx/v5 github.com/jackc/pgx/v5/pgxpool`. Classified as `[tool-bug]` from Phase E work; `go test ./internal/platform/...` still passes. Next iteration should not use `go run ./cmd/dot-agents` without first fixing this dependency.
+
+### Iteration 31 — 2026-04-14
+- wave: typescript-port
+- item: Phase 3 Stage 1 MVP — 8 CLI commands (init, add, refresh, status, doctor, skills, agents, hooks) via TypeScript entry point
+- scenario_tags: [delegated-worker, typescript-only, pattern-e-test]
+- feedback_goal: Do the 8 Stage 1 MVP commands wire correctly through the CLI entry point with passing TypeScript tests?
+- files_changed: 12
+- lines_added: 1710
+- lines_removed: 0
+- tests_added: 33
+- tests_total_pass: true
+- retries: 0
+- commit: b6937fb
+- scope_note: "on-target — strict write scope: ports/typescript/src/commands/, src/core/config.ts, src/cli.ts, src/index.ts, tests/commands.test.ts"
+- summary: Created 8 command modules (init/add/refresh/status/doctor/skills/agents/hooks), core config.ts helpers, cli.ts argv dispatcher, and 33-test suite. All 63 TypeScript tests pass. Merge-back submitted.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (missing path, already registered, dry-run no write, kind:none, canonical vs legacy preference, stale paths, verbose mode)
+- tests_used_sandbox: yes (agentsHomeOverride pattern throughout — real ~/.agents never touched)
+- used_workflow_orient_status: no (delegated worker — bundle is authoritative scope)
+- aligned_with_canonical_tasks: yes (TASKS.yaml phase-3-stage1-command-mvp in_progress; merge-back submitted for parent to advance)
+- persisted_via_workflow_commands: yes
+- ran_cli_command: yes (workflow verify record, workflow checkpoint, workflow merge-back)
+- exercised_new_scenario: yes (typescript-only — no Go CLI, vitest only; pattern-e-test first live subagent worker)
+- cli_produced_actionable_feedback: yes — verify record + checkpoint + merge-back all succeeded
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes (12 files but 10 are new; no existing files broadly edited)
+- no_destructive_commands: yes
+
+## Next Iteration Playbook
+
+- **Parent (orchestrator):** review `.agents/active/merge-back/phase-3-stage1-command-mvp.md`, then run `workflow advance typescript-port phase-3-stage1-command-mvp completed` and `workflow delegation closeout del-phase-3-stage1-command-mvp-1776169635`
+- **Next TypeScript wave:** phase-4-advanced-surface-decision — decide and document the TS boundary for workflow and KG features
+- **pgx blocker still active:** `internal/graphstore/postgres.go` requires `go get github.com/jackc/pgx/v5` before any Go CLI commands will work
