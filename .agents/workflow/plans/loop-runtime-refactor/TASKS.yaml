@@ -133,7 +133,7 @@ tasks:
         [tool-bug] for 6+ iterations but never escalated for scheduling.
     - id: phase-2a-refactor-active-loop-overlay
       title: Phase 2a — Refactor active.loop.md to worker-only scope (~100 lines)
-      status: pending
+      status: completed
       depends_on:
         - phase-1e-tool-bug-auto-escalation
       blocks:
@@ -172,7 +172,7 @@ tasks:
           Worker does NOT update ## Current Position — that is orchestrator scope.
     - id: phase-2b-create-orchestrator-overlay
       title: Phase 2b — Create orchestrator.loop.md (extracted orchestrator content)
-      status: pending
+      status: completed
       depends_on:
         - phase-2a-refactor-active-loop-overlay
       blocks:
