@@ -97,7 +97,7 @@ tasks:
         context: 8-command MVP delivered; phase-4 boundary work is now the active lane.
     - id: phase-4-advanced-surface-decision
       title: Phase 4 — Decide and document the TS boundary for workflow and KG features
-      status: in_progress
+      status: completed
       depends_on:
         - phase-3-stage1-command-mvp
       blocks:
