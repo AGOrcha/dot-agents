@@ -1955,10 +1955,40 @@ Self-assessment:
 - stayed_under_10_files: yes (12 files but 10 are new; no existing files broadly edited)
 - no_destructive_commands: yes
 
+### Iteration 32 — 2026-04-14
+- wave: typescript-port
+- item: AB-test B — TS `runKgHealth` + `runKgQuery` stubs (`ts-ab-kg-commands`)
+- scenario_tags: [delegated-worker, typescript-only, kg-read-only-stub]
+- feedback_goal: Do the kg health + query stubs correctly reflect the phase-4 boundary decision (KG query Go-only) with passing tests?
+- files_changed: 7
+- lines_added: 325
+- lines_removed: 4
+- tests_added: 8
+- tests_total_pass: true
+- retries: 0
+- scope_note: "on-target — write_scope: kg.ts, kg.test.ts, TASKS.yaml, loop-state, active.loop.md"
+- summary: Added `ports/typescript/src/commands/kg.ts` (filesystem health for KG_HOME + `notes/`; stub query message) and `tests/kg.test.ts`. Vitest 74/74 pass; `go test ./...` green. Closeout: verify record → checkpoint → merge-back for parent review.
+
+Self-assessment:
+- read_loop_state: yes
+- one_item_only: yes
+- committed_after_tests: yes
+- tests_positive_and_negative: yes (missing KG_HOME, missing notes/, notes as file, nonexistent path, stub message, override vs env)
+- tests_used_sandbox: yes (tmpdirs + kgHomeOverride)
+- used_workflow_orient_status: no (delegated worker)
+- aligned_with_canonical_tasks: yes (`ts-ab-kg-commands` — merge-back submitted)
+- persisted_via_workflow_commands: yes
+- ran_cli_command: yes (`workflow tasks typescript-port`, verify record, checkpoint, merge-back)
+- exercised_new_scenario: yes (`kg-read-only-stub`)
+- cli_produced_actionable_feedback: yes — workflow tasks + merge-back chain
+- linked_traces_to_outcomes: yes
+- stayed_under_10_files: yes
+- no_destructive_commands: yes
+
 ## Next Iteration Playbook
 
 - **Phase 3 closeout:** already completed at `dca9054` (merge-back archived; checkpoint verification pass).
-- **Active worker target (iteration 37):** `typescript-port` / `phase-4-advanced-surface-decision` — sole bundle `del-phase-4-advanced-surface-decision-1776192016.yaml`. Load `.agents/skills/loop-worker/SKILL.md`, implement within `docs/`, `ports/typescript/src/`, `ports/typescript/tests/` only; then `/iteration-close` (verify → checkpoint → merge-back). Parent: `workflow advance` + `workflow delegation closeout` after review.
-- **Evidence:** `go run ./cmd/dot-agents workflow tasks typescript-port`; primary verification `cd ports/typescript && npm test`. Avoid `go test ./...` until pgx dependency is added.
-- **Orchestrator:** no additional bundles this pass (`RALPH_MAX_PARALLEL_WORKERS=3` headroom unused — single active delegation until phase-4 merge-back + phase-5 gate). Do not start phase-5 until phase-4 is `completed` in YAML and boundary docs exist; ignore `workflow next` → phase-5 until then.
-- **pgx blocker still active:** `internal/graphstore/postgres.go` requires `go get github.com/jackc/pgx/v5` (and pool) before Go CLI / full-repo tests work.
+- **AB-test B (`ts-ab-kg-commands`):** implementation + tests landed; merge-back artifact pending parent `workflow advance` + `workflow delegation closeout` for task `ts-ab-kg-commands` after review.
+- **Parallel lane:** `ts-ab-workflow-commands` (worker A) may still be in flight — reconcile TASKS + delegations before the next fanout.
+- **Evidence:** `go run ./cmd/dot-agents workflow tasks typescript-port`; TS verification `cd ports/typescript && npm test`. Full repo `go test ./...` currently green in this workspace.
+- **Orchestrator:** resume phase-5 / phase-6 gating per canonical `TASKS.yaml` after AB-test merge-backs and any open phase-4 delegation closeouts.

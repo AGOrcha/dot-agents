@@ -134,6 +134,54 @@ tasks:
         `cd ports/typescript && npm test` only until `internal/graphstore/postgres.go` / go.mod pgx fix lands.
         verification: `cd ports/typescript && npm test` after CLI/help/test edits; do not rely on
         `go test ./...` until pgx blocker is resolved.
+    - id: ts-ab-workflow-commands
+      title: AB-test A — Implement read-only workflow commands in TS port (orient, tasks, health)
+      status: in_progress
+      depends_on:
+        - phase-4-advanced-surface-decision
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - ports/typescript/src/commands/workflow.ts
+        - ports/typescript/tests/workflow.test.ts
+      verification_required: true
+      notes: |
+        Worker A/B comparison task. Pattern E worker.
+        Implement three read-only workflow command stubs in TS:
+        - `runWorkflowOrient(opts)` → reads loop-state.md Current Position if present, returns {branch, plan, task}
+        - `runWorkflowTasks(planId, opts)` → reads TASKS.yaml for the plan, returns task list
+        - `runWorkflowHealth(opts)` → checks workflow/ dir exists + has PLAN.yaml, returns {healthy, warnings[]}
+        All three take `agentsHomeOverride?` + `repoRootOverride?`. No Go CLI invocation — pure TS file reads.
+        Write positive + negative tests (missing file, empty plan, unknown plan) in workflow.test.ts.
+        Run: `cd ports/typescript && npm test` — all tests must pass.
+        feedback_goal: Do the three workflow read-only commands parse real YAML/MD fixtures and return
+        structured results matching the Go CLI shape?
+    - id: ts-ab-kg-commands
+      title: AB-test B — Implement read-only kg commands in TS port (health, query stub)
+      status: in_progress
+      depends_on:
+        - phase-4-advanced-surface-decision
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - ports/typescript/src/commands/kg.ts
+        - ports/typescript/tests/kg.test.ts
+      verification_required: true
+      notes: |
+        Worker A/B comparison task. Script worker.
+        Implement two read-only kg command stubs in TS:
+        - `runKgHealth(opts)` → checks KG_HOME env var is set + notes/ subdir exists, returns {healthy, kgHome, warnings[]}
+        - `runKgQuery(query, opts)` → returns {query, result: "KG query requires Go CLI — not available in TS port"}
+          (intentional stub: marks KG writes as Go-only per phase-4 boundary decision)
+        Both take `kgHomeOverride?`. No subprocess or Go CLI invocation.
+        Write positive + negative tests in kg.test.ts (missing KG_HOME, empty dir, query stub message).
+        Run: `cd ports/typescript && npm test` — all tests must pass.
+        feedback_goal: Do the kg health + query stubs correctly reflect the phase-4 boundary decision
+        (KG writes are Go-only) with passing tests?
+
+        Worker (2026-04-14, bundle `del-ts-ab-kg-commands-1776194475`): Delivered `ports/typescript/src/commands/kg.ts`
+        (`runKgHealth`, `runKgQuery`) + `tests/kg.test.ts` (8 cases). `cd ports/typescript && npm test` green; merge-back submitted — parent owns `workflow advance` + delegation closeout.
+        feedback_goal: satisfied — boundary stub + filesystem health checks covered by tests.
     - id: phase-5-stage2-and-plugin-alignment
       title: Phase 5 — Align the TS port with Stage 2 buckets and plugin resources after current Go contracts settle
       status: pending
