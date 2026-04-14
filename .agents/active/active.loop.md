@@ -7,6 +7,7 @@ Copy the prompt below into an agent as: `/loop 1hr <prompt>` (if `/loop` is avai
 - **Role:** Repo-local overlay for this repository — plans, specs, CLI inventory, and dogfood rhythm. It is **not** the global worker profile.
 - **Global `loop-worker` profile:** `~/.agents/profiles/loop-worker.md` (use `--delegate-profile loop-worker` with `workflow fanout`).
 - **Valid fanout reference:** `--project-overlay .agents/active/active.loop.md` (path must stay inside the repo).
+- **Skill routing:** In this project prefer `/orchestrator-session-start` over `/agent-start`. `agent-start` is for one-off tasks in repos without a dot-agents workflow setup.
 
 ---
 
@@ -34,9 +35,7 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
 2. Run `go run ./cmd/dot-agents review` — check for pending improvement proposals from prior iterations. If any exist, run `review show <id>` to read them and `review approve <id>` / `review reject <id>` before starting new work.
 3. Run `go run ./cmd/dot-agents workflow orient` — same session snapshot the CLI uses: git summary, active markdown plans, canonical plan summaries (if any), checkpoint pointer, proposals, delegation/merge-back hints, workflow health. Use it **together with** loop-state; do not treat CLI output as a substitute for the iteration log when loop-state has fresher detail.
    - If orient warns about missing `.agents/workflow/` or lists zero canonical plans, continue using markdown `.agents/active/*.plan.md` via the plan-wave-picker — that is expected until YAML canonical plans exist for this repo.
-4. Run `go run ./cmd/dot-agents workflow status`
-   - Treat this as checkpoint-backed readback, not as the only source of truth.
-   - If `workflow status` next action conflicts with loop-state, `workflow orient`, or canonical task status, assume the checkpoint is stale until proven otherwise. Do **not** silently follow the stale next action; log the mismatch under `## Loop Health` or `## CLI Observations`.
+4. If `workflow orient` output conflicts with canonical task state found in step 7, log the mismatch under `## Loop Health` — canonical YAML wins. (`workflow status` is not part of startup; its checkpoint is frequently stale and adds no new signal over orient + tasks.)
 5. Run `git status --short` to see current dirty state — if there are uncommitted changes from a prior iteration, review and commit them first
 6. Skim the two driving specs only if loop-state.md doesn't already summarize the current position
 7. Run `go run ./cmd/dot-agents workflow plan`
@@ -72,6 +71,16 @@ For the specs in progress: docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md and docs/K
 
 ## Implementation (ONE item per iteration)
 13. Pick the next single unchecked item from the selected wave's plan
+
+### Reconciliation iterations
+When the iteration is state catch-up only (verifying pre-existing work, advancing YAML tasks that are already implemented, or reconciling markdown/YAML drift):
+- iteration type: reconciliation
+- feedback_goal: `state hygiene: confirm <X> is marked correctly`
+- CLI trace: `workflow tasks <plan>` before/after is sufficient
+- one_item_only: n/a (a single pass may touch multiple already-done checkboxes)
+- cli_produced_actionable_feedback: n/a
+- Do not invent a stretch feedback goal for a reconciliation pass.
+
 14. Implement the code change — keep scope tight, touch minimal files
 15. Run focused tests first: `go test ./<changed-packages>`
     - **Positive scenarios**: cover intended success paths — default inputs, happy-path behavior, and outputs the change is meant to guarantee.
@@ -201,97 +210,9 @@ If a command chain mixes classifications, add a `Commands:` line with per-comman
 - Maximum 10 files changed per iteration — if scope grows beyond that, split the work and commit what you have
 
 ## Iteration End
-21. **Persist workflow state** — run `/iteration-close` (or the individual commands manually):
-   - `go run ./cmd/dot-agents workflow verify record --status pass --summary "<focused packages: N tests>"` 
-   - `go run ./cmd/dot-agents workflow checkpoint --message "<what was built and why>" --verification-status pass`
-   - **Direct:** if you completed a YAML canonical task and you are **not** under an active delegation: `go run ./cmd/dot-agents workflow advance <plan-id> <task-id> completed`
-   - **Delegated:** if `.agents/active/delegation/<task-id>.yaml` is active for your work: `go run ./cmd/dot-agents workflow merge-back …` instead of `advance`
-   - This is **not** approval-gated for verify/checkpoint — run every iteration. Record `persisted_via_workflow_commands: yes` in self-assessment.
-   - Only use sandbox mode (`AGENTS_HOME=<tmp>`) when exercising the checkpoint/verify commands themselves as product test surfaces; for normal iteration closeout, write to the real `~/.agents`.
-22. **Queue an improvement proposal** if the iteration produced a worthy candidate:
-   - Scan `## CLI Observations` and this iteration's traces for: new gotchas, rule gaps, hook improvements, UX friction patterns
-   - If found, write a proposal to `~/.agents/proposals/<id>.yaml` using the `propose.sh` helper or directly:
-     - `type`: `skill` | `rule` | `hook` | `setting`
-     - `action`: `add` | `modify` | `remove`
-     - `target`: path relative to `~/.agents/` (e.g., `skills/dot-agents/iteration-close/instructions/gotchas.md`)
-     - `content`: **full updated file** (not just the new fragment — `modify` replaces the entire file)
-   - Only one proposal per iteration. Batch multiple small items into one `modify` on one file.
-   - Record `proposal_queued: yes (<id>)` or `proposal_queued: no` in the self-assessment.
-   - Do NOT propose CLI implementation changes — those go into plan items.
-23. Self-review: run `git diff` on any unstaged changes and `git diff --cached` on the staged iteration, then fix obvious issues before committing
-24. If you hit a repeatable pattern, gotcha, or correction: update or create `.agents/lessons/<lesson-name>/LESSON.md` and add it to `.agents/lessons/index.md`
-25. Append a structured entry to `## Iteration Log` in loop-state.md using this exact format:
-    ```
-    ### Iteration N — YYYY-MM-DD HH:MM
-    - wave: <plan-name>
-    - item: <specific checklist item text>
-    - scenario_tags: [tag-1, tag-2]
-    - feedback_goal: <the concrete question the CLI run was meant to answer>
-    - files_changed: N
-    - lines_added: N
-    - lines_removed: N
-    - tests_added: N
-    - tests_total_pass: true/false
-    - retries: N (compile/test failures fixed before final commit)
-    - commit: <short hash>
-    - scope_note: "on-target" | "expanded: <reason>" | "split: <reason>"
-    - summary: <one-line description of what was done>
-    ```
-    Get file/line counts from `git diff --cached --stat` before the final commit. Prefer one commit that includes code + loop-state/history updates; avoid standalone `loop-state:` follow-up commits.
-26. Append a self-assessment block to the same iteration entry:
-    ```
-    Self-assessment:
-    - read_loop_state: yes/no
-    - one_item_only: yes/no
-    - committed_after_tests: yes/no
-    - tests_positive_and_negative: yes/no (focused tests exercised both success and intended failure paths for the changed surface, or N/A if change cannot fail)
-    - tests_used_sandbox: yes/no/n/a (yes = mutating/destructive `dot-agents` CLI was run with temp `AGENTS_HOME` and/or temp project copy per the sandbox section; no = those commands were not run; n/a = only read-only CLI or no CLI this iteration)
-    - used_workflow_orient_status: yes/no
-    - aligned_with_canonical_tasks: yes/no/N/A
-    - persisted_via_workflow_commands: yes/no/sandboxed
-    - proposal_queued: yes (<id>) | no
-    - ran_cli_command: yes/no
-    - exercised_new_scenario: yes/no
-    - cli_produced_actionable_feedback: yes/no
-    - linked_traces_to_outcomes: yes/no
-    - stayed_under_10_files: yes/no
-    - no_destructive_commands: yes/no
-    ```
-    Be honest — these are for post-hoc analysis, not grading.
-27. Under `## CLI Traces` in loop-state.md, log every `go run ./cmd/dot-agents` invocation with:
-    - A trace label, for example `Trace: workflow-status-clean-repo`
-    - The exact command
-    - Scenario tags
-    - Feedback goal
-    - Output summary (truncate long output, keep errors verbatim)
-    - Expectation: `expected`, `unexpected`, or `informative-nonblocking`
-    - Follow-on: `none`, `documented`, `fixed same iteration`, `deferred`, or similar
-    - Classification: `[ok]`, `[ok-empty]`, `[ok-warning]`, `[retry-recovered]`, `[impl-bug]`, `[tool-bug]`, `[missing-feature]`, or `[blocked]`
-    - If multiple commands form one integration scenario, give them a shared scenario tag and note the chain in the trace labels or follow-on text
-    - If commands in the chain had different outcomes, record per-command classifications explicitly instead of collapsing them into one label
-28. Update `## Command Coverage` in loop-state.md: for each command you ran, set Tested=yes, Last Iteration=N, Status=<classification>
-    - Reconcile the table against the commands listed in this iteration's trace before finishing
-29. Update `## Scenario Coverage` in loop-state.md: for each scenario you exercised, set Covered=yes, Last Iteration=N, and add a short note about what evidence was captured
-    - Update the matching family bucket, not just the first row that seems close
-    - When a scenario is one half of a useful pair, note which side was exercised and what still remains uncovered
-    - Use tag names exactly as written in the table; if a new tag is needed, add the row first
-    - For integration scenarios, describe the command chain, the stack sub-bucket, and whether the subsystems stayed coherent end-to-end
-30. If any compile errors, test failures, CLI errors, or retry-recovered detours occurred during this iteration, append to `## Error Log`:
-    ```
-    ### Iteration N
-    - type: test-failure | compile-error | cli-error
-    - detail: <what failed>
-    - resolution: <what fixed it>
-    - retries: N
-    ```
-    - If `retries: N` is greater than 0 in the iteration log, an Error Log entry is mandatory
-31. Under `## CLI Observations` in loop-state.md, note any patterns:
-    - Commands that feel awkward or require too many steps
-    - Output that is confusing or missing useful info
-    - Features that would make the workflow smoother
-    - UX friction (e.g., unnecessary prompts, unclear errors)
-32. Update `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`, and `## Analysis Readiness` in loop-state.md when new evidence changes what the later analysis phase can conclude
-    - Rewrite these sections in place; do not append a second candidate-path block, duplicate priorities, or stale summary paragraphs
+21. Run `/iteration-close`
+   - This handles the full closeout sequence: verify record → checkpoint → advance (direct) or merge-back (delegated) → iteration log → self-assessment → CLI traces → command/scenario coverage → error log.
+   - **CLI broken fallback:** if the CLI binary won't build, mark `persisted_via_workflow_commands: paused — <reason>`, create a fold-back item for the blocker (`go run ./cmd/dot-agents workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`), and continue. Run deferred persist commands at the start of the next iteration before picking new work.
 
 ## What NOT to spend time on
 - Workspace hygiene beyond what the current wave requires

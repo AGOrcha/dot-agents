@@ -4,8 +4,8 @@ title: Loop Runtime Refactor — Skill Chain + Ralph Scripts + Subagent Worker
 status: active
 summary: 'Three-track refactor: (1) fix skill chain load order, strip duplication, and add reconciliation iteration type; (2) split ralph-cursor-loop into role-pure orchestrator/worker/closeout/pipeline scripts; (3) create a cold-start worker skill and Pattern-E subagent invocation pattern for metrics comparison against script workers.'
 created_at: "2026-04-14T00:00:00Z"
-updated_at: "2026-04-14T05:28:06Z"
+updated_at: "2026-04-14T05:42:26Z"
 owner: dot-agents
 success_criteria: Skill chain has no load-order bugs and no duplicated closeout steps. Four ralph scripts cover orchestrator, worker, closeout, and pipeline roles. A loop-worker skill can be cold-started with only a bundle path and succeeds at reaching merge-back without workflow orient.
 verification_strategy: Manual smoke tests for skill load order; cold-start test for loop-worker skill; ralph-pipeline.sh E2E run on at least one unblocked task; metrics.json captured and compared across worker modes.
-current_focus_task: Phase 1a — Fix orchestrator-session-start load order (gotchas before workflow)
+current_focus_task: Phase 2a — Refactor active.loop.md to worker-only scope (~100 lines)
