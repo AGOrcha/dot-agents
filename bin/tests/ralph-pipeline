@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# ralph-pipeline: full E2E orchestration pipeline.
+#   Phase 1: ralph-orchestrate  → discovers unblocked tasks, creates bundles
+#   Phase 2: ralph-cursor-loop  → parallel workers, one per bundle
+#   Phase 3: ralph-closeout     → accept merge-backs, advance canonical tasks
+#
+# Each phase uses role-pure scripts. Orchestrator does not implement.
+# Workers do not select tasks. Closeout is separate.
+#
+# Env vars (forwarded to sub-scripts as appropriate):
+#   RALPH_ITERATIONS             worker implementation budget (default 5)
+#   RALPH_MAX_PARALLEL_WORKERS   max concurrent workers (default 3)
+#   RALPH_AUTO_FANOUT            1 = auto-create bundles (default)
+#   RALPH_CLOSEOUT_AUTO          1 = auto-accept merge-backs (default)
+#   RALPH_MODEL                  agent model override
+#   RALPH_FORCE                  1 = pass -f to agent
+#   RALPH_LOG_DIR                override base log directory (subdirs created per phase)
+#   RALPH_NO_LOG                 1 = stdout only, no files
+#   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
+#   AGENT_BIN                    agent binary (default: agent)
+#   DOT_AGENTS                   dot-agents binary or "go run ..." override
+#
+# Early exits:
+#   No unblocked tasks (no RALPH_BUNDLE lines from orchestrate) → message, exit 0
+#   Fanout failed → exit 1
+#   Worker error → continues to closeout, reports summary
+#   Closeout error → exit 1
+#
+# Metrics: writes .ralph-loop-streams/<run-dir>/metrics.json after completion
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RALPH_ORCHESTRATE="$SCRIPT_DIR/ralph-orchestrate"
+RALPH_WORKER="$SCRIPT_DIR/ralph-cursor-loop"
+RALPH_CLOSEOUT="$SCRIPT_DIR/ralph-closeout"
+
+for s in "$RALPH_ORCHESTRATE" "$RALPH_WORKER" "$RALPH_CLOSEOUT"; do
+  [[ -x "$s" ]] || { echo "error: script not found or not executable: $s" >&2; exit 1; }
+done
+
+RUN_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  BASE_LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  BASE_LOG_DIR="$RALPH_LOG_DIR"
+else
+  BASE_LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-${RUN_TIMESTAMP}"
+fi
+
+[[ -n "$BASE_LOG_DIR" ]] && mkdir -p "$BASE_LOG_DIR"
+
+echo "=== ralph-pipeline: starting run ${RUN_TIMESTAMP} ===" >&2
+
+# Phase 1: Orchestrate — collect RALPH_BUNDLE lines
+echo "=== ralph-pipeline: phase 1 — orchestrate ===" >&2
+
+ORCH_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/orchestrate}"
+[[ -n "$ORCH_LOG_DIR" ]] && mkdir -p "$ORCH_LOG_DIR"
+
+orch_output_file="$(mktemp "${TMPDIR:-/tmp}/ralph-orch-output.XXXXXX")"
+trap 'rm -f "$orch_output_file" 2>/dev/null || true' EXIT
+
+export RALPH_NO_LOG="${RALPH_NO_LOG:-0}"
+export RALPH_LOG_DIR="${ORCH_LOG_DIR:-}"
+export RALPH_MAX_PARALLEL_WORKERS="${RALPH_MAX_PARALLEL_WORKERS:-3}"
+export RALPH_AUTO_FANOUT="${RALPH_AUTO_FANOUT:-1}"
+export RALPH_MODEL="${RALPH_MODEL:-}"
+export RALPH_FORCE="${RALPH_FORCE:-0}"
+export RALPH_AGENT_OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+export AGENT_BIN="${AGENT_BIN:-agent}"
+export DOT_AGENTS="${DOT_AGENTS:-}"
+
+if ! "$RALPH_ORCHESTRATE" >"$orch_output_file" 2>&2; then
+  echo "error: ralph-orchestrate failed" >&2
+  exit 1
+fi
+
+# Parse RALPH_BUNDLE: lines from orchestrator output
+BUNDLES=()
+while IFS= read -r line; do
+  if [[ "$line" == RALPH_BUNDLE:* ]]; then
+    bundle_path="${line#RALPH_BUNDLE: }"
+    bundle_path="${bundle_path## }"
+    [[ -f "$bundle_path" ]] && BUNDLES+=( "$bundle_path" )
+  fi
+done <"$orch_output_file"
+
+# Also emit the orchestrator output to stdout
+cat "$orch_output_file"
+
+if [[ ${#BUNDLES[@]} -eq 0 ]]; then
+  echo "ralph-pipeline: no bundles created — no unblocked tasks to work on" >&2
+  # Write minimal metrics
+  if [[ -n "$BASE_LOG_DIR" ]]; then
+    cat >"$BASE_LOG_DIR/metrics.json" <<EOF
+{
+  "run_id": "${RUN_TIMESTAMP}",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "worker_mode": "script",
+  "bundles_created": 0,
+  "workers_spawned": 0,
+  "worker_iterations": {},
+  "merge_back_status": {},
+  "persisted_via_workflow_commands": {},
+  "context_tokens_approx": null
+}
+EOF
+  fi
+  exit 0
+fi
+
+echo "ralph-pipeline: ${#BUNDLES[@]} bundle(s) created — spawning workers" >&2
+
+# Phase 2: Workers — one per bundle, run in parallel
+echo "=== ralph-pipeline: phase 2 — workers (parallel) ===" >&2
+
+WORKER_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/workers}"
+[[ -n "$WORKER_LOG_DIR" ]] && mkdir -p "$WORKER_LOG_DIR"
+
+declare -A worker_pids
+declare -A worker_logs
+
+for bundle_path in "${BUNDLES[@]}"; do
+  bundle_base="$(basename "$bundle_path" .yaml)"
+  wlog="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}}"
+  [[ -n "$wlog" ]] && mkdir -p "$wlog"
+
+  echo "ralph-pipeline: spawning worker for bundle $(basename "$bundle_path")" >&2
+  (
+    export RALPH_LOG_DIR="${wlog:-}"
+    export RALPH_ITERATIONS="${RALPH_ITERATIONS:-5}"
+    "$RALPH_WORKER" --bundle "$bundle_path"
+  ) &
+  pid=$!
+  worker_pids["$bundle_path"]=$pid
+  worker_logs["$bundle_path"]="${wlog:-}"
+done
+
+# Wait for all workers
+worker_errors=0
+for bundle_path in "${!worker_pids[@]}"; do
+  pid="${worker_pids[$bundle_path]}"
+  if wait "$pid"; then
+    echo "ralph-pipeline: worker for $(basename "$bundle_path") completed" >&2
+  else
+    echo "ralph-pipeline: worker for $(basename "$bundle_path") exited with error (pid=$pid)" >&2
+    (( worker_errors++ )) || true
+  fi
+done
+
+if [[ $worker_errors -gt 0 ]]; then
+  echo "ralph-pipeline: $worker_errors worker(s) failed — continuing to closeout" >&2
+fi
+
+# Phase 3: Closeout
+echo "=== ralph-pipeline: phase 3 — closeout ===" >&2
+
+CLOSEOUT_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/closeout}"
+[[ -n "$CLOSEOUT_LOG_DIR" ]] && mkdir -p "$CLOSEOUT_LOG_DIR"
+
+export RALPH_LOG_DIR="${CLOSEOUT_LOG_DIR:-}"
+export RALPH_CLOSEOUT_AUTO="${RALPH_CLOSEOUT_AUTO:-1}"
+
+if ! "$RALPH_CLOSEOUT"; then
+  echo "error: ralph-closeout failed" >&2
+  exit 1
+fi
+
+# Write metrics
+if [[ -n "$BASE_LOG_DIR" ]]; then
+  merge_back_status="{}"
+  if [[ -d "$REPO_ROOT/.agents/active/merge-back" ]]; then
+    merge_back_entries=""
+    for bundle_path in "${BUNDLES[@]}"; do
+      # Extract task_id from bundle filename (delegation-bundles/<did>.yaml) via contract
+      task_id=""
+      for contract in "$REPO_ROOT/.agents/active/delegation/"*.yaml; do
+        [[ -f "$contract" ]] || continue
+        did="$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')"
+        [[ "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml" == "$bundle_path" ]] || continue
+        task_id="$(basename "$contract" .yaml)"
+        break
+      done
+      [[ -z "$task_id" ]] && continue
+      mb="$REPO_ROOT/.agents/active/merge-back/${task_id}.md"
+      if [[ -f "$mb" ]]; then
+        status="present"
+      else
+        status="missing"
+      fi
+      [[ -n "$merge_back_entries" ]] && merge_back_entries+=","
+      merge_back_entries+="\"${task_id}\": \"${status}\""
+    done
+    [[ -n "$merge_back_entries" ]] && merge_back_status="{${merge_back_entries}}"
+  fi
+
+  cat >"$BASE_LOG_DIR/metrics.json" <<EOF
+{
+  "run_id": "${RUN_TIMESTAMP}",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "worker_mode": "script",
+  "bundles_created": ${#BUNDLES[@]},
+  "workers_spawned": ${#BUNDLES[@]},
+  "worker_iterations": {},
+  "merge_back_status": ${merge_back_status},
+  "persisted_via_workflow_commands": {},
+  "context_tokens_approx": null
+}
+EOF
+  echo "ralph-pipeline: metrics written to $BASE_LOG_DIR/metrics.json" >&2
+fi
+
+if [[ $worker_errors -gt 0 ]]; then
+  echo "ralph-pipeline: done with $worker_errors worker error(s)" >&2
+  exit 1
+fi
+
+echo "ralph-pipeline: done." >&2

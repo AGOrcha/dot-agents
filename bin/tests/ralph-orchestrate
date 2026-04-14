@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# ralph-orchestrate: orchestrator-only pass — discovers unblocked tasks, creates delegation bundles,
+# emits machine-parseable "RALPH_BUNDLE: <path>" lines for each bundle created.
+#
+# Run the orchestrator agent EXACTLY ONCE, then exit. No implementation loop.
+# Use ralph-cursor-loop (worker) and ralph-pipeline (E2E) for the rest.
+#
+# Env vars:
+#   RALPH_MAX_PARALLEL_WORKERS   max bundles to create per run (default 3)
+#   RALPH_AUTO_FANOUT            1 = auto-create bundles (default), 0 = prompt-only (no fanout)
+#   RALPH_FANOUT_PLAN            manual plan override (requires RALPH_FANOUT_TASK)
+#   RALPH_FANOUT_TASK            manual task override
+#   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
+#   RALPH_MODEL                  agent model override
+#   RALPH_FORCE                  1 = pass -f to agent (broader allow)
+#   RALPH_LOG_DIR                override log directory
+#   RALPH_NO_LOG                 1 = stdout only, no log files
+#   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
+#   AGENT_BIN                    agent binary (default: agent)
+#   DOT_AGENTS                   dot-agents binary or "go run ..." override
+#
+# Output:
+#   One "RALPH_BUNDLE: <absolute_bundle_path>" line per created bundle (stdout).
+#   All other output goes to stderr or log files.
+#
+# Verification:
+#   No unblocked tasks → exits 0, no RALPH_BUNDLE lines emitted.
+#   One unblocked task → exits 0, exactly one RALPH_BUNDLE line emitted.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+AGENT_BIN="${AGENT_BIN:-agent}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+MAX_WORKERS="${RALPH_MAX_PARALLEL_WORKERS:-3}"
+AUTO_FANOUT="${RALPH_AUTO_FANOUT:-1}"
+
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  LOG_DIR="$RALPH_LOG_DIR"
+else
+  LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)-orch"
+fi
+
+ORCHESTRATOR_OVERLAY="${RALPH_ORCHESTRATOR_OVERLAY:-$REPO_ROOT/.agents/active/orchestrator.loop.md}"
+LOOP_PROFILE_FILE="${RALPH_LOOP_PROFILE:-$HOME/.agents/profiles/loop-worker.md}"
+WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.md}"
+
+# Prefer repo checkout binary
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v dot-agents >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(dot-agents)
+else
+  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+delegation_bundle_path_for_task() {
+  local task_id="$1"
+  local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
+  [[ -f "$contract" ]] || return 1
+  local did
+  did=$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+  [[ -n "$did" ]] || return 1
+  printf '%s' "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml"
+}
+
+if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+  echo "error: '$AGENT_BIN' not found on PATH (install Cursor Agent CLI or set AGENT_BIN)" >&2
+  exit 1
+fi
+
+command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for JSON parsing" >&2; exit 1; }
+
+case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
+  echo "error: RALPH_AGENT_OUTPUT_FORMAT must be text, json, or stream-json (got $OUTPUT_FORMAT)" >&2
+  exit 1
+esac
+
+# Discover unblocked pending tasks
+# Returns: array of "plan_id:task_id:write_scope_csv" strings
+discover_unblocked_tasks() {
+  local tasks=()
+
+  if [[ -n "${RALPH_FANOUT_PLAN:-}" && -n "${RALPH_FANOUT_TASK:-}" ]]; then
+    local ws="${RALPH_FANOUT_WRITE_SCOPE:-}"
+    [[ -z "$ws" ]] && { echo "error: RALPH_FANOUT_WRITE_SCOPE required with manual plan/task override" >&2; return 1; }
+    tasks+=( "${RALPH_FANOUT_PLAN}:${RALPH_FANOUT_TASK}:${ws}" )
+    printf '%s\n' "${tasks[@]}"
+    return 0
+  fi
+
+  local plan_json
+  plan_json="$(da --json workflow plan 2>/dev/null || true)"
+  [[ "${plan_json:0:1}" == "[" || "${plan_json:0:1}" == "{" ]] || {
+    echo "ralph-orchestrate: no canonical plans found — nothing to fan out" >&2
+    return 0
+  }
+
+  local plan_ids
+  plan_ids="$(printf '%s' "$plan_json" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+plans = data if isinstance(data, list) else data.get('plans', [data])
+for p in plans:
+    pid = p.get('id') or p.get('plan_id')
+    if pid:
+        print(pid)
+" 2>/dev/null || true)"
+
+  [[ -n "$plan_ids" ]] || { echo "ralph-orchestrate: no plan IDs extracted from workflow plan output" >&2; return 0; }
+
+  local count=0
+  local plan_id
+  while IFS= read -r plan_id && [[ $count -lt $MAX_WORKERS ]]; do
+    [[ -z "$plan_id" ]] && continue
+    local tasks_json
+    tasks_json="$(da --json workflow tasks "$plan_id" 2>/dev/null || true)"
+    [[ "${tasks_json:0:1}" == "[" || "${tasks_json:0:1}" == "{" ]] || continue
+
+    local pending
+    pending="$(printf '%s' "$tasks_json" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+items = data if isinstance(data, list) else data.get('tasks', [])
+for t in items:
+    if t.get('status','') == 'pending':
+        tid = t.get('id') or t.get('task_id','')
+        ws = ','.join(t.get('write_scope') or [])
+        print(tid + '\t' + ws)
+" 2>/dev/null || true)"
+
+    local task_id ws_csv
+    while IFS=$'\t' read -r task_id ws_csv && [[ $count -lt $MAX_WORKERS ]]; do
+      [[ -z "$task_id" ]] && continue
+      # Skip if delegation contract already exists
+      local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
+      [[ -f "$contract" ]] && { echo "ralph-orchestrate: skipping $task_id (delegation already exists)" >&2; continue; }
+      tasks+=( "${plan_id}:${task_id}:${ws_csv}" )
+      (( count++ )) || true
+    done <<< "$pending"
+  done <<< "$plan_ids"
+
+  printf '%s\n' "${tasks[@]}"
+}
+
+# Create delegation bundle for one task, emit RALPH_BUNDLE: line
+create_bundle() {
+  local plan_id="$1" task_id="$2" write_scope_csv="$3"
+
+  local -a fanout_args=( workflow fanout
+    --plan "$plan_id"
+    --task "$task_id"
+    --owner "${RALPH_FANOUT_OWNER:-ralph-orchestrate}"
+    --delegate-profile "${RALPH_DELEGATE_PROFILE:-loop-worker}"
+    --selection-reason "ralph-orchestrate auto-fanout"
+    --project-overlay "$WORKER_OVERLAY"
+    --prompt-file "$WORKER_OVERLAY"
+  )
+  [[ -n "$write_scope_csv" ]] && fanout_args+=( --write-scope "$write_scope_csv" )
+  [[ -f "$REPO_ROOT/.agents/active/loop-state.md" ]] && fanout_args+=( --context-file .agents/active/loop-state.md )
+  local tasks_yaml="$REPO_ROOT/.agents/workflow/plans/${plan_id}/TASKS.yaml"
+  [[ -f "$tasks_yaml" ]] && fanout_args+=( --context-file "$tasks_yaml" )
+
+  echo "ralph-orchestrate: fanout plan=$plan_id task=$task_id …" >&2
+  local fanout_log
+  fanout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-fanout.XXXXXX")"
+  if da "${fanout_args[@]}" >"$fanout_log" 2>&1; then
+    cat "$fanout_log" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$fanout_log" "$LOG_DIR/fanout-${task_id}.log"
+    rm -f "$fanout_log"
+  else
+    cat "$fanout_log" >&2
+    rm -f "$fanout_log"
+    echo "error: workflow fanout failed for task $task_id" >&2
+    return 1
+  fi
+
+  local bundle_path
+  if bundle_path="$(delegation_bundle_path_for_task "$task_id")" && [[ -f "$bundle_path" ]]; then
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$bundle_path" "$LOG_DIR/bundle-${task_id}.snapshot.yaml"
+    printf 'RALPH_BUNDLE: %s\n' "$bundle_path"
+  else
+    echo "warning: fanout succeeded but bundle not found for task $task_id" >&2
+  fi
+}
+
+find_skill_dir() {
+  local name="$1"
+  local p
+  for p in \
+    "$REPO_ROOT/.claude/skills/$name" \
+    "$HOME/.claude/skills/$name" \
+    "$HOME/.agents/skills/dot-agents/$name" \
+    "$REPO_ROOT/.agents/skills/dot-agents/$name"; do
+    [[ -f "$p/SKILL.md" ]] && printf '%s' "$p" && return 0
+  done
+  return 1
+}
+
+ORCH_DIR="$(find_skill_dir orchestrator-session-start || true)"
+
+if [[ -n "$LOG_DIR" ]]; then
+  mkdir -p "$LOG_DIR"
+  echo "ralph-orchestrate: log dir: $LOG_DIR" >&2
+fi
+
+# Discover tasks
+BUNDLES=()
+if [[ "$AUTO_FANOUT" == "1" ]]; then
+  unblocked=()
+  while IFS= read -r entry && [[ -n "$entry" ]]; do
+    unblocked+=( "$entry" )
+  done < <(discover_unblocked_tasks)
+
+  if [[ ${#unblocked[@]} -eq 0 ]]; then
+    echo "ralph-orchestrate: no unblocked pending tasks found — nothing to fan out" >&2
+  else
+    for entry in "${unblocked[@]}"; do
+      IFS=':' read -r plan_id task_id ws_csv <<< "$entry"
+      bundle_line="$(create_bundle "$plan_id" "$task_id" "$ws_csv" 2>&2 || true)"
+      if [[ -n "$bundle_line" ]]; then
+        echo "$bundle_line"
+        BUNDLES+=( "${bundle_line#RALPH_BUNDLE: }" )
+      fi
+    done
+  fi
+else
+  echo "ralph-orchestrate: AUTO_FANOUT=0 — skipping bundle creation (prompt-only run)" >&2
+fi
+
+# Capture snapshot (orient + next only — no status)
+snapshot="$(mktemp -d "${TMPDIR:-/tmp}/ralph-wf.XXXXXX")"
+trap 'rm -rf "$snapshot" 2>/dev/null || true' EXIT
+da --json workflow orient >"$snapshot/orient.json" 2>/dev/null || echo '{}' >"$snapshot/orient.json"
+da --json workflow next >"$snapshot/next.json" 2>/dev/null || echo '{}' >"$snapshot/next.json"
+
+if [[ -n "$LOG_DIR" ]]; then
+  cp "$snapshot/orient.json" "$LOG_DIR/orient.json"
+  cp "$snapshot/next.json" "$LOG_DIR/next.json"
+fi
+
+# Build orchestrator prompt (single pass — no implementation loop)
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/ralph-orch-prompt.XXXXXX")"
+trap 'rm -rf "$snapshot" "$prompt_file" 2>/dev/null || true' EXIT
+
+{
+  cat <<EOF
+You are the loop orchestrator for this repository (dot-agents workflow).
+Your job this pass: decide which tasks to delegate. Do NOT implement anything.
+
+EOF
+  if [[ -n "${ORCHESTRATOR_OVERLAY:-}" && -f "$ORCHESTRATOR_OVERLAY" ]]; then
+    echo "## Orchestrator overlay"
+    cat "$ORCHESTRATOR_OVERLAY"
+    echo ""
+  fi
+  if [[ -n "${ORCH_DIR:-}" ]]; then
+    cat <<EOF
+## Skill: orchestrator-session-start
+Read SKILL.md, then instructions/workflow.md and instructions/gotchas.md using your file tools:
+${ORCH_DIR}
+
+EOF
+  fi
+  if [[ ${#BUNDLES[@]} -gt 0 ]]; then
+    cat <<EOF
+## Delegation bundles already created by this run
+EOF
+    for b in "${BUNDLES[@]}"; do
+      echo "- RALPH_BUNDLE: $b"
+    done
+    echo ""
+  fi
+  cat <<EOF
+## Workflow snapshot
+### workflow orient
+$(cat "$snapshot/orient.json")
+
+### workflow next
+$(cat "$snapshot/next.json")
+
+## Deliverables for this response
+1. Confirm which tasks were bundled above (or note why they should not proceed).
+2. Write updated TASKS.yaml notes for each task (feedback_goal, write_scope, context).
+3. If additional tasks should be bundled (within RALPH_MAX_PARALLEL_WORKERS=${MAX_WORKERS}), emit:
+   RALPH_BUNDLE: <absolute_bundle_path>
+   One line per additional bundle. If none, emit nothing.
+4. Do NOT implement. Stop after producing the above.
+EOF
+} >"$prompt_file"
+
+[[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/prompt-orchestrator.txt"
+
+agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+[[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+[[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+[[ -n "${RALPH_MODEL:-}" ]] && agent_inv+=( --model "$RALPH_MODEL" )
+
+echo "=== ralph-orchestrate: orchestrator pass (single run) ===" >&2
+if [[ -n "$LOG_DIR" ]]; then
+  case "$OUTPUT_FORMAT" in
+    stream-json) log_agent="$LOG_DIR/agent-orchestrator.ndjson" ;;
+    json)        log_agent="$LOG_DIR/agent-orchestrator.json" ;;
+    *)           log_agent="$LOG_DIR/agent-orchestrator.txt" ;;
+  esac
+  "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+else
+  "${agent_inv[@]}" "$(cat "$prompt_file")"
+fi
+
+echo "ralph-orchestrate: done." >&2

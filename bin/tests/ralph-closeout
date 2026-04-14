@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# ralph-closeout: scan .agents/active/merge-back/*.md for unprocessed merge-backs,
+# run delegation closeout + workflow advance for each.
+#
+# Env vars:
+#   RALPH_CLOSEOUT_AUTO   1 = auto-accept all pending merge-backs (default), 0 = spawn orchestrator review pass
+#   RALPH_LOG_DIR         override log directory
+#   RALPH_NO_LOG          1 = stdout only, no log files
+#   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_MODEL           agent model override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_FORCE           1 = pass -f to agent (only used when RALPH_CLOSEOUT_AUTO=0)
+#   AGENT_BIN             agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
+#   DOT_AGENTS            dot-agents binary or "go run ..." override
+#
+# Exit codes:
+#   0  — all merge-backs processed (or none found)
+#   1  — one or more closeouts failed
+#
+# Verification:
+#   No merge-backs → exits 0, logs "no pending merge-backs"
+#   One completed merge-back → delegation closeout + advance run cleanly
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+CLOSEOUT_AUTO="${RALPH_CLOSEOUT_AUTO:-1}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  LOG_DIR="$RALPH_LOG_DIR"
+else
+  LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)-closeout"
+fi
+
+# Prefer repo checkout binary
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v dot-agents >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(dot-agents)
+else
+  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for YAML parsing" >&2; exit 1; }
+
+MERGE_BACK_DIR="$REPO_ROOT/.agents/active/merge-back"
+DELEGATION_DIR="$REPO_ROOT/.agents/active/delegation"
+
+if [[ ! -d "$MERGE_BACK_DIR" ]]; then
+  echo "ralph-closeout: no merge-back directory found — no pending merge-backs" >&2
+  exit 0
+fi
+
+# Collect unprocessed merge-back files (presence of file = pending)
+pending=()
+for f in "$MERGE_BACK_DIR"/*.md; do
+  [[ -f "$f" ]] || continue
+  pending+=( "$f" )
+done
+
+if [[ ${#pending[@]} -eq 0 ]]; then
+  echo "ralph-closeout: no pending merge-backs" >&2
+  exit 0
+fi
+
+echo "ralph-closeout: found ${#pending[@]} pending merge-back(s)" >&2
+
+if [[ -n "$LOG_DIR" ]]; then
+  mkdir -p "$LOG_DIR"
+  echo "ralph-closeout: log dir: $LOG_DIR" >&2
+fi
+
+errors=0
+
+process_merge_back_auto() {
+  local mb_file="$1"
+  local base
+  base="$(basename "$mb_file" .md)"
+  local task_id="$base"
+
+  echo "ralph-closeout: processing merge-back for task=$task_id" >&2
+
+  # Extract plan_id from merge-back frontmatter or delegation contract
+  local plan_id=""
+  plan_id="$(python3 -c "
+import re,sys
+text=open('${mb_file}').read()
+m=re.search(r'^plan_id:\s*(.+)', text, re.M)
+if m:
+    print(m.group(1).strip().strip('\"'))
+" 2>/dev/null || true)"
+
+  if [[ -z "$plan_id" ]]; then
+    # Try delegation contract
+    local contract="$DELEGATION_DIR/${task_id}.yaml"
+    if [[ -f "$contract" ]]; then
+      plan_id="$(python3 -c "
+import re,sys
+text=open('${contract}').read()
+m=re.search(r'^plan_id:\s*(.+)', text, re.M)
+if m:
+    print(m.group(1).strip().strip('\"'))
+" 2>/dev/null || true)"
+    fi
+  fi
+
+  if [[ -z "$plan_id" ]]; then
+    echo "error: could not extract plan_id for task=$task_id (checked merge-back + delegation contract)" >&2
+    return 1
+  fi
+
+  # Verify delegation contract exists
+  local contract="$DELEGATION_DIR/${task_id}.yaml"
+  if [[ ! -f "$contract" ]]; then
+    echo "warning: no delegation contract at $contract for task=$task_id — skipping delegation closeout" >&2
+  else
+    echo "ralph-closeout: workflow delegation closeout plan=$plan_id task=$task_id --decision accept" >&2
+    local closeout_log
+    closeout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout.XXXXXX")"
+    if da workflow delegation closeout --plan "$plan_id" --task "$task_id" --decision accept >"$closeout_log" 2>&1; then
+      cat "$closeout_log" >&2
+      [[ -n "${LOG_DIR:-}" ]] && cp -f "$closeout_log" "$LOG_DIR/closeout-${task_id}.log"
+    else
+      cat "$closeout_log" >&2
+      rm -f "$closeout_log"
+      echo "error: delegation closeout failed for task=$task_id" >&2
+      return 1
+    fi
+    rm -f "$closeout_log"
+  fi
+
+  echo "ralph-closeout: workflow advance plan=$plan_id task=$task_id completed" >&2
+  local advance_log
+  advance_log="$(mktemp "${TMPDIR:-/tmp}/ralph-advance.XXXXXX")"
+  if da workflow advance "$plan_id" --task "$task_id" --status completed >"$advance_log" 2>&1; then
+    cat "$advance_log" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$advance_log" "$LOG_DIR/advance-${task_id}.log"
+  else
+    cat "$advance_log" >&2
+    rm -f "$advance_log"
+    echo "error: workflow advance failed for task=$task_id" >&2
+    return 1
+  fi
+  rm -f "$advance_log"
+
+  echo "ralph-closeout: task=$task_id closed successfully" >&2
+}
+
+if [[ "$CLOSEOUT_AUTO" == "1" ]]; then
+  for mb_file in "${pending[@]}"; do
+    if ! process_merge_back_auto "$mb_file"; then
+      (( errors++ )) || true
+    fi
+  done
+else
+  # Non-auto: spawn a single orchestrator agent pass to review and decide
+  AGENT_BIN="${AGENT_BIN:-agent}"
+  if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+    echo "error: '$AGENT_BIN' not found on PATH (needed for RALPH_CLOSEOUT_AUTO=0 review pass)" >&2
+    exit 1
+  fi
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout-prompt.XXXXXX")"
+  trap 'rm -f "$prompt_file" 2>/dev/null || true' EXIT
+
+  {
+    cat <<EOF
+You are reviewing merge-back artifacts to decide whether to accept or reject each.
+
+## Pending merge-backs
+EOF
+    for mb_file in "${pending[@]}"; do
+      local base task_id
+      base="$(basename "$mb_file" .md)"
+      task_id="$base"
+      cat <<EOF
+
+### Task: $task_id
+File: $mb_file
+
+$(cat "$mb_file")
+EOF
+    done
+    cat <<'EOF'
+
+## Your deliverables
+For each merge-back, decide: accept or reject.
+For each accepted task, run:
+  dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
+  dot-agents workflow advance <plan_id> --task <task_id> --status completed
+
+For each rejected task, run:
+  dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision reject
+
+Do not implement anything. Only evaluate and close out.
+EOF
+  } >"$prompt_file"
+
+  [[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/closeout-review-prompt.txt"
+
+  agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+  [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+  [[ -n "${RALPH_MODEL:-}" ]] && agent_inv+=( --model "$RALPH_MODEL" )
+
+  echo "=== ralph-closeout: orchestrator review pass ===" >&2
+  if [[ -n "$LOG_DIR" ]]; then
+    case "$OUTPUT_FORMAT" in
+      stream-json) log_agent="$LOG_DIR/agent-closeout-review.ndjson" ;;
+      json)        log_agent="$LOG_DIR/agent-closeout-review.json" ;;
+      *)           log_agent="$LOG_DIR/agent-closeout-review.txt" ;;
+    esac
+    "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+  else
+    "${agent_inv[@]}" "$(cat "$prompt_file")"
+  fi
+fi
+
+if [[ $errors -gt 0 ]]; then
+  echo "ralph-closeout: $errors error(s) during closeout" >&2
+  exit 1
+fi
+
+echo "ralph-closeout: done." >&2

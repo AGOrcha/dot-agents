@@ -197,7 +197,7 @@ tasks:
         - ## CLI full command list (orchestrator needs all surfaces)
     - id: phase-3a-ralph-orchestrate
       title: Phase 3a — Create ralph-orchestrate.sh (orchestrator-only, multi-task discovery)
-      status: pending
+      status: completed
       depends_on:
         - phase-2a-worker-overlay
       blocks:
@@ -232,7 +232,7 @@ tasks:
         Run with one unblocked task → emits exactly one RALPH_BUNDLE line.
     - id: phase-3b-ralph-worker-rework
       title: Phase 3b — Rework ralph-cursor-loop.sh to worker-only (--bundle required)
-      status: pending
+      status: completed
       depends_on:
         - phase-3a-ralph-orchestrate
       blocks:
@@ -267,7 +267,7 @@ tasks:
         ./bin/tests/ralph-cursor-loop.sh --bundle <valid_path> → runs worker agent.
     - id: phase-3c-ralph-closeout
       title: Phase 3c — Create ralph-closeout.sh (advance + delegation closeout per merge-back)
-      status: pending
+      status: completed
       depends_on:
         - phase-3a-ralph-orchestrate
       blocks:
@@ -294,7 +294,7 @@ tasks:
         With one completed merge-back → delegation closeout + advance runs cleanly.
     - id: phase-3d-ralph-pipeline
       title: Phase 3d — Create ralph-pipeline.sh (orchestrate → parallel workers → closeout)
-      status: pending
+      status: completed
       depends_on:
         - phase-3a-ralph-orchestrate
         - phase-3b-ralph-worker-rework
