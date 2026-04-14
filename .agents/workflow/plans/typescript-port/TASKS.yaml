@@ -23,6 +23,10 @@ tasks:
         4. workflow command surface
         5. Stage 2 bucket and plugin-roadmap boundaries
         - Fold-back: merge-back integrated — TS port Phase 1 donor audit complete; plan aligned to current Go contracts.
+
+        Orchestrator (2026-04-14, iter 37): completed — no delegation this pass.
+        feedback_goal: n/a (closed)
+        context: Historical donor-audit baseline; canonical contracts now live in later phases.
     - id: phase-2-foundations-on-current-contracts
       title: Phase 2 — Rebuild core config, path, link, and hook foundations on current contracts
       status: completed
@@ -52,6 +56,10 @@ tasks:
         - Workflow/plugin/Stage 2 parity is explicitly deferred until platform-dir-unification and
           plugin-resource-salvage settle. Do not pull those surfaces into this phase.
         - Write scope is strict: ports/typescript/src/core/, ports/typescript/src/platforms/, ports/typescript/tests/
+
+        Orchestrator (2026-04-14, iter 37): completed — no delegation this pass.
+        feedback_goal: n/a (closed)
+        context: Foundations landed; Phase 3 MVP supersedes narrow CLI scope discussion here.
     - id: phase-3-stage1-command-mvp
       title: Phase 3 — Land a bounded Stage 1 command MVP for restricted machines
       status: completed
@@ -83,9 +91,13 @@ tasks:
         - Do NOT run go test ./... — it will fail due to the pgx dependency missing from go.mod
         - Do NOT pull Stage 2/plugin assumptions into this phase
         - workflow/KG surfaces are deferred to phase-4
+
+        Orchestrator (2026-04-14, iter 37): completed — Pattern E bundle closed; merge-back archived at dca9054.
+        feedback_goal: n/a (closed)
+        context: 8-command MVP delivered; phase-4 boundary work is now the active lane.
     - id: phase-4-advanced-surface-decision
       title: Phase 4 — Decide and document the TS boundary for workflow and KG features
-      status: pending
+      status: in_progress
       depends_on:
         - phase-3-stage1-command-mvp
       blocks:
@@ -102,6 +114,26 @@ tasks:
         2. selected `workflow` read-only surfaces
         3. broader parity that includes KG bridge and orchestration commands
         The chosen boundary must be reflected in CLI help, docs, and tests.
+
+        Orchestrator (2026-04-14, iteration 37): **delegation active** — canonical bundle on disk:
+        `.agents/active/delegation-bundles/del-phase-4-advanced-surface-decision-1776192016.yaml`
+        (`workflow fanout`, profile `loop-worker`, overlays `active.loop.md`; supersedes
+        `...1776191464.yaml` / `...1776190659.yaml` / `...1776188348.yaml` if referenced elsewhere).
+        **No additional fanout** this orchestrator pass — single lane until merge-back.
+        Worker implements the boundary decision end-to-end in docs, TS CLI help, and tests within
+        canonical write_scope only. Pattern E (Claude Code): subagent reads bundle +
+        `.agents/skills/loop-worker/SKILL.md`, then `/iteration-close` (verify → checkpoint → merge-back;
+        parent advances + delegation closeout). Rationale: role isolation for TS-boundary work; scope is
+        broad (not ≤5 files) — fanout overhead accepted for orchestrator/worker separation.
+        feedback_goal: Can a reader infer from docs, `ports/typescript` CLI `--help`, and tests exactly
+        which workflow/KG/orchestration surfaces the TS port implements vs permanently defers?
+        write_scope (canonical): docs/, ports/typescript/src/, ports/typescript/tests/
+        context: Task stays `in_progress` until merge-back. `workflow next` may return `phase-5` first
+        (phase-5 `depends_on` is only phase-3) — **YAML + orchestrator priority: finish phase-4 before
+        starting phase-5**. Phase-4 blocks the narrative gate for phase-5/6. pgx: use
+        `cd ports/typescript && npm test` only until `internal/graphstore/postgres.go` / go.mod pgx fix lands.
+        verification: `cd ports/typescript && npm test` after CLI/help/test edits; do not rely on
+        `go test ./...` until pgx blocker is resolved.
     - id: phase-5-stage2-and-plugin-alignment
       title: Phase 5 — Align the TS port with Stage 2 buckets and plugin resources after current Go contracts settle
       status: pending
@@ -121,6 +153,19 @@ tasks:
         - `platform-dir-unification` Phase 5 (commands, output-styles, modes, plugins, themes, prompts)
         - `plugin-resource-salvage` Phases 4-5 (import/status/explain/doctor plugin readback and closeout)
         Until those settle, the TypeScript port should treat plugins and Stage 2 buckets as deferred scope.
+
+        Orchestrator (2026-04-14, iter 37): **not bundled** — `workflow next` selects this task, but
+        canonical orchestration defers it until `phase-4-advanced-surface-decision` completes (merge-back;
+        active bundle `del-phase-4-advanced-surface-decision-1776192016.yaml`) and upstream
+        `platform-dir-unification` / `plugin-resource-salvage` contract waves settle; do not
+        parallel with the active phase-4 worker.
+        selector_note: phase-5 does not declare `depends_on: phase-4` in YAML — treat `workflow next` as
+        algorithm-only; phase-4 in_progress + active delegation wins priority.
+        feedback_goal: After Go-side buckets/plugins stabilize, does TS `import`/resource behavior match
+        the declared Stage-2 contract without drift from `platform-dir-unification` / plugin salvage?
+        write_scope (canonical): ports/typescript/src/platforms/, ports/typescript/src/commands/, ports/typescript/tests/, docs/
+        context: Depends on phase-3 (done), phase-4 boundary artifacts, and external Go plans; phase-4
+        docs should name what phase-5 inherits.
     - id: phase-6-release-and-docs
       title: Phase 6 — Package, document, and validate the Windows-friendly release path
       status: pending
@@ -138,3 +183,10 @@ tasks:
         Finalize packaging, command naming, installation instructions, and platform support language.
         The README should describe the TypeScript port as an explicit variant with declared capability boundaries,
         not as a silent replacement for the Go CLI.
+
+        Orchestrator (2026-04-14, iter 37): **not bundled** — depends on phase-4 + phase-5; no worker until both complete; phase-4 delegation still open.
+        feedback_goal: Can a new user install the TS port, read README + `--help`, and understand parity
+        limits vs Go CLI without ambiguity?
+        write_scope (canonical): ports/typescript/, README.md, docs/
+        context: Release narrative must trace back to the phase-4 boundary decision and phase-5 alignment;
+        no fanout while phase-4 delegation is open.

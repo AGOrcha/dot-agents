@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-phase-4-advanced-surface-decision-1776192016
+plan_id: typescript-port
+task_id: phase-4-advanced-surface-decision
+owner: ralph-orchestrate
+worker:
+    profile: loop-worker
+    project_overlay_files:
+        - .agents/active/active.loop.md
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-04-14T18:40:16Z"
+    reason: ralph-orchestrate auto-fanout
+scope:
+    write_scope:
+        - docs/
+        - ports/typescript/src/
+        - ports/typescript/tests/
+prompt:
+    prompt_files:
+        - .agents/active/active.loop.md
+context:
+    required_files:
+        - .agents/active/loop-state.md
+        - .agents/workflow/plans/typescript-port/TASKS.yaml
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

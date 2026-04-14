@@ -73,23 +73,22 @@ WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.m
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for bundle parsing" >&2; exit 1; }
 
 read -r PLAN_ID TASK_ID WRITE_SCOPE_CSV < <(python3 -c "
-import yaml,sys
+import re, sys
+text = open('${BUNDLE_PATH}').read()
 try:
     import yaml
-except ImportError:
-    # Fallback: minimal grep parsing
-    import re,sys
-    text=open('${BUNDLE_PATH}').read()
-    plan=re.search(r'^plan_id:\s*(.+)', text, re.M)
-    task=re.search(r'^task_id:\s*(.+)', text, re.M)
-    ws=re.findall(r'^\s*-\s+(.+)', open('${BUNDLE_PATH}').read())
-    print((plan.group(1).strip() if plan else ''), (task.group(1).strip() if task else ''), ','.join(ws[:5]))
-    sys.exit(0)
-with open('${BUNDLE_PATH}') as f:
-    d=yaml.safe_load(f)
-plan=d.get('plan_id','')
-task=d.get('task_id','')
-ws=','.join(d.get('write_scope') or [])
+    d = yaml.safe_load(text)
+    plan = d.get('plan_id', '')
+    task = d.get('task_id', '')
+    scope = (d.get('scope') or {})
+    ws = ','.join(scope.get('write_scope') or d.get('write_scope') or [])
+except Exception:
+    plan_m = re.search(r'^plan_id:\s*(.+)', text, re.M)
+    task_m = re.search(r'^task_id:\s*(.+)', text, re.M)
+    ws_items = re.findall(r'^\s+-\s+(\S.+)', text, re.M)
+    plan = plan_m.group(1).strip() if plan_m else ''
+    task = task_m.group(1).strip() if task_m else ''
+    ws = ','.join(ws_items[:5])
 print(plan, task, ws)
 " 2>/dev/null || echo "- - -") || { echo "error: failed to parse bundle YAML" >&2; exit 1; }
 
