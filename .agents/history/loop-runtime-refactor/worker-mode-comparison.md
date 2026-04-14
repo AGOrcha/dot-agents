@@ -15,9 +15,31 @@ on equivalent tasks. Metrics to compare:
 
 ## How to populate this table
 
-1. **Script run:** `./bin/tests/ralph-pipeline` → read `metrics.json` from `.ralph-loop-streams/run-*/`
+1. **Script run (clean):**
+   ```bash
+   # For a specific bounded implementation task:
+   RALPH_FANOUT_PLAN=<plan-id> \
+   RALPH_FANOUT_TASK=<task-id> \
+   RALPH_FANOUT_WRITE_SCOPE="<comma-separated-paths>" \
+   RALPH_ITERATIONS=5 \
+   ./bin/tests/ralph-pipeline
+   # Then read metrics.json from .ralph-loop-streams/run-<timestamp>/metrics.json
+   # token_detail per task is populated from .ralph-loop-streams/run-*/workers/*/worker-iter-*.ndjson
+   ```
+   Requirements: `RALPH_NO_LOG` must NOT be set (default 0); log dir is created automatically.
+
 2. **Pattern E run:** orchestrator session → fanout → `Agent(...)` call → write Pattern E metrics manually
    (see `orchestrator-session-start/instructions/workflow.md` → Pattern E metrics capture)
+
+## Choosing equivalent tasks for A/B comparison
+
+For a fair comparison pick a task that is:
+- **Bounded implementation** (not architectural/decision) — produces actual code + tests
+- **≤5 files write_scope** or a single tightly-scoped directory
+- **Same plan** if possible, same task type (TypeScript command additions work well)
+
+Phase-3 (Pattern E) was ideal: 8 specific commands, 33 tests, single `ports/typescript/src/commands/` dir.
+Phase-4 (script) was a poor match: architectural decision task, broad `docs/` + TS dirs.
 
 Run both modes on the **same task** (same plan_id + task_id, same write_scope) for a meaningful comparison.
 

@@ -188,37 +188,87 @@ if [[ -n "$BASE_LOG_DIR" ]]; then
   for bundle_path in "${BUNDLES[@]}"; do
     bundle_base="$(basename "$bundle_path" .yaml)"
 
-    # Resolve task_id from delegation contract (contract filename = task_id.yaml)
-    task_id=""
-    for contract in "$REPO_ROOT/.agents/active/delegation/"*.yaml; do
-      [[ -f "$contract" ]] || continue
-      did="$(grep -m1 '^id:' "$contract" | sed 's/^id:[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')"
-      [[ "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml" == "$bundle_path" ]] || continue
-      task_id="$(basename "$contract" .yaml)"
-      break
-    done
+    # Derive task_id: parse from bundle YAML (plan_id / task_id at top level)
+    task_id="$(python3 -c "
+import re, sys
+text = open('${bundle_path}').read()
+m = re.search(r'^task_id:\s*(.+)', text, re.M)
+print(m.group(1).strip() if m else '')
+" 2>/dev/null || true)"
     [[ -z "$task_id" ]] && continue
 
     # Count worker iterations from log files
     wlog="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}}"
     iter_count=0
+    tokens_in=0; tokens_out=0; tokens_cache_read=0; tool_uses=0; duration_ms=0
     if [[ -n "$wlog" && -d "$wlog" ]]; then
       iter_count="$(ls "$wlog"/worker-iter-*.{ndjson,json,txt} 2>/dev/null | wc -l | tr -d ' ')"
+      # Extract token usage + tool count from ndjson result lines
+      for ndjson in "$wlog"/worker-iter-*.ndjson; do
+        [[ -f "$ndjson" ]] || continue
+        read -r t_in t_out t_cr t_uses t_dur < <(python3 -c "
+import json, sys
+ti=to=tcr=tuses=tdur=0
+for line in open('$ndjson'):
+    line=line.strip()
+    if not line: continue
+    try:
+        d=json.loads(line)
+    except: continue
+    if d.get('type')=='result':
+        u=d.get('usage',{})
+        ti+=u.get('inputTokens',0)
+        to+=u.get('outputTokens',0)
+        tcr+=u.get('cacheReadTokens',0)
+        tdur+=d.get('duration_ms',0)
+    if d.get('type')=='tool_call' and d.get('subtype')=='started':
+        tuses+=1
+print(ti, to, tcr, tuses, tdur)
+" 2>/dev/null || echo "0 0 0 0 0")
+        tokens_in=$((tokens_in + t_in))
+        tokens_out=$((tokens_out + t_out))
+        tokens_cache_read=$((tokens_cache_read + t_cr))
+        tool_uses=$((tool_uses + t_uses))
+        duration_ms=$((duration_ms + t_dur))
+      done
     fi
 
-    # merge-back status
+    # merge-back status + persisted check
     mb="$REPO_ROOT/.agents/active/merge-back/${task_id}.md"
-    if [[ -f "$mb" ]]; then mb_status="present"; else mb_status="missing"; fi
+    hist_mb="$REPO_ROOT/.agents/history/"*"/delegate-merge-back-archive/"*"/${task_id}/merge-back.md"
+    if [[ -f "$mb" ]]; then
+      mb_status="present"
+      persisted="$(python3 -c "
+import re, sys
+t=open('$mb').read()
+m=re.search(r'persisted_via_workflow_commands:\s*(\S+)', t)
+print(m.group(1) if m else 'unknown')
+" 2>/dev/null || echo 'unknown')"
+    else
+      mb_status="missing"
+      persisted="no"
+    fi
+
+    context_tokens=$((tokens_in + tokens_cache_read))
+    [[ $context_tokens -eq 0 ]] && context_tokens_val="null" || context_tokens_val="$context_tokens"
 
     [[ -n "$merge_back_entries" ]] && merge_back_entries+=","
     merge_back_entries+="\"${task_id}\": \"${mb_status}\""
 
     [[ -n "$worker_iter_entries" ]] && worker_iter_entries+=","
     worker_iter_entries+="\"${task_id}\": ${iter_count}"
+
+    [[ -n "$persisted_entries" ]] && persisted_entries+=","
+    persisted_entries+="\"${task_id}\": \"${persisted}\""
+
+    [[ -n "$token_entries" ]] && token_entries+=","
+    token_entries+="\"${task_id}\": {\"input_tokens\": ${tokens_in}, \"output_tokens\": ${tokens_out}, \"cache_read_tokens\": ${tokens_cache_read}, \"tool_uses\": ${tool_uses}, \"duration_ms\": ${duration_ms}}"
   done
 
   merge_back_status="{${merge_back_entries}}"
   worker_iterations="{${worker_iter_entries}}"
+  persisted_via="${persisted_entries:-}"
+  token_detail="${token_entries:-}"
 
   cat >"$BASE_LOG_DIR/metrics.json" <<EOF
 {
@@ -229,7 +279,8 @@ if [[ -n "$BASE_LOG_DIR" ]]; then
   "workers_spawned": ${#BUNDLES[@]},
   "worker_iterations": ${worker_iterations},
   "merge_back_status": ${merge_back_status},
-  "persisted_via_workflow_commands": {},
+  "persisted_via_workflow_commands": {${persisted_via}},
+  "token_detail": {${token_detail}},
   "context_tokens_approx": null
 }
 EOF
