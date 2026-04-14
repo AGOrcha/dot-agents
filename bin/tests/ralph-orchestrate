@@ -158,19 +158,22 @@ for t in items:
 create_bundle() {
   local plan_id="$1" task_id="$2" write_scope_csv="$3"
 
+  # workflow fanout expects repo-relative paths; strip REPO_ROOT prefix if present
+  local worker_overlay_rel="${WORKER_OVERLAY#$REPO_ROOT/}"
+  local tasks_yaml_rel=".agents/workflow/plans/${plan_id}/TASKS.yaml"
+
   local -a fanout_args=( workflow fanout
     --plan "$plan_id"
     --task "$task_id"
     --owner "${RALPH_FANOUT_OWNER:-ralph-orchestrate}"
     --delegate-profile "${RALPH_DELEGATE_PROFILE:-loop-worker}"
     --selection-reason "ralph-orchestrate auto-fanout"
-    --project-overlay "$WORKER_OVERLAY"
-    --prompt-file "$WORKER_OVERLAY"
+    --project-overlay "$worker_overlay_rel"
+    --prompt-file "$worker_overlay_rel"
   )
   [[ -n "$write_scope_csv" ]] && fanout_args+=( --write-scope "$write_scope_csv" )
   [[ -f "$REPO_ROOT/.agents/active/loop-state.md" ]] && fanout_args+=( --context-file .agents/active/loop-state.md )
-  local tasks_yaml="$REPO_ROOT/.agents/workflow/plans/${plan_id}/TASKS.yaml"
-  [[ -f "$tasks_yaml" ]] && fanout_args+=( --context-file "$tasks_yaml" )
+  [[ -f "$REPO_ROOT/$tasks_yaml_rel" ]] && fanout_args+=( --context-file "$tasks_yaml_rel" )
 
   echo "ralph-orchestrate: fanout plan=$plan_id task=$task_id …" >&2
   local fanout_log

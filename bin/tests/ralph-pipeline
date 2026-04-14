@@ -89,6 +89,16 @@ while IFS= read -r line; do
   fi
 done <"$orch_output_file"
 
+# Fallback: pick up any existing delegation bundles that the orchestrate run may have
+# created but not emitted (e.g. if workflow fanout succeeded but the RALPH_BUNDLE line
+# was not captured because a prior run's contract still existed and was cleaned up mid-run).
+if [[ ${#BUNDLES[@]} -eq 0 && -d "$REPO_ROOT/.agents/active/delegation-bundles" ]]; then
+  for f in "$REPO_ROOT/.agents/active/delegation-bundles"/del-*.yaml; do
+    [[ -f "$f" ]] && BUNDLES+=( "$f" )
+  done
+  [[ ${#BUNDLES[@]} -gt 0 ]] && echo "ralph-pipeline: using ${#BUNDLES[@]} existing bundle(s) from delegation-bundles/" >&2
+fi
+
 # Also emit the orchestrator output to stdout
 cat "$orch_output_file"
 

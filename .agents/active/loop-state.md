@@ -1,33 +1,31 @@
 # Loop State
 
-Last updated: 2026-04-12
-Iteration: 30
+Last updated: 2026-04-14
+Iteration: 37 (orchestrator pass)
 
 ## Current Position
 
-Driving specs:
-- `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` — post-MVP workflow automation waves
-- `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md` — KG subsystem with code-structure layer
+Canonical focus (checkpoint + `workflow tasks typescript-port`, sha `dca9054`):
+- **Plan:** `typescript-port`
+- **Task:** `phase-4-advanced-surface-decision` — in_progress; active delegation bundle controls this lane.
 
-Active waves:
-- `resource-intent-centralization`: **ALL PHASES COMPLETE (2026-04-12).** Phase 3 checkboxes reconciled — all items were already implemented; YAML tasks advanced to `completed` for phases 3–6; plan status updated. Focused tests (`go test ./internal/platform/...`) green. `go test ./...` fails due to pre-existing pgx dependency absence in `internal/graphstore/postgres.go` (Phase E work not yet `go get`'d) — classified as pre-existing `[tool-bug]`, not regression from this wave.
-- `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
-- `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active. **Pre-existing blocker:** `postgres.go` imports `github.com/jackc/pgx/v5` which is not in `go.mod`; `go get` required before `go test ./...` passes.
-- `typescript-port`: **Planning wave opened (2026-04-12).** Donor branch `origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines` audited as source material only. Canonical plan + rewritten docs added. Do not merge donor commit wholesale; rebuild `ports/typescript/` against current contracts (`.agentsrc.json` unknown-field preservation, Codex `developer_instructions`, current hook shapes) and keep workflow/plugin/Stage 2 parity explicitly deferred until the relevant Go-side plans settle.
-- `loop-runtime-refactor`: **Plan created (2026-04-14).** 4-phase refactor: skill chain fixes (load order, strip closeout duplication, oracle reduction, reconciliation iteration type, tool-bug escalation), worker overlay, ralph scripts split (orchestrate/worker/closeout/pipeline), and loop-worker subagent skill. No CLI changes. First task: `phase-1a-orchestrator-session-start-load-order`.
+This orchestrator pass (2026-04-14, iteration 37):
+- Ran `workflow orient`, `workflow next`, `workflow tasks typescript-port`.
+- **Delegation:** **one bundle** (canonical on-disk id) — `del-phase-4-advanced-surface-decision-1776192016.yaml` for `phase-4-advanced-surface-decision` (loop-worker + `active.loop.md` context). Supersedes `...1776191464.yaml` and older `...0659` / `...8348` references. **No additional fanout** — phase-5/6 remain deferred per plan notes, deps, and `RALPH_MAX_PARALLEL_WORKERS` headroom reserved for post–phase-4 work.
+- **Next execution:** Pattern E subagent or `ralph-cursor-loop.sh` worker consumes the bundle; implements boundary in `docs/`, `ports/typescript/src/`, `ports/typescript/tests/`; `/iteration-close` when done. Orchestrator does not implement.
 
-Blocked waves (reassessed):
-- `platform-dir-unification`: Phase 4 (bash parity) is still deferrable — no urgency, bash path is orthogonal.
-- `refresh-skill-relink`: effectively done (all root-cause items are resolved by resource-intent-centralization). Remaining item is a regression test that requires running `refresh`, which is guardrail-blocked. Can update status to reflect this.
-
-State summary:
-- `resource-intent-centralization` is fully complete. All 4 platform adapters have `SharedTargetIntents` implemented. `BuildResourcePlan` dedupes and conflicts. `CollectAndExecuteSharedTargetPlan`, `DryRunSharedTargetPlanLines`, `RunSharedTargetProjection`, `RemoveSharedTargetPlan` all implemented. All agents/ projections centralized. Status/explain wired to same registry.
-- YAML canonical tasks for `resource-intent-centralization`: phases 3–6 all advanced to `completed`; PLAN.yaml status = `completed`.
-- **Pre-existing build break**: `internal/graphstore/postgres.go` imports `pgx/v5` which is missing from `go.mod`. This was introduced by Phase E (crg-kg-integration) work. Requires `go get github.com/jackc/pgx/v5 github.com/jackc/pgx/v5/pgxpool` to fix. Classified as `[tool-bug]`, not a regression from platform work.
-- New canonical plan added: `typescript-port`. This is a planning-only fold-in of the office-machine donor branch. The immediate rule is selective salvage, not cherry-picking `d1b1e46`.
-- Next active wave: `crg-kg-integration` Phase E Postgres backend (after pgx dependency is resolved).
+Background (unchanged baselines):
+- **Pre-existing Go build break:** `internal/graphstore/postgres.go` imports `pgx/v5` not in `go.mod` — blocks `go run ./cmd/dot-agents` / `go test ./...`; TS verification remains `cd ports/typescript && npm test` unless/until pgx is fixed.
+- **Other active canonical plans** (`loop-runtime-refactor`, `platform-dir-unification`, `plugin-resource-salvage`, etc.): no pending tasks in `workflow tasks` output for those IDs this pass; `typescript-port` is the selector’s authoritative next wave.
+- **Dirty workspace:** `workflow orient` reports **7** dirty/untracked paths (includes loop-state, TASKS, ralph test harness, delegation artifacts, research article) — unrelated to TS port unless explicitly in task scope; exclude from phase-4 worker commits unless intentional.
 
 ## Loop Health
+
+Orchestrator (2026-04-14, iteration 37):
+- **`workflow next` vs canonical tasks (YAML wins):** `workflow next` selects `phase-5-stage2-and-plugin-alignment` (first pending task whose `depends_on` is satisfied — phase-5 only depends on phase-3). Canonical `TASKS.yaml` has `phase-4-advanced-surface-decision` **in_progress** with an **active** delegation bundle; orchestration priority is finishing phase-4, not starting phase-5 in parallel.
+- **Canonical vs checkpoint:** aligned on plan and substance — checkpoint `next_action` and plan focus remain Phase 4 boundary work; selector order differs from `workflow next` ordering for the reason above.
+- **`workflow orient` active_plans empty:** expected when no markdown plans live under `.agents/active/`; canonical `PLAN.yaml` + `workflow tasks` remain source of truth.
+- **Active delegations:** `active_count: 1` — phase-4 bundle path `.agents/active/delegation-bundles/del-phase-4-advanced-surface-decision-1776192016.yaml` (canonical id; superseded ids include `...1776191464`, `...0659`, `...8348`).
 
 Review target: iterations 18-20 and paired commits.
 
@@ -901,6 +899,8 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
+> **Stale snapshot** — for the current playbook see the **second** `## Next Iteration Playbook` section at the **end of this file** (after the latest `## Iteration Log` entries).
+
 **Active focus: `loop-runtime-refactor`** — skill chain smoothing, overlay split, ralph scripts, subagent worker.
 Plan: `.agents/workflow/plans/loop-runtime-refactor/`
 First task: `phase-1a-orchestrator-session-start-load-order`
@@ -994,7 +994,8 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 | `legacy-plan-only` | no | - | no iteration has isolated next-action behavior driven only by `.agents/active/*.plan.md` unchecked items |
 | `no-canonical-plan` | yes | 5 | historical empty-state trace from early loop setup; keep as contrast against the now-populated canonical plan inventory |
 | `canonical-plan-present` | yes | 14 | `workflow plan` now lists 6 canonical plans; live workflow readback during dogfooding review confirmed the inventory is stable |
-| `current-focus-task-present` | no | - | requires active canonical plan state with `current_focus_task` set |
+| `current-focus-task-present` | yes | 37 | `typescript-port` phase-4 in_progress + active delegation bundle `...1776192016.yaml`; `workflow tasks` + checkpoint aligned |
+| `workflow-next-differs-from-canonical-priority` | yes | 37 | `workflow next` surfaced `phase-5` (deps satisfied); canonical YAML + orchestrator priority keep phase-4 active until merge-back |
 | `blocked-plan-set` | yes | 5 | `workflow orient` rendered blocked and deferred active plans correctly |
 | `blocked-task-visible` | no | - | requires canonical tasks with `blocked` status surfaced by `workflow tasks` or `plan show` |
 
@@ -1025,9 +1026,11 @@ Coverage is grouped by state family so later analysis can distinguish "which com
 
 | Scenario | Covered | Last Iteration | Notes |
 |---|---|---|---|
-| `fanout-success` | no | - | `workflow fanout` not exercised yet |
+| `orchestrator-skip-fanout-architectural` | yes | 32 | (superseded) iter 33 issued `workflow fanout` for phase-4 despite broad dirs — see `orchestrator-fanout-broad-scope-phase-4` |
+| `orchestrator-fanout-broad-scope-phase-4` | yes | 35 | `del-phase-4-advanced-surface-decision-1776190659.yaml` — role isolation / loop-worker; boundary still doc+CLI+tests |
+| `fanout-success` | yes | 31 | Pattern E: `del-phase-3-stage1-command-mvp-1776169635` (typescript-port phase-3) |
 | `fanout-write-scope-conflict` | no | - | no overlapping delegation contract has been created/tested |
-| `merge-back-success` | no | - | `workflow merge-back` not exercised yet |
+| `merge-back-success` | yes | 31 | phase-3 merge-back; closeout dca9054 |
 | `merge-back-without-contract` | no | - | missing-contract error path not exercised yet |
 
 ### Cross-Project Workflow Ops
@@ -1838,11 +1841,12 @@ This table tracks the last **loop-traced** invocation per command. For current l
 | `refresh` | yes | 24 | ok (dry-run merged skills; post–RunSharedTargetProjection wiring) |
 | `remove` | tests only | 23 | ok (RemoveSharedTargetPlan covered in `resource_plan_test`; live cmd guardrail) |
 | `workflow status` | yes | 24 | ok-warning (stale next-action baseline) |
-| `workflow orient` | yes | 5 | ok |
+| `workflow orient` | yes | 37 | ok |
 | `workflow plan` | yes | 14 | ok |
+| `workflow next` | yes | 37 | ok — returns phase-5 (algorithm); canonical orchestration still prioritizes phase-4 in_progress + bundle |
 | `workflow checkpoint` | yes | 5 | ok |
 | `workflow log` | yes | 6 | ok |
-| `workflow tasks` | yes | 28 | ok |
+| `workflow tasks` | yes | 37 | ok |
 | `workflow advance` | yes | 17 | ok |
 | `workflow health` | yes | 13 | ok |
 | `workflow verify` | no | - | - |
@@ -1953,6 +1957,8 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-- **Parent (orchestrator):** review `.agents/active/merge-back/phase-3-stage1-command-mvp.md`, then run `workflow advance typescript-port phase-3-stage1-command-mvp completed` and `workflow delegation closeout del-phase-3-stage1-command-mvp-1776169635`
-- **Next TypeScript wave:** phase-4-advanced-surface-decision — decide and document the TS boundary for workflow and KG features
-- **pgx blocker still active:** `internal/graphstore/postgres.go` requires `go get github.com/jackc/pgx/v5` before any Go CLI commands will work
+- **Phase 3 closeout:** already completed at `dca9054` (merge-back archived; checkpoint verification pass).
+- **Active worker target (iteration 37):** `typescript-port` / `phase-4-advanced-surface-decision` — sole bundle `del-phase-4-advanced-surface-decision-1776192016.yaml`. Load `.agents/skills/loop-worker/SKILL.md`, implement within `docs/`, `ports/typescript/src/`, `ports/typescript/tests/` only; then `/iteration-close` (verify → checkpoint → merge-back). Parent: `workflow advance` + `workflow delegation closeout` after review.
+- **Evidence:** `go run ./cmd/dot-agents workflow tasks typescript-port`; primary verification `cd ports/typescript && npm test`. Avoid `go test ./...` until pgx dependency is added.
+- **Orchestrator:** no additional bundles this pass (`RALPH_MAX_PARALLEL_WORKERS=3` headroom unused — single active delegation until phase-4 merge-back + phase-5 gate). Do not start phase-5 until phase-4 is `completed` in YAML and boundary docs exist; ignore `workflow next` → phase-5 until then.
+- **pgx blocker still active:** `internal/graphstore/postgres.go` requires `go get github.com/jackc/pgx/v5` (and pool) before Go CLI / full-repo tests work.
