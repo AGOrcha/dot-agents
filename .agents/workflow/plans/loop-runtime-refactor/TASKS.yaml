@@ -1,0 +1,476 @@
+schema_version: 1
+plan_id: loop-runtime-refactor
+tasks:
+  # ── Phase 1: Skill Chain Fixes ────────────────────────────────────────────
+
+  - id: phase-1a-orchestrator-session-start-load-order
+    title: "Phase 1a — Fix orchestrator-session-start load order (gotchas before workflow)"
+    status: pending
+    depends_on: []
+    blocks:
+      - phase-1b-strip-closeout-from-loop-prompt
+    owner: dot-agents
+    write_scope:
+      - .agents/skills/orchestrator-session-start/SKILL.md
+    verification_required: false
+    notes: |
+      Use /skill-architect (mode: improve) for this task.
+
+      Reorder SKILL.md steps so gotchas.md loads before workflow.md:
+        0. preflight.md
+        1. gotchas.md     ← move here (currently step 2)
+        2. workflow.md    ← move here (currently step 1)
+        3. delegation-lifecycle (only if fanout was run)
+      This ensures "Do Not Turn The Orchestrator Into A Worker" fires before the
+      fanout/direct decision, not after. Caused session 31916bf2 to drift into
+      implementation mode.
+      Also update SKILL.md description to include trigger hint:
+      "Use in repos with .agents/workflow/ and active.loop.md present."
+
+  - id: phase-1b-strip-closeout-from-loop-prompt
+    title: "Phase 1b — Strip steps 19–30 from active.loop.md, delegate to /iteration-close"
+    status: pending
+    depends_on:
+      - phase-1a-orchestrator-session-start-load-order
+    blocks:
+      - phase-1c-agent-start-suppression
+    owner: dot-agents
+    write_scope:
+      - .agents/active/active.loop.md
+    verification_required: false
+    notes: |
+      Replace steps 19–30 (12 sub-steps covering verify, checkpoint, advance/merge-back,
+      proposals, iteration log, self-assessment, CLI traces, command coverage, scenario
+      coverage, error log) with a single step:
+        "19. Run /iteration-close
+             CLI broken fallback: if the CLI binary won't build, mark
+             persisted_via_workflow_commands: paused — <reason>, create a fold-back item
+             for the blocker (workflow fold-back create --plan <id> --observation ...
+             --propose), and continue. Run deferred persist commands at the start of the
+             next iteration before picking new work."
+      The iteration-close skill owns this surface entirely. The loop prompt should not
+      duplicate it — the duplication is why agents skip the skill and execute inline,
+      causing the persisted_via_workflow_commands: no anti-pattern.
+
+  - id: phase-1c-agent-start-suppression
+    title: "Phase 1c — Add loop-context suppression note for agent-start + oracle reduction"
+    status: pending
+    depends_on:
+      - phase-1b-strip-closeout-from-loop-prompt
+    blocks:
+      - phase-1d-reconciliation-iteration-type
+    owner: dot-agents
+    write_scope:
+      - .agents/active/active.loop.md
+    verification_required: false
+    notes: |
+      Two changes to active.loop.md:
+
+      1. Add under "## Project overlay metadata":
+           "- **Skill routing:** In this project prefer /orchestrator-session-start over
+             /agent-start. agent-start is for one-off tasks in repos without a dot-agents
+             workflow setup."
+         Do NOT modify ~/.claude/skills/agent-start/ — it is global and used in other projects.
+
+      2. Remove workflow status from the session-start oracle chain (step 4). It is
+         always stale (acknowledged baseline for 6+ consecutive iterations). Replace with:
+           "4. If workflow orient output conflicts with canonical task state found in step 7,
+               log the mismatch under ## Loop Health — canonical YAML wins."
+         This reduces startup from 4–5 commands to orient + next + tasks <id>.
+
+  - id: phase-1d-reconciliation-iteration-type
+    title: "Phase 1d — Add reconciliation iteration type to active.loop.md"
+    status: pending
+    depends_on:
+      - phase-1c-agent-start-suppression
+    blocks:
+      - phase-1e-tool-bug-auto-escalation
+    owner: dot-agents
+    write_scope:
+      - .agents/active/active.loop.md
+    verification_required: false
+    notes: |
+      Add an explicit "Reconciliation Iteration" definition to the Implementation section
+      (after step 13 "Pick the next single unchecked item"):
+
+        "### Reconciliation iterations
+         When the iteration is state catch-up only (verifying pre-existing work, advancing
+         YAML tasks that are already implemented, or reconciling markdown/YAML drift):
+         - iteration type: reconciliation
+         - feedback_goal: 'state hygiene: confirm <X> is marked correctly'
+         - CLI trace: workflow tasks <plan> before/after is sufficient
+         - one_item_only: n/a (a single pass may touch multiple already-done checkboxes)
+         - cli_produced_actionable_feedback: n/a
+         - Do not invent a stretch feedback goal for a reconciliation pass."
+
+      This prevents the agent from fabricating feedback goals that produce
+      informative-nonblocking traces with no real evidence value.
+
+  - id: phase-1e-tool-bug-auto-escalation
+    title: "Phase 1e — Add tool-bug auto-escalation to iteration-close"
+    status: pending
+    depends_on:
+      - phase-1d-reconciliation-iteration-type
+    blocks:
+      - phase-2a-worker-overlay
+    owner: dot-agents
+    write_scope:
+      - .agents/skills/iteration-close/instructions/workflow.md
+    verification_required: false
+    notes: |
+      Use /skill-architect (mode: improve) for this task.
+
+      Add a new "## Auto-escalate tool-bugs" section to iteration-close/instructions/workflow.md,
+      after the Write Checkpoint section:
+
+        "## Auto-escalate tool-bugs
+         If any [tool-bug] was logged this iteration, fold it back immediately:
+
+           dot-agents workflow fold-back create \
+             --plan <active-plan-id> \
+             --observation '[tool-bug]: <detail — command, error, reproduction steps>' \
+             --propose
+
+         This routes the bug into the proposal queue for orchestrator scheduling rather than
+         leaving it as perpetual baseline noise. One fold-back per distinct tool-bug per
+         iteration. The active plan ID is the plan the current iteration was working on."
+
+      The pgx dependency issue is the motivating example: it has been documented as
+      [tool-bug] for 6+ iterations but never escalated for scheduling.
+
+  # ── Phase 2: Worker Overlay ───────────────────────────────────────────────
+
+  - id: phase-2a-refactor-active-loop-overlay
+    title: "Phase 2a — Refactor active.loop.md to worker-only scope (~100 lines)"
+    status: pending
+    depends_on:
+      - phase-1e-tool-bug-auto-escalation
+    blocks:
+      - phase-2b-create-orchestrator-overlay
+      - phase-3a-ralph-orchestrate
+      - phase-4a-loop-worker-skill
+    owner: dot-agents
+    write_scope:
+      - .agents/active/active.loop.md
+    verification_required: false
+    notes: |
+      Background: ~/.agents/profiles/loop-worker.md documents the three-layer model:
+        Layer 1 (global): loop-worker.md — discipline + closeout sequence
+        Layer 2 (project): *.loop.md — repo-specific CLI, plans, matrices
+        Layer 3 (bundle): delegation YAML — per-task scope, prompts, context
+      active.loop.md was always intended as the worker's Layer 2 overlay. Orchestrator
+      content crept in. This task strips it back to worker scope.
+
+      REMOVE from active.loop.md:
+      - Steps 1–12 multi-oracle startup chain (replace with 3-step: read loop-state
+        Current Position → workflow tasks <plan_id from bundle> → git status)
+      - Wave selection logic (steps 11–12, plan-wave-picker guidance)
+      - The 90-line evidence decision tree (replace with: "Run the command closest to
+        what you changed. If unclear, workflow tasks <plan> is always valid.")
+      - Scenario coverage and command coverage update instructions
+      - Step 49 scenario tag taxonomy
+
+      KEEP in active.loop.md:
+      - Role: worker, bundle is your context
+      - 3-step startup
+      - Implementation rules (one item, write_scope, tests, one CLI trace)
+      - Closeout: /iteration-close single line (Phase 1b)
+      - Read-only and write CLI command lists (worker-relevant subset)
+      - Safety guardrails (unchanged)
+      - Loop-state write: iteration log entry + Next Iteration Playbook ONLY
+        Worker does NOT update ## Current Position — that is orchestrator scope.
+
+  - id: phase-2b-create-orchestrator-overlay
+    title: "Phase 2b — Create orchestrator.loop.md (extracted orchestrator content)"
+    status: pending
+    depends_on:
+      - phase-2a-refactor-active-loop-overlay
+    blocks:
+      - phase-3a-ralph-orchestrate
+    owner: dot-agents
+    write_scope:
+      - .agents/active/orchestrator.loop.md
+    verification_required: false
+    notes: |
+      New file. Contains orchestrator-facing content extracted from active.loop.md.
+      Passed via --project-overlay .agents/active/orchestrator.loop.md when running
+      the orchestrator agent (ralph-orchestrate.sh, orchestrator-session-start turns).
+
+      Sections to include (extracted from current active.loop.md + trimmed):
+      - ## Role: orchestrator — select work, bound scope, create bundles. Do not implement.
+      - ## Startup: orient + next + plan + tasks <id> (4-step, multi-oracle chain lives here)
+      - ## Wave selection: priority order, plan-wave-picker guidance, blocked wave skip rules
+      - ## Evidence decision tree: simplified version from Phase 1d
+      - ## Loop-state updates: ## Current Position, ## Loop Health, ## Scenario Coverage,
+          ## Command Coverage (these are orchestrator responsibilities, not worker)
+      - ## Skill routing: /orchestrator-session-start preferred over /agent-start here
+      - ## CLI full command list (orchestrator needs all surfaces)
+
+  # ── Phase 3: Ralph Scripts ────────────────────────────────────────────────
+
+  - id: phase-3a-ralph-orchestrate
+    title: "Phase 3a — Create ralph-orchestrate.sh (orchestrator-only, multi-task discovery)"
+    status: pending
+    depends_on:
+      - phase-2a-worker-overlay
+    blocks:
+      - phase-3b-ralph-worker-rework
+      - phase-3d-ralph-pipeline
+    owner: dot-agents
+    write_scope:
+      - bin/tests/ralph-orchestrate.sh
+    verification_required: true
+    notes: |
+      New script forked from ralph-cursor-loop.sh. Key behavioral changes:
+      - No ITERATIONS outer loop. Runs the orchestrator agent exactly ONCE.
+      - Snapshot: orient + next only (remove status from the 3-command capture).
+      - Multi-task discovery:
+          da --json workflow plan → list active plan IDs
+          For each plan ID: da --json workflow tasks <plan_id>
+          Filter: status=pending AND no .agents/active/delegation/<task_id>.yaml exists
+          Cap at RALPH_MAX_PARALLEL_WORKERS (default 3)
+      - For each unblocked task: run fanout with worker.loop.md as --project-overlay,
+          loop-worker as --delegate-profile, loop-state.md + TASKS.yaml as --context-file.
+      - Emit one "RALPH_BUNDLE: <absolute_path>" line per created bundle (machine-parseable).
+      - Orchestrator prompt deliverables: "Do NOT implement. Output RALPH_BUNDLE: lines.
+          Write TASKS.yaml notes for each task. Stop."
+      - RALPH_PREFANOUT=0 still works (skip bundle creation, prompt-only run).
+
+      Env vars:
+        RALPH_MAX_PARALLEL_WORKERS (default 3)
+        RALPH_AUTO_FANOUT (default 1)
+        RALPH_FANOUT_PLAN / RALPH_FANOUT_TASK / RALPH_FANOUT_WRITE_SCOPE (manual override)
+
+      Verification: run with no unblocked tasks → exits 0, no RALPH_BUNDLE lines.
+      Run with one unblocked task → emits exactly one RALPH_BUNDLE line.
+
+  - id: phase-3b-ralph-worker-rework
+    title: "Phase 3b — Rework ralph-cursor-loop.sh to worker-only (--bundle required)"
+    status: pending
+    depends_on:
+      - phase-3a-ralph-orchestrate
+    blocks:
+      - phase-3d-ralph-pipeline
+    owner: dot-agents
+    write_scope:
+      - bin/tests/ralph-cursor-loop.sh
+    verification_required: true
+    notes: |
+      Breaking change: --bundle <path> is now required. Without it, the script exits with:
+        "error: ralph-cursor-loop requires --bundle <delegation_bundle_path>
+         To create a bundle and select a task, use ralph-orchestrate.sh first."
+
+      Key removals:
+      - run_fanout_preflight() function removed entirely (orchestrator's responsibility)
+      - No workflow orient/status/next commands in the snapshot or prompt
+
+      Key changes:
+      - RALPH_ITERATIONS = worker implementation budget (default 5, renamed from
+          "loop count" to "implementation budget" in comments/help)
+      - Worker prompt (~30 lines): read bundle → read worker overlay → implement write_scope
+          → /iteration-close. No wave selection. No oracle chain.
+      - Parse plan_id, task_id, write_scope from --bundle YAML at script start.
+      - Each iteration logs to $LOG_DIR/worker-iter-<N>.{ndjson|json|txt}
+      - Worker exits when merge-back artifact is found at
+          .agents/active/merge-back/<task_id>.md OR budget exhausted.
+
+      Kept env vars: RALPH_ITERATIONS, RALPH_MODEL, RALPH_FORCE, RALPH_NO_LOG,
+      RALPH_LOG_DIR, RALPH_AGENT_OUTPUT_FORMAT, AGENT_BIN.
+
+      Verification: ./bin/tests/ralph-cursor-loop.sh (no args) → error message.
+      ./bin/tests/ralph-cursor-loop.sh --bundle <valid_path> → runs worker agent.
+
+  - id: phase-3c-ralph-closeout
+    title: "Phase 3c — Create ralph-closeout.sh (advance + delegation closeout per merge-back)"
+    status: pending
+    depends_on:
+      - phase-3a-ralph-orchestrate
+    blocks:
+      - phase-3d-ralph-pipeline
+    owner: dot-agents
+    write_scope:
+      - bin/tests/ralph-closeout.sh
+    verification_required: true
+    notes: |
+      New script. Scans .agents/active/merge-back/*.md for unprocessed merge-back artifacts.
+      For each:
+        1. Extract task_id and plan_id from the merge-back YAML frontmatter
+        2. Check that matching delegation contract exists (.agents/active/delegation/<task_id>.yaml)
+        3. Run: da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
+        4. Run: da workflow advance <plan_id> <task_id> completed
+        5. Log result to $LOG_DIR/closeout-<task_id>.log
+
+      RALPH_CLOSEOUT_AUTO=1 (default) — auto-accept all pending merge-backs with pass/partial status.
+      RALPH_CLOSEOUT_AUTO=0 — spawn a single orchestrator agent pass to review and decide.
+
+      Env vars: RALPH_CLOSEOUT_AUTO, RALPH_LOG_DIR, AGENT_BIN (for non-auto mode).
+
+      Verification: with no merge-backs → exits 0, logs "no pending merge-backs".
+      With one completed merge-back → delegation closeout + advance runs cleanly.
+
+  - id: phase-3d-ralph-pipeline
+    title: "Phase 3d — Create ralph-pipeline.sh (orchestrate → parallel workers → closeout)"
+    status: pending
+    depends_on:
+      - phase-3a-ralph-orchestrate
+      - phase-3b-ralph-worker-rework
+      - phase-3c-ralph-closeout
+    blocks:
+      - phase-4c-metrics-capture
+    owner: dot-agents
+    write_scope:
+      - bin/tests/ralph-pipeline.sh
+    verification_required: true
+    notes: |
+      Full E2E wrapper. Calls the three role-pure scripts in sequence with parallel workers.
+
+      Structure:
+        LOG_DIR=.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)
+        Phase 1: ralph-orchestrate.sh → parse RALPH_BUNDLE lines → collect BUNDLES array
+        Phase 2: parallel workers — for each bundle spawn ralph-cursor-loop.sh as background job
+        Phase 3: wait for all workers → ralph-closeout.sh
+
+      Early exits:
+      - No unblocked tasks (no RALPH_BUNDLE lines) → print message, exit 0
+      - Fanout failed → exit 1 with error
+
+      Metrics stub: write .ralph-loop-streams/run-.../metrics.json with:
+        { "timestamp": "...", "bundles_created": N, "workers_spawned": N,
+          "worker_mode": "script", "run_log_dir": "..." }
+      The subagent test (Phase 4) will add "worker_mode": "subagent" entries for comparison.
+
+      Verification: dry run with RALPH_PREFANOUT=0 → orchestrator only, no workers spawned.
+      Full run with at least one unblocked task → all three phases complete, log dir populated.
+
+  # ── Phase 4: Subagent Worker ─────────────────────────────────────────────
+
+  - id: phase-4a-loop-worker-skill
+    title: "Phase 4a — Create loop-worker skill (.agents/skills/loop-worker/)"
+    status: pending
+    depends_on:
+      - phase-2a-refactor-active-loop-overlay
+    blocks:
+      - phase-4b-orchestrator-pattern-e-docs
+    owner: dot-agents
+    write_scope:
+      - .agents/skills/loop-worker/
+    verification_required: false
+    notes: |
+      New skill designed for cold-start invocation with only a bundle path as context.
+      Invocable by human (/loop-worker) or by Claude Code Agent tool (Pattern E).
+
+      Use /skill-architect (mode: new) for this task.
+
+      IMPORTANT: ~/.agents/profiles/loop-worker.md already has the worker discipline
+      rules and closeout sequence (verify record → checkpoint → merge-back). The skill
+      is a thin wrapper that loads the profile — do not duplicate its content.
+
+      Files:
+      - SKILL.md:
+          name: loop-worker
+          description: "Bounded implementation worker for a delegated task. Reads a
+            delegation bundle, implements write_scope, runs /iteration-close. Cold-start
+            capable — only the bundle path is needed. Use in repos with .agents/workflow/."
+        Workflow in SKILL.md:
+          0. Load → ~/.agents/profiles/loop-worker.md  (global discipline + closeout)
+          1. Load → instructions/startup.md             (cold-start 3 steps)
+          2. Load → .agents/active/active.loop.md       (worker project overlay — post Phase 2a)
+          3. Implement write_scope task
+          4. Load → iteration-close skill
+
+      - instructions/startup.md: 3-step startup only:
+          1. Read bundle YAML at <path from your invocation prompt>
+          2. dot-agents workflow tasks <plan_id from bundle>
+          3. git status --short
+          Do NOT run workflow orient, workflow next, or workflow status.
+
+      - instructions/gotchas.md: worker-specific failure modes only:
+          "Do not run workflow orient or workflow next — bundle is your context"
+          "Do not touch files outside write_scope"
+          "merge-back is your exit, not workflow advance — parent owns advance"
+          "If CLI broken: fold-back the blocker (--propose), mark paused, continue"
+          "Do not update loop-state ## Current Position — that is orchestrator scope"
+
+  - id: phase-4b-orchestrator-pattern-e-docs
+    title: "Phase 4b — Document Pattern E invocation in orchestrator-session-start"
+    status: pending
+    depends_on:
+      - phase-4a-loop-worker-skill
+    blocks:
+      - phase-4c-metrics-capture
+    owner: dot-agents
+    write_scope:
+      - .agents/skills/orchestrator-session-start/instructions/workflow.md
+    verification_required: false
+    notes: |
+      Use /skill-architect (mode: improve) for this task.
+
+      Add a "### Pattern E: Native subagent (Claude Code Agent tool)" section to
+      orchestrator-session-start/instructions/workflow.md inside step 4 (fanout decision),
+      below the fanout command example.
+
+      Content:
+        After workflow fanout creates the bundle, spawn a worker as a native Claude Code
+        subagent instead of shelling out to ralph-cursor-loop.sh:
+
+          Agent(
+            description="Implement <task_id> in <plan_id>",
+            prompt="""
+          Delegation bundle: <absolute_bundle_path>
+          Worker skill: .agents/skills/loop-worker/
+
+          Read the bundle (write_scope, task_id, plan_id, feedback_goal, context_files).
+          Load the worker skill at the path above.
+          Implement the single task within write_scope only.
+          Run /iteration-close when done.
+          """,
+            mode="auto"
+          )
+
+        Use Pattern E when:
+        - Task write_scope is ≤ 5 files (cold start cost justified for role isolation)
+        - You want guaranteed role separation (subagent literally cannot continue orchestrating)
+        - You are in an interactive Claude Code session with Agent tool available
+
+        Use ralph-cursor-loop.sh (script worker) when:
+        - Tasks require multiple hours or many implementation steps
+        - Running headless/batch without an interactive Claude Code session
+
+  - id: phase-4c-metrics-capture
+    title: "Phase 4c — Add metrics.json capture to pipeline and Pattern E runs"
+    status: pending
+    depends_on:
+      - phase-3d-ralph-pipeline
+      - phase-4b-orchestrator-pattern-e-docs
+    blocks: []
+    owner: dot-agents
+    write_scope:
+      - bin/tests/ralph-pipeline.sh
+      - bin/tests/ralph-cursor-loop.sh
+    verification_required: true
+    notes: |
+      Extend the metrics.json stub from phase-3d and the worker script to capture the
+      fields needed for script vs Pattern E comparison:
+
+      ralph-pipeline.sh and ralph-cursor-loop.sh emit:
+        {
+          "run_id": "<log dir basename>",
+          "timestamp": "<ISO8601>",
+          "worker_mode": "script",
+          "bundles_created": N,
+          "workers_spawned": N,
+          "worker_iterations": { "<task_id>": N, ... },
+          "merge_back_status": { "<task_id>": "pass|partial|fail|missing" },
+          "persisted_via_workflow_commands": { "<task_id>": "yes|paused|no" },
+          "context_tokens_approx": null
+        }
+
+      For Pattern E runs (manual orchestrator session): the orchestrator writes a
+      metrics.json to .ralph-loop-streams/pattern-e-<timestamp>/ with:
+        "worker_mode": "subagent"
+        "context_tokens_approx": <from Agent tool result or --output-format json usage field>
+
+      Comparison target: same task, both worker modes, compare iteration count, token cost,
+      merge_back_status, persisted_via_workflow_commands rate.
+      Write results to .agents/history/loop-runtime-refactor/worker-mode-comparison.md
+      after at least one run of each mode.

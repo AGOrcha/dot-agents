@@ -14,6 +14,7 @@ Active waves:
 - `skill-import-streamline`: **Completed** — manifest preservation, `install --generate` merge, `skills promote` with copy-move convergence, `TestPromoteSkillIn_PreservesManifestUnknownFields` regression; canonical plan/tasks marked completed.
 - `crg-kg-integration`: Phases A-D complete. Phase E (Postgres backend) and Phase F (Go MCP server) remain active. **Pre-existing blocker:** `postgres.go` imports `github.com/jackc/pgx/v5` which is not in `go.mod`; `go get` required before `go test ./...` passes.
 - `typescript-port`: **Planning wave opened (2026-04-12).** Donor branch `origin/feature/go-fixes-and-typescript-port-for-availability-on-restricted-machines` audited as source material only. Canonical plan + rewritten docs added. Do not merge donor commit wholesale; rebuild `ports/typescript/` against current contracts (`.agentsrc.json` unknown-field preservation, Codex `developer_instructions`, current hook shapes) and keep workflow/plugin/Stage 2 parity explicitly deferred until the relevant Go-side plans settle.
+- `loop-runtime-refactor`: **Plan created (2026-04-14).** 4-phase refactor: skill chain fixes (load order, strip closeout duplication, oracle reduction, reconciliation iteration type, tool-bug escalation), worker overlay, ralph scripts split (orchestrate/worker/closeout/pipeline), and loop-worker subagent skill. No CLI changes. First task: `phase-1a-orchestrator-session-start-load-order`.
 
 Blocked waves (reassessed):
 - `platform-dir-unification`: Phase 4 (bash parity) is still deferrable — no urgency, bash path is orthogonal.
@@ -900,14 +901,23 @@ Self-assessment:
 
 ## Next Iteration Playbook
 
-Preferred single item for iteration 30:
-- **`crg-kg-integration` Phase E** (Postgres backend slice) **or** resource-intent optional adapter thinning **or** canonical TASKS advance/reconcile when closing Phase 6 in YAML.
+**Active focus: `loop-runtime-refactor`** — skill chain smoothing, overlay split, ralph scripts, subagent worker.
+Plan: `.agents/workflow/plans/loop-runtime-refactor/`
+First task: `phase-1a-orchestrator-session-start-load-order`
 
-Loop closeout rules (iteration 21+):
+Start here:
+1. `go run ./cmd/dot-agents workflow tasks loop-runtime-refactor` — read task list and notes
+2. Pick `phase-1a` — single file edit to `.agents/skills/orchestrator-session-start/SKILL.md`
+3. Use `/skill-architect` mode: `improve` for all `.agents/skills/` changes
+4. Phases run in order: 1a → 1b → 1c → 1d → 1e → 2a → 2b → 3a → 3b → 3c → 3d → 4a → 4b → 4c
+
+Do NOT start `crg-kg-integration` Phase E or `typescript-port` Phase 3 until `loop-runtime-refactor`
+phases 1–2 are complete. Those plans remain active but are deprioritized for now.
+
+Loop closeout rules (unchanged):
 - Keep the iteration atomic: code plus loop-state/plan updates in one final commit.
 - Run one primary evidence chain plus at most one secondary probe.
 - Reconcile coverage tables before ending the iteration.
-- Use the product workflow surfaces on purpose: `workflow orient` + `workflow status` + `workflow plan`, then `workflow tasks <id>` when the selected wave has a canonical plan.
 
 Candidate paths (priority order):
 1. **crg-kg-integration Phase E**: Postgres backend slice (`internal/graphstore/postgres.go` + config).
