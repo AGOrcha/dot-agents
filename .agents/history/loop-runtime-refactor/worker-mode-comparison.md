@@ -194,3 +194,59 @@ For bounded implementation tasks (≤5 files, single directory):
 - Script worker suitable when Pattern E is unavailable (no interactive session) or for tasks where wall time matters more than cost
 
 Mitigation for script worker token bloat: trim `active.loop.md` to a minimal overlay (remove full loop-state.md inclusion), or use `--context-file` selectively rather than full overlay injection. This could reduce script worker context to ~200k-500k, closing most of the gap.
+
+## A/B Direct Comparison — REPLACE_DATE (same plan, same task, same base commit, different worktrees)
+
+  ### Setup
+  Both workers ran in parallel in separate sibling worktrees from the same base commit.
+
+  - base_commit: `REPLACE_SHA`
+  - plan_id: `loop-runtime-refactor`
+  - task_id: `phase-5d-iter-log-schema`
+  - write_scope: `schemas/workflow-iter-log.schema.json`, `commands/workflow.go`, `commands/workflow_test.go`, `.agents/
+  active/iteration-log/`
+
+  ### Pattern E run — REPLACE_TIMESTAMP
+
+  - worker_mode: subagent
+  - worker_iterations: REPLACE
+  - merge_back_status: REPLACE
+  - persisted_via_workflow_commands: REPLACE
+  - total_tokens: REPLACE_OR_NULL
+  - tool_uses: REPLACE_OR_NULL
+  - duration_ms: REPLACE_OR_NULL
+  - task_result: REPLACE
+  - commit: REPLACE
+  - metrics_file: `.ralph-loop-streams/pattern-e-ab-REPLACE/metrics.json`
+
+  ### Script run — REPLACE_TIMESTAMP
+
+  - worker_mode: script
+  - worker_iterations: REPLACE
+  - merge_back_status: REPLACE
+  - persisted_via_workflow_commands: REPLACE
+  - total_tokens: REPLACE_OR_NULL
+  - tool_uses: REPLACE_OR_NULL
+  - duration_ms: REPLACE_OR_NULL
+  - task_result: REPLACE
+  - commit: REPLACE
+  - metrics_file: `.ralph-loop-streams/script-ab-REPLACE/metrics.json`
+
+  ### Comparison Table
+
+  | Metric | Pattern E | Script worker |
+  |--------|-----------|---------------|
+  | task | `phase-5d-iter-log-schema` | `phase-5d-iter-log-schema` |
+  | iterations to merge-back | REPLACE | REPLACE |
+  | total tokens | REPLACE | REPLACE |
+  | tool uses | REPLACE | REPLACE |
+  | wall time | REPLACE | REPLACE |
+  | merge_back_status | REPLACE | REPLACE |
+  | persisted_via_workflow_commands | REPLACE | REPLACE |
+  | commit | REPLACE | REPLACE |
+
+  ### Notes
+
+  - Same base commit, same task, separate worktrees.
+  - Do not compare results from the main checkout with worktree runs.
+  - `workflow advance` currently has a false-success bug; verify `TASKS.yaml` on disk after closeout.
