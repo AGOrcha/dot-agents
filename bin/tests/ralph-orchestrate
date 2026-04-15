@@ -11,7 +11,7 @@
 #   RALPH_FANOUT_PLAN            manual plan override (requires RALPH_FANOUT_TASK)
 #   RALPH_FANOUT_TASK            manual task override
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
-#   RALPH_MODEL                  agent model override
+#   RALPH_MODEL                  agent model override (use a real id from `agent --help` / CLI list; not a README placeholder)
 #   RALPH_FORCE                  1 = pass -f to agent (broader allow)
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
@@ -157,6 +157,21 @@ for t in items:
 # Create delegation bundle for one task, emit RALPH_BUNDLE: line
 create_bundle() {
   local plan_id="$1" task_id="$2" write_scope_csv="$3"
+
+  # Manual fanout + re-runs: if a contract already exists, dot-agents workflow fanout errors.
+  # Match auto-discover behavior (skip when contract exists) by reusing the bundle path.
+  local existing_contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
+  if [[ -f "$existing_contract" ]]; then
+    echo "ralph-orchestrate: skipping fanout — delegation already exists for $task_id; reusing bundle" >&2
+    local existing_bundle
+    if existing_bundle="$(delegation_bundle_path_for_task "$task_id")" && [[ -f "$existing_bundle" ]]; then
+      [[ -n "${LOG_DIR:-}" ]] && cp -f "$existing_bundle" "$LOG_DIR/bundle-${task_id}.snapshot.yaml"
+      printf 'RALPH_BUNDLE: %s\n' "$existing_bundle"
+      return 0
+    fi
+    echo "error: delegation contract exists for $task_id but bundle YAML not found" >&2
+    return 1
+  fi
 
   # workflow fanout expects repo-relative paths; strip REPO_ROOT prefix if present
   local worker_overlay_rel="${WORKER_OVERLAY#$REPO_ROOT/}"
