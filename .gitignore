@@ -77,6 +77,7 @@ AGENTS.md
 # skill symlinks created by dot-agents refresh/install — not committed
 .agents/skills/
 .agents/agents/
+.github/agents/
 # macOS
 .AppleDouble
 .LSOverride
