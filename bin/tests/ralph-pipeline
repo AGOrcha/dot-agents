@@ -74,7 +74,7 @@ export RALPH_AGENT_OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
 export AGENT_BIN="${AGENT_BIN:-agent}"
 export DOT_AGENTS="${DOT_AGENTS:-}"
 
-if ! "$RALPH_ORCHESTRATE" >"$orch_output_file" 2>&2; then
+if ! "$RALPH_ORCHESTRATE" >"$orch_output_file" 2>&1; then
   echo "error: ralph-orchestrate failed" >&2
   exit 1
 fi
@@ -184,6 +184,8 @@ fi
 if [[ -n "$BASE_LOG_DIR" ]]; then
   merge_back_entries=""
   worker_iter_entries=""
+  persisted_entries=""
+  token_entries=""
 
   for bundle_path in "${BUNDLES[@]}"; do
     bundle_base="$(basename "$bundle_path" .yaml)"
