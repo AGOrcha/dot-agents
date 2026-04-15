@@ -285,6 +285,7 @@ func NewWorkflowCmd() *cobra.Command {
 		checkpointMessage           string
 		checkpointVerificationState string
 		checkpointVerificationText  string
+		checkpointLogToIter         int
 		logAll                      bool
 	)
 
@@ -336,12 +337,18 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: NoArgsWithHints("Use flags such as `--message` instead of positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("log-to-iter") && checkpointLogToIter > 0 {
+				if err := runWorkflowCheckpointLogToIter(checkpointLogToIter); err != nil {
+					return err
+				}
+			}
 			return runWorkflowCheckpoint(checkpointMessage, checkpointVerificationState, checkpointVerificationText)
 		},
 	}
 	checkpointCmd.Flags().StringVar(&checkpointMessage, "message", "", "Checkpoint message")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationState, "verification-status", workflowDefaultVerificationState, "Verification status: pass, fail, partial, or unknown")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationText, "verification-summary", "", "Verification summary text")
+	checkpointCmd.Flags().IntVar(&checkpointLogToIter, "log-to-iter", 0, "Write an iteration log stub for iteration N to .agents/active/iteration-log/iter-N.yaml")
 
 	logCmd := &cobra.Command{
 		Use:   "log",
@@ -954,6 +961,194 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 
 	ui.Success("Checkpoint written")
 	fmt.Fprintf(os.Stdout, "  %s\n\n", config.DisplayPath(checkpointPath))
+	return nil
+}
+
+// iterLogEntry is the YAML structure for .agents/active/iteration-log/iter-N.yaml.
+// CLI-deterministic fields are written here; agent fields are left as empty stubs.
+type iterLogEntry struct {
+	SchemaVersion int    `yaml:"schema_version"`
+	Iteration     int    `yaml:"iteration"`
+	Date          string `yaml:"date"`
+	Wave          string `yaml:"wave"`
+	TaskID        string `yaml:"task_id"`
+	Commit        string `yaml:"commit"`
+	FilesChanged  int    `yaml:"files_changed"`
+	LinesAdded    int    `yaml:"lines_added"`
+	LinesRemoved  int    `yaml:"lines_removed"`
+	FirstCommit   bool   `yaml:"first_commit,omitempty"`
+
+	// Agent fields — all empty stubs
+	Item             string      `yaml:"item"`
+	ScenarioTags     []string    `yaml:"scenario_tags"`
+	FeedbackGoal     string      `yaml:"feedback_goal"`
+	TestsAdded       int         `yaml:"tests_added"`
+	TestsTotalPass   interface{} `yaml:"tests_total_pass"`
+	Retries          int         `yaml:"retries"`
+	ScopeNote        string      `yaml:"scope_note"`
+	Summary          string      `yaml:"summary"`
+	SelfAssessment   iterLogSelfAssessment `yaml:"self_assessment"`
+}
+
+type iterLogSelfAssessment struct {
+	ReadLoopState                 bool   `yaml:"read_loop_state"`
+	OneItemOnly                   bool   `yaml:"one_item_only"`
+	CommittedAfterTests           bool   `yaml:"committed_after_tests"`
+	TestsPositiveAndNegative      bool   `yaml:"tests_positive_and_negative"`
+	TestsUsedSandbox              bool   `yaml:"tests_used_sandbox"`
+	AlignedWithCanonicalTasks     bool   `yaml:"aligned_with_canonical_tasks"`
+	PersistedViaWorkflowCommands  string `yaml:"persisted_via_workflow_commands"`
+	RanCliCommand                 bool   `yaml:"ran_cli_command"`
+	ExercisedNewScenario          bool   `yaml:"exercised_new_scenario"`
+	CliProducedActionableFeedback string `yaml:"cli_produced_actionable_feedback"`
+	LinkedTracesToOutcomes        bool   `yaml:"linked_traces_to_outcomes"`
+	StayedUnder10Files            bool   `yaml:"stayed_under_10_files"`
+	NoDestructiveCommands         bool   `yaml:"no_destructive_commands"`
+}
+
+// iterLogDiffStat holds parsed output from git diff --stat HEAD~1.
+type iterLogDiffStat struct {
+	FilesChanged int
+	LinesAdded   int
+	LinesRemoved int
+	FirstCommit  bool
+}
+
+// gitIterDiffStat runs git diff --stat HEAD~1 and parses the summary line.
+// If HEAD~1 doesn't exist (first commit), all counts are 0 and FirstCommit is true.
+func gitIterDiffStat(projectPath string) iterLogDiffStat {
+	cmd := exec.Command("git", "-C", projectPath, "rev-parse", "HEAD~1")
+	if err := cmd.Run(); err != nil {
+		// HEAD~1 does not exist: first commit
+		return iterLogDiffStat{FirstCommit: true}
+	}
+
+	out := strings.TrimSpace(gitOutput(projectPath, "diff", "--stat", "HEAD~1"))
+	if out == "" {
+		return iterLogDiffStat{}
+	}
+
+	// The summary line is the last non-empty line, e.g.:
+	//   3 files changed, 42 insertions(+), 5 deletions(-)
+	//   1 file changed, 10 insertions(+)
+	//   1 file changed, 3 deletions(-)
+	lines := strings.Split(out, "\n")
+	summary := ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			summary = strings.TrimSpace(lines[i])
+			break
+		}
+	}
+	if summary == "" {
+		return iterLogDiffStat{}
+	}
+	return parseGitDiffStatSummary(summary)
+}
+
+// parseGitDiffStatSummary parses a git diff --stat summary line into counts.
+func parseGitDiffStatSummary(summary string) iterLogDiffStat {
+	var result iterLogDiffStat
+	// files changed
+	if idx := strings.Index(summary, " file"); idx != -1 {
+		fmt.Sscanf(strings.TrimSpace(summary[:idx]), "%d", &result.FilesChanged)
+	}
+	// insertions
+	if idx := strings.Index(summary, " insertion"); idx != -1 {
+		// walk back to the comma or start
+		start := idx
+		for start > 0 && summary[start-1] != ',' {
+			start--
+		}
+		fmt.Sscanf(strings.TrimSpace(summary[start:idx]), "%d", &result.LinesAdded)
+	}
+	// deletions
+	if idx := strings.Index(summary, " deletion"); idx != -1 {
+		start := idx
+		for start > 0 && summary[start-1] != ',' {
+			start--
+		}
+		fmt.Sscanf(strings.TrimSpace(summary[start:idx]), "%d", &result.LinesRemoved)
+	}
+	return result
+}
+
+// scanActiveDelegationContract scans .agents/active/delegation/*.yaml and returns
+// the first contract's (plan_id, task_id). Returns empty strings if none found.
+func scanActiveDelegationContract(projectPath string) (wave, taskID string) {
+	dir := delegationDir(projectPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		contract, err := loadDelegationContract(projectPath, strings.TrimSuffix(e.Name(), ".yaml"))
+		if err != nil {
+			continue
+		}
+		return contract.ParentPlanID, contract.ParentTaskID
+	}
+	return "", ""
+}
+
+func runWorkflowCheckpointLogToIter(n int) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	wave, taskID := scanActiveDelegationContract(project.Path)
+
+	commit := strings.TrimSpace(gitOutput(project.Path, "log", "-1", "--format=%H"))
+
+	diff := gitIterDiffStat(project.Path)
+
+	entry := iterLogEntry{
+		SchemaVersion: 1,
+		Iteration:     n,
+		Date:          time.Now().UTC().Format("2006-01-02"),
+		Wave:          wave,
+		TaskID:        taskID,
+		Commit:        commit,
+		FilesChanged:  diff.FilesChanged,
+		LinesAdded:    diff.LinesAdded,
+		LinesRemoved:  diff.LinesRemoved,
+		FirstCommit:   diff.FirstCommit,
+
+		// Agent stubs
+		Item:           "",
+		ScenarioTags:   []string{},
+		FeedbackGoal:   "",
+		TestsAdded:     0,
+		TestsTotalPass: nil,
+		Retries:        0,
+		ScopeNote:      "",
+		Summary:        "",
+		SelfAssessment: iterLogSelfAssessment{},
+	}
+
+	iterDir := filepath.Join(project.Path, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(iterDir, 0755); err != nil {
+		return fmt.Errorf("create iteration-log dir: %w", err)
+	}
+
+	body, err := yaml.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal iter log: %w", err)
+	}
+
+	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
+	content := []byte(header + string(body))
+
+	iterPath := filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n))
+	if err := os.WriteFile(iterPath, content, 0644); err != nil {
+		return fmt.Errorf("write iter log: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "%s\n", config.DisplayPath(iterPath))
 	return nil
 }
 
@@ -4246,6 +4441,10 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 				writeScope = append(writeScope, p)
 			}
 		}
+	}
+	// Fall back to task definition's write_scope when not explicitly provided
+	if len(writeScope) == 0 && len(targetTask.WriteScope) > 0 {
+		writeScope = append([]string(nil), targetTask.WriteScope...)
 	}
 
 	// Check write-scope overlap

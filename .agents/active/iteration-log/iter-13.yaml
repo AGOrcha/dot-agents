@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 13
+date: "2026-04-11"
+wave: "skill-import-streamline"
+task_id: ""
+commit: "b457809"
+files_changed: 2
+lines_added: 178
+lines_removed: 0
+item: "Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)"
+scenario_tags: ["clean-repo", "sweep-dry-run", "manifest-roundtrip-fixed"]
+feedback_goal: "Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?"
+tests_added: 2
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "yes"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

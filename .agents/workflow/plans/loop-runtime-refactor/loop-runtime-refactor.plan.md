@@ -365,6 +365,116 @@ and the Pattern E orchestrator session.
 
 ---
 
+## Phase 5 — Loop-State Split
+
+**Write scope:** `.agents/active/`, CLI `workflow checkpoint` command
+
+Context: empirical evidence from the A/B run (2026-04-14) shows the script worker consumed
+~2.5M cache-read tokens per iteration, dominated by `loop-state.md` being inlined verbatim
+into the prompt via `active.loop.md` → `$WORKER_OVERLAY`. `loop-state.md` is 33k+ tokens of
+accumulated iteration log. This was discussed in session `d694aff6` but never captured as a
+task — the A/B experiment ran with the monolithic file in place.
+
+### 5a. Split `loop-state.md` into structured log + prose file
+
+**Current shape:** one monolithic file — ## Current Position, ## Loop Health, ## Next Iteration
+Playbook, ## Workflow Command Baseline, ## Iteration Log (37+ entries, growing unboundedly).
+
+**Target shape:**
+
+```
+.agents/active/loop-state.md            ← 3 prose sections only (agent-written):
+                                          ## Current Position
+                                          ## Loop Health
+                                          ## Next Iteration Playbook
+
+.agents/active/iteration-log/           ← new directory
+  iter-N.yaml                           ← one file per iteration (CLI-written)
+```
+
+`iter-N.yaml` exact schema (two-author model):
+
+```yaml
+schema_version: 1
+iteration: N                          # CLI: from --iter flag or auto-incremented
+date: YYYY-MM-DD                      # CLI: today's date at checkpoint time
+wave: <plan-id>                       # CLI: from active checkpoint/delegation
+task_id: <task-id>                    # CLI: from active delegation contract
+commit: <sha>                         # CLI: git log -1 --format=%H
+files_changed: N                      # CLI: git diff --stat HEAD~1
+lines_added: N                        # CLI: git diff --stat HEAD~1
+lines_removed: N                      # CLI: git diff --stat HEAD~1
+
+# Agent fills these in after --log-to-iter creates the stub:
+item: ""                              # AGENT: brief description of what was done
+scenario_tags: []                     # AGENT: coverage tags
+feedback_goal: ""                     # AGENT: verification question answered
+tests_added: 0                        # AGENT: new test count
+tests_total_pass: true                # AGENT: full suite result
+retries: 0                            # AGENT: implementation attempts before success
+scope_note: ""                        # AGENT: on-target | scope-breach | partial
+summary: ""                           # AGENT: prose summary of the iteration
+
+self_assessment:                      # AGENT: all boolean/enum
+  read_loop_state: false
+  one_item_only: false
+  committed_after_tests: false
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""  # yes | no | paused — <reason>
+  ran_cli_command: false
+  exercised_new_scenario: false
+  cli_produced_actionable_feedback: ""  # yes | no | informative-nonblocking
+  linked_traces_to_outcomes: false
+  stayed_under_10_files: false
+  no_destructive_commands: false
+```
+
+**Two-author protocol:**
+1. `workflow checkpoint --log-to-iter N` (required) — creates `iter-N.yaml` with all CLI
+   fields populated and agent fields set to empty stubs
+2. Agent fills in the stub fields in `iter-N.yaml`
+3. Agent writes/updates only the 3 prose sections in `loop-state.md`
+
+This removes the agent's need to produce structured YAML from scratch and gives it a template
+to fill. The CLI fields are never wrong because they come directly from git and state.
+
+Agent continues to write the 3 prose sections; the iteration log entries move out of the file
+entirely. This reduces the agent's write surface from 15+ structured fields to 3 prose blocks,
+and drops the loop-state token size from ~33k to ~500 tokens.
+
+**Migration:** existing ## Iteration Log entries in loop-state.md get archived to
+`.agents/active/iteration-log/historical.yaml` (bulk array). New entries start at
+`iter-38.yaml` (next after current iteration 37).
+
+### 5b. Update `active.loop.md` worker instructions
+
+Change the "what to write in loop-state" section to:
+- Run `workflow checkpoint --log-to-iter <N>` to create the iter-N.yaml stub
+- Fill in the agent fields in the stub
+- Update the 3 prose sections in loop-state.md only
+- Do not append to ## Iteration Log (section no longer exists)
+
+### 5c. Add `workflow checkpoint --log-to-iter` flag (required part of phase)
+
+Add `--log-to-iter <N>` flag to `workflow checkpoint`. When passed:
+- Reads the current delegation contract (or uses active plan/task from checkpoint) for `wave`
+  and `task_id`
+- Runs `git log -1 --format=%H` for `commit`
+- Runs `git diff --stat HEAD~1` for `files_changed`, `lines_added`, `lines_removed`
+- Writes `.agents/active/iteration-log/iter-<N>.yaml` with all CLI fields set and agent
+  fields as empty stubs (string `""`, int `0`, bool `false`)
+- Prints the path to the created file so the agent can confirm it
+
+If `HEAD~1` doesn't exist (first commit), CLI fields default to `0` / `""` and a
+`first_commit: true` marker is added.
+
+The `--log-to-iter` flag is not optional — it is the mechanism that enforces the two-author
+split and prevents agents from being responsible for git-derivable fields.
+
+---
+
 ## Acceptance Criteria
 
 - Phase 1: `orchestrator-session-start` loads gotchas before workflow; `active.loop.md` has
@@ -379,3 +489,8 @@ and the Pattern E orchestrator session.
 - Phase 4: `loop-worker` skill exists. Orchestrator instructions document Pattern E invocation.
   A cold-start test (worker spawned with only bundle + skill path, no other context) succeeds
   without running workflow orient.
+- Phase 5: `workflow checkpoint --log-to-iter N` creates a valid `iter-N.yaml` stub with all
+  CLI-deterministic fields populated from git. `loop-state.md` contains only the 3 prose
+  sections (≤500 tokens). Historical iteration log entries archived to `iteration-log/historical.yaml`.
+  `active.loop.md` worker instructions reference the two-author protocol. No agent-written
+  structured YAML in loop-state.md.

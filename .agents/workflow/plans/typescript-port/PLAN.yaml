@@ -8,4 +8,4 @@ updated_at: "2026-04-14T19:34:40Z"
 owner: dot-agents
 success_criteria: The `ports/typescript/` port has a bounded Windows-friendly MVP on current contracts, and deferred workflow/plugin/Stage 2 scope is explicit rather than implied.
 verification_strategy: TypeScript tests under `ports/typescript/tests`; targeted Go regression checks for copied contract behavior; docs and canonical plan alignment
-current_focus_task: Phase 5 — Align the TS port with Stage 2 buckets and plugin resources after current Go contracts settle
+current_focus_task: ""

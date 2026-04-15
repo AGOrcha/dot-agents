@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 24
+date: "2026-04-11"
+wave: "resource-intent-centralization"
+task_id: ""
+commit: ""
+files_changed: 7
+lines_added: 140
+lines_removed: 39
+item: "Phase 5 — RunSharedTargetProjection unifies shared-target dry-run + execute for refresh, install, and add"
+scenario_tags: ["clean-repo", "canonical-plan-present", "dry-run-shared-target-preview"]
+feedback_goal: "After wiring RunSharedTargetProjection, does refresh --dry-run dot-agents still show the same merged shared-target skill rows (duplicate merges)?"
+tests_added: 2
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added platform.RunSharedTargetProjection; refactored refresh/install/add to use it; tests assert dry-run parity with DryRunSharedTargetPlanLines and nil lines on apply"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: "no"
+  ran_cli_command: true
+  exercised_new_scenario: false
+  cli_produced_actionable_feedback: "yes"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

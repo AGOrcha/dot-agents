@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 15
+date: "2026-04-11"
+wave: "skill-import-streamline"
+task_id: ""
+commit: "b457809"
+files_changed: 2
+lines_added: 154
+lines_removed: 0
+item: "Add a project-scope 'skills import/promote' command path"
+scenario_tags: ["clean-repo", "skills-promote-new-command"]
+feedback_goal: "Does skills promote create the managed symlink in agentsHome/skills/<project>/, update .agentsrc.json Skills, and return errors for non-existent skill / missing project name / real-dir conflict?"
+tests_added: 5
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added skills promote subcommand with promoteSkillIn; creates managed symlink + updates manifest + calls ExecuteSharedSkillMirrorPlan; 5 tests cover success, idempotency, 3 error paths"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "yes"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

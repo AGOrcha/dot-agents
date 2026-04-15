@@ -76,7 +76,7 @@ AGENTS.md
 .mcp.json
 # skill symlinks created by dot-agents refresh/install — not committed
 .agents/skills/
-
+.agents/agents/
 # macOS
 .AppleDouble
 .LSOverride

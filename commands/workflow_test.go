@@ -2395,6 +2395,32 @@ func TestFanoutSliceAndTaskMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestFanoutTaskWriteScopeFallback(t *testing.T) {
+	// fanout --plan X --task Y without --write-scope should pull write_scope from task definition
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := loadDelegationContract(repo, "task-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.WriteScope) != 1 || contract.WriteScope[0] != "commands/" {
+		t.Fatalf("write_scope = %+v, want [commands/]", contract.WriteScope)
+	}
+	bundleData, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(bundleData, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.Scope.WriteScope) != 1 || bundle.Scope.WriteScope[0] != "commands/" {
+		t.Fatalf("bundle write_scope = %+v, want [commands/]", bundle.Scope.WriteScope)
+	}
+}
+
 func TestFanoutSliceNotFound(t *testing.T) {
 	repo := setupFanoutSliceProject(t, "in_progress")
 	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "missing", "--owner", "test")
@@ -2979,3 +3005,231 @@ func TestFoldBackList(t *testing.T) {
 		t.Fatalf("filtered list: %s", outP1)
 	}
 }
+
+// initWorkflowTestRepoWithCommit creates a repo with a second commit so HEAD~1 exists.
+func initWorkflowTestRepoWithCommit(t *testing.T) string {
+	t.Helper()
+	repo := initWorkflowTestRepo(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+		}
+	}
+	// Write a second file and commit so HEAD~1 exists
+	second := filepath.Join(repo, "second.txt")
+	if err := os.WriteFile(second, []byte("second\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "second.txt")
+	run("commit", "-m", "second commit")
+	return repo
+}
+
+func TestCheckpointLogToIter(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	const iterN = 38
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "38"); err != nil {
+		t.Fatalf("checkpoint --log-to-iter 38: %v", err)
+	}
+
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-38.yaml")
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatalf("iter-38.yaml not created: %v", err)
+	}
+	content := string(raw)
+
+	// Header comment must be present
+	if !strings.HasPrefix(content, "# yaml-language-server:") {
+		t.Errorf("missing yaml-language-server header; got: %q", content[:min(len(content), 80)])
+	}
+	if !strings.Contains(content, "workflow-iter-log.schema.json") {
+		t.Errorf("header does not reference schema: %s", content[:min(len(content), 120)])
+	}
+
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal iter-38.yaml: %v", err)
+	}
+
+	// CLI-deterministic fields
+	if entry.SchemaVersion != 1 {
+		t.Errorf("schema_version = %d, want 1", entry.SchemaVersion)
+	}
+	if entry.Iteration != iterN {
+		t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	if entry.Date != today {
+		t.Errorf("date = %q, want %q", entry.Date, today)
+	}
+	// commit sha should be non-empty (repo has commits)
+	if entry.Commit == "" {
+		t.Errorf("commit sha is empty; expected a git SHA")
+	}
+	// files_changed, lines_added, lines_removed are >= 0 (parsed from diff --stat)
+	if entry.FilesChanged < 0 {
+		t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
+	}
+
+	// Agent fields must be empty stubs
+	if entry.Item != "" {
+		t.Errorf("item = %q, want empty string", entry.Item)
+	}
+	if len(entry.ScenarioTags) != 0 {
+		t.Errorf("scenario_tags = %v, want []", entry.ScenarioTags)
+	}
+	if entry.FeedbackGoal != "" {
+		t.Errorf("feedback_goal = %q, want empty", entry.FeedbackGoal)
+	}
+	if entry.TestsAdded != 0 {
+		t.Errorf("tests_added = %d, want 0", entry.TestsAdded)
+	}
+	if entry.TestsTotalPass != nil {
+		t.Errorf("tests_total_pass = %v, want nil", entry.TestsTotalPass)
+	}
+	if entry.Retries != 0 {
+		t.Errorf("retries = %d, want 0", entry.Retries)
+	}
+	if entry.ScopeNote != "" {
+		t.Errorf("scope_note = %q, want empty", entry.ScopeNote)
+	}
+	if entry.Summary != "" {
+		t.Errorf("summary = %q, want empty", entry.Summary)
+	}
+
+	// self_assessment block: all boolean fields false, string fields empty
+	sa := entry.SelfAssessment
+	if sa.ReadLoopState {
+		t.Error("self_assessment.read_loop_state should be false")
+	}
+	if sa.OneItemOnly {
+		t.Error("self_assessment.one_item_only should be false")
+	}
+	if sa.CommittedAfterTests {
+		t.Error("self_assessment.committed_after_tests should be false")
+	}
+	if sa.TestsPositiveAndNegative {
+		t.Error("self_assessment.tests_positive_and_negative should be false")
+	}
+	if sa.TestsUsedSandbox {
+		t.Error("self_assessment.tests_used_sandbox should be false")
+	}
+	if sa.AlignedWithCanonicalTasks {
+		t.Error("self_assessment.aligned_with_canonical_tasks should be false")
+	}
+	if sa.PersistedViaWorkflowCommands != "" {
+		t.Errorf("self_assessment.persisted_via_workflow_commands = %q, want empty", sa.PersistedViaWorkflowCommands)
+	}
+	if sa.RanCliCommand {
+		t.Error("self_assessment.ran_cli_command should be false")
+	}
+	if sa.ExercisedNewScenario {
+		t.Error("self_assessment.exercised_new_scenario should be false")
+	}
+	if sa.CliProducedActionableFeedback != "" {
+		t.Errorf("self_assessment.cli_produced_actionable_feedback = %q, want empty", sa.CliProducedActionableFeedback)
+	}
+	if sa.LinkedTracesToOutcomes {
+		t.Error("self_assessment.linked_traces_to_outcomes should be false")
+	}
+	if sa.StayedUnder10Files {
+		t.Error("self_assessment.stayed_under_10_files should be false")
+	}
+	if sa.NoDestructiveCommands {
+		t.Error("self_assessment.no_destructive_commands should be false")
+	}
+}
+
+func TestCheckpointLogToIterFirstCommit(t *testing.T) {
+	// Repo with only one commit: HEAD~1 does not exist → first_commit: true, counts 0
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "1"); err != nil {
+		t.Fatalf("checkpoint --log-to-iter 1: %v", err)
+	}
+
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-1.yaml")
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatalf("iter-1.yaml not created: %v", err)
+	}
+
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !entry.FirstCommit {
+		t.Errorf("first_commit = false, want true when HEAD~1 absent")
+	}
+	if entry.FilesChanged != 0 || entry.LinesAdded != 0 || entry.LinesRemoved != 0 {
+		t.Errorf("expected zero diff counts for first commit, got files=%d added=%d removed=%d",
+			entry.FilesChanged, entry.LinesAdded, entry.LinesRemoved)
+	}
+}
+
+func TestCheckpointLogToIterNoDelegation(t *testing.T) {
+	// No delegation contracts → wave and task_id are empty strings
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "5"); err != nil {
+		t.Fatalf("checkpoint --log-to-iter 5: %v", err)
+	}
+
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-5.yaml")
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatalf("iter-5.yaml not created: %v", err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if entry.Wave != "" {
+		t.Errorf("wave = %q, want empty when no delegation contract", entry.Wave)
+	}
+	if entry.TaskID != "" {
+		t.Errorf("task_id = %q, want empty when no delegation contract", entry.TaskID)
+	}
+}
+
+func TestParseGitDiffStatSummary(t *testing.T) {
+	cases := []struct {
+		summary      string
+		wantFiles    int
+		wantAdded    int
+		wantRemoved  int
+	}{
+		{"3 files changed, 42 insertions(+), 5 deletions(-)", 3, 42, 5},
+		{"1 file changed, 10 insertions(+)", 1, 10, 0},
+		{"1 file changed, 3 deletions(-)", 1, 0, 3},
+		{"2 files changed, 1 insertion(+), 1 deletion(-)", 2, 1, 1},
+		{"", 0, 0, 0},
+	}
+	for _, tc := range cases {
+		r := parseGitDiffStatSummary(tc.summary)
+		if r.FilesChanged != tc.wantFiles || r.LinesAdded != tc.wantAdded || r.LinesRemoved != tc.wantRemoved {
+			t.Errorf("parseGitDiffStatSummary(%q) = {files:%d added:%d removed:%d}, want {files:%d added:%d removed:%d}",
+				tc.summary, r.FilesChanged, r.LinesAdded, r.LinesRemoved,
+				tc.wantFiles, tc.wantAdded, tc.wantRemoved)
+		}
+	}
+}
+

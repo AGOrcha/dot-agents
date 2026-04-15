@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776216530704763904
+plan_id: loop-runtime-refactor
+task_id: ""
+observation: 'Resource audit after the loop-worker conversion shows a second, broader command-surface gap beyond agents. hooks has only hooks list; rules, mcp, and settings have no dedicated command families at all and are managed indirectly through add/import/refresh/install/remove/status; context, memory, and profiles still have no lifecycle surface by design. This should be tracked separately from agent wiring so a future parity plan does not mix distinct problems.'
+classification: proposal
+routed_to: proposal:obs-1776216530704763904.md
+created_at: "2026-04-15T01:28:45Z"

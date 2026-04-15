@@ -1,0 +1,88 @@
+schema_version: 1
+plan_id: agent-resource-lifecycle
+tasks:
+    - id: agents-promote
+      title: agents promote <name> — repo .agents/agents/<name>/ → ~/.agents/agents/<project>/; repo dirs become symlinks
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents.go
+        - commands/agents_test.go
+      verification_required: true
+      notes: |-
+        Mirror of promoteSkillIn() in commands/skills.go.
+
+        Behaviour:
+        - Source: .agents/agents/<name>/ in the current repo (must contain AGENT.md)
+        - Canonical target: ~/.agents/agents/<project>/<name>/ (real directory, SOT)
+        - After copy: replace repo .agents/agents/<name>/ with symlink → canonical target
+        - Also create/update repo .claude/agents/<name>/ symlink → canonical target
+        - Register name in .agentsrc.json agents[] list if not already present
+        - Print next steps (dot-agents refresh to wire platform links)
+
+        Edge cases: already-promoted (symlink exists), canonical already real dir (--force to overwrite), missing AGENT.md (error with hint).
+    - id: agents-import
+      title: agents import <name> — pull ~/.agents/agents/<project>/<name>/ into repo as symlink
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents.go
+        - commands/agents_test.go
+      verification_required: true
+      notes: |-
+        Reverse of promote: given a name registered in ~/.agents/agents/<project>/, create the repo symlinks.
+
+        Behaviour:
+        - Source: ~/.agents/agents/<project>/<name>/ (must exist and contain AGENT.md)
+        - Creates .agents/agents/<name>/ → canonical (symlink)
+        - Creates .claude/agents/<name>/ → canonical (symlink)
+        - Registers name in .agentsrc.json agents[] if absent
+        - Idempotent: no-op if symlinks already correct
+    - id: agents-refresh-wiring
+      title: Fix refresh and install to wire .agentsrc.json agents list and sync ~/.agents/agents/<project>/ → repo symlinks
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/claude.go
+        - commands/refresh.go
+        - commands/install.go
+      verification_required: true
+      notes: |-
+        Two surfaces to fix:
+
+        1. createAgentsLinks() in internal/platform/claude.go is a no-op (line 288).
+           Fix: scan ~/.agents/agents/<project>/ for agent dirs; for each, ensure
+           .agents/agents/<name>/ and .claude/agents/<name>/ symlinks exist and resolve.
+           This makes refresh idempotent and self-healing (same model as ensureUserSkills).
+
+        2. install (commands/install.go) reads .agentsrc.json agents[] list but does not
+           wire the agents. Fix: for each name in agents[], call the same logic as agents-import
+           to create the repo symlinks from the canonical path.
+
+        Acceptance: dot-agents refresh after adding a new agent to ~/.agents/agents/dot-agents/
+        auto-creates the repo symlinks without requiring manual ln -s.
+    - id: agents-remove
+      title: agents remove <name> — unlink repo symlinks and optionally delete canonical
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents.go
+        - commands/agents_test.go
+      verification_required: true
+      notes: |-
+        Cleanup counterpart to promote/import.
+
+        Behaviour:
+        - Removes .agents/agents/<name>/ symlink from repo
+        - Removes .claude/agents/<name>/ symlink from repo
+        - Removes name from .agentsrc.json agents[] list
+        - --purge flag: also deletes ~/.agents/agents/<project>/<name>/ (with confirmation)
+        - Without --purge: canonical dir is left intact (safe default)

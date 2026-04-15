@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 18
+date: "2026-04-11"
+wave: "resource-intent-centralization"
+task_id: ""
+commit: "b457809"
+files_changed: 4
+lines_added: 109
+lines_removed: 10
+item: "Phase 3 — dry-run visibility for centralized shared-target plan (refresh / install aligned with CollectAndExecuteSharedTargetPlan)"
+scenario_tags: ["clean-repo", "dry-run-vs-apply", "planner-diagnostic-visible", "canonical-plan-present"]
+feedback_goal: "Does refresh --dry-run print merged shared target: lines (duplicate merge counts) before per-platform dry-run rows, and does explain links still describe centralized shared targets?"
+tests_added: 2
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added DryRunSharedTargetPlanLines and wired refresh/install dry-run paths to print merged symlink plan; two unit tests (none + cross-platform dedupe)."
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "yes"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

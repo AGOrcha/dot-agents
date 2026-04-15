@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-iter-log.schema.json",
+  "title": "dot-agents workflow iteration log entry",
+  "description": "Schema for .agents/active/iteration-log/iter-N.yaml. Two-author model: CLI-deterministic fields are written by 'workflow checkpoint --log-to-iter'; agent fields are filled in by the worker after the stub is created.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "iteration",
+    "date",
+    "wave",
+    "task_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. Increment when adding required fields."
+    },
+
+    "iteration": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "CLI: monotonically increasing iteration number."
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "CLI: date the checkpoint was written (YYYY-MM-DD)."
+    },
+    "wave": {
+      "type": "string",
+      "description": "CLI: active plan ID at checkpoint time."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "CLI: active task ID from the delegation contract or checkpoint."
+    },
+    "commit": {
+      "type": "string",
+      "description": "CLI: git commit SHA at checkpoint time. Empty string if no commits yet.",
+      "default": ""
+    },
+    "files_changed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CLI: number of files changed (from git diff --stat HEAD~1).",
+      "default": 0
+    },
+    "lines_added": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CLI: lines added (from git diff --stat HEAD~1).",
+      "default": 0
+    },
+    "lines_removed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CLI: lines removed (from git diff --stat HEAD~1).",
+      "default": 0
+    },
+    "first_commit": {
+      "type": "boolean",
+      "description": "CLI: true when HEAD~1 does not exist; git diff fields default to 0.",
+      "default": false
+    },
+
+    "item": {
+      "type": "string",
+      "description": "AGENT: brief description of the work done this iteration.",
+      "default": ""
+    },
+    "scenario_tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "AGENT: coverage tags for this iteration.",
+      "default": []
+    },
+    "feedback_goal": {
+      "type": "string",
+      "description": "AGENT: verification question this iteration was designed to answer.",
+      "default": ""
+    },
+    "tests_added": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "AGENT: number of new tests added.",
+      "default": 0
+    },
+    "tests_total_pass": {
+      "type": ["boolean", "null"],
+      "description": "AGENT: true if full test suite passed, false if not, null if not run.",
+      "default": null
+    },
+    "retries": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "AGENT: number of implementation attempts before the iteration closed.",
+      "default": 0
+    },
+    "scope_note": {
+      "type": "string",
+      "enum": ["on-target", "scope-breach", "partial", ""],
+      "description": "AGENT: scope discipline assessment.",
+      "default": ""
+    },
+    "summary": {
+      "type": "string",
+      "description": "AGENT: prose summary of what was done and why.",
+      "default": ""
+    },
+
+    "self_assessment": {
+      "type": "object",
+      "description": "AGENT: structured self-assessment block. All fields coalesce to their default when absent (for migration compatibility).",
+      "additionalProperties": false,
+      "properties": {
+        "read_loop_state":                  { "type": "boolean", "default": false },
+        "one_item_only":                    { "type": ["boolean", "string"], "default": false },
+        "committed_after_tests":            { "type": "boolean", "default": false },
+        "tests_positive_and_negative":      { "type": ["boolean", "string"], "default": false },
+        "tests_used_sandbox":               { "type": ["boolean", "string"], "default": false },
+        "aligned_with_canonical_tasks":     { "type": ["boolean", "string"], "default": false },
+        "persisted_via_workflow_commands":  {
+          "type": "string",
+          "description": "yes | no | paused — <reason>",
+          "default": ""
+        },
+        "ran_cli_command":                  { "type": "boolean", "default": false },
+        "exercised_new_scenario":           { "type": "boolean", "default": false },
+        "cli_produced_actionable_feedback": {
+          "type": "string",
+          "description": "yes | no | informative-nonblocking",
+          "default": ""
+        },
+        "linked_traces_to_outcomes":        { "type": "boolean", "default": false },
+        "stayed_under_10_files":            { "type": ["boolean", "string"], "default": false },
+        "no_destructive_commands":          { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

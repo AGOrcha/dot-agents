@@ -75,7 +75,12 @@ Approval-gated (only when the task explicitly requires it):
 ## Iteration End
 10. Run `/iteration-close`
     - Full closeout: verify record → checkpoint → merge-back (delegated) or advance (direct) → iteration log → self-assessment.
-    - **Loop-state writes:** append iteration log entry + update `## Next Iteration Playbook` only. **Do NOT update `## Current Position`** — that is orchestrator scope.
+    - **Loop-state writes (two-author protocol):**
+      1. Run `go run ./cmd/dot-agents workflow checkpoint --log-to-iter <N>` — creates `.agents/active/iteration-log/iter-N.yaml` with all CLI-deterministic fields. Prints the file path.
+      2. Fill agent fields in `iter-N.yaml`: `item`, `scenario_tags`, `feedback_goal`, `tests_added`, `tests_total_pass`, `retries`, `scope_note`, `summary`, and the full `self_assessment` block.
+      3. Update `## Loop Health` and `## Next Iteration Playbook` in `loop-state.md`.
+      **Do NOT update `## Current Position`** — that is orchestrator scope.
+      **Do NOT append to `## Iteration Log`** — that section no longer exists in loop-state.md.
     - **CLI broken fallback:** if the binary won't build, mark `persisted_via_workflow_commands: paused — <reason>`, fold-back the blocker immediately (`go run ./cmd/dot-agents workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`), and continue. Run deferred persist commands at the start of the next iteration.
 
 ## What NOT to spend time on

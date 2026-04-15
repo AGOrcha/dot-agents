@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776215397478320000
+plan_id: loop-runtime-refactor
+task_id: ""
+observation: 'Phase 6 (loop-worker sub-agent conversion) exposed an agent lifecycle parity gap. Existing surfaces: agents list and agents new already ship. Missing: agents promote, agents import, agents remove, plus refresh/install wiring for canonical agent directories. createAgentsLinks() is a no-op; install does not wire .agentsrc.json agents[]; refresh does not auto-heal agent symlinks. Workaround required manual ln -s and circular symlink debugging. New canonical plan created: agent-resource-lifecycle with 4 real gap tasks.'
+classification: proposal
+routed_to: proposal:obs-1776215397478320000.md
+created_at: "2026-04-15T01:09:57Z"

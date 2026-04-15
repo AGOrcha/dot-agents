@@ -27,7 +27,8 @@
   ],
   "agents": [
     "test-runner",
-    "verifier"
+    "verifier",
+    "loop-worker"
   ],
   "hooks": false,
   "mcp": false,
@@ -44,6 +45,6 @@
   ],
   "refresh": {
     "version": "dev",
-    "refreshedAt": "2026-04-13T12:59:35Z"
+    "refreshedAt": "2026-04-15T00:29:36Z"
   }
 }

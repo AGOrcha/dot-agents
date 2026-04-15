@@ -453,3 +453,124 @@ tasks:
         merge_back_status, persisted_via_workflow_commands rate.
         Write results to .agents/history/loop-runtime-refactor/worker-mode-comparison.md
         after at least one run of each mode.
+    - id: phase-5-loop-state-split
+      title: Phase 5 — Split loop-state.md into iter-N.yaml log + 3-section prose
+      status: completed
+      depends_on:
+        - phase-4c-metrics-capture
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/active/
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: |-
+        Split the monolithic loop-state.md (33k+ tokens) into two surfaces:
+          1. .agents/active/iteration-log/iter-N.yaml — structured per-iteration log (CLI-written stub + agent-filled fields)
+          2. loop-state.md — 3 prose sections only: ## Current Position, ## Loop Health, ## Next Iteration Playbook
+
+        Two-author model: workflow checkpoint --log-to-iter N creates the stub with all
+        git-derivable fields; agent fills the interpretation fields and self_assessment block.
+
+        WORKER CONTEXT (session 2026-04-14):
+        - loop-state.md is currently 33k+ tokens (37 iteration entries in ## Iteration Log)
+        - A/B run confirmed this is the root cause of 2.5M cache-read token bloat per script worker iteration
+        - The split was designed in session d694aff6 but never captured as a task until now
+        - Schema file already exists: schemas/workflow-iter-log.schema.json
+        - Iteration numbering: current iteration is 37; new entries start at iter-38.yaml
+        - SLICES are the unit of work: 5a (migrate) → 5b (worker overlay) || 5c (CLI flag) → 5d (schema wire-in) → 5e (migration script)
+        - Start with slice phase-5a-migrate-loop-state: archive iteration log to historical.yaml, strip loop-state.md to 3 sections
+    - id: phase-5d-iter-log-schema
+      title: Phase 5d — Add workflow-iter-log.schema.json for iter-N.yaml stability
+      status: in_progress
+      depends_on:
+        - phase-5-loop-state-split
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-iter-log.schema.json
+        - .agents/active/iteration-log/
+      verification_required: true
+      notes: |-
+        schemas/workflow-iter-log.schema.json already exists (created during planning).
+        Tasks:
+        - Add yaml-language-server schema reference header to iter-N.yaml stubs written by --log-to-iter
+        - Add schema validation in the --log-to-iter flag implementation (unmarshal + validate before write)
+        - Ensure migration script (phase-5-migration-script) writes schema-valid output
+        - Document the two-author convention (CLI fields vs AGENT fields) in the schema description
+
+        The schema uses additionalProperties: false so field names are stable across CLI versions.
+        Missing optional fields coalesce to their defaults — this is the evolution contract.
+        - Audit 2026-04-15: workflow-iter-log.schema.json exists and --log-to-iter writes the yaml-language-server schema header, but Phase 5d is not complete yet. commands/workflow.go does not load or validate against the schema before write, tests only assert header/stub contents, and existing .agents/active/iteration-log/iter-0.yaml conflicts with schema iteration.minimum=1.
+    - id: phase-5e-migration-script
+      title: 'Phase 5e — One-off migration script: loop-state iteration log → iter-N.yaml files'
+      status: pending
+      depends_on:
+        - phase-5-loop-state-split
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/migrate-loop-state.sh
+        - .agents/active/iteration-log/
+      verification_required: true
+      notes: |-
+        Script: bin/tests/migrate-loop-state.sh
+
+        Reads the ## Iteration Log section from .agents/active/loop-state.md.
+        For each iteration entry, parses all known fields and writes:
+          .agents/active/iteration-log/iter-<N>.yaml
+
+        Coalescing rules for missing fields (migration compatibility, matches schema defaults):
+          commit: ''           if absent
+          files_changed: 0     if absent
+          lines_added: 0       if absent
+          lines_removed: 0     if absent
+          tests_added: 0       if absent
+          tests_total_pass: null  if absent
+          retries: 0           if absent
+          scope_note: ''       if absent
+          summary: ''          if absent
+          scenario_tags: []    if absent
+          feedback_goal: ''    if absent
+          self_assessment:     all fields default to false/''/null if block absent or field missing
+
+        After writing all iter-N.yaml files, appends a single bulk historical.yaml:
+          .agents/active/iteration-log/historical.yaml
+          (array of all the same entries, for human browsing without per-file traversal)
+
+        Final step: strips ## Iteration Log and everything below it from loop-state.md,
+        leaving only ## Current Position, ## Loop Health, ## Next Iteration Playbook.
+
+        Idempotent: skip iter-N.yaml files that already exist (--force to overwrite).
+        Dry-run: --dry-run prints what would be written without touching files.
+    - id: phase-6-loop-worker-subagent
+      title: Phase 6 — Convert loop-worker to a Claude Code sub-agent (AGENT.md + .agentsrc.json)
+      status: completed
+      depends_on:
+        - phase-4a-loop-worker-skill
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/loop-worker/
+        - .agentsrc.json
+      verification_required: true
+      notes: |-
+        Convert Pattern E from an inlined orchestrator prompt to a first-class Claude Code sub-agent.
+
+        Current state (Pattern E): orchestrator inlines the worker prompt inside Agent(prompt=...) in
+        orchestrator-session-start. Worker identity lives in the orchestrator skill, not self-contained.
+
+        Target state (sub-agent): AGENT.md defines the worker system prompt once. Orchestrator calls
+        Agent(subagent_type='loop-worker') — no inlined prompt. Clean role separation.
+
+        WORKER CONTEXT (session 2026-04-14):
+        - loop-worker skill (Phase 4a) already has the right shape: startup.md, workflow.md, gotchas.md files
+        - Conversion is: create AGENT.md (sub-agent system prompt format) alongside existing SKILL.md
+        - SKILL.md stays for human /loop-worker invocation — do NOT remove or rename it
+        - AGENT.md consolidates startup + workflow + gotchas into single cold-start system prompt
+        - Do NOT duplicate ~/.agents/profiles/loop-worker.md content — that loads separately
+        - Use /skill-architect (mode: improve) for AGENT.md creation and orchestrator update
+        - .agentsrc.json edit (adding 'loop-worker' to agents list) is a direct file edit, not skill-architect
+        - After .agentsrc.json edit: dot-agents skills promote loop-worker && dot-agents refresh
+        - SLICES: 6a (AGENT.md) → 6b (.agentsrc.json + orchestrator prompt strip)

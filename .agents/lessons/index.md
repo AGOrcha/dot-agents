@@ -12,5 +12,6 @@
 - [`lint-check-count-assertion`](./lint-check-count-assertion/LESSON.md): When adding a new lint check, grep for `ChecksRun` count assertions in tests and update them to `N+1` before running the suite.
 - [`sidecar-manifest-pattern`](./sidecar-manifest-pattern/LESSON.md): Store integrity hashes in a sidecar manifest file keyed by ID, not inline in the file being hashed — avoids self-referential hash problem.
 - [`rfc-resolves-plan`](./rfc-resolves-plan/LESSON.md): Plans gated on "requires RFC" often already contain the answers — write a brief RFC and implement in the same session instead of spending a full cycle on research.
+- [`analysis-gaps-need-tasks`](./analysis-gaps-need-tasks/LESSON.md): When a session produces analysis results (A/B comparisons, gap findings, identified bugs), those findings must become canonical tasks before the session closes — prose notes are not tasks and don't get scheduled.
 - [`select-star-scan-order`](./select-star-scan-order/LESSON.md): When porting DB schemas to Go, SELECT * scans must match exact column order — enumerate columns explicitly or count and comment them inline.
 - [`use-existing-subdir-helpers`](./use-existing-subdir-helpers/LESSON.md): In kg.go, use `noteSubdir(t)` not `noteType+"s"` — "entity" maps to "entities" not "entitys".
