@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 5
-lines_added: 257
-lines_removed: 24
-item: "Phase 3 — centralize project-scoped agents/ dir mirrors (.claude/agents/<name>) in shared target plan; thin Claude/Cursor createAgentsLinks for repo paths"
-scenario_tags: ["clean-repo", "agents-repo-symlink-centralized", "canonical-plan-present", "dry-run-vs-apply"]
-feedback_goal: "Does refresh --dry-run surface .claude/agents shared-target rows when canonical project agents exist, and do unit tests prove Claude+Cursor agent intents dedupe to a single symlink?"
-tests_added: 3
+files_changed: 4
+lines_added: 109
+lines_removed: 10
+item: "Phase 3 — dry-run visibility for centralized shared-target plan (refresh / install aligned with CollectAndExecuteSharedTargetPlan)"
+scenario_tags: ["clean-repo", "dry-run-vs-apply", "planner-diagnostic-visible", "canonical-plan-present"]
+feedback_goal: "Does refresh --dry-run print merged shared target: lines (duplicate merge counts) before per-platform dry-run rows, and does explain links still describe centralized shared targets?"
+tests_added: 2
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added BuildSharedAgentMirrorIntents, allowlisted .claude/agents/ for imported-dir replacement, merged agent intents into Claude SharedTargetIntents and Cursor SharedTargetIntents, no-op repo createAgentsLinks; tests for dedupe, replacement, Claude+Cursor execute."
+summary: "Added DryRunSharedTargetPlanLines and wired refresh/install dry-run paths to print merged symlink plan; two unit tests (none + cross-platform dedupe)."
 self_assessment:
   read_loop_state: true
   one_item_only: true

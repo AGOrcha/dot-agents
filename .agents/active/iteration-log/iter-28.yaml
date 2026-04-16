@@ -4,23 +4,23 @@ iteration: 28
 date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
-commit: "502b4f2"
+commit: "ae29a92"
 files_changed: 3
-lines_added: 194
-lines_removed: 11
-item: "Phase 6 — coverage proving non-empty directory replacement is executor-only and allowlisted"
-scenario_tags: ["clean-repo", "canonical-plan-present", "executor-only-dir-replacement-allowlist"]
-feedback_goal: "Do ResourcePlan.Execute paths refuse non-allowlisted dirs and allowlisted dirs without imported markers with the intended error strings, and succeed when SKILL.md marks an imported dir?"
-tests_added: 3
+lines_added: 134
+lines_removed: 10
+item: "Phase 6 — refresh/import regression test: imported .agents/skills/<name>/ directory → managed symlink via full runRefresh"
+scenario_tags: ["clean-repo", "canonical-plan-present", "imported-dir-to-managed-symlink"]
+feedback_goal: "Does runRefresh after import-from-refresh still leave repo/.agents/skills/review as a symlink to the canonical ~/.agents/skills/proj/review skill dir (full pipeline ordering)?"
+tests_added: 1
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added three internal/platform tests for removeImportedDirIfAllowlisted / prepareIntentTargetForReplacement; marked Phase 6 allowlist checkbox in markdown plan"
+summary: "Added TestRefreshReplacesImportedRepoSkillDirWithManagedSymlink; marked Phase 6 refresh/import regression checkbox in markdown plan"
 self_assessment:
   read_loop_state: true
   one_item_only: true
   committed_after_tests: true
-  tests_positive_and_negative: true
+  tests_positive_and_negative: false
   tests_used_sandbox: false
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: "no"

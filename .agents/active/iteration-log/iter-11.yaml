@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 2
-lines_added: 13
-lines_removed: 6
-item: "Phase 4 — thin claude.createSkillsLinks to user-home only; update stage1 tests to use command-layer pattern"
-scenario_tags: ["clean-repo", "platform-adapter-thinned", "multi-project-drift-empty-state"]
-feedback_goal: "After thinning claude adapter, do stage1 integration tests still pass using CollectAndExecuteSharedTargetPlan + CreateLinks pattern?"
+files_changed: 3
+lines_added: 33
+lines_removed: 2
+item: "Phase 3 — wire command layer (install.go, refresh.go, add.go) to call CollectAndExecuteSharedTargetPlan before the platform loop"
+scenario_tags: ["clean-repo", "command-layer-shared-plan-wired"]
+feedback_goal: "Does workflow health stay healthy after command-layer wiring, confirming the new pre-platform shared plan doesn't break the build path?"
 tests_added: 0
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Thinned claude.createSkillsLinks (now user-home only); updated TestClaudeCreateLinksDualSkillOutputs and TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink to use command-layer pattern"
+summary: "Wired CollectAndExecuteSharedTargetPlan into install, refresh, and add command flows before the per-platform CreateLinks loop"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -25,7 +25,7 @@ self_assessment:
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: ""
   ran_cli_command: true
-  exercised_new_scenario: true
+  exercised_new_scenario: false
   cli_produced_actionable_feedback: "yes"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true

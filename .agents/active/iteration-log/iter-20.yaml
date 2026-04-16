@@ -5,25 +5,25 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 8
-lines_added: 326
-lines_removed: 47
-item: "Phase 3 — centralize non-dir agent projections (Codex TOML render, OpenCode/Copilot AGENT.md file symlinks) in shared target plan"
-scenario_tags: ["clean-repo", "canonical-plan-present", "dry-run-shared-target-preview", "agents-non-dir-outputs-centralized"]
-feedback_goal: "After centralization, does refresh --dry-run still emit merged skill shared-target lines (and remain healthy) for the default enabled platforms?"
+files_changed: 5
+lines_added: 257
+lines_removed: 24
+item: "Phase 3 — centralize project-scoped agents/ dir mirrors (.claude/agents/<name>) in shared target plan; thin Claude/Cursor createAgentsLinks for repo paths"
+scenario_tags: ["clean-repo", "agents-repo-symlink-centralized", "canonical-plan-present", "dry-run-vs-apply"]
+feedback_goal: "Does refresh --dry-run surface .claude/agents shared-target rows when canonical project agents exist, and do unit tests prove Claude+Cursor agent intents dedupe to a single symlink?"
 tests_added: 3
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Extended resource executor for file symlinks and codex-agent-toml render; Codex/OpenCode/Copilot SharedTargetIntents + thinned CreateLinks; prune stale Codex tomls; integration tests call CollectAndExecuteSharedTargetPlan; negative test for non-allowlisted file replace."
+summary: "Added BuildSharedAgentMirrorIntents, allowlisted .claude/agents/ for imported-dir replacement, merged agent intents into Claude SharedTargetIntents and Cursor SharedTargetIntents, no-op repo createAgentsLinks; tests for dedupe, replacement, Claude+Cursor execute."
 self_assessment:
   read_loop_state: true
   one_item_only: true
   committed_after_tests: true
-  tests_positive_and_negative: true
+  tests_positive_and_negative: false
   tests_used_sandbox: false
-  aligned_with_canonical_tasks: true
-  persisted_via_workflow_commands: "no"
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
   ran_cli_command: true
   exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"

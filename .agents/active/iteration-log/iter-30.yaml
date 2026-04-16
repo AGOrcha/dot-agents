@@ -1,32 +1,32 @@
 # yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
 schema_version: 1
 iteration: 30
-date: "2026-04-12"
+date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
-commit: ""
-files_changed: 4
-lines_added: 30
-lines_removed: 20
-item: "Phase 3 + Phase 6 — reconcile markdown checkboxes with already-implemented code; advance canonical YAML tasks to completed; run focused tests"
-scenario_tags: ["canonical-plan-reconcile", "phase-3-complete", "resource-intent-centralization-closed"]
-feedback_goal: "Are all Phase 3 markdown checkboxes accurate, all canonical YAML tasks for phases 3-6 advanced to completed, and go test ./internal/platform/... green?"
-tests_added: 0
+commit: "a8e874c"
+files_changed: 5
+lines_added: 188
+lines_removed: 14
+item: "Phase 6 — Add status/explain coverage so the new registry remains the source of truth"
+scenario_tags: ["clean-repo", "canonical-plan-present", "status-explain-registry-unit-tests"]
+feedback_goal: "Does sharedTargetRegistryPlanLines delegate to DryRunSharedTargetPlanLines for non-empty platforms (and propagate collection errors), and does explain links still mention status --audit / Shared target registry / refresh --dry-run?"
+tests_added: 4
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Verified all Phase 3 items fully implemented in internal/platform/; marked 4 unchecked Phase 3 items + Phase 6 test item as complete; advanced TASKS.yaml phases 3-6 to completed; PLAN.yaml status = completed; loop-state Current Position rewritten"
+summary: "Extracted sharedTargetRegistryPlanLines; added status + explain tests for registry/dry-run parity and explain copy"
 self_assessment:
   read_loop_state: true
-  one_item_only: false
+  one_item_only: true
   committed_after_tests: true
-  tests_positive_and_negative: false
+  tests_positive_and_negative: true
   tests_used_sandbox: false
-  aligned_with_canonical_tasks: true
+  aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: "no"
   ran_cli_command: true
   exercised_new_scenario: true
-  cli_produced_actionable_feedback: "yes"
+  cli_produced_actionable_feedback: "informative-nonblocking"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true
   no_destructive_commands: true

@@ -2,31 +2,31 @@
 schema_version: 1
 iteration: 5
 date: "2026-04-11"
-wave: "none"
+wave: "active-artifact-cleanup"
 task_id: ""
 commit: "b457809"
-files_changed: 0
-lines_added: 0
-lines_removed: 0
-item: "Exercise uncovered write-command-path and kg-postprocess-complete scenarios"
-scenario_tags: ["write-command-path", "kg-postprocess-complete", "clean-repo", "no-kg-home-configured"]
+files_changed: 6
+lines_added: 65
+lines_removed: 3
+item: "Normalize stale plan state + record cleanup outcome in history + add lesson"
+scenario_tags: []
 feedback_goal: ""
 tests_added: 0
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Exercised kg warm, kg warm stats, kg link add/list/remove, kg postprocess, kg flows (after postprocess), workflow checkpoint, workflow health (before+after checkpoint), workflow orient, workflow drift, workflow plan, status, doctor, kg health, kg query, kg lint. Captured write-path trace, postprocess-complete trace, and several ok-empty/ok-warning patterns."
+summary: "Added Status/Depends-on headers to 3 blocked plans; wrote impl-results.2.md; extended archive-completed-active-plans lesson; marked active-artifact-cleanup complete"
 self_assessment:
   read_loop_state: true
-  one_item_only: true
+  one_item_only: false
   committed_after_tests: true
   tests_positive_and_negative: false
   tests_used_sandbox: false
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: ""
   ran_cli_command: true
-  exercised_new_scenario: true
+  exercised_new_scenario: false
   cli_produced_actionable_feedback: ""
-  linked_traces_to_outcomes: true
+  linked_traces_to_outcomes: false
   stayed_under_10_files: true
   no_destructive_commands: false

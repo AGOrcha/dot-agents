@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 2
-lines_added: 345
-lines_removed: 0
-item: "Phase 2 — Define an internal ResourceIntent shape for projection outputs"
-scenario_tags: ["clean-repo", "repo-health-stack"]
-feedback_goal: "Confirm the new internal model did not regress baseline repo-health surfaces"
+files_changed: 7
+lines_added: 194
+lines_removed: 80
+item: "Phase 1 — Extract shared command spine into internal/projectsync"
+scenario_tags: ["clean-repo", "managed-file-restore-stack", "repo-health-stack"]
+feedback_goal: ""
 tests_added: 5
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added a declarative ResourceIntent / ResourceSourceRef model with typed ownership, shape, transport, replace/prune policies, validation, and focused tests in internal/platform"
+summary: "Created internal/projectsync with CopyFile, EnsureGitignoreEntry, CreateProjectDirs, WriteRefreshMarker, RefreshMarkerContent; removed duplicates from add.go, refresh.go, import.go, install.go, init.go; 5 new tests pass"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -25,8 +25,8 @@ self_assessment:
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: ""
   ran_cli_command: true
-  exercised_new_scenario: false
+  exercised_new_scenario: true
   cli_produced_actionable_feedback: ""
   linked_traces_to_outcomes: true
-  stayed_under_10_files: true
+  stayed_under_10_files: false
   no_destructive_commands: false

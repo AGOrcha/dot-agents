@@ -5,25 +5,25 @@ date: "2026-04-11"
 wave: "skill-import-streamline"
 task_id: ""
 commit: "b457809"
-files_changed: 5
-lines_added: 97
-lines_removed: 43
-item: "Fix shared .agents/skills/* convergence so repo-local source directories can become managed mirrors after promotion without conflicting platform relink behavior"
-scenario_tags: ["canonical-plan-stale", "skills-promote-convergence", "skills-list-readback"]
-feedback_goal: "After promote, does skills list <project> show the promoted skill, confirming the agentsHome scan works end-to-end with canonical as real dir + repo-local as managed symlink?"
-tests_added: 1
+files_changed: 2
+lines_added: 154
+lines_removed: 0
+item: "Add a project-scope 'skills import/promote' command path"
+scenario_tags: ["clean-repo", "skills-promote-new-command"]
+feedback_goal: "Does skills promote create the managed symlink in agentsHome/skills/<project>/, update .agentsrc.json Skills, and return errors for non-existent skill / missing project name / real-dir conflict?"
+tests_added: 5
 tests_total_pass: true
-retries: 2
+retries: 0
 scope_note: "on-target"
-summary: "Rewrote promoteSkillIn to copy-move: canonical is real dir, repo-local becomes managed symlink. Added mispointing-symlink error path test. Canonical tasks advanced for items 1-4."
+summary: "Added skills promote subcommand with promoteSkillIn; creates managed symlink + updates manifest + calls ExecuteSharedSkillMirrorPlan; 5 tests cover success, idempotency, 3 error paths"
 self_assessment:
   read_loop_state: true
   one_item_only: true
   committed_after_tests: true
   tests_positive_and_negative: false
   tests_used_sandbox: false
-  aligned_with_canonical_tasks: true
-  persisted_via_workflow_commands: "sandboxed"
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
   ran_cli_command: true
   exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"

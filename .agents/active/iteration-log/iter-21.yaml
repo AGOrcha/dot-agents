@@ -4,25 +4,25 @@ iteration: 21
 date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
-commit: "fb68a05"
+commit: "b457809"
 files_changed: 8
-lines_added: 158
-lines_removed: 25
-item: "Phase 5 — status/explain read shared-target registry (DryRunSharedTargetPlanLines); InstalledEnabledPlatforms helper; refresh uses shared selector"
-scenario_tags: ["clean-repo", "canonical-plan-present", "status-audit-shared-registry", "planner-diagnostic-visible"]
-feedback_goal: "Does status --audit list the same merged shared target: lines as refresh --dry-run for each managed project?"
-tests_added: 2
+lines_added: 326
+lines_removed: 47
+item: "Phase 3 — centralize non-dir agent projections (Codex TOML render, OpenCode/Copilot AGENT.md file symlinks) in shared target plan"
+scenario_tags: ["clean-repo", "canonical-plan-present", "dry-run-shared-target-preview", "agents-non-dir-outputs-centralized"]
+feedback_goal: "After centralization, does refresh --dry-run still emit merged skill shared-target lines (and remain healthy) for the default enabled platforms?"
+tests_added: 3
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added platform.InstalledEnabledPlatforms; status/doctor audit prints Shared target registry; explain links documents path; refresh hoists installed-enabled platform list"
+summary: "Extended resource executor for file symlinks and codex-agent-toml render; Codex/OpenCode/Copilot SharedTargetIntents + thinned CreateLinks; prune stale Codex tomls; integration tests call CollectAndExecuteSharedTargetPlan; negative test for non-allowlisted file replace."
 self_assessment:
   read_loop_state: true
   one_item_only: true
   committed_after_tests: true
-  tests_positive_and_negative: false
+  tests_positive_and_negative: true
   tests_used_sandbox: false
-  aligned_with_canonical_tasks: false
+  aligned_with_canonical_tasks: true
   persisted_via_workflow_commands: "no"
   ran_cli_command: true
   exercised_new_scenario: true

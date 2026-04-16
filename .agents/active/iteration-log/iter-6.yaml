@@ -2,20 +2,20 @@
 schema_version: 1
 iteration: 6
 date: "2026-04-11"
-wave: "resource-intent-centralization"
+wave: "none"
 task_id: ""
 commit: "b457809"
-files_changed: 7
-lines_added: 194
-lines_removed: 80
-item: "Phase 1 — Extract shared command spine into internal/projectsync"
-scenario_tags: ["clean-repo", "managed-file-restore-stack", "repo-health-stack"]
+files_changed: 0
+lines_added: 0
+lines_removed: 0
+item: "Exercise uncovered write-command-path and kg-postprocess-complete scenarios"
+scenario_tags: ["write-command-path", "kg-postprocess-complete", "clean-repo", "no-kg-home-configured"]
 feedback_goal: ""
-tests_added: 5
+tests_added: 0
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Created internal/projectsync with CopyFile, EnsureGitignoreEntry, CreateProjectDirs, WriteRefreshMarker, RefreshMarkerContent; removed duplicates from add.go, refresh.go, import.go, install.go, init.go; 5 new tests pass"
+summary: "Exercised kg warm, kg warm stats, kg link add/list/remove, kg postprocess, kg flows (after postprocess), workflow checkpoint, workflow health (before+after checkpoint), workflow orient, workflow drift, workflow plan, status, doctor, kg health, kg query, kg lint. Captured write-path trace, postprocess-complete trace, and several ok-empty/ok-warning patterns."
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -28,5 +28,5 @@ self_assessment:
   exercised_new_scenario: true
   cli_produced_actionable_feedback: ""
   linked_traces_to_outcomes: true
-  stayed_under_10_files: false
+  stayed_under_10_files: true
   no_destructive_commands: false

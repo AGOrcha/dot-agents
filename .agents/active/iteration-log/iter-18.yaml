@@ -2,28 +2,28 @@
 schema_version: 1
 iteration: 18
 date: "2026-04-11"
-wave: "resource-intent-centralization"
+wave: "skill-import-streamline"
 task_id: ""
 commit: "b457809"
-files_changed: 4
-lines_added: 109
-lines_removed: 10
-item: "Phase 3 — dry-run visibility for centralized shared-target plan (refresh / install aligned with CollectAndExecuteSharedTargetPlan)"
-scenario_tags: ["clean-repo", "dry-run-vs-apply", "planner-diagnostic-visible", "canonical-plan-present"]
-feedback_goal: "Does refresh --dry-run print merged shared target: lines (duplicate merge counts) before per-platform dry-run rows, and does explain links still describe centralized shared targets?"
-tests_added: 2
+files_changed: 5
+lines_added: 152
+lines_removed: 37
+item: "Add regression tests for manifest round-trip through promote (add-regression-tests); align canonical task install-generate-merge with implemented merge"
+scenario_tags: ["clean-repo", "promote-preserves-extra-manifest", "canonical-plan-reconciled"]
+feedback_goal: "Does TestPromoteSkillIn_PreservesManifestUnknownFields fail if promote drops ExtraFields or multi-source sources, and does go test ./... stay green?"
+tests_added: 1
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added DryRunSharedTargetPlanLines and wired refresh/install dry-run paths to print merged symlink plan; two unit tests (none + cross-platform dedupe)."
+summary: "Added promote-path regression test preserving legacy refresh + custom extra fields and git+local sources; advanced canonical tasks add-regression-tests and install-generate-merge to completed; PLAN.yaml + markdown plan marked completed for skill-import-streamline."
 self_assessment:
   read_loop_state: true
   one_item_only: true
   committed_after_tests: true
   tests_positive_and_negative: false
   tests_used_sandbox: false
-  aligned_with_canonical_tasks: false
-  persisted_via_workflow_commands: ""
+  aligned_with_canonical_tasks: true
+  persisted_via_workflow_commands: "yes"
   ran_cli_command: true
   exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"

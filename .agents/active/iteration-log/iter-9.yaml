@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 8
-lines_added: 87
-lines_removed: 0
-item: "Phase 3 — add SharedTargetIntents to Platform interface and CollectAndExecuteSharedTargetPlan command-layer aggregation function"
-scenario_tags: ["clean-repo", "planner-diagnostic-visible", "interface-machinery-added"]
-feedback_goal: "Does explain links still surface planner correctly, and does workflow health stay clean after the interface expansion?"
-tests_added: 1
+files_changed: 9
+lines_added: 424
+lines_removed: 24
+item: "Phase 2 — add a planner/executor layer that aggregates intents before any filesystem writes"
+scenario_tags: ["clean-repo", "planner-diagnostic-visible"]
+feedback_goal: "Does dot-agents explain now surface centralized shared-skill planning clearly enough to make the new planner visible without a write command?"
+tests_added: 4
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added SharedTargetIntents to Platform interface (5 platform impls), added CollectAndExecuteSharedTargetPlan aggregation helper, added cross-platform dedupe test"
+summary: "Added a minimal ResourcePlan builder/executor for shared skill mirrors, routed repo-local shared skill projections through it for Claude/Codex/OpenCode/Copilot, and documented the new ownership model in dot-agents explain"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -25,7 +25,7 @@ self_assessment:
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: ""
   ran_cli_command: true
-  exercised_new_scenario: false
+  exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true

@@ -2,31 +2,31 @@
 schema_version: 1
 iteration: 1
 date: "2026-04-11"
-wave: "crg-kg-integration"
+wave: "n/a"
 task_id: ""
 commit: "b457809"
-files_changed: 6
-lines_added: 500
-lines_removed: 5
-item: "Phase B — CRG subprocess bridge and basic code-graph CLI commands"
+files_changed: 30
+lines_added: 2000
+lines_removed: 200
+item: "n/a (seed from Codex sessions 019d7a6d and 019d7a9d)"
 scenario_tags: []
 feedback_goal: ""
-tests_added: 10
+tests_added: 37
 tests_total_pass: true
 retries: 0
-scope_note: "partial"
-summary: "CRGBridge subprocess bridge to Python CRG, kg build/update/code-status/changes subcommands"
+scope_note: ""
+summary: "GraphStore interface + SQLite backend, managed resource cleanup, AGENTS.md, skill transforms, AgentsRC schema, resource-intent-centralization plan"
 self_assessment:
-  read_loop_state: true
+  read_loop_state: false
   one_item_only: false
-  committed_after_tests: true
+  committed_after_tests: false
   tests_positive_and_negative: false
   tests_used_sandbox: false
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: ""
-  ran_cli_command: true
+  ran_cli_command: false
   exercised_new_scenario: false
   cli_produced_actionable_feedback: ""
   linked_traces_to_outcomes: false
-  stayed_under_10_files: true
+  stayed_under_10_files: false
   no_destructive_commands: false

@@ -5,20 +5,20 @@ date: "2026-04-11"
 wave: "crg-kg-integration"
 task_id: ""
 commit: "b457809"
-files_changed: 3
-lines_added: 350
-lines_removed: 10
-item: "Phase C — CRG advanced query bridge (impact, flows, communities, postprocess)"
+files_changed: 6
+lines_added: 500
+lines_removed: 5
+item: "Phase B — CRG subprocess bridge and basic code-graph CLI commands"
 scenario_tags: []
 feedback_goal: ""
-tests_added: 0
+tests_added: 10
 tests_total_pass: true
-retries: 1
-scope_note: "on-target"
-summary: "Added runPyQuery helper, 4 CRGBridge methods, 4 kg subcommands (impact, flows, communities, postprocess)"
+retries: 0
+scope_note: "partial"
+summary: "CRGBridge subprocess bridge to Python CRG, kg build/update/code-status/changes subcommands"
 self_assessment:
   read_loop_state: true
-  one_item_only: true
+  one_item_only: false
   committed_after_tests: true
   tests_positive_and_negative: false
   tests_used_sandbox: false

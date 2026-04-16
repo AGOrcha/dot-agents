@@ -4,18 +4,18 @@ iteration: 22
 date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
-commit: ""
-files_changed: 4
-lines_added: 103
-lines_removed: 32
-item: "Phase 5 — centralize shared projection plan build (BuildSharedTargetPlan for dry-run + execute)"
-scenario_tags: ["clean-repo", "canonical-plan-present", "dry-run-shared-target-preview"]
-feedback_goal: "After refactoring to BuildSharedTargetPlan, does refresh --dry-run still emit the same merged shared-target lines (duplicate merges, skill rows)?"
-tests_added: 1
+commit: "fb68a05"
+files_changed: 8
+lines_added: 158
+lines_removed: 25
+item: "Phase 5 — status/explain read shared-target registry (DryRunSharedTargetPlanLines); InstalledEnabledPlatforms helper; refresh uses shared selector"
+scenario_tags: ["clean-repo", "canonical-plan-present", "status-audit-shared-registry", "planner-diagnostic-visible"]
+feedback_goal: "Does status --audit list the same merged shared target: lines as refresh --dry-run for each managed project?"
+tests_added: 2
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added BuildSharedTargetPlan + collectSharedTargetIntents; CollectAndExecuteSharedTargetPlan and DryRunSharedTargetPlanLines share one plan build; formatSharedTargetPlanForDryRun extracted; tests for empty platforms and dry-run/build parity"
+summary: "Added platform.InstalledEnabledPlatforms; status/doctor audit prints Shared target registry; explain links documents path; refresh hoists installed-enabled platform list"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -25,7 +25,7 @@ self_assessment:
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: "no"
   ran_cli_command: true
-  exercised_new_scenario: false
+  exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true
