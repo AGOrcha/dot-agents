@@ -2,20 +2,20 @@
 schema_version: 1
 iteration: 13
 date: "2026-04-11"
-wave: "skill-import-streamline"
+wave: "resource-intent-centralization"
 task_id: ""
 commit: "b457809"
-files_changed: 2
-lines_added: 178
-lines_removed: 0
-item: "Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)"
-scenario_tags: ["clean-repo", "sweep-dry-run", "manifest-roundtrip-fixed"]
-feedback_goal: "Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?"
-tests_added: 2
+files_changed: 3
+lines_added: 3
+lines_removed: 3
+item: "Phase 4 — thin codex, opencode, and copilot createSkillsLinks to return nil (shared targets now command-layer only)"
+scenario_tags: ["clean-repo", "platform-adapter-thinned", "kg-uninitialized"]
+feedback_goal: "After thinning all 4 platform adapters, do all tests still pass, and does kg health cleanly surface the uninitialized state?"
+tests_added: 0
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)"
+summary: "Thinned codex/opencode/copilot createSkillsLinks to no-ops; ExecuteSharedSkillMirrorPlan now has zero callers from adapters; Phase 4 complete"
 self_assessment:
   read_loop_state: true
   one_item_only: true

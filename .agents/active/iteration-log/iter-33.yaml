@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 33
+date: "2026-04-14"
+wave: "typescript-port"
+task_id: ""
+commit: ""
+files_changed: 7
+lines_added: 325
+lines_removed: 4
+item: "AB-test B — TS runKgHealth + runKgQuery stubs (ts-ab-kg-commands)"
+scenario_tags: ["delegated-worker", "typescript-only", "kg-read-only-stub"]
+feedback_goal: "Do the kg health + query stubs correctly reflect the phase-4 boundary decision (KG query Go-only) with passing tests?"
+tests_added: 8
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added ports/typescript/src/commands/kg.ts (filesystem health for KG_HOME + notes/; stub query message) and tests/kg.test.ts. Vitest 74/74 pass; go test ./... green. Closeout: verify record → checkpoint → merge-back for parent review."
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: true
+  tests_used_sandbox: true
+  aligned_with_canonical_tasks: true
+  persisted_via_workflow_commands: "yes"
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "yes"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: true

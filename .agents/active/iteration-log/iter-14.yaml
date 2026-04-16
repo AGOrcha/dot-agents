@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "skill-import-streamline"
 task_id: ""
 commit: "b457809"
-files_changed: 5
-lines_added: 269
-lines_removed: 62
-item: "Make install --generate merge with existing .agentsrc.json (preserve sources, project, ExtraFields)"
-scenario_tags: ["clean-repo", "install-generate-source-merge"]
-feedback_goal: "After merge, does generated manifest state preserve pre-existing git/manual sources and extra keys instead of replacing sources wholesale?"
-tests_added: 6
+files_changed: 2
+lines_added: 178
+lines_removed: 0
+item: "Add manifest round-trip preservation for unknown fields (legacy refresh block, custom keys)"
+scenario_tags: ["clean-repo", "sweep-dry-run", "manifest-roundtrip-fixed"]
+feedback_goal: "Does AgentsRC.Save() now preserve unknown JSON fields like the legacy refresh block through a load → save cycle?"
+tests_added: 2
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added MergeGenerateAgentsRC + merge in runInstallGenerate when manifest exists; dry-run shows merged project and source count; six unit tests"
+summary: "Added custom MarshalJSON/UnmarshalJSON to AgentsRC for unknown-field preservation; 2 new tests (round-trip + no-duplication)"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -26,7 +26,7 @@ self_assessment:
   persisted_via_workflow_commands: ""
   ran_cli_command: true
   exercised_new_scenario: true
-  cli_produced_actionable_feedback: "informative-nonblocking"
+  cli_produced_actionable_feedback: "yes"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true
   no_destructive_commands: false

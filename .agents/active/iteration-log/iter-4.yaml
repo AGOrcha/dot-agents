@@ -5,20 +5,20 @@ date: "2026-04-11"
 wave: "active-artifact-cleanup"
 task_id: ""
 commit: "b457809"
-files_changed: 6
-lines_added: 65
-lines_removed: 3
-item: "Normalize stale plan state + record cleanup outcome in history + add lesson"
+files_changed: 12
+lines_added: 0
+lines_removed: 11
+item: "Archive completed plan files out of .agents/active/ when the task is done or already has matching history coverage"
 scenario_tags: []
 feedback_goal: ""
 tests_added: 0
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added Status/Depends-on headers to 3 blocked plans; wrote impl-results.2.md; extended archive-completed-active-plans lesson; marked active-artifact-cleanup complete"
+summary: "Moved 12 completed plan files from .agents/active/ to matching history/ folders; active set reduced from 18 to 6 plans"
 self_assessment:
   read_loop_state: true
-  one_item_only: false
+  one_item_only: true
   committed_after_tests: true
   tests_positive_and_negative: false
   tests_used_sandbox: false
@@ -28,5 +28,5 @@ self_assessment:
   exercised_new_scenario: false
   cli_produced_actionable_feedback: ""
   linked_traces_to_outcomes: false
-  stayed_under_10_files: true
-  no_destructive_commands: false
+  stayed_under_10_files: false
+  no_destructive_commands: true

@@ -4,18 +4,18 @@ iteration: 32
 date: "2026-04-14"
 wave: "typescript-port"
 task_id: ""
-commit: ""
-files_changed: 7
-lines_added: 325
-lines_removed: 4
-item: "AB-test B — TS runKgHealth + runKgQuery stubs (ts-ab-kg-commands)"
-scenario_tags: ["delegated-worker", "typescript-only", "kg-read-only-stub"]
-feedback_goal: "Do the kg health + query stubs correctly reflect the phase-4 boundary decision (KG query Go-only) with passing tests?"
-tests_added: 8
+commit: "b6937fb"
+files_changed: 12
+lines_added: 1710
+lines_removed: 0
+item: "Phase 3 Stage 1 MVP — 8 CLI commands (init, add, refresh, status, doctor, skills, agents, hooks) via TypeScript entry point"
+scenario_tags: ["delegated-worker", "typescript-only", "pattern-e-test"]
+feedback_goal: "Do the 8 Stage 1 MVP commands wire correctly through the CLI entry point with passing TypeScript tests?"
+tests_added: 33
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added ports/typescript/src/commands/kg.ts (filesystem health for KG_HOME + notes/; stub query message) and tests/kg.test.ts. Vitest 74/74 pass; go test ./... green. Closeout: verify record → checkpoint → merge-back for parent review."
+summary: "Created 8 command modules (init/add/refresh/status/doctor/skills/agents/hooks), core config.ts helpers, cli.ts argv dispatcher, and 33-test suite. All 63 TypeScript tests pass. Merge-back submitted."
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -28,5 +28,5 @@ self_assessment:
   exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"
   linked_traces_to_outcomes: true
-  stayed_under_10_files: true
+  stayed_under_10_files: false
   no_destructive_commands: true

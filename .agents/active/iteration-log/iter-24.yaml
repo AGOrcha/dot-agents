@@ -5,17 +5,17 @@ date: "2026-04-11"
 wave: "resource-intent-centralization"
 task_id: ""
 commit: ""
-files_changed: 7
-lines_added: 140
-lines_removed: 39
-item: "Phase 5 — RunSharedTargetProjection unifies shared-target dry-run + execute for refresh, install, and add"
-scenario_tags: ["clean-repo", "canonical-plan-present", "dry-run-shared-target-preview"]
-feedback_goal: "After wiring RunSharedTargetProjection, does refresh --dry-run dot-agents still show the same merged shared-target skill rows (duplicate merges)?"
+files_changed: 5
+lines_added: 178
+lines_removed: 7
+item: "Phase 5 — remove calls RemoveSharedTargetPlan before per-platform RemoveLinks; ResourcePlan.RemoveSharedTargets + tests"
+scenario_tags: ["clean-repo", "canonical-plan-present", "remove-shared-target-plan"]
+feedback_goal: "After CollectAndExecuteSharedTargetPlan, does RemoveSharedTargetPlan remove the same shared symlink / rendered targets deterministically (tests)?"
 tests_added: 2
 tests_total_pass: true
 retries: 0
 scope_note: "on-target"
-summary: "Added platform.RunSharedTargetProjection; refactored refresh/install/add to use it; tests assert dry-run parity with DryRunSharedTargetPlanLines and nil lines on apply"
+summary: "Added RemoveSharedTargetPlan / RemoveSharedTargets for merged shared intents; remove command runs it for installed platforms before adapter RemoveLinks; tests for skill symlink + Codex TOML removal"
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -25,8 +25,8 @@ self_assessment:
   aligned_with_canonical_tasks: false
   persisted_via_workflow_commands: "no"
   ran_cli_command: true
-  exercised_new_scenario: false
-  cli_produced_actionable_feedback: "yes"
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "informative-nonblocking"
   linked_traces_to_outcomes: true
   stayed_under_10_files: true
   no_destructive_commands: false

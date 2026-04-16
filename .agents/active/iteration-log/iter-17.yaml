@@ -6,16 +6,16 @@ wave: "skill-import-streamline"
 task_id: ""
 commit: "b457809"
 files_changed: 5
-lines_added: 152
-lines_removed: 37
-item: "Add regression tests for manifest round-trip through promote (add-regression-tests); align canonical task install-generate-merge with implemented merge"
-scenario_tags: ["clean-repo", "promote-preserves-extra-manifest", "canonical-plan-reconciled"]
-feedback_goal: "Does TestPromoteSkillIn_PreservesManifestUnknownFields fail if promote drops ExtraFields or multi-source sources, and does go test ./... stay green?"
+lines_added: 97
+lines_removed: 43
+item: "Fix shared .agents/skills/* convergence so repo-local source directories can become managed mirrors after promotion without conflicting platform relink behavior"
+scenario_tags: ["canonical-plan-stale", "skills-promote-convergence", "skills-list-readback"]
+feedback_goal: "After promote, does skills list <project> show the promoted skill, confirming the agentsHome scan works end-to-end with canonical as real dir + repo-local as managed symlink?"
 tests_added: 1
 tests_total_pass: true
-retries: 0
+retries: 2
 scope_note: "on-target"
-summary: "Added promote-path regression test preserving legacy refresh + custom extra fields and git+local sources; advanced canonical tasks add-regression-tests and install-generate-merge to completed; PLAN.yaml + markdown plan marked completed for skill-import-streamline."
+summary: "Rewrote promoteSkillIn to copy-move: canonical is real dir, repo-local becomes managed symlink. Added mispointing-symlink error path test. Canonical tasks advanced for items 1-4."
 self_assessment:
   read_loop_state: true
   one_item_only: true
@@ -23,7 +23,7 @@ self_assessment:
   tests_positive_and_negative: false
   tests_used_sandbox: false
   aligned_with_canonical_tasks: true
-  persisted_via_workflow_commands: "yes"
+  persisted_via_workflow_commands: "sandboxed"
   ran_cli_command: true
   exercised_new_scenario: true
   cli_produced_actionable_feedback: "yes"
