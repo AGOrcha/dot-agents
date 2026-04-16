@@ -1828,7 +1828,7 @@ func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
 
 	repoRoot := dotAgentsRepoRoot(t)
 	bin := filepath.Join(t.TempDir(), "dot-agents")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/dot-agents")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/dot-agents")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build dot-agents: %v\n%s", err, out)
@@ -3150,6 +3150,36 @@ func TestCheckpointLogToIter(t *testing.T) {
 	}
 	if sa.NoDestructiveCommands {
 		t.Error("self_assessment.no_destructive_commands should be false")
+	}
+
+	if err := validateWorkflowIterLogEntry(&entry); err != nil {
+		t.Fatalf("schema validation failed for valid stub: %v", err)
+	}
+}
+
+func TestCheckpointLogToIterRequiresPositiveIteration(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	for _, n := range []string{"0", "-1"} {
+		t.Run("n="+n, func(t *testing.T) {
+			err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", n)
+			if err == nil {
+				t.Fatalf("expected error for --log-to-iter %s, got nil", n)
+			}
+		})
+	}
+}
+
+func TestWorkflowIterLogEmbeddedSchemaMatchesCanonical(t *testing.T) {
+	root := dotAgentsRepoRoot(t)
+	want, err := os.ReadFile(filepath.Join(root, "schemas", "workflow-iter-log.schema.json"))
+	if err != nil {
+		t.Fatalf("read canonical schema: %v", err)
+	}
+	if string(want) != string(workflowIterLogSchemaJSON) {
+		t.Fatal("commands/static/workflow-iter-log.schema.json is out of sync with schemas/workflow-iter-log.schema.json — copy the canonical file after editing")
 	}
 }
 

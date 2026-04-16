@@ -33,7 +33,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
 AGENT_BIN="${AGENT_BIN:-agent}"
-OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:--output-format stream-json --stream-partial-output}"
 MAX_WORKERS="${RALPH_MAX_PARALLEL_WORKERS:-3}"
 AUTO_FANOUT="${RALPH_AUTO_FANOUT:-1}"
 
@@ -202,6 +202,23 @@ create_bundle() {
     rm -f "$fanout_log"
     echo "error: workflow fanout failed for task $task_id" >&2
     return 1
+  fi
+
+  # Commit fanout artifacts so orchestrator workstate is clean before handing off
+  # to workers. This prevents uncommitted TASKS.yaml / delegation contract drift
+  # if the pipeline fails at the worker or closeout phase.
+  local changed_files
+  changed_files="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | grep -v '^\?' | awk '{print $2}')"
+  if [[ -n "$changed_files" ]]; then
+    git -C "$REPO_ROOT" add \
+      ".agents/workflow/plans/${plan_id}/TASKS.yaml" \
+      ".agents/active/delegation/" \
+      ".agents/active/delegation-bundles/" \
+      ".agents/active/loop-state.md" 2>/dev/null || true
+    if ! git -C "$REPO_ROOT" diff --cached --quiet; then
+      git -C "$REPO_ROOT" commit -m "orchestrate: fanout ${plan_id}/${task_id}" --quiet
+      echo "ralph-orchestrate: committed fanout artifacts for task=$task_id" >&2
+    fi
   fi
 
   local bundle_path

@@ -131,8 +131,9 @@ echo "=== ralph-pipeline: phase 2 — workers (parallel) ===" >&2
 WORKER_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/workers}"
 [[ -n "$WORKER_LOG_DIR" ]] && mkdir -p "$WORKER_LOG_DIR"
 
-declare -A worker_pids
-declare -A worker_logs
+worker_pids=()
+worker_logs=()
+worker_bundle_keys=()
 
 for bundle_path in "${BUNDLES[@]}"; do
   bundle_base="$(basename "$bundle_path" .yaml)"
@@ -146,14 +147,16 @@ for bundle_path in "${BUNDLES[@]}"; do
     "$RALPH_WORKER" --bundle "$bundle_path"
   ) &
   pid=$!
-  worker_pids["$bundle_path"]=$pid
-  worker_logs["$bundle_path"]="${wlog:-}"
+  worker_pids+=("$pid")
+  worker_logs+=("${wlog:-}")
+  worker_bundle_keys+=("$bundle_path")
 done
 
 # Wait for all workers
 worker_errors=0
-for bundle_path in "${!worker_pids[@]}"; do
-  pid="${worker_pids[$bundle_path]}"
+for i in "${!worker_bundle_keys[@]}"; do
+  bundle_path="${worker_bundle_keys[$i]}"
+  pid="${worker_pids[$i]}"
   if wait "$pid"; then
     echo "ralph-pipeline: worker for $(basename "$bundle_path") completed" >&2
   else

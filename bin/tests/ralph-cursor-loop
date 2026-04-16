@@ -239,15 +239,27 @@ EOF
   [[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/worker-iter-${i}.txt"
 
   echo "=== ralph-cursor-loop: worker iteration $i/$ITERATIONS ===" >&2
+  agent_rc=0
   if [[ -n "$LOG_DIR" ]]; then
     case "$OUTPUT_FORMAT" in
       stream-json) log_agent="$LOG_DIR/worker-iter-${i}.ndjson" ;;
       json)        log_agent="$LOG_DIR/worker-iter-${i}.json" ;;
       *)           log_agent="$LOG_DIR/worker-iter-${i}.txt" ;;
     esac
+    # Use set +e around the pipe so pipefail doesn't abort on a non-zero agent exit.
+    # PIPESTATUS[0] captures the agent's own exit code regardless of tee's status.
+    set +e
     "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+    agent_rc=${PIPESTATUS[0]}
+    set -e
   else
+    set +e
     "${agent_inv[@]}" "$(cat "$prompt_file")"
+    agent_rc=$?
+    set -e
+  fi
+  if [[ $agent_rc -ne 0 ]]; then
+    echo "ralph-cursor-loop: agent exited with code $agent_rc on iteration $i" >&2
   fi
 
   trap - EXIT

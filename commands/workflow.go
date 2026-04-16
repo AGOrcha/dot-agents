@@ -337,7 +337,10 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: NoArgsWithHints("Use flags such as `--message` instead of positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("log-to-iter") && checkpointLogToIter > 0 {
+			if cmd.Flags().Changed("log-to-iter") {
+				if checkpointLogToIter < 1 {
+					return fmt.Errorf("checkpoint --log-to-iter requires N >= 1 (schema workflow-iter-log enforces iteration.minimum: 1)")
+				}
 				if err := runWorkflowCheckpointLogToIter(checkpointLogToIter); err != nil {
 					return err
 				}
@@ -348,7 +351,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	checkpointCmd.Flags().StringVar(&checkpointMessage, "message", "", "Checkpoint message")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationState, "verification-status", workflowDefaultVerificationState, "Verification status: pass, fail, partial, or unknown")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationText, "verification-summary", "", "Verification summary text")
-	checkpointCmd.Flags().IntVar(&checkpointLogToIter, "log-to-iter", 0, "Write an iteration log stub for iteration N to .agents/active/iteration-log/iter-N.yaml")
+	checkpointCmd.Flags().IntVar(&checkpointLogToIter, "log-to-iter", 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
 
 	logCmd := &cobra.Command{
 		Use:   "log",
@@ -967,43 +970,43 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 // iterLogEntry is the YAML structure for .agents/active/iteration-log/iter-N.yaml.
 // CLI-deterministic fields are written here; agent fields are left as empty stubs.
 type iterLogEntry struct {
-	SchemaVersion int    `yaml:"schema_version"`
-	Iteration     int    `yaml:"iteration"`
-	Date          string `yaml:"date"`
-	Wave          string `yaml:"wave"`
-	TaskID        string `yaml:"task_id"`
-	Commit        string `yaml:"commit"`
-	FilesChanged  int    `yaml:"files_changed"`
-	LinesAdded    int    `yaml:"lines_added"`
-	LinesRemoved  int    `yaml:"lines_removed"`
-	FirstCommit   bool   `yaml:"first_commit,omitempty"`
+	SchemaVersion int    `yaml:"schema_version" json:"schema_version"`
+	Iteration     int    `yaml:"iteration" json:"iteration"`
+	Date          string `yaml:"date" json:"date"`
+	Wave          string `yaml:"wave" json:"wave"`
+	TaskID        string `yaml:"task_id" json:"task_id"`
+	Commit        string `yaml:"commit" json:"commit"`
+	FilesChanged  int    `yaml:"files_changed" json:"files_changed"`
+	LinesAdded    int    `yaml:"lines_added" json:"lines_added"`
+	LinesRemoved  int    `yaml:"lines_removed" json:"lines_removed"`
+	FirstCommit   bool   `yaml:"first_commit,omitempty" json:"first_commit,omitempty"`
 
 	// Agent fields — all empty stubs
-	Item             string      `yaml:"item"`
-	ScenarioTags     []string    `yaml:"scenario_tags"`
-	FeedbackGoal     string      `yaml:"feedback_goal"`
-	TestsAdded       int         `yaml:"tests_added"`
-	TestsTotalPass   interface{} `yaml:"tests_total_pass"`
-	Retries          int         `yaml:"retries"`
-	ScopeNote        string      `yaml:"scope_note"`
-	Summary          string      `yaml:"summary"`
-	SelfAssessment   iterLogSelfAssessment `yaml:"self_assessment"`
+	Item           string                `yaml:"item" json:"item"`
+	ScenarioTags   []string              `yaml:"scenario_tags" json:"scenario_tags"`
+	FeedbackGoal   string                `yaml:"feedback_goal" json:"feedback_goal"`
+	TestsAdded     int                   `yaml:"tests_added" json:"tests_added"`
+	TestsTotalPass interface{}           `yaml:"tests_total_pass" json:"tests_total_pass"`
+	Retries        int                   `yaml:"retries" json:"retries"`
+	ScopeNote      string                `yaml:"scope_note" json:"scope_note"`
+	Summary        string                `yaml:"summary" json:"summary"`
+	SelfAssessment iterLogSelfAssessment `yaml:"self_assessment" json:"self_assessment"`
 }
 
 type iterLogSelfAssessment struct {
-	ReadLoopState                 bool   `yaml:"read_loop_state"`
-	OneItemOnly                   bool   `yaml:"one_item_only"`
-	CommittedAfterTests           bool   `yaml:"committed_after_tests"`
-	TestsPositiveAndNegative      bool   `yaml:"tests_positive_and_negative"`
-	TestsUsedSandbox              bool   `yaml:"tests_used_sandbox"`
-	AlignedWithCanonicalTasks     bool   `yaml:"aligned_with_canonical_tasks"`
-	PersistedViaWorkflowCommands  string `yaml:"persisted_via_workflow_commands"`
-	RanCliCommand                 bool   `yaml:"ran_cli_command"`
-	ExercisedNewScenario          bool   `yaml:"exercised_new_scenario"`
-	CliProducedActionableFeedback string `yaml:"cli_produced_actionable_feedback"`
-	LinkedTracesToOutcomes        bool   `yaml:"linked_traces_to_outcomes"`
-	StayedUnder10Files            bool   `yaml:"stayed_under_10_files"`
-	NoDestructiveCommands         bool   `yaml:"no_destructive_commands"`
+	ReadLoopState                 bool   `yaml:"read_loop_state" json:"read_loop_state"`
+	OneItemOnly                   bool   `yaml:"one_item_only" json:"one_item_only"`
+	CommittedAfterTests           bool   `yaml:"committed_after_tests" json:"committed_after_tests"`
+	TestsPositiveAndNegative      bool   `yaml:"tests_positive_and_negative" json:"tests_positive_and_negative"`
+	TestsUsedSandbox              bool   `yaml:"tests_used_sandbox" json:"tests_used_sandbox"`
+	AlignedWithCanonicalTasks     bool   `yaml:"aligned_with_canonical_tasks" json:"aligned_with_canonical_tasks"`
+	PersistedViaWorkflowCommands  string `yaml:"persisted_via_workflow_commands" json:"persisted_via_workflow_commands"`
+	RanCliCommand                 bool   `yaml:"ran_cli_command" json:"ran_cli_command"`
+	ExercisedNewScenario          bool   `yaml:"exercised_new_scenario" json:"exercised_new_scenario"`
+	CliProducedActionableFeedback string `yaml:"cli_produced_actionable_feedback" json:"cli_produced_actionable_feedback"`
+	LinkedTracesToOutcomes        bool   `yaml:"linked_traces_to_outcomes" json:"linked_traces_to_outcomes"`
+	StayedUnder10Files            bool   `yaml:"stayed_under_10_files" json:"stayed_under_10_files"`
+	NoDestructiveCommands         bool   `yaml:"no_destructive_commands" json:"no_destructive_commands"`
 }
 
 // iterLogDiffStat holds parsed output from git diff --stat HEAD~1.
@@ -1128,6 +1131,10 @@ func runWorkflowCheckpointLogToIter(n int) error {
 		ScopeNote:      "",
 		Summary:        "",
 		SelfAssessment: iterLogSelfAssessment{},
+	}
+
+	if err := validateWorkflowIterLogEntry(&entry); err != nil {
+		return err
 	}
 
 	iterDir := filepath.Join(project.Path, ".agents", "active", "iteration-log")

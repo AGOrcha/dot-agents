@@ -483,7 +483,7 @@ tasks:
         - Start with slice phase-5a-migrate-loop-state: archive iteration log to historical.yaml, strip loop-state.md to 3 sections
     - id: phase-5d-iter-log-schema
       title: Phase 5d — Add workflow-iter-log.schema.json for iter-N.yaml stability
-      status: in_progress
+      status: completed
       depends_on:
         - phase-5-loop-state-split
       blocks: []

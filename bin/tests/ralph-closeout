@@ -96,7 +96,7 @@ process_merge_back_auto() {
   plan_id="$(python3 -c "
 import re,sys
 text=open('${mb_file}').read()
-m=re.search(r'^plan_id:\s*(.+)', text, re.M)
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
 if m:
     print(m.group(1).strip().strip('\"'))
 " 2>/dev/null || true)"
@@ -108,7 +108,7 @@ if m:
       plan_id="$(python3 -c "
 import re,sys
 text=open('${contract}').read()
-m=re.search(r'^plan_id:\s*(.+)', text, re.M)
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
 if m:
     print(m.group(1).strip().strip('\"'))
 " 2>/dev/null || true)"
@@ -155,6 +155,20 @@ if m:
   rm -f "$advance_log"
 
   echo "ralph-closeout: task=$task_id closed successfully" >&2
+
+  # Commit closeout state so workstate is clean regardless of what follows.
+  # workflow advance + delegation closeout mutate TASKS.yaml, remove the contract,
+  # and archive the merge-back — none of that is committed automatically.
+  git -C "$REPO_ROOT" add \
+    ".agents/workflow/plans/${plan_id}/TASKS.yaml" \
+    ".agents/active/delegation/" \
+    ".agents/active/delegation-bundles/" \
+    ".agents/active/merge-back/" \
+    ".agents/active/loop-state.md" 2>/dev/null || true
+  if ! git -C "$REPO_ROOT" diff --cached --quiet; then
+    git -C "$REPO_ROOT" commit -m "closeout: ${plan_id}/${task_id} accepted" --quiet
+    echo "ralph-closeout: committed closeout state for task=$task_id" >&2
+  fi
 }
 
 if [[ "$CLOSEOUT_AUTO" == "1" ]]; then
