@@ -44,7 +44,7 @@ tasks:
 
         **write_scope:** commands/agents.go, commands/agents_test.go
 
-        **context:** No active bundle yet — **do not fan out in parallel** with `agents-promote` (same write_scope; merge conflicts). Queue fanout after `agents-promote` merge-back completes or hand off sequentially.
+        **context:** Active delegation bundle `del-agents-import-1776434328` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `p1-pipeline-control` (disjoint files — workflow/ralph vs agents CLI). **Do not** run another worker on `commands/agents.go` until this closes — serialize `agents-remove` and any follow-up that edits the same Go files.
 
         Reverse of promote: given a name registered in ~/.agents/agents/<project>/, create the repo symlinks.
 
@@ -87,7 +87,7 @@ tasks:
         auto-creates the repo symlinks without requiring manual ln -s.
     - id: agents-remove
       title: agents remove <name> — unlink repo symlinks and optionally delete canonical
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -100,7 +100,7 @@ tasks:
 
         **write_scope:** commands/agents.go, commands/agents_test.go
 
-        **context:** Same files as promote/import — fan out only when no other worker holds `commands/agents.go` (after promote/import delegations close).
+        **context:** Same files as import — **not bundled this session** while `agents-import` is in flight (`del-agents-import-1776434328`). Fan out only after that delegation merge-back / closeout so `commands/agents.go` has a single writer.
 
         Cleanup counterpart to promote/import.
 

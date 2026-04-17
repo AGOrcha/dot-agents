@@ -1,0 +1,30 @@
+schema_version: 1
+id: del-agents-remove-1776438876
+parent_plan_id: agent-resource-lifecycle
+parent_task_id: agents-remove
+title: agents remove <name> — unlink repo symlinks and optionally delete canonical
+summary: Delegated from plan Agent Resource Lifecycle — promote, import, remove, and wiring parity for Claude Code agents
+write_scope:
+    - commands/agents.go
+    - commands/agents_test.go
+success_criteria: |-
+    **feedback_goal:** `agents remove` unlinks repo symlinks, updates .agentsrc.json, optional --purge with confirmation; tests pass; merge-back ready.
+
+    **write_scope:** commands/agents.go, commands/agents_test.go
+
+    **context:** Same files as import — **not bundled this session** while `agents-import` is in flight (`del-agents-import-1776434328`). Fan out only after that delegation merge-back / closeout so `commands/agents.go` has a single writer.
+
+    Cleanup counterpart to promote/import.
+
+    Behaviour:
+    - Removes .agents/agents/<name>/ symlink from repo
+    - Removes .claude/agents/<name>/ symlink from repo
+    - Removes name from .agentsrc.json agents[] list
+    - --purge flag: also deletes ~/.agents/agents/<project>/<name>/ (with confirmation)
+    - Without --purge: canonical dir is left intact (safe default)
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-17T15:14:36Z"
+updated_at: "2026-04-17T15:14:36Z"

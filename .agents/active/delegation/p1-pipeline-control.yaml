@@ -13,6 +13,6 @@ success_criteria: Control-plane entry point for D3.a. Add plan-scoped loop-break
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-17T13:58:49Z"
-updated_at: "2026-04-17T13:58:49Z"
+updated_at: "2026-04-17T14:04:33Z"
