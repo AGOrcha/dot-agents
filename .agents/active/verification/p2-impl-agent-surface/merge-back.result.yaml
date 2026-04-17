@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: p2-impl-agent-surface
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: impl-agent.project.md added; LOOP_ORCHESTRATION_SPEC documents impl-handoff + role split; ralph-cursor-loop logs prompt_surface=loop-worker and impl_agent_prompt_file (not loaded)
+recorded_at: "2026-04-17T15:19:05Z"
+delegation_id: del-p2-impl-agent-surface-1776438876
+artifact_paths:
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/agent-resource-lifecycle/PLAN.yaml
+    - .agents/workflow/plans/agent-resource-lifecycle/TASKS.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - bin/tests/ralph-pipeline
+    - commands/agents.go
+    - commands/agents_test.go
+    - commands/workflow.go
+    - commands/workflow_test.go

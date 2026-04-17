@@ -12,6 +12,6 @@ success_criteria: Define the repo-owned impl-agent overlay and impl-handoff cont
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-17T15:14:36Z"
-updated_at: "2026-04-17T15:14:36Z"
+updated_at: "2026-04-17T15:19:05Z"
