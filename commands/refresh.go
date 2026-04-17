@@ -144,6 +144,8 @@ func runRefresh(projectFilter string) error {
 
 		config.SetWindowsMirrorContext(path)
 
+		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
+		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
 		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
 		if err != nil {
 			if Flags.DryRun {

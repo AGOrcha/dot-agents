@@ -140,13 +140,16 @@ func resolveInstallSources(sources []config.Source, strict bool) ([]string, erro
 }
 
 func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool) error {
-	if len(resolvedSources) == 0 {
-		return nil
+	sources := resolvedSources
+	if len(sources) == 0 {
+		// Manifest may omit explicit sources while listing skills/agents that already exist
+		// under ~/.agents/<bucket>/<project>/ (e.g. after promote). Resolve from canonical home.
+		sources = []string{config.AgentsHome()}
 	}
-	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, resolvedSources, strict); err != nil {
+	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, sources, strict); err != nil {
 		return err
 	}
-	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, resolvedSources, strict)
+	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, sources, strict)
 }
 
 func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool) error {
@@ -457,7 +460,7 @@ func touchLastFetch(cacheDir string) {
 func linkResourceFromSources(resourceType, name, project string, sources []string) error {
 	destDir := filepath.Join(config.AgentsHome(), resourceType, project, name)
 	markerFile := resourceMarkerFile(resourceType)
-	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, sources)
+	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, project, sources)
 	if !found {
 		return fmt.Errorf("not found in any source")
 	}
@@ -492,13 +495,18 @@ func resourceMarkerFile(resourceType string) string {
 	}
 }
 
-func firstResourceCandidate(resourceType, name, markerFile string, sources []string) (string, string, bool) {
+func firstResourceCandidate(resourceType, name, markerFile, project string, sources []string) (string, string, bool) {
 	for _, srcRoot := range sources {
-		candidate := filepath.Join(srcRoot, resourceType, "global", name)
-		if !resourceCandidateIsValid(candidate, markerFile) {
-			continue
+		// Prefer project-scoped canonical dirs (~/.agents/skills/<project>/…), then global/.
+		candidates := []string{
+			filepath.Join(srcRoot, resourceType, project, name),
+			filepath.Join(srcRoot, resourceType, "global", name),
 		}
-		return candidate, srcRoot, true
+		for _, candidate := range candidates {
+			if resourceCandidateIsValid(candidate, markerFile) {
+				return candidate, srcRoot, true
+			}
+		}
 	}
 	return "", "", false
 }

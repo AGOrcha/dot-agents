@@ -285,10 +285,14 @@ func (c *claude) ensureUserSkills(agentsHome string) error {
 	return nil
 }
 
-func (c *claude) createAgentsLinks(_ string, _ string, _ string) error {
-	// Repo-local `.claude/agents/*` mirrors are written by CollectAndExecuteSharedTargetPlan.
-	// User-home links for global agents remain in ensureUserAgents (prepareLinks).
-	return nil
+func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
+	// Mirror ~/.agents/agents/<project>/<name>/ into the repo (same model as ensureUserSkills /
+	// syncScopedDirSymlinks). Shared-target projection may already create `.claude/agents/*`;
+	// this pass also ensures `.agents/agents/*` and heals incorrect symlinks idempotently.
+	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md",
+		filepath.Join(repoPath, ".agents", "agents"),
+		filepath.Join(repoPath, claudeDir, "agents"),
+	)
 }
 
 func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
