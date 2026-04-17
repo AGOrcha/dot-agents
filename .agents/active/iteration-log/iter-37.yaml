@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 37
+date: "2026-04-17"
+wave: loop-agent-pipeline
+task_id: p2-impl-agent-surface
+commit: 8843d36835fbe5a5c81eb43a5ddbf23c74e32ce3
+files_changed: 3
+lines_added: 67
+lines_removed: 1
+item: "Separate repo impl-agent prompt from loop-worker; document impl-handoff.yaml; Pattern E script metadata"
+scenario_tags:
+    - impl-agent-surface
+    - loop-worker-vs-impl
+    - pattern-e
+    - impl-handoff
+feedback_goal: "Repo-owned impl-agent overlay and impl-handoff fields documented; ralph-cursor-loop remains loop-worker; write_scope_touched / ready_for_verification / tests_unchanged_justified clarified"
+tests_added: 0
+tests_total_pass: null
+retries: 0
+scope_note: "bin/tests/ralph-cursor-loop, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md"
+summary: "Added impl-agent.project.md; LOOP_ORCHESTRATION_SPEC: role split (loop-worker vs impl-agent), impl-handoff table, Pattern E note; ralph-cursor-loop header + worker-context.env prompt_surface and impl_agent_* reference keys"
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: false
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — workflow tasks loop-agent-pipeline; verify record + checkpoint; bash negative paths for ralph-cursor-loop"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true
