@@ -505,7 +505,7 @@ tasks:
         - Audit 2026-04-15: workflow-iter-log.schema.json exists and --log-to-iter writes the yaml-language-server schema header, but Phase 5d is not complete yet. commands/workflow.go does not load or validate against the schema before write, tests only assert header/stub contents, and existing .agents/active/iteration-log/iter-0.yaml conflicts with schema iteration.minimum=1.
     - id: phase-5e-migration-script
       title: 'Phase 5e — One-off migration script: loop-state iteration log → iter-N.yaml files'
-      status: pending
+      status: completed
       depends_on:
         - phase-5-loop-state-split
       blocks: []
@@ -514,36 +514,7 @@ tasks:
         - bin/tests/migrate-loop-state.sh
         - .agents/active/iteration-log/
       verification_required: true
-      notes: |-
-        Script: bin/tests/migrate-loop-state.sh
-
-        Reads the ## Iteration Log section from .agents/active/loop-state.md.
-        For each iteration entry, parses all known fields and writes:
-          .agents/active/iteration-log/iter-<N>.yaml
-
-        Coalescing rules for missing fields (migration compatibility, matches schema defaults):
-          commit: ''           if absent
-          files_changed: 0     if absent
-          lines_added: 0       if absent
-          lines_removed: 0     if absent
-          tests_added: 0       if absent
-          tests_total_pass: null  if absent
-          retries: 0           if absent
-          scope_note: ''       if absent
-          summary: ''          if absent
-          scenario_tags: []    if absent
-          feedback_goal: ''    if absent
-          self_assessment:     all fields default to false/''/null if block absent or field missing
-
-        After writing all iter-N.yaml files, appends a single bulk historical.yaml:
-          .agents/active/iteration-log/historical.yaml
-          (array of all the same entries, for human browsing without per-file traversal)
-
-        Final step: strips ## Iteration Log and everything below it from loop-state.md,
-        leaving only ## Current Position, ## Loop Health, ## Next Iteration Playbook.
-
-        Idempotent: skip iter-N.yaml files that already exist (--force to overwrite).
-        Dry-run: --dry-run prints what would be written without touching files.
+      notes: 'Reconciled 2026-04-17: the loop-state migration outcome is already present in repo state. Commit 50d3a51 performed the one-off archive from loop-state.md into .agents/active/iteration-log/ and reduced loop-state.md to the 3 prose sections. Commits 18321b8 and 3e66ab2 completed schema validation and iter numbering reconciliation. No retained bin/tests/migrate-loop-state.sh artifact remains; treat this as an executed one-off migration whose durable outputs are the iter-N.yaml files, historical.yaml, and the reduced loop-state.md surface.'
     - id: phase-6-loop-worker-subagent
       title: Phase 6 — Convert loop-worker to a Claude Code sub-agent (AGENT.md + .agentsrc.json)
       status: completed

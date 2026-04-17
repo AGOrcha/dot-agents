@@ -1,0 +1,217 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+tasks:
+    - id: p1-pipeline-control
+      title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
+      status: pending
+      depends_on: []
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-orchestrate
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: Control-plane entry point for D3.a. Add plan-scoped loop-break behavior via workflow next or tasks filtering, create verification directories before dispatch, and enforce the tdd-fresh gate plus verifier retry-cap wiring.
+    - id: p2-impl-agent-surface
+      title: Separate repo-side impl-agent surface from loop-worker behavior
+      status: pending
+      depends_on: []
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-cursor-loop
+        - .agents/prompts/impl-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Define the repo-owned impl-agent overlay and impl-handoff contract without breaking existing Pattern E loop-worker callers. Clarify write_scope_touched, ready_for_verification, and optional tests_unchanged_justified.
+    - id: p3a-result-schema
+      title: Introduce canonical verification-result artifact contract
+      status: pending
+      depends_on: []
+      blocks:
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-result.schema.json
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: Establish the typed verifier artifact at .agents/active/verification/<task_id>/<type>.result.yaml and any minimal command-side validation helpers required by review and merge-back paths.
+    - id: p3b-unit-verifier
+      title: Unit verifier surface and result contract
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/unit.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add unit verifier guidance with explicit go test ./... -race -count=1 -timeout=300s expectations and scoped-test discipline aligned to D12.
+    - id: p3c-api-verifier
+      title: API verifier surface and result contract
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/api.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add API verifier guidance, contract and perf artifact expectations, and Playwright API setup expectations on top of the canonical verification result schema.
+    - id: p3d-ui-verifier
+      title: UI E2E verifier surface and result contract
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/ui-e2e.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add UI E2E verifier guidance plus screenshot diff and accessibility artifact expectations.
+    - id: p3e-batch-verifier
+      title: Batch verifier surface and result contract
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/batch.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add fixture-driven batch verifier guidance with expected-vs-actual diff artifact expectations.
+    - id: p3f-streaming-verifier
+      title: Streaming verifier surface and result contract
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/streaming.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add SSE and WebSocket verifier guidance plus timeout, backpressure, and dropped-frame artifact expectations.
+    - id: p4-review-agent
+      title: Review-agent surface plus merged workflow verify record decision writer
+      status: pending
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-decision.schema.json
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - .agents/prompts/review-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append.
+    - id: p5-iter-log-v2
+      title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
+      status: pending
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p4-review-agent
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-iter-log.schema.json
+        - commands/static/workflow-iter-log.schema.json
+        - commands/workflow_iter_log_schema.go
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
+    - id: p6-fanout-dispatch
+      title: App-type dispatch and verifier-sequence wiring through plan schema, .agentsrc, and delegation bundles
+      status: pending
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-delegation-bundle.schema.json
+        - schemas/workflow-plan.schema.json
+        - schemas/agentsrc.schema.json
+        - src/share/templates/standard/agentsrc.json
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - bin/tests/ralph-orchestrate
+      verification_required: true
+      notes: Integration hotspot from iter-1 review. Add app_type to plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
+    - id: p7-post-closeout
+      title: Post-closeout orchestration pass plus fold-back update
+      status: pending
+      depends_on:
+        - p1-pipeline-control
+        - p4-review-agent
+        - p5-iter-log-v2
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-closeout
+        - bin/tests/ralph-pipeline
+        - commands/workflow.go
+        - commands/workflow_test.go
+      verification_required: true
+      notes: Add the post-closeout reasoning pass, workflow fold-back update, and stable slug routing for D2. Group repeated task or slice observations instead of emitting noisy duplicates.
+    - id: p8-orchestrator-awareness
+      title: Make orchestrator prompts and dispatch role-aware
+      status: pending
+      depends_on: []
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-orchestrate
+        - bin/tests/ralph-pipeline
+        - .agents/active/orchestrator.loop.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Preserve D5 explicitly. The orchestrator must choose impl, verifier, and review role surfaces deliberately and stop reusing the same file as both project overlay and prompt-file.
+    - id: p9-sources-design-fork
+      title: Fork external-sources design doc from the main implementation plan
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/external-agent-sources/design.md
+      verification_required: false
+      notes: Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
