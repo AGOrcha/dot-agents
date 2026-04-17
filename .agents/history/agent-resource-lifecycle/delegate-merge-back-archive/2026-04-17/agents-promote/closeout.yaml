@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: agent-resource-lifecycle
+task_id: agents-promote
+delegation_id: del-agents-promote-1776416139
+decision: accept
+closed_at: "2026-04-17T09:02:18Z"

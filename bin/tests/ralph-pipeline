@@ -36,7 +36,33 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Run from a temp snapshot so workers can safely edit the repo copies of these
+# scripts without corrupting the unread tail of the currently executing shell.
+if [[ -z "${RALPH_PIPELINE_SNAPSHOT_DIR:-}" ]]; then
+  SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ralph-pipeline-snapshot.XXXXXX")"
+  cp \
+    "$ORIG_SCRIPT_DIR/ralph-pipeline" \
+    "$ORIG_SCRIPT_DIR/ralph-orchestrate" \
+    "$ORIG_SCRIPT_DIR/ralph-cursor-loop" \
+    "$ORIG_SCRIPT_DIR/ralph-closeout" \
+    "$SNAPSHOT_DIR/"
+  chmod +x \
+    "$SNAPSHOT_DIR/ralph-pipeline" \
+    "$SNAPSHOT_DIR/ralph-orchestrate" \
+    "$SNAPSHOT_DIR/ralph-cursor-loop" \
+    "$SNAPSHOT_DIR/ralph-closeout"
+  export RALPH_PIPELINE_SNAPSHOT_DIR="$SNAPSHOT_DIR"
+  export RALPH_PIPELINE_SNAPSHOT_OWNER=1
+  exec "$SNAPSHOT_DIR/ralph-pipeline" "$@"
+fi
+
+SCRIPT_DIR="$RALPH_PIPELINE_SNAPSHOT_DIR"
+if [[ "${RALPH_PIPELINE_SNAPSHOT_OWNER:-0}" == "1" ]]; then
+  trap 'rm -rf "$RALPH_PIPELINE_SNAPSHOT_DIR" 2>/dev/null || true' EXIT
+fi
+
 RALPH_ORCHESTRATE="$SCRIPT_DIR/ralph-orchestrate"
 RALPH_WORKER="$SCRIPT_DIR/ralph-cursor-loop"
 RALPH_CLOSEOUT="$SCRIPT_DIR/ralph-closeout"
