@@ -20,6 +20,9 @@
 #   AGENT_BIN                    agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
+# Control plane (dot-agents): fanout creates `.agents/active/verification/<task_id>/` before dispatch;
+#   `workflow next` scopes to plans that have active delegations; see `workflow next --help`.
+#
 # Early exits:
 #   No unblocked tasks (no RALPH_BUNDLE lines from orchestrate) → message, exit 0
 #   Fanout failed → exit 1

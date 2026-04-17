@@ -12,17 +12,17 @@ Orchestrator pass — 2026-04-17:
 
 ## Loop Health
 
-- **`workflow next` vs canonical TASKS.yaml:** Selector may surface `agents-remove` (pending, same plan) while `agents-import` is `in_progress` with an active bundle. **Canonical YAML wins** — do not fan out `agents-remove` until the parent runs `workflow advance` + `workflow delegation closeout` for `agents-import` after reviewing merge-back (shared `commands/agents.go`).
+- **`workflow next` vs canonical TASKS.yaml:** `workflow next` now **locks to plan ids that have active delegations** (pending/active contract), so it will not jump to another plan while work is in-flight elsewhere. Optional **`workflow next --plan <id>`** scopes to one plan. Canonical TASKS.yaml remains authoritative for task status.
 - **`workflow orient` vs checkpoint:** If orient still warns checkpoint stale vs branch tip, treat `next_action` from canonical plan + TASKS.yaml as authoritative.
-- **Parallelism:** `agents-import` worker iteration **merge-back written** (`.agents/active/merge-back/agents-import.md`); still **in_progress** in YAML until orchestrator accepts closeout. `p1-pipeline-control` may still be in flight. `agents-remove` remains **serialized** after import closes.
-- **Third worker:** Not started — no safe third task without overlapping `commands/agents.go` or `commands/workflow.go` with the two in-flight delegations.
+- **Parallelism:** `agents-import` merge-back exists for parent review; **`p1-pipeline-control` merge-back** is at `.agents/active/merge-back/p1-pipeline-control.md` — still **in_progress** in YAML until orchestrator runs delegation closeout + advance. `agents-remove` remains **serialized** after import closes.
+- **Fanout / pipeline:** `workflow fanout` creates `.agents/active/verification/<task_id>/` before dispatch; TDD gate blocks Go-only write_scope without adjacent `*_test.go` unless `--skip-tdd-gate`; **`--verifier-retry-max`** maps to bundle `primary_chain_max`; **`RALPH_VERIFIER_RETRY_MAX`** in `ralph-orchestrate` forwards the flag.
 
 ## Next Iteration Playbook
 
-1. **Orchestrator:** Review `merge-back/agents-import.md` → `workflow advance agent-resource-lifecycle agents-import completed` → `workflow delegation closeout` for bundle `del-agents-import-1776434328` as appropriate.
+1. **Orchestrator:** Review `merge-back/agents-import.md` and **`merge-back/p1-pipeline-control.md`** → `workflow advance` + `workflow delegation closeout` per bundle when satisfied.
 2. **After `agents-import` is completed in YAML:** `workflow fanout` for `agents-remove` (same write_scope family), unless branch already satisfies removal work.
-3. **Worker `p1-pipeline-control`:** Continue per its bundle; after merge-back, parent advances pipeline task — avoid parallel edits on `commands/workflow.go` with successors until p1 is merged.
-4. **Evidence:** `go run ./cmd/dot-agents workflow tasks agent-resource-lifecycle`; `go test ./commands -run Import` for import surface.
+3. **After `p1-pipeline-control` closes:** Schedule `p2-impl-agent-surface` or next unblocked pipeline task — avoid parallel `commands/workflow.go` edits with successors until the parent advances p1.
+4. **Evidence:** `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go test ./commands -run 'Fanout_|SelectNext'` for this slice.
 
 ## Scenario Coverage
 
@@ -38,7 +38,8 @@ Orchestrator pass — 2026-04-17:
 | `workflow orient` | yes | 40 |
 | `workflow next` | yes | 40 |
 | `workflow tasks agent-resource-lifecycle` | yes | 40 |
-| `workflow tasks loop-agent-pipeline` | yes | 40 |
+| `workflow tasks loop-agent-pipeline` | yes | 36 |
+| `workflow merge-back` (p1-pipeline-control) | yes | 36 |
 
 ## Iteration Log
 

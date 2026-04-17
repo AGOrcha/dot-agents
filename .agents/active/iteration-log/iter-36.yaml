@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 36
+date: "2026-04-17"
+wave: loop-agent-pipeline
+task_id: p1-pipeline-control
+commit: b1a73ee605264086a579d00888be9d899b5acdeb
+files_changed: 7
+lines_added: 314
+lines_removed: 19
+item: "D3.a pipeline control: plan-scoped next, verification dir before fanout, TDD gate, verifier retry cap"
+scenario_tags:
+    - workflow-next
+    - fanout
+    - delegation-bundle
+    - ralph-orchestrate
+feedback_goal: "Confirm workflow next does not jump plans while another plan has an active delegation; fanout prepares verification/<task_id>/ and enforces TDD gate for Go scope; bundle carries primary_chain_max when --verifier-retry-max set"
+tests_added: 4
+tests_total_pass: 4
+retries: 0
+scope_note: "commands/workflow.go, commands/workflow_test.go, bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate"
+summary: "selectNextCanonicalTask filters plan list to ParentPlanID of active delegations; workflow next --plan; ensureTaskVerificationDir + checkPreVerifierTDDGate on fanout; --verifier-retry-max/--skip-tdd-gate; shell passes RALPH_VERIFIER_RETRY_MAX"
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: false
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — workflow tasks loop-agent-pipeline; verify + checkpoint + merge-back succeeded"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true

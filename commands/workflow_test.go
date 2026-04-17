@@ -806,7 +806,7 @@ func TestSelectNextCanonicalTaskPrefersInProgressFocusTask(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPlanFixture(t, repo)
 
-	suggestion, err := selectNextCanonicalTask(repo)
+	suggestion, err := selectNextCanonicalTask(repo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -821,11 +821,44 @@ func TestSelectNextCanonicalTaskPrefersInProgressFocusTask(t *testing.T) {
 	}
 }
 
+func TestSelectNextCanonicalTask_ScopedToPlansWithActiveDelegation(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalPendingPlanFixture(t, repo)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-t1", ParentPlanID: "wave-2", ParentTaskID: "t1",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+
+	suggestion, err := selectNextCanonicalTask(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion != nil {
+		t.Fatalf("expected nil while wave-2 has an active delegation and remaining tasks there are blocked/skipped, got %+v", suggestion)
+	}
+}
+
+func TestSelectNextCanonicalTask_ExplicitUnknownPlan(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	_, err := selectNextCanonicalTask(repo, "missing-plan")
+	if err == nil {
+		t.Fatal("expected error for unknown plan id")
+	}
+}
+
 func TestSelectNextCanonicalTaskChoosesUnblockedPendingTask(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPendingPlanFixture(t, repo)
 
-	suggestion, err := selectNextCanonicalTask(repo)
+	suggestion, err := selectNextCanonicalTask(repo, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -871,7 +904,7 @@ func TestRunWorkflowNextPrintsHelpfulMessageWhenNoActionableTaskExists(t *testin
 	}
 	os.Stdout = w
 
-	if err := runWorkflowNext(); err != nil {
+	if err := runWorkflowNext(""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2395,6 +2428,66 @@ func TestFanoutSliceAndTaskMutuallyExclusive(t *testing.T) {
 	}
 }
 
+func TestFanout_CreatesVerificationDir(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(repo, ".agents", "active", "verification", "task-001"))
+	if err != nil || !st.IsDir() {
+		t.Fatalf("verification dir: %v", err)
+	}
+}
+
+func TestFanout_TDDGateRejectsGoScopeWithoutTests(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := os.MkdirAll(filepath.Join(repo, "commands"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "commands", "x.go"), []byte("package x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "plan-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tf.Tasks[0].WriteScope = []string{"commands/x.go"}
+	tf.Tasks[0].VerificationRequired = true
+	if err := saveCanonicalTasks(repo, tf); err != nil {
+		t.Fatal(err)
+	}
+
+	err = executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil {
+		t.Fatal("expected TDD gate error")
+	}
+	if !strings.Contains(err.Error(), "pre-verifier TDD gate") {
+		t.Fatalf("unexpected err: %v", err)
+	}
+}
+
+func TestFanout_VerifierRetryMaxInBundle(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w", "--verifier-retry-max", "4"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadDelegationContract(repo, "task-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.PrimaryChainMax == nil || *bundle.Verification.EvidencePolicy.PrimaryChainMax != 4 {
+		t.Fatalf("expected primary_chain_max 4, got %+v", bundle.Verification.EvidencePolicy)
+	}
+}
+
 func TestFanoutTaskWriteScopeFallback(t *testing.T) {
 	// fanout --plan X --task Y without --write-scope should pull write_scope from task definition
 	repo := setupTestProject(t)
@@ -3242,10 +3335,10 @@ func TestCheckpointLogToIterNoDelegation(t *testing.T) {
 
 func TestParseGitDiffStatSummary(t *testing.T) {
 	cases := []struct {
-		summary      string
-		wantFiles    int
-		wantAdded    int
-		wantRemoved  int
+		summary     string
+		wantFiles   int
+		wantAdded   int
+		wantRemoved int
 	}{
 		{"3 files changed, 42 insertions(+), 5 deletions(-)", 3, 42, 5},
 		{"1 file changed, 10 insertions(+)", 1, 10, 0},
@@ -3262,4 +3355,3 @@ func TestParseGitDiffStatSummary(t *testing.T) {
 		}
 	}
 }
-

@@ -521,17 +521,20 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 
+	var workflowNextPlanID string
 	nextCmd := &cobra.Command{
 		Use:   "next",
 		Short: "Suggest the next actionable canonical task",
 		Example: ExampleBlock(
 			"  dot-agents workflow next",
+			"  dot-agents workflow next --plan loop-agent-pipeline",
 		),
 		Args: NoArgsWithHints("`dot-agents workflow next` works on the current repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowNext()
+			return runWorkflowNext(workflowNextPlanID)
 		},
 	}
+	nextCmd.Flags().StringVar(&workflowNextPlanID, "plan", "", "Only consider tasks from this canonical plan id")
 
 	// advance subcommand
 	var advanceTask, advanceStatus string
@@ -725,6 +728,8 @@ preferences, fanout artifacts, and bridge queries.`,
 	fanoutCmd.Flags().String("selection-reason", "", "Optional human-readable reason this task was delegated")
 	fanoutCmd.Flags().Bool("require-negative-coverage", false, "Set verification.evidence_policy.require_negative_coverage in the bundle")
 	fanoutCmd.Flags().Bool("sandbox-mutations", false, "Set verification.evidence_policy.sandbox_mutations in the bundle")
+	fanoutCmd.Flags().Int("verifier-retry-max", 0, "If > 0, set verification.evidence_policy.primary_chain_max (verifier retry budget)")
+	fanoutCmd.Flags().Bool("skip-tdd-gate", false, "Skip pre-verifier check that Go write_scope has *_test.go coverage")
 	_ = fanoutCmd.MarkFlagRequired("plan")
 
 	// merge-back subcommand (Wave 6)
@@ -2396,13 +2401,13 @@ type workflowNextTaskSuggestion struct {
 	DependsOn            []string `json:"depends_on,omitempty"`
 }
 
-func runWorkflowNext() error {
+func runWorkflowNext(explicitPlanID string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
 
-	suggestion, err := selectNextCanonicalTask(project.Path)
+	suggestion, err := selectNextCanonicalTask(project.Path, explicitPlanID)
 	if err != nil {
 		return err
 	}
@@ -2438,7 +2443,35 @@ func runWorkflowNext() error {
 	return nil
 }
 
-func selectNextCanonicalTask(projectPath string) (*workflowNextTaskSuggestion, error) {
+// activeDelegationPlanIDs returns plan ids that currently have a pending or active delegation.
+// Used to scope `workflow next` so suggestions do not jump to another plan while work is in-flight elsewhere.
+func activeDelegationPlanIDs(delegations []DelegationContract) map[string]bool {
+	m := make(map[string]bool)
+	for _, c := range delegations {
+		if c.Status != "pending" && c.Status != "active" {
+			continue
+		}
+		if c.ParentPlanID != "" {
+			m[c.ParentPlanID] = true
+		}
+	}
+	return m
+}
+
+func filterPlanIDsLocked(ids []string, locked map[string]bool) []string {
+	if len(locked) == 0 {
+		return ids
+	}
+	var out []string
+	for _, id := range ids {
+		if locked[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
 		return nil, err
@@ -2447,9 +2480,30 @@ func selectNextCanonicalTask(projectPath string) (*workflowNextTaskSuggestion, e
 		return nil, nil
 	}
 
+	explicitPlanID = strings.TrimSpace(explicitPlanID)
+	if explicitPlanID != "" {
+		found := false
+		for _, id := range ids {
+			if id == explicitPlanID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("plan %q not found", explicitPlanID)
+		}
+		ids = []string{explicitPlanID}
+	}
+
 	delegations, err := listDelegationContracts(projectPath)
 	if err != nil {
 		return nil, err
+	}
+
+	lockedPlans := activeDelegationPlanIDs(delegations)
+	ids = filterPlanIDsLocked(ids, lockedPlans)
+	if len(ids) == 0 {
+		return nil, nil
 	}
 	activeDelegations := make(map[string]bool, len(delegations))
 	for _, c := range delegations {
@@ -4362,6 +4416,60 @@ func runWorkflowFoldBackList(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// ensureTaskVerificationDir creates .agents/active/verification/<task_id>/ before dispatch
+// so workers and verifiers have a stable per-task location for artifacts.
+func ensureTaskVerificationDir(projectPath, taskID string) error {
+	dir := filepath.Join(projectPath, ".agents", "active", "verification", taskID)
+	return os.MkdirAll(dir, 0755)
+}
+
+func writeScopeImpliesNonTestGo(ws []string) bool {
+	for _, rel := range ws {
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, "_test.go") {
+			return true
+		}
+	}
+	return false
+}
+
+func writeScopeHasAdjacentGoTests(projectPath string, ws []string) bool {
+	dirs := make(map[string]bool)
+	for _, rel := range ws {
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if strings.HasSuffix(rel, ".go") {
+			dirs[filepath.ToSlash(filepath.Dir(rel))] = true
+			continue
+		}
+		abs := filepath.Join(projectPath, filepath.FromSlash(rel))
+		st, err := os.Stat(abs)
+		if err == nil && st.IsDir() {
+			dirs[rel] = true
+		}
+	}
+	for d := range dirs {
+		abs := filepath.Join(projectPath, filepath.FromSlash(d))
+		matches, err := filepath.Glob(filepath.Join(abs, "*_test.go"))
+		if err == nil && len(matches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func checkPreVerifierTDDGate(projectPath string, writeScope []string, verificationRequired, skip bool) error {
+	if skip || !verificationRequired {
+		return nil
+	}
+	if !writeScopeImpliesNonTestGo(writeScope) {
+		return nil
+	}
+	if writeScopeHasAdjacentGoTests(projectPath, writeScope) {
+		return nil
+	}
+	return fmt.Errorf("pre-verifier TDD gate: verification-required task with Go write_scope needs at least one *_test.go in the same directory (or list a *_test.go path); use --skip-tdd-gate for doc-only or non-Go work")
+}
+
 // ── workflow fanout subcommand (Wave 6 Step 5) ───────────────────────────────
 
 func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
@@ -4452,6 +4560,14 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	// Fall back to task definition's write_scope when not explicitly provided
 	if len(writeScope) == 0 && len(targetTask.WriteScope) > 0 {
 		writeScope = append([]string(nil), targetTask.WriteScope...)
+	}
+
+	if err := ensureTaskVerificationDir(project.Path, taskID); err != nil {
+		return fmt.Errorf("prepare verification directory: %w", err)
+	}
+	skipTDD, _ := cmd.Flags().GetBool("skip-tdd-gate")
+	if err := checkPreVerifierTDDGate(project.Path, writeScope, targetTask.VerificationRequired, skipTDD); err != nil {
+		return err
 	}
 
 	// Check write-scope overlap
@@ -4770,6 +4886,20 @@ func buildDelegationBundleForFanout(
 			v := true
 			b.Verification.EvidencePolicy.SandboxMutations = &v
 		}
+	}
+
+	retryMax, _ := cmd.Flags().GetInt("verifier-retry-max")
+	if retryMax > 0 {
+		if b.Verification.EvidencePolicy == nil {
+			b.Verification.EvidencePolicy = &struct {
+				RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+				ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+				SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+				PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+			}{}
+		}
+		rm := retryMax
+		b.Verification.EvidencePolicy.PrimaryChainMax = &rm
 	}
 
 	b.Closeout.WorkerMust = []string{"workflow_verify_record", "workflow_checkpoint", "workflow_merge_back"}
