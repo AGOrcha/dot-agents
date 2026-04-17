@@ -31,7 +31,7 @@ tasks:
         Edge cases: already-promoted (symlink exists), canonical already real dir (--force to overwrite), missing AGENT.md (error with hint).
     - id: agents-import
       title: agents import <name> — pull ~/.agents/agents/<project>/<name>/ into repo as symlink
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
