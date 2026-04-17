@@ -2558,6 +2558,88 @@ func TestSaveLoadMergeBack_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestValidateVerificationResultDoc_Table(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	base := VerificationResultDoc{
+		SchemaVersion: 1,
+		TaskID:        "t1",
+		ParentPlanID:  "p1",
+		VerifierType:  "unit",
+		Status:        "pass",
+		Summary:       "go test ./...",
+		RecordedAt:    now,
+	}
+	t.Run("valid minimal", func(t *testing.T) {
+		d := base
+		if err := validateVerificationResultDoc(&d); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("invalid status", func(t *testing.T) {
+		d := base
+		d.Status = "green"
+		if err := validateVerificationResultDoc(&d); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+	t.Run("invalid verifier_type pattern", func(t *testing.T) {
+		d := base
+		d.VerifierType = "Unit"
+		if err := validateVerificationResultDoc(&d); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+	t.Run("missing required field", func(t *testing.T) {
+		d := base
+		d.ParentPlanID = ""
+		if err := validateVerificationResultDoc(&d); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestMergeBack_WritesVerificationResultYAML(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "merge-back", "--task", "t1", "--summary", "done", "--verification-status", "pass", "--integration-notes", "go test ./commands"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, ".agents", "active", "verification", "t1", VerifierTypeMergeBack+".result.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read verification result: %v", err)
+	}
+	var got VerificationResultDoc
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("yaml: %v", err)
+	}
+	if got.TaskID != "t1" || got.ParentPlanID != "p1" || got.VerifierType != VerifierTypeMergeBack {
+		t.Fatalf("unexpected doc: %+v", got)
+	}
+	if got.Status != "pass" || !strings.Contains(got.Summary, "go test") {
+		t.Fatalf("status/summary: %+v", got)
+	}
+	if err := validateVerificationResultDoc(&got); err != nil {
+		t.Fatalf("re-validate: %v", err)
+	}
+}
+
+func TestMergeBack_InvalidVerificationStatus(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "merge-back", "--task", "t1", "--summary", "done", "--verification-status", "bogus")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid verification status") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // ── Wave 6 Step 7: orient/status delegation summary ───────────────────────────
 
 func TestCollectDelegationSummary_Empty(t *testing.T) {

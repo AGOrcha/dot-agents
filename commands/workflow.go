@@ -4641,6 +4641,10 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	verificationStatus, _ := cmd.Flags().GetString("verification-status")
 	integrationNotes, _ := cmd.Flags().GetString("integration-notes")
 
+	if !isValidVerificationStatus(verificationStatus) {
+		return fmt.Errorf("invalid verification status %q (expected pass, fail, partial, or unknown)", verificationStatus)
+	}
+
 	// Load delegation contract
 	contract, err := loadDelegationContract(project.Path, taskID)
 	if err != nil {
@@ -4681,6 +4685,25 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("save merge-back: %w", err)
 	}
 
+	verifSummary := strings.TrimSpace(integrationNotes)
+	if verifSummary == "" {
+		verifSummary = summary
+	}
+	vrDoc := &VerificationResultDoc{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		ParentPlanID:  contract.ParentPlanID,
+		VerifierType:  VerifierTypeMergeBack,
+		Status:        verificationStatus,
+		Summary:       verifSummary,
+		RecordedAt:    now,
+		DelegationID:  contract.ID,
+		ArtifactPaths: append([]string(nil), filesChanged...),
+	}
+	if err := writeVerificationResultYAML(project.Path, vrDoc); err != nil {
+		return fmt.Errorf("write verification result: %w", err)
+	}
+
 	// Update delegation status to completed
 	contract.Status = "completed"
 	if err := saveDelegationContract(project.Path, contract); err != nil {
@@ -4690,6 +4713,7 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	ui.SuccessBox(
 		fmt.Sprintf("Merge-back created for task %s", taskID),
 		fmt.Sprintf("Artifact: .agents/active/merge-back/%s.md", taskID),
+		fmt.Sprintf("Verification result: .agents/active/verification/%s/%s.result.yaml", taskID, VerifierTypeMergeBack),
 		"Parent agent should review this artifact before advancing task to completed",
 	)
 	return nil
