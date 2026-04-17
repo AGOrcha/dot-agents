@@ -3,7 +3,7 @@ plan_id: loop-agent-pipeline
 tasks:
     - id: p1-pipeline-control
       title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - p7-post-closeout
