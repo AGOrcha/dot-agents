@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # ralph-cursor-loop: worker-only implementation loop for a single delegated task.
 #
+# Pattern E (this script): loop-worker semantics — global loop-worker profile + repo project overlay
+# (.agents/active/active.loop.md) + loop-worker / iteration-close skills, then verify → checkpoint →
+# merge-back. It does NOT load .agents/prompts/impl-agent.project.md; that file is for impl-only
+# fanouts (implementation slice + impl-handoff.yaml) per docs/LOOP_ORCHESTRATION_SPEC.md.
+#
 # --bundle <path> is REQUIRED. To create a bundle and select a task, use ralph-orchestrate first.
 #
 # Worker loop: reads the bundle, implements write_scope, runs /iteration-close.
@@ -145,6 +150,9 @@ if [[ -n "$LOG_DIR" ]]; then
     echo "plan_id=${PLAN_ID}"
     echo "task_id=${TASK_ID}"
     echo "write_scope_csv=${WRITE_SCOPE_CSV}"
+    echo "prompt_surface=loop-worker"
+    echo "impl_agent_prompt_file=${REPO_ROOT}/.agents/prompts/impl-agent.project.md"
+    echo "impl_agent_prompt_loaded=false"
     echo "loop_profile_path=${LOOP_PROFILE_FILE}"
     echo "worker_overlay_path=${WORKER_OVERLAY}"
   } >"$LOG_DIR/worker-context.env"
