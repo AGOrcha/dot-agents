@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-agents-promote-1776416139
+parent_plan_id: agent-resource-lifecycle
+parent_task_id: agents-promote
+title: agents promote <name> — repo .agents/agents/<name>/ → ~/.agents/agents/<project>/; repo dirs become symlinks
+summary: Delegated from plan Agent Resource Lifecycle — promote, import, remove, and wiring parity for Claude Code agents
+write_scope:
+    - commands/agents.go
+    - commands/agents_test.go
+success_criteria: |-
+    Mirror of promoteSkillIn() in commands/skills.go.
+
+    Behaviour:
+    - Source: .agents/agents/<name>/ in the current repo (must contain AGENT.md)
+    - Canonical target: ~/.agents/agents/<project>/<name>/ (real directory, SOT)
+    - After copy: replace repo .agents/agents/<name>/ with symlink → canonical target
+    - Also create/update repo .claude/agents/<name>/ symlink → canonical target
+    - Register name in .agentsrc.json agents[] list if not already present
+    - Print next steps (dot-agents refresh to wire platform links)
+
+    Edge cases: already-promoted (symlink exists), canonical already real dir (--force to overwrite), missing AGENT.md (error with hint).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-17T08:55:39Z"
+updated_at: "2026-04-17T08:55:39Z"

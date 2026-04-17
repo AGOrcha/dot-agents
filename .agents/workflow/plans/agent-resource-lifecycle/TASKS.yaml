@@ -3,7 +3,7 @@ plan_id: agent-resource-lifecycle
 tasks:
     - id: agents-promote
       title: agents promote <name> — repo .agents/agents/<name>/ → ~/.agents/agents/<project>/; repo dirs become symlinks
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
