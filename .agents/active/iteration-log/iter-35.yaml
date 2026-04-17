@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 35
+date: "2026-04-17"
+wave: agent-resource-lifecycle
+task_id: agents-import
+commit: 0c398a7240e763434c90c88d40d34b75ab270436
+files_changed: 2
+lines_added: 303
+lines_removed: 0
+item: "Implement dot-agents agents import <name> (canonical → repo symlinks + .agentsrc)"
+scenario_tags:
+    - delegation-lifecycle
+    - agents-cli
+    - import
+feedback_goal: "agents import creates .agents/agents and .claude/agents symlinks from ~/.agents/agents/<project>/<name>, registers agents[] idempotently; tests cover success and failure paths"
+tests_added: 6
+tests_total_pass: 6
+retries: 0
+scope_note: "commands/agents.go, commands/agents_test.go only (delegation write_scope)"
+summary: "Added importAgentIn, ensureImportRepoAgentsSlot, buildSingleAgentMirrorIntent; Cobra agents import; table-style tests for happy path, idempotency, missing canonical, no project name, real-dir conflict, mispointed symlink"
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: true
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — agents import --help; workflow tasks agent-resource-lifecycle"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true
