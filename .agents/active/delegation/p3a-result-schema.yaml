@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-p3a-result-schema-1776438877
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p3a-result-schema
+title: Introduce canonical verification-result artifact contract
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - schemas/verification-result.schema.json
+    - commands/workflow.go
+    - commands/workflow_test.go
+success_criteria: Establish the typed verifier artifact at .agents/active/verification/<task_id>/<type>.result.yaml and any minimal command-side validation helpers required by review and merge-back paths.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-17T15:14:37Z"
+updated_at: "2026-04-17T15:14:37Z"
