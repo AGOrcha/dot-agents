@@ -43,7 +43,7 @@ tasks:
         **context:** Delegation bundle `del-p2-impl-agent-surface-1776438876` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe to run in parallel** with `p1-pipeline-control` and `agents-import` — no overlap with `commands/workflow.go` or `commands/agents.go`. Worker runs verify + checkpoint + merge-back.
     - id: p3a-result-schema
       title: Introduce canonical verification-result artifact contract
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - p3b-unit-verifier
