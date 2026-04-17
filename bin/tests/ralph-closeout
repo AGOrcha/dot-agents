@@ -7,9 +7,11 @@
 #   RALPH_LOG_DIR         override log directory
 #   RALPH_NO_LOG          1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
-#   RALPH_MODEL           agent model override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_CLOSEOUT_MODEL  closeout-review model override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_MODEL           fallback model override (only used when RALPH_CLOSEOUT_AUTO=0)
 #   RALPH_FORCE           1 = pass -f to agent (only used when RALPH_CLOSEOUT_AUTO=0)
-#   AGENT_BIN             agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_CLOSEOUT_AGENT_BIN closeout-review agent binary override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   AGENT_BIN             fallback agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
 #   DOT_AGENTS            dot-agents binary or "go run ..." override
 #
 # Exit codes:
@@ -51,6 +53,24 @@ else
 fi
 
 da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+resolve_closeout_agent_bin() {
+  if [[ -n "${RALPH_CLOSEOUT_AGENT_BIN:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_AGENT_BIN"
+  elif [[ -n "${AGENT_BIN:-}" ]]; then
+    printf '%s' "$AGENT_BIN"
+  else
+    printf '%s' "agent"
+  fi
+}
+
+resolve_closeout_model() {
+  if [[ -n "${RALPH_CLOSEOUT_MODEL:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_MODEL"
+  else
+    printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
 
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for YAML parsing" >&2; exit 1; }
 
@@ -179,7 +199,8 @@ if [[ "$CLOSEOUT_AUTO" == "1" ]]; then
   done
 else
   # Non-auto: spawn a single orchestrator agent pass to review and decide
-  AGENT_BIN="${AGENT_BIN:-agent}"
+  AGENT_BIN="$(resolve_closeout_agent_bin)"
+  ROLE_MODEL="$(resolve_closeout_model)"
   if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
     echo "error: '$AGENT_BIN' not found on PATH (needed for RALPH_CLOSEOUT_AUTO=0 review pass)" >&2
     exit 1
@@ -226,7 +247,7 @@ EOF
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
   [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
-  [[ -n "${RALPH_MODEL:-}" ]] && agent_inv+=( --model "$RALPH_MODEL" )
+  [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
   echo "=== ralph-closeout: orchestrator review pass ===" >&2
   if [[ -n "$LOG_DIR" ]]; then

@@ -13,13 +13,21 @@
 #
 # Env vars:
 #   RALPH_ITERATIONS             implementation budget — max iterations (default 5)
-#   RALPH_MODEL                  agent model override
+#   RALPH_IMPL_WORKER_MODEL      impl-worker model override
+#   RALPH_VERIFIER_WORKER_MODEL  verifier-worker model override
+#   RALPH_REVIEW_WORKER_MODEL    review-worker model override
+#   RALPH_WORKER_MODEL           generic worker model override
+#   RALPH_MODEL                  fallback model override
 #   RALPH_FORCE                  1 = pass -f to agent (broader command allow)
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
 #   RALPH_STREAM_PARTIAL         0 = disable stream-partial-output (default 1)
-#   AGENT_BIN                    agent binary (default: agent)
+#   RALPH_IMPL_WORKER_AGENT_BIN      impl-worker agent binary override
+#   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
+#   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
+#   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
+#   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Usage:
@@ -59,7 +67,6 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
-AGENT_BIN="${AGENT_BIN:-agent}"
 ITERATIONS="${RALPH_ITERATIONS:-5}"
 OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
 
@@ -99,6 +106,89 @@ print(plan, task, ws)
 
 [[ -z "$PLAN_ID" || "$PLAN_ID" == "-" ]] && { echo "error: could not extract plan_id from bundle" >&2; exit 1; }
 [[ -z "$TASK_ID" || "$TASK_ID" == "-" ]] && { echo "error: could not extract task_id from bundle" >&2; exit 1; }
+
+classify_worker_role() {
+  local task_id="$1" write_scope_csv="$2"
+  case "$task_id" in
+    *review* ) printf '%s' "review"; return 0 ;;
+    *verifier* ) printf '%s' "verifier"; return 0 ;;
+    *impl* ) printf '%s' "impl"; return 0 ;;
+  esac
+
+  if [[ "$write_scope_csv" == *".agents/prompts/review-agent.project.md"* ]]; then
+    printf '%s' "review"
+  elif [[ "$write_scope_csv" == *".agents/prompts/verifiers/"* || "$write_scope_csv" == *"/verifiers/"* ]]; then
+    printf '%s' "verifier"
+  elif [[ "$write_scope_csv" == *".agents/prompts/impl-agent.project.md"* ]]; then
+    printf '%s' "impl"
+  else
+    printf '%s' "worker"
+  fi
+}
+
+resolve_worker_agent_bin() {
+  local role="$1"
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_AGENT_BIN:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_AGENT_BIN"
+  elif [[ -n "${AGENT_BIN:-}" ]]; then
+    printf '%s' "$AGENT_BIN"
+  else
+    printf '%s' "agent"
+  fi
+}
+
+resolve_worker_model() {
+  local role="$1"
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_MODEL:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_MODEL"
+  else
+    printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
+
+WORKER_ROLE="$(classify_worker_role "$TASK_ID" "$WRITE_SCOPE_CSV")"
+AGENT_BIN="$(resolve_worker_agent_bin "$WORKER_ROLE")"
+ROLE_MODEL="$(resolve_worker_model "$WORKER_ROLE")"
 
 # Prefer repo checkout binary
 DOT_AGENTS_CMD=()
@@ -149,8 +239,11 @@ if [[ -n "$LOG_DIR" ]]; then
     echo "bundle_path=${BUNDLE_PATH}"
     echo "plan_id=${PLAN_ID}"
     echo "task_id=${TASK_ID}"
+    echo "worker_role=${WORKER_ROLE}"
     echo "write_scope_csv=${WRITE_SCOPE_CSV}"
     echo "prompt_surface=loop-worker"
+    echo "resolved_agent_bin=${AGENT_BIN}"
+    echo "resolved_model=${ROLE_MODEL}"
     echo "impl_agent_prompt_file=${REPO_ROOT}/.agents/prompts/impl-agent.project.md"
     echo "impl_agent_prompt_loaded=false"
     echo "loop_profile_path=${LOOP_PROFILE_FILE}"
@@ -166,9 +259,9 @@ merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
 agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
 [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
 [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
-[[ -n "${RALPH_MODEL:-}" ]] && agent_inv+=( --model "$RALPH_MODEL" )
+[[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
-echo "ralph-cursor-loop: starting worker for plan=$PLAN_ID task=$TASK_ID (budget: ${ITERATIONS} iterations)" >&2
+echo "ralph-cursor-loop: starting worker for plan=$PLAN_ID task=$TASK_ID role=$WORKER_ROLE (budget: ${ITERATIONS} iterations)" >&2
 
 for ((i = 1; i <= ITERATIONS; i++)); do
   # Exit early if merge-back artifact already exists (prior iteration closed out)

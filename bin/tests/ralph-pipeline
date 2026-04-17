@@ -12,12 +12,24 @@
 #   RALPH_MAX_PARALLEL_WORKERS   max concurrent workers (default 3)
 #   RALPH_AUTO_FANOUT            1 = auto-create bundles (default)
 #   RALPH_CLOSEOUT_AUTO          1 = auto-accept merge-backs (default)
-#   RALPH_MODEL                  agent model override
+#   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
+#   RALPH_CLOSEOUT_MODEL         closeout-review model override
+#   RALPH_IMPL_WORKER_MODEL      impl-worker model override
+#   RALPH_VERIFIER_WORKER_MODEL  verifier-worker model override
+#   RALPH_REVIEW_WORKER_MODEL    review-worker model override
+#   RALPH_WORKER_MODEL           generic worker model override
+#   RALPH_MODEL                  fallback model override
 #   RALPH_FORCE                  1 = pass -f to agent
 #   RALPH_LOG_DIR                override base log directory (subdirs created per phase)
 #   RALPH_NO_LOG                 1 = stdout only, no files
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
-#   AGENT_BIN                    agent binary (default: agent)
+#   RALPH_ORCHESTRATOR_AGENT_BIN orchestrator-only agent binary override
+#   RALPH_CLOSEOUT_AGENT_BIN     closeout-review agent binary override
+#   RALPH_IMPL_WORKER_AGENT_BIN      impl-worker agent binary override
+#   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
+#   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
+#   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
+#   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Control plane (dot-agents): fanout creates `.agents/active/verification/<task_id>/` before dispatch;

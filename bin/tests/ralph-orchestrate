@@ -12,12 +12,14 @@
 #   RALPH_FANOUT_TASK            manual task override
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
 #   RALPH_VERIFIER_RETRY_MAX     if set to a positive integer, passed as workflow fanout --verifier-retry-max
-#   RALPH_MODEL                  agent model override (use a real id from `agent --help` / CLI list; not a README placeholder)
+#   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
+#   RALPH_MODEL                  fallback model override when no role-specific value is set
 #   RALPH_FORCE                  1 = pass -f to agent (broader allow)
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
-#   AGENT_BIN                    agent binary (default: agent)
+#   RALPH_ORCHESTRATOR_AGENT_BIN orchestrator-only agent binary override
+#   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Output:
@@ -33,7 +35,6 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
-AGENT_BIN="${AGENT_BIN:-agent}"
 OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:--output-format stream-json --stream-partial-output}"
 MAX_WORKERS="${RALPH_MAX_PARALLEL_WORKERS:-3}"
 AUTO_FANOUT="${RALPH_AUTO_FANOUT:-1}"
@@ -65,6 +66,107 @@ else
 fi
 
 da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+resolve_orchestrator_agent_bin() {
+  if [[ -n "${RALPH_ORCHESTRATOR_AGENT_BIN:-}" ]]; then
+    printf '%s' "$RALPH_ORCHESTRATOR_AGENT_BIN"
+  elif [[ -n "${AGENT_BIN:-}" ]]; then
+    printf '%s' "$AGENT_BIN"
+  else
+    printf '%s' "agent"
+  fi
+}
+
+resolve_orchestrator_model() {
+  if [[ -n "${RALPH_ORCHESTRATOR_MODEL:-}" ]]; then
+    printf '%s' "$RALPH_ORCHESTRATOR_MODEL"
+  else
+    printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
+
+AGENT_BIN="$(resolve_orchestrator_agent_bin)"
+ROLE_MODEL="$(resolve_orchestrator_model)"
+
+normalize_scope_path() {
+  local path="$1"
+  path="${path#./}"
+  while [[ "$path" == */ && "$path" != "/" ]]; do
+    path="${path%/}"
+  done
+  printf '%s' "$path"
+}
+
+scope_lists_overlap() {
+  local left_csv="$1" right_csv="$2"
+  local left_entry right_entry left_norm right_norm
+  local -a left_paths=() right_paths=()
+
+  IFS=',' read -r -a left_paths <<< "$left_csv"
+  IFS=',' read -r -a right_paths <<< "$right_csv"
+
+  for left_entry in "${left_paths[@]}"; do
+    left_entry="${left_entry#"${left_entry%%[![:space:]]*}"}"
+    left_entry="${left_entry%"${left_entry##*[![:space:]]}"}"
+    [[ -z "$left_entry" ]] && continue
+    left_norm="$(normalize_scope_path "$left_entry")"
+    [[ -z "$left_norm" ]] && continue
+    for right_entry in "${right_paths[@]}"; do
+      right_entry="${right_entry#"${right_entry%%[![:space:]]*}"}"
+      right_entry="${right_entry%"${right_entry##*[![:space:]]}"}"
+      [[ -z "$right_entry" ]] && continue
+      right_norm="$(normalize_scope_path "$right_entry")"
+      [[ -z "$right_norm" ]] && continue
+      if [[ "$left_norm" == "$right_norm" || "$left_norm" == "$right_norm/"* || "$right_norm" == "$left_norm/"* ]]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+active_delegation_scopes() {
+  local contract
+  for contract in "$REPO_ROOT/.agents/active/delegation"/*.yaml; do
+    [[ -f "$contract" ]] || continue
+    python3 - <<'PY' "$contract"
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text()
+
+plan_id = ""
+task_id = ""
+scope = []
+
+try:
+    import yaml
+    data = yaml.safe_load(text) or {}
+    plan_id = str(data.get("parent_plan_id") or data.get("plan_id") or "").strip()
+    task_id = str(data.get("parent_task_id") or data.get("task_id") or "").strip()
+    scope = list(data.get("write_scope") or [])
+except Exception:
+    current = None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.startswith("parent_plan_id:") or line.startswith("plan_id:"):
+            plan_id = line.split(":", 1)[1].strip().strip('"')
+        elif line.startswith("parent_task_id:") or line.startswith("task_id:"):
+            task_id = line.split(":", 1)[1].strip().strip('"')
+        elif line.startswith("write_scope:"):
+            current = "write_scope"
+        elif current == "write_scope" and line.startswith("    - "):
+            scope.append(line.split("- ", 1)[1].strip())
+        elif current == "write_scope" and line and not line.startswith(" "):
+            current = None
+
+scope = [str(item).strip() for item in scope if str(item).strip()]
+if task_id and scope:
+    print(f"{plan_id}\t{task_id}\t{','.join(scope)}")
+PY
+  done
+}
 
 delegation_bundle_path_for_task() {
   local task_id="$1"
@@ -121,7 +223,13 @@ for p in plans:
 
   [[ -n "$plan_ids" ]] || { echo "ralph-orchestrate: no plan IDs extracted from workflow plan output" >&2; return 0; }
 
+  local -a active_scope_rows=()
+  local -a selected_scope_rows=()
   local count=0
+  while IFS= read -r row; do
+    [[ -n "$row" ]] && active_scope_rows+=( "$row" )
+  done < <(active_delegation_scopes)
+
   local plan_id
   while IFS= read -r plan_id && [[ $count -lt $MAX_WORKERS ]]; do
     [[ -z "$plan_id" ]] && continue
@@ -141,13 +249,30 @@ for t in items:
         print(tid + '\t' + ws)
 " 2>/dev/null || true)"
 
-    local task_id ws_csv
+    local task_id ws_csv active_row selected_row active_plan active_task active_scope selected_plan selected_task selected_scope
     while IFS=$'\t' read -r task_id ws_csv && [[ $count -lt $MAX_WORKERS ]]; do
       [[ -z "$task_id" ]] && continue
       # Skip if delegation contract already exists
       local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
       [[ -f "$contract" ]] && { echo "ralph-orchestrate: skipping $task_id (delegation already exists)" >&2; continue; }
+      if [[ -n "$ws_csv" ]]; then
+        for active_row in "${active_scope_rows[@]}"; do
+          IFS=$'\t' read -r active_plan active_task active_scope <<< "$active_row"
+          if scope_lists_overlap "$ws_csv" "$active_scope"; then
+            echo "ralph-orchestrate: skipping $task_id (write_scope overlaps active delegation ${active_plan}/${active_task})" >&2
+            continue 2
+          fi
+        done
+        for selected_row in "${selected_scope_rows[@]}"; do
+          IFS=$'\t' read -r selected_plan selected_task selected_scope <<< "$selected_row"
+          if scope_lists_overlap "$ws_csv" "$selected_scope"; then
+            echo "ralph-orchestrate: skipping $task_id (write_scope overlaps same-pass selection ${selected_plan}/${selected_task})" >&2
+            continue 2
+          fi
+        done
+      fi
       tasks+=( "${plan_id}:${task_id}:${ws_csv}" )
+      selected_scope_rows+=( "${plan_id}"$'\t'"${task_id}"$'\t'"${ws_csv}" )
       (( count++ )) || true
     done <<< "$pending"
   done <<< "$plan_ids"
@@ -344,7 +469,7 @@ EOF
 agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
 [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
 [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
-[[ -n "${RALPH_MODEL:-}" ]] && agent_inv+=( --model "$RALPH_MODEL" )
+[[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
 echo "=== ralph-orchestrate: orchestrator pass (single run) ===" >&2
 if [[ -n "$LOG_DIR" ]]; then
