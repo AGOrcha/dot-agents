@@ -50,6 +50,181 @@ func writeAgentMD(t *testing.T, projectPath, agentName string) {
 	}
 }
 
+// writeCanonicalAgent creates ~/.agents/agents/<project>/<name>/AGENT.md under agentsHome.
+func writeCanonicalAgent(t *testing.T, agentsHome, projectName, agentName string) string {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "agents", projectName, agentName)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: " + agentName + "\ndescription: test agent\n---\n\n# " + agentName + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// ── importAgentIn ─────────────────────────────────────────────────────────────
+
+func TestImportAgentIn_CreatesSymlinksAndRegisters(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "importproj")
+	canonical := writeCanonicalAgent(t, agentsHome, "importproj", "imported-agent")
+
+	if err := importAgentIn("imported-agent", projectPath); err != nil {
+		t.Fatalf("importAgentIn: %v", err)
+	}
+
+	repoAgents := filepath.Join(projectPath, ".agents", "agents", "imported-agent")
+	fi, err := os.Lstat(repoAgents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected .agents/agents symlink, got %v", fi.Mode())
+	}
+	target, err := os.Readlink(repoAgents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != canonical {
+		t.Errorf(".agents/agents target = %q, want %q", target, canonical)
+	}
+
+	claudePath := filepath.Join(projectPath, ".claude", "agents", "imported-agent")
+	cfi, err := os.Lstat(claudePath)
+	if err != nil {
+		t.Fatalf(".claude/agents symlink: %v", err)
+	}
+	if cfi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected .claude/agents symlink")
+	}
+	clTarget, err := os.Readlink(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clTarget != canonical {
+		t.Errorf(".claude/agents target = %q, want %q", clTarget, canonical)
+	}
+
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range rc.Agents {
+		if a == "imported-agent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Agents = %v; want imported-agent", rc.Agents)
+	}
+}
+
+func TestImportAgentIn_Idempotent(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "importproj2")
+	writeCanonicalAgent(t, agentsHome, "importproj2", "idem-import")
+
+	if err := importAgentIn("idem-import", projectPath); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if err := importAgentIn("idem-import", projectPath); err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, a := range rc.Agents {
+		if a == "idem-import" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("want 1 listing of idem-import, got %d in %v", n, rc.Agents)
+	}
+}
+
+func TestImportAgentIn_ErrorCanonicalMissing(t *testing.T) {
+	_, projectPath := setupAgentsEnv(t, "missingcanon")
+
+	err := importAgentIn("nope", projectPath)
+	if err == nil {
+		t.Fatal("expected error for missing canonical agent")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q; want 'not found'", err.Error())
+	}
+}
+
+func TestImportAgentIn_ErrorNoProjectName(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	rc := &config.AgentsRC{Version: 1, Project: ""}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	writeCanonicalAgent(t, agentsHome, "global", "orphan")
+
+	err := importAgentIn("orphan", projectPath)
+	if err == nil {
+		t.Fatal("expected error for empty project name")
+	}
+	if !strings.Contains(err.Error(), "project name") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestImportAgentIn_ErrorRepoLocalRealDir(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "importproj3")
+	writeCanonicalAgent(t, agentsHome, "importproj3", "clash-import")
+	writeAgentMD(t, projectPath, "clash-import")
+
+	err := importAgentIn("clash-import", projectPath)
+	if err == nil {
+		t.Fatal("expected error when repo has real directory")
+	}
+	if !strings.Contains(err.Error(), "real directory") {
+		t.Errorf("error = %q; want 'real directory'", err.Error())
+	}
+}
+
+func TestImportAgentIn_ErrorRepoLocalMispointedSymlink(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "importproj4")
+	canonical := writeCanonicalAgent(t, agentsHome, "importproj4", "mis-import")
+
+	repoLocal := filepath.Join(projectPath, ".agents", "agents", "mis-import")
+	if err := os.MkdirAll(filepath.Join(projectPath, ".agents", "agents"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(agentsHome, "other"), repoLocal); err != nil {
+		t.Fatal(err)
+	}
+
+	err := importAgentIn("mis-import", projectPath)
+	if err == nil {
+		t.Fatal("expected error for mispointed symlink")
+	}
+	if !strings.Contains(err.Error(), "not the canonical path") {
+		t.Errorf("error = %q", err.Error())
+	}
+	// canonical tree unchanged
+	if _, err := os.Stat(filepath.Join(canonical, "AGENT.md")); err != nil {
+		t.Errorf("canonical AGENT.md: %v", err)
+	}
+}
+
 // ── promoteAgentIn success ─────────────────────────────────────────────────────
 
 func TestPromoteAgentIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
