@@ -3,7 +3,7 @@ plan_id: loop-agent-pipeline
 tasks:
     - id: p1-pipeline-control
       title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - p7-post-closeout
@@ -19,7 +19,7 @@ tasks:
 
         **write_scope:** bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate, commands/workflow.go, commands/workflow_test.go
 
-        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes). **Serialize** later pipeline tasks that touch `commands/workflow.go` (e.g. `p2`–`p6`, `p7`) until this delegation closes — avoid overlapping edits on workflow.go.
+        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes) and with `p2-impl-agent-surface` (p2 does not touch workflow.go). **Do not** start `p3a-result-schema` worker (`del-p3a-result-schema-1776438877`) until this task closes — both edit `commands/workflow.go` / `commands/workflow_test.go`. **Serialize** other pipeline tasks that touch `commands/workflow.go` after this delegation closes as needed.
 
         Control-plane entry point for D3.a: plan-scoped loop-break via workflow next/tasks filtering, verification directories before dispatch, tdd-fresh gate plus verifier retry-cap wiring.
     - id: p2-impl-agent-surface
@@ -35,7 +35,12 @@ tasks:
         - .agents/prompts/impl-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Define the repo-owned impl-agent overlay and impl-handoff contract without breaking existing Pattern E loop-worker callers. Clarify write_scope_touched, ready_for_verification, and optional tests_unchanged_justified.
+      notes: |-
+        **feedback_goal:** Repo-owned impl-agent overlay and impl-handoff contract updated; Pattern E loop-worker callers still work; `write_scope_touched`, `ready_for_verification`, and optional `tests_unchanged_justified` semantics clarified in spec + scripts; verification passes.
+
+        **write_scope:** bin/tests/ralph-cursor-loop, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Delegation bundle `del-p2-impl-agent-surface-1776438876` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe to run in parallel** with `p1-pipeline-control` and `agents-import` — no overlap with `commands/workflow.go` or `commands/agents.go`. Worker runs verify + checkpoint + merge-back.
     - id: p3a-result-schema
       title: Introduce canonical verification-result artifact contract
       status: in_progress
@@ -55,7 +60,12 @@ tasks:
         - commands/workflow.go
         - commands/workflow_test.go
       verification_required: true
-      notes: Establish the typed verifier artifact at .agents/active/verification/<task_id>/<type>.result.yaml and any minimal command-side validation helpers required by review and merge-back paths.
+      notes: |-
+        **feedback_goal:** Canonical JSON Schema + command-side validation for verification results; typed artifact path `.agents/active/verification/<task_id>/<type>.result.yaml`; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
+
+        **write_scope:** schemas/verification-result.schema.json, commands/workflow.go, commands/workflow_test.go
+
+        **context:** Delegation bundle `del-p3a-result-schema-1776438877` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Blocked on `p1-pipeline-control`** — both modify `commands/workflow.go` / `commands/workflow_test.go`. **Do not** start this worker until `del-p1-pipeline-control` merge-back completes and p1 advances. After p1 closes, worker runs verify + checkpoint + merge-back.
     - id: p3b-unit-verifier
       title: Unit verifier surface and result contract
       status: pending
