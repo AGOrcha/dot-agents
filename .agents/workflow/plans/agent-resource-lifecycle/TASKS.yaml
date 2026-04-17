@@ -87,7 +87,7 @@ tasks:
         auto-creates the repo symlinks without requiring manual ln -s.
     - id: agents-remove
       title: agents remove <name> — unlink repo symlinks and optionally delete canonical
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
