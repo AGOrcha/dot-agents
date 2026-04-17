@@ -44,7 +44,7 @@ tasks:
         - Idempotent: no-op if symlinks already correct
     - id: agents-refresh-wiring
       title: Fix refresh and install to wire .agentsrc.json agents list and sync ~/.agents/agents/<project>/ → repo symlinks
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents

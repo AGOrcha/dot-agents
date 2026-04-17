@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-agents-refresh-wiring-1776416139
+plan_id: agent-resource-lifecycle
+task_id: agents-refresh-wiring
+owner: ralph-orchestrate
+worker:
+    profile: loop-worker
+    project_overlay_files:
+        - .agents/active/active.loop.md
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-04-17T08:55:39Z"
+    reason: ralph-orchestrate auto-fanout
+scope:
+    write_scope:
+        - internal/platform/claude.go
+        - commands/refresh.go
+        - commands/install.go
+prompt:
+    prompt_files:
+        - .agents/active/active.loop.md
+context:
+    required_files:
+        - .agents/active/loop-state.md
+        - .agents/workflow/plans/agent-resource-lifecycle/TASKS.yaml
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -1,0 +1,30 @@
+schema_version: 1
+id: del-agents-refresh-wiring-1776416139
+parent_plan_id: agent-resource-lifecycle
+parent_task_id: agents-refresh-wiring
+title: Fix refresh and install to wire .agentsrc.json agents list and sync ~/.agents/agents/<project>/ → repo symlinks
+summary: Delegated from plan Agent Resource Lifecycle — promote, import, remove, and wiring parity for Claude Code agents
+write_scope:
+    - internal/platform/claude.go
+    - commands/refresh.go
+    - commands/install.go
+success_criteria: |-
+    Two surfaces to fix:
+
+    1. createAgentsLinks() in internal/platform/claude.go is a no-op (line 288).
+       Fix: scan ~/.agents/agents/<project>/ for agent dirs; for each, ensure
+       .agents/agents/<name>/ and .claude/agents/<name>/ symlinks exist and resolve.
+       This makes refresh idempotent and self-healing (same model as ensureUserSkills).
+
+    2. install (commands/install.go) reads .agentsrc.json agents[] list but does not
+       wire the agents. Fix: for each name in agents[], call the same logic as agents-import
+       to create the repo symlinks from the canonical path.
+
+    Acceptance: dot-agents refresh after adding a new agent to ~/.agents/agents/dot-agents/
+    auto-creates the repo symlinks without requiring manual ln -s.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-17T08:55:39Z"
+updated_at: "2026-04-17T08:55:39Z"
