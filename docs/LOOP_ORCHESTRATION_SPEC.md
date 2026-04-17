@@ -1,7 +1,7 @@
 # Loop Orchestration Spec
 
 Status: Draft
-Last updated: 2026-04-12
+Last updated: 2026-04-17
 Related:
 - `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md`
@@ -331,6 +331,13 @@ Repo-local guidance layered on top of the worker profile:
 
 This is where files like `.agents/active/active.loop.md` or repo-specific loop prompts belong once trimmed into project overlays instead of full worker definitions.
 
+**Repo prompt files — do not collapse roles**
+
+- **`loop-worker` role** (bounded worker that runs tests, `workflow verify record`, `workflow checkpoint`, and `workflow merge-back`): optional repo prompt file is a *worker* overlay (e.g. `.agents/prompts/loop-worker.project.md` if your repo adds one). Same three-layer stack: global profile → project overlay → bundle.
+- **`impl-agent` role** (implementation slice only; hands off to verifiers): use **`.agents/prompts/impl-agent.project.md`** as the repo-owned impl surface. It must not duplicate the global loop-worker profile; it only adds repo wording for implementation + **`impl-handoff.yaml`** emission.
+
+**Pattern E (`bin/tests/ralph-cursor-loop`)** remains a **loop-worker** caller: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Splitting impl-only fanouts from loop-worker fanouts is deliberate so orchestrators do not reuse one prompt file for both roles.
+
 #### 3. Delegation bundle
 
 Per-delegation persisted payload at `.agents/active/delegation-bundles/<delegation_id>.yaml` (written by `workflow fanout` with Phase 8 flags — see **Delegation bundle workflow** under *Canonical Artifact Direction*):
@@ -356,6 +363,23 @@ The global loop-worker profile should carry six reusable testing/verification ad
 6. `sandbox_policy` for destructive or stateful verification, so a worker can prove mutating behavior without touching the user's live home/project state.
 
 Global loop-worker behavior should also require negative-path coverage whenever the delegated change introduces new failure modes.
+
+### Phase 8: Impl-handoff contract (impl-agent → verifiers)
+
+The **impl-agent** role writes a small YAML handoff beside verification artifacts so gates do not depend on chat logs:
+
+**Path:** `.agents/active/verification/<task_id>/impl-handoff.yaml`
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `task_id` | string | Canonical task id (matches delegation bundle) |
+| `commit_sha` | string | Commit the verifier should evaluate |
+| `write_scope_touched` | string[] | Paths actually modified; drives scoped tests and TDD-fresh gates |
+| `ready_for_verification` | boolean | `true` when implementation is complete and the tree is ready for verifier entry |
+| `tests_unchanged_justified` | boolean (optional) | When `true`, documents that tests were intentionally not changed under `write_scope_touched` (e.g. doc-only work); omit or `false` when tests were added/updated |
+| `impl_notes` | string | Short cold-start context for verifiers |
+
+Pre-verifier policy can require: either a test file touch under `write_scope_touched`, or `tests_unchanged_justified: true` with an allowed reason. Repo wording for the impl role lives in **`.agents/prompts/impl-agent.project.md`**; loop-worker behavior stays in the global profile + `loop-worker` skill.
 
 ### Phase 8: Canonical artifact and schema
 
@@ -421,6 +445,7 @@ prompt:
     - "Implement only the selected task."
   prompt_files:
     - .agents/prompts/loop-worker.project.md
+    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for Pattern E (ralph-cursor-loop)
 
 context:
   required_files:
