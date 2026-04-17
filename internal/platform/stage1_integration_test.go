@@ -108,6 +108,24 @@ func TestClaudeCreateLinksSymlinksGlobalAgentsIntoUserHome(t *testing.T) {
 	assertSymlinkTarget(t, filepath.Join(home, dirClaude, "agents", "reviewer"), globalAgentDir)
 }
 
+func TestClaudeCreateLinksSymlinksProjectAgentsIntoRepoMirrors(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	projectAgentDir := filepath.Join(agentsHome, "agents", fixtureProject, "docbot")
+	writeTextFile(t, filepath.Join(projectAgentDir, "AGENT.md"), "# Docbot\n")
+	mkdirAll(t, repo)
+
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "agents", "docbot"), projectAgentDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "agents", "docbot"), projectAgentDir)
+}
+
 func TestCursorCreateLinksHardlinksAndMCPSelection(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome

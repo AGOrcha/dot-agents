@@ -12,6 +12,12 @@ tasks:
         - commands/agents_test.go
       verification_required: true
       notes: |-
+        **feedback_goal:** `agents promote` behaves like `promoteSkillIn` for agents: copy to canonical ~/.agents, replace repo dirs with symlinks, register in .agentsrc.json, platform symlink under .claude/agents; `go test ./commands -run Agents` (or focused agents tests) passes; worker runs verify + checkpoint + merge-back.
+
+        **write_scope:** commands/agents.go, commands/agents_test.go
+
+        **context:** Active delegation bundle `del-agents-promote-1776416139`. Parallel with `agents-refresh-wiring` is OK (disjoint files). **Serialize before** `agents-import` / `agents-remove` — those tasks edit the same Go files.
+
         Mirror of promoteSkillIn() in commands/skills.go.
 
         Behaviour:
@@ -34,6 +40,12 @@ tasks:
         - commands/agents_test.go
       verification_required: true
       notes: |-
+        **feedback_goal:** `agents import <name>` creates repo symlinks and .agentsrc registration from canonical tree; idempotent when already correct; tests cover happy path and edge cases; ready for merge-back after verify.
+
+        **write_scope:** commands/agents.go, commands/agents_test.go
+
+        **context:** No active bundle yet — **do not fan out in parallel** with `agents-promote` (same write_scope; merge conflicts). Queue fanout after `agents-promote` merge-back completes or hand off sequentially.
+
         Reverse of promote: given a name registered in ~/.agents/agents/<project>/, create the repo symlinks.
 
         Behaviour:
@@ -54,6 +66,12 @@ tasks:
         - commands/install.go
       verification_required: true
       notes: |-
+        **feedback_goal:** `createAgentsLinks` implements real symlink healing; `install` wires `.agentsrc.json` agents[] into repo; refresh/install tests or focused integration checks pass; merge-back ready.
+
+        **write_scope:** internal/platform/claude.go, commands/refresh.go, commands/install.go
+
+        **context:** Active delegation bundle `del-agents-refresh-wiring-1776416139`. Safe to run parallel with `agents-promote` (no file overlap). Install path should reuse the same helper as `agents-import` once that exists — coordinate ordering if import lands after this worker (rebase or thin follow-up).
+
         Two surfaces to fix:
 
         1. createAgentsLinks() in internal/platform/claude.go is a no-op (line 288).
@@ -78,6 +96,12 @@ tasks:
         - commands/agents_test.go
       verification_required: true
       notes: |-
+        **feedback_goal:** `agents remove` unlinks repo symlinks, updates .agentsrc.json, optional --purge with confirmation; tests pass; merge-back ready.
+
+        **write_scope:** commands/agents.go, commands/agents_test.go
+
+        **context:** Same files as promote/import — fan out only when no other worker holds `commands/agents.go` (after promote/import delegations close).
+
         Cleanup counterpart to promote/import.
 
         Behaviour:

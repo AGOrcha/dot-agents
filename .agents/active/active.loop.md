@@ -9,6 +9,7 @@ Copy the prompt below into a worker agent as: `/loop 1hr <prompt>` (or paste `<p
 - **Valid fanout reference:** `--project-overlay .agents/active/active.loop.md` (path must stay inside the repo).
 - **Skill routing:** In this project prefer `/orchestrator-session-start` over `/agent-start`. `agent-start` is for one-off tasks in repos without a dot-agents workflow setup.
 - **TS port KG (phase-4):** `ports/typescript/src/commands/kg.ts` exposes read-only `runKgHealth` / `runKgQuery`; query is an intentional Go-only stub (no subprocess).
+- **Agent repo mirrors:** On refresh/install, Claude `createAgentsLinks` syncs `~/.agents/agents/<project>/` into repo `.agents/agents/` and `.claude/agents/` (idempotent alongside shared-target projection).
 
 ---
 
