@@ -1,0 +1,59 @@
+schema_version: 1
+plan_id: error-message-compliance
+tasks:
+    - id: inventory-error-message-behavior
+      title: Inventory current CLI error rendering and command-specific failure patterns
+      status: proposed
+      depends_on: []
+      blocks:
+        - define-error-message-contract
+        - implement-error-message-fixes
+      owner: dot-agents
+      write_scope:
+        - cmd/dot-agents/
+        - commands/
+        - docs/
+      verification_required: false
+      notes: Record how CLIError, ErrorWithHints, UsageError, flag parse errors, and ad hoc fmt.Errorf paths currently render; call out commands that still leak raw internal errors or omit actionable hints.
+    - id: define-error-message-contract
+      title: Define the supported contract for actionable CLI error messages
+      status: proposed
+      depends_on:
+        - inventory-error-message-behavior
+      blocks:
+        - implement-error-message-fixes
+        - add-error-message-regression-coverage
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - docs/
+      verification_required: false
+      notes: Decide which failures should show usage, which should show hints, how enum validation errors enumerate valid values, and what automation can or cannot rely on from error paths.
+    - id: implement-error-message-fixes
+      title: Normalize mismatched command errors onto the shared CLIError contract
+      status: proposed
+      depends_on:
+        - inventory-error-message-behavior
+        - define-error-message-contract
+      blocks:
+        - add-error-message-regression-coverage
+      owner: dot-agents
+      write_scope:
+        - cmd/dot-agents/
+        - commands/
+        - internal/ui/
+      verification_required: true
+      notes: Prioritize command families that currently return raw fmt.Errorf strings for validation or recovery-heavy failures instead of UsageError or ErrorWithHints.
+    - id: add-error-message-regression-coverage
+      title: Add regression coverage for error message rendering and recovery hints
+      status: proposed
+      depends_on:
+        - define-error-message-contract
+        - implement-error-message-fixes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/*_test.go
+        - cmd/dot-agents/
+      verification_required: true
+      notes: Cover representative usage errors, enum validation errors, recovery hints, and root flag parse failures so future commands do not drift back to opaque messages.

@@ -1,0 +1,11 @@
+schema_version: 1
+id: error-message-compliance
+title: Error Message Compliance Plan
+status: proposed
+summary: Audit and normalize CLI error messages so command failures use consistent actionable phrasing, hints, and usage rendering, with explicit contracts for validation and automation-facing surfaces.
+created_at: "2026-04-17T00:00:00Z"
+updated_at: "2026-04-17T00:00:00Z"
+owner: dot-agents
+success_criteria: Command failures use a deliberate contract for primary message, hints, and usage; validation errors enumerate valid values; unsupported paths fail clearly instead of leaking raw internal errors.
+verification_strategy: Focused command tests for representative failure paths plus go test ./...
+current_focus_task: ""
