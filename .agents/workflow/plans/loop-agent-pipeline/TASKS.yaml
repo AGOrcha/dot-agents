@@ -38,7 +38,7 @@ tasks:
       notes: Define the repo-owned impl-agent overlay and impl-handoff contract without breaking existing Pattern E loop-worker callers. Clarify write_scope_touched, ready_for_verification, and optional tests_unchanged_justified.
     - id: p3a-result-schema
       title: Introduce canonical verification-result artifact contract
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - p3b-unit-verifier
