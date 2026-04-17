@@ -24,7 +24,7 @@ tasks:
         Control-plane entry point for D3.a: plan-scoped loop-break via workflow next/tasks filtering, verification directories before dispatch, tdd-fresh gate plus verifier retry-cap wiring.
     - id: p2-impl-agent-surface
       title: Separate repo-side impl-agent surface from loop-worker behavior
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - p5-iter-log-v2
