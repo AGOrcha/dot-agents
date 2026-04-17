@@ -14,10 +14,17 @@ tasks:
         - commands/workflow.go
         - commands/workflow_test.go
       verification_required: true
-      notes: Control-plane entry point for D3.a. Add plan-scoped loop-break behavior via workflow next or tasks filtering, create verification directories before dispatch, and enforce the tdd-fresh gate plus verifier retry-cap wiring.
+      notes: |-
+        **feedback_goal:** Ralph pipeline + orchestrate scripts and `workflow` CLI implement plan-scoped break checks, verification dir lifecycle before dispatch, pre-verifier TDD gate, and verifier retry-cap wiring; `go test ./commands -run Workflow` (or focused workflow tests) passes; worker runs verify + checkpoint + merge-back.
+
+        **write_scope:** bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate, commands/workflow.go, commands/workflow_test.go
+
+        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes). **Serialize** later pipeline tasks that touch `commands/workflow.go` (e.g. `p2`–`p6`, `p7`) until this delegation closes — avoid overlapping edits on workflow.go.
+
+        Control-plane entry point for D3.a: plan-scoped loop-break via workflow next/tasks filtering, verification directories before dispatch, tdd-fresh gate plus verifier retry-cap wiring.
     - id: p2-impl-agent-surface
       title: Separate repo-side impl-agent surface from loop-worker behavior
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - p5-iter-log-v2
