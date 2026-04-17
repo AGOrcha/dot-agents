@@ -524,3 +524,134 @@ func TestPromoteAgentIn_ErrorMissingAGENTmd(t *testing.T) {
 		t.Errorf("error message = %q; want 'AGENT.md' substring", err.Error())
 	}
 }
+
+// ── removeAgentIn ─────────────────────────────────────────────────────────────
+
+func TestRemoveAgentIn_UnlinksSymlinksAndManifest(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "rmproj")
+	writeCanonicalAgent(t, agentsHome, "rmproj", "gone-agent")
+
+	if err := importAgentIn("gone-agent", projectPath); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if err := removeAgentIn("gone-agent", projectPath, false); err != nil {
+		t.Fatalf("removeAgentIn: %v", err)
+	}
+
+	if pathExists(filepath.Join(projectPath, ".agents", "agents", "gone-agent")) {
+		t.Error("expected .agents/agents/gone-agent removed")
+	}
+	if pathExists(filepath.Join(projectPath, ".claude", "agents", "gone-agent")) {
+		t.Error("expected .claude/agents/gone-agent removed")
+	}
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range rc.Agents {
+		if a == "gone-agent" {
+			t.Errorf("agents list should not include gone-agent: %v", rc.Agents)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "agents", "rmproj", "gone-agent", "AGENT.md")); err != nil {
+		t.Errorf("canonical AGENT.md should remain without --purge: %v", err)
+	}
+}
+
+func TestRemoveAgentIn_DriftSymlinkWithoutManifestEntry(t *testing.T) {
+	agentsHome, projectPath := setupAgentsEnv(t, "driftproj")
+	canonical := writeCanonicalAgent(t, agentsHome, "driftproj", "drift-agent")
+
+	repoLocal := filepath.Join(projectPath, ".agents", "agents", "drift-agent")
+	if err := os.MkdirAll(filepath.Join(projectPath, ".agents", "agents"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(canonical, repoLocal); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeAgentIn("drift-agent", projectPath, false); err != nil {
+		t.Fatalf("removeAgentIn: %v", err)
+	}
+	if pathExists(repoLocal) {
+		t.Error("expected drift symlink removed")
+	}
+}
+
+func TestRemoveAgentIn_ErrorNotLinked(t *testing.T) {
+	_, projectPath := setupAgentsEnv(t, "nolink")
+
+	err := removeAgentIn("missing", projectPath, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "not linked") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestRemoveAgentIn_ErrorRealDirectory(t *testing.T) {
+	_, projectPath := setupAgentsEnv(t, "realdirproj")
+	writeAgentMD(t, projectPath, "real-agent")
+
+	err := removeAgentIn("real-agent", projectPath, false)
+	if err == nil {
+		t.Fatal("expected error for real directory")
+	}
+	if !strings.Contains(err.Error(), "real directory") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestRemoveAgentIn_PurgeDeletesCanonical(t *testing.T) {
+	oldYes := Flags.Yes
+	Flags.Yes = true
+	t.Cleanup(func() { Flags.Yes = oldYes })
+
+	agentsHome, projectPath := setupAgentsEnv(t, "purgeproj")
+	writeCanonicalAgent(t, agentsHome, "purgeproj", "purge-me")
+	if err := importAgentIn("purge-me", projectPath); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	if err := removeAgentIn("purge-me", projectPath, true); err != nil {
+		t.Fatalf("removeAgentIn: %v", err)
+	}
+	canonical := filepath.Join(agentsHome, "agents", "purgeproj", "purge-me")
+	if _, err := os.Stat(filepath.Join(canonical, "AGENT.md")); !os.IsNotExist(err) {
+		t.Errorf("expected canonical tree removed: %v", err)
+	}
+}
+
+func TestRemoveAgentIn_ErrorPurgeCanonicalSymlink(t *testing.T) {
+	oldYes := Flags.Yes
+	Flags.Yes = true
+	t.Cleanup(func() { Flags.Yes = oldYes })
+
+	agentsHome, projectPath := setupAgentsEnv(t, "symproj")
+	other := filepath.Join(agentsHome, "agents", "symproj", "other")
+	if err := os.MkdirAll(filepath.Join(other, "nested"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	badCanon := filepath.Join(agentsHome, "agents", "symproj", "bad-sym")
+	_ = os.RemoveAll(badCanon)
+	if err := os.Symlink(other, badCanon); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc.Agents = append(rc.Agents, "bad-sym")
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	err = removeAgentIn("bad-sym", projectPath, true)
+	if err == nil {
+		t.Fatal("expected error when canonical path is symlink")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error = %q", err.Error())
+	}
+}

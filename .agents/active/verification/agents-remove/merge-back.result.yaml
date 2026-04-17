@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: agents-remove
+parent_plan_id: agent-resource-lifecycle
+verifier_type: merge-back
+status: pass
+summary: 'Parent: advance agents-remove + delegation closeout after review.'
+recorded_at: "2026-04-17T15:19:31Z"
+delegation_id: del-agents-remove-1776438876
+artifact_paths:
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/agent-resource-lifecycle/PLAN.yaml
+    - .agents/workflow/plans/agent-resource-lifecycle/TASKS.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - bin/tests/ralph-pipeline
+    - commands/agents.go
+    - commands/agents_test.go
+    - commands/workflow.go
+    - commands/workflow_test.go
