@@ -591,28 +591,60 @@ preferences, fanout artifacts, and bridge queries.`,
 		Short: "Manage verification log",
 		Example: ExampleBlock(
 			"  dot-agents workflow verify record --kind test --status pass --summary \"go test ./...\"",
+			"  dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
 			"  dot-agents workflow verify log",
 		),
 	}
 	var verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary string
+	var reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask string
+	var reviewFailedGates []string
 	verifyRecordCmd := &cobra.Command{
 		Use:   "record",
 		Short: "Record a verification run",
 		Example: ExampleBlock(
 			"  dot-agents workflow verify record --kind test --status pass --command \"go test ./...\" --summary \"all packages passed\"",
+			"  dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"ready to merge\"",
 		),
 		Args: NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			k := strings.TrimSpace(strings.ToLower(verifyKind))
+			if k == "" {
+				return fmt.Errorf("--kind is required")
+			}
+			if strings.TrimSpace(verifySummary) == "" {
+				return fmt.Errorf("--summary is required")
+			}
+			if k == "review" {
+				if strings.TrimSpace(verifyStatus) != "" {
+					return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
+				}
+				if strings.TrimSpace(reviewPhase1) == "" || strings.TrimSpace(reviewPhase2) == "" {
+					return ErrorWithHints(
+						"--phase1-decision and --phase2-decision are required when --kind review",
+						"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
+					)
+				}
+				return runWorkflowVerifyRecordReview(verifyCommand, verifyScope, verifySummary, reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, reviewFailedGates)
+			}
+			if strings.TrimSpace(verifyStatus) == "" {
+				return fmt.Errorf("--status is required when --kind is not review")
+			}
 			return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary)
 		},
 	}
-	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom (required)")
-	verifyRecordCmd.Flags().StringVar(&verifyStatus, "status", "", "Status: pass|fail|partial|unknown (required)")
+	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom|review (required)")
+	verifyRecordCmd.Flags().StringVar(&verifyStatus, "status", "", "Status: pass|fail|partial|unknown (required unless --kind review)")
 	verifyRecordCmd.Flags().StringVar(&verifyCommand, "command", "", "Command that was run")
 	verifyRecordCmd.Flags().StringVar(&verifyScope, "scope", "repo", "Scope: file|package|repo|custom")
 	verifyRecordCmd.Flags().StringVar(&verifySummary, "summary", "", "Summary of the run (required)")
+	verifyRecordCmd.Flags().StringVar(&reviewPhase1, "phase1-decision", "", "When --kind review: first phase decision (accept|reject|escalate)")
+	verifyRecordCmd.Flags().StringVar(&reviewPhase2, "phase2-decision", "", "When --kind review: second phase decision (accept|reject|escalate)")
+	verifyRecordCmd.Flags().StringVar(&reviewOverall, "overall-decision", "", "When --kind review: optional; must match derived consolidation from phase decisions if set")
+	verifyRecordCmd.Flags().StringSliceVar(&reviewFailedGates, "failed-gate", nil, "When --kind review: failed verifier or gate slug (repeatable)")
+	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
+	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
+	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "When --kind review: task id under .agents/active/delegation/<task>.yaml (defaults to sole active delegation)")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
-	_ = verifyRecordCmd.MarkFlagRequired("status")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")
 
 	var verifyLogAll bool
@@ -3217,8 +3249,8 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 // ── Wave 3: Verification log ──────────────────────────────────────────────────
 
 func isValidVerificationKind(k string) bool {
-	switch k {
-	case "test", "lint", "build", "format", "custom":
+	switch strings.TrimSpace(strings.ToLower(k)) {
+	case "test", "lint", "build", "format", "custom", "review":
 		return true
 	default:
 		return false
@@ -3397,11 +3429,111 @@ func runWorkflowHealth() error {
 	return nil
 }
 
+func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, overallIn, escalation, reviewerNotes, taskFlag string, failedGatesInput []string) error {
+	if !isValidVerificationScope(scope) {
+		return ErrorWithHints(
+			fmt.Sprintf("invalid scope %q", scope),
+			"Valid verification scopes: `file`, `package`, `repo`, `custom`.",
+		)
+	}
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	phase1, err := parseReviewPhaseDecision("--phase1-decision", phase1In)
+	if err != nil {
+		return err
+	}
+	phase2, err := parseReviewPhaseDecision("--phase2-decision", phase2In)
+	if err != nil {
+		return err
+	}
+	derived := deriveOverallReviewDecision(phase1, phase2)
+	overall := strings.TrimSpace(strings.ToLower(overallIn))
+	if overall == "" {
+		overall = derived
+	} else if overall != derived {
+		return ErrorWithHints(
+			fmt.Sprintf("overall decision %q disagrees with phases (derived %q from phase_1=%s phase_2=%s)", overall, derived, phase1, phase2),
+			"Omit --overall-decision to use derived consolidation, or adjust phase flags so the derived value matches.",
+		)
+	}
+	if overall == "escalate" && strings.TrimSpace(escalation) == "" {
+		return ErrorWithHints(
+			"overall decision is escalate but --escalation-reason is empty",
+			"Provide a non-empty --escalation-reason whenever the consolidated decision is escalate.",
+		)
+	}
+
+	taskID := strings.TrimSpace(taskFlag)
+	var contract *DelegationContract
+	if taskID == "" {
+		contract = firstReadableDelegationContract(project.Path)
+		if contract == nil {
+			return ErrorWithHints(
+				"review verify record needs a delegation task id",
+				"Pass --task <task_id> matching `.agents/active/delegation/<task_id>.yaml`, or keep a single readable active delegation contract.",
+			)
+		}
+		taskID = contract.ParentTaskID
+	} else {
+		contract, err = loadDelegationContract(project.Path, taskID)
+		if err != nil {
+			return fmt.Errorf("load delegation contract for task %q: %w", taskID, err)
+		}
+	}
+
+	failedGates := trimStringSlice(failedGatesInput)
+	if failedGates == nil {
+		failedGates = []string{}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	doc := &ReviewDecisionDoc{
+		SchemaVersion:    1,
+		TaskID:           taskID,
+		ParentPlanID:     contract.ParentPlanID,
+		DelegationID:     contract.ID,
+		Phase1Decision:   phase1,
+		Phase2Decision:   phase2,
+		OverallDecision:  overall,
+		FailedGates:      failedGates,
+		EscalationReason: strings.TrimSpace(escalation),
+		ReviewerNotes:    strings.TrimSpace(reviewerNotes),
+		RecordedAt:       now,
+		RecordedBy:       "dot-agents workflow verify record",
+	}
+	if err := writeReviewDecisionYAML(project.Path, doc); err != nil {
+		return err
+	}
+
+	artifactRel := iterLogReviewDecisionPath(taskID)
+	rec := VerificationRecord{
+		SchemaVersion: 1,
+		Timestamp:     now,
+		Kind:          "review",
+		Status:        overallDecisionToVerificationStatus(overall),
+		Command:       strings.TrimSpace(command),
+		Scope:         scope,
+		Summary:       strings.TrimSpace(summary),
+		Artifacts:     []string{artifactRel},
+		RecordedBy:    "dot-agents workflow verify record",
+	}
+	if err := appendVerificationLog(project.Name, rec); err != nil {
+		return err
+	}
+	ui.Success(fmt.Sprintf("Review decision recorded for task %s: overall=%s (%s)", taskID, overall, strings.TrimSpace(summary)))
+	return nil
+}
+
 func runWorkflowVerifyRecord(kind, status, command, scope, summary string) error {
+	if strings.TrimSpace(strings.ToLower(kind)) == "review" {
+		return fmt.Errorf("internal error: use runWorkflowVerifyRecordReview for kind review")
+	}
 	if !isValidVerificationKind(kind) {
 		return ErrorWithHints(
 			fmt.Sprintf("invalid kind %q", kind),
-			"Valid verification kinds: `test`, `lint`, `build`, `format`, `custom`.",
+			"Valid verification kinds: `test`, `lint`, `build`, `format`, `custom`, `review`.",
 		)
 	}
 	if !isValidVerificationStatus(status) {
@@ -4791,7 +4923,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	artifact := foldBackArtifact{
 		SchemaVersion: 1,
 		PlanID:        planID,
-		Observation: observation,
+		Observation:   observation,
 		CreatedAt:     createdAt,
 	}
 	if priorExists {
