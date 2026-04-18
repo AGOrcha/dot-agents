@@ -11,6 +11,7 @@
 #   RALPH_ITERATIONS             worker implementation budget (default 5)
 #   RALPH_MAX_PARALLEL_WORKERS   max concurrent workers (default 3)
 #   RALPH_AUTO_FANOUT            1 = auto-create bundles (default)
+#   RALPH_DELEGATION_PROMPT_FILE optional: forwarded to ralph-orchestrate (must differ from RALPH_PROJECT_OVERLAY; see D5)
 #   RALPH_CLOSEOUT_AUTO          1 = auto-accept merge-backs (default)
 #   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  forwarded to ralph-closeout: optional read-only fold-back list per plan after closeout
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override

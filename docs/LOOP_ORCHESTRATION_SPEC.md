@@ -302,6 +302,18 @@ Phase 3B/3C correspond to items 4 and 5 below: define the canonical slice artifa
 
 Phase 8 should formalize delegation handoff as a three-layer model rather than treating one giant prompt as the interface.
 
+#### D5 — `--project-overlay` vs `--prompt` / `--prompt-file` (do not collapse)
+
+**Resolution (locked in `decisions.1.md` for this plan):** `workflow fanout` maps these to **different** parts of the delegation bundle:
+
+| Input | Bundle path | Role |
+|------|-------------|------|
+| `--project-overlay` | `worker.project_overlay_files` | How this role runs in the repo (AGENT.md-like, durable) |
+| `--prompt` (repeatable) | `prompt.inline` | What to do for **this** delegation (runtime) |
+| `--prompt-file` (repeatable) | `prompt.prompt_files` | File-backed per-delegation prompt, still distinct from the overlay file |
+
+`bin/tests/ralph-orchestrate` must **not** pass the same file as both `--project-overlay` and `--prompt-file`. The default is overlay + inline `--prompt`; an optional repo file such as `.agents/prompts/loop-worker.project.md` may be used for `--prompt-file` when it exists and is not the overlay path. **Role-aware dispatch** picks the right overlay and prompt file for **impl** vs **verifier** vs **review** (see *Repo prompt files — do not collapse roles* below); the orchestrator uses `.agents/active/orchestrator.loop.md` and the worker uses `active.loop.md` plus delegation prompts — not one file for every role.
+
 #### 1. Global worker profile
 
 Reusable, user-local behavior under `~/.agents/`:

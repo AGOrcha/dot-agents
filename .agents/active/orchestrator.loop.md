@@ -65,11 +65,16 @@ After selecting a task:
 go run ./cmd/dot-agents workflow fanout \
   --plan <plan-id> \
   --task <task-id> \
+  --owner <delegate-name> \
+  --write-scope "<bounded paths>" \
   --delegate-profile loop-worker \
   --project-overlay .agents/active/active.loop.md \
+  --prompt "Read the bundle; load loop-worker; implement write_scope; /iteration-close when done." \
   --context-file .agents/active/loop-state.md \
   --context-file .agents/workflow/plans/<plan-id>/TASKS.yaml
 ```
+
+`--project-overlay` (project/role guidance) and per-delegation prompt (`--prompt` and/or `--prompt-file`) are **different** bundle fields per **D5** (see `decisions.1.md` in this plan’s spec set). **Do not** pass the same file as both `--project-overlay` and `--prompt-file`. `ralph-orchestrate` uses `.agents/active/active.loop.md` for overlay, inline `--prompt` for the default handoff, and only adds `--prompt-file` when `RALPH_DELEGATION_PROMPT_FILE` (or the default `.agents/prompts/loop-worker.project.md` if present) is a path **distinct** from the overlay. Pick role-specific project overlays and prompts when the task is impl-only, verifier, or review (e.g. `.agents/prompts/impl-agent.project.md`, `verifiers/*.project.md`, `review-agent.project.md`).
 
 **Work directly (no fanout) when:**
 - The task is research, planning, or architectural (no bounded write_scope)

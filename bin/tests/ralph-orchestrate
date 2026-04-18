@@ -13,6 +13,8 @@
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
 #   RALPH_VERIFIER_RETRY_MAX     if set to a positive integer, passed as workflow fanout --verifier-retry-max
 #   RALPH_VERIFIER_SEQUENCE      if non-empty, passed as workflow fanout --verifier-sequence (comma-separated profile ids)
+#   RALPH_DELEGATION_PROMPT_FILE optional repo-relative file for --prompt-file; must not be the same path as
+#                                 RALPH_PROJECT_OVERLAY (D5: bundle fields for overlay vs per-delegation prompt)
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_MODEL                  fallback model override when no role-specific value is set
 #   RALPH_FORCE                  1 = pass -f to agent (broader allow)
@@ -310,6 +312,10 @@ create_bundle() {
   local worker_overlay_rel="${WORKER_OVERLAY#$REPO_ROOT/}"
   local tasks_yaml_rel=".agents/workflow/plans/${plan_id}/TASKS.yaml"
 
+  # D5: --project-overlay and per-delegation prompt are different bundle fields; do not pass
+  # the same repo file for both. Runtime "what to do" defaults to --prompt; optional
+  # RALPH_DELEGATION_PROMPT_FILE (or .agents/prompts/loop-worker.project.md) supplies --prompt-file
+  # when it exists and is not the overlay path.
   local -a fanout_args=( workflow fanout
     --plan "$plan_id"
     --task "$task_id"
@@ -317,8 +323,18 @@ create_bundle() {
     --delegate-profile "${RALPH_DELEGATE_PROFILE:-loop-worker}"
     --selection-reason "ralph-orchestrate auto-fanout"
     --project-overlay "$worker_overlay_rel"
-    --prompt-file "$worker_overlay_rel"
+    --prompt "You are a bounded implementation worker. Read the delegation bundle YAML (path below after fanout) for plan_id, task_id, write_scope, feedback_goal, and context. Load the loop-worker skill, implement only within write_scope, run /iteration-close when the slice is complete."
   )
+  local extra_pf="${RALPH_DELEGATION_PROMPT_FILE:-.agents/prompts/loop-worker.project.md}"
+  extra_pf="${extra_pf#./}"
+  extra_pf="${extra_pf#"$REPO_ROOT/"}"
+  if [[ -f "$REPO_ROOT/$extra_pf" ]]; then
+    if [[ "$extra_pf" == "$worker_overlay_rel" ]]; then
+      echo "error: RALPH_DELEGATION_PROMPT_FILE must not equal the project overlay path (got $extra_pf) — D5" >&2
+      return 1
+    fi
+    fanout_args+=( --prompt-file "$extra_pf" )
+  fi
   [[ -n "$write_scope_csv" ]] && fanout_args+=( --write-scope "$write_scope_csv" )
   if [[ -n "${RALPH_VERIFIER_RETRY_MAX:-}" ]] && [[ "${RALPH_VERIFIER_RETRY_MAX}" =~ ^[0-9]+$ ]] && [[ "${RALPH_VERIFIER_RETRY_MAX}" -gt 0 ]]; then
     fanout_args+=( --verifier-retry-max "${RALPH_VERIFIER_RETRY_MAX}" )
