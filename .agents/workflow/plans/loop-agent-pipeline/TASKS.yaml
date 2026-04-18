@@ -99,7 +99,7 @@ tasks:
         **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3c-api-verifier-1776516721.yaml` (overlay `.agents/active/active.loop.md`; context files: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — this worker may proceed. **Serialize** `p3d`–`p3f` (and any other work touching `docs/LOOP_ORCHESTRATION_SPEC.md`) until this task merges to avoid spec merge churn. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p3d-ui-verifier
       title: UI E2E verifier surface and result contract
-      status: pending
+      status: in_progress
       depends_on:
         - p3a-result-schema
       blocks:
