@@ -173,7 +173,7 @@ tasks:
 
         **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow_test.go, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3f-streaming-verifier`** is **completed** — worker may proceed; this slice currently owns concurrent edits to **`docs/LOOP_ORCHESTRATION_SPEC.md`** and **`commands/workflow.go`** in the review-agent wave. **Serialize** **`p8-orchestrator-awareness`** (also edits the spec) until **`p4`** merges and parent runs **`workflow advance`** + **`workflow delegation closeout`**. **Mismatch note:** `go run ./cmd/dot-agents workflow next` may surface **`p8-orchestrator-awareness`** while **`p4`** is **`in_progress`** — **canonical TASKS + spec/workflow serialization win** over raw next-task ordering; do **not** fan out **`p8`** until **`p4`** closes.
+        **context:** Task **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Parent ran **`workflow advance`** + **`workflow delegation closeout`**. Downstream **`p8-orchestrator-awareness`** may edit **`docs/LOOP_ORCHESTRATION_SPEC.md`** without review-agent serialization — see **`p8`** notes for the active orchestrator-awareness bundle.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
       status: completed

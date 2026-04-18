@@ -186,14 +186,25 @@ if m:
   echo "ralph-closeout: task=$task_id closed successfully" >&2
 
   # Commit closeout state so workstate is clean regardless of what follows.
-  # workflow advance + delegation closeout mutate TASKS.yaml, remove the contract,
-  # and archive the merge-back — none of that is committed automatically.
+  # workflow advance + delegation closeout mutate TASKS.yaml and PLAN.yaml,
+  # remove active artifacts, and archive the merge-back under history/.
+  # Stage the task-scoped archive result as part of the post-archival checkpoint
+  # so ralph-pipeline does not leave the repo dirty after a successful closeout.
+  local verification_dir="$REPO_ROOT/.agents/active/verification/${task_id}"
+  local archive_dirs=( "$REPO_ROOT/.agents/history/${plan_id}/delegate-merge-back-archive/"*/"${task_id}" )
   git -C "$REPO_ROOT" add \
+    ".agents/workflow/plans/${plan_id}/PLAN.yaml" \
     ".agents/workflow/plans/${plan_id}/TASKS.yaml" \
     ".agents/active/delegation/" \
     ".agents/active/delegation-bundles/" \
     ".agents/active/merge-back/" \
     ".agents/active/loop-state.md" 2>/dev/null || true
+  if [[ -d "$verification_dir" ]]; then
+    git -C "$REPO_ROOT" add -- "$verification_dir" 2>/dev/null || true
+  fi
+  if [[ -d "${archive_dirs[0]}" ]]; then
+    git -C "$REPO_ROOT" add -- "${archive_dirs[@]}" 2>/dev/null || true
+  fi
   if ! git -C "$REPO_ROOT" diff --cached --quiet; then
     git -C "$REPO_ROOT" commit -m "closeout: ${plan_id}/${task_id} accepted" --quiet
     echo "ralph-closeout: committed closeout state for task=$task_id" >&2

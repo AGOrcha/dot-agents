@@ -95,7 +95,7 @@ Wire `app_type`, `verifier_profiles`, `app_type_verifier_map`, and `workflow fan
 
 ### `p7-post-closeout`
 
-Add the post-closeout reasoning pass plus `workflow fold-back update`. This task turns stable slugs into create-or-update behavior and prevents noisy duplicate observations during convergence.
+Add the post-closeout reasoning pass plus `workflow fold-back update`. This task turns stable slugs into create-or-update behavior and prevents noisy duplicate observations during convergence. The closeout lane also needs a post-archive checkpoint commit so archived merge-back artifacts, canonical `PLAN.yaml` updates, and verification records do not leave the repo dirty after `ralph-closeout` completes.
 
 ### `p8-orchestrator-awareness`
 
