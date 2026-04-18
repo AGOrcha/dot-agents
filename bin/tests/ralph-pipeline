@@ -139,11 +139,11 @@ if [[ ${#BUNDLES[@]} -eq 0 && -d "$REPO_ROOT/.agents/active/delegation-bundles" 
   for f in "$REPO_ROOT/.agents/active/delegation-bundles"/del-*.yaml; do
     [[ -f "$f" ]] || continue
     tid="$(python3 - "$f" <<'PY'
-import sys, yaml
+import re, sys
 try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        d = yaml.safe_load(fh) or {}
-    print(str(d.get("task_id") or "").strip())
+    text = open(sys.argv[1], encoding="utf-8").read()
+    m = re.search(r"^task_id:\s*(.+)", text, re.M)
+    print(m.group(1).strip().strip('"') if m else "")
 except Exception:
     pass
 PY

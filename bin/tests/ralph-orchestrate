@@ -142,27 +142,19 @@ text = path.read_text()
 plan_id = ""
 task_id = ""
 scope = []
-
-try:
-    import yaml
-    data = yaml.safe_load(text) or {}
-    plan_id = str(data.get("parent_plan_id") or data.get("plan_id") or "").strip()
-    task_id = str(data.get("parent_task_id") or data.get("task_id") or "").strip()
-    scope = list(data.get("write_scope") or [])
-except Exception:
-    current = None
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        if line.startswith("parent_plan_id:") or line.startswith("plan_id:"):
-            plan_id = line.split(":", 1)[1].strip().strip('"')
-        elif line.startswith("parent_task_id:") or line.startswith("task_id:"):
-            task_id = line.split(":", 1)[1].strip().strip('"')
-        elif line.startswith("write_scope:"):
-            current = "write_scope"
-        elif current == "write_scope" and line.startswith("    - "):
-            scope.append(line.split("- ", 1)[1].strip())
-        elif current == "write_scope" and line and not line.startswith(" "):
-            current = None
+current = None
+for raw in text.splitlines():
+    line = raw.rstrip()
+    if line.startswith("parent_plan_id:") or line.startswith("plan_id:"):
+        plan_id = line.split(":", 1)[1].strip().strip('"')
+    elif line.startswith("parent_task_id:") or line.startswith("task_id:"):
+        task_id = line.split(":", 1)[1].strip().strip('"')
+    elif line.startswith("write_scope:"):
+        current = "write_scope"
+    elif current == "write_scope" and line.startswith("    - "):
+        scope.append(line.split("- ", 1)[1].strip())
+    elif current == "write_scope" and line and not line.startswith(" "):
+        current = None
 
 scope = [str(item).strip() for item in scope if str(item).strip()]
 if task_id and scope:

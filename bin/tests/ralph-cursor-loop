@@ -84,25 +84,46 @@ WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.m
 # Parse plan_id and task_id from bundle YAML
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for bundle parsing" >&2; exit 1; }
 
-read -r PLAN_ID TASK_ID WRITE_SCOPE_CSV < <(python3 -c "
+read -r PLAN_ID TASK_ID WRITE_SCOPE_CSV < <(python3 - "$BUNDLE_PATH" <<'PY'
 import re, sys
-text = open('${BUNDLE_PATH}').read()
-try:
-    import yaml
-    d = yaml.safe_load(text)
-    plan = d.get('plan_id', '')
-    task = d.get('task_id', '')
-    scope = (d.get('scope') or {})
-    ws = ','.join(scope.get('write_scope') or d.get('write_scope') or [])
-except Exception:
-    plan_m = re.search(r'^plan_id:\s*(.+)', text, re.M)
-    task_m = re.search(r'^task_id:\s*(.+)', text, re.M)
-    ws_items = re.findall(r'^\s+-\s+(\S.+)', text, re.M)
-    plan = plan_m.group(1).strip() if plan_m else ''
-    task = task_m.group(1).strip() if task_m else ''
-    ws = ','.join(ws_items[:5])
-print(plan, task, ws)
-" 2>/dev/null || echo "- - -") || { echo "error: failed to parse bundle YAML" >&2; exit 1; }
+
+def parse_bundle(text):
+    plan_m = re.search(r"^plan_id:\s*(.+)", text, re.M)
+    task_m = re.search(r"^task_id:\s*(.+)", text, re.M)
+    plan = plan_m.group(1).strip().strip('"') if plan_m else ""
+    task = task_m.group(1).strip().strip('"') if task_m else ""
+    ws_items = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith("scope:"):
+            j = i + 1
+            while j < len(lines):
+                ln = lines[j]
+                if re.match(r"^\s*write_scope:\s*$", ln) or ln.strip() == "write_scope:":
+                    j += 1
+                    while j < len(lines):
+                        item = lines[j]
+                        if item.startswith("        - "):
+                            ws_items.append(item[10:].strip())
+                            j += 1
+                        elif item.strip() == "":
+                            j += 1
+                        else:
+                            break
+                    return plan, task, ",".join(ws_items)
+                if ln.strip() != "" and not ln.startswith(" "):
+                    break
+                j += 1
+            break
+        i += 1
+    return plan, task, ",".join(ws_items)
+
+text = open(sys.argv[1], encoding="utf-8").read()
+p, t, w = parse_bundle(text)
+print(p, t, w)
+PY
+2>/dev/null || echo "- - -") || { echo "error: failed to parse bundle YAML" >&2; exit 1; }
 
 [[ -z "$PLAN_ID" || "$PLAN_ID" == "-" ]] && { echo "error: could not extract plan_id from bundle" >&2; exit 1; }
 [[ -z "$TASK_ID" || "$TASK_ID" == "-" ]] && { echo "error: could not extract task_id from bundle" >&2; exit 1; }

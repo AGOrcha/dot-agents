@@ -77,7 +77,7 @@ resolve_closeout_model() {
   fi
 }
 
-command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for YAML parsing" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for merge-back helpers" >&2; exit 1; }
 
 MERGE_BACK_DIR="$REPO_ROOT/.agents/active/merge-back"
 DELEGATION_DIR="$REPO_ROOT/.agents/active/delegation"
