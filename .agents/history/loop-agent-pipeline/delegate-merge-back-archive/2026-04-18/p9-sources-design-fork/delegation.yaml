@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-p9-sources-design-fork-1776475771
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p9-sources-design-fork
+title: Fork external-sources design doc from the main implementation plan
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - .agents/workflow/specs/external-agent-sources/design.md
+success_criteria: Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T01:29:31Z"
+updated_at: "2026-04-18T12:47:25Z"

@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-phase-2-hooks-lifecycle-1776475771
+parent_plan_id: resource-command-parity
+parent_task_id: phase-2-hooks-lifecycle
+title: Phase 2 — Add coherent hook lifecycle commands on top of canonical HOOK.yaml bundles
+summary: Delegated from plan Resource Command Parity — Hooks, Rules, MCP, and Settings
+write_scope:
+    - commands/hooks.go
+    - commands/hooks_test.go
+    - commands/import.go
+    - commands/remove.go
+    - internal/platform/hooks.go
+success_criteria: |-
+    Extend the existing `hooks list` surface into an intentional lifecycle path that matches the
+    canonical hook-bundle model instead of forcing users through indirect side effects.
+
+    Minimum outcome:
+    - hook resources can be discovered and explicitly wired/removed without spelunking raw files
+    - command help matches the canonical bundle model used by import/refresh/install/remove
+    - repo vs global scope behavior is documented and tested
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T01:29:31Z"
+updated_at: "2026-04-18T12:48:11Z"
