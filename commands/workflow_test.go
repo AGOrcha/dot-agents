@@ -3214,6 +3214,78 @@ func TestFoldBackCreatePropose(t *testing.T) {
 	}
 }
 
+func TestFoldBackSlugTaskDedupesNotes(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	slug := "schema-drift-p1-t1"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "second"); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := tf.Tasks[0].Notes
+	if strings.Count(notes, "(fb:"+slug+")") != 1 {
+		t.Fatalf("expected exactly one tagged line for slug, got notes:\n%s", notes)
+	}
+	if !strings.Contains(notes, "second") || strings.Contains(notes, "first") {
+		t.Fatalf("expected latest observation only, got:\n%s", notes)
+	}
+}
+
+func TestFoldBackUpdateMissingSlug(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewWorkflowCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"fold-back", "update", "--plan", "p1", "--slug", "missing-slug", "--observation", "x"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for missing slug")
+	}
+}
+
+func TestFoldBackUpdatePlanScoped(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	slug := "fold-back-triage-p1"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--slug", slug, "--observation", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fold-back", "update", "--plan", "p1", "--slug", slug, "--observation", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loadCanonicalPlan(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(plan.Summary, "(fb:"+slug+")") != 1 || !strings.Contains(plan.Summary, "v2") {
+		t.Fatalf("plan summary = %q", plan.Summary)
+	}
+}
+
+func TestFoldBackSlugInvalid(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewWorkflowCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", "bad slug", "--observation", "x"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for invalid slug")
+	}
+}
+
 func TestDelegationCloseoutAccept(t *testing.T) {
 	repo := setupFanoutSliceProject(t, "in_progress")
 	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {

@@ -12,6 +12,7 @@
 #   RALPH_MAX_PARALLEL_WORKERS   max concurrent workers (default 3)
 #   RALPH_AUTO_FANOUT            1 = auto-create bundles (default)
 #   RALPH_CLOSEOUT_AUTO          1 = auto-accept merge-backs (default)
+#   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  forwarded to ralph-closeout: optional read-only fold-back list per plan after closeout
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_CLOSEOUT_MODEL         closeout-review model override
 #   RALPH_IMPL_WORKER_MODEL      impl-worker model override
@@ -218,6 +219,7 @@ CLOSEOUT_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/closeout}"
 
 export RALPH_LOG_DIR="${CLOSEOUT_LOG_DIR:-}"
 export RALPH_CLOSEOUT_AUTO="${RALPH_CLOSEOUT_AUTO:-1}"
+export RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT="${RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT:-0}"
 
 if ! "$RALPH_CLOSEOUT"; then
   echo "error: ralph-closeout failed" >&2
