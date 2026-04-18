@@ -49,7 +49,7 @@ tasks:
         **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Parallel wave: disjoint from `c4-skills-command-decomposition` (`commands/skills*`); avoid touching other command packages.
     - id: c4-skills-command-decomposition
       title: Split skills command by lifecycle surface
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
