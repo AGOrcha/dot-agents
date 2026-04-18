@@ -7,13 +7,18 @@ Each row is one `dot-agents` subcommand path. A cell is **yes** if `commands.Fla
 | Command | `--json` | `--dry-run` | `--yes` | `--force` | `--verbose` | Handler | Notes |
 |---------|:---:|:---:|:---:|:---:|:---:|---------|-------|
 | `add` | no | yes | yes | yes | no | `NewAddCmd.func1` | — |
+| `agents import` | no | no | no | no | no | `newAgentsImportCmd.func1` | — |
 | `agents list` | no | no | no | no | no | `newAgentsListCmd.func1` | — |
 | `agents new` | no | no | no | no | no | `newAgentsNewCmd.func1` | — |
+| `agents promote` | no | no | no | no | no | `newAgentsPromoteCmd.func1` | — |
+| `agents remove` | no | no | yes | no | no | `newAgentsRemoveCmd.func1` | — |
 | `doctor` | no | yes | no | no | yes | `runDoctor` | — |
 | `explain` | no | no | no | no | no | `runExplain` | — |
-| `hooks list` | no | no | no | no | no | `newHooksListCmd.func1` | — |
+| `hooks list` | no | no | no | no | no | `hooks.newHooksListCmd.func1` | — |
+| `hooks remove` | no | yes | yes | yes | no | `hooks.newHooksRemoveCmd.func1` | — |
+| `hooks show` | no | no | no | no | no | `hooks.newHooksShowCmd.func1` | — |
 | `import` | no | yes | yes | no | no | `NewImportCmd.func1` | — |
-| `init` | no | yes | yes | yes | no | `runInit` | — |
+| `init` | no | yes | no | no | no | `runInit` | — |
 | `install` | no | yes | no | yes | yes | `NewInstallCmd.func1` | — |
 | `kg bridge health` | yes | no | no | no | no | `runKGBridgeHealth` | — |
 | `kg bridge mapping` | yes | no | no | no | no | `runKGBridgeMapping` | — |
@@ -52,12 +57,12 @@ Each row is one `dot-agents` subcommand path. A cell is **yes** if `commands.Fla
 | `skills new` | no | no | no | no | no | `newSkillsNewCmd.func1` | — |
 | `skills promote` | no | no | no | no | no | `newSkillsPromoteCmd.func1` | — |
 | `status` | yes | no | no | no | no | `NewStatusCmd.func1` | — |
-| `sync commit` | no | yes | no | no | no | `newSyncCommitCmd.func1` | — |
-| `sync init` | no | yes | no | no | no | `newSyncInitCmd.func1` | — |
-| `sync log` | no | no | no | no | no | `NewSyncCmd.newSyncLogCmd.func3` | — |
-| `sync pull` | no | yes | yes | no | no | `NewSyncCmd.newSyncPullCmd.func1` | — |
-| `sync push` | no | yes | yes | yes | no | `newSyncPushCmd.func1` | — |
-| `sync status` | no | no | no | no | no | `NewSyncCmd.newSyncStatusCmd.func2` | — |
+| `sync commit` | no | yes | no | no | no | `sync.newCommitCmd.func1` | — |
+| `sync init` | no | yes | no | no | no | `sync.newInitCmd.func1` | — |
+| `sync log` | no | no | no | no | no | `sync.NewSyncCmd.newLogCmd.func3` | — |
+| `sync pull` | no | yes | yes | no | no | `sync.NewSyncCmd.newPullCmd.func1` | — |
+| `sync push` | no | yes | yes | yes | no | `sync.newPushCmd.func1` | — |
+| `sync status` | no | no | no | no | no | `sync.NewSyncCmd.newStatusCmd.func2` | — |
 | `workflow advance` | no | no | no | no | no | `NewWorkflowCmd.func15` | — |
 | `workflow checkpoint` | no | no | no | no | no | `NewWorkflowCmd.func3` | — |
 | `workflow delegation closeout` | yes | no | no | no | no | `runWorkflowDelegationCloseout` | — |
@@ -65,6 +70,7 @@ Each row is one `dot-agents` subcommand path. A cell is **yes** if `commands.Fla
 | `workflow fanout` | no | no | no | no | no | `runWorkflowFanout` | — |
 | `workflow fold-back create` | yes | no | no | no | no | `runWorkflowFoldBackCreate` | — |
 | `workflow fold-back list` | yes | no | no | no | no | `runWorkflowFoldBackList` | — |
+| `workflow fold-back update` | yes | no | no | no | no | `runWorkflowFoldBackUpdate` | — |
 | `workflow graph health` | yes | no | no | no | no | `runWorkflowGraphHealth` | — |
 | `workflow graph query` | yes | no | no | no | no | `runWorkflowGraphQuery` | — |
 | `workflow health` | yes | no | no | no | no | `NewWorkflowCmd.func16` | — |
