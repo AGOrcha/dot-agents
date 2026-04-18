@@ -1,0 +1,84 @@
+schema_version: 1
+plan_id: command-surface-decomposition
+tasks:
+    - id: c1-kg-command-decomposition
+      title: Split kg command into narrower files or subpackages
+      status: in_progress
+      depends_on: []
+      blocks:
+        - c6-status-import-helper-extraction
+      owner: dot-agents
+      write_scope:
+        - commands/kg.go
+        - commands/kg_test.go
+        - commands/kg/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Break `kg` into narrower ownership slices without changing command behavior; keep the root command wiring stable while separating bridge, query, link, warm, maintenance, and code-status concerns into files that workers can own independently.
+
+        `commands/kg.go` is the largest remaining command hotspot after workflow. Prefer a real `commands/kg/` subpackage plus a thin top-level shim unless package-level constraints force a same-package split.
+    - id: c2-agents-command-decomposition
+      title: Split agents command by lifecycle surface
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents.go
+        - commands/agents_test.go
+        - commands/agents/
+      verification_required: true
+      notes: '**feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.'
+    - id: c3-sync-command-decomposition
+      title: Split sync command by subcommand family
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/sync.go
+        - commands/sync/
+      verification_required: true
+      notes: '**feedback_goal:** Decompose `sync` into stable command-family files (`init`, `commit`, `pull`, `push`, `status`, `log`) so small changes do not require workers to load or edit the whole sync surface.'
+    - id: c4-skills-command-decomposition
+      title: Split skills command by lifecycle surface
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/skills.go
+        - commands/skills_test.go
+        - commands/skills/
+      verification_required: true
+      notes: '**feedback_goal:** Separate `skills list/new/promote` ownership into narrower files or a subpackage, matching tests to the same boundaries and keeping generated or mutation helpers from re-accumulating in one file.'
+    - id: c5-hooks-command-decomposition
+      title: Split hooks command by subcommand family
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/hooks.go
+        - commands/hooks_test.go
+        - commands/hooks/
+      verification_required: true
+      notes: '**feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.'
+    - id: c6-status-import-helper-extraction
+      title: Extract internal helper seams for status and import without forcing premature package splits
+      status: pending
+      depends_on:
+        - c1-kg-command-decomposition
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/status.go
+        - commands/status_test.go
+        - commands/import.go
+        - commands/import_test.go
+        - commands/import_plugins.go
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Create smaller helper seams in `status` and `import` where the code is large but not yet clearly divisible into subcommand packages. Reduce worker context load and make future package splits easier without forcing a bad decomposition now.
+
+        This task is intentionally helper-first, not package-split-first.
