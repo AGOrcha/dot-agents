@@ -3405,6 +3405,45 @@ func TestFoldBackUpdatePlanScoped(t *testing.T) {
 	}
 }
 
+func TestFoldBackUpdateTaskScoped(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	slug := "coverage-regression-p1-t1"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "round-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fold-back", "update", "--plan", "p1", "--slug", slug, "--task", "t1", "--observation", "round-b"); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := tf.Tasks[0].Notes
+	if strings.Count(notes, "(fb:"+slug+")") != 1 || !strings.Contains(notes, "round-b") || strings.Contains(notes, "round-a") {
+		t.Fatalf("task notes = %q", notes)
+	}
+}
+
+func TestFoldBackUpdateTaskScopedRequiresTaskFlag(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	slug := "tool-bug-p1-t1"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "first"); err != nil {
+		t.Fatal(err)
+	}
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewWorkflowCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"fold-back", "update", "--plan", "p1", "--slug", slug, "--observation", "x"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when updating task-scoped fold-back without --task")
+	}
+}
+
 func TestFoldBackSlugInvalid(t *testing.T) {
 	repo := setupFoldBackProject(t)
 	oldwd, _ := os.Getwd()

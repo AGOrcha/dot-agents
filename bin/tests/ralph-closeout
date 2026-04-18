@@ -6,6 +6,9 @@
 #   RALPH_CLOSEOUT_AUTO   1 = auto-accept all pending merge-backs (default), 0 = spawn orchestrator review pass
 #   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  1 = after each successful auto-closeout, run `workflow fold-back list --plan <id>`
 #                            for each distinct plan_id touched (read-only D2 post-closeout snapshot)
+#   Post-closeout git checkpoint stages only this task's canonical plan files, archive tree,
+#   verification dir, and removals of that task's merge-back / delegation / bundle — not whole
+#   `.agents/active/delegation*` dirs (avoids scooping parallel workers' state).
 #   RALPH_LOG_DIR         override log directory
 #   RALPH_NO_LOG          1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
@@ -117,6 +120,7 @@ process_merge_back_auto() {
   local base
   base="$(basename "$mb_file" .md)"
   local task_id="$base"
+  local delegation_id=""
 
   echo "ralph-closeout: processing merge-back for task=$task_id" >&2
 
@@ -154,6 +158,18 @@ if m:
   if [[ ! -f "$contract" ]]; then
     echo "warning: no delegation contract at $contract for task=$task_id — skipping delegation closeout" >&2
   else
+    # delegation closeout deletes the contract + bundle; capture id for git add -u on bundle path.
+    delegation_id="$(python3 - "$contract" <<'PY'
+import sys, yaml
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        d = yaml.safe_load(fh) or {}
+    print(str(d.get("id") or "").strip())
+except Exception:
+    pass
+PY
+)"
     echo "ralph-closeout: workflow delegation closeout plan=$plan_id task=$task_id --decision accept" >&2
     local closeout_log
     closeout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout.XXXXXX")"
@@ -192,18 +208,21 @@ if m:
   # so ralph-pipeline does not leave the repo dirty after a successful closeout.
   local verification_dir="$REPO_ROOT/.agents/active/verification/${task_id}"
   local archive_dirs=( "$REPO_ROOT/.agents/history/${plan_id}/delegate-merge-back-archive/"*/"${task_id}" )
-  git -C "$REPO_ROOT" add \
+  git -C "$REPO_ROOT" add -- \
     ".agents/workflow/plans/${plan_id}/PLAN.yaml" \
-    ".agents/workflow/plans/${plan_id}/TASKS.yaml" \
-    ".agents/active/delegation/" \
-    ".agents/active/delegation-bundles/" \
-    ".agents/active/merge-back/" \
-    ".agents/active/loop-state.md" 2>/dev/null || true
+    ".agents/workflow/plans/${plan_id}/TASKS.yaml" 2>/dev/null || true
   if [[ -d "$verification_dir" ]]; then
     git -C "$REPO_ROOT" add -- "$verification_dir" 2>/dev/null || true
   fi
   if [[ -d "${archive_dirs[0]}" ]]; then
     git -C "$REPO_ROOT" add -- "${archive_dirs[@]}" 2>/dev/null || true
+  fi
+  # Record deletions under active/ for this task only (parallel workers may still own siblings).
+  git -C "$REPO_ROOT" add -u -- \
+    ".agents/active/merge-back/${task_id}.md" \
+    ".agents/active/delegation/${task_id}.yaml" 2>/dev/null || true
+  if [[ -n "${delegation_id:-}" ]]; then
+    git -C "$REPO_ROOT" add -u -- ".agents/active/delegation-bundles/${delegation_id}.yaml" 2>/dev/null || true
   fi
   if ! git -C "$REPO_ROOT" diff --cached --quiet; then
     git -C "$REPO_ROOT" commit -m "closeout: ${plan_id}/${task_id} accepted" --quiet
