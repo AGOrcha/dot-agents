@@ -1,7 +1,8 @@
-package commands
+package workflow
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,57 @@ import (
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
+
+// workflowTestJSON toggles JSON output in workflow tests (replaces commands.Flags.JSON for isolated workflow command runs).
+var workflowTestJSON bool
+
+func init() {
+	// Self-contained deps so workflow tests do not import package commands (import cycle: commands → workflow).
+	InitTestDeps(Deps{
+		ErrNoProject: errors.New("workflow commands must run inside a project directory"),
+		Flags: GlobalFlags{
+			JSON: func() bool { return workflowTestJSON },
+			Yes:  func() bool { return false },
+		},
+		ErrorWithHints: func(msg string, hints ...string) error {
+			return errors.New(strings.TrimSpace(msg))
+		},
+		UsageError: func(msg string, hints ...string) error {
+			return errors.New(strings.TrimSpace(msg))
+		},
+		NoArgsWithHints: func(hints ...string) cobra.PositionalArgs {
+			return func(cmd *cobra.Command, args []string) error {
+				if len(args) == 0 {
+					return nil
+				}
+				return fmt.Errorf("%s does not accept positional arguments (got %d)", cmd.CommandPath(), len(args))
+			}
+		},
+		ExactArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return func(cmd *cobra.Command, args []string) error {
+				if len(args) == n {
+					return nil
+				}
+				noun := "arguments"
+				if n == 1 {
+					noun = "argument"
+				}
+				return fmt.Errorf("%s expects %d %s, got %d", cmd.CommandPath(), n, noun, len(args))
+			}
+		},
+		MaximumNArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return func(cmd *cobra.Command, args []string) error {
+				if len(args) <= n {
+					return nil
+				}
+				return fmt.Errorf("%s accepts at most %d argument(s), got %d", cmd.CommandPath(), n, len(args))
+			}
+		},
+		ExampleBlock: func(lines ...string) string {
+			return strings.Join(lines, "\n")
+		},
+	})
+}
 
 // dotAgentsRepoRoot returns the module root (directory containing go.mod) by walking
 // up from this test file. It does not depend on process working directory, which can
@@ -36,6 +88,19 @@ func dotAgentsRepoRoot(t *testing.T) string {
 			t.Fatalf("go.mod not found walking up from %s", file)
 		}
 		dir = parent
+	}
+}
+
+// runKGSetupViaCLI initializes KG_HOME using the real CLI (avoids importing package commands from workflow tests).
+func runKGSetupViaCLI(t *testing.T) {
+	t.Helper()
+	repoRoot := dotAgentsRepoRoot(t)
+	cmd := exec.Command("go", "run", "./cmd/dot-agents", "kg", "setup")
+	cmd.Dir = repoRoot
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("kg setup: %v\n%s", err, string(out))
 	}
 }
 
@@ -1963,9 +2028,7 @@ func TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent(t *testing.T) {
 	t.Setenv("KG_HOME", kgHome)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	if err := runKGSetup(); err != nil {
-		t.Fatalf("kg setup: %v", err)
-	}
+	runKGSetupViaCLI(t)
 
 	cfgDir := filepath.Join(project, ".agents", "workflow")
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
@@ -2090,18 +2153,24 @@ func TestLocalGraphAdapter_Health_NotInitialized(t *testing.T) {
 
 func TestLocalGraphAdapter_Query_ReturnsResults(t *testing.T) {
 	home := newTempKGForWorkflow(t)
-	// Set up KG with notes using the kg package functions
-	if err := runKGSetup(); err != nil {
-		t.Fatalf("kg setup: %v", err)
-	}
+	runKGSetupViaCLI(t)
 	now := "2026-01-01T00:00:00Z"
-	note := &GraphNote{
-		SchemaVersion: 1, ID: "dec-workflow-test", Type: "decision",
-		Title: "Use cobra for CLI", Summary: "We chose cobra.", Status: "active",
-		CreatedAt: now, UpdatedAt: now,
+	notePath := filepath.Join(home, "notes", "decisions", "dec-workflow-test.md")
+	if err := os.MkdirAll(filepath.Dir(notePath), 0755); err != nil {
+		t.Fatal(err)
 	}
-	if err := createGraphNote(home, note, "body content about cobra CLI framework"); err != nil {
-		t.Fatalf("createGraphNote: %v", err)
+	noteBody := "---\n" +
+		"id: dec-workflow-test\n" +
+		"type: decision\n" +
+		"title: \"Use cobra for CLI\"\n" +
+		"summary: \"We chose cobra.\"\n" +
+		"status: active\n" +
+		"created_at: " + now + "\n" +
+		"updated_at: " + now + "\n" +
+		"---\n\n" +
+		"body content about cobra CLI framework\n"
+	if err := os.WriteFile(notePath, []byte(noteBody), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
 	}
 
 	adapter := NewLocalGraphAdapter(home)
@@ -2227,7 +2296,7 @@ func executeWorkflowCommand(t *testing.T, repo string, args ...string) error {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
-	cmd := NewWorkflowCmd()
+	cmd := NewCmdForTest()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetArgs(args)
@@ -3222,7 +3291,7 @@ func executeWorkflowCommandOutput(t *testing.T, repo string, args ...string) str
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	cmd := NewWorkflowCmd()
+	cmd := NewCmdForTest()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetOut(&buf)
@@ -3378,7 +3447,7 @@ func TestFoldBackUpdateMissingSlug(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
-	cmd := NewWorkflowCmd()
+	cmd := NewCmdForTest()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetArgs([]string{"fold-back", "update", "--plan", "p1", "--slug", "missing-slug", "--observation", "x"})
@@ -3435,7 +3504,7 @@ func TestFoldBackUpdateTaskScopedRequiresTaskFlag(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
-	cmd := NewWorkflowCmd()
+	cmd := NewCmdForTest()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetArgs([]string{"fold-back", "update", "--plan", "p1", "--slug", slug, "--observation", "x"})
@@ -3451,7 +3520,7 @@ func TestFoldBackSlugInvalid(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
-	cmd := NewWorkflowCmd()
+	cmd := NewCmdForTest()
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	cmd.SetArgs([]string{"fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", "bad slug", "--observation", "x"})
@@ -3536,9 +3605,8 @@ func TestFoldBackList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prev := Flags.JSON
-	Flags.JSON = true
-	defer func() { Flags.JSON = prev }()
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
 
 	outAll := executeWorkflowCommandOutput(t, repo, "fold-back", "list")
 	if !strings.Contains(outAll, `"plan_id": "p1"`) || !strings.Contains(outAll, `"plan_id": "p2"`) {
