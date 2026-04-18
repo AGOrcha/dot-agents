@@ -35,7 +35,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
-OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:--output-format stream-json --stream-partial-output}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
 MAX_WORKERS="${RALPH_MAX_PARALLEL_WORKERS:-3}"
 AUTO_FANOUT="${RALPH_AUTO_FANOUT:-1}"
 
