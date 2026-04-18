@@ -16,15 +16,16 @@ Orchestrator snapshot — 2026-04-18 (iter 57):
 
 - **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale).
 - **Delegation inventory:** **`active_delegations.active_count: 2`** — **`command-surface-decomposition`** **`c1`** + **`c2`** only (`typescript-port` has no active delegation after **phase-6** closeout).
-- **`pending_merge_backs: 0`** — `.agents/active/merge-back/` empty as of this note.
+- **`c1` worker (iter 57):** Merge-back committed for **`c1-kg-command-decomposition`** (artifact `.agents/active/merge-back/c1-kg-command-decomposition.md`, verification under `.agents/active/verification/c1-kg-command-decomposition/`). **Parent** should **`workflow advance`** + **`workflow delegation closeout`** after review.
 - **`c6` vs `c1` (DAG):** **`c6-status-import-helper-extraction`** is **`completed`** while **`c1-kg-command-decomposition`** remains **`in_progress`** — YAML still lists **`depends_on: [c1]`** on **c6**. **Status field wins** for “no remaining **c6** implementation”; reconcile **`depends_on`** or notes when **c1** closes if the edge should drop from the living graph.
 - **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as `--prompt-file`).
 
 ## Next Iteration Playbook
 
-1. **Workers:** **`c1`** / **`c2`** — Pattern E or **`ralph-cursor-loop`** per bundle → **`loop-worker`** → **`/iteration-close`** when the slice is complete.
-2. **Parent:** Optional **`TASKS.yaml`** notes scrub for **`phase-6`** and **`c5`** (stale “delegation active” / absolute bundle paths). Commit workflow **`ralph-closeout`** + **`delegation closeout`** reconcile when ready.
-3. **Evidence:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks typescript-port`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`.
+1. **Parent:** Review **`c1`** merge-back at commit **`5e420734`**; run **`workflow delegation closeout`** + **`workflow advance`** for **`c1-kg-command-decomposition`** when ready. **`c2`** worker continues in parallel if applicable.
+2. **Workers:** **`c2`** — **`loop-worker`** + **`/iteration-close`** when the slice is complete ( **`c1`** worker handoff done).
+3. **Optional:** **`TASKS.yaml`** notes scrub for **`phase-6`** / **`c5`** stale bundle paths.
+4. **Evidence:** `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents kg health`.
 
 ## Scenario Coverage
 

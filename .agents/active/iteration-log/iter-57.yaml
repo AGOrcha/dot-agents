@@ -4,18 +4,43 @@ iteration: 57
 date: "2026-04-18"
 wave: command-surface-decomposition
 task_id: c1-kg-command-decomposition
-commit: 02bb7e79f24c7ed2ed0d4677e0c29efb3f9b4106
-files_changed: 10
-lines_added: 86
-lines_removed: 6308
+commit: 5e420734fb72e636300b739321e7f11c7cab3dbc
+files_changed: 15
+lines_added: 5817
+lines_removed: 5615
 impl:
-    item: ""
-    summary: ""
-    scope_note: ""
+    item: "c1-kg-command-decomposition: subpackage + file split"
+    summary: "Introduced commands/kg (Deps, NewKGCmd), split into kg.go, query_lint_maintain.go, bridge.go, sync_code_warm_link.go, cmd.go; thin commands/kg.go shim; SaveKGConfig export; globalflagcov loads ./commands/kg; MCP tests in commands/kg_test.go."
+    scope_note: on-target
     feedback_goal: Complete the delegated task within write scope with verification and merge-back.
     retries: 0
     focused_tests_added: 0
-verifiers: []
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back, iter-57"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: merge-back
+      status: pass
+      gate_passed: true
+      tests_added: 0
+      tests_total_pass: true
+      scenario_tags: [kg-cli, go-test]
+      result_artifact: .agents/active/verification/c1-kg-command-decomposition/merge-back.result.yaml
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: false
+          exercised_new_scenario: false
+          ran_cli_command: true
+          cli_produced_actionable_feedback: ok
+          linked_traces_to_outcomes: true
 review:
     phase_1_decision: ""
     phase_2_decision: ""
