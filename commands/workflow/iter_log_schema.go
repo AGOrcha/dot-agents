@@ -1,4 +1,4 @@
-package commands
+package workflow
 
 import (
 	_ "embed"

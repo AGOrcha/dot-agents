@@ -39,6 +39,7 @@ func loadStatic(moduleRoot string) (*staticAnalysis, error) {
 		"./commands/sync",
 		"./commands/hooks",
 		"./commands/skills",
+		"./commands/workflow",
 	)
 	if err != nil {
 		return nil, err
