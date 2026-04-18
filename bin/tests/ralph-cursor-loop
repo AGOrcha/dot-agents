@@ -279,6 +279,7 @@ merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
 
 if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
