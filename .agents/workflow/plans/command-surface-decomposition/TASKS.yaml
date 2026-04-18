@@ -3,7 +3,7 @@ plan_id: command-surface-decomposition
 tasks:
     - id: c1-kg-command-decomposition
       title: Split kg command into narrower files or subpackages
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - c6-status-import-helper-extraction
