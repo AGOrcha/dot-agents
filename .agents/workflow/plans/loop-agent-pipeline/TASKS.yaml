@@ -151,7 +151,7 @@ tasks:
       notes: Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
-      status: in_progress
+      status: completed
       depends_on:
         - p2-impl-agent-surface
         - p3a-result-schema
