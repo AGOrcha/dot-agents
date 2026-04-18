@@ -281,7 +281,7 @@ tasks:
         **D6.a landed:** `.agents/workflow/specs/external-agent-sources/design.md` — forked from `decisions.1.md` D6/D6.a; sections 1–13 match locked TOC. Parent reviews merge-back, then `workflow advance` + delegation closeout.
     - id: p10-workflow-command-decomposition
       title: Split workflow command into subpackage files to reduce worker hotspot contention
-      status: pending
+      status: in_progress
       depends_on:
         - p7-post-closeout
         - p8-orchestrator-awareness
