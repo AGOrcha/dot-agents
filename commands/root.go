@@ -52,6 +52,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewSkillsCmd())
 	root.AddCommand(NewAgentsCmd())
 	root.AddCommand(NewHooksCmd())
+	root.AddCommand(NewRulesCmd())
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewReviewCmd())
 	root.AddCommand(NewSyncCmd())

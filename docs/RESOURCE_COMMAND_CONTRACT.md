@@ -35,7 +35,7 @@ Rationale:
 | Family   | Dedicated lifecycle commands (CLI) | Also touched indirectly |
 |----------|-------------------------------------|-------------------------|
 | **Hooks** | `hooks list`, `hooks show`, `hooks remove` | `import`, `refresh`, `install`, `remove`, `status`, `doctor` |
-| **Rules** | *None yet* (phase 3) | `add`, `import`, `refresh`, `install`, `remove`, `status`, `doctor` |
+| **Rules** | `rules list`, `rules show`, `rules remove` | `add`, `import`, `refresh`, `install`, `remove`, `status`, `doctor` |
 | **MCP** | *None yet* (phase 4) | same as rules |
 | **Settings** | *None yet* (phase 4) | same as rules |
 
@@ -55,8 +55,8 @@ this contract (no implying a dedicated lifecycle where none exists yet):
 
 - `status`, `explain`, `doctor`, `install`, `remove`
 
-Phase **5** aligned readback/install/remove copy with this model; rules/MCP/settings remain
-implicit until phases **3** and **4** land their families.
+Phase **5** aligned readback/install/remove copy with this model; **rules** now have a dedicated
+family (phase **3**); MCP/settings remain implicit until phase **4**.
 
 ## Retrofit: shipped phases vs this contract
 
@@ -64,7 +64,8 @@ implicit until phases **3** and **4** land their families.
 |-------|---------------------------|
 | **2 — hooks lifecycle** | Shipped `hooks list`, `hooks show`, `hooks remove` on top of canonical `HOOK.yaml` bundles; matches the “per-resource family + shared executor” shape. |
 | **5 — readback alignment** | Updated user-visible surfaces so readback and lifecycle wording match the contract (including “implicit until dedicated commands exist”). |
-| **3 / 4 — rules, MCP, settings** | **Pending**; contract already reserves dedicated families and forbids duplicate emitters. |
+| **3 — rules lifecycle** | Shipped `rules list`, `rules show`, `rules remove` for canonical `~/.agents/rules/` files; matches the per-resource family + shared link/refresh model. |
+| **4 — MCP, settings** | **Pending**; contract already reserves dedicated families and forbids duplicate emitters. |
 
 ## Canonical task graph note (for maintainers)
 
