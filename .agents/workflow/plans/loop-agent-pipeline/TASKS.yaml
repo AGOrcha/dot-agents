@@ -99,7 +99,7 @@ tasks:
         **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3c-api-verifier-1776516721.yaml` (overlay `.agents/active/active.loop.md`; context files: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — this worker may proceed. **Serialize** `p3d`–`p3f` (and any other work touching `docs/LOOP_ORCHESTRATION_SPEC.md`) until this task merges to avoid spec merge churn. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p3d-ui-verifier
       title: UI E2E verifier surface and result contract
-      status: in_progress
+      status: completed
       depends_on:
         - p3a-result-schema
       blocks:
@@ -109,7 +109,12 @@ tasks:
         - .agents/prompts/verifiers/ui-e2e.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Add UI E2E verifier guidance plus screenshot diff and accessibility artifact expectations.
+      notes: |-
+        **feedback_goal:** UI E2E verifier prompt plus spec updates for Playwright/browser flows, screenshot or visual diff artifacts, accessibility checks, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/ui-e2e.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3d-ui-verifier-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — worker may proceed. **Serialize** `p3e`–`p3f` (shared `docs/LOOP_ORCHESTRATION_SPEC.md`): do **not** fan out or run batch/streaming verifier workers until this task merges and parent advances. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p3e-batch-verifier
       title: Batch verifier surface and result contract
       status: pending
@@ -122,7 +127,12 @@ tasks:
         - .agents/prompts/verifiers/batch.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Add fixture-driven batch verifier guidance with expected-vs-actual diff artifact expectations.
+      notes: |-
+        **feedback_goal:** Batch verifier prompt plus spec updates for fixture-driven runs, expected-vs-actual diff artifacts, and alignment with the canonical verification-result schema; verification + merge-back ready.
+
+        **write_scope:** .agents/prompts/verifiers/batch.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** `workflow next` may select this task while **`p3d-ui-verifier`** is still **in_progress** — **do not fan out yet**: verifier slices share `docs/LOOP_ORCHESTRATION_SPEC.md`; wait for **`p3d`** merge-back and task advance before creating `del-p3e-batch-verifier` (orchestrator-ordered serialization).
     - id: p3f-streaming-verifier
       title: Streaming verifier surface and result contract
       status: pending
@@ -201,9 +211,9 @@ tasks:
 
         **write_scope:** schemas/workflow-delegation-bundle.schema.json, schemas/workflow-plan.schema.json, schemas/agentsrc.schema.json, src/share/templates/standard/agentsrc.json, commands/workflow.go, commands/workflow_test.go, bin/tests/ralph-orchestrate
 
-        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p6-fanout-dispatch-1776516721.yaml` was created by auto-fanout — **do not dispatch or implement this worker yet**: canonical `depends_on` includes **`p3c-api-verifier` (in progress), `p3d-ui-verifier`, `p3e-batch-verifier`, `p3f-streaming-verifier`, `p4-review-agent`, `p8-orchestrator-awareness` (all pending)**. TASKS.yaml dependency graph is authoritative; treat bundle as **queued** until every dependency is `completed`. Orchestrator / parent should avoid starting the p6 worker until unblocked; if the runner cannot hold bundles, skip p6 in the parallel batch until deps clear.
+        **context:** Task is **completed** (closeout accepted per git history). Historical bundle reference: `.agents/active/delegation-bundles/del-p6-fanout-dispatch-1776516721.yaml`. Downstream verifier waves should still respect **spec serialization** for `docs/LOOP_ORCHESTRATION_SPEC.md` when multiple verifier tasks were mid-flight.
 
-        Integration hotspot from iter-1 review: app_type on plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
+        Integration hotspot: app_type on plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
     - id: p7-post-closeout
       title: Post-closeout orchestration pass plus fold-back update
       status: in_progress
@@ -219,7 +229,12 @@ tasks:
         - commands/workflow.go
         - commands/workflow_test.go
       verification_required: true
-      notes: Add the post-closeout reasoning pass, workflow fold-back update, and stable slug routing for D2. Group repeated task or slice observations instead of emitting noisy duplicates.
+      notes: |-
+        **feedback_goal:** Post-closeout reasoning pass in `ralph-closeout` / pipeline scripts, workflow fold-back update, stable slug routing for D2, and grouped (non-noisy) slice observations; `go test ./commands` (workflow) + script smoke paths green; merge-back ready.
+
+        **write_scope:** bin/tests/ralph-closeout, bin/tests/ralph-pipeline, commands/workflow.go, commands/workflow_test.go
+
+        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p7-post-closeout-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **DAG note:** `depends_on` still lists **`p4-review-agent` (pending)** — reconcile with parent: either complete/reconcile **p4** before landing **p7**, or update TASKS.yaml if p7 was intentionally parallelized (p5 is already **completed** despite also listing p4 in its historical `depends_on`). Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p8-orchestrator-awareness
       title: Make orchestrator prompts and dispatch role-aware
       status: pending
