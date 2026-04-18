@@ -80,7 +80,7 @@ tasks:
       notes: '**feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.'
     - id: c6-status-import-helper-extraction
       title: Extract internal helper seams for status and import without forcing premature package splits
-      status: in_progress
+      status: completed
       depends_on:
         - c1-kg-command-decomposition
       blocks: []
