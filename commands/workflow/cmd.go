@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Command wiring for `dot-agents workflow`: cobra subtree and exported NewCmd(deps).
+// Behavioral implementations live in sibling sources (state.go, plan_task.go, verification.go, …).
+
 func newWorkflowCmd() *cobra.Command {
 	var (
 		checkpointMessage               string
@@ -621,7 +624,7 @@ func NewCmd(d Deps) *cobra.Command {
 	return newWorkflowCmd()
 }
 
-// NewCmdForTest returns the workflow command tree using deps registered by InitTestDeps (see workflow_test.go init).
+// NewCmdForTest returns the workflow command tree using deps registered by InitTestDeps (see workflow_testutil_test.go init).
 func NewCmdForTest() *cobra.Command {
 	return newWorkflowCmd()
 }
