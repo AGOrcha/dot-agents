@@ -242,7 +242,10 @@ config_get_project_path() {
   local config_file="$AGENTS_HOME/config.json"
   local path
   path=$(json_get_file "$config_file" ".projects.\"$name\".path")
-  [ -n "$path" ] && expand_path "$path"
+  if [ -n "$path" ]; then
+    expand_path "$path"
+  fi
+  return 0
 }
 
 # Get whether a platform is enabled in config.json.
