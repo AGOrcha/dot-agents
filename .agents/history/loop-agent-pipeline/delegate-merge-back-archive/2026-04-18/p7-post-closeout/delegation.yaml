@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p7-post-closeout-1776517508
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p7-post-closeout
+title: Post-closeout orchestration pass plus fold-back update
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - bin/tests/ralph-closeout
+    - bin/tests/ralph-pipeline
+    - commands/workflow.go
+    - commands/workflow_test.go
+success_criteria: Add the post-closeout reasoning pass, workflow fold-back update, and stable slug routing for D2. Group repeated task or slice observations instead of emitting noisy duplicates.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T13:05:08Z"
+updated_at: "2026-04-18T13:13:25Z"

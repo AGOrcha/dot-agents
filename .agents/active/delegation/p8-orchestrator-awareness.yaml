@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-p8-orchestrator-awareness-1776535727
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p8-orchestrator-awareness
+title: Make orchestrator prompts and dispatch role-aware
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - bin/tests/ralph-orchestrate
+    - bin/tests/ralph-pipeline
+    - .agents/active/orchestrator.loop.md
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+success_criteria: |-
+    **feedback_goal:** Ralph orchestrate/pipeline scripts and `docs/LOOP_ORCHESTRATION_SPEC.md` describe role-aware orchestrator dispatch (impl vs verifier vs review), preserve D5 explicitly, and stop reusing the same file as both project overlay and prompt-file; script smoke + targeted tests pass; merge-back ready.
+
+    **write_scope:** bin/tests/ralph-orchestrate, bin/tests/ralph-pipeline, .agents/active/orchestrator.loop.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+    **context:** Task is **pending**. **Do not `workflow fanout`** while **`p4-review-agent`** is **`in_progress`** — both touch **`docs/LOOP_ORCHESTRATION_SPEC.md`**; **`p4`** bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` owns the spec until merge-back. After **`p4`** closes, delegate with profile **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context **`.agents/active/loop-state.md`** + this TASKS.yaml. Parent runs **`workflow advance`** + **`workflow delegation closeout`** after merge-back acceptance.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T18:08:47Z"
+updated_at: "2026-04-18T18:08:47Z"
