@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: p3f-streaming-verifier
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: 'Prior dirty state (loop-state, TASKS, PLAN, untracked archives) left untouched—outside bundle write_scope. Two commits: verifiers docs + iter-47.'
+recorded_at: "2026-04-18T16:11:42Z"
+delegation_id: del-p3f-streaming-verifier-1776528467
+artifact_paths:
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/loop-agent-pipeline/PLAN.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
