@@ -42,6 +42,11 @@
     "owner": { "type": "string" },
     "success_criteria": { "type": "string" },
     "verification_strategy": { "type": "string" },
-    "current_focus_task": { "type": "string" }
+    "current_focus_task": { "type": "string" },
+    "default_app_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Fallback TASKS app_type when resolving workflow fanout verifier_sequence if a task omits app_type"
+    }
   }
 }

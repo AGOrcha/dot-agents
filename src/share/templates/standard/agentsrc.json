@@ -8,6 +8,8 @@
   "hooks": true,
   "mcp": true,
   "settings": true,
+  "verifier_profiles": {},
+  "app_type_verifier_map": {},
   "sources": [
     {"type": "local"}
   ]

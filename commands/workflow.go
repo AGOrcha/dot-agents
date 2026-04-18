@@ -3,8 +3,10 @@ package commands
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,6 +111,9 @@ type CanonicalPlan struct {
 	SuccessCriteria      string `json:"success_criteria" yaml:"success_criteria"`
 	VerificationStrategy string `json:"verification_strategy" yaml:"verification_strategy"`
 	CurrentFocusTask     string `json:"current_focus_task" yaml:"current_focus_task"`
+	// DefaultAppType is used when resolving workflow fanout verifier_sequence
+	// if the target task omits app_type in TASKS.yaml.
+	DefaultAppType string `json:"default_app_type,omitempty" yaml:"default_app_type,omitempty"`
 }
 
 // CanonicalTaskFile is the TASKS.yaml schema for .agents/workflow/plans/<id>/TASKS.yaml
@@ -129,6 +134,8 @@ type CanonicalTask struct {
 	WriteScope           []string `json:"write_scope" yaml:"write_scope"`
 	VerificationRequired bool     `json:"verification_required" yaml:"verification_required"`
 	Notes                string   `json:"notes" yaml:"notes"`
+	// AppType selects app_type_verifier_map entries in .agentsrc.json for fanout.
+	AppType string `json:"app_type,omitempty" yaml:"app_type,omitempty"`
 }
 
 // CanonicalSliceFile is the SLICES.yaml schema for .agents/workflow/plans/<id>/SLICES.yaml
@@ -211,6 +218,8 @@ type delegationBundleYAML struct {
 		HigherLayerValidationQueue string   `yaml:"higher_layer_validation_queue,omitempty"`
 		FocusedCommands            []string `yaml:"focused_commands,omitempty"`
 		RegressionCommands         []string `yaml:"regression_commands,omitempty"`
+		AppType                    string   `yaml:"app_type,omitempty"`
+		VerifierSequence           []string `yaml:"verifier_sequence,omitempty"`
 		EvidencePolicy             *struct {
 			RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
 			ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
@@ -738,6 +747,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	fanoutCmd.Flags().Bool("require-negative-coverage", false, "Set verification.evidence_policy.require_negative_coverage in the bundle")
 	fanoutCmd.Flags().Bool("sandbox-mutations", false, "Set verification.evidence_policy.sandbox_mutations in the bundle")
 	fanoutCmd.Flags().Int("verifier-retry-max", 0, "If > 0, set verification.evidence_policy.primary_chain_max (verifier retry budget)")
+	fanoutCmd.Flags().String("verifier-sequence", "", "Comma-separated verifier profile ids (overrides app_type resolution from .agentsrc.json)")
 	fanoutCmd.Flags().Bool("skip-tdd-gate", false, "Skip pre-verifier check that Go write_scope has *_test.go coverage")
 	_ = fanoutCmd.MarkFlagRequired("plan")
 
@@ -2734,6 +2744,7 @@ type workflowNextTaskSuggestion struct {
 	WriteScope           []string `json:"write_scope,omitempty"`
 	VerificationRequired bool     `json:"verification_required"`
 	DependsOn            []string `json:"depends_on,omitempty"`
+	AppType              string   `json:"app_type,omitempty"`
 }
 
 func runWorkflowNext(explicitPlanID string) error {
@@ -2883,6 +2894,7 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 					WriteScope:           append([]string(nil), task.WriteScope...),
 					VerificationRequired: task.VerificationRequired,
 					DependsOn:            append([]string(nil), task.DependsOn...),
+					AppType:              task.AppType,
 				},
 				priority: 3,
 			}
@@ -4933,7 +4945,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	bundle, err := buildDelegationBundleForFanout(project.Path, cmd, planID, taskID, sliceID, contract, writeScope, now)
+	bundle, err := buildDelegationBundleForFanout(project.Path, cmd, planID, taskID, sliceID, plan, targetTask, contract, writeScope, now)
 	if err != nil {
 		return err
 	}
@@ -5120,10 +5132,107 @@ func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
 	return os.WriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
 }
 
+// agentsrcFanoutDispatch holds verifier dispatch fields read from .agentsrc.json
+// (see schemas/agentsrc.schema.json). Parsed separately from config.AgentsRC so
+// workflow fanout does not require expanding the typed manifest model.
+type agentsrcFanoutDispatch struct {
+	VerifierProfiles   map[string]json.RawMessage `json:"verifier_profiles"`
+	AppTypeVerifierMap map[string][]string        `json:"app_type_verifier_map"`
+}
+
+func loadAgentsrcFanoutDispatch(projectPath string) (*agentsrcFanoutDispatch, error) {
+	path := filepath.Join(projectPath, config.AgentsRCFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var d agentsrcFanoutDispatch
+	if err := json.Unmarshal(data, &d); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", config.AgentsRCFile, err)
+	}
+	return &d, nil
+}
+
+func splitCommaVerifierList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func validateVerifierProfileRefs(sequence []string, profiles map[string]json.RawMessage) error {
+	if len(profiles) == 0 || len(sequence) == 0 {
+		return nil
+	}
+	for _, id := range sequence {
+		if _, ok := profiles[id]; !ok {
+			return fmt.Errorf("verifier profile %q is not defined under verifier_profiles in .agentsrc.json", id)
+		}
+	}
+	return nil
+}
+
+func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan *CanonicalPlan, task *CanonicalTask) (appType string, sequence []string, err error) {
+	appType = strings.TrimSpace(task.AppType)
+	if appType == "" && plan != nil {
+		appType = strings.TrimSpace(plan.DefaultAppType)
+	}
+
+	verifierSeqFlag, _ := cmd.Flags().GetString("verifier-sequence")
+	verifierSeqFlag = strings.TrimSpace(verifierSeqFlag)
+	if verifierSeqFlag != "" {
+		sequence = splitCommaVerifierList(verifierSeqFlag)
+		if len(sequence) == 0 {
+			return "", nil, fmt.Errorf("--verifier-sequence is non-empty but yielded no verifier profile ids")
+		}
+		d, err := loadAgentsrcFanoutDispatch(projectPath)
+		if err != nil {
+			return "", nil, err
+		}
+		var profiles map[string]json.RawMessage
+		if d != nil {
+			profiles = d.VerifierProfiles
+		}
+		if err := validateVerifierProfileRefs(sequence, profiles); err != nil {
+			return "", nil, err
+		}
+		return appType, sequence, nil
+	}
+
+	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if d == nil || len(d.AppTypeVerifierMap) == 0 {
+		return appType, nil, nil
+	}
+	if appType == "" {
+		return "", nil, nil
+	}
+	seq := d.AppTypeVerifierMap[appType]
+	if len(seq) == 0 {
+		return appType, nil, nil
+	}
+	sequence = append([]string(nil), seq...)
+	if err := validateVerifierProfileRefs(sequence, d.VerifierProfiles); err != nil {
+		return "", nil, err
+	}
+	return appType, sequence, nil
+}
+
 func buildDelegationBundleForFanout(
 	projectPath string,
 	cmd *cobra.Command,
 	planID, taskID, sliceID string,
+	plan *CanonicalPlan,
+	targetTask *CanonicalTask,
 	contract *DelegationContract,
 	writeScope []string,
 	createdAtRFC3339 string,
@@ -5226,6 +5335,17 @@ func buildDelegationBundleForFanout(
 	}
 	if validationQueue != "" {
 		b.Verification.HigherLayerValidationQueue = validationQueue
+	}
+
+	appType, verifierSeq, err := resolveFanoutVerifierDispatch(projectPath, cmd, plan, targetTask)
+	if err != nil {
+		return nil, err
+	}
+	if appType != "" {
+		b.Verification.AppType = appType
+	}
+	if len(verifierSeq) > 0 {
+		b.Verification.VerifierSequence = verifierSeq
 	}
 
 	reqNeg, _ := cmd.Flags().GetBool("require-negative-coverage")
