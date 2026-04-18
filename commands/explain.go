@@ -62,6 +62,7 @@ func printOverviewExplanation() {
 		{"status", "Show managed projects and link health"},
 		{"doctor", "Diagnose installation issues"},
 		{"skills", "Manage skills"},
+		{"hooks", "List/show/remove hook bundles under ~/.agents/hooks/"},
 		{"agents", "Manage agent definitions"},
 		{"sync", "Git operations on ~/.agents/"},
 	}
@@ -125,7 +126,7 @@ func printManifestExplanation() {
 	fmt.Fprintf(os.Stdout, "  %sKeeping it up to date:%s\n", ui.Bold, ui.Reset)
 	fmt.Fprintf(os.Stdout, "    dot-agents skills new <n> --project <p>  → manifest updated automatically\n")
 	fmt.Fprintf(os.Stdout, "    dot-agents agents new <n> --project <p>  → manifest updated automatically\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents hooks add <Event> ...         → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    dot-agents hooks list|show|remove       → inspect ~/.agents/hooks bundles (author on disk, then refresh/install)\n")
 	fmt.Fprintf(os.Stdout, "    dot-agents install --generate            → regenerate from current state\n\n")
 
 	ui.Section("Flags")

@@ -3,8 +3,19 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestNewInstallCmd_Long_DescribesMaterializeAndPlatformLinkPass(t *testing.T) {
+	cmd := NewInstallCmd()
+	if !strings.Contains(cmd.Long, "materializes") {
+		t.Fatalf("install Long should mention materializing skills/agents: %s", cmd.Long)
+	}
+	if !strings.Contains(cmd.Long, "refresh") {
+		t.Fatalf("install Long should tie platform link pass to refresh: %s", cmd.Long)
+	}
+}
 
 func TestFirstResourceCandidatePrefersProjectScopeOverGlobal(t *testing.T) {
 	tmp := t.TempDir()

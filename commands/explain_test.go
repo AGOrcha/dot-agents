@@ -35,3 +35,30 @@ func TestExplainLinks_MentionsSharedTargetRegistryDiagnostics(t *testing.T) {
 		t.Fatalf("explain links output missing refresh --dry-run parity note:\n%s", s)
 	}
 }
+
+func TestExplainManifest_ReadbackDoesNotClaimHooksAdd(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	printManifestExplanation()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	os.Stdout = old
+
+	s := string(out)
+	if strings.Contains(s, "hooks add") {
+		t.Fatalf("manifest explain must not reference obsolete hooks add:\n%s", s)
+	}
+	if !strings.Contains(s, "hooks list") {
+		t.Fatalf("manifest explain should point readers at hooks list:\n%s", s)
+	}
+}

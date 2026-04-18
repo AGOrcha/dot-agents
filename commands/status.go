@@ -90,6 +90,10 @@ func NewStatusCmd() *cobra.Command {
 		Long: `Summarizes the shared ~/.agents/ store, managed projects, and per-platform
 link health so you can quickly see whether configuration is present, stale, or broken.
 
+The manifest line reflects declared skills, agents, hooks, MCP, and settings in
+.agentsrc.json; canonical hook bundle inventory on disk is dot-agents hooks list
+(or hooks show).
+
 Use --audit when you need file-level detail suitable for debugging or for an AI
 agent that must reason about the exact managed outputs.`,
 		Example: ExampleBlock(

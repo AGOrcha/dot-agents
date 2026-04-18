@@ -18,8 +18,9 @@ func NewDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check installations, validate links, detect issues",
 		Long: `Audits the local dot-agents installation, installed platforms, manifest health,
-and managed project links. Doctor is the fastest way to detect drift after manual
-edits, moved repositories, or partial setup on a new machine.`,
+and managed project links using the same managed paths as dot-agents install and
+refresh. Doctor is the fastest way to detect drift after manual edits, moved
+repositories, or partial setup on a new machine.`,
 		Example: ExampleBlock(
 			"  dot-agents doctor",
 			"  dot-agents doctor --verbose",

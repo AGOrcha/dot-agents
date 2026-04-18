@@ -1,42 +1,49 @@
 # Loop State
 
 Last updated: 2026-04-18
-Iteration: 47 (orchestrator)
+Iteration: 48 (orchestrator)
 
 ## Current Position
 
 Orchestrator pass — 2026-04-18:
-- **Bundle confirmed (this run):** `loop-agent-pipeline` / **`p4-review-agent`** → `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (**proceed** — **`p3f-streaming-verifier`** is **completed**; **`p4`** is **`in_progress`** with bounded review-agent + workflow + schema scope; this slice owns concurrent edits to **`docs/LOOP_ORCHESTRATION_SPEC.md`** and **`commands/workflow.go`** until merge-back).
-- **`workflow next` vs in-flight `p4`:** CLI reports **`p8-orchestrator-awareness`** (first **pending** task; **`p4`** is **`in_progress`** so it is not the pending queue head). **Do not** fan out **`p8`** while **`p4`** is open — **shared `docs/LOOP_ORCHESTRATION_SPEC.md`**; **canonical TASKS.yaml notes + orchestrator serialization policy** win over **`workflow next`** for dispatch.
-- **Parallelism:** `RALPH_MAX_PARALLEL_WORKERS=3` (this pass); **1** active delegation (**`p4`**); **no additional** `workflow fanout` emitted this pass.
+- **Bundles confirmed (this run, max parallel = 2):**
+  1. **`loop-agent-pipeline` / `p7-post-closeout`** → `.agents/active/delegation-bundles/del-p7-post-closeout-1776538664.yaml` — **proceed** (task **`in_progress`**, bounded scope matches bundle `write_scope`; closes post-closeout / fold-back slice).
+  2. **`resource-command-parity` / `phase-5-readback-alignment`** → `.agents/active/delegation-bundles/del-phase-5-readback-alignment-1776538664.yaml` — **proceed with DAG awareness** (worker is active; canonical **`depends_on`** still lists **`phase-3`** / **`phase-4`** as **`pending`** — merge-back must reconcile or parent adjusts the DAG).
+- **`workflow next`:** **`resource-command-parity` / `phase-1-command-contract`** (pending, all deps complete). **No third fanout** this pass — **`RALPH_MAX_PARALLEL_WORKERS=2`** satisfied by the two bundles above.
+- **TASKS.yaml** updated for **`p7-post-closeout`**, **`phase-5-readback-alignment`**, and scheduling notes on **`phase-1-command-contract`**.
 
 ## Loop Health
 
-- **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag git + canonical focus — **canonical PLAN.yaml / TASKS.yaml** win for focus text.
-- **`workflow next` vs `p4` / `p8`:** Historical note (pre-**`p4`** close): orchestrator could defer **`p8`** for **`docs/LOOP_ORCHESTRATION_SPEC.md`** overlap — **resolved** for **`p8` worker slice**; **`p8`** **merge-back** (iter-48) documents **D5** in **`ralph-orchestrate`**.
-- **D5 in scripts:** `bin/tests/ralph-orchestrate` no longer passes **`active.loop.md`** as both `--project-overlay` and `--prompt-file` — default **inline `--prompt`**, optional **`.agents/prompts/loop-worker.project.md`** (or **RALPH_DELEGATION_PROMPT_FILE**) when present and not the overlay path.
-- **`p6` / `p7` / `p5` vs `p4` pending:** Historical DAG text in TASKS may still be stale; **canonical** **`workflow tasks`** wins.
+- **`workflow orient` vs checkpoint:** Checkpoint `next_action` may lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warned: stale “Make orchestrator prompts…” vs **`p7`** focus).
+- **`phase-1` vs `phase-2`:** **`phase-2-hooks-lifecycle` is `completed`** while **`phase-1-command-contract` remains `pending`** — **reconcile** via `workflow advance` / status fix when contract is verified landed.
+- **`phase-5` readback slice (iter 49):** Merge-back **`.agents/active/merge-back/phase-5-readback-alignment.md`** — aligned **`explain` / `install` / `status` / `doctor` / `remove`** copy with manifest + **`hooks list|show|remove`** (removed obsolete **`hooks add`**); tests added. **Parent:** review → **`workflow advance`** + **`workflow delegation closeout`**; DAG still lists **`phase-3`/`phase-4`** pending — reconcile YAML vs completed readback work.
+- **`phase-5` vs upstream:** Fanout exists while **`phase-3`** / **`phase-4`** are **`pending`** per YAML — document exception in merge-back or complete upstream before closing **`phase-5`**.
+- **`phase-1` vs `phase-5` workers:** Both can touch **`commands/`** — **serialize** or partition scopes to avoid merge fights while **`phase-5`** is in flight.
+- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as prompt-file) — consistent with **`c08ce94`**.
 
 ## Next Iteration Playbook
 
-1. **Parent:** review **`.agents/active/merge-back/p8-orchestrator-awareness.md`**, then **`workflow advance loop-agent-pipeline p8-orchestrator-awareness completed`**, then **`workflow delegation closeout --plan loop-agent-pipeline --task p8-orchestrator-awareness --decision accept`**, refresh **`## Current Position`** in this file.
-2. **Then:** pick next pending (e.g. **`p7-post-closeout`**) with **`workflow next`**, **`workflow tasks`**, and orchestrator pass as needed.
-3. **Evidence:** `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go run ./cmd/dot-agents workflow orient`.
+1. **Parent (priority):** Review **`phase-5-readback-alignment`** merge-back → **`workflow advance resource-command-parity phase-5-readback-alignment completed`** (if accepted) + **`workflow delegation closeout`**; reconcile **`depends_on`** vs DAG notes.
+2. **Workers:** Remaining bundles (`p7`, etc.) — **`/iteration-close`** after verify + checkpoint + merge-back.
+3. **After `p7` / `phase-5` land:** Re-run **`workflow next`** / **`workflow tasks resource-command-parity`** — expect head **`phase-1-command-contract`** unless focus moved; reconcile **`phase-1`** pending vs **`phase-2`** completed.
+4. **Evidence:** `go run ./cmd/dot-agents workflow tasks resource-command-parity`; `go run ./cmd/dot-agents explain manifest`; `go run ./cmd/dot-agents workflow orient`.
 
 ## Scenario Coverage
 
 | Family | Last exercised |
 |--------|----------------|
-| orchestrator-selection | 2026-04-18 — confirmed **`p4`** bundle after **`p3f`** completion; deferred **`p8`** fanout despite **`workflow next`** |
-| delegation-lifecycle | 2026-04-18 — TASKS notes aligned to **`p4`** bundle path + **`p8`** deferral rationale |
+| orchestrator-selection | 2026-04-18 — confirmed two bundles (`p7`, **`phase-5`**) + cap at parallel=2; deferred extra fanout |
+| delegation-lifecycle | 2026-04-18 — TASKS notes aligned to bundle paths + DAG / merge-coordination notes |
 
 ## Command Coverage
 
 | Command | Tested | Last Iteration |
 |---------|--------|----------------|
-| `workflow orient` | yes | 47 |
-| `workflow next` | yes | 47 |
-| `workflow tasks loop-agent-pipeline` | yes | 47 |
+| `workflow orient` | yes | 48 |
+| `workflow next` | yes | 48 |
+| `workflow tasks loop-agent-pipeline` | yes | 48 |
+| `workflow tasks resource-command-parity` | yes | 48 |
+| `explain manifest` | yes | 49 |
 
 ## Iteration Log
 

@@ -16,7 +16,8 @@ func NewRemoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <project>",
 		Short: "Remove a project from dot-agents management",
-		Long: `Unregisters a project from dot-agents and removes config symlinks.
+		Long: `Unregisters a project from dot-agents and removes platform links (rules, hooks,
+MCP, settings, and other managed outputs) the same way install/refresh created them.
 
 With --clean, also removes project directories from ~/.agents/.`,
 		Example: ExampleBlock(
@@ -64,6 +65,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 	ui.PreviewSection("From "+displayPath+":",
 		".cursor/rules/global--*.mdc     (hard links)",
 		".cursor/rules/"+projectName+"--*.mdc (hard links)",
+		".cursor/hooks.json, .codex/hooks.json (managed links)",
 		".claude/rules/"+projectName+"--*.md      (symlinks)",
 		"AGENTS.md                       (symlink)",
 		"opencode.json and .opencode/agent/* (symlinks)",

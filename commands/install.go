@@ -21,9 +21,10 @@ func NewInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Set up project from .agentsrc.json manifest",
-		Long: `Reads .agentsrc.json in the current directory and wires up all declared
-resources (skills, rules, agents, hooks, MCP configs, settings) by creating
-the appropriate platform-specific symlinks and hard links.
+		Long: `Reads .agentsrc.json in the current directory, materializes declared skills and
+agents into ~/.agents/ from configured sources, then applies the manifest to each
+installed platform (rules, hooks, MCP configs, settings) with the same link pass
+as dot-agents refresh.
 
 Commit .agentsrc.json to git so any contributor can run 'dot-agents install'
 after cloning — no manual init or sync required.
