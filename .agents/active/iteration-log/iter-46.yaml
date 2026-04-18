@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 46
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p3e-batch-verifier
+commit: 6c21f7df3b881cb0a486e4a004b5ebbe5243ba70
+files_changed: 4
+lines_added: 63
+lines_removed: 22
+impl:
+    item: 'p3e-batch-verifier: batch verifier prompt + LOOP_ORCHESTRATION_SPEC batch role'
+    summary: Added `.agents/prompts/verifiers/batch.project.md` (fixture/golden batch runs, expected-vs-actual artifacts, `batch.result.yaml`). Documented `batch` verifier role and routing vs `unit` in `docs/LOOP_ORCHESTRATION_SPEC.md`.
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: yes — verify record, checkpoint --log-to-iter 46, merge-back; iter-46 filled
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3e-batch-verifier/review-decision.yaml
+    verify_record_appended: false
