@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p5-iter-log-v2
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: Shipped workflow-iter-log schema v2, role-aware --log-to-iter merge (impl/verifier/review), delegation bundle feedback_goal wiring, v1 migration, and tests.
+recorded_at: "2026-04-18T12:48:43Z"
+delegation_id: del-p5-iter-log-v2-1776475771
+artifact_paths:
+    - .agents/active/delegation/phase-2-hooks-lifecycle.yaml
+    - bin/tests/ralph-orchestrate
