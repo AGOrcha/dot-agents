@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-c1-kg-command-decomposition-1776539821
+parent_plan_id: command-surface-decomposition
+parent_task_id: c1-kg-command-decomposition
+title: Split kg command into narrower files or subpackages
+summary: Delegated from plan Command Surface Decomposition Plan
+write_scope:
+    - commands/kg.go
+    - commands/kg_test.go
+    - commands/kg/
+success_criteria: |-
+    **feedback_goal:** Break `kg` into narrower ownership slices without changing command behavior; keep the root command wiring stable while separating bridge, query, link, warm, maintenance, and code-status concerns into files that workers can own independently.
+
+    `commands/kg.go` is the largest remaining command hotspot after workflow. Prefer a real `commands/kg/` subpackage plus a thin top-level shim unless package-level constraints force a same-package split.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T19:17:01Z"
+updated_at: "2026-04-18T19:17:01Z"
