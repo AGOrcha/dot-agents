@@ -42,6 +42,8 @@ func TestResourceCommandContractDoc(t *testing.T) {
 		"hooks show",
 		"hooks remove",
 		"rules list",
+		"mcp list",
+		"settings list",
 		"agent-resource-lifecycle",
 		"DAG drift",
 		"internal/",

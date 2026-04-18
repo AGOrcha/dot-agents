@@ -36,8 +36,8 @@ Rationale:
 |----------|-------------------------------------|-------------------------|
 | **Hooks** | `hooks list`, `hooks show`, `hooks remove` | `import`, `refresh`, `install`, `remove`, `status`, `doctor` |
 | **Rules** | `rules list`, `rules show`, `rules remove` | `add`, `import`, `refresh`, `install`, `remove`, `status`, `doctor` |
-| **MCP** | *None yet* (phase 4) | same as rules |
-| **Settings** | *None yet* (phase 4) | same as rules |
+| **MCP** | `mcp list`, `mcp show`, `mcp remove` | same as rules |
+| **Settings** | `settings list`, `settings show`, `settings remove` | same as rules |
 
 Canonical hook storage and bundle layout: `~/.agents/hooks/…` with `HOOK.yaml` bundles (see
 `dot-agents hooks --help`).
@@ -55,8 +55,8 @@ this contract (no implying a dedicated lifecycle where none exists yet):
 
 - `status`, `explain`, `doctor`, `install`, `remove`
 
-Phase **5** aligned readback/install/remove copy with this model; **rules** now have a dedicated
-family (phase **3**); MCP/settings remain implicit until phase **4**.
+Phase **5** aligned readback/install/remove copy with this model; **rules** have a dedicated family
+(phase **3**); **MCP** and **settings** have dedicated families (phase **4**).
 
 ## Retrofit: shipped phases vs this contract
 
@@ -65,7 +65,7 @@ family (phase **3**); MCP/settings remain implicit until phase **4**.
 | **2 — hooks lifecycle** | Shipped `hooks list`, `hooks show`, `hooks remove` on top of canonical `HOOK.yaml` bundles; matches the “per-resource family + shared executor” shape. |
 | **5 — readback alignment** | Updated user-visible surfaces so readback and lifecycle wording match the contract (including “implicit until dedicated commands exist”). |
 | **3 — rules lifecycle** | Shipped `rules list`, `rules show`, `rules remove` for canonical `~/.agents/rules/` files; matches the per-resource family + shared link/refresh model. |
-| **4 — MCP, settings** | **Pending**; contract already reserves dedicated families and forbids duplicate emitters. |
+| **4 — MCP, settings** | Shipped `mcp list`, `mcp show`, `mcp remove` and `settings list`, `settings show`, `settings remove` over canonical `~/.agents/mcp/` and `~/.agents/settings/` trees; matches per-resource family + shared link/refresh model. |
 
 ## Canonical task graph note (for maintainers)
 
