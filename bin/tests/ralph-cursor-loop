@@ -277,9 +277,14 @@ fi
 
 merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
 
-agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
-[[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
-[[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
+  agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+else
+  agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+  [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
 echo "ralph-cursor-loop: starting worker for plan=$PLAN_ID task=$TASK_ID role=$WORKER_ROLE (budget: ${ITERATIONS} iterations)" >&2
