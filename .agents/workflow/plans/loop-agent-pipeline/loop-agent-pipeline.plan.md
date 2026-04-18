@@ -11,6 +11,7 @@ Implement the role-pure loop-agent pipeline so the repo can:
 - enforce the pre-verifier TDD-fresh gate in the control plane
 - upgrade iteration logging to schema v2 with nested role blocks
 - run a post-closeout pass that can create or update fold-back observations
+- split the `workflow` command surface so future worker slices no longer serialize on one monolithic file
 
 This document is the human-readable view of the canonical plan in [`PLAN.yaml`](./PLAN.yaml) and [`TASKS.yaml`](./TASKS.yaml). The exploratory design work is already done in `specs/loop-agent-pipeline`; this plan should be executed, not reopened.
 
@@ -54,6 +55,7 @@ These converge the pipeline after the role surfaces exist:
 - `p5-iter-log-v2`
 - `p6-fanout-dispatch`
 - `p7-post-closeout`
+- `p10-workflow-command-decomposition`
 
 ## Task Catalog
 
@@ -105,6 +107,10 @@ Make orchestrator dispatch explicitly role-aware. `--project-overlay` and `--pro
 
 Keep external sources alive only as a doc-only design fork. This task writes the design artifact and deliberately does not pull registry or source-package implementation work back into this plan.
 
+### `p10-workflow-command-decomposition`
+
+Split the `workflow` command out of the current monolith into `commands/workflow/` with a thin top-level shim in `commands/workflow.go`. The goal is not new behavior. The goal is smaller write scopes, lower worker context load, and fewer forced serializations across future workflow tasks.
+
 ## Hotspots And Sequencing
 
 The logical dependency graph is wider than the safe implementation graph.
@@ -116,6 +122,10 @@ Shared hotspots:
 - `bin/tests/ralph-orchestrate`
 - `bin/tests/ralph-pipeline`
 - `docs/LOOP_ORCHESTRATION_SPEC.md`
+
+Structural note:
+
+`commands/workflow.go` and `commands/workflow_test.go` are still the largest remaining worker hotspot in this plan. `p10` exists specifically to remove that bottleneck rather than only documenting it.
 
 Good early parallel candidates:
 
@@ -148,4 +158,4 @@ Execution is not complete until the plan has:
 
 ## Exit Condition
 
-The plan is complete when the loop-agent pipeline can run end-to-end with typed verifier and reviewer artifacts, role-aware dispatch, iter-log v2 persistence, and post-closeout fold-back updates without reopening the architectural questions already settled in the spec set.
+The plan is complete when the loop-agent pipeline can run end-to-end with typed verifier and reviewer artifacts, role-aware dispatch, iter-log v2 persistence, post-closeout fold-back updates, and a decomposed workflow command surface that no longer forces unrelated worker slices through one giant file.

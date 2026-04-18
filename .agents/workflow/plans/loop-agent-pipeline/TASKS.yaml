@@ -279,3 +279,24 @@ tasks:
         Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
 
         **D6.a landed:** `.agents/workflow/specs/external-agent-sources/design.md` — forked from `decisions.1.md` D6/D6.a; sections 1–13 match locked TOC. Parent reviews merge-back, then `workflow advance` + delegation closeout.
+    - id: p10-workflow-command-decomposition
+      title: Split workflow command into subpackage files to reduce worker hotspot contention
+      status: pending
+      depends_on:
+        - p7-post-closeout
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow_test.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Replace the monolithic `commands/workflow.go` / `commands/workflow_test.go` hotspot with a `commands/workflow/` subpackage and a thin top-level shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
+
+        **write_scope:** commands/workflow.go, commands/workflow_test.go, commands/workflow/
+
+        **context:** This is a structural follow-on after the core pipeline behavior landed. Keep command semantics stable; the primary goal is decomposition by subcommand family (`status`, `orient`, `checkpoint`, `plan/task`, `verify`, `graph`, `fanout`, `merge-back`, `fold-back`, `delegation`, `drift`, `sweep`) and matching test-file decomposition. If additional helpers are needed, keep them inside the new workflow subpackage instead of growing other command hotspots.
+
+        **serialization note:** Treat this as an exclusive hotspot task. Do not parallelize with other work that still edits `commands/workflow.go` or `commands/workflow_test.go`.

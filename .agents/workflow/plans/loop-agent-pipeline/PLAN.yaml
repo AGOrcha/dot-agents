@@ -1,11 +1,11 @@
 schema_version: 1
 id: loop-agent-pipeline
 title: Loop Agent Pipeline Plan
-status: completed
-summary: Implement the role-pure loop-agent pipeline with repo-owned impl, verifier, and review surfaces; control-plane verification gating; iter-log schema v2; and post-closeout fold-back updates.
+status: active
+summary: Implement the role-pure loop-agent pipeline with repo-owned impl, verifier, and review surfaces; control-plane verification gating; iter-log schema v2; post-closeout fold-back updates; and workflow command decomposition to reduce worker hotspot contention.
 created_at: "2026-04-17T08:39:50Z"
-updated_at: "2026-04-18T19:03:12Z"
+updated_at: "2026-04-18T21:55:00Z"
 owner: dot-agents
-success_criteria: The loop pipeline can dispatch role-specific impl, verifier, and review agents with typed artifacts, enforce the pre-verifier TDD-fresh gate in the control plane, persist iter-log schema v2, and complete reviewer-driven closeout without reopening D1/D2/D3/D6/D7 design questions.
+success_criteria: The loop pipeline can dispatch role-specific impl, verifier, and review agents with typed artifacts, enforce the pre-verifier TDD-fresh gate in the control plane, persist iter-log schema v2, complete reviewer-driven closeout without reopening D1/D2/D3/D6/D7 design questions, and split the workflow command surface into narrower files so future pipeline work no longer serializes on one monolithic workflow hotspot.
 verification_strategy: Focused command tests, schema fixture and sync coverage, ralph script coverage for orchestration branches, prompt/path checks for role surfaces, and go test ./... before merge.
-current_focus_task: ""
+current_focus_task: p10-workflow-command-decomposition
