@@ -43,6 +43,15 @@
       "ref": "main"
     }
   ],
+  "verifier_profiles": {
+    "unit": {
+      "label": "Unit (Go)",
+      "prompt_files": [".agents/prompts/verifiers/unit.project.md"]
+    }
+  },
+  "app_type_verifier_map": {
+    "go-cli": ["unit"]
+  },
   "refresh": {
     "version": "dev",
     "refreshedAt": "2026-04-15T04:00:00Z"

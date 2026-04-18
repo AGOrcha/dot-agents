@@ -9,3 +9,4 @@ owner: dot-agents
 success_criteria: Hooks, rules, MCP, and settings have an explicit, documented lifecycle story with bounded command surfaces and aligned readback/install/remove behavior; intentional non-lifecycle resources remain documented as out of scope.
 verification_strategy: Focused command tests plus readback/status/explain/doctor/install/remove smoke for each managed resource family.
 current_focus_task: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
+default_app_type: go-cli
