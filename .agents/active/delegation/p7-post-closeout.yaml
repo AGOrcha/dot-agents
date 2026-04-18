@@ -13,6 +13,6 @@ success_criteria: Add the post-closeout reasoning pass, workflow fold-back updat
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T13:05:08Z"
-updated_at: "2026-04-18T13:05:08Z"
+updated_at: "2026-04-18T13:13:25Z"
