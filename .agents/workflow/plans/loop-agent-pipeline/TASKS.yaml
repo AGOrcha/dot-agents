@@ -117,7 +117,7 @@ tasks:
         **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3d-ui-verifier-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — worker may proceed. **Serialize** `p3e`–`p3f` (shared `docs/LOOP_ORCHESTRATION_SPEC.md`): do **not** fan out or run batch/streaming verifier workers until this task merges and parent advances. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p3e-batch-verifier
       title: Batch verifier surface and result contract
-      status: pending
+      status: in_progress
       depends_on:
         - p3a-result-schema
       blocks:
