@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 48
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p8-orchestrator-awareness
+commit: c08ce94a47472abff5090f70afb73111cc7f5e3c
+files_changed: 4
+lines_added: 35
+lines_removed: 1
+impl:
+    item: "p8-orchestrator-awareness: D5 in ralph fanout, spec, orchestrator overlay"
+    summary: "Removed --prompt-file duplicate of --project-overlay in ralph-orchestrate; add default inline --prompt; optional RALPH_DELEGATION_PROMPT_FILE or .agents/prompts/loop-worker.project.md if present and not overlay. Documented D5 in LOOP_ORCHESTRATION_SPEC; fanout example + role dispatch in orchestrator.loop; ralph-pipeline env forward note."
+    scope_note: "on-target (write_scope: ralph-orchestrate, ralph-pipeline, orchestrator.loop, LOOP_ORCHESTRATION_SPEC)"
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back, checkpoint --log-to-iter 48; parent owes advance + delegation closeout"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p8-orchestrator-awareness/review-decision.yaml
+    verify_record_appended: false

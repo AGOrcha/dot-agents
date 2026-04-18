@@ -13,13 +13,14 @@ Orchestrator pass — 2026-04-18:
 ## Loop Health
 
 - **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag git + canonical focus — **canonical PLAN.yaml / TASKS.yaml** win for focus text.
-- **`workflow next` vs `p4` / `p8`:** **`next`** correctly skips **`in_progress`** **`p4`** and surfaces **`p8`**; orchestrator still **defers `p8` fanout** until **`p4`** closes due to **spec overlap** — logged here so parent does not double-book **`docs/LOOP_ORCHESTRATION_SPEC.md`**.
-- **`p6` / `p7` / `p5` vs `p4` pending:** Historical DAG text in TASKS still references **`p4`** as pending while downstream tasks show **completed** — **known drift**; do not infer **`p4`** is already done from downstream statuses alone.
+- **`workflow next` vs `p4` / `p8`:** Historical note (pre-**`p4`** close): orchestrator could defer **`p8`** for **`docs/LOOP_ORCHESTRATION_SPEC.md`** overlap — **resolved** for **`p8` worker slice**; **`p8`** **merge-back** (iter-48) documents **D5** in **`ralph-orchestrate`**.
+- **D5 in scripts:** `bin/tests/ralph-orchestrate` no longer passes **`active.loop.md`** as both `--project-overlay` and `--prompt-file` — default **inline `--prompt`**, optional **`.agents/prompts/loop-worker.project.md`** (or **RALPH_DELEGATION_PROMPT_FILE**) when present and not the overlay path.
+- **`p6` / `p7` / `p5` vs `p4` pending:** Historical DAG text in TASKS may still be stale; **canonical** **`workflow tasks`** wins.
 
 ## Next Iteration Playbook
 
-1. **Run `p4-review-agent` worker** on bundle `del-p4-review-agent-1776528758.yaml` (`.agents/skills/dot-agents/loop-worker/` + `/iteration-close`); parent **`workflow advance`** + **`workflow delegation closeout`** when merge-back is accepted.
-2. **Then** re-run `go run ./cmd/dot-agents workflow next` and `workflow tasks loop-agent-pipeline`; **`workflow fanout`** for **`p8-orchestrator-awareness`** when the spec is free (delegate-profile **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context: **`.agents/active/loop-state.md`**, **`TASKS.yaml`**).
+1. **Parent:** review **`.agents/active/merge-back/p8-orchestrator-awareness.md`**, then **`workflow advance loop-agent-pipeline p8-orchestrator-awareness completed`**, then **`workflow delegation closeout --plan loop-agent-pipeline --task p8-orchestrator-awareness --decision accept`**, refresh **`## Current Position`** in this file.
+2. **Then:** pick next pending (e.g. **`p7-post-closeout`**) with **`workflow next`**, **`workflow tasks`**, and orchestrator pass as needed.
 3. **Evidence:** `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go run ./cmd/dot-agents workflow orient`.
 
 ## Scenario Coverage
