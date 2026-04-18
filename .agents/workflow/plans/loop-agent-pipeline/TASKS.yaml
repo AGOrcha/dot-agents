@@ -81,7 +81,7 @@ tasks:
       notes: Add unit verifier guidance with explicit go test ./... -race -count=1 -timeout=300s expectations and scoped-test discipline aligned to D12.
     - id: p3c-api-verifier
       title: API verifier surface and result contract
-      status: pending
+      status: in_progress
       depends_on:
         - p3a-result-schema
       blocks:
