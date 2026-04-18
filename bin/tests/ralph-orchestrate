@@ -501,6 +501,8 @@ fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
 echo "=== ralph-orchestrate: orchestrator pass (single run) ===" >&2
+orch_agent_rc=0
+set +e
 if [[ -n "$LOG_DIR" ]]; then
   case "$OUTPUT_FORMAT" in
     stream-json) log_agent="$LOG_DIR/agent-orchestrator.ndjson" ;;
@@ -508,8 +510,15 @@ if [[ -n "$LOG_DIR" ]]; then
     *)           log_agent="$LOG_DIR/agent-orchestrator.txt" ;;
   esac
   "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+  orch_agent_rc=${PIPESTATUS[0]}
 else
   "${agent_inv[@]}" "$(cat "$prompt_file")"
+  orch_agent_rc=$?
+fi
+set -e
+if [[ $orch_agent_rc -ne 0 ]]; then
+  echo "ralph-orchestrate: orchestrator agent exited with code $orch_agent_rc" >&2
+  exit $orch_agent_rc
 fi
 
 echo "ralph-orchestrate: done." >&2

@@ -117,8 +117,13 @@ export RALPH_AGENT_OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
 export AGENT_BIN="${AGENT_BIN:-agent}"
 export DOT_AGENTS="${DOT_AGENTS:-}"
 
-if ! "$RALPH_ORCHESTRATE" >"$orch_output_file" 2>&1; then
-  echo "error: ralph-orchestrate failed" >&2
+orch_rc=0
+set +e
+"$RALPH_ORCHESTRATE" 2>&1 | tee "$orch_output_file" >&2
+orch_rc=${PIPESTATUS[0]}
+set -e
+if [[ $orch_rc -ne 0 ]]; then
+  echo "error: ralph-orchestrate failed (exit $orch_rc)" >&2
   exit 1
 fi
 
