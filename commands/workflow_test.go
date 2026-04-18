@@ -1159,6 +1159,141 @@ func TestWorkflow_VerifyThenHealth(t *testing.T) {
 	}
 }
 
+func saveTestDelegationContract(t *testing.T, repo, taskID, planID, contractID string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1,
+		ID:            contractID,
+		ParentPlanID:  planID,
+		ParentTaskID:  taskID,
+		Title:         "test delegation",
+		WriteScope:    []string{"commands/"},
+		Status:        "active",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatalf("save delegation: %v", err)
+	}
+}
+
+func TestReviewDecisionSchema_Validate(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	ok := &ReviewDecisionDoc{
+		SchemaVersion: 1, TaskID: "t1", ParentPlanID: "p1",
+		Phase1Decision: "accept", Phase2Decision: "accept", OverallDecision: "accept",
+		FailedGates: []string{}, RecordedAt: now,
+	}
+	if err := validateReviewDecisionDoc(ok); err != nil {
+		t.Fatalf("valid doc: %v", err)
+	}
+	escNoReason := &ReviewDecisionDoc{
+		SchemaVersion: 1, TaskID: "t1", ParentPlanID: "p1",
+		Phase1Decision: "escalate", Phase2Decision: "accept", OverallDecision: "escalate",
+		FailedGates: []string{}, RecordedAt: now,
+	}
+	if err := validateReviewDecisionDoc(escNoReason); err == nil {
+		t.Fatal("expected schema error for escalate without escalation_reason")
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_WritesArtifactAndLog(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, "slice-99", "plan-loop", "del-slice-99-1")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowVerifyRecordReview("", "repo", "LGTM scoped surface",
+		"accept", "accept", "", "", "", "slice-99", []string{"unit", "api"}); err != nil {
+		t.Fatal(err)
+	}
+
+	decPath := filepath.Join(repo, ".agents", "active", "verification", "slice-99", "review-decision.yaml")
+	data, err := os.ReadFile(decPath)
+	if err != nil {
+		t.Fatalf("read review decision: %v", err)
+	}
+	var got ReviewDecisionDoc
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.OverallDecision != "accept" || got.Phase1Decision != "accept" || len(got.FailedGates) != 2 {
+		t.Fatalf("unexpected decision doc: %+v", got)
+	}
+	if err := validateReviewDecisionDoc(&got); err != nil {
+		t.Fatalf("on disk doc invalid: %v", err)
+	}
+
+	records, err := readVerificationLog("workflow-proj", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Kind != "review" || records[0].Status != "pass" {
+		t.Fatalf("log: %+v", records)
+	}
+	if len(records[0].Artifacts) != 1 || !strings.HasSuffix(records[0].Artifacts[0], "review-decision.yaml") {
+		t.Fatalf("artifacts: %+v", records[0].Artifacts)
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_Errors(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, "slice-err", "plan-loop", "del-slice-err")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowVerifyRecordReview("", "repo", "x",
+		"escalate", "accept", "", "", "", "slice-err", nil); err == nil {
+		t.Fatal("expected error for escalate without escalation reason")
+	}
+	if err := runWorkflowVerifyRecordReview("", "repo", "x",
+		"accept", "accept", "reject", "", "", "slice-err", nil); err == nil {
+		t.Fatal("expected error when overall disagrees with phases")
+	}
+	if err := runWorkflowVerifyRecordReview("", "repo", "x",
+		"maybe", "accept", "", "", "", "slice-err", nil); err == nil {
+		t.Fatal("expected error for invalid phase decision")
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_Cobra(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, "t-cobra", "p-cobra", "del-t-cobra")
+
+	if err := executeWorkflowCommand(t, repo,
+		"verify", "record", "--kind", "review",
+		"--task", "t-cobra",
+		"--phase1-decision", "reject", "--phase2-decision", "accept",
+		"--failed-gate", "unit", "--summary", "blocked on unit"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readVerificationLog("workflow-proj", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Status != "fail" {
+		t.Fatalf("want fail log, got %+v", records)
+	}
+}
+
 // TestWorkflow_StaleCheckpointState writes a checkpoint with an old timestamp and verifies
 // that collectWorkflowState succeeds, returns the checkpoint without error, and that the
 // orient output renders the old timestamp (no crash or data loss).
