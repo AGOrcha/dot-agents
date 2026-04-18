@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 59
+date: "2026-04-18"
+wave: resource-command-parity
+task_id: phase-1-command-contract
+commit: 463b7481c3880161cbfefb13656574d83390dbc7
+files_changed: 11
+lines_added: 283
+lines_removed: 35
+impl:
+    item: "phase-1-command-contract: canonical RESOURCE_COMMAND_CONTRACT + plan link + root help + tests"
+    summary: "Added docs/RESOURCE_COMMAND_CONTRACT.md (per-resource families, shared executor, out-of-scope table, retrofit phases 2–5, DAG drift note). Linked from resource-command-parity.plan.md; corrected TASKS audit for hooks list/show/remove; root Long points to doc; TestResourceCommandContractDoc + obsolete-phrase negative guard. loop-state Loop Health/Playbook updated for parent closeout."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 1
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record (test), checkpoint, merge-back phase-1-command-contract"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: merge-back
+      status: pass
+      gate_passed: true
+      tests_added: 1
+      tests_total_pass: true
+      scenario_tags: [resource-contract, go-test, workflow-cli]
+      result_artifact: .agents/active/verification/phase-1-command-contract/merge-back.result.yaml
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: false
+          exercised_new_scenario: true
+          ran_cli_command: true
+          cli_produced_actionable_feedback: ok
+          linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/phase-1-command-contract/review-decision.yaml
+    verify_record_appended: true

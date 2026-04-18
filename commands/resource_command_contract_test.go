@@ -50,4 +50,9 @@ func TestResourceCommandContractDoc(t *testing.T) {
 			t.Errorf("contract doc missing expected fragment %q", frag)
 		}
 	}
+
+	// Negative guard: obsolete audit line claimed hooks were list-only; contract must not regress.
+	if strings.Contains(body, "only `hooks list`") {
+		t.Error("contract doc still contains obsolete hooks-only-list audit phrasing")
+	}
 }
