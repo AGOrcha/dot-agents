@@ -68,7 +68,7 @@ tasks:
         **context:** Delegation bundle `del-p3a-result-schema-1776438877` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Blocked on `p1-pipeline-control`** — both modify `commands/workflow.go` / `commands/workflow_test.go`. **Do not** start this worker until `del-p1-pipeline-control` merge-back completes and p1 advances. After p1 closes, worker runs verify + checkpoint + merge-back.
     - id: p3b-unit-verifier
       title: Unit verifier surface and result contract
-      status: in_progress
+      status: completed
       depends_on:
         - p3a-result-schema
       blocks:
