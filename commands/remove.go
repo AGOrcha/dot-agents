@@ -93,6 +93,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 			"  ~/.agents/rules/"+projectName+"/",
 			"  ~/.agents/settings/"+projectName+"/",
 			"  ~/.agents/mcp/"+projectName+"/",
+			"  ~/.agents/hooks/"+projectName+"/",
 			"  ~/.agents/skills/"+projectName+"/",
 			"  ~/.agents/agents/"+projectName+"/",
 		)
@@ -165,6 +166,7 @@ func removeProjectDirs(project string) {
 		agentsHome + "/rules/" + project,
 		agentsHome + "/settings/" + project,
 		agentsHome + "/mcp/" + project,
+		agentsHome + "/hooks/" + project,
 		agentsHome + "/skills/" + project,
 		agentsHome + "/agents/" + project,
 	}

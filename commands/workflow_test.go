@@ -3240,8 +3240,8 @@ func TestCheckpointLogToIter(t *testing.T) {
 	}
 
 	// CLI-deterministic fields
-	if entry.SchemaVersion != 1 {
-		t.Errorf("schema_version = %d, want 1", entry.SchemaVersion)
+	if entry.SchemaVersion != 2 {
+		t.Errorf("schema_version = %d, want 2", entry.SchemaVersion)
 	}
 	if entry.Iteration != iterN {
 		t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
@@ -3259,72 +3259,64 @@ func TestCheckpointLogToIter(t *testing.T) {
 		t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
 	}
 
-	// Agent fields must be empty stubs
-	if entry.Item != "" {
-		t.Errorf("item = %q, want empty string", entry.Item)
+	// impl block: empty stubs (schema v2)
+	impl := entry.Impl
+	if impl.Item != "" {
+		t.Errorf("impl.item = %q, want empty string", impl.Item)
 	}
-	if len(entry.ScenarioTags) != 0 {
-		t.Errorf("scenario_tags = %v, want []", entry.ScenarioTags)
+	if impl.Summary != "" {
+		t.Errorf("impl.summary = %q, want empty", impl.Summary)
 	}
-	if entry.FeedbackGoal != "" {
-		t.Errorf("feedback_goal = %q, want empty", entry.FeedbackGoal)
+	if impl.ScopeNote != "" {
+		t.Errorf("impl.scope_note = %q, want empty", impl.ScopeNote)
 	}
-	if entry.TestsAdded != 0 {
-		t.Errorf("tests_added = %d, want 0", entry.TestsAdded)
+	if impl.FeedbackGoal != "" {
+		t.Errorf("impl.feedback_goal = %q, want empty", impl.FeedbackGoal)
 	}
-	if entry.TestsTotalPass != nil {
-		t.Errorf("tests_total_pass = %v, want nil", entry.TestsTotalPass)
+	if impl.Retries != 0 {
+		t.Errorf("impl.retries = %d, want 0", impl.Retries)
 	}
-	if entry.Retries != 0 {
-		t.Errorf("retries = %d, want 0", entry.Retries)
+	if impl.FocusedTestsAdded != 0 {
+		t.Errorf("impl.focused_tests_added = %d, want 0", impl.FocusedTestsAdded)
 	}
-	if entry.ScopeNote != "" {
-		t.Errorf("scope_note = %q, want empty", entry.ScopeNote)
+	if impl.FocusedTestsPass != nil {
+		t.Errorf("impl.focused_tests_pass = %v, want nil", impl.FocusedTestsPass)
 	}
-	if entry.Summary != "" {
-		t.Errorf("summary = %q, want empty", entry.Summary)
+	isa := impl.SelfAssessment
+	if isa.ReadLoopState {
+		t.Error("impl.self_assessment.read_loop_state should be false")
+	}
+	if isa.OneItemOnly {
+		t.Error("impl.self_assessment.one_item_only should be false")
+	}
+	if isa.CommittedAfterTests {
+		t.Error("impl.self_assessment.committed_after_tests should be false")
+	}
+	if isa.AlignedWithCanonicalTasks {
+		t.Error("impl.self_assessment.aligned_with_canonical_tasks should be false")
+	}
+	if isa.PersistedViaWorkflowCommands != "" {
+		t.Errorf("impl.self_assessment.persisted_via_workflow_commands = %q, want empty", isa.PersistedViaWorkflowCommands)
+	}
+	if isa.StayedUnder10Files {
+		t.Error("impl.self_assessment.stayed_under_10_files should be false")
+	}
+	if isa.NoDestructiveCommands {
+		t.Error("impl.self_assessment.no_destructive_commands should be false")
+	}
+	if isa.ScopedTestsToWriteScope {
+		t.Error("impl.self_assessment.scoped_tests_to_write_scope should be false")
+	}
+	if isa.TddRefreshPerformed {
+		t.Error("impl.self_assessment.tdd_refresh_performed should be false")
 	}
 
-	// self_assessment block: all boolean fields false, string fields empty
-	sa := entry.SelfAssessment
-	if sa.ReadLoopState {
-		t.Error("self_assessment.read_loop_state should be false")
+	if len(entry.Verifiers) != 0 {
+		t.Errorf("verifiers = %v, want empty", entry.Verifiers)
 	}
-	if sa.OneItemOnly {
-		t.Error("self_assessment.one_item_only should be false")
-	}
-	if sa.CommittedAfterTests {
-		t.Error("self_assessment.committed_after_tests should be false")
-	}
-	if sa.TestsPositiveAndNegative {
-		t.Error("self_assessment.tests_positive_and_negative should be false")
-	}
-	if sa.TestsUsedSandbox {
-		t.Error("self_assessment.tests_used_sandbox should be false")
-	}
-	if sa.AlignedWithCanonicalTasks {
-		t.Error("self_assessment.aligned_with_canonical_tasks should be false")
-	}
-	if sa.PersistedViaWorkflowCommands != "" {
-		t.Errorf("self_assessment.persisted_via_workflow_commands = %q, want empty", sa.PersistedViaWorkflowCommands)
-	}
-	if sa.RanCliCommand {
-		t.Error("self_assessment.ran_cli_command should be false")
-	}
-	if sa.ExercisedNewScenario {
-		t.Error("self_assessment.exercised_new_scenario should be false")
-	}
-	if sa.CliProducedActionableFeedback != "" {
-		t.Errorf("self_assessment.cli_produced_actionable_feedback = %q, want empty", sa.CliProducedActionableFeedback)
-	}
-	if sa.LinkedTracesToOutcomes {
-		t.Error("self_assessment.linked_traces_to_outcomes should be false")
-	}
-	if sa.StayedUnder10Files {
-		t.Error("self_assessment.stayed_under_10_files should be false")
-	}
-	if sa.NoDestructiveCommands {
-		t.Error("self_assessment.no_destructive_commands should be false")
+	// review block: empty defaults
+	if entry.Review.Phase1Decision != "" || entry.Review.Phase2Decision != "" || entry.Review.OverallDecision != "" {
+		t.Errorf("review decisions should be empty stubs, got %#v", entry.Review)
 	}
 
 	if err := validateWorkflowIterLogEntry(&entry); err != nil {
@@ -3412,6 +3404,271 @@ func TestCheckpointLogToIterNoDelegation(t *testing.T) {
 	}
 	if entry.TaskID != "" {
 		t.Errorf("task_id = %q, want empty when no delegation contract", entry.TaskID)
+	}
+}
+
+func TestCheckpointLogToIterVerifierRequiresVerifierType(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "2", "--role", "verifier")
+	if err == nil {
+		t.Fatal("expected error for --role verifier without --verifier-type")
+	}
+}
+
+func TestCheckpointLogToIterVerifierTypeWithoutLogToIterRejected(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	err := executeWorkflowCommand(t, repo, "checkpoint", "--verifier-type", "unit", "--message", "x")
+	if err == nil {
+		t.Fatal("expected error when --verifier-type is set without --log-to-iter")
+	}
+}
+
+func TestCheckpointLogToIterVerifierMergePreservesImpl(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
+	bundleDir := filepath.Join(repo, ".agents", "active", "delegation-bundles")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "slice-task"
+	const bundleID = "del-slice-task-999001"
+	contract := fmt.Sprintf(`schema_version: 1
+id: %s
+parent_plan_id: plan-x
+parent_task_id: %s
+title: t
+write_scope: []
+status: active
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(delegDir, taskID+".yaml"), []byte(contract), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bundle := fmt.Sprintf(`schema_version: 1
+delegation_id: %s
+plan_id: plan-x
+task_id: %s
+owner: test
+worker:
+  profile: loop-worker
+scope:
+  write_scope: []
+prompt: {}
+context: {}
+verification:
+  feedback_goal: bundle-fg
+closeout: {}
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(bundleDir, bundleID+".yaml"), []byte(bundle), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77"); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	entry.Impl.Item = "keep-me"
+	body, err := yaml.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
+	if err := os.WriteFile(iterPath, append([]byte(header), body...), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	verDir := filepath.Join(repo, ".agents", "active", "verification", taskID)
+	if err := os.MkdirAll(verDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	result := fmt.Sprintf(`schema_version: 1
+task_id: %s
+parent_plan_id: plan-x
+verifier_type: unit
+status: pass
+summary: ok
+recorded_at: "2026-04-18T12:00:00Z"
+`, taskID)
+	if err := os.WriteFile(filepath.Join(verDir, "unit.result.yaml"), []byte(result), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77", "--role", "verifier", "--verifier-type", "unit"); err != nil {
+		t.Fatalf("verifier merge: %v", err)
+	}
+	raw2, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out iterLogEntry
+	if err := yaml.Unmarshal(raw2, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Impl.Item != "keep-me" {
+		t.Errorf("impl.item = %q, want keep-me (verifier merge must not wipe impl)", out.Impl.Item)
+	}
+	if len(out.Verifiers) != 1 {
+		t.Fatalf("verifiers len = %d, want 1", len(out.Verifiers))
+	}
+	if out.Verifiers[0].Type != "unit" || out.Verifiers[0].Status != "pass" || !out.Verifiers[0].GatePassed {
+		t.Fatalf("unexpected verifier row: %#v", out.Verifiers[0])
+	}
+}
+
+func TestCheckpointLogToIterBundleFeedbackGoalOnStub(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
+	bundleDir := filepath.Join(repo, ".agents", "active", "delegation-bundles")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "fg-task"
+	const bundleID = "del-fg-task-999002"
+	contract := fmt.Sprintf(`schema_version: 1
+id: %s
+parent_plan_id: plan-fg
+parent_task_id: %s
+title: t
+write_scope: []
+status: active
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(delegDir, taskID+".yaml"), []byte(contract), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bundle := fmt.Sprintf(`schema_version: 1
+delegation_id: %s
+plan_id: plan-fg
+task_id: %s
+owner: test
+worker:
+  profile: loop-worker
+scope:
+  write_scope: []
+prompt: {}
+context: {}
+verification:
+  feedback_goal: "read bundle goal"
+closeout: {}
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(bundleDir, bundleID+".yaml"), []byte(bundle), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "12"); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "iteration-log", "iter-12.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Impl.FeedbackGoal != "read bundle goal" {
+		t.Errorf("impl.feedback_goal = %q, want from delegation bundle", entry.Impl.FeedbackGoal)
+	}
+}
+
+func TestCheckpointLogToIterMigratesV1Document(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	iterDir := filepath.Join(repo, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(iterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	v1 := `# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 20
+date: 2020-01-01
+wave: old-wave
+task_id: old-task
+commit: deadbeef
+files_changed: 1
+lines_added: 2
+lines_removed: 3
+first_commit: false
+item: legacy-item
+scenario_tags: []
+feedback_goal: old-fg
+tests_added: 0
+tests_total_pass: null
+retries: 0
+scope_note: ""
+summary: legacy-summary
+self_assessment:
+  read_loop_state: true
+  one_item_only: false
+  committed_after_tests: false
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
+  ran_cli_command: false
+  exercised_new_scenario: false
+  cli_produced_actionable_feedback: ""
+  linked_traces_to_outcomes: false
+  stayed_under_10_files: false
+  no_destructive_commands: false
+`
+	iterPath := filepath.Join(iterDir, "iter-20.yaml")
+	if err := os.WriteFile(iterPath, []byte(v1), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "20"); err != nil {
+		t.Fatalf("migrate pass: %v", err)
+	}
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.SchemaVersion != 2 {
+		t.Fatalf("schema_version = %d after migrate", entry.SchemaVersion)
+	}
+	if entry.Impl.Item != "legacy-item" {
+		t.Errorf("impl.item = %q, want legacy-item", entry.Impl.Item)
+	}
+	if entry.Impl.Summary != "legacy-summary" {
+		t.Errorf("impl.summary = %q", entry.Impl.Summary)
+	}
+	if !entry.Impl.SelfAssessment.ReadLoopState {
+		t.Error("expected migrated read_loop_state true")
 	}
 }
 
