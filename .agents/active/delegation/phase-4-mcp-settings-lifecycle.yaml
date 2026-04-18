@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-phase-4-mcp-settings-lifecycle-1776555203
+parent_plan_id: resource-command-parity
+parent_task_id: phase-4-mcp-settings-lifecycle
+title: Phase 4 — Add explicit MCP and settings lifecycle surfaces without duplicating emitter logic
+summary: Delegated from plan Resource Command Parity — Hooks, Rules, MCP, and Settings
+write_scope:
+    - commands/
+    - internal/platform/
+    - internal/config/
+    - docs/
+success_criteria: |-
+    MCP and settings are especially prone to split-brain because install/refresh/remove already
+    touch them. Reuse the shared planner/executor path rather than adding parallel custom wiring.
+
+    **feedback_goal:** MCP and settings lifecycle surfaces match the phase-1 contract without duplicating emitter/planner logic; regression tests for touched commands pass.
+
+    **write_scope:** `commands/`, `internal/platform/`, `internal/config/`, `docs/` (see task `write_scope` list).
+
+    **context:** Blocked until **`phase-1-command-contract`** is **`completed`** and parent **`workflow advance`**; do not fan out in parallel with the phase-1 contract worker (`commands/` overlap).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T23:33:23Z"
+updated_at: "2026-04-18T23:33:23Z"
