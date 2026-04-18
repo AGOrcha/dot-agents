@@ -213,7 +213,7 @@ tasks:
         **parallel:** `workflow orient` reports **4** active delegations and `workflow next` returned **no actionable** task — **no further fanout** this pass after this bundle (`RALPH_MAX_PARALLEL_WORKERS=3` saturated elsewhere).
     - id: phase-6-release-and-docs
       title: Phase 6 — Package, document, and validate the Windows-friendly release path
-      status: pending
+      status: in_progress
       depends_on:
         - phase-4-advanced-surface-decision
         - phase-5-stage2-and-plugin-alignment

@@ -1,7 +1,7 @@
 schema_version: 1
-delegation_id: del-phase-5-stage2-and-plugin-alignment-1776546530
+delegation_id: del-phase-6-release-and-docs-1776546980
 plan_id: typescript-port
-task_id: phase-5-stage2-and-plugin-alignment
+task_id: phase-6-release-and-docs
 owner: ralph-orchestrate
 worker:
     profile: loop-worker
@@ -9,13 +9,12 @@ worker:
         - .agents/active/active.loop.md
 selection:
     selected_by: workflow fanout
-    selected_at: "2026-04-18T21:08:50Z"
+    selected_at: "2026-04-18T21:16:20Z"
     reason: ralph-orchestrate auto-fanout
 scope:
     write_scope:
-        - ports/typescript/src/platforms/
-        - ports/typescript/src/commands/
-        - ports/typescript/tests/
+        - ports/typescript/
+        - README.md
         - docs/
 prompt:
     inline:

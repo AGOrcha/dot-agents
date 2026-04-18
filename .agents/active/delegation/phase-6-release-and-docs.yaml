@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-phase-6-release-and-docs-1776546980
+parent_plan_id: typescript-port
+parent_task_id: phase-6-release-and-docs
+title: Phase 6 — Package, document, and validate the Windows-friendly release path
+summary: Delegated from plan TypeScript Port Plan
+write_scope:
+    - ports/typescript/
+    - README.md
+    - docs/
+success_criteria: |
+    Finalize packaging, command naming, installation instructions, and platform support language.
+    The README should describe the TypeScript port as an explicit variant with declared capability boundaries,
+    not as a silent replacement for the Go CLI.
+
+    Orchestrator (2026-04-14, iter 37): **not bundled** — depends on phase-4 + phase-5; no worker until both complete; phase-4 delegation still open.
+    feedback_goal: Can a new user install the TS port, read README + `--help`, and understand parity
+    limits vs Go CLI without ambiguity?
+    write_scope (canonical): ports/typescript/, README.md, docs/
+    context: Release narrative must trace back to the phase-4 boundary decision and phase-5 alignment;
+    no fanout while phase-4 delegation is open.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T21:16:20Z"
+updated_at: "2026-04-18T21:16:20Z"
