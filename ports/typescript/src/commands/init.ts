@@ -8,6 +8,7 @@
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome } from "../core/config.js";
+import { CANONICAL_BUCKET_SPECS } from "../platforms/canonical-buckets.js";
 
 export interface InitOptions {
   /** Print what would be done without making changes. */
@@ -26,7 +27,7 @@ export interface InitResult {
 
 /** Standard directories created by `dot-agents init`. */
 export function standardDirs(home: string): string[] {
-  return [
+  const dirs = [
     home,
     join(home, "resources"),
     join(home, "rules", "global"),
@@ -38,6 +39,11 @@ export function standardDirs(home: string): string[] {
     join(home, "agents", "global"),
     join(home, "hooks", "global"),
   ];
+  // Match commands/init.go: one global scope dir per canonical store bucket (Stage 1 + Stage 2).
+  for (const spec of CANONICAL_BUCKET_SPECS) {
+    dirs.push(join(home, spec.name, "global"));
+  }
+  return dirs;
 }
 
 /** Run the init command. Returns a result summary. */

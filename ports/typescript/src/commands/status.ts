@@ -9,6 +9,7 @@
 import { stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome, loadConfig, listProjects, getProjectPath } from "../core/config.js";
+import { CANONICAL_BUCKET_SPECS } from "../platforms/canonical-buckets.js";
 
 export interface StatusOptions {
   /** Custom agents home override (used in tests). */
@@ -38,34 +39,61 @@ export interface StatusResult {
   canonicalStore: CanonicalStoreEntry[];
 }
 
-const STORE_BUCKETS = ["agents", "rules", "skills", "hooks", "mcp", "settings", "resources"] as const;
-
-/** Count direct subdirectories of a directory (returns 0 if dir doesn't exist). */
-async function countSubdirs(dir: string): Promise<number> {
+/**
+ * Match commands/status.go summarizeCanonicalScope + summarizeCanonicalBucket
+ * (marker dirs vs loose files per bucket).
+ */
+async function summarizeCanonicalScope(
+  scopePath: string,
+  countDirs: boolean,
+  markerFile: string,
+): Promise<number> {
+  let entries;
   try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).length;
+    entries = await readdir(scopePath, { withFileTypes: true });
   } catch {
     return 0;
   }
+  if (countDirs) {
+    let count = 0;
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const dirPath = join(scopePath, e.name);
+      try {
+        await stat(join(dirPath, markerFile));
+        count++;
+      } catch {
+        /* no marker */
+      }
+    }
+    return count;
+  }
+  return entries.filter((e) => !e.isDirectory()).length;
 }
 
-/** Count items (any entry) inside all scope subdirs of a bucket directory. */
-async function countBucketItems(bucketDir: string): Promise<{ scopes: number; items: number }> {
-  let scopes = 0;
-  let items = 0;
-  let scopeDirs: string[];
+async function summarizeCanonicalBucket(
+  root: string,
+  countDirs: boolean,
+  markerFile: string,
+): Promise<{ scopes: number; items: number }> {
+  let scopeEntries;
   try {
-    const entries = await readdir(bucketDir, { withFileTypes: true });
-    scopeDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    scopes = scopeDirs.length;
+    scopeEntries = await readdir(root, { withFileTypes: true });
   } catch {
     return { scopes: 0, items: 0 };
   }
-  for (const scope of scopeDirs) {
-    items += await countSubdirs(join(bucketDir, scope));
+  let scopeCount = 0;
+  let itemCount = 0;
+  for (const e of scopeEntries) {
+    if (!e.isDirectory()) continue;
+    const scopePath = join(root, e.name);
+    const n = await summarizeCanonicalScope(scopePath, countDirs, markerFile);
+    if (n > 0) {
+      scopeCount++;
+      itemCount += n;
+    }
   }
-  return { scopes, items };
+  return { scopes: scopeCount, items: itemCount };
 }
 
 export async function runStatus(opts: StatusOptions = {}): Promise<StatusResult> {
@@ -113,12 +141,16 @@ export async function runStatus(opts: StatusOptions = {}): Promise<StatusResult>
     projects.push({ name, path, pathExists, agentsRcFound });
   }
 
-  // Canonical store summary
+  // Canonical store summary (parity with platform.CanonicalStoreBucketSpecs + summarizeCanonicalBucket)
   const canonicalStore: CanonicalStoreEntry[] = [];
-  for (const bucket of STORE_BUCKETS) {
-    const bucketDir = join(home, bucket);
-    const { scopes, items } = await countBucketItems(bucketDir);
-    canonicalStore.push({ bucket, scopes, items });
+  for (const spec of CANONICAL_BUCKET_SPECS) {
+    const bucketDir = join(home, spec.name);
+    const { scopes, items } = await summarizeCanonicalBucket(
+      bucketDir,
+      spec.countDirs,
+      spec.markerFile,
+    );
+    canonicalStore.push({ bucket: spec.name, scopes, items });
   }
 
   return { agentsHome: home, agentsHomeExists, configExists, projects, canonicalStore };

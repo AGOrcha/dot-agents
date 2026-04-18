@@ -225,16 +225,40 @@ describe("runStatus", () => {
     expect(p?.agentsRcFound).toBe(true);
   });
 
-  it("returns canonical store buckets", async () => {
+  it("returns canonical store buckets aligned with Go platform buckets (Stage 1 + Stage 2)", async () => {
     const home = await makeTmp();
     await runInit({ agentsHomeOverride: home });
 
     const result = await runStatus({ agentsHomeOverride: home });
     const buckets = result.canonicalStore.map((e) => e.bucket);
-    expect(buckets).toContain("skills");
-    expect(buckets).toContain("agents");
-    expect(buckets).toContain("hooks");
-    expect(buckets).toContain("rules");
+    expect(buckets).toEqual([
+      "rules",
+      "settings",
+      "mcp",
+      "skills",
+      "agents",
+      "hooks",
+      "commands",
+      "output-styles",
+      "ignore",
+      "modes",
+      "plugins",
+      "themes",
+      "prompts",
+    ]);
+    expect(buckets).not.toContain("resources");
+  });
+
+  it("counts skills with SKILL.md markers like Go status (not raw subdir counts)", async () => {
+    const home = await makeTmp();
+    await mkdir(join(home, "skills", "global", "real-skill"), { recursive: true });
+    await writeFile(join(home, "skills", "global", "real-skill", "SKILL.md"), "# ok\n", "utf8");
+    await mkdir(join(home, "skills", "global", "empty-dir"), { recursive: true });
+
+    const result = await runStatus({ agentsHomeOverride: home });
+    const skills = result.canonicalStore.find((e) => e.bucket === "skills");
+    expect(skills?.scopes).toBe(1);
+    expect(skills?.items).toBe(1);
   });
 });
 
