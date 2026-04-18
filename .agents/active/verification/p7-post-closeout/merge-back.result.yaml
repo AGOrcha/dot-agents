@@ -3,11 +3,19 @@ task_id: p7-post-closeout
 parent_plan_id: loop-agent-pipeline
 verifier_type: merge-back
 status: pass
-summary: 'CLI: workflow fold-back create --slug / update; help shows --slug. Evidence: go test ./... ; go run ./cmd/dot-agents workflow fold-back create --help.'
-recorded_at: "2026-04-18T13:13:25Z"
-delegation_id: del-p7-post-closeout-1776517508
+summary: No commands/workflow.go changes. [ok] workflow tasks loop-agent-pipeline.
+recorded_at: "2026-04-18T19:01:54Z"
+delegation_id: del-p7-post-closeout-1776538664
 artifact_paths:
-    - .agents/active/delegation/p3d-ui-verifier.yaml
+    - .agents/active/active.loop.md
+    - .agents/active/delegation/phase-5-readback-alignment.yaml
     - .agents/active/loop-state.md
-    - .agents/workflow/plans/loop-agent-pipeline/PLAN.yaml
     - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - .agents/workflow/plans/resource-command-parity/TASKS.yaml
+    - commands/doctor.go
+    - commands/explain.go
+    - commands/explain_test.go
+    - commands/install.go
+    - commands/install_test.go
+    - commands/remove.go
+    - commands/status.go
