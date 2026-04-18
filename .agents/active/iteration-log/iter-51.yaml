@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 51
+date: "2026-04-18"
+wave: command-surface-decomposition
+task_id: c5-hooks-command-decomposition
+commit: 5b9d9380b0c4cb87cb68ac1c0add6724fd0ac323
+files_changed: 9
+lines_added: 467
+lines_removed: 370
+impl:
+    item: "c5-hooks-command-decomposition: split hooks list/show/remove into commands/hooks subpackage"
+    summary: "Introduced hooks.Deps (GlobalFlags + ErrorWithHints/UsageError + cobra positional-arg injectors) to avoid commands↔hooks import cycles. Moved implementation to cmd.go, list.go, show.go, remove.go, spec.go; relocated tests to commands/hooks/hooks_test.go. Preserved CLI behavior; hooks --help unchanged."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record (test), checkpoint --log-to-iter 51, merge-back c5-hooks-command-decomposition; parent owes advance + delegation closeout"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/c5-hooks-command-decomposition/review-decision.yaml
+    verify_record_appended: false
