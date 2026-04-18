@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 42
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p3c-api-verifier
+commit: ""
+files_changed: 4
+lines_added: 99
+lines_removed: 30
+impl:
+    item: "p3c-api-verifier: API verifier prompt + LOOP_ORCHESTRATION_SPEC api role"
+    summary: "Added .agents/prompts/verifiers/api.project.md (impl-handoff, scoped HTTP/httptest, contract + perf artifacts, Playwright network evidence) and spec bullet for api verifier + api.result.yaml."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: false
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3c-api-verifier/review-decision.yaml
+    verify_record_appended: false

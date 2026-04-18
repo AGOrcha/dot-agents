@@ -11,6 +11,6 @@ success_criteria: Add API verifier guidance, contract and perf artifact expectat
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T12:52:01Z"
-updated_at: "2026-04-18T12:52:01Z"
+updated_at: "2026-04-18T12:55:08Z"
