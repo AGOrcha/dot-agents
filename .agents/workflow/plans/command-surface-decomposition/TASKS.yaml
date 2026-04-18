@@ -21,7 +21,7 @@ tasks:
         Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c1-kg-command-decomposition-1776539821.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/kg.go`, `commands/kg_test.go`, `commands/kg/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
     - id: c2-agents-command-decomposition
       title: Split agents command by lifecycle surface
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
