@@ -1,0 +1,22 @@
+schema_version: 1
+task_id: p9-sources-design-fork
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: 'Uncommitted M bin/tests/ralph-orchestrate left untouched (out of scope). Parent: workflow advance + delegation closeout for p9.'
+recorded_at: "2026-04-18T12:47:25Z"
+delegation_id: del-p9-sources-design-fork-1776475771
+artifact_paths:
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - bin/tests/ralph-orchestrate
+    - commands/hooks.go
+    - commands/import.go
+    - commands/remove.go
+    - commands/static/workflow-iter-log.schema.json
+    - commands/workflow.go
+    - commands/workflow_test.go
+    - internal/platform/copilot.go
+    - internal/platform/hooks.go
+    - internal/platform/hooks_test.go
+    - schemas/workflow-iter-log.schema.json
