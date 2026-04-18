@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 45
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p7-post-closeout
+commit: 5bc02b7de99a7d2debe5ac534ffea56f5577dc3b
+files_changed: 8
+lines_added: 461
+lines_removed: 58
+impl:
+    item: "p7-post-closeout: fold-back D2 stable slug create-or-update, fold-back update subcommand, tagged TASKS/plan notes, optional ralph-closeout fold-back audit"
+    summary: "Shipped workflow fold-back --slug upsert + fold-back update; added tests; ralph-closeout optional RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT; ralph-pipeline exports same env."
+    scope_note: "on-target"
+    feedback_goal: "Does slug-scoped fold-back dedupe TASKS notes and does update refine plan-scoped observations without duplicate bullets?"
+    retries: 0
+    focused_tests_added: 4
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint --log-to-iter 45, merge-back"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3d-ui-verifier/review-decision.yaml
+    verify_record_appended: false
