@@ -18,16 +18,16 @@ Orchestrator pass — 2026-04-18:
 
 - **`workflow orient` vs checkpoint:** Checkpoint `next_action` may lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale).
 - **`c6` dependency gate:** Canonical **`c6-status-import-helper-extraction`** lists **`depends_on: [c1-kg-command-decomposition]`** while **`c1`** remains **`in_progress`**. Fanout created **`del-c6-...-1776539976`** anyway — **YAML wins:** treat **`c6` worker as blocked on `c1`** until **`c1`** completes (merge-back + advance) or the plan records an explicit waiver. Prefer finishing **`c1`** before starting **`c6`** implementation.
-- **`p10` hotspot:** Exclusive **`commands/workflow*`** slice — **do not** fan out a second worker on **`commands/workflow.go`**; concurrent **`c5`** is file-disjoint; re-check any other active delegation that still targets **`commands/workflow.go`** before spawning more.
+- **`p10` decomposition (2026-04-18):** Implementation lives under **`commands/workflow/`** with a thin **`commands/workflow.go`** shim; merge-back **`.agents/active/merge-back/p10-workflow-command-decomposition.md`** awaits parent **`advance` / `delegation closeout`**. Narrower future edits should target **`commands/workflow/*.go`** instead of growing the shim.
 - **`workflow next`:** No head task — expected when caps/delegations saturate; not a tooling failure if **`workflow tasks <plan>`** still shows expected **`in_progress`** rows.
 - **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as prompt-file).
-- **Skills (c4) + globalflagcov:** `skills list` / `skills promote` moved to `commands/skills/`; `internal/globalflagcov` now loads `./commands`, `./commands/sync`, `./commands/hooks`, and `./commands/skills` explicitly so `packages.Load` is not broken by stray or WIP trees under `commands/` (for example an untracked experimental `commands/workflow/` split).
+- **Skills (c4) + globalflagcov:** `skills list` / `skills promote` live in `commands/skills/`; `internal/globalflagcov` loads `./commands`, `./commands/sync`, `./commands/hooks`, `./commands/skills`, and **`./commands/workflow`** explicitly so `packages.Load` tracks the workflow subpackage.
 
 ## Next Iteration Playbook
 
 1. **`c4` worker:** **Merge-back written** (`c4-skills-command-decomposition`) — parent reviews `.agents/active/merge-back/c4-skills-command-decomposition.md`, then **`workflow advance`** + **`workflow delegation closeout`**.
 2. **`c5` worker:** **Merge-back written** (`c5-hooks-command-decomposition`) — parent reviews `.agents/active/merge-back/c5-hooks-command-decomposition.md`, then **`workflow advance`** + **`workflow delegation closeout`**.
-3. **`p10` worker:** Same closeout path; keep edits inside **`commands/workflow.go`**, **`commands/workflow_test.go`**, **`commands/workflow/`** only.
+3. **`p10` worker:** **Merge-back written** — parent reviews **`.agents/active/merge-back/p10-workflow-command-decomposition.md`**, then **`workflow advance`** + **`workflow delegation closeout`** (implementation is under **`commands/workflow/`** + thin **`commands/workflow.go`**).
 4. **`c6` worker:** **Hold** until **`c1`** **`completed`** (or documented waiver); if idle, parent may **`workflow delegation closeout`** on the bundle after reconciling queue state.
 5. **Ongoing `c3`/`c1`/`c2` waves:** Continue merge-back / advance / closeout per delegation-lifecycle; free slots before next **`workflow next`** fanout.
 6. **Evidence next session:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`.
