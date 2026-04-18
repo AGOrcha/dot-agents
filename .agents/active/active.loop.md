@@ -11,6 +11,7 @@ Copy the prompt below into a worker agent as: `/loop 1hr <prompt>` (or paste `<p
 - **TS port KG (phase-4):** `ports/typescript/src/commands/kg.ts` exposes read-only `runKgHealth` / `runKgQuery`; query is an intentional Go-only stub (no subprocess).
 - **Agent repo mirrors:** On refresh/install, Claude `createAgentsLinks` syncs `~/.agents/agents/<project>/` into repo `.agents/agents/` and `.claude/agents/` (idempotent alongside shared-target projection).
 - **Resource readback:** `status` summarizes declared hooks/MCP/etc. from `.agentsrc.json`; canonical hook bundles on disk are listed with `hooks list` / `hooks show` (Go CLI: no `hooks add` — author bundles under `~/.agents/hooks/…` then `refresh` / `install`).
+- **Skills CLI layout:** `skills list` and `skills promote` live in `commands/skills/` (`skills.List`, `skills.PromoteSkillIn`). `skills new`, `createSkill`, and `readFrontmatterDescription` stay in `commands/skills.go` (package `commands`) so `agents list` and `agentsrc_mutations` tests keep working without import cycles.
 
 ---
 

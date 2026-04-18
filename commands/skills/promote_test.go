@@ -1,4 +1,4 @@
-package commands
+package skills
 
 import (
 	"encoding/json"
@@ -50,13 +50,13 @@ func writeSkillMD(t *testing.T, projectPath, skillName string) {
 	}
 }
 
-// ── promoteSkillIn success ────────────────────────────────────────────────────
+// ── PromoteSkillIn success ────────────────────────────────────────────────────
 
 func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest")
 	writeSkillMD(t, projectPath, "my-skill")
 
-	if err := promoteSkillIn("my-skill", projectPath); err != nil {
+	if err := PromoteSkillIn("my-skill", projectPath); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -141,8 +141,8 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 
 	writeSkillMD(t, projectPath, "extra-skill")
 
-	if err := promoteSkillIn("extra-skill", projectPath); err != nil {
-		t.Fatalf("promoteSkillIn: %v", err)
+	if err := PromoteSkillIn("extra-skill", projectPath); err != nil {
+		t.Fatalf("PromoteSkillIn: %v", err)
 	}
 
 	rc, err := config.LoadAgentsRC(projectPath)
@@ -184,11 +184,11 @@ func TestPromoteSkillIn_IdempotentOnExistingSymlink(t *testing.T) {
 	writeSkillMD(t, projectPath, "idem-skill")
 
 	// First promote: copies content, repo-local becomes managed symlink.
-	if err := promoteSkillIn("idem-skill", projectPath); err != nil {
+	if err := PromoteSkillIn("idem-skill", projectPath); err != nil {
 		t.Fatalf("first promote: %v", err)
 	}
 	// Second promote: repo-local is already a symlink to canonical — idempotent.
-	if err := promoteSkillIn("idem-skill", projectPath); err != nil {
+	if err := PromoteSkillIn("idem-skill", projectPath); err != nil {
 		t.Fatalf("second promote: %v", err)
 	}
 
@@ -218,13 +218,13 @@ func TestPromoteSkillIn_IdempotentOnExistingSymlink(t *testing.T) {
 	}
 }
 
-// ── promoteSkillIn error paths ────────────────────────────────────────────────
+// ── PromoteSkillIn error paths ────────────────────────────────────────────────
 
 func TestPromoteSkillIn_ErrorSkillNotFound(t *testing.T) {
 	_, projectPath := setupSkillsEnv(t, "myprojtest3")
 	// Do NOT write skill files — skill directory does not exist.
 
-	err := promoteSkillIn("nonexistent", projectPath)
+	err := PromoteSkillIn("nonexistent", projectPath)
 	if err == nil {
 		t.Fatal("expected error for missing skill, got nil")
 	}
@@ -252,7 +252,7 @@ func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
 	}
 	writeSkillMD(t, projectPath, "some-skill")
 
-	err := promoteSkillIn("some-skill", projectPath)
+	err := PromoteSkillIn("some-skill", projectPath)
 	if err == nil {
 		t.Fatal("expected error for empty project name, got nil")
 	}
@@ -275,7 +275,7 @@ func TestPromoteSkillIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := promoteSkillIn("mis-skill", projectPath)
+	err := PromoteSkillIn("mis-skill", projectPath)
 	if err == nil {
 		t.Fatal("expected error when repo-local symlink points elsewhere, got nil")
 	}
@@ -294,7 +294,7 @@ func TestPromoteSkillIn_ErrorExistingNonSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := promoteSkillIn("clash-skill", projectPath)
+	err := PromoteSkillIn("clash-skill", projectPath)
 	if err == nil {
 		t.Fatal("expected error when canonical path is a real directory, got nil")
 	}

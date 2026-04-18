@@ -21,6 +21,7 @@ Orchestrator pass — 2026-04-18:
 - **`p10` hotspot:** Exclusive **`commands/workflow*`** slice — **do not** fan out a second worker on **`commands/workflow.go`**; concurrent **`c5`** is file-disjoint; re-check any other active delegation that still targets **`commands/workflow.go`** before spawning more.
 - **`workflow next`:** No head task — expected when caps/delegations saturate; not a tooling failure if **`workflow tasks <plan>`** still shows expected **`in_progress`** rows.
 - **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as prompt-file).
+- **Skills (c4) + globalflagcov:** `skills list` / `skills promote` moved to `commands/skills/`; `internal/globalflagcov` now loads `./commands`, `./commands/sync`, `./commands/hooks`, and `./commands/skills` explicitly so `packages.Load` is not broken by stray or WIP trees under `commands/` (for example an untracked experimental `commands/workflow/` split).
 
 ## Next Iteration Playbook
 
