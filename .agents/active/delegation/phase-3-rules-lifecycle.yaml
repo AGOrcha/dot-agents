@@ -1,0 +1,25 @@
+schema_version: 1
+id: del-phase-3-rules-lifecycle-1776550550
+parent_plan_id: resource-command-parity
+parent_task_id: phase-3-rules-lifecycle
+title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
+summary: Delegated from plan Resource Command Parity — Hooks, Rules, MCP, and Settings
+write_scope:
+    - commands/
+    - internal/platform/
+    - docs/
+success_criteria: |-
+    Rules are canonically managed today but have no dedicated command family. Implement the chosen
+    lifecycle surface and keep the Cursor/Claude/Codex projection details behind the command layer.
+
+    **feedback_goal:** Rules lifecycle commands and help match the phase-1 resource contract; projections stay behind the command layer; `go test` for touched packages green.
+
+    **write_scope:** `commands/`, `internal/platform/`, `docs/` (see task `write_scope` list).
+
+    **context:** Blocked until **`phase-1-command-contract`** is **`completed`** and parent **`workflow advance`**; do not fan out in parallel with the phase-1 contract worker (`commands/` overlap).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T22:15:50Z"
+updated_at: "2026-04-18T22:15:50Z"
