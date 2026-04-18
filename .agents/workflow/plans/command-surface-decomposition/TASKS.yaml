@@ -19,7 +19,7 @@ tasks:
         `commands/kg.go` is the largest remaining command hotspot after workflow. Prefer a real `commands/kg/` subpackage plus a thin top-level shim unless package-level constraints force a same-package split.
     - id: c2-agents-command-decomposition
       title: Split agents command by lifecycle surface
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
