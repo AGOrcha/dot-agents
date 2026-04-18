@@ -20,7 +20,9 @@ func NewRootCommand() *cobra.Command {
 			"It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.\n\n" +
 			"Use it to bootstrap shared agent configuration, keep project links healthy,\n" +
 			"capture workflow state, and generate reproducible .agentsrc.json manifests\n" +
-			"that both humans and AI agents can follow.",
+			"that both humans and AI agents can follow.\n\n" +
+			"Managed hook/rules/MCP/settings command boundaries are documented in\n" +
+			"docs/RESOURCE_COMMAND_CONTRACT.md (resource-command-parity plan).",
 		Example: strings.Join([]string{
 			"  dot-agents init",
 			"  dot-agents add .",

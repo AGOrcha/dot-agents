@@ -18,11 +18,27 @@ This plan is intentionally separate from `agent-resource-lifecycle`:
 
 - `agents`: `agents list` and `agents new` exist; remaining gaps are tracked in
   `agent-resource-lifecycle`.
-- `hooks`: only `hooks list` exists today.
+- `hooks`: `hooks list`, `hooks show`, and `hooks remove` (phase 2); still coordinated with
+  `import` / `refresh` / `install` / `remove` / `status` / `doctor` for full wiring.
 - `rules`: no dedicated command family.
 - `mcp`: no dedicated command family.
 - `settings`: no dedicated command family.
 - `context`, `memory`, `profiles`: no lifecycle surface by design.
+
+## Command-surface contract (canonical)
+
+**Source of truth:** [`docs/RESOURCE_COMMAND_CONTRACT.md`](../../../../docs/RESOURCE_COMMAND_CONTRACT.md)
+
+Summary:
+
+- **Per-resource Cobra families** (`hooks`, later `rules`, `mcp`, `settings`) with shared internal
+  planner/executor — not a single mega-`resources` command.
+- **Agents, context, memory, profiles** stay out of this plan’s scope (agents covered elsewhere).
+- **Readback** (`status`, `explain`, `doctor`, …) must not claim dedicated lifecycle where the
+  contract says it is still implicit (phase 5 aligned copy to this model).
+
+See the doc for the retrofit table (phases 2–5) and the **TASKS DAG drift** note on phase 5 vs
+pending phases 3–4.
 
 ## Priority Order
 

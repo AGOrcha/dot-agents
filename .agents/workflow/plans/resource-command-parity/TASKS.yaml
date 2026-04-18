@@ -18,7 +18,7 @@ tasks:
       verification_required: true
       notes: |-
         Capture the approved audit into a canonical contract:
-        - hooks currently has only `hooks list`
+        - hooks: dedicated `hooks list`, `hooks show`, `hooks remove` (phase 2) plus indirect flows
         - rules, mcp, and settings have no dedicated command families and are managed indirectly
           through add/import/refresh/install/remove/status
         - agents are explicitly out of scope here (covered by agent-resource-lifecycle)
@@ -27,13 +27,13 @@ tasks:
         Decide whether parity lands as per-resource families (`hooks ...`, `rules ...`, etc.) or a
         shared lifecycle surface with resource-specific adapters, then document the rationale before implementation.
 
-        **feedback_goal:** Land the written contract under this plan + `docs/` + `commands/` such that later phases cite a single source of truth; tests/docs reflect boundaries above.
+        **feedback_goal:** Land the written contract under this plan + `docs/` + `commands/` so later phases cite one source of truth; tests/docs reflect the boundaries above; merge-back explains how already-shipped phase 2–5 behavior maps onto the contract (retrofit narrative), and calls out any TASKS `depends_on` / status mismatches that need a parent follow-up.
 
-        **write_scope:** `.agents/workflow/plans/resource-command-parity/`, `docs/`, `commands/` (broad — coordinate merges with in-flight work touching the same command files).
+        **write_scope:** `.agents/workflow/plans/resource-command-parity/`, `docs/`, `commands/` (broad — coordinate merges with other branches touching the same command files).
 
-        **context:** **`workflow next` selects this task** while PLAN `current_focus_task` is Phase 1 (verify alignment). **Do not fan out** a second broad `commands/` worker while **`phase-5-readback-alignment`** is in progress unless scopes are explicitly partitioned — merge conflict risk on shared command paths.
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-phase-1-command-contract-1776548679.yaml` (project overlay `.agents/active/active.loop.md` only per D5; context: `.agents/active/loop-state.md`, this `TASKS.yaml`). Profile **loop-worker**. Worker: verify + checkpoint + merge-back; parent: `workflow advance` + `workflow delegation closeout` after acceptance. `workflow next` may report **no actionable task** while this delegation is open — treat canonical YAML + orient `active delegations` as truth.
 
-        **reconciliation:** **`phase-2-hooks-lifecycle` is `completed`** while this task remains `pending` — parent should confirm contract artifacts landed and **`workflow advance`** this task when accurate.
+        **reconciliation:** **`phase-2-hooks-lifecycle` is `completed`** while phase 1 was still open — use this pass to backfill the missing contract artifacts and rationale so downstream notes stop contradicting shipped hook lifecycle.
     - id: phase-2-hooks-lifecycle
       title: Phase 2 — Add coherent hook lifecycle commands on top of canonical HOOK.yaml bundles
       status: completed
@@ -57,6 +57,12 @@ tasks:
         - hook resources can be discovered and explicitly wired/removed without spelunking raw files
         - command help matches the canonical bundle model used by import/refresh/install/remove
         - repo vs global scope behavior is documented and tested
+
+        **feedback_goal:** (met) Hook lifecycle matches canonical HOOK.yaml bundles; help and tests aligned.
+
+        **write_scope:** `commands/hooks.go`, `commands/hooks_test.go`, `commands/import.go`, `commands/remove.go`, `internal/platform/hooks.go` (see task `write_scope` list).
+
+        **context:** **`completed`** — phase 1 contract work is catching up to document and reconcile this shipped surface.
     - id: phase-3-rules-lifecycle
       title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
       status: pending
@@ -73,6 +79,12 @@ tasks:
       notes: |-
         Rules are canonically managed today but have no dedicated command family. Implement the chosen
         lifecycle surface and keep the Cursor/Claude/Codex projection details behind the command layer.
+
+        **feedback_goal:** Rules lifecycle commands and help match the phase-1 resource contract; projections stay behind the command layer; `go test` for touched packages green.
+
+        **write_scope:** `commands/`, `internal/platform/`, `docs/` (see task `write_scope` list).
+
+        **context:** Blocked until **`phase-1-command-contract`** is **`completed`** and parent **`workflow advance`**; do not fan out in parallel with the phase-1 contract worker (`commands/` overlap).
     - id: phase-4-mcp-settings-lifecycle
       title: Phase 4 — Add explicit MCP and settings lifecycle surfaces without duplicating emitter logic
       status: pending
@@ -90,6 +102,12 @@ tasks:
       notes: |-
         MCP and settings are especially prone to split-brain because install/refresh/remove already
         touch them. Reuse the shared planner/executor path rather than adding parallel custom wiring.
+
+        **feedback_goal:** MCP and settings lifecycle surfaces match the phase-1 contract without duplicating emitter/planner logic; regression tests for touched commands pass.
+
+        **write_scope:** `commands/`, `internal/platform/`, `internal/config/`, `docs/` (see task `write_scope` list).
+
+        **context:** Blocked until **`phase-1-command-contract`** is **`completed`** and parent **`workflow advance`**; do not fan out in parallel with the phase-1 contract worker (`commands/` overlap).
     - id: phase-5-readback-alignment
       title: Phase 5 — Align status, explain, doctor, install, and remove with the new resource contract
       status: completed
@@ -112,8 +130,8 @@ tasks:
 
         **write_scope:** commands/status.go, commands/explain.go, commands/doctor.go, commands/install.go, commands/remove.go, docs/
 
-        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-phase-5-readback-alignment-1776538664.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Profile: **loop-worker**. Worker runs verify + checkpoint + merge-back; parent runs `workflow advance` + `workflow delegation closeout` after acceptance.
+        **context:** Task status is **`completed`** — historical bundle **`.agents/active/delegation-bundles/del-phase-5-readback-alignment-1776538664.yaml`** is no longer the active handoff. Parent should keep **`depends_on`** vs **`phase-3` / `phase-4` pending** honest: either record known drift in plan notes, add a hardening task, or adjust the DAG so completed status matches the graph.
 
-        **DAG:** Canonical `depends_on` includes **`phase-3-rules-lifecycle`** and **`phase-4-mcp-settings-lifecycle`** (still **`pending`**). Treat upstream gaps explicitly in merge-back notes or complete/adjust dependencies before closing — do not silently ignore contract drift.
+        **DAG:** Canonical `depends_on` still lists **`phase-3-rules-lifecycle`** and **`phase-4-mcp-settings-lifecycle`** ( **`pending`** ). Treat upstream gaps explicitly in merge-back notes or complete/adjust dependencies — do not silently ignore contract drift.
 
         Acceptance is not just new commands existing; explanation surfaces must match actual lifecycle behavior.
