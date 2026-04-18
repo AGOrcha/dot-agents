@@ -1,52 +1,46 @@
 # Loop State
 
 Last updated: 2026-04-18
-Iteration: 41 (orchestrator pass)
+Iteration: 43 (worker — p6-fanout-dispatch)
 
 ## Current Position
 
-Orchestrator pass — 2026-04-17:
-- **Bundles confirmed (this run):** `agent-resource-lifecycle` / `agents-remove` → `del-agents-remove-1776438876.yaml`; `loop-agent-pipeline` / `p2-impl-agent-surface` → `del-p2-impl-agent-surface-1776438876.yaml`; `loop-agent-pipeline` / `p3a-result-schema` → `del-p3a-result-schema-1776438877.yaml`. **RALPH_MAX_PARALLEL_WORKERS=3** — slots full; no additional fanout.
-- **`workflow next` (canonical):** `agent-resource-lifecycle` / `agents-import` — **in_progress** (same `commands/agents.go` scope as `agents-remove`; **serialize**).
-- **Decision:** **Proceed now:** only **`p2-impl-agent-surface`** (disjoint from `commands/workflow.go` and `commands/agents.go`). **Park / do not dispatch workers** for **`agents-remove`** until `agents-import` closes; **`p3a-result-schema`** until **`p1-pipeline-control`** closes (both edit `commands/workflow.go`). TASKS.yaml notes updated with bundle ids and gating.
+Orchestrator pass — 2026-04-18:
+- **Bundles confirmed (this run):** `loop-agent-pipeline` / **`p3c-api-verifier`** → `.agents/active/delegation-bundles/del-p3c-api-verifier-1776516721.yaml` (**proceed** — `p3a` complete, bounded prompt + spec scope). `loop-agent-pipeline` / **`p6-fanout-dispatch`** → `.agents/active/delegation-bundles/del-p6-fanout-dispatch-1776516721.yaml` (**hold — do not run worker** until all `depends_on` tasks complete; see Loop Health).
+- **`workflow next` (canonical):** `loop-agent-pipeline` / **`p3d-ui-verifier`** (pending; deps satisfied vs `p3a` — **no new fanout this pass** to avoid concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md` while **`p3c`** is in flight).
+- **Parallelism:** `RALPH_MAX_PARALLEL_WORKERS=5` with **2** active delegations; **no additional** `workflow fanout` emitted this pass (spec serialization + p6 gating).
 
 ## Loop Health
 
-- **`resource-command-parity` / `phase-2-hooks-lifecycle`:** Worker merge-back at `.agents/active/merge-back/phase-2-hooks-lifecycle.md` (hooks show/remove, `ListHookSpecs`, import/remove copy, `remove --clean` hooks tree, iter-log schema v2 embed sync). **Parent** runs `workflow advance resource-command-parity phase-2-hooks-lifecycle completed` and `workflow delegation closeout` after review.
-- **`p9-sources-design-fork`:** D6.a design doc added at `.agents/workflow/specs/external-agent-sources/design.md` (TOC sections 1–13). **Delegated** worker merge-back pending review; **parent** runs `workflow advance loop-agent-pipeline p9-sources-design-fork completed` and `workflow delegation closeout` when accepting — no Go/schema changes in this task.
-- **`workflow next` vs active bundles:** Canonical selector still surfaces **`agents-import`** (in_progress). **`agents-remove`:** worker merge-back written (`.agents/active/merge-back/agents-remove.md`); implementation complete — **parent** advances + `workflow delegation closeout` after review (still serialize with **`agents-import`** on the same Go files until import task advances). **`p3a-result-schema`:** worker merge-back written (`.agents/active/merge-back/p3a-result-schema.md`, verification result under `.agents/active/verification/p3a-result-schema/merge-back.result.yaml`) — **parent** `workflow advance` + `workflow delegation closeout` after review.
-- **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag; canonical plan focus (`agents remove…` / pipeline focus) reflects newer orchestrate commits — use TASKS.yaml + bundle gating.
-- **Parallelism:** Run **`p2`** worker when ready. **`p3a-result-schema`** implementation is in merge-back review (no longer blocked on **`p1`** for this slice — parent reconciles TASKS/deps). Pending merge-backs: **`agents-remove`**, **`p3a-result-schema`**, plus prior queue per `orient`.
-- **Fanout / pipeline:** `workflow fanout` creates `.agents/active/verification/<task_id>/` before dispatch; TDD gate blocks Go-only write_scope without adjacent `*_test.go` unless `--skip-tdd-gate`; **`--verifier-retry-max`** maps to bundle `primary_chain_max`; **`RALPH_VERIFIER_RETRY_MAX`** in `ralph-orchestrate` forwards the flag.
+- **`workflow orient` vs checkpoint:** Checkpoint `next_action` / summary can lag git + canonical plan focus (orient warning: stale checkpoint vs `canonical_plan`) — **canonical YAML + `workflow next` win**; logged here per overlay.
+- **`p6-fanout-dispatch` (iter 43):** Worker merge-back written (`merge-back/p6-fanout-dispatch.md`); **parent** runs `workflow advance` + `workflow delegation closeout` after review. Fanout now emits `verification.app_type` + `verification.verifier_sequence` from TASKS `app_type` / PLAN `default_app_type`, `.agentsrc.json` maps, or `--verifier-sequence` / `RALPH_VERIFIER_SEQUENCE`.
+- **`p6-fanout-dispatch` bundle vs TASKS.yaml:** Bundle exists but **must not proceed** until `p3c`, `p3d`, `p3e`, `p3f`, `p4-review-agent`, and `p8-orchestrator-awareness` are all **completed**. Auto-fanout ahead of dependency satisfaction is a **queue-only** artifact until unblocked.
+- **`p3c` vs `p3d`–`p3f`:** Verifier slices share **`docs/LOOP_ORCHESTRATION_SPEC.md`** — **serialize** workers (finish `p3c` merge-back before fanning `p3d`, then chain or re-orchestrate).
+- **Prior loop-state (iter 41):** Merge-back / closeout bullets for hooks parity, p9, agents, p1, etc. remain valid where those artifacts still await parent review; this pass did not re-verify those files.
 
 ## Next Iteration Playbook
 
-1. **Parent closeout (hooks parity):** Review **`.agents/active/merge-back/phase-2-hooks-lifecycle.md`**, then **`workflow advance resource-command-parity phase-2-hooks-lifecycle completed`** and **`workflow delegation closeout --plan resource-command-parity --task phase-2-hooks-lifecycle --decision accept`** when accepting.
-2. **Parent closeout (p9):** Review **`.agents/active/merge-back/p9-sources-design-fork.md`**, then **`workflow advance loop-agent-pipeline p9-sources-design-fork completed`** and **`workflow delegation closeout --plan loop-agent-pipeline --task p9-sources-design-fork --decision accept`** when accepting the doc-only fork.
-3. **Dispatch / run:** **`p2-impl-agent-surface`** worker only (`del-p2-impl-agent-surface-1776438876`) — unblock path that does not touch `workflow.go` or `agents.go`.
-4. **Parent closeout (agents):** Review **`.agents/active/merge-back/agents-remove.md`**, then **`workflow advance agent-resource-lifecycle agents-remove completed`** and **`workflow delegation closeout`** when accepting the delegation. Complete **`agents-import`** merge-back → advance on that task (same file scope — order per your review). Complete **`p1-pipeline-control`** merge-back → advance when ready.
-5. **Parent closeout (pipeline p3a):** Review **`.agents/active/merge-back/p3a-result-schema.md`** and verification YAML, then **`workflow advance loop-agent-pipeline p3a-result-schema completed`** and **`workflow delegation closeout --plan loop-agent-pipeline --task p3a-result-schema --decision accept`** when accepting.
-6. **Orchestrator after workers:** `workflow verify record`, `workflow merge-back`, `workflow advance`, `workflow delegation closeout` per completed bundle; re-run `workflow next --plan …` if needed.
-7. **Evidence:** `go run ./cmd/dot-agents workflow tasks agent-resource-lifecycle`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go test ./commands -run 'RemoveAgentIn|Agents'` or `go test ./commands -run Workflow` as appropriate.
+1. **Parent:** Review **p6-fanout-dispatch** merge-back + iter-43, then `workflow advance loop-agent-pipeline p6-fanout-dispatch completed` and `workflow delegation closeout --plan loop-agent-pipeline --task p6-fanout-dispatch --decision accept|reject` as appropriate.
+2. **Run / review `p3c-api-verifier` worker** against bundle `del-p3c-api-verifier-1776516721.yaml` (loop-worker + `/iteration-close` on completion).
+3. **Do not re-dispatch `p6-fanout-dispatch`** until canonical deps in TASKS.yaml are satisfied; orchestrator gating on the existing bundle remains authoritative for parallel safety.
+4. **After `p3c` closes:** Fan out or directly schedule **`p3d-ui-verifier`**; re-run `go run ./cmd/dot-agents workflow next` and `workflow tasks loop-agent-pipeline`.
+5. **Evidence:** `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `workflow fanout --help` for `--verifier-sequence`.
 
 ## Scenario Coverage
 
 | Family | Last exercised |
 |--------|----------------|
-| orchestrator-selection | 2026-04-17 — triple fanout at cap: `agents-remove`, `p2-impl-agent-surface`, `p3a-result-schema`; gating: only p2 runnable vs p1/agents-import |
-| delegation-lifecycle | Active: 3 bundles; 2 parked on `agents-import` / `p1` blockers; merge-back queue per orient |
+| orchestrator-selection | 2026-04-18 — confirmed two bundles (p3c proceed, p6 hold); no extra fanout; spec serialization rule for p3d–p3f |
+| delegation-lifecycle | 2026-04-18 — p6 merge-back recorded (iter 43); parent closeout pending |
 
 ## Command Coverage
 
 | Command | Tested | Last iteration |
-|---------|--------|------------------|
-| `workflow orient` | yes | 41 |
-| `workflow next` | yes | 41 |
-| `workflow tasks agent-resource-lifecycle` | yes | 41 |
-| `workflow tasks loop-agent-pipeline` | yes | 41 |
-| `workflow merge-back` (agents-remove) | yes | 38 |
-| `workflow merge-back` (p1-pipeline-control) | no | — |
-| `workflow merge-back` (p3a-result-schema) | yes | 39 |
+|---------|--------|----------------|
+| `workflow orient` | yes | 42 |
+| `workflow next` | yes | 42 |
+| `workflow tasks loop-agent-pipeline` | yes | 43 |
+| `workflow fanout --verifier-sequence` | yes | 43 |
 
 ## Iteration Log
 

@@ -12,6 +12,7 @@
 #   RALPH_FANOUT_TASK            manual task override
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
 #   RALPH_VERIFIER_RETRY_MAX     if set to a positive integer, passed as workflow fanout --verifier-retry-max
+#   RALPH_VERIFIER_SEQUENCE      if non-empty, passed as workflow fanout --verifier-sequence (comma-separated profile ids)
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_MODEL                  fallback model override when no role-specific value is set
 #   RALPH_FORCE                  1 = pass -f to agent (broader allow)
@@ -321,6 +322,9 @@ create_bundle() {
   [[ -n "$write_scope_csv" ]] && fanout_args+=( --write-scope "$write_scope_csv" )
   if [[ -n "${RALPH_VERIFIER_RETRY_MAX:-}" ]] && [[ "${RALPH_VERIFIER_RETRY_MAX}" =~ ^[0-9]+$ ]] && [[ "${RALPH_VERIFIER_RETRY_MAX}" -gt 0 ]]; then
     fanout_args+=( --verifier-retry-max "${RALPH_VERIFIER_RETRY_MAX}" )
+  fi
+  if [[ -n "${RALPH_VERIFIER_SEQUENCE:-}" ]]; then
+    fanout_args+=( --verifier-sequence "${RALPH_VERIFIER_SEQUENCE}" )
   fi
   [[ -f "$REPO_ROOT/.agents/active/loop-state.md" ]] && fanout_args+=( --context-file .agents/active/loop-state.md )
   [[ -f "$REPO_ROOT/$tasks_yaml_rel" ]] && fanout_args+=( --context-file "$tasks_yaml_rel" )

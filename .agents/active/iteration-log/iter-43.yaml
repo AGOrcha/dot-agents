@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 43
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p6-fanout-dispatch
+commit: ""
+files_changed: 8
+lines_added: 0
+lines_removed: 0
+impl:
+    item: "p6-fanout-dispatch: app_type + verifier_sequence through fanout, schemas, ralph-orchestrate"
+    summary: "workflow fanout reads .agentsrc verifier_profiles + app_type_verifier_map; TASKS app_type and PLAN default_app_type; --verifier-sequence override; bundle verification.app_type + verifier_sequence; JSON schemas + template; RALPH_VERIFIER_SEQUENCE in ralph-orchestrate."
+    scope_note: on-target; internal/config/agentsrc.go out of bundle scope — dispatch JSON parsed in workflow.go
+    feedback_goal: "Complete the delegated task within write scope with verification and merge-back."
+    scenario_tags: [fanout-dispatch, agentsrc-map, negative-unknown-profile]
+    tests_added: 4
+    tests_total_pass: 1
+    retries: 0
+    focused_tests_added: 4
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p6-fanout-dispatch/review-decision.yaml
+    verify_record_appended: true

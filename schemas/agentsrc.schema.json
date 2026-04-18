@@ -53,6 +53,33 @@
         "$ref": "#/$defs/source"
       }
     },
+    "verifier_profiles": {
+      "type": "object",
+      "description": "Named verifier profiles referenced by app_type_verifier_map and workflow fanout",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/stringList"
+          }
+        }
+      }
+    },
+    "app_type_verifier_map": {
+      "type": "object",
+      "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "refresh": {
       "type": "object",
       "properties": {

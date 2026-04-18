@@ -184,6 +184,19 @@
             "minLength": 1
           }
         },
+        "app_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Resolved task or plan default_app_type used with app_type_verifier_map"
+        },
+        "verifier_sequence": {
+          "type": "array",
+          "description": "Ordered verifier profile ids from --verifier-sequence or .agentsrc.json app_type_verifier_map",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "evidence_policy": {
           "type": "object",
           "additionalProperties": false,

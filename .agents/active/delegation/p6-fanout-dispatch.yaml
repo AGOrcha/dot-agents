@@ -16,6 +16,6 @@ success_criteria: Integration hotspot from iter-1 review. Add app_type to plan t
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T12:52:01Z"
-updated_at: "2026-04-18T12:52:01Z"
+updated_at: "2026-04-18T13:00:31Z"

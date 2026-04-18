@@ -2489,6 +2489,129 @@ func TestFanout_VerifierRetryMaxInBundle(t *testing.T) {
 	}
 }
 
+func setupVerifierDispatchProject(t *testing.T, taskAppType, planDefaultAppType string) string {
+	t.Helper()
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "plan-vd")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	plan := CanonicalPlan{
+		SchemaVersion: 1, ID: "plan-vd", Title: "Verifier dispatch", Status: "active",
+		CreatedAt: "2026-04-10T00:00:00Z", UpdatedAt: "2026-04-10T00:00:00Z",
+		DefaultAppType: planDefaultAppType,
+	}
+	planData, err := yaml.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatalf("write PLAN.yaml: %v", err)
+	}
+	task := CanonicalTask{
+		ID: "task-vd", Title: "VD task", Status: "pending",
+		WriteScope: []string{"docs/"}, VerificationRequired: true,
+		AppType: taskAppType,
+	}
+	tf := CanonicalTaskFile{SchemaVersion: 1, PlanID: "plan-vd", Tasks: []CanonicalTask{task}}
+	td, err := yaml.Marshal(tf)
+	if err != nil {
+		t.Fatalf("marshal tasks: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), td, 0644); err != nil {
+		t.Fatalf("write TASKS.yaml: %v", err)
+	}
+	rc := `{
+  "version": 1,
+  "project": "tmp",
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "sources": [{"type":"local"}],
+  "verifier_profiles": {"unit":{"label":"U"},"api":{"label":"A"}},
+  "app_type_verifier_map": {"api":["unit","api"]}
+}`
+	if err := os.WriteFile(filepath.Join(dir, ".agentsrc.json"), []byte(rc), 0644); err != nil {
+		t.Fatalf("write .agentsrc.json: %v", err)
+	}
+	return dir
+}
+
+func loadFanoutBundle(t *testing.T, repo string, taskID string) delegationBundleYAML {
+	t.Helper()
+	c, err := loadDelegationContract(repo, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	return bundle
+}
+
+func TestFanout_VerifierSequenceFromAppTypeInAgentsrc(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "api", "")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w", "--skip-tdd-gate"); err != nil {
+		t.Fatal(err)
+	}
+	b := loadFanoutBundle(t, repo, "task-vd")
+	if b.Verification.AppType != "api" {
+		t.Fatalf("app_type = %q, want api", b.Verification.AppType)
+	}
+	want := []string{"unit", "api"}
+	if len(b.Verification.VerifierSequence) != len(want) {
+		t.Fatalf("verifier_sequence = %#v, want %#v", b.Verification.VerifierSequence, want)
+	}
+	for i := range want {
+		if b.Verification.VerifierSequence[i] != want[i] {
+			t.Fatalf("verifier_sequence = %#v, want %#v", b.Verification.VerifierSequence, want)
+		}
+	}
+}
+
+func TestFanout_VerifierSequenceUsesPlanDefaultAppType(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "", "api")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w", "--skip-tdd-gate"); err != nil {
+		t.Fatal(err)
+	}
+	b := loadFanoutBundle(t, repo, "task-vd")
+	if b.Verification.AppType != "api" {
+		t.Fatalf("app_type = %q, want api", b.Verification.AppType)
+	}
+	if len(b.Verification.VerifierSequence) != 2 {
+		t.Fatalf("verifier_sequence = %#v", b.Verification.VerifierSequence)
+	}
+}
+
+func TestFanout_VerifierSequenceFlagOverridesMap(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "api", "")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w",
+		"--skip-tdd-gate", "--verifier-sequence", "api,unit"); err != nil {
+		t.Fatal(err)
+	}
+	b := loadFanoutBundle(t, repo, "task-vd")
+	if len(b.Verification.VerifierSequence) != 2 || b.Verification.VerifierSequence[0] != "api" || b.Verification.VerifierSequence[1] != "unit" {
+		t.Fatalf("verifier_sequence = %#v, want [api unit]", b.Verification.VerifierSequence)
+	}
+}
+
+func TestFanout_VerifierSequenceRejectsUnknownProfile(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "api", "")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w",
+		"--skip-tdd-gate", "--verifier-sequence", "unit,notdefined")
+	if err == nil {
+		t.Fatal("expected error for unknown verifier profile")
+	}
+	if !strings.Contains(err.Error(), "not defined") {
+		t.Fatalf("unexpected err: %v", err)
+	}
+}
+
 func TestFanoutTaskWriteScopeFallback(t *testing.T) {
 	// fanout --plan X --task Y without --write-scope should pull write_scope from task definition
 	repo := setupTestProject(t)
