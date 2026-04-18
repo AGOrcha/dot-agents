@@ -84,7 +84,7 @@ tasks:
         touch them. Reuse the shared planner/executor path rather than adding parallel custom wiring.
     - id: phase-5-readback-alignment
       title: Phase 5 — Align status, explain, doctor, install, and remove with the new resource contract
-      status: pending
+      status: in_progress
       depends_on:
         - phase-2-hooks-lifecycle
         - phase-3-rules-lifecycle

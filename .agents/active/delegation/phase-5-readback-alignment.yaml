@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-phase-5-readback-alignment-1776538664
+parent_plan_id: resource-command-parity
+parent_task_id: phase-5-readback-alignment
+title: Phase 5 — Align status, explain, doctor, install, and remove with the new resource contract
+summary: Delegated from plan Resource Command Parity — Hooks, Rules, MCP, and Settings
+write_scope:
+    - commands/status.go
+    - commands/explain.go
+    - commands/doctor.go
+    - commands/install.go
+    - commands/remove.go
+    - docs/
+success_criteria: |-
+    Close the loop so readback and lifecycle management tell the same story. Acceptance is not
+    just new commands existing; the user-visible explanation surfaces must stop implying that
+    these resources are first-class if the lifecycle is still implicit or inconsistent.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T18:57:44Z"
+updated_at: "2026-04-18T18:57:44Z"
