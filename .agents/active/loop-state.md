@@ -1,49 +1,46 @@
 # Loop State
 
 Last updated: 2026-04-18
-Iteration: 48 (orchestrator)
+Iteration: 49 (orchestrator)
 
 ## Current Position
 
 Orchestrator pass — 2026-04-18:
-- **Bundles confirmed (this run, max parallel = 2):**
-  1. **`loop-agent-pipeline` / `p7-post-closeout`** → `.agents/active/delegation-bundles/del-p7-post-closeout-1776538664.yaml` — **proceed** (task **`in_progress`**, bounded scope matches bundle `write_scope`; closes post-closeout / fold-back slice).
-  2. **`resource-command-parity` / `phase-5-readback-alignment`** → `.agents/active/delegation-bundles/del-phase-5-readback-alignment-1776538664.yaml` — **proceed with DAG awareness** (worker is active; canonical **`depends_on`** still lists **`phase-3`** / **`phase-4`** as **`pending`** — merge-back must reconcile or parent adjusts the DAG).
-- **`workflow next`:** **`resource-command-parity` / `phase-1-command-contract`** (pending, all deps complete). **No third fanout** this pass — **`RALPH_MAX_PARALLEL_WORKERS=2`** satisfied by the two bundles above.
-- **TASKS.yaml** updated for **`p7-post-closeout`**, **`phase-5-readback-alignment`**, and scheduling notes on **`phase-1-command-contract`**.
+- **Bundles confirmed (this run, `RALPH_MAX_PARALLEL_WORKERS=2` — slot full):**
+  1. **`command-surface-decomposition` / `c3-sync-command-decomposition`** → `.agents/active/delegation-bundles/del-c3-sync-command-decomposition-1776539849.yaml` — **proceed** (`in_progress`, `write_scope` matches bundle: `commands/sync.go`, `commands/sync/`).
+  2. **`command-surface-decomposition` / `c4-skills-command-decomposition`** → `.agents/active/delegation-bundles/del-c4-skills-command-decomposition-1776539849.yaml` — **proceed** (`in_progress`, `write_scope` matches bundle: `commands/skills.go`, `commands/skills_test.go`, `commands/skills/`).
+- **No additional fanout** this pass — parallel cap reached; **`workflow next`** head task is **`c5-hooks-command-decomposition`** (pending) once **`c3`/`c4`** merge-backs advance or backlog is rechecked.
+- **`TASKS.yaml`** notes updated for **`c3-sync-command-decomposition`** and **`c4-skills-command-decomposition`** (feedback_goal, write_scope, delegation path, context).
 
 ## Loop Health
 
-- **`workflow orient` vs checkpoint:** Checkpoint `next_action` may lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warned: stale “Make orchestrator prompts…” vs **`p7`** focus).
-- **`phase-1` vs `phase-2`:** **`phase-2-hooks-lifecycle` is `completed`** while **`phase-1-command-contract` remains `pending`** — **reconcile** via `workflow advance` / status fix when contract is verified landed.
-- **`phase-5` readback slice (iter 49):** Merge-back **`.agents/active/merge-back/phase-5-readback-alignment.md`** — aligned **`explain` / `install` / `status` / `doctor` / `remove`** copy with manifest + **`hooks list|show|remove`** (removed obsolete **`hooks add`**); tests added. **Parent:** review → **`workflow advance`** + **`workflow delegation closeout`**; DAG still lists **`phase-3`/`phase-4`** pending — reconcile YAML vs completed readback work.
-- **`phase-5` vs upstream:** Fanout exists while **`phase-3`** / **`phase-4`** are **`pending`** per YAML — document exception in merge-back or complete upstream before closing **`phase-5`**.
-- **`phase-1` vs `phase-5` workers:** Both can touch **`commands/`** — **serialize** or partition scopes to avoid merge fights while **`phase-5`** is in flight.
-- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as prompt-file) — consistent with **`c08ce94`**.
+- **`workflow orient` vs checkpoint:** Checkpoint `next_action` (“Post-closeout orchestration…”) may lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale).
+- **`workflow orient` vs `PLAN.yaml` focus:** Human-readable orient line may show “Split skills…” while **`.agents/workflow/plans/command-surface-decomposition/PLAN.yaml`** has `current_focus_task: c1-kg-command-decomposition` — **canonical YAML wins**; reconcile display vs `current_focus_task` when convenient.
+- **`workflow next` vs plan focus:** Selector returns **`c5-hooks-command-decomposition`** (first **pending** unblocked); **`c1`–`c4`** remain **`in_progress`** — not a contradiction: next picks pending queue; decomposition wave still has four parallel/in-flight slices (**`c1`–`c4`**).
+- **Parallelism:** **`c3`** + **`c4`** bundles are **file-disjoint** — safe concurrent workers; **`active_delegations: 4`** from orient includes other plans’ workers — still avoid overlapping **`commands/`** edits with **`resource-command-parity`** / **`loop-agent-pipeline`** if those run concurrently.
+- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as `--prompt-file`).
 
 ## Next Iteration Playbook
 
-1. **Parent (priority):** Review **`phase-5-readback-alignment`** merge-back → **`workflow advance resource-command-parity phase-5-readback-alignment completed`** (if accepted) + **`workflow delegation closeout`**; reconcile **`depends_on`** vs DAG notes.
-2. **Workers:** Remaining bundles (`p7`, etc.) — **`/iteration-close`** after verify + checkpoint + merge-back.
-3. **After `p7` / `phase-5` land:** Re-run **`workflow next`** / **`workflow tasks resource-command-parity`** — expect head **`phase-1-command-contract`** unless focus moved; reconcile **`phase-1`** pending vs **`phase-2`** completed.
-4. **Evidence:** `go run ./cmd/dot-agents workflow tasks resource-command-parity`; `go run ./cmd/dot-agents explain manifest`; `go run ./cmd/dot-agents workflow orient`.
+1. **Workers (`c3`, `c4`):** Implement within bundle `write_scope` → **`go test`** focused packages → **`workflow verify record`** → **`workflow checkpoint`** → **`workflow merge-back`** → **`/iteration-close`** per loop-worker skill.
+2. **Parent:** After merge-back review — **`workflow advance command-surface-decomposition <task-id> completed`** + **`workflow delegation closeout`** for each closed delegation.
+3. **When slots free (`RALPH_MAX_PARALLEL_WORKERS=2`):** Re-run **`workflow next`** / **`workflow tasks command-surface-decomposition`** — expect **`c5-hooks-command-decomposition`** if **`c3`/`c4`** cleared, or fanout **`c1`/`c2`** if still **`in_progress`** without bundles (orchestrator re-check priority list).
+4. **Evidence:** `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents workflow orient`.
 
 ## Scenario Coverage
 
 | Family | Last exercised |
 |--------|----------------|
-| orchestrator-selection | 2026-04-18 — confirmed two bundles (`p7`, **`phase-5`**) + cap at parallel=2; deferred extra fanout |
-| delegation-lifecycle | 2026-04-18 — TASKS notes aligned to bundle paths + DAG / merge-coordination notes |
+| orchestrator-selection | 2026-04-18 — **`command-surface-decomposition`** **`c3`**+**`c4`** bundles; parallel cap **2**; no extra fanout |
+| delegation-lifecycle | 2026-04-18 — TASKS notes + bundle paths aligned for **`c3`** / **`c4`** |
 
 ## Command Coverage
 
 | Command | Tested | Last Iteration |
 |---------|--------|----------------|
-| `workflow orient` | yes | 48 |
-| `workflow next` | yes | 48 |
-| `workflow tasks loop-agent-pipeline` | yes | 48 |
-| `workflow tasks resource-command-parity` | yes | 48 |
-| `explain manifest` | yes | 49 |
+| `workflow orient` | yes | 49 |
+| `workflow next` | yes | 49 |
+| `workflow tasks command-surface-decomposition` | yes | 49 |
 
 ## Iteration Log
 

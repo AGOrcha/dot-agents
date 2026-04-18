@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-c5-hooks-command-decomposition-1776539976
+parent_plan_id: command-surface-decomposition
+parent_task_id: c5-hooks-command-decomposition
+title: Split hooks command by subcommand family
+summary: Delegated from plan Command Surface Decomposition Plan
+write_scope:
+    - commands/hooks.go
+    - commands/hooks_test.go
+    - commands/hooks/
+success_criteria: '**feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T19:19:36Z"
+updated_at: "2026-04-18T19:19:36Z"
