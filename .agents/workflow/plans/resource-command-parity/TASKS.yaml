@@ -87,7 +87,7 @@ tasks:
         **context:** Blocked until **`phase-1-command-contract`** is **`completed`** and parent **`workflow advance`**; do not fan out in parallel with the phase-1 contract worker (`commands/` overlap).
     - id: phase-4-mcp-settings-lifecycle
       title: Phase 4 — Add explicit MCP and settings lifecycle surfaces without duplicating emitter logic
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-command-contract
       blocks:
