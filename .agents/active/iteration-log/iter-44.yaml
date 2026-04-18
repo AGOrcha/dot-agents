@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 44
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p3d-ui-verifier
+commit: 05e64200bdfa48846ec715988cf2549f7413417b
+files_changed: 6
+lines_added: 108
+lines_removed: 30
+impl:
+    item: "p3d-ui-verifier: UI E2E verifier prompt + LOOP_ORCHESTRATION_SPEC ui-e2e role"
+    summary: "Created `.agents/prompts/verifiers/ui-e2e.project.md` (scoped-first browser flows, visual/a11y tiers, `ui-e2e.result.yaml`). Documented `ui-e2e` verifier role and routing vs `api` in `docs/LOOP_ORCHESTRATION_SPEC.md`."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back; iter-44 filled"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3d-ui-verifier/review-decision.yaml
+    verify_record_appended: false
