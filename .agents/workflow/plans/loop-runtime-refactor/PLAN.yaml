@@ -8,4 +8,4 @@ updated_at: "2026-04-17T08:52:21Z"
 owner: dot-agents
 success_criteria: Skill chain has no load-order bugs and no duplicated closeout steps. Four ralph scripts cover orchestrator, worker, closeout, and pipeline roles. A loop-worker skill can be cold-started with only a bundle path and succeeds at reaching merge-back without workflow orient.
 verification_strategy: Manual smoke tests for skill load order; cold-start test for loop-worker skill; ralph-pipeline.sh E2E run on at least one unblocked task; metrics.json captured and compared across worker modes.
-current_focus_task: completed
+current_focus_task: ""

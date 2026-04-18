@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-tasks.schema.json",
   "title": "dot-agents canonical workflow tasks",
-  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/TASKS.yaml. Matches commands.CanonicalTaskFile in commands/workflow.go.",
+  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/TASKS.yaml. Matches workflow.CanonicalTaskFile in commands/workflow/workflow.go.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "plan_id", "tasks"],

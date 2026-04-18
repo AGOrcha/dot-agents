@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-slices.schema.json",
   "title": "dot-agents canonical workflow slices",
-  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/SLICES.yaml. Matches commands.CanonicalSliceFile in commands/workflow.go.",
+  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/SLICES.yaml. Matches workflow.CanonicalSliceFile in commands/workflow/workflow.go.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "plan_id", "slices"],
