@@ -153,7 +153,7 @@ tasks:
         **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3f-streaming-verifier-1776528467.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3e-batch-verifier`** is **completed** — this worker is the current owner for concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md` in the verifier wave. **Serialize** **`p4-review-agent`** and any other work touching **`docs/LOOP_ORCHESTRATION_SPEC.md`** until **`p3f`** merges and parent runs **`workflow advance`** + **`workflow delegation closeout`**. **Mismatch note:** `go run ./cmd/dot-agents workflow next` may surface **`p4-review-agent`** while **`p3f`** is **`in_progress`** — **canonical TASKS + spec serialization win** over raw next-task ordering; do **not** fan out **`p4`** until **`p3f`** closes.
     - id: p4-review-agent
       title: Review-agent surface plus merged workflow verify record decision writer
-      status: pending
+      status: in_progress
       depends_on:
         - p3a-result-schema
       blocks:
