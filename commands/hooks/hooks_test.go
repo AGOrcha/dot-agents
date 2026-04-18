@@ -1,13 +1,32 @@
-package commands
+package hooks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/spf13/cobra"
 )
+
+func testDeps() Deps {
+	return Deps{
+		ErrorWithHints: func(msg string, hints ...string) error {
+			return fmt.Errorf("%s", msg)
+		},
+		UsageError: func(msg string, hints ...string) error {
+			return fmt.Errorf("%s", msg)
+		},
+		MaxArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return func(*cobra.Command, []string) error { return nil }
+		},
+		ExactArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return func(*cobra.Command, []string) error { return nil }
+		},
+	}
+}
 
 func TestEnsureUnderHooksScopeTree(t *testing.T) {
 	tmp := t.TempDir()
@@ -43,14 +62,15 @@ run:
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := findHookSpec(agentsHome, scope, "alpha")
+	deps := testDeps()
+	got, err := findHookSpec(deps, agentsHome, scope, "alpha")
 	if err != nil {
 		t.Fatalf("findHookSpec: %v", err)
 	}
 	if got.Name != "alpha" || got.SourceKind != platform.HookSourceCanonicalBundle {
 		t.Fatalf("unexpected spec: %#v", got)
 	}
-	if _, err := findHookSpec(agentsHome, scope, "missing"); err == nil {
+	if _, err := findHookSpec(deps, agentsHome, scope, "missing"); err == nil {
 		t.Fatal("expected error for missing hook")
 	}
 }
@@ -75,9 +95,6 @@ enabled_on: [claude]
 	if err := os.WriteFile(filepath.Join(root, "legacy.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	oldYes := Flags.Yes
-	Flags.Yes = true
-	defer func() { Flags.Yes = oldYes }()
 
 	if err := runHooksList(scope); err != nil {
 		t.Fatalf("runHooksList: %v", err)
@@ -100,11 +117,10 @@ run:
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	oldYes := Flags.Yes
-	Flags.Yes = true
-	defer func() { Flags.Yes = oldYes }()
+	deps := testDeps()
+	deps.Flags.Yes = true
 
-	if err := runHooksRemove(scope, "to-drop"); err != nil {
+	if err := runHooksRemove(deps, scope, "to-drop"); err != nil {
 		t.Fatalf("runHooksRemove: %v", err)
 	}
 	if _, err := os.Stat(hookDir); !os.IsNotExist(err) {
@@ -124,11 +140,10 @@ func TestRunHooksRemoveLegacyJSON(t *testing.T) {
 	if err := os.WriteFile(p, []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	oldYes := Flags.Yes
-	Flags.Yes = true
-	defer func() { Flags.Yes = oldYes }()
+	deps := testDeps()
+	deps.Flags.Yes = true
 
-	if err := runHooksRemove(scope, "x"); err != nil {
+	if err := runHooksRemove(deps, scope, "x"); err != nil {
 		t.Fatalf("runHooksRemove: %v", err)
 	}
 	if _, err := os.Stat(p); !os.IsNotExist(err) {
@@ -153,7 +168,8 @@ run:
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runHooksShow(scope, "show-me"); err != nil {
+	deps := testDeps()
+	if err := runHooksShow(deps, scope, "show-me"); err != nil {
 		t.Fatalf("runHooksShow: %v", err)
 	}
 }
@@ -184,7 +200,8 @@ func TestFindHookSpecNotFoundMessage(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks", scope), 0755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := findHookSpec(agentsHome, scope, "nope")
+	deps := testDeps()
+	_, err := findHookSpec(deps, agentsHome, scope, "nope")
 	if err == nil {
 		t.Fatal("expected error")
 	}
