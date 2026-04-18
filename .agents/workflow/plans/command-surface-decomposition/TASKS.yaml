@@ -17,6 +17,8 @@ tasks:
         **feedback_goal:** Break `kg` into narrower ownership slices without changing command behavior; keep the root command wiring stable while separating bridge, query, link, warm, maintenance, and code-status concerns into files that workers can own independently.
 
         `commands/kg.go` is the largest remaining command hotspot after workflow. Prefer a real `commands/kg/` subpackage plus a thin top-level shim unless package-level constraints force a same-package split.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c1-kg-command-decomposition-1776539821.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/kg.go`, `commands/kg_test.go`, `commands/kg/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
     - id: c2-agents-command-decomposition
       title: Split agents command by lifecycle surface
       status: in_progress
@@ -28,7 +30,10 @@ tasks:
         - commands/agents_test.go
         - commands/agents/
       verification_required: true
-      notes: '**feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.'
+      notes: |-
+        **feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c2-agents-command-decomposition-1776539822.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/agents.go`, `commands/agents_test.go`, `commands/agents/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
     - id: c3-sync-command-decomposition
       title: Split sync command by subcommand family
       status: completed
@@ -68,7 +73,7 @@ tasks:
         **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Parallel wave: disjoint from `c3-sync-command-decomposition` (`commands/sync*`); avoid touching other command packages.
     - id: c5-hooks-command-decomposition
       title: Split hooks command by subcommand family
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -77,7 +82,10 @@ tasks:
         - commands/hooks_test.go
         - commands/hooks/
       verification_required: true
-      notes: '**feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.'
+      notes: |-
+        **feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c5-hooks-command-decomposition-1776539976.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/hooks.go`, `commands/hooks_test.go`, `commands/hooks/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
     - id: c6-status-import-helper-extraction
       title: Extract internal helper seams for status and import without forcing premature package splits
       status: completed

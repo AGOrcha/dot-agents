@@ -12,6 +12,6 @@ success_criteria: '**feedback_goal:** Narrow `hooks list/show/remove` into indep
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T19:19:36Z"
-updated_at: "2026-04-18T19:19:36Z"
+updated_at: "2026-04-18T21:25:13Z"
