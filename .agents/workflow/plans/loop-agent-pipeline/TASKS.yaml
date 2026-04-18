@@ -174,7 +174,7 @@ tasks:
       notes: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
     - id: p6-fanout-dispatch
       title: App-type dispatch and verifier-sequence wiring through plan schema, .agentsrc, and delegation bundles
-      status: in_progress
+      status: completed
       depends_on:
         - p2-impl-agent-surface
         - p3a-result-schema
