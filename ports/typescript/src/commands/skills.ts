@@ -4,6 +4,7 @@
  * Supports list and new subcommands. Aligned with commands/skills.go.
  */
 
+import type { Dirent } from "node:fs";
 import { readdir, stat, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome } from "../core/config.js";
@@ -48,7 +49,7 @@ export async function runSkillsList(scope = "global", opts: SkillsOptions = {}):
   const skillsDir = join(home, "skills", scope);
   const skills: SkillEntry[] = [];
 
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent[];
   try {
     entries = await readdir(skillsDir, { withFileTypes: true });
   } catch {

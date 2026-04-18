@@ -18,6 +18,7 @@ export const BOUNDARY_HELP_SUBSTRINGS = [
   "merge-back",
   "orchestration",
   "TYPESCRIPT_PORT_BOUNDARY.md",
+  "ports/typescript/README.md",
 ] as const;
 
 /**
@@ -30,6 +31,6 @@ export function boundaryHelpLines(): string[] {
     `  Decision: option ${CHOSEN_PHASE4_OPTION} — read-only workflow may be added later; not full parity.`,
     "  Implemented now: Stage 1 commands only (init, add, refresh, status, doctor, skills, agents, hooks).",
     "  Use the Go dot-agents CLI for: kg/*, workflow writes (checkpoint, advance, merge-back, fanout, …),",
-    "  and orchestration. See docs/TYPESCRIPT_PORT_BOUNDARY.md.",
+    "  and orchestration. See docs/TYPESCRIPT_PORT_BOUNDARY.md and ports/typescript/README.md (install).",
   ];
 }

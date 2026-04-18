@@ -3,8 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "dot-agents-ts": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,7 +19,9 @@
   },
   "scripts": {
     "test": "vitest run",
-    "build": "tsc"
+    "build": "tsc",
+    "start": "node ./dist/cli.js",
+    "dot-agents-ts": "node ./dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

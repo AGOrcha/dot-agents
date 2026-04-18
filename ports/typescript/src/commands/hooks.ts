@@ -6,6 +6,7 @@
  * Aligned with commands/hooks.go listHooks / listCanonicalHooks.
  */
 
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome } from "../core/config.js";
@@ -39,7 +40,7 @@ export interface HooksListResult {
  * Returns undefined if the directory doesn't exist or has no bundles.
  */
 async function listCanonicalBundles(hooksDir: string): Promise<HookBundle[] | undefined> {
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent[];
   try {
     entries = await readdir(hooksDir, { withFileTypes: true });
   } catch {

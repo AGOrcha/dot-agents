@@ -40,6 +40,17 @@ Rationale in one line: restricted-machine users still benefit from **read-only w
 - User-facing summary: `ports/typescript` top-level `--help` and `ports/typescript/README.md`
 - Automated checks: `ports/typescript/tests/boundary.test.ts`
 
+## Install and release path (Phase 6)
+
+The TypeScript variant is **not published** as a standalone npm package from this repo today. Consume it **from a git checkout** of dot-agents:
+
+1. `cd ports/typescript`
+2. `npm ci` (or `npm install`)
+3. `npm run build`
+4. Run `node dist/cli.js …`, `npm run start -- …`, or `npm link` then `dot-agents-ts …` (see **`ports/typescript/README.md`** for Windows notes and PATH).
+
+Parity limits are repeated in **`--help`** so users are not steered toward expecting Go-only commands in TS.
+
 ## Phase 5 — Stage 2 buckets and canonical store (`status`)
 
 The Go CLI’s **`~/.agents` canonical store** is defined in `internal/platform/buckets.go` (Stage 1 + Stage 2 buckets, ordered). The TypeScript port’s `status` command reports **the same bucket names in the same order** and uses the same **scope/item counting rules** as `commands/status.go` (marker files for `skills` / `agents` / `hooks` / `plugins`; loose files for file-style buckets).

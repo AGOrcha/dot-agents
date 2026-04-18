@@ -130,6 +130,13 @@ git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
 export PATH="$HOME/.dot-agents/src/bin:$PATH"
 ```
 
+### TypeScript port (optional, Windows-friendly subset)
+
+The primary CLI is the **Go** `dot-agents` binary (Homebrew or `scripts/install.sh` above). For machines where **Node.js 20+** is easier than Go, this repo also ships an experimental **TypeScript** implementation under [`ports/typescript/`](ports/typescript/README.md).
+
+- **Same goal:** Stage 1 config, links, skills, agents, and hooks — not a silent replacement for Go.
+- **Different limits:** Knowledge graph commands, workflow **writes**, and loop orchestration stay **Go-only**. Read the boundary once in [`docs/TYPESCRIPT_PORT_BOUNDARY.md`](docs/TYPESCRIPT_PORT_BOUNDARY.md), then run `npm run build` and `node dist/cli.js --help` inside `ports/typescript/` before relying on it.
+
 ## Quick Start
 
 ```bash
@@ -256,7 +263,8 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 
 ## Requirements
 
-- **macOS** or **Linux**
+- **macOS** or **Linux** for the **Go** CLI installed via Homebrew or `install.sh` (those paths are what most contributors use day to day).
+- **Windows or other OS:** use the **TypeScript** port under `ports/typescript/` if you only need the Stage 1 subset documented there; use Go `dot-agents` when you need workflow and KG features.
 - **git** (for sync features)
 
 ## Configuration

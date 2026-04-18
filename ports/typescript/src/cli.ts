@@ -256,9 +256,10 @@ async function cmdHooks(args: string[]): Promise<number> {
 }
 
 function printHelp(): void {
-  printLine("dot-agents TypeScript CLI — Stage 1 MVP");
+  printLine("dot-agents TypeScript CLI — Stage 1 variant (not full Go parity)");
   printLine("");
   printLine("Usage: dot-agents-ts <command> [subcommand] [args...] [flags]");
+  printLine("(Run from repo: npm run start -- <command> … after npm run build — see ports/typescript/README.md)");
   printLine("");
   printLine("Commands:");
   printLine("  init                  Initialize ~/.agents/ directory structure");

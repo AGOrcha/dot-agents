@@ -4,6 +4,7 @@
  * Supports list and new subcommands. Aligned with commands/agents.go.
  */
 
+import type { Dirent } from "node:fs";
 import { readdir, stat, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome } from "../core/config.js";
@@ -47,7 +48,7 @@ export async function runAgentsList(scope = "global", opts: AgentsOptions = {}):
   const agentsDir = join(home, "agents", scope);
   const agents: AgentEntry[] = [];
 
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: Dirent[];
   try {
     entries = await readdir(agentsDir, { withFileTypes: true });
   } catch {

@@ -19,7 +19,7 @@ import type { StringsOrBool } from "./agentsrc.js";
  */
 async function hasCanonicalHookBundles(agentsHome: string, scope: string): Promise<boolean> {
   const hooksDir = join(agentsHome, "hooks", scope);
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: string[];
   try {
     entries = await readdir(hooksDir);
   } catch {
