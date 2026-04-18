@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 40
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p9-sources-design-fork
+commit: d15016ce91a110200388b48ecd9a4665d0fdf59e
+files_changed: 15
+lines_added: 1034
+lines_removed: 382
+impl:
+    item: "Fork D6.a external-agent-sources design doc; TASKS + loop-state notes; iter-log v2 build fixes"
+    summary: "Added `.agents/workflow/specs/external-agent-sources/design.md` with TOC sections 1–13 per locked D6.a; linked to decisions.1.md. Updated TASKS p9 notes and loop-state Loop Health / Next Iteration Playbook. Unblocked CLI by syncing `commands/static/workflow-iter-log.schema.json` to v2, fixing `checkpoint --log-to-iter` call arity, and updating TestCheckpointLogToIter for schema v2."
+    scope_note: on-target
+    feedback_goal: "Complete the delegated task within write scope with verification and merge-back."
+    retries: 0
+    focused_tests_added: 0
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p9-sources-design-fork/review-decision.yaml
+    verify_record_appended: false

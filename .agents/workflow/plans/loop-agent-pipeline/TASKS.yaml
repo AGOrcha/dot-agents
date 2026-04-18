@@ -231,4 +231,7 @@ tasks:
       write_scope:
         - .agents/workflow/specs/external-agent-sources/design.md
       verification_required: false
-      notes: Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
+      notes: |-
+        Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
+
+        **D6.a landed:** `.agents/workflow/specs/external-agent-sources/design.md` — forked from `decisions.1.md` D6/D6.a; sections 1–13 match locked TOC. Parent reviews merge-back, then `workflow advance` + delegation closeout.

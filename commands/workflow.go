@@ -984,54 +984,54 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 // iterLogEntry is schema_version 2 YAML for .agents/active/iteration-log/iter-N.yaml.
 // Top-level git fields refresh on every checkpoint --log-to-iter call; impl / verifiers / review merge by role.
 type iterLogEntry struct {
-	SchemaVersion int    `yaml:"schema_version" json:"schema_version"`
-	Iteration     int    `yaml:"iteration" json:"iteration"`
-	Date          string `yaml:"date" json:"date"`
-	Wave          string `yaml:"wave" json:"wave"`
-	TaskID        string `yaml:"task_id" json:"task_id"`
-	Commit        string `yaml:"commit" json:"commit"`
-	FilesChanged  int    `yaml:"files_changed" json:"files_changed"`
-	LinesAdded    int    `yaml:"lines_added" json:"lines_added"`
-	LinesRemoved  int    `yaml:"lines_removed" json:"lines_removed"`
-	FirstCommit   bool   `yaml:"first_commit,omitempty" json:"first_commit,omitempty"`
+	SchemaVersion int                    `yaml:"schema_version" json:"schema_version"`
+	Iteration     int                    `yaml:"iteration" json:"iteration"`
+	Date          string                 `yaml:"date" json:"date"`
+	Wave          string                 `yaml:"wave" json:"wave"`
+	TaskID        string                 `yaml:"task_id" json:"task_id"`
+	Commit        string                 `yaml:"commit" json:"commit"`
+	FilesChanged  int                    `yaml:"files_changed" json:"files_changed"`
+	LinesAdded    int                    `yaml:"lines_added" json:"lines_added"`
+	LinesRemoved  int                    `yaml:"lines_removed" json:"lines_removed"`
+	FirstCommit   bool                   `yaml:"first_commit,omitempty" json:"first_commit,omitempty"`
 	Impl          iterLogImplBlock       `yaml:"impl" json:"impl"`
 	Verifiers     []iterLogVerifierEntry `yaml:"verifiers" json:"verifiers"`
 	Review        iterLogReviewBlock     `yaml:"review" json:"review"`
 }
 
 type iterLogImplBlock struct {
-	Item                 string                   `yaml:"item" json:"item"`
-	Summary              string                   `yaml:"summary" json:"summary"`
-	ScopeNote            string                   `yaml:"scope_note" json:"scope_note"`
-	FeedbackGoal         string                   `yaml:"feedback_goal" json:"feedback_goal"`
-	Retries              int                      `yaml:"retries" json:"retries"`
-	FocusedTestsAdded    int                      `yaml:"focused_tests_added" json:"focused_tests_added"`
-	FocusedTestsPass     interface{}              `yaml:"focused_tests_pass,omitempty" json:"focused_tests_pass,omitempty"`
-	SelfAssessment       iterLogImplSelfAssessment `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
+	Item              string                    `yaml:"item" json:"item"`
+	Summary           string                    `yaml:"summary" json:"summary"`
+	ScopeNote         string                    `yaml:"scope_note" json:"scope_note"`
+	FeedbackGoal      string                    `yaml:"feedback_goal" json:"feedback_goal"`
+	Retries           int                       `yaml:"retries" json:"retries"`
+	FocusedTestsAdded int                       `yaml:"focused_tests_added" json:"focused_tests_added"`
+	FocusedTestsPass  interface{}               `yaml:"focused_tests_pass,omitempty" json:"focused_tests_pass,omitempty"`
+	SelfAssessment    iterLogImplSelfAssessment `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
 }
 
 type iterLogImplSelfAssessment struct {
-	ReadLoopState                 bool   `yaml:"read_loop_state" json:"read_loop_state"`
-	OneItemOnly                   bool   `yaml:"one_item_only" json:"one_item_only"`
-	CommittedAfterTests           bool   `yaml:"committed_after_tests" json:"committed_after_tests"`
-	AlignedWithCanonicalTasks     bool   `yaml:"aligned_with_canonical_tasks" json:"aligned_with_canonical_tasks"`
-	PersistedViaWorkflowCommands  string `yaml:"persisted_via_workflow_commands" json:"persisted_via_workflow_commands"`
-	StayedUnder10Files            bool   `yaml:"stayed_under_10_files" json:"stayed_under_10_files"`
-	NoDestructiveCommands         bool   `yaml:"no_destructive_commands" json:"no_destructive_commands"`
-	ScopedTestsToWriteScope       bool   `yaml:"scoped_tests_to_write_scope" json:"scoped_tests_to_write_scope"`
-	TddRefreshPerformed           bool   `yaml:"tdd_refresh_performed" json:"tdd_refresh_performed"`
+	ReadLoopState                bool   `yaml:"read_loop_state" json:"read_loop_state"`
+	OneItemOnly                  bool   `yaml:"one_item_only" json:"one_item_only"`
+	CommittedAfterTests          bool   `yaml:"committed_after_tests" json:"committed_after_tests"`
+	AlignedWithCanonicalTasks    bool   `yaml:"aligned_with_canonical_tasks" json:"aligned_with_canonical_tasks"`
+	PersistedViaWorkflowCommands string `yaml:"persisted_via_workflow_commands" json:"persisted_via_workflow_commands"`
+	StayedUnder10Files           bool   `yaml:"stayed_under_10_files" json:"stayed_under_10_files"`
+	NoDestructiveCommands        bool   `yaml:"no_destructive_commands" json:"no_destructive_commands"`
+	ScopedTestsToWriteScope      bool   `yaml:"scoped_tests_to_write_scope" json:"scoped_tests_to_write_scope"`
+	TddRefreshPerformed          bool   `yaml:"tdd_refresh_performed" json:"tdd_refresh_performed"`
 }
 
 type iterLogVerifierEntry struct {
-	Type             string                         `yaml:"type" json:"type"`
-	Status           string                         `yaml:"status" json:"status"`
-	GatePassed       bool                           `yaml:"gate_passed" json:"gate_passed"`
-	TestsAdded       int                            `yaml:"tests_added" json:"tests_added"`
-	TestsTotalPass   interface{}                    `yaml:"tests_total_pass,omitempty" json:"tests_total_pass,omitempty"`
-	ScenarioTags     []string                       `yaml:"scenario_tags,omitempty" json:"scenario_tags,omitempty"`
-	Retries          int                            `yaml:"retries" json:"retries"`
-	ResultArtifact   string                         `yaml:"result_artifact" json:"result_artifact"`
-	SelfAssessment   iterLogVerifierSelfAssessment  `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
+	Type           string                        `yaml:"type" json:"type"`
+	Status         string                        `yaml:"status" json:"status"`
+	GatePassed     bool                          `yaml:"gate_passed" json:"gate_passed"`
+	TestsAdded     int                           `yaml:"tests_added" json:"tests_added"`
+	TestsTotalPass interface{}                   `yaml:"tests_total_pass,omitempty" json:"tests_total_pass,omitempty"`
+	ScenarioTags   []string                      `yaml:"scenario_tags,omitempty" json:"scenario_tags,omitempty"`
+	Retries        int                           `yaml:"retries" json:"retries"`
+	ResultArtifact string                        `yaml:"result_artifact" json:"result_artifact"`
+	SelfAssessment iterLogVerifierSelfAssessment `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
 }
 
 type iterLogVerifierSelfAssessment struct {
@@ -1044,36 +1044,36 @@ type iterLogVerifierSelfAssessment struct {
 }
 
 type iterLogReviewBlock struct {
-	Phase1Decision         string   `yaml:"phase_1_decision" json:"phase_1_decision"`
-	Phase2Decision         string   `yaml:"phase_2_decision" json:"phase_2_decision"`
-	OverallDecision        string   `yaml:"overall_decision" json:"overall_decision"`
-	FailedGates            []string `yaml:"failed_gates,omitempty" json:"failed_gates,omitempty"`
-	EscalationReason       string   `yaml:"escalation_reason" json:"escalation_reason"`
-	ReviewerNotes          string   `yaml:"reviewer_notes" json:"reviewer_notes"`
-	DecisionArtifact       string   `yaml:"decision_artifact" json:"decision_artifact"`
-	VerifyRecordAppended   bool     `yaml:"verify_record_appended" json:"verify_record_appended"`
+	Phase1Decision       string   `yaml:"phase_1_decision" json:"phase_1_decision"`
+	Phase2Decision       string   `yaml:"phase_2_decision" json:"phase_2_decision"`
+	OverallDecision      string   `yaml:"overall_decision" json:"overall_decision"`
+	FailedGates          []string `yaml:"failed_gates,omitempty" json:"failed_gates,omitempty"`
+	EscalationReason     string   `yaml:"escalation_reason" json:"escalation_reason"`
+	ReviewerNotes        string   `yaml:"reviewer_notes" json:"reviewer_notes"`
+	DecisionArtifact     string   `yaml:"decision_artifact" json:"decision_artifact"`
+	VerifyRecordAppended bool     `yaml:"verify_record_appended" json:"verify_record_appended"`
 }
 
 // iterLogV1Legacy unmarshals on-disk iteration logs written before schema_version 2.
 type iterLogV1Legacy struct {
-	SchemaVersion int    `yaml:"schema_version"`
-	Iteration     int    `yaml:"iteration"`
-	Date          string `yaml:"date"`
-	Wave          string `yaml:"wave"`
-	TaskID        string `yaml:"task_id"`
-	Commit        string `yaml:"commit"`
-	FilesChanged  int    `yaml:"files_changed"`
-	LinesAdded    int    `yaml:"lines_added"`
-	LinesRemoved  int    `yaml:"lines_removed"`
-	FirstCommit   bool   `yaml:"first_commit"`
-	Item          string `yaml:"item"`
-	ScenarioTags  []string `yaml:"scenario_tags"`
-	FeedbackGoal  string `yaml:"feedback_goal"`
-	TestsAdded    int    `yaml:"tests_added"`
-	TestsTotalPass interface{} `yaml:"tests_total_pass"`
-	Retries       int    `yaml:"retries"`
-	ScopeNote     string `yaml:"scope_note"`
-	Summary       string `yaml:"summary"`
+	SchemaVersion  int                     `yaml:"schema_version"`
+	Iteration      int                     `yaml:"iteration"`
+	Date           string                  `yaml:"date"`
+	Wave           string                  `yaml:"wave"`
+	TaskID         string                  `yaml:"task_id"`
+	Commit         string                  `yaml:"commit"`
+	FilesChanged   int                     `yaml:"files_changed"`
+	LinesAdded     int                     `yaml:"lines_added"`
+	LinesRemoved   int                     `yaml:"lines_removed"`
+	FirstCommit    bool                    `yaml:"first_commit"`
+	Item           string                  `yaml:"item"`
+	ScenarioTags   []string                `yaml:"scenario_tags"`
+	FeedbackGoal   string                  `yaml:"feedback_goal"`
+	TestsAdded     int                     `yaml:"tests_added"`
+	TestsTotalPass interface{}             `yaml:"tests_total_pass"`
+	Retries        int                     `yaml:"retries"`
+	ScopeNote      string                  `yaml:"scope_note"`
+	Summary        string                  `yaml:"summary"`
 	SelfAssessment iterLogV1SelfAssessment `yaml:"self_assessment"`
 }
 

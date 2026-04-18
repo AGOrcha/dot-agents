@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"

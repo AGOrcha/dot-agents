@@ -1,6 +1,6 @@
 # Loop State
 
-Last updated: 2026-04-17
+Last updated: 2026-04-18
 Iteration: 41 (orchestrator pass)
 
 ## Current Position
@@ -12,6 +12,8 @@ Orchestrator pass — 2026-04-17:
 
 ## Loop Health
 
+- **`resource-command-parity` / `phase-2-hooks-lifecycle`:** Worker merge-back at `.agents/active/merge-back/phase-2-hooks-lifecycle.md` (hooks show/remove, `ListHookSpecs`, import/remove copy, `remove --clean` hooks tree, iter-log schema v2 embed sync). **Parent** runs `workflow advance resource-command-parity phase-2-hooks-lifecycle completed` and `workflow delegation closeout` after review.
+- **`p9-sources-design-fork`:** D6.a design doc added at `.agents/workflow/specs/external-agent-sources/design.md` (TOC sections 1–13). **Delegated** worker merge-back pending review; **parent** runs `workflow advance loop-agent-pipeline p9-sources-design-fork completed` and `workflow delegation closeout` when accepting — no Go/schema changes in this task.
 - **`workflow next` vs active bundles:** Canonical selector still surfaces **`agents-import`** (in_progress). **`agents-remove`:** worker merge-back written (`.agents/active/merge-back/agents-remove.md`); implementation complete — **parent** advances + `workflow delegation closeout` after review (still serialize with **`agents-import`** on the same Go files until import task advances). **`p3a-result-schema`:** worker merge-back written (`.agents/active/merge-back/p3a-result-schema.md`, verification result under `.agents/active/verification/p3a-result-schema/merge-back.result.yaml`) — **parent** `workflow advance` + `workflow delegation closeout` after review.
 - **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag; canonical plan focus (`agents remove…` / pipeline focus) reflects newer orchestrate commits — use TASKS.yaml + bundle gating.
 - **Parallelism:** Run **`p2`** worker when ready. **`p3a-result-schema`** implementation is in merge-back review (no longer blocked on **`p1`** for this slice — parent reconciles TASKS/deps). Pending merge-backs: **`agents-remove`**, **`p3a-result-schema`**, plus prior queue per `orient`.
@@ -19,11 +21,13 @@ Orchestrator pass — 2026-04-17:
 
 ## Next Iteration Playbook
 
-1. **Dispatch / run:** **`p2-impl-agent-surface`** worker only (`del-p2-impl-agent-surface-1776438876`) — unblock path that does not touch `workflow.go` or `agents.go`.
-2. **Parent closeout (agents):** Review **`.agents/active/merge-back/agents-remove.md`**, then **`workflow advance agent-resource-lifecycle agents-remove completed`** and **`workflow delegation closeout`** when accepting the delegation. Complete **`agents-import`** merge-back → advance on that task (same file scope — order per your review). Complete **`p1-pipeline-control`** merge-back → advance when ready.
-3. **Parent closeout (pipeline p3a):** Review **`.agents/active/merge-back/p3a-result-schema.md`** and verification YAML, then **`workflow advance loop-agent-pipeline p3a-result-schema completed`** and **`workflow delegation closeout --plan loop-agent-pipeline --task p3a-result-schema --decision accept`** when accepting.
-4. **Orchestrator after workers:** `workflow verify record`, `workflow merge-back`, `workflow advance`, `workflow delegation closeout` per completed bundle; re-run `workflow next --plan …` if needed.
-5. **Evidence:** `go run ./cmd/dot-agents workflow tasks agent-resource-lifecycle`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go test ./commands -run 'RemoveAgentIn|Agents'` or `go test ./commands -run Workflow` as appropriate.
+1. **Parent closeout (hooks parity):** Review **`.agents/active/merge-back/phase-2-hooks-lifecycle.md`**, then **`workflow advance resource-command-parity phase-2-hooks-lifecycle completed`** and **`workflow delegation closeout --plan resource-command-parity --task phase-2-hooks-lifecycle --decision accept`** when accepting.
+2. **Parent closeout (p9):** Review **`.agents/active/merge-back/p9-sources-design-fork.md`**, then **`workflow advance loop-agent-pipeline p9-sources-design-fork completed`** and **`workflow delegation closeout --plan loop-agent-pipeline --task p9-sources-design-fork --decision accept`** when accepting the doc-only fork.
+3. **Dispatch / run:** **`p2-impl-agent-surface`** worker only (`del-p2-impl-agent-surface-1776438876`) — unblock path that does not touch `workflow.go` or `agents.go`.
+4. **Parent closeout (agents):** Review **`.agents/active/merge-back/agents-remove.md`**, then **`workflow advance agent-resource-lifecycle agents-remove completed`** and **`workflow delegation closeout`** when accepting the delegation. Complete **`agents-import`** merge-back → advance on that task (same file scope — order per your review). Complete **`p1-pipeline-control`** merge-back → advance when ready.
+5. **Parent closeout (pipeline p3a):** Review **`.agents/active/merge-back/p3a-result-schema.md`** and verification YAML, then **`workflow advance loop-agent-pipeline p3a-result-schema completed`** and **`workflow delegation closeout --plan loop-agent-pipeline --task p3a-result-schema --decision accept`** when accepting.
+6. **Orchestrator after workers:** `workflow verify record`, `workflow merge-back`, `workflow advance`, `workflow delegation closeout` per completed bundle; re-run `workflow next --plan …` if needed.
+7. **Evidence:** `go run ./cmd/dot-agents workflow tasks agent-resource-lifecycle`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`; `go test ./commands -run 'RemoveAgentIn|Agents'` or `go test ./commands -run Workflow` as appropriate.
 
 ## Scenario Coverage
 
