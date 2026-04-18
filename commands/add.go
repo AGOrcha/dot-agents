@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/commands/kg"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -656,7 +657,7 @@ func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) erro
 }
 
 func ensureGlobalKGMCPConfigs(agentsHome string) error {
-	if _, err := os.Stat(kgConfigPath()); err != nil {
+	if _, err := os.Stat(kg.ConfigPath()); err != nil {
 		return nil
 	}
 	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"))

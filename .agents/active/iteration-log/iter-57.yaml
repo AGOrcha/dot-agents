@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 57
+date: "2026-04-18"
+wave: command-surface-decomposition
+task_id: c1-kg-command-decomposition
+commit: 02bb7e79f24c7ed2ed0d4677e0c29efb3f9b4106
+files_changed: 10
+lines_added: 86
+lines_removed: 6308
+impl:
+    item: ""
+    summary: ""
+    scope_note: ""
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/c1-kg-command-decomposition/review-decision.yaml
+    verify_record_appended: false
