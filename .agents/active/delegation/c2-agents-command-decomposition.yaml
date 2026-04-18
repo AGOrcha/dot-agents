@@ -12,6 +12,6 @@ success_criteria: '**feedback_goal:** Separate `agents list/new/promote/remove/i
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T19:17:02Z"
-updated_at: "2026-04-18T19:17:02Z"
+updated_at: "2026-04-18T21:43:26Z"

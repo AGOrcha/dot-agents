@@ -1,7 +1,7 @@
 # Loop State
 
 Last updated: 2026-04-18
-Iteration: 57 (post closeout — phase-6 + c5 drained; queue: c1 / c2)
+Iteration: 58 (c2 agents decomposition merge-back written; parent review queue: c1 + c2)
 
 ## Current Position
 
@@ -15,24 +15,24 @@ Orchestrator snapshot — 2026-04-18 (iter 57):
 ## Loop Health
 
 - **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale).
-- **Delegation inventory:** **`active_delegations.active_count: 2`** — **`command-surface-decomposition`** **`c1`** + **`c2`** only (`typescript-port` has no active delegation after **phase-6** closeout).
-- **`c1` worker (iter 57):** Merge-back committed for **`c1-kg-command-decomposition`** (artifact `.agents/active/merge-back/c1-kg-command-decomposition.md`, verification under `.agents/active/verification/c1-kg-command-decomposition/`). **Parent** should **`workflow advance`** + **`workflow delegation closeout`** after review.
+- **Delegation inventory:** **`command-surface-decomposition`** **`c1`** + **`c2`** — both have **merge-back artifacts on disk** pending parent **`workflow delegation closeout`** + **`workflow advance`** (contracts may still read **`active`** until closeout).
+- **`c2` worker (iter 58):** Merge-back for **`c2-agents-command-decomposition`** at **`.agents/active/merge-back/c2-agents-command-decomposition.md`** (commit **`7304a72`**); verification **`.agents/active/verification/c2-agents-command-decomposition/merge-back.result.yaml`**; iteration log **`.agents/active/iteration-log/iter-58.yaml`**.
+- **`c1` worker (iter 57):** Merge-back for **`c1-kg-command-decomposition`** remains at **`.agents/active/merge-back/c1-kg-command-decomposition.md`** — parent still owns closeout when ready.
 - **`c6` vs `c1` (DAG):** **`c6-status-import-helper-extraction`** is **`completed`** while **`c1-kg-command-decomposition`** remains **`in_progress`** — YAML still lists **`depends_on: [c1]`** on **c6**. **Status field wins** for “no remaining **c6** implementation”; reconcile **`depends_on`** or notes when **c1** closes if the edge should drop from the living graph.
 - **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as `--prompt-file`).
 
 ## Next Iteration Playbook
 
-1. **Parent:** Review **`c1`** merge-back at commit **`5e420734`**; run **`workflow delegation closeout`** + **`workflow advance`** for **`c1-kg-command-decomposition`** when ready. **`c2`** worker continues in parallel if applicable.
-2. **Workers:** **`c2`** — **`loop-worker`** + **`/iteration-close`** when the slice is complete ( **`c1`** worker handoff done).
-3. **Optional:** **`TASKS.yaml`** notes scrub for **`phase-6`** / **`c5`** stale bundle paths.
-4. **Evidence:** `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents kg health`.
+1. **Parent:** Review **`c1`** + **`c2`** merge-backs; run **`workflow delegation closeout`** + **`workflow advance`** per task when accepting ( **`c1`** commit **`5e420734`**, **`c2`** commit **`7304a72`**).
+2. **Optional:** **`TASKS.yaml`** notes scrub for stale “delegation active” / bundle paths after closeouts.
+3. **Evidence:** `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents agents --help`.
 
 ## Scenario Coverage
 
 | Family | Last exercised |
 |--------|----------------|
 | orchestrator-selection | 2026-04-18 — queue after **phase-6** + **c5** closeout |
-| delegation-lifecycle | 2026-04-18 — **`ralph-closeout`** + **`delegation closeout`** + **`advance`** for **phase-6** / **c5** |
+| delegation-lifecycle | 2026-04-18 — **`c2`** worker **merge-back** recorded (**iter 58**); parent closeout still owns **`advance`** |
 
 ## Command Coverage
 
@@ -41,7 +41,8 @@ Orchestrator snapshot — 2026-04-18 (iter 57):
 | `workflow orient` | yes | 57 |
 | `workflow next` | yes | 57 |
 | `workflow tasks typescript-port` | yes | 57 |
-| `workflow tasks command-surface-decomposition` | yes | 57 |
+| `workflow tasks command-surface-decomposition` | yes | 58 |
+| `agents --help` | yes | 58 |
 
 ## Iteration Log
 
