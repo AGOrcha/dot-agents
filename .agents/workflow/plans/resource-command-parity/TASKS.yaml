@@ -28,7 +28,7 @@ tasks:
         shared lifecycle surface with resource-specific adapters, then document the rationale before implementation.
     - id: phase-2-hooks-lifecycle
       title: Phase 2 — Add coherent hook lifecycle commands on top of canonical HOOK.yaml bundles
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-command-contract
       blocks:
