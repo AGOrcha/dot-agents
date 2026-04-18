@@ -132,10 +132,10 @@ tasks:
 
         **write_scope:** .agents/prompts/verifiers/batch.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3e-batch-verifier-1776528136.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3d-ui-verifier`** is **completed** — this worker is the current spec owner for verifier-wave edits. **Serialize** **`p3f-streaming-verifier`** (same spec path): do **not** fan out or run the streaming verifier worker until **`p3e`** merges and parent runs `workflow advance` + `workflow delegation closeout`. `workflow next` may surface **`p3f`** while **`p3e`** is **in_progress** — treat TASKS + orchestrator serialization policy as authoritative over the raw next-task sort.
+        **context:** Task is **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p3e-batch-verifier-1776528136.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3f-streaming-verifier`** was serialized after this slice; parent ran `workflow advance` + `workflow delegation closeout`, then **`workflow fanout`** for **`p3f`** — see **`p3f`** notes for the active streaming bundle.
     - id: p3f-streaming-verifier
       title: Streaming verifier surface and result contract
-      status: in_progress
+      status: completed
       depends_on:
         - p3a-result-schema
       blocks:
@@ -150,7 +150,7 @@ tasks:
 
         **write_scope:** .agents/prompts/verifiers/streaming.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** **No active bundle** this pass — **`p3e-batch-verifier`** is **in_progress** and owns concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md`. **`p3a-result-schema`** is **completed** (graph dependency satisfied), but orchestrator policy **serializes** `p3e` → `p3f` on the spec. After **`p3e`** closes, parent should `workflow fanout` for `p3f` (delegate-profile `loop-worker`, overlay `.agents/active/active.loop.md`, context: `.agents/active/loop-state.md`, this TASKS.yaml). **Mismatch note:** `go run ./cmd/dot-agents workflow next` may list **`p3f`** first among pending verifier slices; **canonical TASKS + serialization win** — do not start **`p3f`** until **`p3e`** merge-back is accepted.
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3f-streaming-verifier-1776528467.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3e-batch-verifier`** is **completed** — this worker is the current owner for concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md` in the verifier wave. **Serialize** **`p4-review-agent`** and any other work touching **`docs/LOOP_ORCHESTRATION_SPEC.md`** until **`p3f`** merges and parent runs **`workflow advance`** + **`workflow delegation closeout`**. **Mismatch note:** `go run ./cmd/dot-agents workflow next` may surface **`p4-review-agent`** while **`p3f`** is **`in_progress`** — **canonical TASKS + spec serialization win** over raw next-task ordering; do **not** fan out **`p4`** until **`p3f`** closes.
     - id: p4-review-agent
       title: Review-agent surface plus merged workflow verify record decision writer
       status: pending
@@ -168,7 +168,12 @@ tasks:
         - .agents/prompts/review-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append.
+      notes: |-
+        **feedback_goal:** Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
+
+        **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow_test.go, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** **No delegation bundle this orchestrator pass.** `workflow next` may select this task while **`p3f-streaming-verifier`** is **`in_progress`** — both touch **`docs/LOOP_ORCHESTRATION_SPEC.md`**; orchestrator **defers `workflow fanout`** for **`p4`** until **`p3f`** merge-back is accepted and the spec is free. Worker profile when fanout runs: **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context **`.agents/active/loop-state.md`** + this TASKS.yaml. Parent runs **`workflow advance`** + **`workflow delegation closeout`** after merge-back acceptance.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
       status: completed
