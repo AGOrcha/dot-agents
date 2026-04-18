@@ -42,7 +42,7 @@ tasks:
       notes: '**feedback_goal:** Decompose `sync` into stable command-family files (`init`, `commit`, `pull`, `push`, `status`, `log`) so small changes do not require workers to load or edit the whole sync surface.'
     - id: c4-skills-command-decomposition
       title: Split skills command by lifecycle surface
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
