@@ -202,18 +202,16 @@ tasks:
         - `plugin-resource-salvage` Phases 4-5 (import/status/explain/doctor plugin readback and closeout)
         Until those settle, the TypeScript port should treat plugins and Stage 2 buckets as deferred scope.
 
-        Orchestrator (2026-04-18, iter 51): **delegation active** — bundle
+        Orchestrator (2026-04-18, iter 51): bundle
         `.agents/active/delegation-bundles/del-phase-5-stage2-and-plugin-alignment-1776546530.yaml`
-        (`workflow fanout`, owner `ralph-orchestrate`, profile `loop-worker`, project overlay `.agents/active/active.loop.md` only; D5 — do not reuse overlay path as `--prompt-file`).
-        Supersedes iter-37 **not bundled** deferral: canonical `phase-4-advanced-surface-decision` is **completed**; phase-5 **in_progress** with bounded worker scope.
-        selector_note: phase-5 YAML `depends_on` is only `phase-3-stage1-command-mvp` — treat `workflow next` as algorithm-only; orchestrator still sequences against upstream Go contract waves via merge-back notes.
-        **feedback_goal:** After Go-side buckets/plugins stabilize, does TS `import`/resource behavior match the declared Stage-2 contract without drift from `platform-dir-unification` / plugin salvage?
-        **write_scope (canonical, matches bundle):** `ports/typescript/src/platforms/`, `ports/typescript/src/commands/`, `ports/typescript/tests/`, `docs/` — implement only here; verify TS changes with `cd ports/typescript && npm test`.
-        **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Inherit phase-4 boundary artifacts from completed phase-4 merge-back; document any contract gaps for parent `workflow advance` / closeout.
-        **parallel:** `workflow orient` reports **4** active delegations and `workflow next` returned **no actionable** task — **no further fanout** this pass after this bundle (`RALPH_MAX_PARALLEL_WORKERS=3` saturated elsewhere).
+        (`workflow fanout`, owner `ralph-orchestrate`, profile `loop-worker`, overlay `.agents/active/active.loop.md` only; D5).
+        Parent (2026-04-18): **`workflow delegation closeout` accepted** — slice complete; canonical row **`completed`** (see history / merge-back archive for iter-55). Supersede any “delegation active” / parallel-cap wording below as historical.
+        **feedback_goal (met at closeout):** TS `import`/resource behavior aligned to declared Stage-2 buckets per merge-back; gaps folded into phase-6 if any.
+        **write_scope (canonical):** `ports/typescript/src/platforms/`, `ports/typescript/src/commands/`, `ports/typescript/tests/`, `docs/`.
+        **context:** Phase-6 release/docs lane unblocked once this row is **completed**.
     - id: phase-6-release-and-docs
       title: Phase 6 — Package, document, and validate the Windows-friendly release path
-      status: in_progress
+      status: completed
       depends_on:
         - phase-4-advanced-surface-decision
         - phase-5-stage2-and-plugin-alignment
@@ -229,9 +227,11 @@ tasks:
         The README should describe the TypeScript port as an explicit variant with declared capability boundaries,
         not as a silent replacement for the Go CLI.
 
-        Orchestrator (2026-04-14, iter 37): **not bundled** — depends on phase-4 + phase-5; no worker until both complete; phase-4 delegation still open.
-        feedback_goal: Can a new user install the TS port, read README + `--help`, and understand parity
-        limits vs Go CLI without ambiguity?
-        write_scope (canonical): ports/typescript/, README.md, docs/
-        context: Release narrative must trace back to the phase-4 boundary decision and phase-5 alignment;
-        no fanout while phase-4 delegation is open.
+        Orchestrator (2026-04-18, iter 56): **delegation active** — bundle
+        `/Users/nikashp/Documents/dot-agents/.agents/active/delegation-bundles/del-phase-6-release-and-docs-1776546980.yaml`
+        (`workflow fanout`, owner `ralph-orchestrate`, profile `loop-worker`, project overlay `.agents/active/active.loop.md` only; D5 — do not reuse overlay path as `--prompt-file`).
+        **Preconditions met:** `phase-4-advanced-surface-decision` and `phase-5-stage2-and-plugin-alignment` are **completed**; this is the head TS-port lane until merge-back.
+        **feedback_goal:** Can a new user install the TS port, read README + `--help`, and understand parity limits vs Go CLI without ambiguity?
+        **write_scope (canonical, matches bundle):** `ports/typescript/`, `README.md`, `docs/` — implement only here; verify with `cd ports/typescript && npm test` (and any packaging scripts the slice touches).
+        **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Trace release copy to phase-4 boundary artifacts + phase-5 alignment merge-back; do not imply full Go parity.
+        **selector_note:** `workflow next` may return **no actionable** task while **four** plans already have **in_progress** rows with on-disk bundles (`command-surface-decomposition` c1/c2/c5 + this task) — not a selector bug; drain merge-backs / closeouts before expecting a new head from `workflow next`.

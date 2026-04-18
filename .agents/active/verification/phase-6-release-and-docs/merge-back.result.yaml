@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: phase-6-release-and-docs
+parent_plan_id: typescript-port
+verifier_type: merge-back
+status: pass
+summary: 'Parent: advance typescript-port phase-6-release-and-docs + delegation closeout. Unstaged edits remain in .agents/ (orchestrator) outside this bundle write_scope.'
+recorded_at: "2026-04-18T21:19:56Z"
+delegation_id: del-phase-6-release-and-docs-1776546980
+artifact_paths:
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/command-surface-decomposition/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml
