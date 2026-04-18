@@ -7,15 +7,10 @@ summary: No commands/workflow.go changes. [ok] workflow tasks loop-agent-pipelin
 recorded_at: "2026-04-18T19:01:54Z"
 delegation_id: del-p7-post-closeout-1776538664
 artifact_paths:
-    - .agents/active/active.loop.md
-    - .agents/active/delegation/phase-5-readback-alignment.yaml
-    - .agents/active/loop-state.md
-    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
-    - .agents/workflow/plans/resource-command-parity/TASKS.yaml
-    - commands/doctor.go
-    - commands/explain.go
-    - commands/explain_test.go
-    - commands/install.go
-    - commands/install_test.go
-    - commands/remove.go
-    - commands/status.go
+    - bin/tests/ralph-closeout
+    - bin/tests/ralph-pipeline
+    - commands/workflow_test.go
+    - .agents/active/iteration-log/iter-50.yaml
+    - .agents/active/merge-back/p7-post-closeout.md
+    - .agents/active/delegation/p7-post-closeout.yaml
+    - .agents/active/verification/p7-post-closeout/merge-back.result.yaml
