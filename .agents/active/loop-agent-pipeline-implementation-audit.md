@@ -27,7 +27,7 @@ Important caveat:
 
 | Task | Canonical status | Audit verdict | Notes |
 | --- | --- | --- | --- |
-| `p1-pipeline-control` | completed | `implemented-complete` | Plan-scoped fanout/next, verification dir lifecycle, TDD gate, verifier retry wiring are present in `commands/workflow.go`, `bin/tests/ralph-orchestrate`, and `bin/tests/ralph-pipeline`. |
+| `p1-pipeline-control` | completed | `implemented-complete` | Plan-scoped fanout/next, verification dir lifecycle, TDD gate, verifier retry wiring are present in `commands/workflow/workflow.go`, `bin/tests/ralph-orchestrate`, and `bin/tests/ralph-pipeline`. |
 | `p2-impl-agent-surface` | completed | `implemented-complete` | `impl-agent.project.md` exists, spec documents impl handoff semantics, and `ralph-cursor-loop` explicitly treats impl-agent as separate from loop-worker. Archive file lists are noisy. |
 | `p3a-result-schema` | completed | `implemented-complete` | Canonical verification-result schema, embedded validation, and merge-back result writing are present. |
 | `p3b-unit-verifier` | completed | `implemented-complete` | Unit verifier prompt and spec role text landed directly in target files. |
@@ -50,9 +50,9 @@ Verdict: `implemented-complete`
 
 Direct evidence:
 
-- `commands/workflow.go` includes `workflow next --plan`, `fanout --verifier-retry-max`, and `fanout --skip-tdd-gate`
-- `commands/workflow.go` contains `ensureTaskVerificationDir(...)`
-- `commands/workflow.go` contains the pre-verifier TDD gate error path
+- `commands/workflow/workflow.go` includes `workflow next --plan`, `fanout --verifier-retry-max`, and `fanout --skip-tdd-gate`
+- `commands/workflow/workflow.go` contains `ensureTaskVerificationDir(...)`
+- `commands/workflow/workflow.go` contains the pre-verifier TDD gate error path
 - `bin/tests/ralph-orchestrate` forwards `--plan`
 - `bin/tests/ralph-pipeline` documents verification dir creation before dispatch
 
@@ -78,9 +78,9 @@ Verdict: `implemented-complete`
 Direct evidence:
 
 - `schemas/verification-result.schema.json`
-- `commands/static/verification-result.schema.json`
-- `commands/verification_result_schema.go`
-- `commands/workflow.go` writes merge-back verification artifacts under `.agents/active/verification/<task_id>/merge-back.result.yaml`
+- `commands/workflow/static/verification-result.schema.json`
+- `commands/workflow/verification_result_schema.go`
+- `commands/workflow/workflow.go` writes merge-back verification artifacts under `.agents/active/verification/<task_id>/merge-back.result.yaml`
 
 ### `p3b-unit-verifier`
 
@@ -147,9 +147,9 @@ Direct evidence:
 
 - `.agents/prompts/review-agent.project.md`
 - `schemas/verification-decision.schema.json`
-- `commands/static/verification-decision.schema.json`
-- `commands/review_decision_schema.go`
-- `commands/workflow.go` exposes `workflow verify record --kind review`, phase decision flags, failed-gate flags, escalation reason enforcement, and writes `review-decision.yaml`
+- `commands/workflow/static/verification-decision.schema.json`
+- `commands/workflow/review_decision_schema.go`
+- `commands/workflow/workflow.go` exposes `workflow verify record --kind review`, phase decision flags, failed-gate flags, escalation reason enforcement, and writes `review-decision.yaml`
 
 ### `p5-iter-log-v2`
 
@@ -158,9 +158,9 @@ Verdict: `implemented-complete`
 Direct evidence:
 
 - `schemas/workflow-iter-log.schema.json`
-- `commands/static/workflow-iter-log.schema.json`
-- `commands/workflow_iter_log_schema.go`
-- `commands/workflow.go` documents and enforces schema v2 nested role blocks
+- `commands/workflow/static/workflow-iter-log.schema.json`
+- `commands/workflow/iter_log_schema.go`
+- `commands/workflow/workflow.go` documents and enforces schema v2 nested role blocks
 
 ### `p6-fanout-dispatch`
 
@@ -171,8 +171,8 @@ Direct evidence:
 - `schemas/workflow-plan.schema.json` includes `default_app_type`
 - `schemas/workflow-delegation-bundle.schema.json` includes `app_type` and `verifier_sequence`
 - `schemas/agentsrc.schema.json` includes `verifier_profiles` and `app_type_verifier_map`
-- `commands/workflow.go` resolves `app_type` and `verifier_sequence`
-- `commands/workflow_test.go` contains explicit `app_type` / `verifier_sequence` tests
+- `commands/workflow/workflow.go` resolves `app_type` and `verifier_sequence`
+- `commands/workflow/workflow_test.go` contains explicit `app_type` / `verifier_sequence` tests
 
 Audit note:
 
@@ -184,8 +184,8 @@ Verdict: `implemented-partial`
 
 What is implemented:
 
-- `commands/workflow.go` has `workflow fold-back update`
-- `commands/workflow.go` enforces `--slug` for update and supports slugged create/upsert behavior
+- `commands/workflow/workflow.go` has `workflow fold-back update`
+- `commands/workflow/workflow.go` enforces `--slug` for update and supports slugged create/upsert behavior
 - `bin/tests/ralph-closeout` includes `RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT`
 - `bin/tests/ralph-pipeline` forwards `RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT`
 

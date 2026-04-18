@@ -3784,7 +3784,7 @@ func TestWorkflowIterLogEmbeddedSchemaMatchesCanonical(t *testing.T) {
 		t.Fatalf("read canonical schema: %v", err)
 	}
 	if string(want) != string(workflowIterLogSchemaJSON) {
-		t.Fatal("commands/static/workflow-iter-log.schema.json is out of sync with schemas/workflow-iter-log.schema.json — copy the canonical file after editing")
+		t.Fatal("commands/workflow/static/workflow-iter-log.schema.json is out of sync with schemas/workflow-iter-log.schema.json — copy the canonical file after editing")
 	}
 }
 

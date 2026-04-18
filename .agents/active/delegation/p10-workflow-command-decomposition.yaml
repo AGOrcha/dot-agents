@@ -6,16 +6,17 @@ title: Split workflow command into subpackage files to reduce worker hotspot con
 summary: Delegated from plan Loop Agent Pipeline Plan
 write_scope:
     - commands/workflow.go
-    - commands/workflow_test.go
+    - commands/workflow/workflow.go
+    - commands/workflow/workflow_test.go
     - commands/workflow/
 success_criteria: |-
-    **feedback_goal:** Replace the monolithic `commands/workflow.go` / `commands/workflow_test.go` hotspot with a `commands/workflow/` subpackage and a thin top-level shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
+    **feedback_goal:** Replace the monolithic workflow hotspot with a `commands/workflow/` subpackage and a thin top-level `commands/workflow.go` shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
 
-    **write_scope:** commands/workflow.go, commands/workflow_test.go, commands/workflow/
+    **write_scope:** commands/workflow.go, commands/workflow/workflow.go, commands/workflow/workflow_test.go, commands/workflow/
 
     **context:** This is a structural follow-on after the core pipeline behavior landed. Keep command semantics stable; the primary goal is decomposition by subcommand family (`status`, `orient`, `checkpoint`, `plan/task`, `verify`, `graph`, `fanout`, `merge-back`, `fold-back`, `delegation`, `drift`, `sweep`) and matching test-file decomposition. If additional helpers are needed, keep them inside the new workflow subpackage instead of growing other command hotspots.
 
-    **serialization note:** Treat this as an exclusive hotspot task. Do not parallelize with other work that still edits `commands/workflow.go` or `commands/workflow_test.go`.
+    **serialization note:** Treat this as an exclusive hotspot task. Do not parallelize with other work that still edits `commands/workflow.go` or files under `commands/workflow/`.
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate

@@ -186,10 +186,10 @@ tasks:
       owner: dot-agents
       write_scope:
         - schemas/workflow-iter-log.schema.json
-        - commands/static/workflow-iter-log.schema.json
-        - commands/workflow_iter_log_schema.go
-        - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log_schema.go
+        - commands/workflow/workflow.go
+        - commands/workflow/workflow_test.go
       verification_required: true
       notes: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
     - id: p6-fanout-dispatch
@@ -289,13 +289,14 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/workflow.go
+        - commands/workflow/workflow_test.go
         - commands/workflow/
       verification_required: true
       notes: |-
-        **feedback_goal:** Replace the monolithic `commands/workflow.go` / `commands/workflow_test.go` hotspot with a `commands/workflow/` subpackage and a thin top-level shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
+        **feedback_goal:** Replace the monolithic workflow hotspot with a `commands/workflow/` subpackage and a thin top-level `commands/workflow.go` shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
 
-        **write_scope:** commands/workflow.go, commands/workflow_test.go, commands/workflow/
+        **write_scope:** commands/workflow.go, commands/workflow/workflow.go, commands/workflow/workflow_test.go, commands/workflow/
 
         **context:** This is a structural follow-on after the core pipeline behavior landed. Keep command semantics stable; the primary goal is decomposition by subcommand family (`status`, `orient`, `checkpoint`, `plan/task`, `verify`, `graph`, `fanout`, `merge-back`, `fold-back`, `delegation`, `drift`, `sweep`) and matching test-file decomposition. If additional helpers are needed, keep them inside the new workflow subpackage instead of growing other command hotspots.
 
