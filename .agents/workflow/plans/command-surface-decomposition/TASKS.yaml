@@ -31,7 +31,7 @@ tasks:
       notes: '**feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.'
     - id: c3-sync-command-decomposition
       title: Split sync command by subcommand family
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
