@@ -224,7 +224,7 @@ tasks:
       notes: Preserve D5 explicitly. The orchestrator must choose impl, verifier, and review role surfaces deliberately and stop reusing the same file as both project overlay and prompt-file.
     - id: p9-sources-design-fork
       title: Fork external-sources design doc from the main implementation plan
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
