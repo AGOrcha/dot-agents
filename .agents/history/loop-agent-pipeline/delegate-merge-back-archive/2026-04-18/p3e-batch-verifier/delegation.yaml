@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-p3e-batch-verifier-1776528136
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p3e-batch-verifier
+title: Batch verifier surface and result contract
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - .agents/prompts/verifiers/batch.project.md
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+success_criteria: |-
+    **feedback_goal:** Batch verifier prompt plus spec updates for fixture-driven runs, expected-vs-actual diff artifacts, and alignment with the canonical verification-result schema; verification + merge-back ready.
+
+    **write_scope:** .agents/prompts/verifiers/batch.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+    **context:** `workflow next` may select this task while **`p3d-ui-verifier`** is still **in_progress** — **do not fan out yet**: verifier slices share `docs/LOOP_ORCHESTRATION_SPEC.md`; wait for **`p3d`** merge-back and task advance before creating `del-p3e-batch-verifier` (orchestrator-ordered serialization).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T16:02:16Z"
+updated_at: "2026-04-18T16:06:57Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+task_id: p3e-batch-verifier
+delegation_id: del-p3e-batch-verifier-1776528136
+decision: accept
+closed_at: "2026-04-18T16:07:24Z"
