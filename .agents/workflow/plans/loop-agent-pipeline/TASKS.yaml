@@ -135,7 +135,7 @@ tasks:
         **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3e-batch-verifier-1776528136.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3d-ui-verifier`** is **completed** — this worker is the current spec owner for verifier-wave edits. **Serialize** **`p3f-streaming-verifier`** (same spec path): do **not** fan out or run the streaming verifier worker until **`p3e`** merges and parent runs `workflow advance` + `workflow delegation closeout`. `workflow next` may surface **`p3f`** while **`p3e`** is **in_progress** — treat TASKS + orchestrator serialization policy as authoritative over the raw next-task sort.
     - id: p3f-streaming-verifier
       title: Streaming verifier surface and result contract
-      status: pending
+      status: in_progress
       depends_on:
         - p3a-result-schema
       blocks:
