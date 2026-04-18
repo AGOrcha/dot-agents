@@ -1,50 +1,46 @@
 # Loop State
 
 Last updated: 2026-04-18
-Iteration: 55 (worker — typescript-port phase-5 slice)
+Iteration: 57 (post closeout — phase-6 + c5 drained; queue: c1 / c2)
 
 ## Current Position
 
-Orchestrator pass — 2026-04-18 (iter 51):
-- **Bundled this run:** **`typescript-port` / `phase-5-stage2-and-plugin-alignment`** → `.agents/active/delegation-bundles/del-phase-5-stage2-and-plugin-alignment-1776546530.yaml` — **proceed** (bundle `write_scope` matches canonical TASKS: `ports/typescript/src/platforms/`, `ports/typescript/src/commands/`, `ports/typescript/tests/`, `docs/`; profile `loop-worker`, overlay `.agents/active/active.loop.md`).
-- **`TASKS.yaml`** notes updated for **`phase-5-stage2-and-plugin-alignment`** (delegation path, feedback_goal, write_scope, context, parallel-cap note).
-- **`workflow next`** returned **no actionable canonical task** — expected while other plans already have **in_progress** / delegated rows and parallel worker cap is saturated (`workflow orient`: **4** active delegations, **`RALPH_MAX_PARALLEL_WORKERS=3`**).
-- **No additional `workflow fanout`** this pass after the phase-5 bundle.
+Orchestrator snapshot — 2026-04-18 (iter 57):
+- **`typescript-port` / `phase-6-release-and-docs`:** **`completed`** — **`workflow delegation closeout` accepted**, **`workflow advance`** done; archives under `.agents/history/typescript-port/delegate-merge-back-archive/2026-04-18/phase-6-release-and-docs/`. Active delegation + bundle paths removed from git (`closeout` commits). Canonical **`TASKS.yaml`** row is **`completed`**; long notes block may still mention an old bundle path until a notes-only trim.
+- **`command-surface-decomposition` / `c5-hooks-command-decomposition`:** **`completed`** — merge-back processed via **`ralph-closeout`** / **`workflow delegation closeout`** + **`workflow advance`**; archive under `.agents/history/command-surface-decomposition/delegate-merge-back-archive/2026-04-18/c5-hooks-command-decomposition/`. Notes may still say “delegation active” until edited; **status field wins**.
+- **Still in flight:** **`c1-kg-command-decomposition`** and **`c2-agents-command-decomposition`** — on-disk bundles `del-c1-kg-command-decomposition-1776539821.yaml`, `del-c2-agents-command-decomposition-1776539822.yaml`; matching contracts under `.agents/active/delegation/`.
+- **`workflow next`:** Should be able to surface work again now that closeouts drained **`phase-6`** and **`c5`** (queue no longer saturated by those lanes).
+- **Tooling (repo):** **`ralph-closeout`** no longer requires PyYAML for delegation **`id`** (stdlib regex). **`workflow delegation closeout`** reconciles **`active` → completed** when a merge-back exists but **`workflow merge-back`** was skipped (hand-written merge-back). Uncommitted until you commit the **`commands/workflow`** + **`bin/tests/ralph-closeout`** changes.
 
 ## Loop Health
 
-- **`typescript-port` / `phase-5-stage2-and-plugin-alignment` (iter 55):** Worker merge-back recorded — `.agents/active/merge-back/phase-5-stage2-and-plugin-alignment.md`, iter-log **`iter-55.yaml`**, commit **`d1cfcae`**. Canonical **`status`/`init`** parity with **`internal/platform/buckets.go`** (Stage 2 buckets + marker counting). **Parent:** review merge-back, then **`workflow advance typescript-port phase-5-stage2-and-plugin-alignment completed`** + **`workflow delegation closeout`** as appropriate.
-- **`workflow orient` vs checkpoint:** Checkpoint `next_action` may lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale; this pass: stale checkpoint warning present — canonical plan focus remains authoritative).
-- **Delegation saturation:** **`active_delegations.active_count: 4`** with cap **`RALPH_MAX_PARALLEL_WORKERS=3`** — treat as queue pressure (merge-back / advance / closeout on finished slices), not a selector bug, until counts reconcile.
-- **`c6` vs `c1` (canonical YAML):** **`c6-status-import-helper-extraction`** is **`completed`** while **`c1-kg-command-decomposition`** remains **`in_progress`** — `c6` still lists **`depends_on: [c1]`** (DAG tension). **Status field wins** for “no remaining `c6` implementation”; parent should confirm **`workflow advance`** / history is consistent or adjust **`depends_on`** if **`c6`** was closed with an explicit waiver.
-- **`p10` decomposition (2026-04-18):** Implementation lives under **`commands/workflow/`** (`cmd.go` cobra tree + feature modules); tests split across **`commands/workflow/*_test.go`** and **`testutil_test.go`**; thin bridge **`commands/workflow.go`**. Parent ran **`workflow advance loop-agent-pipeline --task p10-workflow-command-decomposition --status completed`** then **`workflow delegation closeout --plan loop-agent-pipeline --task p10-workflow-command-decomposition --decision accept`** from repo root (`go run ./cmd/dot-agents …`). Archive: **`.agents/history/loop-agent-pipeline/delegate-merge-back-archive/2026-04-18/p10-workflow-command-decomposition/`**; **`active/`** delegation / merge-back / bundle cleared by closeout — no further **`p10`** lifecycle steps pending.
-- **`workflow next`:** No head task — expected when caps/delegations saturate; not a tooling failure if **`workflow tasks <plan>`** still shows expected **`in_progress`** rows.
-- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as prompt-file).
-- **Skills (c4) + globalflagcov:** `skills list` / `skills promote` live in `commands/skills/`; `internal/globalflagcov` loads `./commands`, `./commands/sync`, `./commands/hooks`, `./commands/skills`, and **`./commands/workflow`** explicitly so `packages.Load` tracks the workflow subpackage.
+- **`workflow orient` vs checkpoint:** Checkpoint `next_action` can lag git — **canonical PLAN.yaml / TASKS.yaml** win (orient warns when stale).
+- **Delegation inventory:** **`active_delegations.active_count: 2`** — **`command-surface-decomposition`** **`c1`** + **`c2`** only (`typescript-port` has no active delegation after **phase-6** closeout).
+- **`pending_merge_backs: 0`** — `.agents/active/merge-back/` empty as of this note.
+- **`c6` vs `c1` (DAG):** **`c6-status-import-helper-extraction`** is **`completed`** while **`c1-kg-command-decomposition`** remains **`in_progress`** — YAML still lists **`depends_on: [c1]`** on **c6**. **Status field wins** for “no remaining **c6** implementation”; reconcile **`depends_on`** or notes when **c1** closes if the edge should drop from the living graph.
+- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as `--prompt-file`).
 
 ## Next Iteration Playbook
 
-1. **Parent — `phase-5-stage2-and-plugin-alignment`:** Accept or extend — review `.agents/active/merge-back/phase-5-stage2-and-plugin-alignment.md`, run **`workflow advance`** + **`workflow delegation closeout`** if slice is complete; otherwise spawn a follow-up bundle for remaining phase-5 work (plugin readback parity, `import`, etc.).
-2. **Drain delegation queue:** **`active_delegations: 4`** vs cap **3** — prioritize **`workflow delegation closeout`** / merge-back acceptance on completed slices so **`workflow next`** can surface the next head task (e.g. **`command-surface-decomposition` / `c5`** if still in flight).
-3. **`c6` worker:** **Hold** on implementation until **`c1`** **`completed`** unless plan waives dependency; reconcile bundle vs YAML gate.
-4. **Evidence next session:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks typescript-port`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`.
+1. **Workers:** **`c1`** / **`c2`** — Pattern E or **`ralph-cursor-loop`** per bundle → **`loop-worker`** → **`/iteration-close`** when the slice is complete.
+2. **Parent:** Optional **`TASKS.yaml`** notes scrub for **`phase-6`** and **`c5`** (stale “delegation active” / absolute bundle paths). Commit workflow **`ralph-closeout`** + **`delegation closeout`** reconcile when ready.
+3. **Evidence:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks typescript-port`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`.
 
 ## Scenario Coverage
 
 | Family | Last exercised |
 |--------|----------------|
-| orchestrator-selection | 2026-04-18 — **`typescript-port` / `phase-5`** fanout; prior **`c5`**/**`c6`**/**`p10`** waves |
-| delegation-lifecycle | 2026-04-18 — TASKS notes + **`del-phase-5-stage2-and-plugin-alignment-1776546530`**; queue drain emphasis |
+| orchestrator-selection | 2026-04-18 — queue after **phase-6** + **c5** closeout |
+| delegation-lifecycle | 2026-04-18 — **`ralph-closeout`** + **`delegation closeout`** + **`advance`** for **phase-6** / **c5** |
 
 ## Command Coverage
 
 | Command | Tested | Last Iteration |
 |---------|--------|----------------|
-| `workflow orient` | yes | 51 |
-| `workflow next` | yes | 51 |
-| `workflow tasks typescript-port` | yes | 51 |
-| `workflow tasks command-surface-decomposition` | yes | 51 |
-| `workflow tasks resource-command-parity` | yes | 51 |
+| `workflow orient` | yes | 57 |
+| `workflow next` | yes | 57 |
+| `workflow tasks typescript-port` | yes | 57 |
+| `workflow tasks command-surface-decomposition` | yes | 57 |
 
 ## Iteration Log
 

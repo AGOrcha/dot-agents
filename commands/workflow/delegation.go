@@ -1369,6 +1369,20 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	if contract.ParentPlanID != planID {
 		return fmt.Errorf("delegation plan_id %q does not match --plan %q", contract.ParentPlanID, planID)
 	}
+
+	// workflow merge-back marks the delegation completed when merge-back is written; workers that drop
+	// merge-back/*.md without invoking that command can leave status as active/pending/failed.
+	if contract.Status != "completed" && contract.Status != "cancelled" {
+		contract.Status = "completed"
+		if err := saveDelegationContract(project.Path, contract); err != nil {
+			return fmt.Errorf("reconcile delegation status before closeout: %w", err)
+		}
+		contract, err = loadDelegationContract(project.Path, taskID)
+		if err != nil {
+			return fmt.Errorf("reload delegation contract: %w", err)
+		}
+	}
+
 	if contract.Status != "completed" {
 		return fmt.Errorf("delegation for task %s must be completed (run merge-back first); status is %q", taskID, contract.Status)
 	}

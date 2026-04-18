@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -232,6 +233,50 @@ func TestFoldBackSlugInvalid(t *testing.T) {
 	cmd.SetArgs([]string{"fold-back", "create", "--plan", "p1", "--task", "t1", "--slug", "bad slug", "--observation", "x"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for invalid slug")
+	}
+}
+
+func TestDelegationCloseoutAcceptHandwrittenMergeBack(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadDelegationContract(repo, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != "active" {
+		t.Fatalf("delegation status = %q, want active", c.Status)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if err := saveMergeBack(repo, &MergeBackSummary{
+		SchemaVersion:      1,
+		TaskID:             "t1",
+		ParentPlanID:       "p1",
+		Title:              c.Title,
+		Summary:            "worker merge-back without CLI",
+		VerificationResult: MergeBackVerification{Status: "pass", Summary: "ok"},
+		IntegrationNotes:   "ok",
+		CreatedAt:          now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := loadDelegationContract(repo, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.Status != "active" {
+		t.Fatalf("after handwritten merge-back, delegation status = %q, want active (closeout reconciles)", c2.Status)
+	}
+	if err := executeWorkflowCommand(t, repo, "delegation", "closeout", "--plan", "p1", "--task", "t1", "--decision", "accept"); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tf.Tasks[0].Status != "completed" {
+		t.Fatalf("task status = %q, want completed", tf.Tasks[0].Status)
 	}
 }
 

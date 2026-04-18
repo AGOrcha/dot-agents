@@ -160,12 +160,14 @@ if m:
   else
     # delegation closeout deletes the contract + bundle; capture id for git add -u on bundle path.
     delegation_id="$(python3 - "$contract" <<'PY'
-import sys, yaml
+import re, sys
 path = sys.argv[1]
 try:
     with open(path, encoding="utf-8") as fh:
-        d = yaml.safe_load(fh) or {}
-    print(str(d.get("id") or "").strip())
+        text = fh.read()
+    m = re.search(r"^id:\s*(.+)$", text, re.M)
+    if m:
+        print(m.group(1).strip().strip('"'))
 except Exception:
     pass
 PY
