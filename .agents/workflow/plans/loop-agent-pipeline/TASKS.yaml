@@ -12,14 +12,14 @@ tasks:
         - bin/tests/ralph-pipeline
         - bin/tests/ralph-orchestrate
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |-
         **feedback_goal:** Ralph pipeline + orchestrate scripts and `workflow` CLI implement plan-scoped break checks, verification dir lifecycle before dispatch, pre-verifier TDD gate, and verifier retry-cap wiring; `go test ./commands -run Workflow` (or focused workflow tests) passes; worker runs verify + checkpoint + merge-back.
 
-        **write_scope:** bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate, commands/workflow.go, commands/workflow_test.go
+        **write_scope:** bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate, commands/workflow.go, commands/workflow/
 
-        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes) and with `p2-impl-agent-surface` (p2 does not touch workflow.go). **Do not** start `p3a-result-schema` worker (`del-p3a-result-schema-1776438877`) until this task closes — both edit `commands/workflow.go` / `commands/workflow_test.go`. **Serialize** other pipeline tasks that touch `commands/workflow.go` after this delegation closes as needed.
+        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes) and with `p2-impl-agent-surface` (p2 does not touch workflow.go). **Do not** start `p3a-result-schema` worker (`del-p3a-result-schema-1776438877`) until this task closes — both edit `commands/workflow.go` / `commands/workflow/`. **Serialize** other pipeline tasks that touch `commands/workflow.go` after this delegation closes as needed.
 
         Control-plane entry point for D3.a: plan-scoped loop-break via workflow next/tasks filtering, verification directories before dispatch, tdd-fresh gate plus verifier retry-cap wiring.
     - id: p2-impl-agent-surface
@@ -58,14 +58,14 @@ tasks:
       write_scope:
         - schemas/verification-result.schema.json
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |-
         **feedback_goal:** Canonical JSON Schema + command-side validation for verification results; typed artifact path `.agents/active/verification/<task_id>/<type>.result.yaml`; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
 
-        **write_scope:** schemas/verification-result.schema.json, commands/workflow.go, commands/workflow_test.go
+        **write_scope:** schemas/verification-result.schema.json, commands/workflow.go, commands/workflow/
 
-        **context:** Delegation bundle `del-p3a-result-schema-1776438877` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Blocked on `p1-pipeline-control`** — both modify `commands/workflow.go` / `commands/workflow_test.go`. **Do not** start this worker until `del-p1-pipeline-control` merge-back completes and p1 advances. After p1 closes, worker runs verify + checkpoint + merge-back.
+        **context:** Delegation bundle `del-p3a-result-schema-1776438877` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Blocked on `p1-pipeline-control`** — both modify `commands/workflow.go` / `commands/workflow/`. **Do not** start this worker until `del-p1-pipeline-control` merge-back completes and p1 advances. After p1 closes, worker runs verify + checkpoint + merge-back.
     - id: p3b-unit-verifier
       title: Unit verifier surface and result contract
       status: completed
@@ -164,14 +164,14 @@ tasks:
       write_scope:
         - schemas/verification-decision.schema.json
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
         - .agents/prompts/review-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
       notes: |-
         **feedback_goal:** Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
 
-        **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow_test.go, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+        **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow/, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
         **context:** Task **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Parent ran **`workflow advance`** + **`workflow delegation closeout`**. Downstream **`p8-orchestrator-awareness`** may edit **`docs/LOOP_ORCHESTRATION_SPEC.md`** without review-agent serialization — see **`p8`** notes for the active orchestrator-awareness bundle.
     - id: p5-iter-log-v2
@@ -188,8 +188,9 @@ tasks:
         - schemas/workflow-iter-log.schema.json
         - commands/workflow/static/workflow-iter-log.schema.json
         - commands/workflow/iter_log_schema.go
-        - commands/workflow/workflow.go
-        - commands/workflow/workflow_test.go
+        - commands/workflow/iter_log.go
+        - commands/workflow/iter_log_test.go
+        - commands/workflow/testutil_test.go
       verification_required: true
       notes: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
     - id: p6-fanout-dispatch
@@ -213,13 +214,13 @@ tasks:
         - schemas/agentsrc.schema.json
         - src/share/templates/standard/agentsrc.json
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
         - bin/tests/ralph-orchestrate
       verification_required: true
       notes: |-
         **feedback_goal:** Plan schema + `.agentsrc` + `workflow fanout` carry `app_type`, verifier profiles, and `--verifier-sequence` resolution into delegation bundles; `ralph-orchestrate` and workflow tests stay green; merge-back ready.
 
-        **write_scope:** schemas/workflow-delegation-bundle.schema.json, schemas/workflow-plan.schema.json, schemas/agentsrc.schema.json, src/share/templates/standard/agentsrc.json, commands/workflow.go, commands/workflow_test.go, bin/tests/ralph-orchestrate
+        **write_scope:** schemas/workflow-delegation-bundle.schema.json, schemas/workflow-plan.schema.json, schemas/agentsrc.schema.json, src/share/templates/standard/agentsrc.json, commands/workflow.go, commands/workflow/, bin/tests/ralph-orchestrate
 
         **context:** Task is **completed** (closeout accepted per git history). Historical bundle reference: `.agents/active/delegation-bundles/del-p6-fanout-dispatch-1776516721.yaml`. Downstream verifier waves should still respect **spec serialization** for `docs/LOOP_ORCHESTRATION_SPEC.md` when multiple verifier tasks were mid-flight.
 
@@ -237,12 +238,12 @@ tasks:
         - bin/tests/ralph-closeout
         - bin/tests/ralph-pipeline
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |-
         **feedback_goal:** Post-closeout reasoning pass in `ralph-closeout` / pipeline scripts, workflow fold-back update, stable slug routing for D2, and grouped (non-noisy) slice observations; `go test ./commands` (workflow) + script smoke paths green; merge-back ready.
 
-        **write_scope:** bin/tests/ralph-closeout, bin/tests/ralph-pipeline, commands/workflow.go, commands/workflow_test.go
+        **write_scope:** bin/tests/ralph-closeout, bin/tests/ralph-pipeline, commands/workflow.go, commands/workflow/
 
         **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p7-post-closeout-1776538664.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Profile: **loop-worker**. Worker runs verify + checkpoint + merge-back; parent runs `workflow advance` + `workflow delegation closeout` after acceptance.
 
@@ -281,7 +282,7 @@ tasks:
         **D6.a landed:** `.agents/workflow/specs/external-agent-sources/design.md` — forked from `decisions.1.md` D6/D6.a; sections 1–13 match locked TOC. Parent reviews merge-back, then `workflow advance` + delegation closeout.
     - id: p10-workflow-command-decomposition
       title: Split workflow command into subpackage files to reduce worker hotspot contention
-      status: in_progress
+      status: completed
       depends_on:
         - p7-post-closeout
         - p8-orchestrator-awareness
@@ -289,15 +290,14 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow/workflow.go
-        - commands/workflow/workflow_test.go
+        - commands/workflow/cmd.go
         - commands/workflow/
       verification_required: true
       notes: |-
         **feedback_goal:** Replace the monolithic workflow hotspot with a `commands/workflow/` subpackage and a thin top-level `commands/workflow.go` shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
 
-        **write_scope:** commands/workflow.go, commands/workflow/workflow.go, commands/workflow/workflow_test.go, commands/workflow/
+        **write_scope:** commands/workflow.go, commands/workflow/cmd.go, commands/workflow/
 
-        **context:** This is a structural follow-on after the core pipeline behavior landed. Keep command semantics stable; the primary goal is decomposition by subcommand family (`status`, `orient`, `checkpoint`, `plan/task`, `verify`, `graph`, `fanout`, `merge-back`, `fold-back`, `delegation`, `drift`, `sweep`) and matching test-file decomposition. If additional helpers are needed, keep them inside the new workflow subpackage instead of growing other command hotspots.
+        **context:** Structural decomposition landed: behavior lives in `commands/workflow/*.go` (e.g. `cmd.go`, `state.go`, `delegation.go`, `iter_log.go`, …); tests split across `*_test.go` plus `testutil_test.go`. Keep command semantics stable; narrow future edits to specific files under `commands/workflow/` instead of growing the shim.
 
-        **serialization note:** Treat this as an exclusive hotspot task. Do not parallelize with other work that still edits `commands/workflow.go` or `commands/workflow_test.go`.
+        **serialization note:** Prefer touching one feature file (or one test file) per worker; avoid parallel edits to the same hot file — use `commands/workflow/tasks` readback if unsure.

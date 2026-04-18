@@ -6,10 +6,10 @@ Scope: audit the canonical `loop-agent-pipeline` tasks against the current sourc
 
 ## Executive Summary
 
-- Total canonical tasks: `14`
-- Substantively implemented and complete: `12`
-- Partially implemented but marked complete too early: `1`
-- In progress and not complete: `1`
+- Total canonical tasks: `15` (`p1`–`p10`, `p3b`–`p3f`)
+- Substantively implemented and complete: `13` (includes **`p10`** decomposition landed 2026-04-18)
+- Partially implemented but marked complete too early: `1` (`p7`)
+- In progress and not complete: `1` (`p8`)
 - Pure paper-complete tasks with no corresponding implementation found: `0`
 
 Important caveat:
@@ -27,7 +27,7 @@ Important caveat:
 
 | Task | Canonical status | Audit verdict | Notes |
 | --- | --- | --- | --- |
-| `p1-pipeline-control` | completed | `implemented-complete` | Plan-scoped fanout/next, verification dir lifecycle, TDD gate, verifier retry wiring are present in `commands/workflow/workflow.go`, `bin/tests/ralph-orchestrate`, and `bin/tests/ralph-pipeline`. |
+| `p1-pipeline-control` | completed | `implemented-complete` | Plan-scoped fanout/next, verification dir lifecycle, TDD gate, verifier retry wiring are present in `commands/workflow/delegation.go`, `bin/tests/ralph-orchestrate`, and `bin/tests/ralph-pipeline`. |
 | `p2-impl-agent-surface` | completed | `implemented-complete` | `impl-agent.project.md` exists, spec documents impl handoff semantics, and `ralph-cursor-loop` explicitly treats impl-agent as separate from loop-worker. Archive file lists are noisy. |
 | `p3a-result-schema` | completed | `implemented-complete` | Canonical verification-result schema, embedded validation, and merge-back result writing are present. |
 | `p3b-unit-verifier` | completed | `implemented-complete` | Unit verifier prompt and spec role text landed directly in target files. |
@@ -41,6 +41,7 @@ Important caveat:
 | `p7-post-closeout` | completed | `implemented-partial` | Fold-back create/update and post-closeout audit wiring landed, but the runtime still fails the “clean closeout / safe rerun” outcome in practice. This task is marked complete too early. |
 | `p8-orchestrator-awareness` | in_progress | `in-progress` | Still not complete. `ralph-orchestrate` still passes the same file as both `--project-overlay` and `--prompt-file`. |
 | `p9-sources-design-fork` | completed | `implemented-complete` | The design doc exists and matches the intended doc-only fork. Merge-back summary includes unrelated iter-log work, but the design task itself is done. |
+| `p10-workflow-command-decomposition` | completed | `implemented-complete` | Workflow CLI lives under `commands/workflow/` (`cmd.go` + feature files); tests split across `*_test.go` and `testutil_test.go`; thin bridge `commands/workflow.go`. |
 
 ## Evidence By Task
 
@@ -50,9 +51,9 @@ Verdict: `implemented-complete`
 
 Direct evidence:
 
-- `commands/workflow/workflow.go` includes `workflow next --plan`, `fanout --verifier-retry-max`, and `fanout --skip-tdd-gate`
-- `commands/workflow/workflow.go` contains `ensureTaskVerificationDir(...)`
-- `commands/workflow/workflow.go` contains the pre-verifier TDD gate error path
+- `commands/workflow/delegation.go` includes `workflow next --plan`, `fanout --verifier-retry-max`, and `fanout --skip-tdd-gate`
+- `commands/workflow/delegation.go` contains `ensureTaskVerificationDir(...)`
+- `commands/workflow/delegation.go` contains the pre-verifier TDD gate error path
 - `bin/tests/ralph-orchestrate` forwards `--plan`
 - `bin/tests/ralph-pipeline` documents verification dir creation before dispatch
 
@@ -80,7 +81,7 @@ Direct evidence:
 - `schemas/verification-result.schema.json`
 - `commands/workflow/static/verification-result.schema.json`
 - `commands/workflow/verification_result_schema.go`
-- `commands/workflow/workflow.go` writes merge-back verification artifacts under `.agents/active/verification/<task_id>/merge-back.result.yaml`
+- `commands/workflow/delegation.go` writes merge-back verification artifacts under `.agents/active/verification/<task_id>/merge-back.result.yaml`
 
 ### `p3b-unit-verifier`
 
@@ -149,7 +150,7 @@ Direct evidence:
 - `schemas/verification-decision.schema.json`
 - `commands/workflow/static/verification-decision.schema.json`
 - `commands/workflow/review_decision_schema.go`
-- `commands/workflow/workflow.go` exposes `workflow verify record --kind review`, phase decision flags, failed-gate flags, escalation reason enforcement, and writes `review-decision.yaml`
+- `commands/workflow/verification.go` exposes `workflow verify record --kind review`, phase decision flags, failed-gate flags, escalation reason enforcement, and writes `review-decision.yaml`
 
 ### `p5-iter-log-v2`
 
@@ -160,7 +161,7 @@ Direct evidence:
 - `schemas/workflow-iter-log.schema.json`
 - `commands/workflow/static/workflow-iter-log.schema.json`
 - `commands/workflow/iter_log_schema.go`
-- `commands/workflow/workflow.go` documents and enforces schema v2 nested role blocks
+- `commands/workflow/iter_log.go` documents and enforces schema v2 nested role blocks
 
 ### `p6-fanout-dispatch`
 
@@ -171,8 +172,8 @@ Direct evidence:
 - `schemas/workflow-plan.schema.json` includes `default_app_type`
 - `schemas/workflow-delegation-bundle.schema.json` includes `app_type` and `verifier_sequence`
 - `schemas/agentsrc.schema.json` includes `verifier_profiles` and `app_type_verifier_map`
-- `commands/workflow/workflow.go` resolves `app_type` and `verifier_sequence`
-- `commands/workflow/workflow_test.go` contains explicit `app_type` / `verifier_sequence` tests
+- `commands/workflow/delegation.go` resolves `app_type` and `verifier_sequence`
+- `commands/workflow/delegation_fanout_test.go` contains explicit `app_type` / `verifier_sequence` tests
 
 Audit note:
 
@@ -184,8 +185,8 @@ Verdict: `implemented-partial`
 
 What is implemented:
 
-- `commands/workflow/workflow.go` has `workflow fold-back update`
-- `commands/workflow/workflow.go` enforces `--slug` for update and supports slugged create/upsert behavior
+- `commands/workflow/delegation.go` has `workflow fold-back update`
+- `commands/workflow/delegation.go` enforces `--slug` for update and supports slugged create/upsert behavior
 - `bin/tests/ralph-closeout` includes `RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT`
 - `bin/tests/ralph-pipeline` forwards `RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT`
 

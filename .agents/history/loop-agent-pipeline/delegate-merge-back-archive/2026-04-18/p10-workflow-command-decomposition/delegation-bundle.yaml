@@ -14,8 +14,7 @@ selection:
 scope:
     write_scope:
         - commands/workflow.go
-        - commands/workflow/workflow.go
-        - commands/workflow/workflow_test.go
+        - commands/workflow/cmd.go
         - commands/workflow/
 prompt:
     inline:

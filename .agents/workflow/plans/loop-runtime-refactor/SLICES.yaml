@@ -35,7 +35,7 @@ slices:
       - "phase-5a-migrate-loop-state"
     write_scope:
       - "commands/workflow.go"
-      - "commands/workflow_test.go"
+      - "commands/workflow/"
     verification_focus: "workflow checkpoint --log-to-iter 38 creates iter-38.yaml with correct git-derived fields and empty agent stubs. Test covers: correct commit sha, files_changed from diff stat, empty item/summary/scenario_tags, self_assessment all false/empty."
     owner: "dot-agents"
 
@@ -49,7 +49,7 @@ slices:
     write_scope:
       - "schemas/workflow-iter-log.schema.json"
       - "commands/workflow.go"
-      - "commands/workflow_test.go"
+      - "commands/workflow/"
     verification_focus: "iter-N.yaml stubs contain yaml-language-server header pointing to schema. Writing an invalid iter-N.yaml (e.g. negative files_changed) is caught at write time."
     owner: "dot-agents"
 

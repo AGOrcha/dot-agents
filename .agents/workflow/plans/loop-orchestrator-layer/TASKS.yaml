@@ -25,7 +25,7 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: Read-only selector that prefers canonical plan/task state over checkpoint text.
     - id: phase-3-plan-graph-and-slices
@@ -54,7 +54,7 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |-
         Add --slice flag to fanoutCmd in NewWorkflowCmd(). Remove MarkFlagRequired("task"); replace with
@@ -74,15 +74,15 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
       notes: |-
         commands/kg.go slice is complete (per delegation merge-back). Remaining work:
-        1. commands/workflow.go — runWorkflowGraphQuery (line ~3017): replace the error-on-code-structure-intent
+        1. `commands/workflow/graph.go` — `runWorkflowGraphQuery`: replace the error-on-code-structure-intent
            guard with an exec.Command subprocess call to "dot-agents kg bridge query --intent <intent>
            [--scope <scope>] <query>". Pipe stdout/stderr directly. Pass --json when Flags.JSON is true.
-        2. commands/workflow_test.go — TestWorkflowGraphQueryCodeStructureRoutesToKGBridge: confirm the old
+        2. commands/workflow/graph_test.go — TestWorkflowGraphQueryCodeStructureRoutesToKGBridge: confirm the old
            error message is gone; TestWorkflowGraphQueryKGBridgeIntentsNotRouted: confirm isWorkflowGraphCode-
            BridgeIntent returns false for all KG intents.
         3. docs/LOOP_ORCHESTRATION_SPEC.md — add "KG-First Query Routing" section with routing table mapping
@@ -98,7 +98,7 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |
         Add "workflow fold-back" subcommand with two sub-subcommands: "create" and "list".
@@ -122,7 +122,7 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
         - docs/LOOP_ORCHESTRATION_SPEC.md
         - .agents/active/
         - .agents/history/
@@ -159,7 +159,7 @@ tasks:
       owner: dot-agents
       write_scope:
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
         - docs/LOOP_ORCHESTRATION_SPEC.md
         - .agents/skills/
         - schemas/

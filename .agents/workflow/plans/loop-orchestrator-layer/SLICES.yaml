@@ -10,7 +10,7 @@ slices:
     depends_on: []
     write_scope:
       - "commands/workflow.go"
-      - "commands/workflow_test.go"
+      - "commands/workflow/"
     verification_focus: "workflow slices + plan graph readback"
     owner: "dot-agents"
 

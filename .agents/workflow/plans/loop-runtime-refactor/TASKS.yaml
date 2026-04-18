@@ -463,7 +463,7 @@ tasks:
       write_scope:
         - .agents/active/
         - commands/workflow.go
-        - commands/workflow_test.go
+        - commands/workflow/
       verification_required: true
       notes: |-
         Split the monolithic loop-state.md (33k+ tokens) into two surfaces:

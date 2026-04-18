@@ -77,7 +77,7 @@ if taskID == "" {
 ```
 Note: the existing `writeScope` population from `writeScopeCSV` is a CSV split loop further down; when populating from slice, assign `writeScope` directly before that loop runs (or skip the loop when already populated).
 
-**New tests in `commands/workflow_test.go`:**
+**New tests in `commands/workflow/graph_test.go` (and related `commands/workflow/*_test.go`):**
 - `TestFanoutFromSlice`: temp project dir with `PLAN.yaml` (plan `p1`, status active), `TASKS.yaml` (task `t1`, status pending, write_scope `["commands/"]`), `SLICES.yaml` (slice `s1`, parent_task_id `t1`, write_scope `["commands/"]`, status in_progress); run `workflow fanout --plan p1 --slice s1 --owner test`; assert delegation contract at `.agents/active/delegation/del-t1-*.yaml` has `parent_task_id: t1` and `write_scope: [commands/]`.
 - `TestFanoutSliceAndTaskMutuallyExclusive`: pass both `--slice s1` and `--task t1`; assert error contains "not both".
 - `TestFanoutSliceNotFound`: pass `--slice nonexistent`; assert error contains "not found".
@@ -96,7 +96,7 @@ Note: the existing `writeScope` population from `writeScopeCSV` is a CSV split l
 - `runWorkflowGraphQuery` — if `isWorkflowGraphCodeBridgeIntent(intent)`, delegates to `runWorkflowGraphQueryViaKGBridge` before loading `graph-bridge.yaml` (code-structure queries do not require the workflow-local bridge to be enabled).
 - `runWorkflowGraphQueryViaKGBridge` — resolves the `dot-agents` binary via `workflowDotAgentsExe` (tests swap this for a freshly built CLI), runs `kg bridge query --intent <intent> [<args...>]`, sets `cmd.Dir` to the project cwd, pipes stdout/stderr, and prepends `--json` to the child argv when the parent CLI has JSON output enabled (`Flags.JSON`).
 
-**Tests:** `commands/workflow_test.go` — `TestWorkflowGraphQueryCodeStructureRoutesToKGBridge`, `TestWorkflowGraphQueryKGBridgeIntentsNotRouted`, plus `TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent` for the note-oriented path.
+**Tests:** `commands/workflow/graph_test.go` — `TestWorkflowGraphQueryCodeStructureRoutesToKGBridge`, `TestWorkflowGraphQueryKGBridgeIntentsNotRouted`, plus `TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent` for the note-oriented path.
 
 **Spec:** `docs/LOOP_ORCHESTRATION_SPEC.md` — subsection **KG-First Query Routing** under **KG / CRG Direction**.
 
@@ -157,7 +157,7 @@ Add `foldBackCmd` to the final `cmd.AddCommand(...)` call at line 468.
 - `writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error` (writes YAML to `.agents/active/fold-back/{id}.yaml`)
 - `type foldBackArtifact struct { SchemaVersion int; ID string; PlanID string; TaskID string; Observation string; Classification string; RoutedTo string; CreatedAt string }`
 
-**New tests in `commands/workflow_test.go`:**
+**New tests in `commands/workflow/graph_test.go` (and related `commands/workflow/*_test.go`):**
 - `TestFoldBackCreateSmall`: temp project with PLAN.yaml and TASKS.yaml (task `t1` with notes "existing"); run `fold-back create --plan p1 --task t1 --observation "new obs"`; assert TASKS.yaml task `t1` Notes field now contains "new obs"; assert `.agents/active/fold-back/fold-*.yaml` artifact exists with classification `small`.
 - `TestFoldBackCreateNoTask`: `fold-back create --plan p1 --observation "plan-level obs"` (no --task); assert plan Summary updated; fold-back artifact exists.
 - `TestFoldBackCreatePropose`: `fold-back create --plan p1 --task t1 --observation "big change" --propose`; assert TASKS.yaml task Notes NOT modified; assert `~/.agents/proposals/obs-*.md` created; fold-back artifact has classification `proposal`.

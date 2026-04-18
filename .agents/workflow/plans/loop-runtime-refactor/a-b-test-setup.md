@@ -14,7 +14,7 @@ For a fair comparison, use the same task in both worktrees. For the current loop
 
 - plan: loop-runtime-refactor
 - task: phase-5d-iter-log-schema
-- write_scope: schemas/workflow-iter-log.schema.json,commands/workflow.go,commands/workflow_test.go,.agents/active/iteration-log/
+- write_scope: schemas/workflow-iter-log.schema.json,commands/workflow.go,commands/workflow/,.agents/active/iteration-log/
 
 ## Script Worker Run
 
@@ -37,7 +37,7 @@ RALPH_AUTO_FANOUT=1 \
 RALPH_CLOSEOUT_AUTO=1 \
 RALPH_FANOUT_PLAN=loop-runtime-refactor \
 RALPH_FANOUT_TASK=phase-5d-iter-log-schema \
-RALPH_FANOUT_WRITE_SCOPE='schemas/workflow-iter-log.schema.json,commands/workflow.go,commands/workflow_test.go,.agents/active/iteration-log/' \
+RALPH_FANOUT_WRITE_SCOPE='schemas/workflow-iter-log.schema.json,commands/workflow.go,commands/workflow/,.agents/active/iteration-log/' \
 RALPH_LOG_DIR="$RUN_DIR" \
 ./bin/tests/ralph-pipeline \
 2>&1 | tee "$RUN_DIR/console.log"
@@ -52,7 +52,7 @@ Use the loop methodology only for `loop-runtime-refactor`.
 Target exactly:
 - plan_id: loop-runtime-refactor
 - task_id: phase-5d-iter-log-schema
-- write_scope: schemas/workflow-iter-log.schema.json, commands/workflow.go, commands/workflow_test.go, .agents/active/iteration-log/
+- write_scope: schemas/workflow-iter-log.schema.json, commands/workflow.go, commands/workflow/, .agents/active/iteration-log/
 
 Required flow:
 1. Run:

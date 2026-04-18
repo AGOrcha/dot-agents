@@ -109,23 +109,23 @@ Keep external sources alive only as a doc-only design fork. This task writes the
 
 ### `p10-workflow-command-decomposition`
 
-Split the `workflow` command out of the current monolith into `commands/workflow/` with a thin top-level shim in `commands/workflow.go`. The goal is not new behavior. The goal is smaller write scopes, lower worker context load, and fewer forced serializations across future workflow tasks.
+**Completed:** The `workflow` command is implemented under `commands/workflow/*.go` (root `cmd.go` for the cobra tree, feature files such as `state.go`, `delegation.go`, `iter_log.go`, …) with a thin bridge in `commands/workflow.go`. Tests are split across `commands/workflow/*_test.go` and `testutil_test.go` instead of a single `commands/workflow_test.go`. The goal was not new behavior but smaller write scopes and less merge contention.
 
 ## Hotspots And Sequencing
 
 The logical dependency graph is wider than the safe implementation graph.
 
-Shared hotspots:
+Shared hotspots (post-p10: prefer a **single file** under `commands/workflow/` per change, not the whole tree at once):
 
-- `commands/workflow.go`
-- `commands/workflow_test.go`
+- `commands/workflow.go` (shim only — keep thin)
+- `commands/workflow/` (feature files; avoid editing every file in one PR)
 - `bin/tests/ralph-orchestrate`
 - `bin/tests/ralph-pipeline`
 - `docs/LOOP_ORCHESTRATION_SPEC.md`
 
 Structural note:
 
-`commands/workflow.go` and `commands/workflow_test.go` are still the largest remaining worker hotspot in this plan. `p10` exists specifically to remove that bottleneck rather than only documenting it.
+`p10` removed the old “one monolith + one giant test file” bottleneck. Remaining coordination is per-file: two workers should not edit the same `commands/workflow/<name>.go` in parallel without intent.
 
 Good early parallel candidates:
 

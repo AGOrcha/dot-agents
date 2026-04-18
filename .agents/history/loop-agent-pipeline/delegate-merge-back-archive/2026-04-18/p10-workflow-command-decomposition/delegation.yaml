@@ -1,0 +1,24 @@
+schema_version: 1
+id: del-p10-workflow-command-decomposition-1776539976
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p10-workflow-command-decomposition
+title: Split workflow command into subpackage files to reduce worker hotspot contention
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - commands/workflow.go
+    - commands/workflow/cmd.go
+    - commands/workflow/
+success_criteria: |-
+    **feedback_goal:** Replace the monolithic workflow hotspot with a `commands/workflow/` subpackage and a thin top-level `commands/workflow.go` shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
+
+    **write_scope:** commands/workflow.go, commands/workflow/cmd.go, commands/workflow/
+
+    **context:** Decomposition landed: implementation in `commands/workflow/*.go` (e.g. `cmd.go`, `state.go`, `delegation.go`, `verification.go`, …); tests in `*_test.go` + `testutil_test.go`. Keep the shim thin; narrow edits to one feature file per worker where possible.
+
+    **serialization note:** Prefer parallel work on disjoint files under `commands/workflow/` rather than everyone editing `cmd.go` at once.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T19:19:36Z"
+updated_at: "2026-04-18T19:39:37Z"
