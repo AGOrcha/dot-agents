@@ -117,7 +117,7 @@ tasks:
         **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3d-ui-verifier-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — worker may proceed. **Serialize** `p3e`–`p3f` (shared `docs/LOOP_ORCHESTRATION_SPEC.md`): do **not** fan out or run batch/streaming verifier workers until this task merges and parent advances. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
     - id: p3e-batch-verifier
       title: Batch verifier surface and result contract
-      status: in_progress
+      status: completed
       depends_on:
         - p3a-result-schema
       blocks:
@@ -128,11 +128,11 @@ tasks:
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
       notes: |-
-        **feedback_goal:** Batch verifier prompt plus spec updates for fixture-driven runs, expected-vs-actual diff artifacts, and alignment with the canonical verification-result schema; verification + merge-back ready.
+        **feedback_goal:** Batch verifier prompt plus spec updates for fixture-driven runs, expected-vs-actual diff artifacts, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
 
         **write_scope:** .agents/prompts/verifiers/batch.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** `workflow next` may select this task while **`p3d-ui-verifier`** is still **in_progress** — **do not fan out yet**: verifier slices share `docs/LOOP_ORCHESTRATION_SPEC.md`; wait for **`p3d`** merge-back and task advance before creating `del-p3e-batch-verifier` (orchestrator-ordered serialization).
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3e-batch-verifier-1776528136.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3d-ui-verifier`** is **completed** — this worker is the current spec owner for verifier-wave edits. **Serialize** **`p3f-streaming-verifier`** (same spec path): do **not** fan out or run the streaming verifier worker until **`p3e`** merges and parent runs `workflow advance` + `workflow delegation closeout`. `workflow next` may surface **`p3f`** while **`p3e`** is **in_progress** — treat TASKS + orchestrator serialization policy as authoritative over the raw next-task sort.
     - id: p3f-streaming-verifier
       title: Streaming verifier surface and result contract
       status: pending
@@ -145,7 +145,12 @@ tasks:
         - .agents/prompts/verifiers/streaming.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Add SSE and WebSocket verifier guidance plus timeout, backpressure, and dropped-frame artifact expectations.
+      notes: |-
+        **feedback_goal:** Streaming verifier prompt plus spec updates for SSE/WebSocket checks, timeout/backpressure/dropped-frame artifact expectations, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/streaming.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** **No active bundle** this pass — **`p3e-batch-verifier`** is **in_progress** and owns concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md`. **`p3a-result-schema`** is **completed** (graph dependency satisfied), but orchestrator policy **serializes** `p3e` → `p3f` on the spec. After **`p3e`** closes, parent should `workflow fanout` for `p3f` (delegate-profile `loop-worker`, overlay `.agents/active/active.loop.md`, context: `.agents/active/loop-state.md`, this TASKS.yaml). **Mismatch note:** `go run ./cmd/dot-agents workflow next` may list **`p3f`** first among pending verifier slices; **canonical TASKS + serialization win** — do not start **`p3f`** until **`p3e`** merge-back is accepted.
     - id: p4-review-agent
       title: Review-agent surface plus merged workflow verify record decision writer
       status: pending
