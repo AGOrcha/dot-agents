@@ -1,0 +1,44 @@
+schema_version: 1
+delegation_id: del-phase-5-readback-alignment-1776538664
+plan_id: resource-command-parity
+task_id: phase-5-readback-alignment
+owner: ralph-orchestrate
+worker:
+    profile: loop-worker
+    project_overlay_files:
+        - .agents/active/active.loop.md
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-04-18T18:57:44Z"
+    reason: ralph-orchestrate auto-fanout
+scope:
+    write_scope:
+        - commands/status.go
+        - commands/explain.go
+        - commands/doctor.go
+        - commands/install.go
+        - commands/remove.go
+        - docs/
+prompt:
+    inline:
+        - You are a bounded implementation worker. Read the delegation bundle YAML (path below after fanout) for plan_id
+        - task_id
+        - write_scope
+        - feedback_goal
+        - and context. Load the loop-worker skill
+        - implement only within write_scope
+        - run /iteration-close when the slice is complete.
+context:
+    required_files:
+        - .agents/active/loop-state.md
+        - .agents/workflow/plans/resource-command-parity/TASKS.yaml
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
