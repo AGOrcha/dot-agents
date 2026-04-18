@@ -40,6 +40,10 @@ func supportsCanonicalImportPath(rel string) bool {
 	if platformID, _, kind := packagePluginLayout(rel); platformID != "" && kind != "" {
 		return true
 	}
+	return supportsCanonicalImportPathNonPlugin(rel)
+}
+
+func supportsCanonicalImportPathNonPlugin(rel string) bool {
 	switch {
 	case rel == relCursorHooksJSON, rel == relCodexHooksJSON:
 		return true

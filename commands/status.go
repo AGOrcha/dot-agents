@@ -111,6 +111,179 @@ agent that must reason about the exact managed outputs.`,
 	return cmd
 }
 
+// agentsHomeGitProbe captures ~/.agents git metadata without formatting output.
+type agentsHomeGitProbe struct {
+	IsRepo bool
+	Branch string
+	Remote string
+}
+
+func probeAgentsHomeGit(agentsHome string) agentsHomeGitProbe {
+	gitDir := filepath.Join(agentsHome, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return agentsHomeGitProbe{}
+	}
+	branchOut, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branch := strings.TrimSpace(string(branchOut))
+	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
+	remote := strings.TrimSpace(string(remoteOut))
+	return agentsHomeGitProbe{IsRepo: true, Branch: branch, Remote: remote}
+}
+
+func printAgentsHomeGitStatusLine(agentsHome string) {
+	g := probeAgentsHomeGit(agentsHome)
+	if !g.IsRepo {
+		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: dot-agents sync init%s\n", ui.Yellow, ui.Reset)
+		return
+	}
+	if g.Remote != "" {
+		fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s %s(%s)%s\n", ui.Dim, ui.Reset, ui.Bold, g.Branch, ui.Reset, ui.Dim, g.Remote, ui.Reset)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s  %s! no remote — run: dot-agents sync init%s\n", ui.Dim, ui.Reset, ui.Bold, g.Branch, ui.Reset, ui.Yellow, ui.Reset)
+}
+
+// collectProjectTextBadges builds the same per-platform row shown in text-mode status.
+func collectProjectTextBadges(path, agentsHome string) []platformBadge {
+	badges := []platformBadge{}
+
+	// Cursor
+	cursorOK, cursorWarn := 0, 0
+	cursorRulesDir := filepath.Join(path, statusCursorDir, "rules")
+	if entries, err := os.ReadDir(cursorRulesDir); err == nil {
+		for _, e := range entries {
+			if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
+				continue
+			}
+			f := filepath.Join(cursorRulesDir, e.Name())
+			if strings.HasPrefix(e.Name(), globalRulesPrefix) {
+				srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
+				src := filepath.Join(agentsHome, "rules", "global", srcName)
+				if linked, _ := links.AreHardlinked(f, src); linked {
+					cursorOK++
+				} else {
+					srcMD := strings.TrimSuffix(srcName, ".mdc") + ".md"
+					src2 := filepath.Join(agentsHome, "rules", "global", srcMD)
+					if linked, _ := links.AreHardlinked(f, src2); linked {
+						cursorOK++
+					} else {
+						cursorWarn++
+					}
+				}
+			}
+		}
+	}
+	addManagedCounts(&cursorOK, &cursorWarn, []string{
+		filepath.Join(path, statusCursorDir, statusCopilotMCPJSON),
+		filepath.Join(path, statusCursorDir, statusClaudeSettingsJSON),
+		filepath.Join(path, statusCursorDir, statusHooksJSON),
+		filepath.Join(path, ".cursorignore"),
+	}, nil)
+	badges = append(badges, platformBadge{"Cursor", cursorOK > 0, cursorWarn > 0})
+
+	// Claude
+	claudeOK, claudeWarn := 0, 0
+	claudeRulesDir := filepath.Join(path, statusClaudeDir, "rules")
+	if entries, err := os.ReadDir(claudeRulesDir); err == nil {
+		for _, e := range entries {
+			linkPath := filepath.Join(claudeRulesDir, e.Name())
+			if dest, err := os.Readlink(linkPath); err == nil {
+				if _, err := os.Stat(dest); err == nil {
+					claudeOK++
+				} else {
+					claudeWarn++
+				}
+			}
+		}
+	}
+	addManagedCounts(&claudeOK, &claudeWarn, []string{
+		filepath.Join(path, ".mcp.json"),
+		filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
+	}, []string{
+		filepath.Join(path, statusClaudeDir, "agents"),
+		filepath.Join(path, statusClaudeDir, "skills"),
+	})
+	badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
+
+	// Codex (AGENTS.md)
+	agentsMD := filepath.Join(path, statusAgentsMarkdown)
+	codexOK, codexWarn := 0, 0
+	addManagedCounts(&codexOK, &codexWarn, []string{
+		agentsMD,
+		filepath.Join(path, statusCodexDir, "config.toml"),
+		filepath.Join(path, statusCodexDir, statusHooksJSON),
+	}, []string{
+		filepath.Join(path, statusCodexDir, "agents"),
+		filepath.Join(path, statusAgentsDir, "skills"),
+	})
+	badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
+
+	// OpenCode
+	opencodeOK, opencodeWarn := 0, 0
+	addManagedCounts(&opencodeOK, &opencodeWarn, []string{
+		filepath.Join(path, "opencode.json"),
+	}, []string{
+		filepath.Join(path, statusOpenCodeDir, "agent"),
+		filepath.Join(path, statusAgentsDir, "skills"),
+	})
+	badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
+
+	// Copilot
+	copilotOK, copilotWarn := 0, 0
+	addManagedCounts(&copilotOK, &copilotWarn, []string{
+		filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
+		filepath.Join(path, ".vscode", statusCopilotMCPJSON),
+		filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
+	}, []string{
+		filepath.Join(path, statusGitHubDir, "agents"),
+		filepath.Join(path, statusGitHubDir, "hooks"),
+		filepath.Join(path, statusAgentsDir, "skills"),
+	})
+	badges = append(badges, platformBadge{"Copilot", copilotOK > 0, copilotWarn > 0})
+
+	return badges
+}
+
+func printStatusProjectManifestSummary(path string) {
+	rc, rcErr := config.LoadAgentsRC(path)
+	if rcErr != nil {
+		fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: dot-agents install --generate%s\n",
+			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	sourceDesc := "local"
+	for _, src := range rc.Sources {
+		if src.Type == "git" && src.URL != "" {
+			u := src.URL
+			for _, prefix := range []string{"https://", "http://", "git@"} {
+				u = strings.TrimPrefix(u, prefix)
+			}
+			u = strings.TrimSuffix(u, ".git")
+			sourceDesc = "git: " + u
+			break
+		}
+	}
+	parts := []string{}
+	if len(rc.Skills) > 0 {
+		parts = append(parts, fmt.Sprintf("%d skill(s)", len(rc.Skills)))
+	}
+	if len(rc.Agents) > 0 {
+		parts = append(parts, fmt.Sprintf("%d agent(s)", len(rc.Agents)))
+	}
+	if rc.Hooks.IsEnabled() {
+		parts = append(parts, "hooks")
+	}
+	if rc.MCP.IsEnabled() {
+		parts = append(parts, "mcp")
+	}
+	detail := sourceDesc
+	if len(parts) > 0 {
+		detail += "  •  " + strings.Join(parts, "  ")
+	}
+	fmt.Fprintf(os.Stdout, "  %s✓%s manifest  %s%s%s\n",
+		ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
+}
+
 func runStatus(audit bool, agentFilter string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -136,21 +309,7 @@ func runStatus(audit bool, agentFilter string) error {
 	ui.Header("dot-agents status")
 	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, displayHome, ui.Reset)
 
-	// Git repo status for ~/.agents/
-	gitDir := filepath.Join(agentsHome, ".git")
-	if _, err := os.Stat(gitDir); err == nil {
-		branchOut, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
-		branch := strings.TrimSpace(string(branchOut))
-		remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
-		remote := strings.TrimSpace(string(remoteOut))
-		if remote != "" {
-			fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s %s(%s)%s\n", ui.Dim, ui.Reset, ui.Bold, branch, ui.Reset, ui.Dim, remote, ui.Reset)
-		} else {
-			fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s  %s! no remote — run: dot-agents sync init%s\n", ui.Dim, ui.Reset, ui.Bold, branch, ui.Reset, ui.Yellow, ui.Reset)
-		}
-	} else {
-		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: dot-agents sync init%s\n", ui.Yellow, ui.Reset)
-	}
+	printAgentsHomeGitStatusLine(agentsHome)
 
 	printCanonicalStoreSection(agentsHome)
 
@@ -185,159 +344,9 @@ func runStatus(audit bool, agentFilter string) error {
 			continue
 		}
 
-		// Quick health check
-		healthOK := 0
-		healthWarn := 0
+		printBadgeRow(collectProjectTextBadges(path, agentsHome))
 
-		// Per-platform link presence for badge row
-		badges := []platformBadge{}
-
-		// Cursor
-		cursorOK, cursorWarn := 0, 0
-		cursorRulesDir := filepath.Join(path, statusCursorDir, "rules")
-		if entries, err := os.ReadDir(cursorRulesDir); err == nil {
-			for _, e := range entries {
-				if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
-					continue
-				}
-				f := filepath.Join(cursorRulesDir, e.Name())
-				if strings.HasPrefix(e.Name(), globalRulesPrefix) {
-					srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
-					src := filepath.Join(agentsHome, "rules", "global", srcName)
-					if linked, _ := links.AreHardlinked(f, src); linked {
-						cursorOK++
-					} else {
-						srcMD := strings.TrimSuffix(srcName, ".mdc") + ".md"
-						src2 := filepath.Join(agentsHome, "rules", "global", srcMD)
-						if linked, _ := links.AreHardlinked(f, src2); linked {
-							cursorOK++
-						} else {
-							cursorWarn++
-						}
-					}
-				}
-			}
-		}
-		// Cursor MCP link
-		addManagedCounts(&cursorOK, &cursorWarn, []string{
-			filepath.Join(path, statusCursorDir, statusCopilotMCPJSON),
-			filepath.Join(path, statusCursorDir, statusClaudeSettingsJSON),
-			filepath.Join(path, statusCursorDir, statusHooksJSON),
-			filepath.Join(path, ".cursorignore"),
-		}, nil)
-		healthOK += cursorOK
-		healthWarn += cursorWarn
-		badges = append(badges, platformBadge{"Cursor", cursorOK > 0, cursorWarn > 0})
-
-		// Claude
-		claudeOK, claudeWarn := 0, 0
-		claudeRulesDir := filepath.Join(path, statusClaudeDir, "rules")
-		if entries, err := os.ReadDir(claudeRulesDir); err == nil {
-			for _, e := range entries {
-				linkPath := filepath.Join(claudeRulesDir, e.Name())
-				if dest, err := os.Readlink(linkPath); err == nil {
-					if _, err := os.Stat(dest); err == nil {
-						claudeOK++
-					} else {
-						claudeWarn++
-					}
-				}
-			}
-		}
-		addManagedCounts(&claudeOK, &claudeWarn, []string{
-			filepath.Join(path, ".mcp.json"),
-			filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
-		}, []string{
-			filepath.Join(path, statusClaudeDir, "agents"),
-			filepath.Join(path, statusClaudeDir, "skills"),
-		})
-		healthOK += claudeOK
-		healthWarn += claudeWarn
-		badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
-
-		// Codex (AGENTS.md)
-		agentsMD := filepath.Join(path, statusAgentsMarkdown)
-		codexOK, codexWarn := 0, 0
-		addManagedCounts(&codexOK, &codexWarn, []string{
-			agentsMD,
-			filepath.Join(path, statusCodexDir, "config.toml"),
-			filepath.Join(path, statusCodexDir, statusHooksJSON),
-		}, []string{
-			filepath.Join(path, statusCodexDir, "agents"),
-			filepath.Join(path, statusAgentsDir, "skills"),
-		})
-		healthOK += codexOK
-		healthWarn += codexWarn
-		badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
-
-		// OpenCode
-		opencodeOK, opencodeWarn := 0, 0
-		addManagedCounts(&opencodeOK, &opencodeWarn, []string{
-			filepath.Join(path, "opencode.json"),
-		}, []string{
-			filepath.Join(path, statusOpenCodeDir, "agent"),
-			filepath.Join(path, statusAgentsDir, "skills"),
-		})
-		healthOK += opencodeOK
-		healthWarn += opencodeWarn
-		badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
-
-		// Copilot
-		copilotOK, copilotWarn := 0, 0
-		addManagedCounts(&copilotOK, &copilotWarn, []string{
-			filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
-			filepath.Join(path, ".vscode", statusCopilotMCPJSON),
-			filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
-		}, []string{
-			filepath.Join(path, statusGitHubDir, "agents"),
-			filepath.Join(path, statusGitHubDir, "hooks"),
-			filepath.Join(path, statusAgentsDir, "skills"),
-		})
-		healthOK += copilotOK
-		healthWarn += copilotWarn
-		badges = append(badges, platformBadge{"Copilot", copilotOK > 0, copilotWarn > 0})
-
-		printBadgeRow(badges)
-
-		// Manifest badge
-		rc, rcErr := config.LoadAgentsRC(path)
-		if rcErr != nil {
-			fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: dot-agents install --generate%s\n",
-				ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
-		} else {
-			sourceDesc := "local"
-			for _, src := range rc.Sources {
-				if src.Type == "git" && src.URL != "" {
-					// Shorten to host/org/repo
-					u := src.URL
-					for _, prefix := range []string{"https://", "http://", "git@"} {
-						u = strings.TrimPrefix(u, prefix)
-					}
-					u = strings.TrimSuffix(u, ".git")
-					sourceDesc = "git: " + u
-					break
-				}
-			}
-			parts := []string{}
-			if len(rc.Skills) > 0 {
-				parts = append(parts, fmt.Sprintf("%d skill(s)", len(rc.Skills)))
-			}
-			if len(rc.Agents) > 0 {
-				parts = append(parts, fmt.Sprintf("%d agent(s)", len(rc.Agents)))
-			}
-			if rc.Hooks.IsEnabled() {
-				parts = append(parts, "hooks")
-			}
-			if rc.MCP.IsEnabled() {
-				parts = append(parts, "mcp")
-			}
-			detail := sourceDesc
-			if len(parts) > 0 {
-				detail += "  •  " + strings.Join(parts, "  ")
-			}
-			fmt.Fprintf(os.Stdout, "  %s✓%s manifest  %s%s%s\n",
-				ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
-		}
+		printStatusProjectManifestSummary(path)
 
 		// Last refreshed
 		if ts := readRefreshTimestamp(path); ts != "" {
@@ -397,17 +406,11 @@ func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (
 }
 
 func statusGitInfo(agentsHome string) statusJSONGit {
-	gitDir := filepath.Join(agentsHome, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
+	g := probeAgentsHomeGit(agentsHome)
+	if !g.IsRepo {
 		return statusJSONGit{}
 	}
-
-	info := statusJSONGit{Initialized: true}
-	branchOut, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
-	info.Branch = strings.TrimSpace(string(branchOut))
-	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
-	info.Remote = strings.TrimSpace(string(remoteOut))
-	return info
+	return statusJSONGit{Initialized: true, Branch: g.Branch, Remote: g.Remote}
 }
 
 func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {

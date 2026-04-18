@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -213,5 +214,60 @@ func TestReadRefreshTimestampFallsBackToLegacyMarker(t *testing.T) {
 	}
 	if got := readRefreshTimestamp(projectPath); got != "2026-03-31 07:45 UTC" {
 		t.Fatalf("readRefreshTimestamp() = %q, want %q", got, "2026-03-31 07:45 UTC")
+	}
+}
+
+func TestProbeAgentsHomeGit_NotARepo(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "no-git-here")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if g := probeAgentsHomeGit(agentsHome); g.IsRepo {
+		t.Fatalf("expected no repo, got %#v", g)
+	}
+}
+
+func TestProbeAgentsHomeGit_InitRepo(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	init := exec.Command("git", "-C", agentsHome, "init")
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	g := probeAgentsHomeGit(agentsHome)
+	if !g.IsRepo {
+		t.Fatalf("expected repo after init, got %#v", g)
+	}
+	if strings.TrimSpace(g.Branch) == "" {
+		t.Fatalf("expected non-empty branch, got %#v", g)
+	}
+	if g.Remote != "" {
+		t.Fatalf("unexpected remote before remote add: %q", g.Remote)
+	}
+}
+
+func TestCollectProjectTextBadges_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "proj")
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	badges := collectProjectTextBadges(projectPath, agentsHome)
+	if len(badges) != 5 {
+		t.Fatalf("len(badges)=%d want 5 (%#v)", len(badges), badges)
+	}
+	want := []string{"Cursor", "Claude", "Codex", "OpenCode", "Copilot"}
+	for i := range want {
+		if badges[i].name != want[i] {
+			t.Fatalf("badges[%d].name=%q want %q", i, badges[i].name, want[i])
+		}
+		if badges[i].present || badges[i].broken {
+			t.Fatalf("empty project: badge %q should be inactive, got %#v", want[i], badges[i])
+		}
 	}
 }

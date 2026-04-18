@@ -315,12 +315,7 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 	sortImportCandidates(candidates)
 
 	timestamp := time.Now().Format("20060102-150405")
-	result := importResult{}
-	for _, c := range candidates {
-		delta := processImportCandidate(c, agentsHome, timestamp)
-		result.imported += delta.imported
-		result.skipped += delta.skipped
-	}
+	result := foldImportCandidates(candidates, agentsHome, timestamp)
 
 	if !skipRelink && scope != importScopeGlobal {
 		relinkImportedProjects(cfg, projectSet)
@@ -328,6 +323,17 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 
 	ui.Success(fmt.Sprintf("Import complete: %d imported, %d skipped.", result.imported, result.skipped))
 	return nil
+}
+
+// foldImportCandidates runs the import pipeline for each candidate in stable order.
+func foldImportCandidates(candidates []importCandidate, agentsHome, timestamp string) importResult {
+	result := importResult{}
+	for _, c := range candidates {
+		delta := processImportCandidate(c, agentsHome, timestamp)
+		result.imported += delta.imported
+		result.skipped += delta.skipped
+	}
+	return result
 }
 
 func normalizeImportScope(scope string) (string, error) {
@@ -879,6 +885,11 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	if outputs, ok, err := canonicalPluginOutputs(c, rel); ok {
 		return outputs, true, err
 	}
+	return canonicalImportOutputsNonPlugin(c, rel)
+}
+
+// canonicalImportOutputsNonPlugin handles hook/settings paths after package-plugin routing.
+func canonicalImportOutputsNonPlugin(c importCandidate, rel string) ([]importOutput, bool, error) {
 	switch rel {
 	case relCursorHooksJSON:
 		return canonicalHookBundleOutputsFromCursorFile(c.project, c.sourcePath)

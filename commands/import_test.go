@@ -58,6 +58,46 @@ func TestMapResourceRelToDestHooks(t *testing.T) {
 	}
 }
 
+func TestFoldImportCandidates_EmptyIsNoOp(t *testing.T) {
+	r := foldImportCandidates(nil, filepath.Join(t.TempDir(), ".agents"), "20260101-000000")
+	if r.imported != 0 || r.skipped != 0 {
+		t.Fatalf("expected zero aggregate, got %#v", r)
+	}
+}
+
+func TestSupportsCanonicalImportPathNonPlugin_Table(t *testing.T) {
+	cases := []struct {
+		rel  string
+		want bool
+	}{
+		{relCursorHooksJSON, true},
+		{".github/hooks/x.json", true},
+		{".opencode/plugins/foo", true},
+		{"misc/unknown.txt", false},
+	}
+	for _, c := range cases {
+		if got := supportsCanonicalImportPathNonPlugin(c.rel); got != c.want {
+			t.Fatalf("supportsCanonicalImportPathNonPlugin(%q)=%v want %v", c.rel, got, c.want)
+		}
+	}
+}
+
+func TestCanonicalImportOutputsNonPlugin_UnknownRel(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "notes.txt")
+	if err := os.WriteFile(src, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := importCandidate{project: canonicalImportProject, sourceRoot: tmp, sourcePath: src}
+	outputs, ok, err := canonicalImportOutputsNonPlugin(c, "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || len(outputs) != 0 {
+		t.Fatalf("expected no outputs, ok=%v len=%d", ok, len(outputs))
+	}
+}
+
 func TestCanonicalHookBundleContentFromCopilotFile(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, promptLogJSON)
