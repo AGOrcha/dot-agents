@@ -65,7 +65,7 @@ tasks:
         **context:** **`completed`** — phase 1 contract work is catching up to document and reconcile this shipped surface.
     - id: phase-3-rules-lifecycle
       title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
-      status: in_progress
+      status: completed
       depends_on:
         - phase-1-command-contract
       blocks:
