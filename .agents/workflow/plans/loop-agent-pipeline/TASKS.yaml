@@ -216,7 +216,7 @@ tasks:
         Integration hotspot: app_type on plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
     - id: p7-post-closeout
       title: Post-closeout orchestration pass plus fold-back update
-      status: in_progress
+      status: completed
       depends_on:
         - p1-pipeline-control
         - p4-review-agent
