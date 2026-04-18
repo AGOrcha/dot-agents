@@ -1,7 +1,7 @@
 # Loop Orchestration Spec
 
 Status: Draft
-Last updated: 2026-04-17
+Last updated: 2026-04-18
 Related:
 - `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md`
@@ -335,6 +335,7 @@ This is where files like `.agents/active/active.loop.md` or repo-specific loop p
 
 - **`loop-worker` role** (bounded worker that runs tests, `workflow verify record`, `workflow checkpoint`, and `workflow merge-back`): optional repo prompt file is a *worker* overlay (e.g. `.agents/prompts/loop-worker.project.md` if your repo adds one). Same three-layer stack: global profile → project overlay → bundle.
 - **`impl-agent` role** (implementation slice only; hands off to verifiers): use **`.agents/prompts/impl-agent.project.md`** as the repo-owned impl surface. It must not duplicate the global loop-worker profile; it only adds repo wording for implementation + **`impl-handoff.yaml`** emission.
+- **`unit` verifier role** (Go test verification only): use **`.agents/prompts/verifiers/unit.project.md`** as the repo-owned unit surface. It consumes **`impl-handoff.yaml`**, runs **scoped** `go test` over packages implied by `write_scope_touched`, then the **full** Go suite per **D12** (`go test ./... -race -count=1 -timeout=300s`), and writes **`.agents/active/verification/<task_id>/unit.result.yaml`** with `verifier_type: unit` and the canonical fields in **`schemas/verification-result.schema.json`**. Scoped-first discipline matches **D12** (parallel verifier isolation): verifiers do not broaden packages beyond what `write_scope_touched` justifies until after that slice is green.
 
 **Pattern E (`bin/tests/ralph-cursor-loop`)** remains a **loop-worker** caller: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Splitting impl-only fanouts from loop-worker fanouts is deliberate so orchestrators do not reuse one prompt file for both roles.
 
