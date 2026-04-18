@@ -1,11 +1,11 @@
 schema_version: 1
 id: loop-agent-pipeline
 title: Loop Agent Pipeline Plan
-status: active
+status: completed
 summary: Implement the role-pure loop-agent pipeline with repo-owned impl, verifier, and review surfaces; control-plane verification gating; iter-log schema v2; and post-closeout fold-back updates.
 created_at: "2026-04-17T08:39:50Z"
-updated_at: "2026-04-18T18:55:37Z"
+updated_at: "2026-04-18T19:03:12Z"
 owner: dot-agents
 success_criteria: The loop pipeline can dispatch role-specific impl, verifier, and review agents with typed artifacts, enforce the pre-verifier TDD-fresh gate in the control plane, persist iter-log schema v2, and complete reviewer-driven closeout without reopening D1/D2/D3/D6/D7 design questions.
 verification_strategy: Focused command tests, schema fixture and sync coverage, ralph script coverage for orchestration branches, prompt/path checks for role surfaces, and go test ./... before merge.
-current_focus_task: Post-closeout orchestration pass plus fold-back update
+current_focus_task: ""
