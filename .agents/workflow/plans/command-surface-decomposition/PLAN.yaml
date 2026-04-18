@@ -8,4 +8,4 @@ updated_at: "2026-04-18T19:33:12Z"
 owner: dot-agents
 success_criteria: Large command families after workflow are split into narrower packages or files with matching test decomposition, preserving CLI behavior while reducing worker hotspot collisions and command-context bloat.
 verification_strategy: Focused command package tests for each decomposed surface, smoke checks for preserved CLI wiring, and go test ./... after the full decomposition wave.
-current_focus_task: Extract internal helper seams for status and import without forcing premature package splits
+current_focus_task: Split hooks command by subcommand family
