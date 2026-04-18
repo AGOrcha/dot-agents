@@ -25,11 +25,12 @@ Orchestrator pass — 2026-04-18:
 
 ## Next Iteration Playbook
 
-1. **`c5` worker:** **Merge-back written** (`c5-hooks-command-decomposition`) — parent reviews `.agents/active/merge-back/c5-hooks-command-decomposition.md`, then **`workflow advance`** + **`workflow delegation closeout`**.
-2. **`p10` worker:** Same closeout path; keep edits inside **`commands/workflow.go`**, **`commands/workflow_test.go`**, **`commands/workflow/`** only.
-3. **`c6` worker:** **Hold** until **`c1`** **`completed`** (or documented waiver); if idle, parent may **`workflow delegation closeout`** on the bundle after reconciling queue state.
-4. **Ongoing `c3`/`c4` (and `c1`/`c2`) waves:** Continue merge-back / advance / closeout per delegation-lifecycle; free slots before next **`workflow next`** fanout.
-5. **Evidence next session:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`.
+1. **`c4` worker:** **Merge-back written** (`c4-skills-command-decomposition`) — parent reviews `.agents/active/merge-back/c4-skills-command-decomposition.md`, then **`workflow advance`** + **`workflow delegation closeout`**.
+2. **`c5` worker:** **Merge-back written** (`c5-hooks-command-decomposition`) — parent reviews `.agents/active/merge-back/c5-hooks-command-decomposition.md`, then **`workflow advance`** + **`workflow delegation closeout`**.
+3. **`p10` worker:** Same closeout path; keep edits inside **`commands/workflow.go`**, **`commands/workflow_test.go`**, **`commands/workflow/`** only.
+4. **`c6` worker:** **Hold** until **`c1`** **`completed`** (or documented waiver); if idle, parent may **`workflow delegation closeout`** on the bundle after reconciling queue state.
+5. **Ongoing `c3`/`c1`/`c2` waves:** Continue merge-back / advance / closeout per delegation-lifecycle; free slots before next **`workflow next`** fanout.
+6. **Evidence next session:** `go run ./cmd/dot-agents workflow orient`; `go run ./cmd/dot-agents workflow next`; `go run ./cmd/dot-agents workflow tasks command-surface-decomposition`; `go run ./cmd/dot-agents workflow tasks loop-agent-pipeline`.
 
 ## Scenario Coverage
 
