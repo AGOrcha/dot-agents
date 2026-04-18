@@ -256,20 +256,24 @@ for t in items:
       local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
       [[ -f "$contract" ]] && { echo "ralph-orchestrate: skipping $task_id (delegation already exists)" >&2; continue; }
       if [[ -n "$ws_csv" ]]; then
-        for active_row in "${active_scope_rows[@]}"; do
-          IFS=$'\t' read -r active_plan active_task active_scope <<< "$active_row"
-          if scope_lists_overlap "$ws_csv" "$active_scope"; then
-            echo "ralph-orchestrate: skipping $task_id (write_scope overlaps active delegation ${active_plan}/${active_task})" >&2
-            continue 2
-          fi
-        done
-        for selected_row in "${selected_scope_rows[@]}"; do
-          IFS=$'\t' read -r selected_plan selected_task selected_scope <<< "$selected_row"
-          if scope_lists_overlap "$ws_csv" "$selected_scope"; then
-            echo "ralph-orchestrate: skipping $task_id (write_scope overlaps same-pass selection ${selected_plan}/${selected_task})" >&2
-            continue 2
-          fi
-        done
+        if [[ ${#active_scope_rows[@]} -gt 0 ]]; then
+          for active_row in "${active_scope_rows[@]}"; do
+            IFS=$'\t' read -r active_plan active_task active_scope <<< "$active_row"
+            if scope_lists_overlap "$ws_csv" "$active_scope"; then
+              echo "ralph-orchestrate: skipping $task_id (write_scope overlaps active delegation ${active_plan}/${active_task})" >&2
+              continue 2
+            fi
+          done
+        fi
+        if [[ ${#selected_scope_rows[@]} -gt 0 ]]; then
+          for selected_row in "${selected_scope_rows[@]}"; do
+            IFS=$'\t' read -r selected_plan selected_task selected_scope <<< "$selected_row"
+            if scope_lists_overlap "$ws_csv" "$selected_scope"; then
+              echo "ralph-orchestrate: skipping $task_id (write_scope overlaps same-pass selection ${selected_plan}/${selected_task})" >&2
+              continue 2
+            fi
+          done
+        fi
       fi
       tasks+=( "${plan_id}:${task_id}:${ws_csv}" )
       selected_scope_rows+=( "${plan_id}"$'\t'"${task_id}"$'\t'"${ws_csv}" )
@@ -277,7 +281,9 @@ for t in items:
     done <<< "$pending"
   done <<< "$plan_ids"
 
-  printf '%s\n' "${tasks[@]}"
+  if [[ ${#tasks[@]} -gt 0 ]]; then
+    printf '%s\n' "${tasks[@]}"
+  fi
 }
 
 # Create delegation bundle for one task, emit RALPH_BUNDLE: line
@@ -401,6 +407,11 @@ if [[ "$AUTO_FANOUT" == "1" ]]; then
   fi
 else
   echo "ralph-orchestrate: AUTO_FANOUT=0 — skipping bundle creation (prompt-only run)" >&2
+fi
+
+if [[ "$AUTO_FANOUT" == "1" && ${#BUNDLES[@]} -eq 0 ]]; then
+  echo "ralph-orchestrate: no bundles created in auto-fanout mode — exiting without agent pass" >&2
+  exit 0
 fi
 
 # Capture snapshot (orient + next only — no status)

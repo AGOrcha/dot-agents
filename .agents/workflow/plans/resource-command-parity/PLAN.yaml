@@ -1,12 +1,11 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
 schema_version: 1
 id: resource-command-parity
 title: Resource Command Parity — Hooks, Rules, MCP, and Settings
 status: active
-summary: 'Approved follow-on from the loop-worker resource audit. Define and implement a coherent command surface for canonically managed resources that are still only reachable through add/import/refresh/install/remove/status side effects. Keep context, memory, and profiles explicitly out of scope unless the contract changes.'
+summary: Approved follow-on from the loop-worker resource audit. Define and implement a coherent command surface for canonically managed resources that are still only reachable through add/import/refresh/install/remove/status side effects. Keep context, memory, and profiles explicitly out of scope unless the contract changes.
 created_at: "2026-04-15T01:42:32Z"
-updated_at: "2026-04-15T01:42:32Z"
+updated_at: "2026-04-18T12:49:27Z"
 owner: dot-agents
 success_criteria: Hooks, rules, MCP, and settings have an explicit, documented lifecycle story with bounded command surfaces and aligned readback/install/remove behavior; intentional non-lifecycle resources remain documented as out of scope.
 verification_strategy: Focused command tests plus readback/status/explain/doctor/install/remove smoke for each managed resource family.
-current_focus_task: ""
+current_focus_task: Phase 1 — Define command-surface contract and scope boundaries for managed resources
