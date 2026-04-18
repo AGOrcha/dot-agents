@@ -1,0 +1,15 @@
+schema_version: 1
+task_id: phase-2-hooks-lifecycle
+parent_plan_id: resource-command-parity
+verifier_type: merge-back
+status: pass
+summary: 'Added hooks show/remove; list uses platform.ListHookSpecs (canonical bundles + legacy json); import/remove docs; remove --clean deletes hooks/<project>; exported ListHookSpecs/ResolveHookCommand; synced workflow-iter-log schema v2 embed. Tests: go test ./...'
+recorded_at: "2026-04-18T12:48:11Z"
+delegation_id: del-phase-2-hooks-lifecycle-1776475771
+artifact_paths:
+    - .agents/active/delegation/p9-sources-design-fork.yaml
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - bin/tests/ralph-orchestrate
+    - commands/workflow.go
+    - commands/workflow_test.go
