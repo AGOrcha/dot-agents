@@ -54,7 +54,7 @@ func TestEmitHookFanoutSymlinksSelectedHookFiles(t *testing.T) {
 	writeTextFile(t, preTool, "{\"name\":\"pre-tool\"}\n")
 	writeTextFile(t, cursorHook, "{\"name\":\"cursor\"}\n")
 
-	specs, err := listHookSpecs(agentsHome, "proj")
+	specs, err := ListHookSpecs(agentsHome, "proj")
 	if err != nil {
 		t.Fatalf("listHookSpecs failed: %v", err)
 	}
@@ -96,7 +96,7 @@ enabled_on: [claude, cursor]
 	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"), "#!/bin/sh\nexit 0\n")
 	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", "copilot-cli-policy.json"), "{\"version\":1}\n")
 
-	specs, err := listHookSpecs(agentsHome, "proj")
+	specs, err := ListHookSpecs(agentsHome, "proj")
 	if err != nil {
 		t.Fatalf("listHookSpecs failed: %v", err)
 	}
@@ -119,7 +119,7 @@ enabled_on: [claude, cursor]
 	if specs[1].MatchExpression != hooksTestCanonicalMatcherExpr {
 		t.Fatalf("expected canonical match expression %q, got %q", hooksTestCanonicalMatcherExpr, specs[1].MatchExpression)
 	}
-	if got, want := resolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"); got != want {
+	if got, want := ResolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"); got != want {
 		t.Fatalf("resolved command = %q, want %q", got, want)
 	}
 }
@@ -341,9 +341,9 @@ run:
 `)
 	writeTextFile(t, filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh"), "#!/bin/sh\nexit 0\n")
 
-	specs, err := listHookSpecs(agentsHome, "global")
+	specs, err := ListHookSpecs(agentsHome, "global")
 	if err != nil {
-		t.Fatalf("listHookSpecs: %v", err)
+		t.Fatalf("ListHookSpecs: %v", err)
 	}
 	var gotUpdate, gotPre *HookSpec
 	for i := range specs {
@@ -367,7 +367,7 @@ run:
 		t.Fatalf("graph-precommit: %#v", gotPre)
 	}
 	wantResolved := filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh")
-	if got := resolveHookCommand(*gotPre); got != wantResolved {
-		t.Fatalf("resolveHookCommand = %q, want %q", got, wantResolved)
+	if got := ResolveHookCommand(*gotPre); got != wantResolved {
+		t.Fatalf("ResolveHookCommand = %q, want %q", got, wantResolved)
 	}
 }

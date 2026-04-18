@@ -215,7 +215,7 @@ func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir strin
 }
 
 func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
-	specs, err := listHookSpecs(agentsHome, project)
+	specs, err := ListHookSpecs(agentsHome, project)
 	if err != nil {
 		return pruneManagedRenderedFanoutExtras(hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
 	}

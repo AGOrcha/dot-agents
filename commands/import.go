@@ -253,6 +253,9 @@ func NewImportCmd() *cobra.Command {
 those artifacts into the canonical ~/.agents/ layout so future refresh and install
 operations can treat them as shared source of truth.
 
+Hook imports are written as canonical bundles under ~/.agents/hooks/<scope>/<name>/HOOK.yaml
+when the source can be normalized (see dot-agents hooks list / hooks show).
+
 This is most useful when adopting dot-agents in an existing setup or when you want
 to normalize hand-edited config back into the managed store.`,
 		Example: ExampleBlock(
