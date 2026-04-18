@@ -1,106 +1,105 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
 plan_id: resource-command-parity
 tasks:
-  - id: phase-1-command-contract
-    title: Phase 1 — Define command-surface contract and scope boundaries for managed resources
-    status: pending
-    depends_on: []
-    blocks:
-      - phase-2-hooks-lifecycle
-      - phase-3-rules-lifecycle
-      - phase-4-mcp-settings-lifecycle
-      - phase-5-readback-alignment
-    owner: dot-agents
-    write_scope:
-      - .agents/workflow/plans/resource-command-parity/
-      - docs/
-      - commands/
-    verification_required: true
-    notes: |-
-      Capture the approved audit into a canonical contract:
-      - hooks currently has only `hooks list`
-      - rules, mcp, and settings have no dedicated command families and are managed indirectly
-        through add/import/refresh/install/remove/status
-      - agents are explicitly out of scope here (covered by agent-resource-lifecycle)
-      - context, memory, and profiles remain out of scope by design unless a separate contract is approved
+    - id: phase-1-command-contract
+      title: Phase 1 — Define command-surface contract and scope boundaries for managed resources
+      status: pending
+      depends_on: []
+      blocks:
+        - phase-2-hooks-lifecycle
+        - phase-3-rules-lifecycle
+        - phase-4-mcp-settings-lifecycle
+        - phase-5-readback-alignment
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/resource-command-parity/
+        - docs/
+        - commands/
+      verification_required: true
+      notes: |-
+        Capture the approved audit into a canonical contract:
+        - hooks currently has only `hooks list`
+        - rules, mcp, and settings have no dedicated command families and are managed indirectly
+          through add/import/refresh/install/remove/status
+        - agents are explicitly out of scope here (covered by agent-resource-lifecycle)
+        - context, memory, and profiles remain out of scope by design unless a separate contract is approved
 
-      Decide whether parity lands as per-resource families (`hooks ...`, `rules ...`, etc.) or a
-      shared lifecycle surface with resource-specific adapters, then document the rationale before implementation.
-  - id: phase-2-hooks-lifecycle
-    title: Phase 2 — Add coherent hook lifecycle commands on top of canonical HOOK.yaml bundles
-    status: pending
-    depends_on:
-      - phase-1-command-contract
-    blocks:
-      - phase-5-readback-alignment
-    owner: dot-agents
-    write_scope:
-      - commands/hooks.go
-      - commands/hooks_test.go
-      - commands/import.go
-      - commands/remove.go
-      - internal/platform/hooks.go
-    verification_required: true
-    notes: |-
-      Extend the existing `hooks list` surface into an intentional lifecycle path that matches the
-      canonical hook-bundle model instead of forcing users through indirect side effects.
+        Decide whether parity lands as per-resource families (`hooks ...`, `rules ...`, etc.) or a
+        shared lifecycle surface with resource-specific adapters, then document the rationale before implementation.
+    - id: phase-2-hooks-lifecycle
+      title: Phase 2 — Add coherent hook lifecycle commands on top of canonical HOOK.yaml bundles
+      status: in_progress
+      depends_on:
+        - phase-1-command-contract
+      blocks:
+        - phase-5-readback-alignment
+      owner: dot-agents
+      write_scope:
+        - commands/hooks.go
+        - commands/hooks_test.go
+        - commands/import.go
+        - commands/remove.go
+        - internal/platform/hooks.go
+      verification_required: true
+      notes: |-
+        Extend the existing `hooks list` surface into an intentional lifecycle path that matches the
+        canonical hook-bundle model instead of forcing users through indirect side effects.
 
-      Minimum outcome:
-      - hook resources can be discovered and explicitly wired/removed without spelunking raw files
-      - command help matches the canonical bundle model used by import/refresh/install/remove
-      - repo vs global scope behavior is documented and tested
-  - id: phase-3-rules-lifecycle
-    title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
-    status: pending
-    depends_on:
-      - phase-1-command-contract
-    blocks:
-      - phase-5-readback-alignment
-    owner: dot-agents
-    write_scope:
-      - commands/
-      - internal/platform/
-      - docs/
-    verification_required: true
-    notes: |-
-      Rules are canonically managed today but have no dedicated command family. Implement the chosen
-      lifecycle surface and keep the Cursor/Claude/Codex projection details behind the command layer.
-  - id: phase-4-mcp-settings-lifecycle
-    title: Phase 4 — Add explicit MCP and settings lifecycle surfaces without duplicating emitter logic
-    status: pending
-    depends_on:
-      - phase-1-command-contract
-    blocks:
-      - phase-5-readback-alignment
-    owner: dot-agents
-    write_scope:
-      - commands/
-      - internal/platform/
-      - internal/config/
-      - docs/
-    verification_required: true
-    notes: |-
-      MCP and settings are especially prone to split-brain because install/refresh/remove already
-      touch them. Reuse the shared planner/executor path rather than adding parallel custom wiring.
-  - id: phase-5-readback-alignment
-    title: Phase 5 — Align status, explain, doctor, install, and remove with the new resource contract
-    status: pending
-    depends_on:
-      - phase-2-hooks-lifecycle
-      - phase-3-rules-lifecycle
-      - phase-4-mcp-settings-lifecycle
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - commands/status.go
-      - commands/explain.go
-      - commands/doctor.go
-      - commands/install.go
-      - commands/remove.go
-      - docs/
-    verification_required: true
-    notes: |-
-      Close the loop so readback and lifecycle management tell the same story. Acceptance is not
-      just new commands existing; the user-visible explanation surfaces must stop implying that
-      these resources are first-class if the lifecycle is still implicit or inconsistent.
+        Minimum outcome:
+        - hook resources can be discovered and explicitly wired/removed without spelunking raw files
+        - command help matches the canonical bundle model used by import/refresh/install/remove
+        - repo vs global scope behavior is documented and tested
+    - id: phase-3-rules-lifecycle
+      title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-specific projections
+      status: pending
+      depends_on:
+        - phase-1-command-contract
+      blocks:
+        - phase-5-readback-alignment
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/platform/
+        - docs/
+      verification_required: true
+      notes: |-
+        Rules are canonically managed today but have no dedicated command family. Implement the chosen
+        lifecycle surface and keep the Cursor/Claude/Codex projection details behind the command layer.
+    - id: phase-4-mcp-settings-lifecycle
+      title: Phase 4 — Add explicit MCP and settings lifecycle surfaces without duplicating emitter logic
+      status: pending
+      depends_on:
+        - phase-1-command-contract
+      blocks:
+        - phase-5-readback-alignment
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/platform/
+        - internal/config/
+        - docs/
+      verification_required: true
+      notes: |-
+        MCP and settings are especially prone to split-brain because install/refresh/remove already
+        touch them. Reuse the shared planner/executor path rather than adding parallel custom wiring.
+    - id: phase-5-readback-alignment
+      title: Phase 5 — Align status, explain, doctor, install, and remove with the new resource contract
+      status: pending
+      depends_on:
+        - phase-2-hooks-lifecycle
+        - phase-3-rules-lifecycle
+        - phase-4-mcp-settings-lifecycle
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/status.go
+        - commands/explain.go
+        - commands/doctor.go
+        - commands/install.go
+        - commands/remove.go
+        - docs/
+      verification_required: true
+      notes: |-
+        Close the loop so readback and lifecycle management tell the same story. Acceptance is not
+        just new commands existing; the user-visible explanation surfaces must stop implying that
+        these resources are first-class if the lifecycle is still implicit or inconsistent.
