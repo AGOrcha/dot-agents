@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 47
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p3f-streaming-verifier
+commit: 59dcf9ea78dce25f68ffda7dabd186bf164caee6
+files_changed: 2
+lines_added: 66
+lines_removed: 0
+impl:
+    item: 'p3f-streaming-verifier: streaming verifier prompt + LOOP_ORCHESTRATION_SPEC role'
+    summary: Added `.agents/prompts/verifiers/streaming.project.md` (SSE/WebSocket scoped checks, timeout/backpressure/dropped-frame artifacts, `streaming.result.yaml`). Documented `streaming` verifier role and routing vs `api` / `ui-e2e` in `docs/LOOP_ORCHESTRATION_SPEC.md`.
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: yes — verify record, checkpoint --log-to-iter 47, merge-back; iter-47 filled
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3f-streaming-verifier/review-decision.yaml
+    verify_record_appended: false
