@@ -1,0 +1,22 @@
+schema_version: 1
+id: del-c6-status-import-helper-extraction-1776539976
+parent_plan_id: command-surface-decomposition
+parent_task_id: c6-status-import-helper-extraction
+title: Extract internal helper seams for status and import without forcing premature package splits
+summary: Delegated from plan Command Surface Decomposition Plan
+write_scope:
+    - commands/status.go
+    - commands/status_test.go
+    - commands/import.go
+    - commands/import_test.go
+    - commands/import_plugins.go
+success_criteria: |-
+    **feedback_goal:** Create smaller helper seams in `status` and `import` where the code is large but not yet clearly divisible into subcommand packages. Reduce worker context load and make future package splits easier without forcing a bad decomposition now.
+
+    This task is intentionally helper-first, not package-split-first.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T19:19:36Z"
+updated_at: "2026-04-18T19:19:36Z"
