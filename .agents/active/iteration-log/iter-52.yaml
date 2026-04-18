@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 52
+date: "2026-04-18"
+wave: command-surface-decomposition
+task_id: c3-sync-command-decomposition
+commit: 1fbac47933ce33132b8dd5ea4ffb6253dee108a8
+files_changed: 15
+lines_added: 758
+lines_removed: 470
+impl:
+    item: "c3-sync-command-decomposition: commands/sync subpackage + globalflagcov"
+    summary: "Moved sync into github.com/.../commands/sync with Deps (DryRun/Yes/Force + RunRefresh). commands/sync.go shim + newSyncPullCmd for global flag tests. Added CountPorcelainLines table tests and pull --dry-run rejection test. globalflagcov loads ./commands/..., qualifies subpackage symbols, matches deps.Flags.* in AST, skips unloadable packages; regenerated GLOBAL_FLAG_COVERAGE.md."
+    scope_note: on-target
+    feedback_goal: "Complete the delegated task within write scope with verification and merge-back."
+    retries: 1
+    focused_tests_added: 2
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint --log-to-iter 52, merge-back c3 (re-run after git reset to drop mistaken amend)"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: test
+      status: pass
+      gate_passed: true
+      tests_added: 2
+      tests_total_pass: true
+      scenario_tags:
+          - sync-porcelain-parse
+          - sync-pull-dry-run-reject
+      retries: 0
+      result_artifact: ""
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: false
+          exercised_new_scenario: true
+          ran_cli_command: true
+          cli_produced_actionable_feedback: "[ok] sync --help; [ok] workflow tasks command-surface-decomposition"
+          linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/c3-sync-command-decomposition/review-decision.yaml
+    verify_record_appended: true

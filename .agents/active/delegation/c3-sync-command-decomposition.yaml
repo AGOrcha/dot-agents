@@ -11,6 +11,6 @@ success_criteria: '**feedback_goal:** Decompose `sync` into stable command-famil
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: ralph-orchestrate
-status: active
+status: completed
 created_at: "2026-04-18T19:17:29Z"
-updated_at: "2026-04-18T19:17:29Z"
+updated_at: "2026-04-18T19:28:12Z"
