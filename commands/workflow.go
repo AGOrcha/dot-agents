@@ -788,9 +788,27 @@ preferences, fanout artifacts, and bridge queries.`,
 	foldBackCreateCmd.Flags().String("plan", "", "Canonical plan ID (required)")
 	foldBackCreateCmd.Flags().String("task", "", "Task ID to append note to (optional)")
 	foldBackCreateCmd.Flags().String("observation", "", "Observation text (required)")
+	foldBackCreateCmd.Flags().String("slug", "", "Stable id for create-or-update (D2.a); one tagged line per slug in TASKS/plan notes")
 	foldBackCreateCmd.Flags().Bool("propose", false, "Route as proposal rather than inline task note")
 	_ = foldBackCreateCmd.MarkFlagRequired("plan")
 	_ = foldBackCreateCmd.MarkFlagRequired("observation")
+	foldBackUpdateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Refine an existing slug-scoped fold-back observation",
+		Example: ExampleBlock(
+			"  dot-agents workflow fold-back update --plan my-plan --slug schema-drift-my-plan --observation \"refined note\"",
+			"  dot-agents workflow fold-back update --plan my-plan --slug coverage-regression-my-plan-t1 --task t1 --observation \"latest\"",
+		),
+		Args: NoArgsWithHints("Requires --plan, --slug, and --observation."),
+		RunE: runWorkflowFoldBackUpdate,
+	}
+	foldBackUpdateCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	foldBackUpdateCmd.Flags().String("slug", "", "Stable fold-back id (required; must match an existing artifact)")
+	foldBackUpdateCmd.Flags().String("task", "", "Task ID (required when the existing fold-back is task-scoped)")
+	foldBackUpdateCmd.Flags().String("observation", "", "Replacement observation text (required)")
+	_ = foldBackUpdateCmd.MarkFlagRequired("plan")
+	_ = foldBackUpdateCmd.MarkFlagRequired("slug")
+	_ = foldBackUpdateCmd.MarkFlagRequired("observation")
 	foldBackListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List recorded fold-back observations",
@@ -802,7 +820,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		RunE: runWorkflowFoldBackList,
 	}
 	foldBackListCmd.Flags().String("plan", "", "Filter by canonical plan ID")
-	foldBackCmd.AddCommand(foldBackCreateCmd, foldBackListCmd)
+	foldBackCmd.AddCommand(foldBackCreateCmd, foldBackUpdateCmd, foldBackListCmd)
 
 	// delegation subcommand (Phase 7 closeout)
 	delegationCmd := &cobra.Command{
@@ -4562,6 +4580,106 @@ func appendFoldBackBullet(notes, observation string) string {
 	return notes + "\n" + line
 }
 
+// setFoldBackTaggedNote replaces or inserts a single markdown line tagged with (fb:<slug>)
+// so repeated create/update with the same slug does not duplicate bullets in TASKS or plan summary.
+func setFoldBackTaggedNote(notes, slug, observation string) string {
+	tag := "- (fb:" + slug + ") "
+	obs := strings.TrimSpace(observation)
+	raw := strings.TrimRight(notes, "\n")
+	if raw == "" {
+		return tag + obs
+	}
+	lines := strings.Split(raw, "\n")
+	var kept []string
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, tag) {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	out := strings.TrimRight(strings.Join(kept, "\n"), "\n")
+	newLine := tag + obs
+	if out == "" {
+		return newLine
+	}
+	return out + "\n" + newLine
+}
+
+func validateFoldBackSlug(s string) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("slug must not be empty")
+	}
+	if len(s) > 200 {
+		return fmt.Errorf("slug exceeds maximum length (200)")
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_':
+		default:
+			return fmt.Errorf("slug contains invalid character %q", r)
+		}
+	}
+	if strings.HasPrefix(s, "-") || strings.HasSuffix(s, "-") {
+		return fmt.Errorf("slug must not start or end with '-'")
+	}
+	return nil
+}
+
+func foldBackArtifactFile(projectPath, id string) string {
+	return filepath.Join(foldBackDir(projectPath), id+".yaml")
+}
+
+func loadFoldBackArtifactByID(projectPath, id string) (foldBackArtifact, error) {
+	data, err := os.ReadFile(foldBackArtifactFile(projectPath, id))
+	if err != nil {
+		return foldBackArtifact{}, err
+	}
+	var a foldBackArtifact
+	if err := yaml.Unmarshal(data, &a); err != nil {
+		return foldBackArtifact{}, err
+	}
+	return a, nil
+}
+
+func proposalAbsPathFromRoutedTo(routed string) (string, error) {
+	if !strings.HasPrefix(routed, "proposal:") {
+		return "", fmt.Errorf("not a proposal route: %q", routed)
+	}
+	name := strings.TrimPrefix(routed, "proposal:")
+	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid proposal name in route %q", routed)
+	}
+	return filepath.Join(config.AgentsHome(), "proposals", name), nil
+}
+
+func readFoldBackProposalFile(path string) (foldBackProposalFrontmatter, string, error) {
+	var zero foldBackProposalFrontmatter
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return zero, "", err
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, "---\n") {
+		return zero, "", fmt.Errorf("proposal %s: missing frontmatter", path)
+	}
+	rest := content[4:]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return zero, "", fmt.Errorf("proposal %s: unterminated frontmatter", path)
+	}
+	var fm foldBackProposalFrontmatter
+	if err := yaml.Unmarshal([]byte(rest[:end]), &fm); err != nil {
+		return zero, "", err
+	}
+	body := strings.TrimSpace(rest[end+5:])
+	return fm, body, nil
+}
+
 func writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error {
 	dir := foldBackDir(projectPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -4584,6 +4702,14 @@ func writeFoldBackProposalFile(path string, fm foldBackProposalFrontmatter, body
 }
 
 func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
+	return runWorkflowFoldBackUpsert(cmd, false)
+}
+
+func runWorkflowFoldBackUpdate(cmd *cobra.Command, _ []string) error {
+	return runWorkflowFoldBackUpsert(cmd, true)
+}
+
+func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
@@ -4593,9 +4719,19 @@ func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
 	taskID, _ := cmd.Flags().GetString("task")
 	observation, _ := cmd.Flags().GetString("observation")
 	propose, _ := cmd.Flags().GetBool("propose")
+	slug, _ := cmd.Flags().GetString("slug")
+	slug = strings.TrimSpace(slug)
 
 	if strings.TrimSpace(observation) == "" {
 		return fmt.Errorf("observation text is required")
+	}
+	if updateOnly && slug == "" {
+		return fmt.Errorf("--slug is required for fold-back update")
+	}
+	if slug != "" {
+		if err := validateFoldBackSlug(slug); err != nil {
+			return err
+		}
 	}
 
 	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
@@ -4607,18 +4743,130 @@ func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
 	ts := now.UnixNano()
 	foldID := fmt.Sprintf("fold-%d", ts)
 
-	artifact := foldBackArtifact{
-		SchemaVersion: 1,
-		ID:            foldID,
-		PlanID:        planID,
-		Observation:   observation,
-		CreatedAt:     createdAt,
+	var prior *foldBackArtifact
+	priorExists := false
+	if slug != "" {
+		st, statErr := os.Stat(foldBackArtifactFile(project.Path, slug))
+		if statErr == nil && !st.IsDir() {
+			a, loadErr := loadFoldBackArtifactByID(project.Path, slug)
+			if loadErr != nil {
+				return fmt.Errorf("load fold-back %q: %w", slug, loadErr)
+			}
+			prior = &a
+			priorExists = true
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return statErr
+		}
 	}
 
-	if propose {
+	if updateOnly && !priorExists {
+		return fmt.Errorf("no fold-back artifact with slug %q", slug)
+	}
+
+	if priorExists {
+		if prior.PlanID != planID {
+			return fmt.Errorf("fold-back %q belongs to plan %q, not %q", slug, prior.PlanID, planID)
+		}
+		if propose {
+			return fmt.Errorf("--propose is not valid when updating an existing slug-scoped fold-back")
+		}
+		if prior.Classification == "small" {
+			if prior.TaskID != "" {
+				if strings.TrimSpace(taskID) == "" {
+					return fmt.Errorf("fold-back %q is task-scoped (%s); pass --task %s", slug, prior.TaskID, prior.TaskID)
+				}
+				if taskID != prior.TaskID {
+					return fmt.Errorf("--task %q does not match fold-back scope (expected %q)", taskID, prior.TaskID)
+				}
+			} else if strings.TrimSpace(taskID) != "" {
+				return fmt.Errorf("fold-back %q is plan-scoped; omit --task", slug)
+			}
+		}
+	}
+
+	if priorExists && prior.Classification == "small" && propose {
+		return fmt.Errorf("cannot use --propose for slug %q: existing artifact is inline (small)", slug)
+	}
+
+	artifact := foldBackArtifact{
+		SchemaVersion: 1,
+		PlanID:        planID,
+		Observation: observation,
+		CreatedAt:     createdAt,
+	}
+	if priorExists {
+		artifact.ID = prior.ID
+		artifact.CreatedAt = prior.CreatedAt
+	} else if slug != "" {
+		artifact.ID = slug
+	} else {
+		artifact.ID = foldID
+	}
+
+	updated := priorExists
+
+	switch {
+	case priorExists && prior.Classification == "proposal":
 		artifact.Classification = "proposal"
-		artifact.TaskID = taskID
+		artifact.TaskID = prior.TaskID
+		artifact.RoutedTo = prior.RoutedTo
+		propPath, err := proposalAbsPathFromRoutedTo(prior.RoutedTo)
+		if err != nil {
+			return err
+		}
+		fm, _, err := readFoldBackProposalFile(propPath)
+		if err != nil {
+			return fmt.Errorf("read proposal %s: %w", propPath, err)
+		}
+		fm.Observation = observation
+		if err := writeFoldBackProposalFile(propPath, fm, observation); err != nil {
+			return err
+		}
+
+	case priorExists && prior.Classification == "small":
+		artifact.Classification = "small"
+		artifact.TaskID = prior.TaskID
+		if prior.TaskID != "" {
+			tf, err := loadCanonicalTasks(project.Path, planID)
+			if err != nil {
+				return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+			}
+			var found bool
+			for i := range tf.Tasks {
+				if tf.Tasks[i].ID == prior.TaskID {
+					tf.Tasks[i].Notes = setFoldBackTaggedNote(tf.Tasks[i].Notes, slug, observation)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("task %s not found in plan %s", prior.TaskID, planID)
+			}
+			if err := saveCanonicalTasks(project.Path, tf); err != nil {
+				return err
+			}
+			artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, prior.TaskID)
+		} else {
+			plan, err := loadCanonicalPlan(project.Path, planID)
+			if err != nil {
+				return err
+			}
+			plan.Summary = setFoldBackTaggedNote(plan.Summary, slug, observation)
+			plan.UpdatedAt = createdAt
+			if err := saveCanonicalPlan(project.Path, plan); err != nil {
+				return err
+			}
+			artifact.TaskID = ""
+			artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+		}
+
+	case !priorExists && propose:
+		artifact.Classification = "proposal"
+		artifact.TaskID = strings.TrimSpace(taskID)
 		proposalName := fmt.Sprintf("obs-%d.md", ts)
+		if slug != "" {
+			proposalName = fmt.Sprintf("obs-%s.md", slug)
+		}
 		proposalsDir := filepath.Join(config.AgentsHome(), "proposals")
 		if err := os.MkdirAll(proposalsDir, 0755); err != nil {
 			return err
@@ -4630,49 +4878,90 @@ func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
 			PlanID:      planID,
 			CreatedAt:   createdAt,
 		}
-		if strings.TrimSpace(taskID) != "" {
-			fm.TaskID = taskID
+		if artifact.TaskID != "" {
+			fm.TaskID = artifact.TaskID
 		}
 		if err := writeFoldBackProposalFile(proposalPath, fm, observation); err != nil {
 			return err
 		}
 		artifact.RoutedTo = "proposal:" + proposalName
-	} else {
+
+	case !priorExists && slug != "" && strings.TrimSpace(taskID) != "":
 		artifact.Classification = "small"
-		if strings.TrimSpace(taskID) != "" {
-			tf, err := loadCanonicalTasks(project.Path, planID)
-			if err != nil {
-				return fmt.Errorf("load tasks for plan %s: %w", planID, err)
-			}
-			var found bool
-			for i := range tf.Tasks {
-				if tf.Tasks[i].ID == taskID {
-					tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, observation)
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("task %s not found in plan %s", taskID, planID)
-			}
-			if err := saveCanonicalTasks(project.Path, tf); err != nil {
-				return err
-			}
-			artifact.TaskID = taskID
-			artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
-		} else {
-			plan, err := loadCanonicalPlan(project.Path, planID)
-			if err != nil {
-				return err
-			}
-			plan.Summary = appendFoldBackBullet(plan.Summary, observation)
-			plan.UpdatedAt = createdAt
-			if err := saveCanonicalPlan(project.Path, plan); err != nil {
-				return err
-			}
-			artifact.TaskID = ""
-			artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+		artifact.TaskID = taskID
+		tf, err := loadCanonicalTasks(project.Path, planID)
+		if err != nil {
+			return fmt.Errorf("load tasks for plan %s: %w", planID, err)
 		}
+		var found bool
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				tf.Tasks[i].Notes = setFoldBackTaggedNote(tf.Tasks[i].Notes, slug, observation)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+		}
+		if err := saveCanonicalTasks(project.Path, tf); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
+
+	case !priorExists && slug != "" && strings.TrimSpace(taskID) == "":
+		artifact.Classification = "small"
+		artifact.TaskID = ""
+		plan, err := loadCanonicalPlan(project.Path, planID)
+		if err != nil {
+			return err
+		}
+		plan.Summary = setFoldBackTaggedNote(plan.Summary, slug, observation)
+		plan.UpdatedAt = createdAt
+		if err := saveCanonicalPlan(project.Path, plan); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+
+	case !priorExists && !propose && strings.TrimSpace(taskID) != "":
+		artifact.Classification = "small"
+		artifact.TaskID = taskID
+		tf, err := loadCanonicalTasks(project.Path, planID)
+		if err != nil {
+			return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+		}
+		var found bool
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, observation)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+		}
+		if err := saveCanonicalTasks(project.Path, tf); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
+
+	case !priorExists && !propose && strings.TrimSpace(taskID) == "":
+		artifact.Classification = "small"
+		artifact.TaskID = ""
+		plan, err := loadCanonicalPlan(project.Path, planID)
+		if err != nil {
+			return err
+		}
+		plan.Summary = appendFoldBackBullet(plan.Summary, observation)
+		plan.UpdatedAt = createdAt
+		if err := saveCanonicalPlan(project.Path, plan); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+
+	default:
+		return fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", slug, propose, priorExists)
 	}
 
 	if err := writeFoldBackArtifact(project.Path, artifact); err != nil {
@@ -4686,7 +4975,11 @@ func runWorkflowFoldBackCreate(cmd *cobra.Command, _ []string) error {
 		return enc.Encode(artifact)
 	}
 
-	fmt.Fprintf(out, "  Recorded fold-back %s (%s) → %s\n", artifact.ID, artifact.Classification, artifact.RoutedTo)
+	verb := "Recorded"
+	if updated {
+		verb = "Updated"
+	}
+	fmt.Fprintf(out, "  %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
 	return nil
 }
 

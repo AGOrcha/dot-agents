@@ -4,6 +4,8 @@
 #
 # Env vars:
 #   RALPH_CLOSEOUT_AUTO   1 = auto-accept all pending merge-backs (default), 0 = spawn orchestrator review pass
+#   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  1 = after each successful auto-closeout, run `workflow fold-back list --plan <id>`
+#                            for each distinct plan_id touched (read-only D2 post-closeout snapshot)
 #   RALPH_LOG_DIR         override log directory
 #   RALPH_NO_LOG          1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
@@ -79,6 +81,7 @@ DELEGATION_DIR="$REPO_ROOT/.agents/active/delegation"
 
 if [[ ! -d "$MERGE_BACK_DIR" ]]; then
   echo "ralph-closeout: no merge-back directory found — no pending merge-backs" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
   exit 0
 fi
 
@@ -91,6 +94,7 @@ done
 
 if [[ ${#pending[@]} -eq 0 ]]; then
   echo "ralph-closeout: no pending merge-backs" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
   exit 0
 fi
 
@@ -102,6 +106,11 @@ if [[ -n "$LOG_DIR" ]]; then
 fi
 
 errors=0
+
+_fold_back_audit_plans_tmp=""
+if [[ "${RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT:-0}" == "1" ]]; then
+  _fold_back_audit_plans_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout-fb-plans.XXXXXX")"
+fi
 
 process_merge_back_auto() {
   local mb_file="$1"
@@ -189,6 +198,10 @@ if m:
     git -C "$REPO_ROOT" commit -m "closeout: ${plan_id}/${task_id} accepted" --quiet
     echo "ralph-closeout: committed closeout state for task=$task_id" >&2
   fi
+
+  if [[ -n "${_fold_back_audit_plans_tmp:-}" ]]; then
+    printf '%s\n' "$plan_id" >>"$_fold_back_audit_plans_tmp"
+  fi
 }
 
 if [[ "$CLOSEOUT_AUTO" == "1" ]]; then
@@ -264,7 +277,18 @@ fi
 
 if [[ $errors -gt 0 ]]; then
   echo "ralph-closeout: $errors error(s) during closeout" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
   exit 1
 fi
+
+if [[ -n "${_fold_back_audit_plans_tmp:-}" && -s "$_fold_back_audit_plans_tmp" ]]; then
+  echo "ralph-closeout: post-closeout fold-back audit (RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT=1)" >&2
+  sort -u "$_fold_back_audit_plans_tmp" | while IFS= read -r _fb_plan; do
+    [[ -z "$_fb_plan" ]] && continue
+    echo "ralph-closeout: --- workflow fold-back list --plan ${_fb_plan} ---" >&2
+    da workflow fold-back list --plan "$_fb_plan" >&2 || echo "ralph-closeout: warning: fold-back list failed for plan=${_fb_plan}" >&2
+  done
+fi
+rm -f "${_fold_back_audit_plans_tmp:-}"
 
 echo "ralph-closeout: done." >&2
