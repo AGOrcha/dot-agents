@@ -4,8 +4,8 @@ title: Command Surface Decomposition Plan
 status: active
 summary: Decompose the remaining large or multi-subcommand command surfaces so worker slices can take narrower write scopes, load less context, and avoid unnecessary serialization on monolithic command files.
 created_at: "2026-04-18T21:55:00Z"
-updated_at: "2026-04-18T21:55:00Z"
+updated_at: "2026-04-18T19:33:11Z"
 owner: dot-agents
 success_criteria: Large command families after workflow are split into narrower packages or files with matching test decomposition, preserving CLI behavior while reducing worker hotspot collisions and command-context bloat.
 verification_strategy: Focused command package tests for each decomposed surface, smoke checks for preserved CLI wiring, and go test ./... after the full decomposition wave.
-current_focus_task: c1-kg-command-decomposition
+current_focus_task: Extract internal helper seams for status and import without forcing premature package splits
