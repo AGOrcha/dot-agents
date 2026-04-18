@@ -3,7 +3,7 @@ plan_id: resource-command-parity
 tasks:
     - id: phase-1-command-contract
       title: Phase 1 — Define command-surface contract and scope boundaries for managed resources
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - phase-2-hooks-lifecycle
