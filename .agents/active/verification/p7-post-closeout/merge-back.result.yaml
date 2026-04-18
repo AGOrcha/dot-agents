@@ -1,0 +1,13 @@
+schema_version: 1
+task_id: p7-post-closeout
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: 'CLI: workflow fold-back create --slug / update; help shows --slug. Evidence: go test ./... ; go run ./cmd/dot-agents workflow fold-back create --help.'
+recorded_at: "2026-04-18T13:13:25Z"
+delegation_id: del-p7-post-closeout-1776517508
+artifact_paths:
+    - .agents/active/delegation/p3d-ui-verifier.yaml
+    - .agents/active/loop-state.md
+    - .agents/workflow/plans/loop-agent-pipeline/PLAN.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
