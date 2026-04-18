@@ -150,10 +150,10 @@ tasks:
 
         **write_scope:** .agents/prompts/verifiers/streaming.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p3f-streaming-verifier-1776528467.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3e-batch-verifier`** is **completed** — this worker is the current owner for concurrent edits to `docs/LOOP_ORCHESTRATION_SPEC.md` in the verifier wave. **Serialize** **`p4-review-agent`** and any other work touching **`docs/LOOP_ORCHESTRATION_SPEC.md`** until **`p3f`** merges and parent runs **`workflow advance`** + **`workflow delegation closeout`**. **Mismatch note:** `go run ./cmd/dot-agents workflow next` may surface **`p4-review-agent`** while **`p3f`** is **`in_progress`** — **canonical TASKS + spec serialization win** over raw next-task ordering; do **not** fan out **`p4`** until **`p3f`** closes.
+        **context:** Task is **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p3f-streaming-verifier-1776528467.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Parent ran **`workflow advance`** + **`workflow delegation closeout`**; orchestrator then **`workflow fanout`** for **`p4-review-agent`** — see **`p4`** notes for the active review-agent bundle.
     - id: p4-review-agent
       title: Review-agent surface plus merged workflow verify record decision writer
-      status: in_progress
+      status: completed
       depends_on:
         - p3a-result-schema
       blocks:
@@ -173,7 +173,7 @@ tasks:
 
         **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow_test.go, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
-        **context:** **No delegation bundle this orchestrator pass.** `workflow next` may select this task while **`p3f-streaming-verifier`** is **`in_progress`** — both touch **`docs/LOOP_ORCHESTRATION_SPEC.md`**; orchestrator **defers `workflow fanout`** for **`p4`** until **`p3f`** merge-back is accepted and the spec is free. Worker profile when fanout runs: **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context **`.agents/active/loop-state.md`** + this TASKS.yaml. Parent runs **`workflow advance`** + **`workflow delegation closeout`** after merge-back acceptance.
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3f-streaming-verifier`** is **completed** — worker may proceed; this slice currently owns concurrent edits to **`docs/LOOP_ORCHESTRATION_SPEC.md`** and **`commands/workflow.go`** in the review-agent wave. **Serialize** **`p8-orchestrator-awareness`** (also edits the spec) until **`p4`** merges and parent runs **`workflow advance`** + **`workflow delegation closeout`**. **Mismatch note:** `go run ./cmd/dot-agents workflow next` may surface **`p8-orchestrator-awareness`** while **`p4`** is **`in_progress`** — **canonical TASKS + spec/workflow serialization win** over raw next-task ordering; do **not** fan out **`p8`** until **`p4`** closes.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
       status: completed
@@ -258,7 +258,12 @@ tasks:
         - .agents/active/orchestrator.loop.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Preserve D5 explicitly. The orchestrator must choose impl, verifier, and review role surfaces deliberately and stop reusing the same file as both project overlay and prompt-file.
+      notes: |-
+        **feedback_goal:** Ralph orchestrate/pipeline scripts and `docs/LOOP_ORCHESTRATION_SPEC.md` describe role-aware orchestrator dispatch (impl vs verifier vs review), preserve D5 explicitly, and stop reusing the same file as both project overlay and prompt-file; script smoke + targeted tests pass; merge-back ready.
+
+        **write_scope:** bin/tests/ralph-orchestrate, bin/tests/ralph-pipeline, .agents/active/orchestrator.loop.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Task is **pending**. **Do not `workflow fanout`** while **`p4-review-agent`** is **`in_progress`** — both touch **`docs/LOOP_ORCHESTRATION_SPEC.md`**; **`p4`** bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` owns the spec until merge-back. After **`p4`** closes, delegate with profile **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context **`.agents/active/loop-state.md`** + this TASKS.yaml. Parent runs **`workflow advance`** + **`workflow delegation closeout`** after merge-back acceptance.
     - id: p9-sources-design-fork
       title: Fork external-sources design doc from the main implementation plan
       status: completed
