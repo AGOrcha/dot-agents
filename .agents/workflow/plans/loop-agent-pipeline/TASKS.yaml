@@ -226,7 +226,7 @@ tasks:
         Integration hotspot: app_type on plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
     - id: p7-post-closeout
       title: Post-closeout orchestration pass plus fold-back update
-      status: in_progress
+      status: completed
       depends_on:
         - p1-pipeline-control
         - p4-review-agent
@@ -244,9 +244,9 @@ tasks:
 
         **write_scope:** bin/tests/ralph-closeout, bin/tests/ralph-pipeline, commands/workflow.go, commands/workflow_test.go
 
-        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p7-post-closeout-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **DAG note:** `depends_on` still lists **`p4-review-agent` (pending)** — reconcile with parent: either complete/reconcile **p4** before landing **p7**, or update TASKS.yaml if p7 was intentionally parallelized (p5 is already **completed** despite also listing p4 in its historical `depends_on`). Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p7-post-closeout-1776538664.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Profile: **loop-worker**. Worker runs verify + checkpoint + merge-back; parent runs `workflow advance` + `workflow delegation closeout` after acceptance.
 
-        **follow-up:** Current closeout archival still leaves repo state dirty because the post-closeout commit path does not reliably stage the task archive move, `PLAN.yaml`, and related verification artifacts after `workflow delegation closeout`. Keep this lane open for a post-archival checkpoint commit so `ralph-pipeline` finishes with a clean workspace instead of orphaned archive output.
+        **follow-up:** Post-closeout archival can still leave workspace dirty until archive moves, `PLAN.yaml`, and verification artifacts are committed — align with `closeout-ci-fix` / parent checkpoint if still observed.
     - id: p8-orchestrator-awareness
       title: Make orchestrator prompts and dispatch role-aware
       status: completed
