@@ -184,7 +184,7 @@ tasks:
         feedback_goal: satisfied — boundary stub + filesystem health checks covered by tests.
     - id: phase-5-stage2-and-plugin-alignment
       title: Phase 5 — Align the TS port with Stage 2 buckets and plugin resources after current Go contracts settle
-      status: pending
+      status: in_progress
       depends_on:
         - phase-3-stage1-command-mvp
       blocks:

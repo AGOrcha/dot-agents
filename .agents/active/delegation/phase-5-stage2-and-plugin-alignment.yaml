@@ -1,0 +1,35 @@
+schema_version: 1
+id: del-phase-5-stage2-and-plugin-alignment-1776546530
+parent_plan_id: typescript-port
+parent_task_id: phase-5-stage2-and-plugin-alignment
+title: Phase 5 — Align the TS port with Stage 2 buckets and plugin resources after current Go contracts settle
+summary: Delegated from plan TypeScript Port Plan
+write_scope:
+    - ports/typescript/src/platforms/
+    - ports/typescript/src/commands/
+    - ports/typescript/tests/
+    - docs/
+success_criteria: |
+    External dependency lane. This phase should follow, not race, the Go-side contract work in:
+    - `platform-dir-unification` Phase 5 (commands, output-styles, modes, plugins, themes, prompts)
+    - `plugin-resource-salvage` Phases 4-5 (import/status/explain/doctor plugin readback and closeout)
+    Until those settle, the TypeScript port should treat plugins and Stage 2 buckets as deferred scope.
+
+    Orchestrator (2026-04-14, iter 37): **not bundled** — `workflow next` selects this task, but
+    canonical orchestration defers it until `phase-4-advanced-surface-decision` completes (merge-back;
+    active bundle `del-phase-4-advanced-surface-decision-1776192016.yaml`) and upstream
+    `platform-dir-unification` / `plugin-resource-salvage` contract waves settle; do not
+    parallel with the active phase-4 worker.
+    selector_note: phase-5 does not declare `depends_on: phase-4` in YAML — treat `workflow next` as
+    algorithm-only; phase-4 in_progress + active delegation wins priority.
+    feedback_goal: After Go-side buckets/plugins stabilize, does TS `import`/resource behavior match
+    the declared Stage-2 contract without drift from `platform-dir-unification` / plugin salvage?
+    write_scope (canonical): ports/typescript/src/platforms/, ports/typescript/src/commands/, ports/typescript/tests/, docs/
+    context: Depends on phase-3 (done), phase-4 boundary artifacts, and external Go plans; phase-4
+    docs should name what phase-5 inherits.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-18T21:08:50Z"
+updated_at: "2026-04-18T21:08:50Z"
