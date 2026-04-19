@@ -10,7 +10,7 @@ tasks:
       write_scope:
         - internal/config/agentsrc.go
       verification_required: true
-      notes: ""
+      notes: '- Plan completed and archived to history'
     - id: install-generate-merge
       title: Make install --generate merge with existing manifest instead of replacing sources
       status: completed
