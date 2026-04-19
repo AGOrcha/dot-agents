@@ -1,0 +1,59 @@
+schema_version: 1
+task_id: isolate-home-based-smoke-harness
+parent_plan_id: ci-smoke-suite-hardening
+verifier_type: unit
+status: pass
+summary: |-
+  All verification checks pass. The "Prepare isolated smoke HOME" step correctly
+  creates a tmpdir via mktemp -d and exports SMOKE_HOME and SMOKE_AGENTS_HOME to
+  GITHUB_ENV. All 15 smoke steps (14 feature steps + Cleanup) carry the
+  HOME/AGENTS_HOME env override. The 5 non-smoke steps (gofmt, go vet, go test,
+  build, binary-type-check) have no HOME override. The Cleanup step removes both
+  ${HOME}/.agents and the ${SMOKE_HOME} tmpdir. YAML is valid, gofmt is clean,
+  and go vet passes.
+recorded_at: "2026-04-19T00:00:00Z"
+findings:
+  - id: F1
+    result: pass
+    check: gofmt -l ./cmd ./commands ./internal
+    detail: No output — all Go files are correctly formatted.
+  - id: F2
+    result: pass
+    check: go vet ./...
+    detail: No errors or warnings.
+  - id: F3
+    result: pass
+    check: "Prepare isolated smoke HOME step exists"
+    detail: |-
+      Step found at line 100 of .github/workflows/test.yml. Creates SMOKE_HOME
+      via mktemp -d, exports SMOKE_HOME and SMOKE_AGENTS_HOME to GITHUB_ENV.
+  - id: F4
+    result: pass
+    check: All 14 named smoke steps + Cleanup have HOME and AGENTS_HOME env
+    detail: |-
+      Verified steps: Test --version, Test --help, Test init --dry-run,
+      Test init (creates ~/.agents/), Test status, Test doctor,
+      Test add (with test project), Test status --audit, Test remove --dry-run,
+      Test sync status, Test skills list, Test workflow status,
+      Test workflow health, Test workflow plan, Cleanup.
+      All 15 carry env.HOME and env.AGENTS_HOME set from the SMOKE_* vars.
+  - id: F5
+    result: pass
+    check: Non-smoke steps have no HOME override
+    detail: |-
+      Check gofmt, Go vet, Go test, Build CLI, and
+      "Verify built binary is real Go binary (not a shim)" — none have an env
+      block with HOME override.
+  - id: F6
+    result: pass
+    check: YAML syntax valid
+    detail: |-
+      ruby -e 'require "yaml"; YAML.load_file(...)' returns successfully.
+      No parse errors.
+  - id: F7
+    result: pass
+    check: Cleanup removes both tmpdir and isolated ~/.agents
+    detail: |-
+      Cleanup run block contains: rm -rf "${HOME}/.agents",
+      rm -rf /tmp/test-project, and rm -rf "${SMOKE_HOME}".
+      Both the isolated .agents dir and the tmpdir are cleaned up.

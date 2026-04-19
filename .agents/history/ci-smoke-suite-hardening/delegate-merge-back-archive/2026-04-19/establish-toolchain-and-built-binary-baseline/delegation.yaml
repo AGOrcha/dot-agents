@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-establish-toolchain-and-built-binary-baseline-1776629042
+parent_plan_id: ci-smoke-suite-hardening
+parent_task_id: establish-toolchain-and-built-binary-baseline
+title: Add toolchain hygiene and built-binary baseline verification to CI
+summary: Delegated from plan CI Smoke Suite Hardening
+write_scope:
+    - .github/workflows/
+    - scripts/
+    - tests/
+    - docs/
+success_criteria: Add the missing baseline checks such as formatting, vet, direct buildability, and built-binary smoke validation so CI stops proving only launcher-shim behavior and partial compile success.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-19T20:04:02Z"
+updated_at: "2026-04-19T20:07:37Z"

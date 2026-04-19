@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: ci-smoke-suite-hardening
+task_id: isolate-home-based-smoke-harness
+delegation_id: del-isolate-home-based-smoke-harness-1776629564
+decision: accept
+closed_at: "2026-04-19T20:19:50Z"

@@ -4,8 +4,8 @@ title: CI Smoke Suite Hardening
 status: active
 summary: Upgrade CI from basic compile-and-smoke coverage into a layered built-binary verification pipeline with isolated homes, broader command-surface coverage, and release packaging checks.
 created_at: "2026-04-19T14:37:51Z"
-updated_at: "2026-04-19T14:37:51Z"
+updated_at: "2026-04-19T20:25:52Z"
 owner: dot-agents
 success_criteria: PR and release CI validate the built binary under isolated homes, cover high-value command surfaces beyond basic help paths, run packaging verification before release time, and keep heavy environment-sensitive integration checks in an intentional lane instead of leaving them untracked.
 verification_strategy: GitHub Actions workflow verification, focused shell smoke tests, built-binary temp-home runs in CI, and release snapshot packaging checks alongside the existing Go test suite.
-current_focus_task: establish-toolchain-and-built-binary-baseline
+current_focus_task: Add release packaging validation and align PR CI with release CI
