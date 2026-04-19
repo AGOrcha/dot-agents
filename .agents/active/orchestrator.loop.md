@@ -83,8 +83,8 @@ go run ./cmd/dot-agents workflow fanout \
 
 ### I_S_P: Native subagent interactive staged pipeline
 
-After `workflow fanout` creates the bundle, spawn a worker as a native Claude Code subagent
-instead of shelling out to `ralph-worker.sh`:
+After `workflow fanout` creates one or more bundles, spawn one worker as a native Claude Code subagent
+per bundle instead of shelling out to `ralph-worker.sh`. Each bundle gets its own staged subagent chain:
 
 ```
 Agent(
@@ -102,10 +102,16 @@ Run /iteration-close when done.
 )
 ```
 
+The worker subagent above is the impl entry point for one bundle. The full
+`I_S_P` prompt at `.agents/prompts/isp.prompt.md` expands that bundle into
+fresh impl, verifier, and review subagent sessions, and parallel fanout repeats
+the pattern once per non-overlapping bundle.
+
 Use `I_S_P` when:
 - Task write_scope is ≤ 5 files (cold-start cost justified for role isolation)
 - You want guaranteed role separation (subagent literally cannot continue orchestrating)
 - You are in an interactive Claude Code session with Agent tool available
+- Multiple eligible tasks can be fanned out in parallel and you want one isolated stage chain per bundle
 
 Use `ralph-worker.sh` in legacy loop-worker or headless script mode when:
 - Tasks require many implementation steps or long runtime

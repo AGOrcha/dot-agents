@@ -3,7 +3,7 @@ plan_id: error-message-compliance
 tasks:
     - id: inventory-error-message-behavior
       title: Inventory current CLI error rendering and command-specific failure patterns
-      status: proposed
+      status: pending
       depends_on: []
       blocks:
         - define-error-message-contract
@@ -17,7 +17,7 @@ tasks:
       notes: Record how CLIError, ErrorWithHints, UsageError, flag parse errors, and ad hoc fmt.Errorf paths currently render; call out commands that still leak raw internal errors or omit actionable hints.
     - id: define-error-message-contract
       title: Define the supported contract for actionable CLI error messages
-      status: proposed
+      status: pending
       depends_on:
         - inventory-error-message-behavior
       blocks:
@@ -31,7 +31,7 @@ tasks:
       notes: Decide which failures should show usage, which should show hints, how enum validation errors enumerate valid values, and what automation can or cannot rely on from error paths.
     - id: implement-error-message-fixes
       title: Normalize mismatched command errors onto the shared CLIError contract
-      status: proposed
+      status: pending
       depends_on:
         - inventory-error-message-behavior
         - define-error-message-contract
@@ -46,7 +46,7 @@ tasks:
       notes: Prioritize command families that currently return raw fmt.Errorf strings for validation or recovery-heavy failures instead of UsageError or ErrorWithHints.
     - id: add-error-message-regression-coverage
       title: Add regression coverage for error message rendering and recovery hints
-      status: proposed
+      status: pending
       depends_on:
         - define-error-message-contract
         - implement-error-message-fixes

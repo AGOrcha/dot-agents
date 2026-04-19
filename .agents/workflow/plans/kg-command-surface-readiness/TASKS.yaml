@@ -11,7 +11,6 @@ tasks:
         - kg-advanced-surfaces-audit
         - kg-mcp-transport-audit
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
@@ -19,7 +18,10 @@ tasks:
         - internal/graphstore/crg.go
         - docs/
       verification_required: false
-      notes: Reproduce current state of kg build and update on a clean checkout. Define the graph-ready contract downstream derive-scope needs before running symbol_lookup or callers_of. Audit only — no fixes.
+      notes: |-
+        Reproduce current state of kg build and update on a clean checkout. Define the graph-ready contract downstream derive-scope needs before running symbol_lookup or callers_of. Audit only — no fixes.
+        - (fb:graph-warm-build-transaction-defect) Fresh isolated heavy-lane verification exposed a live defect: 'dot-agents kg build' fails on a new KG_HOME with sqlite3.OperationalError: cannot start a transaction within a transaction. Treat graph-warm-health as escalated into working scope, not deferred heavy-lane debt; fold this into kg-freshness-audit and route follow-on implementation through kg-command-surface-readiness.
+      app_type: go-cli
     - id: kg-freshness-impl
       title: Implement kg build/update/code-status readiness fixes and add smoke coverage
       status: pending
@@ -29,7 +31,6 @@ tasks:
         - kg-change-impact-impl
         - kg-mcp-transport-impl
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
@@ -39,6 +40,7 @@ tasks:
         - docs/
       verification_required: true
       notes: Clear actionable errors when CRG preconditions missing; kg code-status machine-readable freshness; kg build/update exit non-zero with distinguishable codes. Add smoke test on minimal fixture.
+      app_type: go-cli
     - id: kg-change-impact-audit
       title: Audit kg changes and kg impact; define empty-result semantics
       status: pending
@@ -47,13 +49,13 @@ tasks:
       blocks:
         - kg-change-impact-impl
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
         - docs/
       verification_required: false
       notes: 'Run kg changes and kg impact on real diffs with fresh graph. Distinguish: empty-because-no-impact vs empty-because-graph-stale. Audit only.'
+      app_type: go-cli
     - id: kg-change-impact-impl
       title: Implement kg changes/impact trustworthiness fixes and add smoke coverage
       status: pending
@@ -62,7 +64,6 @@ tasks:
         - kg-change-impact-audit
       blocks: []
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
@@ -71,6 +72,7 @@ tasks:
         - docs/
       verification_required: true
       notes: Distinguish empty-graph from no-impact in output and exit codes. Add --require-graph flag. Structured JSON output mode. Smoke tests on known repo fixtures.
+      app_type: go-cli
     - id: kg-advanced-surfaces-audit
       title: Audit kg flows, communities, postprocess; decide agent-ready vs expert-only
       status: pending
@@ -92,7 +94,6 @@ tasks:
       blocks:
         - kg-mcp-transport-impl
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
@@ -100,6 +101,7 @@ tasks:
         - docs/
       verification_required: false
       notes: Enumerate MCP tools from kg serve. Compare to semantic_search_nodes_tool, query_graph_tool, get_impact_radius_tool, get_review_context_tool. Produce parity matrix with keep/implement/defer decision per tool.
+      app_type: go-cli
     - id: kg-mcp-transport-impl
       title: Implement MCP parity decisions from audit
       status: pending
@@ -108,7 +110,6 @@ tasks:
         - kg-mcp-transport-audit
       blocks: []
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/kg/cmd.go
         - commands/kg/kg.go
@@ -118,3 +119,4 @@ tasks:
         - docs/
       verification_required: true
       notes: 'Implement only the implement-now entries from parity matrix. Deferred decisions go to docs only. Stop: do not redesign MCP server; do not change external tool name surface.'
+      app_type: go-cli

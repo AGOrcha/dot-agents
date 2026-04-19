@@ -88,7 +88,7 @@ jobs:
         run: go vet ./...
 
       - name: Go test
-        run: go test ./... $GO_TEST_FLAGS
+        run: go test $GO_TEST_FLAGS ./...
 
       - name: Build CLI
         run: go build -o ./bin/dot-agents ./cmd/dot-agents
@@ -97,9 +97,34 @@ jobs:
         run: |
           file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"
 
+      - name: Install GoReleaser (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          install-only: true
+
+      - name: Validate GoReleaser config (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: goreleaser check
+
+      - name: Validate GoReleaser snapshot packaging (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: goreleaser release --snapshot --clean
+
       # ── Smoke isolation ──────────────────────────────────────────────────
       # All smoke steps below override HOME and AGENTS_HOME so they cannot
       # inherit the runner's real ~/.agents config or links.
+      #
+      # Scenario families tracked here until .agents/workflow/testing-matrix.yaml
+      # is introduced:
+      # - built-binary-baseline
+      # - isolated-home-bootstrap
+      # - workflow-control-plane
+      # - kg-bridge-surface
+      # - managed-resource-listing
+      # - release-packaging-parity
       - name: Test --version
         env:
           HOME: ${{ env.SMOKE_HOME }}
@@ -154,8 +179,9 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          mkdir -p /tmp/test-project
-          ./bin/dot-agents add /tmp/test-project --name ci-test --yes
+          TEST_PROJECT="${SMOKE_HOME}/test-project"
+          mkdir -p "${TEST_PROJECT}"
+          ./bin/dot-agents add "${TEST_PROJECT}" --name ci-test --yes
           ./bin/dot-agents status >/tmp/dot-agents-status.txt
           grep -q "ci-test" /tmp/dot-agents-status.txt
 
@@ -222,6 +248,15 @@ jobs:
         run: |
           ./bin/dot-agents workflow next
 
+      - name: Test workflow complete (scoped JSON)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents workflow complete --json --plan ci-smoke-suite-hardening > /tmp/workflow-complete.json
+          jq -e '.scope[0] == "ci-smoke-suite-hardening"' /tmp/workflow-complete.json
+          jq -e '.state | type == "string"' /tmp/workflow-complete.json
+
       - name: Test kg --help
         env:
           HOME: ${{ env.SMOKE_HOME }}
@@ -277,5 +312,4 @@ jobs:
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           rm -rf "${HOME}/.agents"
-          rm -rf /tmp/test-project
           rm -rf "${SMOKE_HOME}"

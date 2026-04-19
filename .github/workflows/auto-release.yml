@@ -13,10 +13,16 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  GO_TEST_FLAGS: -race -count=1 -timeout=300s
+
 jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    env:
+      SMOKE_HOME: /tmp/release-smoke-${{ github.run_id }}
+      SMOKE_AGENTS_HOME: /tmp/release-smoke-${{ github.run_id }}/.agents
 
     steps:
       - name: Checkout
@@ -45,42 +51,51 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify CLI version matches
-        if: steps.check.outputs.exists == 'false'
-        run: |
-          chmod +x src/bin/dot-agents
-          CLI_VERSION=$(./src/bin/dot-agents --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-          FILE_VERSION="${{ steps.version.outputs.version }}"
-          if [ "$CLI_VERSION" != "$FILE_VERSION" ]; then
-            echo "CLI reports version $CLI_VERSION but VERSION file has $FILE_VERSION"
-            echo "This may be okay if VERSION file is the source of truth"
-          fi
-          echo "Version check: CLI=$CLI_VERSION, File=$FILE_VERSION"
-
-      - name: Install dependencies
-        if: steps.check.outputs.exists == 'false'
-        run: |
-         sudo apt-get update && sudo apt-get install -y jq
-
       - name: Set up Go
         if: steps.check.outputs.exists == 'false'
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
 
-      - name: Run Go tests
-        if: steps.check.outputs.exists == 'false'
-        run: go test ./...
-
-      - name: Run tests
+      - name: Install dependencies
         if: steps.check.outputs.exists == 'false'
         run: |
-          chmod +x src/bin/dot-agents
-          ./src/bin/dot-agents --version
-          ./src/bin/dot-agents --help
-          ./src/bin/dot-agents init --yes
-          ./src/bin/dot-agents status
-          ./src/bin/dot-agents doctor
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Build CLI
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          go build \
+            -ldflags "-X github.com/NikashPrakash/dot-agents/commands.Version=${{ steps.version.outputs.version }} -X github.com/NikashPrakash/dot-agents/commands.Commit=${GITHUB_SHA} -X github.com/NikashPrakash/dot-agents/commands.Describe=v${{ steps.version.outputs.version }}" \
+            -o ./bin/dot-agents ./cmd/dot-agents
+
+      - name: Verify CLI version matches
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          CLI_VERSION=$(./bin/dot-agents --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          FILE_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$CLI_VERSION" != "$FILE_VERSION" ]; then
+            echo "CLI reports version $CLI_VERSION but VERSION file has $FILE_VERSION"
+            exit 1
+          fi
+          echo "Version check: CLI=$CLI_VERSION, File=$FILE_VERSION"
+
+      - name: Run Go tests
+        if: steps.check.outputs.exists == 'false'
+        run: go test $GO_TEST_FLAGS ./...
+
+      - name: Run built-binary smoke tests
+        if: steps.check.outputs.exists == 'false'
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents --version
+          ./bin/dot-agents --help
+          ./bin/dot-agents init --yes
+          test -d "${HOME}/.agents"
+          ./bin/dot-agents status
+          ./bin/dot-agents doctor
 
       - name: Install GoReleaser
         if: steps.check.outputs.exists == 'false'
@@ -106,3 +121,7 @@ jobs:
 
           # Let GoReleaser handle GitHub release + archives + Homebrew
           goreleaser release --clean --verbose
+
+      - name: Cleanup smoke home
+        if: always()
+        run: rm -rf "${SMOKE_HOME}"

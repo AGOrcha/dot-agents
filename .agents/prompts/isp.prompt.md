@@ -3,6 +3,7 @@ Run this session using Pattern I_S_P (interactive staged pipeline) as the intera
 Scope context:
 - Plan scope: `<plan_id>[,<plan_id>...]`
 - Active task: `<task_id>` once selected
+- Active task set: multiple eligible tasks when the runtime is in parallel fanout mode
 - Delegation bundle: `<absolute_bundle_path>` once fanout creates or reuses it
 
 Top-level operating model:
@@ -28,14 +29,16 @@ Step 2: Select the next scoped task
 - Use `dot-agents workflow next --plan <id>[,<id>...]` to select the next actionable canonical task inside the scoped plan set
 - Prefer canonical task state over ad hoc notes or checkpoint hints
 - If no task is returned, treat the scope as unavailable rather than searching outside the scoped plan set
+- If the runtime is not in scoped-completion mode and multiple eligible tasks remain, select every non-overlapping task the pipeline is allowed to fan out in this pass, up to the parallel worker limit
 
 Step 3: Decide direct work vs fanout
 - Work directly only when the task is research, planning, architecture, or interactive user collaboration with no bounded write_scope
-- Otherwise create or reuse a bounded delegation for the selected task, the same way the pipeline orchestrator does
+- Otherwise create or reuse bounded delegations for the selected task set, the same way the pipeline orchestrator does
 - Keep one canonical delegated task / contract per task; do not split impl, verifier, and review into separate top-level workflow tasks
+- In parallel fanout mode, one orchestrator pass may create multiple non-overlapping bundles; in scoped completion mode, stay serialized to one scoped task per pass
 
 Step 4: Fanout the delegated task
-- Use `dot-agents workflow fanout` to create the bounded contract and bundle for the selected task
+- Use `dot-agents workflow fanout` to create the bounded contract and bundle for each selected task
 - Pass the canonical plan id, task id, owner, write_scope, project overlay, prompt text, prompt files, context files, and verification controls
 - Default orchestrator-side files should mirror the scripted path when they exist:
   - project overlay: `.agents/active/active.loop.md`
@@ -44,6 +47,7 @@ Step 4: Fanout the delegated task
 - Keep `--project-overlay` and per-delegation prompt files distinct bundle fields; do not pass the same file as both
 - Reuse an existing active delegation bundle for the same task when one already exists instead of inventing a second contract
 - Treat the bundle as the execution contract carrying task goal, decision locks, required reads, verification focus, exclusions, and stop conditions
+- Keep bundle write_scopes non-overlapping when the pass is fanning out multiple tasks in parallel; otherwise defer the conflicting task to a later pass
 
 Step 5: Drive the staged runtime for that bundle
 - Expand the delegated task into the staged chain `impl -> verifier(s) -> review -> parent gate`
@@ -69,6 +73,7 @@ Subagent spawn discipline:
   - required artifact paths from prior stages
 - The parent orchestrator is responsible for waiting on stage completion, checking that the stage's done artifact exists, and only then spawning the next stage
 - If a stage fails for a resumable reason, replace that stage with a fresh subagent on the same bundle/stage rather than trying to continue inside the failed session
+- If multiple bundles were fanned out in parallel, each bundle runs its own staged chain independently; the orchestrator may wait on all of them before parent closeout
 
 Impl stage:
 - Read the delegation bundle and required context files
