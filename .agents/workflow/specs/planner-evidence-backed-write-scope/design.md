@@ -4,7 +4,7 @@
 
 **Purpose:** define the first upgrade to the planning system so canonical workflow tasks stop treating `write_scope` as an unsupported guess and start treating it as a justified, reviewable contract backed by code-graph evidence.
 
-**Dependency:** live graph-backed planner automation from this spec depends on [graph-bridge-command-readiness-resurrection.plan.md](/Users/nikashp/Documents/dot-agents/.agents/active/graph-bridge-command-readiness-resurrection.plan.md), because the current repo state does not yet provide dependable `workflow graph query` and `kg bridge query` behavior for planning use.
+**Dependency:** live graph-backed planner automation from this spec depends on the canonical [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan, because the current repo state does not yet provide dependable `workflow graph query` and `kg bridge query` behavior for planning use. New follow-on plan/task work should be recorded through `dot-agents workflow` under `.agents/workflow/plans/` and `.agents/workflow/specs/`.
 
 ## 1. Audit Summary
 
@@ -108,8 +108,45 @@ The graph surface already exists. The gap is not query capability; it is that pl
 Back `write_scope` with a task-local evidence artifact derived from:
 
 - code-structure queries from `dot-agents kg`
-- workflow context queries from `dot-agents workflow graph query`
+- workflow and repo-memory queries from `dot-agents workflow graph query` and `dot-agents kg query`
 - planner-authored seeds, assumptions, and exclusions
+
+Treat the evidence as two distinct lanes:
+
+1. **Scope lane:** blast-radius and test evidence that justifies which files belong in `write_scope`
+2. **Context lane:** decisions, syntheses, repo notes, and contradictions that explain how the task should be implemented and what must not be re-decided
+
+The planner should not treat file scope as the whole contract. A worker can still fail with a perfect `write_scope` if the bundle omits the prior decision or invariant that explains what to do inside that scope.
+
+### 3.2.1 Execution contract rule
+
+For implementation work, the planning artifact should behave like an execution contract, not only a scope note.
+
+At minimum it should capture:
+
+- one concrete task goal
+- the locked decisions and invariants the worker must preserve
+- the bounded `write_scope`
+- the required reads the worker should load before editing
+- the verification target that proves the task is done
+- the explicit exclusions and stop conditions that prevent adjacent architectural drift
+
+### 3.2.2 Worker-decision boundary
+
+Implementation slices should be delegated only when no major architectural or product decision is still hidden inside the slice.
+
+Permitted worker autonomy should be local and explicit, for example:
+
+- helper extraction within the same file or same bounded scope
+- minor test-fixture structure
+- exact assertion wording
+
+Disallowed worker autonomy should also be explicit, for example:
+
+- widening `write_scope`
+- changing public CLI semantics or schema contracts
+- introducing new persistence formats
+- altering orchestration flow outside the task contract
 
 ### 3.3 Why sidecar first
 
@@ -150,6 +187,15 @@ plan_id: loop-agent-pipeline
 task_id: p6-fanout-dispatch
 status: draft
 mode: code
+goal: Consume persisted app_type and verifier_sequence at runtime without inventing a second dispatch path
+decision_locks:
+  - Keep one canonical delegated task per workflow task; do not split impl/verifier/review into separate top-level tasks
+  - Extend existing workflow verify record surfaces instead of introducing near-duplicate artifact writers
+required_reads:
+  - path: .agents/workflow/plans/loop-agent-pipeline/loop-agent-pipeline.plan.md
+    why: active canonical plan and runtime boundary
+  - path: .agents/workflow/specs/loop-agent-pipeline/decisions.1.md
+    why: locked runtime and artifact decisions
 seeds:
   symbols:
     - commands.workflow.RunFanout
@@ -197,10 +243,21 @@ excluded_paths:
   - path: bin/tests/ralph-pipeline
     rationale:
       - related runtime, but not in this slice; should become a separate task if needed
+provides:
+  - runtime consumption of persisted verifier routing metadata
+consumes:
+  - task app_type metadata
+  - resolved verifier_sequence from delegation bundle generation
 final_write_scope:
   - commands/workflow/delegation.go
   - commands/workflow/cmd.go
   - commands/workflow/delegation_fanout_test.go
+verification_focus:
+  - workflow fanout and bundle tests prove runtime-visible verifier routing metadata is populated and consumed consistently
+allowed_local_choices:
+  - helper extraction inside commands/workflow/*
+stop_conditions:
+  - if implementing the task requires a new top-level delegation contract or a new artifact writer command, stop and fold back
 confidence: medium
 open_gaps:
   - graph has no direct coverage mapping for shell harnesses
@@ -212,12 +269,21 @@ open_gaps:
 - `optional_paths`: paths likely to need review or update, but not confirmed
 - `excluded_paths`: transitive candidates intentionally left out, with rationale
 - `final_write_scope`: the normalized bounded set copied into `TASKS.yaml`
+- `decision_locks`: already-decided constraints the worker must not reopen
+- `required_reads`: exact files, notes, or specs the worker should load before editing
+- `provides` / `consumes`: the provider-consumer contract that keeps adjacent slices from being rediscovered mid-implementation
+- `verification_focus`: the concrete proof target, not just "run tests"
+- `stop_conditions`: the point where the worker must fold back instead of making a bigger decision alone
 
 This keeps `write_scope` concise while preserving the reasoning behind it.
 
 ## 5. Query Bundle For Code Tasks
 
-For code-oriented tasks, the first planning pass should prefer this query bundle:
+For code-oriented tasks, the first planning pass should prefer a split query bundle.
+
+### 5.1 Scope lane
+
+Use these to derive candidate paths and tests:
 
 1. `dot-agents kg build` or `dot-agents kg update`
 2. `dot-agents kg bridge query --intent symbol_lookup <seed>`
@@ -225,10 +291,20 @@ For code-oriented tasks, the first planning pass should prefer this query bundle
 4. `dot-agents kg bridge query --intent callees_of <symbol>` when downstream impact matters
 5. `dot-agents kg bridge query --intent tests_for <symbol>`
 6. `dot-agents kg impact <path-or-symbol>` when blast radius is broad or ambiguous
-7. `dot-agents workflow graph query --intent plan_context <topic>`
-8. `dot-agents workflow graph query --intent decision_lookup <topic>`
 
-Not every task needs every query, but code-task scope should stop at "manual only" only when the planner records why graph evidence was unavailable or unhelpful.
+### 5.2 Context lane
+
+Use these to derive the non-code context pack that keeps workers from improvising:
+
+1. `dot-agents workflow graph query --intent plan_context <topic>`
+2. `dot-agents workflow graph query --intent decision_lookup <topic>`
+3. `dot-agents workflow graph query --intent workflow_memory <topic>` when historical task lineage matters
+4. `dot-agents workflow graph query --intent contradictions <topic>` before delegation
+5. `dot-agents kg query --intent repo_context <topic>`
+6. `dot-agents kg query --intent related_notes <topic>`
+7. `dot-agents kg query --intent source_lookup <topic>` when upstream sources or research notes matter
+
+Not every task needs every query, but code-task planning should stop at "manual only" only when the planner records why graph or note evidence was unavailable or unhelpful.
 
 ## 6. Planner Workflow
 
@@ -236,12 +312,15 @@ Not every task needs every query, but code-task scope should stop at "manual onl
 
 1. Planner identifies the seed symbol, path, or task topic.
 2. Planner runs graph/context queries and captures the result summaries.
-3. Planner reduces those results into `required`, `optional`, and `excluded` path sets.
-4. Planner writes the sidecar artifact.
-5. Planner copies the bounded final set into `TASKS.yaml.write_scope`.
-6. If the scope is still broad, planner either:
+3. Planner reduces those results into `required`, `optional`, and `excluded` path sets plus `decision_locks`, `required_reads`, and `verification_focus`.
+4. Planner checks whether any major implementation decision is still unresolved.
+5. Planner writes the sidecar artifact.
+6. Planner copies the bounded final set into `TASKS.yaml.write_scope`.
+7. If the scope is still broad, planner either:
    - splits the task, or
    - records why broad scope is unavoidable
+
+If unresolved implementation decisions remain, the planner should create or reopen a planning/design slice instead of delegating the code task as if it were ready.
 
 ### 6.2 Execution flow
 
@@ -254,6 +333,8 @@ The evidence artifact is for:
 - post-change auditing
 - future automation that checks whether work escaped or missed the planned blast radius
 
+Workers should not have to reconstruct planner intent from raw query output. The sidecar exists so fanout can hand a cold-start worker a concise context pack instead of a scavenger hunt.
+
 ### 6.3 Review flow
 
 Reviewers and orchestrators should be able to ask:
@@ -261,6 +342,8 @@ Reviewers and orchestrators should be able to ask:
 - Did the task change files outside `write_scope`?
 - Did the task skip required paths from the evidence record?
 - Were excluded paths later proven necessary?
+- Did the worker need to reopen a supposedly locked decision?
+- Did the task lack enough required reads or stop conditions to execute directly?
 
 That is the first practical path to making planning quality measurable instead of anecdotal.
 
@@ -278,6 +361,7 @@ First responsibilities:
 - run the graph query bundle
 - emit a candidate evidence sidecar
 - summarize required/optional/excluded paths
+- emit the reduced context pack: `decision_locks`, `required_reads`, `verification_focus`, and `stop_conditions`
 
 Important constraint:
 
@@ -304,6 +388,8 @@ Later, `workflow fanout` can warn or block when:
 - a code task has no evidence sidecar
 - the graph is healthy but no evidence was captured
 - the scope is obviously broad and no rationale was recorded
+- the task still contains unresolved implementation decisions
+- the bundle has no verification target or no required-read context pack
 
 That should be phased in only after read-only adoption proves useful.
 
@@ -342,6 +428,7 @@ The planning problem is not only command-side. Several skills should explicitly 
 - add `workflow plan derive-scope`
 - add `workflow plan check-scope`
 - add tests for sidecar parsing and candidate generation
+- ensure the generated artifact can carry both scope evidence and context-pack fields without forcing `TASKS.yaml` schema churn
 - gate `derive-scope` on the graph-bridge readiness resurrection plan, or make it degrade honestly when graph evidence is unavailable
 
 ### Phase 3: planner integration
@@ -349,6 +436,7 @@ The planning problem is not only command-side. Several skills should explicitly 
 - let plan-authoring flows and fanout helpers reference evidence sidecars
 - add warnings when code tasks have no evidence
 - teach review/closeout flows to read required and excluded paths
+- teach fanout readiness to reject tasks that still leave major decisions to the worker
 
 ### Phase 4: enforcement and metrics
 
@@ -372,6 +460,7 @@ The planner still decides the task boundary. The graph supplies evidence, not au
 3. When a task intentionally excludes a likely affected path, should that create a fold-back automatically?
 4. How should shell/runtime files that are weakly represented in the graph be captured without forcing false precision?
 5. Should `tests_for` evidence become part of the existing TDD gate, or stay planner-only until later?
+6. Should `SLICES.yaml` eventually carry lightweight execution-contract fields directly, or should rich task/slice context remain sidecar-only?
 
 ## 12. Recommended First Implementation Slice
 

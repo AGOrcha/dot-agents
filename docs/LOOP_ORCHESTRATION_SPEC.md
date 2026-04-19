@@ -41,6 +41,8 @@ The orchestrator should be a mixed system, not a single new super-agent.
 
 - `workflow next`
   - recommend the next actionable canonical task
+  - accept scoped completion filters via `--plan <id>[,<id>...]`
+  - return `null` when every scoped plan is drained, blocked, or paused
 - `workflow plan graph`
   - derive a dependency graph across plans, tasks, and blockers
 - `workflow slices`
@@ -197,6 +199,16 @@ Guardrails:
 - skip tasks whose dependencies are not completed
 - prefer canonical tasks over checkpoint `next_action`
 
+### Scoped Completion Mode
+
+`RALPH_RUN_PLAN` is the repo-level driver for plan-completion loops.
+
+- When set, completion drivers must stay inside the comma-separated scoped plan list.
+- `workflow complete --json --plan <id>[,<id>...]` is the scoped completion probe. It reports `actionable`, `locked`, `paused`, or `drained` so the runtime can tell a planning pause apart from a real drain.
+- `workflow next --plan <id>[,<id>...]` remains the selector for the next actionable task inside that scope.
+- `paused` plans act as planning locks: they stay in canonical state, but completion drivers treat them as unavailable until a human or planning artifact reactivates them.
+- Closeout and fanout should ignore merge-backs and bundles that fall outside the scoped plan set during a completion run.
+
 ## Slice Model
 
 `SLICES.yaml` should support bounded parallel work below one canonical task.
@@ -352,9 +364,11 @@ This is where files like `.agents/active/active.loop.md` or repo-specific loop p
 - **`ui-e2e` verifier role** (browser / DOM / visual / accessibility verification): use **`.agents/prompts/verifiers/ui-e2e.project.md`** as the repo-owned UI surface. It consumes **`impl-handoff.yaml`**, runs **scoped** browser flows first (pages, components, or tagged suites implied by `write_scope_touched`), then optional broader **visual regression** (screenshots, image diffs, snapshot reports), **accessibility** audits (for example axe output with a configured WCAG level), and **cross-browser** or full navigation suites when the plan calls for them, and writes **`.agents/active/verification/<task_id>/ui-e2e.result.yaml`** with `verifier_type: ui-e2e` and the canonical fields in **`schemas/verification-result.schema.json`**. Prefer the **`api` verifier** prompt when the primary evidence is **HTTP-level** (HAR, intercepted responses); prefer **`ui-e2e`** when the primary evidence is **DOM, layout, screenshots, keyboard interaction, or a11y violations**. Scoped-first discipline matches other verifier roles: do not broaden to unrelated suites until the slice covering `write_scope_touched` is green.
 - **`batch` verifier role** (fixture-driven, golden, or multi-record batch verification): use **`.agents/prompts/verifiers/batch.project.md`** as the repo-owned batch surface. It consumes **`impl-handoff.yaml`**, runs **scoped** batch or fixture jobs first (golden directories, CSV/JSON fixture trees, snapshot or CLI **expected-vs-actual** diffs, schema validation batches, or matrix rows tied to `write_scope_touched`), then optional broader **full fixture passes** or **volume/regression matrix** tiers when the plan calls for them, and writes **`.agents/active/verification/<task_id>/batch.result.yaml`** with `verifier_type: batch` and the canonical fields in **`schemas/verification-result.schema.json`**. Prefer the **`unit` verifier** prompt when the primary evidence is **`go test`** and in-process Go coverage; prefer **`batch`** when the primary evidence is **file-backed or multi-record comparisons** (diff artifacts, golden updates, tabular mismatch reports). Scoped-first discipline matches other verifier roles: do not broaden to unrelated datasets or jobs until the slice covering `write_scope_touched` is green.
 - **`streaming` verifier role** (SSE, WebSocket, or other long-lived / event-ordered verification): use **`.agents/prompts/verifiers/streaming.project.md`** as the repo-owned streaming surface. It consumes **`impl-handoff.yaml`**, runs **scoped** stream checks first (one SSE resource, one WS channel, or tagged stream scenarios tied to `write_scope_touched`), then optional broader **soak**, **fault-injection**, or **multi-session** tiers when the plan calls for them, and writes **`.agents/active/verification/<task_id>/streaming.result.yaml`** with `verifier_type: streaming` and the canonical fields in **`schemas/verification-result.schema.json`**. Evidence should capture **behavior over time**: event ordering, heartbeats, **timeouts**, **backpressure** or slow-consumer behavior, **dropped or duplicated** frames when the contract allows, reconnect semantics, and **artifact_paths** pointing to transcripts, frame logs, HAR excerpts, or trace archives. Prefer the **`api` verifier** prompt when the primary evidence is **finite HTTP** responses; prefer **`streaming`** when the primary evidence is **duplex or incremental** delivery. Scoped-first discipline matches other verifier roles: do not broaden to unrelated feeds or full-cluster soak until the slice covering `write_scope_touched` is green.
-- **`review` role** (human gate after verifiers): use **`.agents/prompts/review-agent.project.md`** as the repo-owned review surface. It reads verifier **`*.result.yaml`** files (and **`impl-handoff.yaml`** when relevant), applies repo-specific meaning to **phase 1** vs **phase 2**, then records **`dot-agents workflow verify record --kind review …`** so the CLI writes **`.agents/active/verification/<task_id>/review-decision.yaml`** validated against **`schemas/verification-decision.schema.json`**, appends a lean **`verification-log.jsonl`** line (`kind: review`, status derived from the consolidated decision), and keeps iteration-log review merges (`workflow checkpoint --log-to-iter --role review`) aligned with the same artifact. Prefer **flags** over hand-editing YAML so **escalation** always carries **`--escalation-reason`** when the consolidated outcome is **escalate**.
+- **`review` role** (human gate after verifiers): use **`.agents/prompts/review-agent.project.md`** as the repo-owned review surface. It reads verifier **`*.result.yaml`** files (and **`impl-handoff.yaml`** when relevant) and performs a **two-lens review**: **phase 1** is the broad product/domain/stability pass ("is the slice moving in the right direction and stable enough for the delegated scope?"), while **phase 2** is the tech-lead / architecture pass ("does the implementation respect repo standards, contracts, and architectural intent?"). The reviewer then records **`dot-agents workflow verify record --kind review …`** so the CLI writes **`.agents/active/verification/<task_id>/review-decision.yaml`** validated against **`schemas/verification-decision.schema.json`**, appends a lean **`verification-log.jsonl`** line (`kind: review`, status derived from the consolidated decision), and keeps iteration-log review merges (`workflow checkpoint --log-to-iter --role review`) aligned with the same artifact. Prefer **flags** over hand-editing YAML so **escalation** always carries **`--escalation-reason`** when the consolidated outcome is **escalate**.
 
-**Pattern E (`bin/tests/ralph-worker`)** remains a **loop-worker** caller: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Splitting impl-only fanouts from loop-worker fanouts is deliberate so orchestrators do not reuse one prompt file for both roles.
+**`I_S_P` (Interactive Staged Pipeline)** is the interactive/manual counterpart to the scripted staged pipeline: it should follow the same task-scoped chain (`impl -> verifier(s) -> review -> parent gate`), but allow a human or interactive agent to drive the stages stepwise instead of relying on one fully scripted pass. `I_S_P` is a conceptual workflow shape, not a promise that one specific script name or prompt file is permanently canonical. It should evolve alongside `ralph-pipeline` and future `dot-agents workflow` command ownership.
+
+**Legacy loop-worker mode (`bin/tests/ralph-worker` without `--stage`)** remains the old single-worker fallback: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Keep it available for backward compatibility, but do not treat it as the target staged runtime model.
 
 #### 3. Delegation bundle
 
@@ -463,7 +477,7 @@ prompt:
     - "Implement only the selected task."
   prompt_files:
     - .agents/prompts/loop-worker.project.md
-    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for Pattern E (ralph-worker)
+    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for legacy loop-worker mode (ralph-worker without --stage)
 
 context:
   required_files:

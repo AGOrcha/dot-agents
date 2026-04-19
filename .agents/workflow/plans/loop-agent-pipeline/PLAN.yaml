@@ -2,10 +2,10 @@ schema_version: 1
 id: loop-agent-pipeline
 title: Loop Agent Pipeline Plan
 status: active
-summary: Revived after runtime audit. Repo-owned impl/verifier/review prompt surfaces and typed artifacts landed, but the live ralph pipeline still executes Pattern E loop-worker only instead of a real impl -> verifier(s) -> review chain, and it still lacks a post-task orchestrator review gate for plan-scoped completion, fold-back/proposal review, and planning locks. The reopened task notes now embed the runtime audit, existing command/spec anchors, and the deterministic-command vs agent-owned boundary so future runtime agents can execute from plan artifacts alone.
+summary: Revived after runtime audit. Repo-owned impl/verifier/review prompt surfaces, typed artifacts, staged bundle expansion, and stage-specific worker prompts landed, but the live ralph pipeline still has remaining control-plane gaps around post-task review enforcement, task-scoped closeout cleanup, and scoped completion behavior for planning locks and replacement workers. The reopened task notes embed the runtime audit, existing command/spec anchors, and the deterministic-command vs agent-owned boundary so future runtime agents can execute from plan artifacts alone.
 created_at: "2026-04-17T08:39:50Z"
 updated_at: "2026-04-19T01:45:02Z"
 owner: dot-agents
 success_criteria: The live ralph pipeline consumes fanout/bundle role metadata, dispatches real impl/verifier/review stages end-to-end, records verifier artifacts through an extended workflow verify record path, runs a post-task orchestrator review gate after merge-back, supports driving a scoped plan set (single id or comma-separated ids) to completion safely, blocks further delegation for a plan when planning or architectural review is required, and leaves enough task-local runtime context in plan artifacts that a follow-on runtime agent does not need prior chat history to understand the gap or target shape.
 verification_strategy: Focused workflow tests, ralph script coverage for orchestration, dispatch, and post-task review branches, prompt/path checks for repo-local role surfaces, plan-lock / plan-target tests, and a final go test ./... pass after the runtime chain is wired.
-current_focus_task: p8-orchestrator-awareness
+current_focus_task: p7-post-closeout

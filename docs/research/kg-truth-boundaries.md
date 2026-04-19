@@ -41,7 +41,7 @@ Four distinct truth domains exist in the dot-agents + KG system. Each domain has
 
 **What it owns:** Plan state, task status, checkpoints, proposals, verification records, health snapshots, preferences.
 
-**Authoritative store:** `.agents/active/` (plans, tasks), `~/.agents/context/<project>/` (checkpoints, health, verification, preferences).
+**Authoritative store:** `.agents/workflow/plans/` (canonical plans and tasks), `.agents/workflow/specs/` (plan-owned design and decision docs), `~/.agents/context/<project>/` (checkpoints, health, verification, preferences). `.agents/active/` remains for transient coordination artifacts and legacy plan-era files, not new canonical plan/task state.
 
 **Properties:**
 - Project-scoped (tied to a specific repo)

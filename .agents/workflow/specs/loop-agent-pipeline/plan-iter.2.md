@@ -1,7 +1,7 @@
 ---
 spec: loop-agent-pipeline
 iter: 2
-purpose: Convert the iter-1 direction into a concrete task graph with explicit write_scope, dependency, and hotspot notes so canonical PLAN/TASKS artifacts can be authored without reopening the architecture.
+purpose: Convert the iter-1 direction into a concrete task graph with explicit write_scope, dependency, hotspot notes, and execution-contract context so canonical PLAN/TASKS artifacts can be authored without reopening the architecture.
 inputs:
   - plan-iter.1.md
   - decisions.1.md
@@ -22,6 +22,7 @@ This iteration does three things that iter-1 did not do cleanly:
    - D6: external sources move to a **design fork**, not an implementation task in this plan
    - D7: iter-log evolves to **schema v2 with nested role blocks**
 3. Resolves the remaining “plan-authoring only” questions inline so the next artifact can be canonical `PLAN.yaml` / `TASKS.yaml`, not another speculative markdown pass.
+4. Pushes task authoring past bare `write_scope` so workers can execute from a clear contract instead of reconstructing intent from scattered docs.
 
 ## Delta From Iter-1
 
@@ -33,8 +34,24 @@ Iter-1 had the right phase model, but the task graph was still missing the detai
 - external sources needed to be split out of the main implementation plan
 - orchestrator awareness needed to be explicit instead of buried inside fanout
 - `commands/workflow.go` and `commands/workflow_test.go` were clearly shared hotspots but not called out as such
+- tasks still leaned on readers inferring goal, verification target, and locked decisions from surrounding prose
 
 Iter-2 fixes those gaps.
+
+## Execution Contract Upgrade
+
+For implementation tasks, `write_scope` is necessary but not sufficient.
+
+The canonical task graph should preserve enough context that a delegated worker does not need to rediscover what the planner meant. In addition to bounded scope, task authoring should carry or point to:
+
+- one concrete goal
+- locked decisions and invariants
+- exact required reads
+- verification focus
+- explicit exclusions and stop conditions
+- provider-consumer relationships when one slice defines an artifact another slice depends on
+
+That is the difference between a task graph that is merely decomposed and one that is actually executable by a cold-start worker.
 
 ## Inline Confirmations Resolved Here
 

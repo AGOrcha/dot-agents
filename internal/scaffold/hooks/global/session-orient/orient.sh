@@ -65,21 +65,40 @@ print_fallback_orient() {
 
   printf '# Active Plans\n\n'
   plans_found=0
-  for plan in "$project_dir"/.agents/active/*.plan.md; do
+  for plan in "$project_dir"/.agents/workflow/plans/*/PLAN.yaml; do
     [ -f "$plan" ] || continue
     plans_found=1
-    title=$(sed -n '1s/^# *//p' "$plan")
-    [ -n "$title" ] || title=$(basename "$plan")
+    title=$(sed -n 's/^title:[[:space:]]*//p' "$plan" | head -n 1 | sed 's/^"//; s/"$//')
+    [ -n "$title" ] || title=$(basename "$(dirname "$plan")")
+    status=$(sed -n 's/^status:[[:space:]]*//p' "$plan" | head -n 1 | sed 's/^"//; s/"$//')
+    focus=$(sed -n 's/^current_focus_task:[[:space:]]*//p' "$plan" | head -n 1 | sed 's/^"//; s/"$//')
     printf '## %s\n' "$title"
     printf -- '- path: %s\n' "$plan"
-    pending_items=$(grep '^- \[ \]' "$plan" 2>/dev/null | head -n 3 | sed 's/^- \[ \] /- /' || true)
-    if [ -n "$pending_items" ]; then
-      printf '%s\n' "$pending_items"
+    [ -n "$status" ] && printf -- '- status: %s\n' "$status"
+    if [ -n "$focus" ]; then
+      printf -- '- focus task: %s\n' "$focus"
     else
-      printf -- '- no pending items found\n'
+      printf -- '- focus task: none recorded\n'
     fi
     printf '\n'
   done
+  if [ "$plans_found" -eq 0 ]; then
+    for plan in "$project_dir"/.agents/active/*.plan.md; do
+      [ -f "$plan" ] || continue
+      plans_found=1
+      title=$(sed -n '1s/^# *//p' "$plan")
+      [ -n "$title" ] || title=$(basename "$plan")
+      printf '## %s\n' "$title"
+      printf -- '- path: %s\n' "$plan"
+      pending_items=$(grep '^- \[ \]' "$plan" 2>/dev/null | head -n 3 | sed 's/^- \[ \] /- /' || true)
+      if [ -n "$pending_items" ]; then
+        printf '%s\n' "$pending_items"
+      else
+        printf -- '- no pending items found\n'
+      fi
+      printf '\n'
+    done
+  fi
   if [ "$plans_found" -eq 0 ]; then
     printf -- '- none\n\n'
   fi
@@ -133,7 +152,11 @@ print_fallback_orient() {
 
   printf '# Next Action\n\n'
   if [ -z "$next_action" ]; then
-    next_action=$(grep '^- \[ \]' "$project_dir"/.agents/active/*.plan.md 2>/dev/null | head -n 1 | sed 's/^- \[ \] //' || true)
+    if ls "$project_dir"/.agents/workflow/plans/*/PLAN.yaml >/dev/null 2>&1; then
+      next_action="Review canonical workflow plan"
+    else
+      next_action=$(grep '^- \[ \]' "$project_dir"/.agents/active/*.plan.md 2>/dev/null | head -n 1 | sed 's/^- \[ \] //' || true)
+    fi
   fi
   if [ -z "$next_action" ]; then
     next_action="Review active plan"

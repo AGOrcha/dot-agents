@@ -38,10 +38,14 @@ write_fallback_checkpoint() {
 
   next_action=$(sed -n 's/^next_action:[[:space:]]*"\{0,1\}\(.*[^"]\)"\{0,1\}[[:space:]]*$/\1/p' "$checkpoint_path" 2>/dev/null | head -n 1 || true)
   if [ -z "$next_action" ]; then
-    next_action=$(grep '^- \[ \]' "$project_dir"/.agents/active/*.plan.md 2>/dev/null | head -n 1 | sed 's/^- \[ \] //' || true)
+    if ls "$project_dir"/.agents/workflow/plans/*/PLAN.yaml >/dev/null 2>&1; then
+      next_action="Review canonical workflow plan"
+    else
+      next_action=$(grep '^- \[ \]' "$project_dir"/.agents/active/*.plan.md 2>/dev/null | head -n 1 | sed 's/^- \[ \] //' || true)
+    fi
   fi
   if [ -z "$next_action" ]; then
-    next_action="Review active plan"
+    next_action="Review canonical workflow plan"
   fi
 
   {

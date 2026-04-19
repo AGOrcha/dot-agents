@@ -102,9 +102,13 @@ These are committed or project-scoped artifacts owned by the repo:
 
 | Path | Purpose |
 |------|---------|
-| `.agents/active/*.plan.md` | Active work plans |
+| `.agents/workflow/plans/<plan-id>/` | Canonical repo-local plan bundle (`PLAN.yaml`, `TASKS.yaml`, optional `plan.md`) |
+| `.agents/workflow/specs/<topic>/` | Canonical repo-local design notes, decisions, and supporting specs referenced by workflow plans |
+| `.agents/active/` | Transient coordination state and legacy artifacts that may still exist during migration, but are not the canonical place for new plan bundles |
 | `.agents/active/handoffs/*.md` | Pending handoff docs |
 | `.agents/lessons/index.md` or `.agents/lessons.md` | Human-readable lesson index |
+
+Current repo inventory for legacy `.agents/active/*.plan.md` artifacts: [docs/ACTIVE_LEGACY_PLAN_MIGRATION.md](ACTIVE_LEGACY_PLAN_MIGRATION.md).
 
 ### User-local artifacts
 

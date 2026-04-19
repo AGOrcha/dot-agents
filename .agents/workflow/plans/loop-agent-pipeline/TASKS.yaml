@@ -2,7 +2,7 @@ schema_version: 1
 plan_id: loop-agent-pipeline
 tasks:
     - id: p1-pipeline-control
-      title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
+      title: ralph-pipeline outer loop, plan-scoped break check, pre-verifier TDD gate, and verifier retry policy
       status: completed
       depends_on: []
       blocks:
@@ -14,7 +14,7 @@ tasks:
         - commands/workflow.go
         - commands/workflow/
       verification_required: true
-      notes: Completed. Plan-scoped filtering, verification directory lifecycle, the pre-verifier TDD gate, and verifier retry-cap wiring are present in the workflow control plane.
+      notes: Completed. Plan-scoped filtering, the pre-verifier TDD gate, and verifier retry-cap wiring are present in the workflow control plane. Task-scoped verification artifact retirement after accept is handled by post-closeout behavior in `p7`, not by the fanout/control setup itself.
     - id: p2-impl-agent-surface
       title: Separate repo-side impl-agent surface from loop-worker behavior
       status: completed
@@ -28,7 +28,7 @@ tasks:
         - .agents/prompts/impl-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Completed as a surface/contract task. `.agents/prompts/impl-agent.project.md` exists and the spec defines `impl-handoff.yaml`, but the live `ralph-*` runtime still does not invoke this impl surface. Runtime integration is reopened under `p6` and `p8`.
+      notes: Completed as a surface/contract task. `.agents/prompts/impl-agent.project.md` exists and the staged runtime can invoke the impl surface. Keep the old single-worker fallback available as `legacy loop-worker`, but treat `I_S_P` and scripted staged execution as the target runtime shape.
     - id: p3a-result-schema
       title: Introduce canonical verification-result artifact contract
       status: completed
@@ -131,7 +131,7 @@ tasks:
         - .agents/prompts/review-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, but the live `ralph-*` runtime still does not execute a distinct review-agent phase. Runtime integration is reopened under `p6` and `p8`.
+      notes: Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, and the review contract is explicitly two-lens: phase 1 is the broad product/domain/stability review while phase 2 is the tech-lead / architecture review. The live `ralph-*` runtime still does not execute a distinct review-agent phase, so actually running that two-lens review in the staged chain remains reopened under `p6` and `p8`.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
       status: completed
@@ -174,43 +174,10 @@ tasks:
         - commands/workflow.go
         - commands/workflow/
       verification_required: true
-      notes: |-
-        **feedback_goal:** Make `app_type`, verifier profiles, and `verifier_sequence` drive the live role chain instead of stopping at bundle serialization.
-
-        **what landed already:** plan schema, `.agentsrc`, bundle schema, and `workflow fanout` can resolve and persist `app_type` / `verifier_sequence`.
-
-        **what is still missing:** the live `ralph-*` runtime does not consume that bundle metadata to spawn typed verifier or review stages. `verifier_sequence` is currently inert at runtime. The pipeline still executes one loop-worker path per bundle rather than `impl -> verifier(s) -> review`.
-
-        **current code anchors:** keep these audited facts in view:
-        - `commands/workflow/delegation.go` already resolves and persists `app_type` plus `verifier_sequence` into delegation bundles and related workflow metadata.
-        - `commands/workflow/verification.go` already gives `workflow verify record --kind review` special handling that writes `.agents/active/verification/<task_id>/review-decision.yaml`.
-        - non-review `workflow verify record` calls still append only `verification-log.jsonl`; they do not yet write typed `<verifier>.result.yaml` artifacts.
-        - the spec and decisions docs already describe the intended staged chain, so this task is runtime alignment, not a fresh design spike.
-
-        **implementation direction:** extend `workflow verify record` so verifier stages can write `.agents/active/verification/<task_id>/<verifier_type>.result.yaml` through the existing CLI surface instead of adding a sibling command that duplicates review/test logging behavior.
-
-        **important constraint:** keep one canonical delegated task / contract per workflow task. Do not split impl, verifier, and review into separate top-level workflow tasks or separate delegation contracts.
-
-        **native command boundary:** deterministic mechanics should move into `dot-agents`, not agent prompts:
-        - resolve `app_type` / `verifier_sequence`
-        - expand bundle metadata into a concrete per-task stage plan
-        - validate verifier profile refs and prompt-file refs
-        - write typed verifier artifacts through `workflow verify record`
-
-        **agent boundary:** agents should still own non-deterministic work:
-        - implementation choices inside `write_scope`
-        - verifier-specific evidence gathering and pass/fail judgment
-        - review acceptance / rejection / escalation reasoning
-
-        **command candidates in scope:** this task should leave behind deterministic helpers such as:
-        - a bundle/stage-plan readback command that expands one bundle into `impl`, ordered verifier stages, and `review`
-        - an extended `workflow verify record` mode for non-review verifier result files
-        - any minimal profile lookup helpers needed so shell no longer hand-parses bundle/runtime dispatch state
-
-        **done means:** fanout metadata is structured so runtime dispatch can consume it deterministically, tests cover the resolved stage chain, and there is no remaining gap between bundle contract and script behavior.
+      notes: Completed. `workflow fanout` resolves and persists `app_type` / `verifier_sequence`, `workflow bundle stages` expands one bundle into `impl`, ordered verifier stages, and `review`, and non-review `workflow verify record` writes typed `<verifier_type>.result.yaml` artifacts. The remaining runtime gaps are no longer stage-expansion or verifier-artifact plumbing; they live in post-task review enforcement and scoped completion behavior tracked under `p7` and `p11`.
     - id: p7-post-closeout
       title: Post-task orchestrator review gate plus fold-back / proposal update
-      status: completed
+      status: in_progress
       depends_on:
         - p1-pipeline-control
         - p4-review-agent
@@ -228,10 +195,10 @@ tasks:
 
         **existing spec hooks:** the spec already expects parent review after merge-back, fold-back reconciliation, and proposal routing for larger cross-cutting changes. What is missing is a concrete runtime gate between task merge-back and "continue to the next task".
 
-        **current runtime anchors:** the present parent-side behavior is still too coarse:
-        - `bin/tests/ralph-closeout` scans `.agents/active/merge-back/*.md`, auto-runs `workflow delegation closeout --decision accept` plus `workflow advance`, and optionally performs a read-only `workflow fold-back list --plan <id>` audit.
-        - when `RALPH_CLOSEOUT_AUTO=0`, the review-style agent pass still happens during closeout, after worker fanout is done, rather than as a mandatory gate after each task.
-        - `workflow fold-back create|update|list` already exists, so the gap is orchestration timing and deterministic reconciliation flow, not missing persistence primitives.
+        **current runtime anchors:** some parent-side control is now present but still incomplete:
+        - `bin/tests/ralph-pipeline` runs `ralph-review-gate` after the staged worker chain and blocks closeout when the gate fails.
+        - `workflow delegation closeout` now archives merge-back, delegation, closeout, and accepted-task verification artifacts before retiring the active verification directory.
+        - `workflow fold-back create|update|list` already exists, so the remaining gap is higher-level orchestration reasoning and deterministic reconciliation flow, not missing persistence primitives.
 
         **what this task now owns:** after a task finishes its impl/verifier/review chain and writes merge-back, the parent/orchestrator should:
         1. review merge-back plus typed verifier/review artifacts
@@ -239,7 +206,12 @@ tasks:
         3. reconcile fold-back observations and proposal-worthy architectural findings
         4. decide whether the plan may continue automatically or must pause for planning / human review
 
-        **pipeline implication:** some logic currently concentrated in `ralph-closeout` should be split into "per-task review gate" vs "end-of-session / no-more-work cleanup". The task-scoped gate should happen before the next bundle for the same plan is delegated.
+        **what is still missing:** the gate is still too lightweight for the full spec:
+        - auto mode in `ralph-review-gate` is artifact-presence based rather than a real orchestrator judgment pass
+        - fold-back / proposal routing decisions are still not applied as part of the task-scoped review gate
+        - `ralph-closeout` still owns too much parent-side reconciliation logic instead of delegating more of it to deterministic `dot-agents workflow` helpers
+
+        **pipeline implication:** some logic currently concentrated in `ralph-closeout` should still be split into "per-task review gate" vs "end-of-session / no-more-work cleanup". The task-scoped gate should happen before the next bundle for the same plan is delegated.
 
         **agent boundary:** the orchestrator/architect agent should decide:
         - whether the task is acceptable
@@ -255,7 +227,7 @@ tasks:
 
         **command candidates in scope:** evaluate whether the parent-side mechanics should collapse into a native helper such as a "parent review apply/finalize" command instead of leaving `ralph-closeout` to string together multiple workflow mutations.
 
-        **done means:** the runtime has an explicit post-task orchestrator review step; fold-back / proposal handling can happen at that step; and `ralph-closeout` is reduced to terminal cleanup rather than carrying all parent reasoning.
+        **done means:** the runtime has a real post-task orchestrator review step with repo-specific judgment rather than auto-accept heuristics, fold-back / proposal handling can happen at that step, and `ralph-closeout` is reduced to terminal cleanup rather than carrying all parent reasoning.
     - id: p8-orchestrator-awareness
       title: Make orchestrator prompts and dispatch role-aware
       status: completed
@@ -270,46 +242,7 @@ tasks:
         - .agents/active/orchestrator.loop.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: |-
-        **feedback_goal:** Align the live `ralph-*` runtime with the spec's role-aware dispatch instead of only documenting it.
-
-        **what landed already:** D5 prompt/overlay separation is documented better, and the repo has distinct impl/verifier/review prompt surfaces.
-
-        **what is still missing:** `ralph-pipeline` still spawns only `ralph-worker`; `ralph-orchestrate` still fans out loop-worker bundles only; `ralph-worker` only uses role classification to select model or agent-bin overrides, then continues to load the loop-worker surface. It does not load `impl-agent.project.md`, verifier prompt files, or `review-agent.project.md` as distinct runtime phases.
-
-        **current runtime anchors:** treat these as the baseline to replace:
-        - `bin/tests/ralph-pipeline` phase 2 still launches `ralph-worker --bundle <path>` once per bundle, then runs `ralph-closeout`.
-        - `bin/tests/ralph-orchestrate` still creates loop-worker-style bundles and tells the worker to load the loop-worker skill.
-        - `bin/tests/ralph-worker` remains a Pattern E loop-worker caller; it parses one bundle, loops for `RALPH_ITERATIONS`, and stops on merge-back. Role classification only affects model / agent-bin override selection.
-        - `docs/LOOP_ORCHESTRATION_SPEC.md` explicitly says Pattern E does not load `impl-agent.project.md`, which is why a staged runtime path is needed rather than more role heuristics inside the loop-worker prompt.
-
-        **runtime target shape:** one canonical delegated task should still map to one task-scoped control-plane entry, but the runtime under that task should become a staged chain:
-        1. impl stage
-        2. zero or more verifier stages in bundle order
-        3. review stage
-        4. parent/orchestrator review gate
-
-        **design guardrail:** preserve the task-scoped control plane. The refactor should introduce a task-chain runner or equivalent staged runtime beneath one bundle, not per-stage plans or per-stage delegations.
-
-        **script boundary:** the scripts should remain thin wrappers around deterministic `dot-agents` commands plus agent invocations. Shell should not be the long-term home for:
-        - plan break checks
-        - stage expansion from bundle metadata
-        - lock enforcement
-        - parent-side reconciliation decisions once an agent has already produced a structured outcome
-
-        **non-deterministic boundary:** role prompts remain agent-owned:
-        - impl prompt decides how to implement
-        - verifier prompt decides how to gather and interpret evidence
-        - review prompt decides accept/reject/escalate
-
-        **deterministic boundary:** `dot-agents` should own:
-        - task selection inside a scoped plan set
-        - stage sequencing from bundle metadata
-        - artifact writes
-        - plan/task lock checks
-        - final task/plan reconciliation
-
-        **done means:** the orchestrator and pipeline dispatch a real multi-stage chain, role-specific prompt surfaces are actually selected at runtime, and script behavior matches the spec's impl/verifier/review separation.
+      notes: Completed. The runtime now expands bundle stages deterministically, selects role-specific prompt surfaces at runtime, and dispatches a real `impl -> verifier(s) -> review` chain beneath one delegated task. This staged chain is the target for both scripted runs and `I_S_P`; the older single-worker path should now be described as `legacy loop-worker`. Remaining gaps are no longer about role-aware dispatch itself; they are about the strength of the post-task review gate and scoped completion / replacement behavior tracked under `p7` and `p11`.
     - id: p9-sources-design-fork
       title: Fork external-sources design doc from the main implementation plan
       status: completed
@@ -355,8 +288,17 @@ tasks:
         - runs the post-task orchestrator review gate after each task
         - pauses automatic delegation when cross-cutting / architectural findings require an analysis or planning task
         - blocks further bundles for that plan until the required planning artifact or human review is resolved
+        - replaces a terminally failed worker/stage with a fresh agent for the same bundle + stage when repo state and artifacts show resumable progress
 
         **planning lock requirement:** when the orchestrator promotes an observation into a planning or architectural review item, delegation for that plan should pause so implementation drift is caught before more task fanout happens.
+
+        **replacement-agent requirement:** terminal worker failures should not force the whole scoped completion run to stop when the task can safely resume from durable state. The control plane already has the right primitives:
+        - one stable delegation bundle per task
+        - stage-local done artifacts (`impl-handoff.yaml`, `<verifier>.result.yaml`, `merge-back.md`)
+        - persisted repo worktree state
+        - worker log classification for terminal causes such as usage-limit or workspace-permissions failures
+
+        Build on that instead of inventing a second handoff protocol: when a stage fails for a resumable terminal reason such as provider usage cap, the pipeline should schedule a fresh worker for the same bundle/stage and let artifact gating decide how much work is already done. For usage-limit / rate-limit failures, do not blindly relaunch the same runtime with the same resolved agent bin. The replacement attempt should prefer a different configured runtime path using the existing role-scoped fallback knobs (`RALPH_<ROLE>_AGENT_BIN`, `RALPH_WORKER_AGENT_BIN`, `AGENT_BIN`, plus role/model overrides) so a capped provider does not immediately fail again for the same reason. Non-resumable causes such as unresolved workspace-permission setup should still stop and surface a real failure.
 
         **break-check requirement:** mirror the historical D4/D14 intent: run the deterministic "is there still actionable work?" check against each scoped plan and break only when all scoped plans are drained or paused.
 
@@ -367,9 +309,9 @@ tasks:
 
         **lock semantics:** if a plan enters a planning-required state, the completion driver should treat that plan as paused/blocked for delegation until the planning artifact, proposal review, or human decision is resolved. Other scoped plans may continue if they are not locked.
 
-        **command candidates in scope:** evaluate a native `workflow complete --plan <id>[,<id>...]` style driver, plus first-class plan-lock surfaces if the existing task/delegation statuses are not enough to encode "pause this plan pending planning review".
+        **command candidates in scope:** evaluate a native `workflow complete --plan <id>[,<id>...]` style driver, plus first-class plan-lock surfaces if the existing task/delegation statuses are not enough to encode "pause this plan pending planning review". Also evaluate whether bundle/stage retry state should stay script-local or move into a deterministic command-owned resume helper so replacement-agent behavior, replacement budgets, and runtime fallback selection are observable and testable.
 
-        **done means:** a scoped completion mode can drive one plan or a filtered set of plans forward task-by-task, but it yields to orchestrator review, proposal/planning flows, and plan-level locks instead of blindly draining the queue.
+        **done means:** a scoped completion mode can drive one plan or a filtered set of plans forward task-by-task, replace resumable failed workers with fresh agents for the same bundle/stage, switch away from a rate-limited agent bin when fallback runtime options exist, and still yield to orchestrator review, proposal/planning flows, and plan-level locks instead of blindly draining the queue.
     - id: p10-workflow-command-decomposition
       title: Split workflow command into subpackage files to reduce worker hotspot contention
       status: completed

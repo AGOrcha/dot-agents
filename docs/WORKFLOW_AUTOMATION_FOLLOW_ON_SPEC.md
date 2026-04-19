@@ -91,7 +91,7 @@ The MVP deliberately reads existing Markdown plans and handoffs, but the researc
 - Introduce canonical repo-local plan and task artifacts.
 - Preserve human-readable planning while adding deterministic machine state.
 - Support dependencies, blockers, verification expectations, and active-next-task resolution.
-- Keep compatibility with existing `.agents/active/*.plan.md` usage during migration.
+- Keep legacy `.agents/active/*.plan.md` artifacts readable during migration, while making `dot-agents workflow` plus `.agents/workflow/plans/` and `.agents/workflow/specs/` the contributor-facing canonical path.
 
 ### Resolved Decisions
 
@@ -148,8 +148,9 @@ New repo-local artifacts introduced in this wave:
 
 ### Migration And Compatibility
 
-- Existing `.agents/active/*.plan.md` files remain valid.
-- When a canonical plan bundle exists, it is the machine-readable source of truth.
+- Existing `.agents/active/*.plan.md` files may still exist as legacy artifacts, but new contributor guidance should point to `dot-agents workflow` and canonical bundles under `.agents/workflow/plans/`.
+- When a canonical plan bundle exists, it is the machine-readable and contributor-facing source of truth.
+- Supporting design and decision docs should live under `.agents/workflow/specs/` rather than alongside legacy active-plan Markdown.
 - `plan.md` is optional and exists for human readability, not canonical machine state.
 - A later migration helper may derive starter `PLAN.yaml` and `TASKS.yaml` files from Markdown plans, but that migration tool is not required in the first implementation pass of this wave.
 
@@ -158,9 +159,13 @@ New repo-local artifacts introduced in this wave:
 This wave should add or extend:
 
 - `dot-agents workflow plan`
+- `dot-agents workflow plan create <plan-id>`
 - `dot-agents workflow plan show <plan-id>`
+- `dot-agents workflow task add <plan-id>`
 - `dot-agents workflow tasks <plan-id>`
 - `dot-agents workflow advance <plan-id> --task <task-id> --status <status>`
+
+During migration, prefer `dot-agents workflow plan create` plus `dot-agents workflow task add|update` to seed canonical bundles under `.agents/workflow/plans/`; use `.agents/workflow/specs/` for longer-form design and decision docs that should not masquerade as executable task graphs.
 
 ### Acceptance Standard
 

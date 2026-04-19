@@ -5,7 +5,9 @@ Last updated: 2026-04-10
 Related:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
-- `.agents/active/crg-kg-integration.plan.md`
+- legacy precursor: `.agents/active/crg-kg-integration.plan.md`
+
+New workflow planning work should use `dot-agents workflow` with canonical bundles under `.agents/workflow/plans/` and supporting design docs under `.agents/workflow/specs/`; `.agents/active/` references here are historical lineage only.
 
 ## Purpose
 

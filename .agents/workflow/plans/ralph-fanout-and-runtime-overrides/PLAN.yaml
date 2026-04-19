@@ -1,0 +1,11 @@
+schema_version: 1
+id: ralph-fanout-and-runtime-overrides
+title: Ralph Fanout And Runtime Overrides
+status: active
+summary: Prevent overlapping Ralph fanout selections and add per-role runtime overrides for model and agent binary selection.
+created_at: "2026-04-19T15:01:14Z"
+updated_at: "2026-04-19T15:02:35Z"
+owner: dot-agents
+success_criteria: Ralph orchestrate skips overlapping fanout selections, does not select multiple conflicting tasks in one pass, and applies explicit per-role model and AGENT_BIN overrides for orchestrator, closeout, generic worker, impl worker, verifier worker, and review worker without ambiguity.
+verification_strategy: bash -n on Ralph scripts, focused workflow tests for task-selection logic and env precedence, and targeted smoke coverage for the overlap and override paths.
+current_focus_task: detect-overlap-conflicts

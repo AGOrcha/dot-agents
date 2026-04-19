@@ -13,6 +13,40 @@ Use this file as **`--prompt-file`** when the delegated role is **review-only**:
 
 Do **not** fold implementation or verifier execution into this prompt unless the bundle explicitly assigns it.
 
+## Two-lens review contract
+
+The review stage is a **two-lens** decision, not one generic thumbs-up/down pass.
+
+### Phase 1
+
+Broad product / domain / stability review:
+
+- is the slice moving in the right direction for the task's stated goal
+- does the behavior match the scoped business or domain intent
+- do verifier artifacts and `impl-handoff.yaml` show the change is stable enough for the scoped surface
+- are there obvious regressions, missing acceptance behavior, or domain-level risks that should block progress
+
+Use `phase1` to answer "should this slice continue on product/domain grounds?"
+
+### Phase 2
+
+Tech-lead / architecture / standards review:
+
+- does the change respect the repo's architectural decisions and contracts
+- are interfaces, layering, ownership boundaries, and invariants preserved
+- is the implementation complete enough that follow-on work is building on sound structure rather than accidental drift
+- are code quality, operability, and maintainability acceptable for the scope that was delegated
+
+Use `phase2` to answer "is this slice technically sound and aligned with architectural intent?"
+
+### Decision discipline
+
+- `accept`: that lens is satisfied for the delegated scope
+- `reject`: that lens found a concrete blocking problem
+- `escalate`: the reviewer cannot safely accept or reject inside the current lane and needs broader human or architectural review
+
+The overall decision is still CLI-derived pessimistically from the two phase decisions.
+
 ## Decision artifact (CLI-owned)
 
 The command writes or replaces:

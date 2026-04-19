@@ -81,7 +81,7 @@ go run ./cmd/dot-agents workflow fanout \
 - The task requires interactive back-and-forth with the user
 - Fanout overhead exceeds the benefit (< 30 min task)
 
-### Pattern E: Native subagent (Claude Code Agent tool)
+### I_S_P: Native subagent interactive staged pipeline
 
 After `workflow fanout` creates the bundle, spawn a worker as a native Claude Code subagent
 instead of shelling out to `ralph-worker.sh`:
@@ -102,12 +102,12 @@ Run /iteration-close when done.
 )
 ```
 
-Use Pattern E when:
+Use `I_S_P` when:
 - Task write_scope is ≤ 5 files (cold-start cost justified for role isolation)
 - You want guaranteed role separation (subagent literally cannot continue orchestrating)
 - You are in an interactive Claude Code session with Agent tool available
 
-Use `ralph-worker.sh` (script worker) when:
+Use `ralph-worker.sh` in legacy loop-worker or headless script mode when:
 - Tasks require many implementation steps or long runtime
 - Running headless/batch without an interactive Claude Code session
 
