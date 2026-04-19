@@ -16,7 +16,7 @@ build/
 *.so
 *.dylib
 dot-agents-go
-
+bin/dot-agents
 # IDE
 .idea/
 .vscode/
