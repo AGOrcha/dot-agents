@@ -51,6 +51,9 @@ jobs:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: lint-workflows  # Only run tests if workflows are valid
+    env:
+      SMOKE_HOME: ${{ runner.temp }}/smoke-home
+      SMOKE_AGENTS_HOME: ${{ runner.temp }}/smoke-home/.agents
     strategy:
       fail-fast: false
       matrix:
@@ -95,14 +98,8 @@ jobs:
           file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"
 
       # ── Smoke isolation ──────────────────────────────────────────────────
-      # All smoke steps below run with an isolated HOME and AGENTS_HOME so
-      # they cannot inherit the runner's real ~/.agents config or links.
-      - name: Prepare isolated smoke HOME
-        run: |
-          SMOKE_HOME=$(mktemp -d)
-          echo "SMOKE_HOME=${SMOKE_HOME}" >> "$GITHUB_ENV"
-          echo "SMOKE_AGENTS_HOME=${SMOKE_HOME}/.agents" >> "$GITHUB_ENV"
-
+      # All smoke steps below override HOME and AGENTS_HOME so they cannot
+      # inherit the runner's real ~/.agents config or links.
       - name: Test --version
         env:
           HOME: ${{ env.SMOKE_HOME }}
