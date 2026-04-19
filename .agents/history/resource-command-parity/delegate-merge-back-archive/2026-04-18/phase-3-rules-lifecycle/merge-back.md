@@ -6,7 +6,7 @@ title: Phase 3 — Add explicit rules lifecycle surface and reconcile platform-s
 summary: Shipped rules list/show/remove; platform rules.go; RESOURCE_COMMAND_CONTRACT + explain; tests in commands/rules_test.go and internal/platform/rules_test.go. Kept implementation in package commands so globalflagcov works without internal/globalflagcov changes.
 files_changed:
     - bin/tests/ralph-closeout
-    - bin/tests/ralph-cursor-loop
+    - bin/tests/ralph-worker
     - bin/tests/ralph-orchestrate
 verification_result:
     status: pass

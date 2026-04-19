@@ -3,7 +3,7 @@ schema_version: 1
 task_id: p2-impl-agent-surface
 parent_plan_id: loop-agent-pipeline
 title: Separate repo-side impl-agent surface from loop-worker behavior
-summary: impl-agent.project.md added; LOOP_ORCHESTRATION_SPEC documents impl-handoff + role split; ralph-cursor-loop logs prompt_surface=loop-worker and impl_agent_prompt_file (not loaded)
+summary: impl-agent.project.md added; LOOP_ORCHESTRATION_SPEC documents impl-handoff + role split; ralph-worker logs prompt_surface=loop-worker and impl_agent_prompt_file (not loaded)
 files_changed:
     - .agents/active/loop-state.md
     - .agents/workflow/plans/agent-resource-lifecycle/PLAN.yaml
@@ -23,8 +23,7 @@ created_at: "2026-04-17T15:19:05Z"
 
 ## Summary
 
-impl-agent.project.md added; LOOP_ORCHESTRATION_SPEC documents impl-handoff + role split; ralph-cursor-loop logs prompt_surface=loop-worker and impl_agent_prompt_file (not loaded)
+impl-agent.project.md added; LOOP_ORCHESTRATION_SPEC documents impl-handoff + role split; ralph-worker logs prompt_surface=loop-worker and impl_agent_prompt_file (not loaded)
 
 ## Integration Notes
-
 

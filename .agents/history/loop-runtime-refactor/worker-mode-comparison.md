@@ -2,7 +2,7 @@
 
 ## Goal
 
-Compare `ralph-cursor-loop.sh` (script worker) against Pattern E (Claude Code Agent tool subagent)
+Compare `ralph-worker.sh` (script worker) against Pattern E (Claude Code Agent tool subagent)
 on equivalent tasks. Metrics to compare:
 
 | Metric | Script | Pattern E |
@@ -75,7 +75,7 @@ Run both modes on the **same task** (same plan_id + task_id, same write_scope) f
 
 **Pipeline bugs found and fixed during this run:**
 1. `ralph-orchestrate`: `--project-overlay` absolute path double-prefixed — `filepath.Join(repoRoot, abs)` in Go concatenates; fixed by stripping `$REPO_ROOT/` prefix
-2. `ralph-cursor-loop`: `import yaml,sys` outside the `try` block — `ModuleNotFoundError` fired before fallback; fixed with `import re,sys` at top and `try: import yaml` inside
+2. `ralph-worker`: `import yaml,sys` outside the `try` block — `ModuleNotFoundError` fired before fallback; fixed with `import re,sys` at top and `try: import yaml` inside
 3. `ralph-pipeline`: no fallback when BUNDLES empty after parsing (re-run case where contract already exists); added delegation-bundles/ scan fallback
 
 ## Analysis
@@ -181,7 +181,7 @@ Both tasks: implement read-only TS command stubs with positive + negative tests.
 
 ### Root cause of script worker token bloat
 
-`ralph-cursor-loop` builds a prompt that inlines the full content of:
+`ralph-worker` builds a prompt that inlines the full content of:
 - `$WORKER_OVERLAY` (`active.loop.md`) — this is the project overlay passed verbatim
 - `$LOOP_PROFILE_FILE` (`loop-worker.md`) — global worker profile
 

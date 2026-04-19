@@ -7,7 +7,7 @@ agent_session_id: c37d1d2d-f403-4e8b-9c37-07f02852ce38
 What's already done (from loop-runtime-refactor)                                                                                                                              
                                                                                                                                                                             
 The infrastructure this plan builds on is almost entirely shipped:                                                                                                            
-- ralph-orchestrate, ralph-cursor-loop, ralph-closeout, ralph-pipeline — all exist in bin/tests/                                                                              
+- ralph-orchestrate, ralph-worker, ralph-closeout, ralph-pipeline — all exist in bin/tests/                                                                              
 - loop-worker AGENT.md + SKILL.md — exists in .agents/skills/loop-worker/                                                                                                     
 - workflow checkpoint --log-to-iter, iter-N.yaml schema, overlay split — all done                                                                                             
 - verifier_profiles and app_type_verifier_map fields — not in agentsrc schema yet (see below)

@@ -550,6 +550,119 @@ func TestMergeBack_InvalidVerificationStatus(t *testing.T) {
 	}
 }
 
+// ── p6-fanout-dispatch: typed verifier artifact from verify record ────────────
+
+func TestVerifyRecord_WritesTypedArtifact_WithTask(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo,
+		"verify", "record",
+		"--kind", "test",
+		"--status", "pass",
+		"--task", "t1",
+		"--verifier-type", "unit",
+		"--command", "go test ./...",
+		"--summary", "all packages green",
+	)
+	if err != nil {
+		t.Fatalf("verify record: %v", err)
+	}
+	path := filepath.Join(repo, ".agents", "active", "verification", "t1", "unit.result.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read typed artifact: %v", err)
+	}
+	var got VerificationResultDoc
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.VerifierType != "unit" {
+		t.Fatalf("verifier_type = %q, want unit", got.VerifierType)
+	}
+	if got.TaskID != "t1" || got.ParentPlanID != "p1" {
+		t.Fatalf("ids: task=%q plan=%q", got.TaskID, got.ParentPlanID)
+	}
+	if got.Status != "pass" {
+		t.Fatalf("status = %q, want pass", got.Status)
+	}
+	if len(got.Commands) != 1 || got.Commands[0] != "go test ./..." {
+		t.Fatalf("commands = %v", got.Commands)
+	}
+	if err := validateVerificationResultDoc(&got); err != nil {
+		t.Fatalf("schema validate: %v", err)
+	}
+}
+
+func TestVerifyRecord_DefaultsVerifierTypeToKind(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	// --task provided without --verifier-type: falls back to --kind as stem
+	err := executeWorkflowCommand(t, repo,
+		"verify", "record",
+		"--kind", "custom",
+		"--status", "pass",
+		"--task", "t1",
+		"--summary", "custom check passed",
+	)
+	if err != nil {
+		t.Fatalf("verify record: %v", err)
+	}
+	path := filepath.Join(repo, ".agents", "active", "verification", "t1", "custom.result.yaml")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected custom.result.yaml: %v", err)
+	}
+}
+
+func TestVerifyRecord_NoTaskNoArtifact(t *testing.T) {
+	repo := setupTestProject(t)
+	err := executeWorkflowCommand(t, repo,
+		"verify", "record",
+		"--kind", "test",
+		"--status", "pass",
+		"--summary", "tests green",
+	)
+	if err != nil {
+		t.Fatalf("verify record without --task: %v", err)
+	}
+	// No typed artifact should be written
+	matches, _ := filepath.Glob(filepath.Join(repo, ".agents", "active", "verification", "*", "*.result.yaml"))
+	if len(matches) != 0 {
+		t.Fatalf("expected no typed artifacts without --task, found: %v", matches)
+	}
+}
+
+func TestVerifyRecord_VerifyLogGetsArtifactEntry(t *testing.T) {
+	repo := setupFanoutSliceProject(t, "in_progress")
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo,
+		"verify", "record",
+		"--kind", "test", "--status", "pass",
+		"--task", "t1", "--verifier-type", "unit",
+		"--summary", "pass",
+	); err != nil {
+		t.Fatal(err)
+	}
+	// The log uses the project name (base dir name of the temp repo).
+	projectName := filepath.Base(repo)
+	records, err := readVerificationLog(projectName, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected log entry")
+	}
+	last := records[len(records)-1]
+	if len(last.Artifacts) != 1 || !strings.Contains(last.Artifacts[0], "unit.result.yaml") {
+		t.Fatalf("expected artifact path in log entry, got: %v", last.Artifacts)
+	}
+}
+
 // ── Wave 6 Step 7: orient/status delegation summary ───────────────────────────
 
 func TestCollectDelegationSummary_Empty(t *testing.T) {

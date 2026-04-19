@@ -28,7 +28,7 @@ Important caveat:
 | Task | Canonical status | Audit verdict | Notes |
 | --- | --- | --- | --- |
 | `p1-pipeline-control` | completed | `implemented-complete` | Plan-scoped fanout/next, verification dir lifecycle, TDD gate, verifier retry wiring are present in `commands/workflow/delegation.go`, `bin/tests/ralph-orchestrate`, and `bin/tests/ralph-pipeline`. |
-| `p2-impl-agent-surface` | completed | `implemented-complete` | `impl-agent.project.md` exists, spec documents impl handoff semantics, and `ralph-cursor-loop` explicitly treats impl-agent as separate from loop-worker. Archive file lists are noisy. |
+| `p2-impl-agent-surface` | completed | `implemented-complete` | `impl-agent.project.md` exists, spec documents impl handoff semantics, and `ralph-worker` explicitly treats impl-agent as separate from loop-worker. Archive file lists are noisy. |
 | `p3a-result-schema` | completed | `implemented-complete` | Canonical verification-result schema, embedded validation, and merge-back result writing are present. |
 | `p3b-unit-verifier` | completed | `implemented-complete` | Unit verifier prompt and spec role text landed directly in target files. |
 | `p3c-api-verifier` | completed | `implemented-complete` | API verifier prompt and spec role text are present, but merge-back artifact paths are contaminated by dirty state. |
@@ -66,7 +66,7 @@ Direct evidence:
 - `.agents/prompts/impl-agent.project.md` exists and defines `impl-handoff.yaml`
 - `impl-agent.project.md` defines `write_scope_touched`, `ready_for_verification`, and `tests_unchanged_justified`
 - `docs/LOOP_ORCHESTRATION_SPEC.md` documents the impl-agent role and impl handoff contract
-- `bin/tests/ralph-cursor-loop` explicitly states it does not load `impl-agent.project.md` and logs the impl prompt path separately
+- `bin/tests/ralph-worker` explicitly states it does not load `impl-agent.project.md` and logs the impl prompt path separately
 
 Audit note:
 

@@ -84,7 +84,7 @@ go run ./cmd/dot-agents workflow fanout \
 ### Pattern E: Native subagent (Claude Code Agent tool)
 
 After `workflow fanout` creates the bundle, spawn a worker as a native Claude Code subagent
-instead of shelling out to `ralph-cursor-loop.sh`:
+instead of shelling out to `ralph-worker.sh`:
 
 ```
 Agent(
@@ -107,7 +107,7 @@ Use Pattern E when:
 - You want guaranteed role separation (subagent literally cannot continue orchestrating)
 - You are in an interactive Claude Code session with Agent tool available
 
-Use `ralph-cursor-loop.sh` (script worker) when:
+Use `ralph-worker.sh` (script worker) when:
 - Tasks require many implementation steps or long runtime
 - Running headless/batch without an interactive Claude Code session
 

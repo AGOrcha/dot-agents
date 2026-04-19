@@ -5,7 +5,7 @@ parent_task_id: p2-impl-agent-surface
 title: Separate repo-side impl-agent surface from loop-worker behavior
 summary: Delegated from plan Loop Agent Pipeline Plan
 write_scope:
-    - bin/tests/ralph-cursor-loop
+    - bin/tests/ralph-worker
     - .agents/prompts/impl-agent.project.md
     - docs/LOOP_ORCHESTRATION_SPEC.md
 success_criteria: Define the repo-owned impl-agent overlay and impl-handoff contract without breaking existing Pattern E loop-worker callers. Clarify write_scope_touched, ready_for_verification, and optional tests_unchanged_justified.

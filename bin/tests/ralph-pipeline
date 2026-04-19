@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ralph-pipeline: full E2E orchestration pipeline.
 #   Phase 1: ralph-orchestrate  → discovers unblocked tasks, creates bundles
-#   Phase 2: ralph-cursor-loop  → parallel workers, one per bundle
+#   Phase 2: ralph-worker       → parallel workers, one per bundle
 #   Phase 3: ralph-closeout     → accept merge-backs, advance canonical tasks
 #
 # Each phase uses role-pure scripts. Orchestrator does not implement.
@@ -59,14 +59,16 @@ if [[ -z "${RALPH_PIPELINE_SNAPSHOT_DIR:-}" ]]; then
   cp \
     "$ORIG_SCRIPT_DIR/ralph-pipeline" \
     "$ORIG_SCRIPT_DIR/ralph-orchestrate" \
-    "$ORIG_SCRIPT_DIR/ralph-cursor-loop" \
+    "$ORIG_SCRIPT_DIR/ralph-worker" \
     "$ORIG_SCRIPT_DIR/ralph-closeout" \
     "$SNAPSHOT_DIR/"
+  [[ -f "$ORIG_SCRIPT_DIR/ralph-review-gate" ]] && cp "$ORIG_SCRIPT_DIR/ralph-review-gate" "$SNAPSHOT_DIR/"
   chmod +x \
     "$SNAPSHOT_DIR/ralph-pipeline" \
     "$SNAPSHOT_DIR/ralph-orchestrate" \
-    "$SNAPSHOT_DIR/ralph-cursor-loop" \
+    "$SNAPSHOT_DIR/ralph-worker" \
     "$SNAPSHOT_DIR/ralph-closeout"
+  [[ -f "$SNAPSHOT_DIR/ralph-review-gate" ]] && chmod +x "$SNAPSHOT_DIR/ralph-review-gate"
   export RALPH_PIPELINE_SNAPSHOT_DIR="$SNAPSHOT_DIR"
   export RALPH_PIPELINE_SNAPSHOT_OWNER=1
   exec "$SNAPSHOT_DIR/ralph-pipeline" "$@"
@@ -78,12 +80,24 @@ if [[ "${RALPH_PIPELINE_SNAPSHOT_OWNER:-0}" == "1" ]]; then
 fi
 
 RALPH_ORCHESTRATE="$SCRIPT_DIR/ralph-orchestrate"
-RALPH_WORKER="$SCRIPT_DIR/ralph-cursor-loop"
+RALPH_WORKER="$SCRIPT_DIR/ralph-worker"
 RALPH_CLOSEOUT="$SCRIPT_DIR/ralph-closeout"
+RALPH_REVIEW_GATE="$SCRIPT_DIR/ralph-review-gate"
 
 for s in "$RALPH_ORCHESTRATE" "$RALPH_WORKER" "$RALPH_CLOSEOUT"; do
   [[ -x "$s" ]] || { echo "error: script not found or not executable: $s" >&2; exit 1; }
 done
+
+# Build dot-agents helper for stage expansion
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v dot-agents >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(dot-agents)
+fi
 
 RUN_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
@@ -186,8 +200,8 @@ fi
 
 echo "ralph-pipeline: ${#BUNDLES[@]} bundle(s) created — spawning workers" >&2
 
-# Phase 2: Workers — one per bundle, run in parallel
-echo "=== ralph-pipeline: phase 2 — workers (parallel) ===" >&2
+# Phase 2: Workers — staged pipeline per bundle, bundles run in parallel
+echo "=== ralph-pipeline: phase 2 — staged workers (parallel across bundles) ===" >&2
 
 WORKER_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/workers}"
 [[ -n "$WORKER_LOG_DIR" ]] && mkdir -p "$WORKER_LOG_DIR"
@@ -201,11 +215,52 @@ for bundle_path in "${BUNDLES[@]}"; do
   wlog="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}}"
   [[ -n "$wlog" ]] && mkdir -p "$wlog"
 
-  echo "ralph-pipeline: spawning worker for bundle $(basename "$bundle_path")" >&2
+  echo "ralph-pipeline: spawning staged bundle execution for $(basename "$bundle_path")" >&2
   (
-    export RALPH_LOG_DIR="${wlog:-}"
     export RALPH_ITERATIONS="${RALPH_ITERATIONS:-5}"
-    "$RALPH_WORKER" --bundle "$bundle_path"
+
+    # Expand stages deterministically via dot-agents (impl → verifier:X … → review)
+    stages_text=""
+    if [[ ${#DOT_AGENTS_CMD[@]} -gt 0 ]]; then
+      stages_text="$( (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" workflow bundle stages "$bundle_path") 2>/dev/null)" || stages_text=""
+    fi
+
+    if [[ -z "$stages_text" ]]; then
+      # dot-agents unavailable or no stage metadata — fall back to single loop-worker
+      echo "ralph-pipeline: warning: could not expand stages for $(basename "$bundle_path"), falling back to loop-worker" >&2
+      export RALPH_LOG_DIR="${wlog:-}"
+      "$RALPH_WORKER" --bundle "$bundle_path"
+      exit $?
+    fi
+
+    # Run each stage sequentially; give each stage its own log subdir
+    stage_rc=0
+    while IFS= read -r stage_line; do
+      [[ -z "$stage_line" ]] && continue
+      stage_log="${wlog:+${wlog}/stage-${stage_line//:/+}}"
+      [[ -n "$stage_log" ]] && mkdir -p "$stage_log"
+      export RALPH_LOG_DIR="${stage_log:-}"
+      if [[ "$stage_line" == verifier:* ]]; then
+        vtype="${stage_line#verifier:}"
+        echo "ralph-pipeline: [$(basename "$bundle_path")] stage verifier:${vtype}" >&2
+        "$RALPH_WORKER" --bundle "$bundle_path" --stage verifier --verifier-type "$vtype" || { echo "ralph-pipeline: stage verifier:${vtype} exited non-zero" >&2; stage_rc=$?; }
+      else
+        echo "ralph-pipeline: [$(basename "$bundle_path")] stage ${stage_line}" >&2
+        "$RALPH_WORKER" --bundle "$bundle_path" --stage "$stage_line" || { echo "ralph-pipeline: stage ${stage_line} exited non-zero" >&2; stage_rc=$?; }
+      fi
+    done <<<"$stages_text"
+
+    # Post-staged review gate (p7)
+    gate_rc=0
+    if [[ -x "$RALPH_REVIEW_GATE" ]]; then
+      export RALPH_LOG_DIR=""
+      "$RALPH_REVIEW_GATE" --bundle "$bundle_path" || gate_rc=$?
+      if [[ $gate_rc -ne 0 && $gate_rc -ne 2 ]]; then
+        echo "ralph-pipeline: review gate error (exit $gate_rc) for $(basename "$bundle_path")" >&2
+      fi
+    fi
+
+    exit $stage_rc
   ) &
   pid=$!
   worker_pids+=("$pid")

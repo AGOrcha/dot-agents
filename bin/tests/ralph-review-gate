@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ralph-review-gate: post-staged-chain orchestrator review gate per delegation bundle.
+# Called by ralph-pipeline after all stages (impl → verifier(s) → review) complete for a bundle.
+#
+# Auto mode (RALPH_REVIEW_GATE_AUTO=1, default): scans typed artifacts, prints summary, exits 0.
+# Agent mode (RALPH_REVIEW_GATE_AUTO=0): spawns orchestrator agent to review before advancing.
+# Exits 2 on GATE_FAIL (non-critical: pipeline continues to closeout but logs failure).
+#
+# Usage:
+#   ./ralph-review-gate --bundle <path>
+#
+# Env vars:
+#   RALPH_REVIEW_GATE_AUTO      1 = auto-accept (default), 0 = agent-driven gate
+#   RALPH_CLOSEOUT_AUTO         fallback for RALPH_REVIEW_GATE_AUTO when unset
+#   RALPH_ORCHESTRATOR_MODEL    model override for agent gate
+#   RALPH_MODEL                 fallback model override
+#   RALPH_ORCHESTRATOR_AGENT_BIN  agent binary for gate
+#   AGENT_BIN                   fallback agent binary (default: agent)
+#   RALPH_AGENT_OUTPUT_FORMAT   text|json|stream-json (default stream-json)
+#   DOT_AGENTS                  dot-agents binary or "go run ..." override
+
+set -euo pipefail
+
+BUNDLE_PATH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bundle) BUNDLE_PATH="$2"; shift 2 ;;
+    --bundle=*) BUNDLE_PATH="${1#--bundle=}"; shift ;;
+    *) echo "error: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+[[ -z "$BUNDLE_PATH" ]] && { echo "error: ralph-review-gate requires --bundle <path>" >&2; exit 1; }
+[[ -f "$BUNDLE_PATH" ]] || { echo "error: bundle file not found: $BUNDLE_PATH" >&2; exit 1; }
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+TASK_ID="$(python3 -c "
+import re, sys
+text = open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'^task_id:\s*(.+)', text, re.M)
+print(m.group(1).strip().strip('\"') if m else '')
+" "$BUNDLE_PATH" 2>/dev/null || true)"
+[[ -z "$TASK_ID" ]] && { echo "error: could not extract task_id from bundle $BUNDLE_PATH" >&2; exit 1; }
+
+# RALPH_REVIEW_GATE_AUTO falls back to RALPH_CLOSEOUT_AUTO, then defaults to 1
+GATE_AUTO="${RALPH_REVIEW_GATE_AUTO:-${RALPH_CLOSEOUT_AUTO:-1}}"
+
+VERIFICATION_DIR="$REPO_ROOT/.agents/active/verification/${TASK_ID}"
+MERGE_BACK_PATH="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
+
+echo "ralph-review-gate: task=$TASK_ID auto=${GATE_AUTO}" >&2
+
+if [[ "$GATE_AUTO" == "1" ]]; then
+  artifact_count=0
+  if [[ -d "$VERIFICATION_DIR" ]]; then
+    artifact_count="$(find "$VERIFICATION_DIR" -name "*.result.yaml" -o -name "review-decision.yaml" 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+  merge_back_exists=0
+  [[ -f "$MERGE_BACK_PATH" ]] && merge_back_exists=1
+  echo "ralph-review-gate: task $TASK_ID — artifacts=${artifact_count} merge_back=${merge_back_exists} → auto-accept" >&2
+  exit 0
+fi
+
+# Agent-driven gate
+GATE_MODEL="${RALPH_ORCHESTRATOR_MODEL:-${RALPH_MODEL:-}}"
+GATE_AGENT_BIN="${RALPH_ORCHESTRATOR_AGENT_BIN:-${AGENT_BIN:-agent}}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if ! command -v "$GATE_AGENT_BIN" >/dev/null 2>&1; then
+  echo "error: '$GATE_AGENT_BIN' not found on PATH (install agent CLI or set AGENT_BIN)" >&2
+  exit 1
+fi
+
+agent_inv=( "$GATE_AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+[[ -n "$GATE_MODEL" ]] && agent_inv+=( --model "$GATE_MODEL" )
+
+prompt="You are an orchestrator review gate for task ${TASK_ID}.
+
+Review the typed verification artifacts in:
+  ${VERIFICATION_DIR}/
+
+And the merge-back at:
+  ${MERGE_BACK_PATH}
+
+Read all *.result.yaml files and review-decision.yaml if present.
+Summarize what was verified, whether all gates passed, and whether this task is ready for closeout.
+Output exactly one of these tokens on a line by itself: GATE_PASS or GATE_FAIL
+Then provide a one-sentence reason."
+
+gate_output="$( "${agent_inv[@]}" "$prompt" 2>&1 || true)"
+echo "$gate_output" >&2
+
+if echo "$gate_output" | grep -qw "GATE_FAIL"; then
+  echo "ralph-review-gate: GATE_FAIL for task $TASK_ID — review required before closeout" >&2
+  exit 2
+fi
+
+echo "ralph-review-gate: GATE_PASS for task $TASK_ID" >&2
+exit 0

@@ -354,7 +354,7 @@ This is where files like `.agents/active/active.loop.md` or repo-specific loop p
 - **`streaming` verifier role** (SSE, WebSocket, or other long-lived / event-ordered verification): use **`.agents/prompts/verifiers/streaming.project.md`** as the repo-owned streaming surface. It consumes **`impl-handoff.yaml`**, runs **scoped** stream checks first (one SSE resource, one WS channel, or tagged stream scenarios tied to `write_scope_touched`), then optional broader **soak**, **fault-injection**, or **multi-session** tiers when the plan calls for them, and writes **`.agents/active/verification/<task_id>/streaming.result.yaml`** with `verifier_type: streaming` and the canonical fields in **`schemas/verification-result.schema.json`**. Evidence should capture **behavior over time**: event ordering, heartbeats, **timeouts**, **backpressure** or slow-consumer behavior, **dropped or duplicated** frames when the contract allows, reconnect semantics, and **artifact_paths** pointing to transcripts, frame logs, HAR excerpts, or trace archives. Prefer the **`api` verifier** prompt when the primary evidence is **finite HTTP** responses; prefer **`streaming`** when the primary evidence is **duplex or incremental** delivery. Scoped-first discipline matches other verifier roles: do not broaden to unrelated feeds or full-cluster soak until the slice covering `write_scope_touched` is green.
 - **`review` role** (human gate after verifiers): use **`.agents/prompts/review-agent.project.md`** as the repo-owned review surface. It reads verifier **`*.result.yaml`** files (and **`impl-handoff.yaml`** when relevant), applies repo-specific meaning to **phase 1** vs **phase 2**, then records **`dot-agents workflow verify record --kind review …`** so the CLI writes **`.agents/active/verification/<task_id>/review-decision.yaml`** validated against **`schemas/verification-decision.schema.json`**, appends a lean **`verification-log.jsonl`** line (`kind: review`, status derived from the consolidated decision), and keeps iteration-log review merges (`workflow checkpoint --log-to-iter --role review`) aligned with the same artifact. Prefer **flags** over hand-editing YAML so **escalation** always carries **`--escalation-reason`** when the consolidated outcome is **escalate**.
 
-**Pattern E (`bin/tests/ralph-cursor-loop`)** remains a **loop-worker** caller: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Splitting impl-only fanouts from loop-worker fanouts is deliberate so orchestrators do not reuse one prompt file for both roles.
+**Pattern E (`bin/tests/ralph-worker`)** remains a **loop-worker** caller: it loads the `loop-worker` skill, inlines the project overlay, and expects iteration-close / merge-back. It does **not** load `impl-agent.project.md`. Splitting impl-only fanouts from loop-worker fanouts is deliberate so orchestrators do not reuse one prompt file for both roles.
 
 #### 3. Delegation bundle
 
@@ -463,7 +463,7 @@ prompt:
     - "Implement only the selected task."
   prompt_files:
     - .agents/prompts/loop-worker.project.md
-    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for Pattern E (ralph-cursor-loop)
+    # impl-only: use .agents/prompts/impl-agent.project.md instead; do not load impl-agent for Pattern E (ralph-worker)
 
 context:
   required_files:

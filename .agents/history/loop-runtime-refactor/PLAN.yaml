@@ -2,7 +2,7 @@ schema_version: 1
 id: loop-runtime-refactor
 title: Loop Runtime Refactor — Skill Chain + Ralph Scripts + Subagent Worker
 status: completed
-summary: 'Three-track refactor: (1) fix skill chain load order, strip duplication, and add reconciliation iteration type; (2) split ralph-cursor-loop into role-pure orchestrator/worker/closeout/pipeline scripts; (3) create a cold-start worker skill and Pattern-E subagent invocation pattern for metrics comparison against script workers.'
+summary: 'Three-track refactor: (1) fix skill chain load order, strip duplication, and add reconciliation iteration type; (2) split ralph-worker into role-pure orchestrator/worker/closeout/pipeline scripts; (3) create a cold-start worker skill and Pattern-E subagent invocation pattern for metrics comparison against script workers.'
 created_at: "2026-04-14T00:00:00Z"
 updated_at: "2026-04-17T08:52:21Z"
 owner: dot-agents

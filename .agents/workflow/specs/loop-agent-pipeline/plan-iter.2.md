@@ -172,7 +172,7 @@ none
 
 Repo `write_scope`:
 
-- `bin/tests/ralph-cursor-loop`
+- `bin/tests/ralph-worker`
 - `.agents/prompts/impl-agent.project.md` (new)
 - `docs/LOOP_ORCHESTRATION_SPEC.md`
 

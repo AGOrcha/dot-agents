@@ -1,6 +1,6 @@
 # Impl-agent — repo project overlay (implementation slice)
 
-Use this file as **`--prompt-file`** (or alongside inline `--prompt`) when the delegated role is **implementation-only**: code changes inside `write_scope`, plus a durable handoff for verifiers. It is **not** a substitute for the global `loop-worker` profile and **not** what `bin/tests/ralph-cursor-loop` assembles (that script is **Pattern E — loop-worker** with verify / checkpoint / merge-back).
+Use this file as **`--prompt-file`** (or alongside inline `--prompt`) when the delegated role is **implementation-only**: code changes inside `write_scope`, plus a durable handoff for verifiers. It is **not** a substitute for the global `loop-worker` profile and **not** what `bin/tests/ralph-worker` assembles (that script is **Pattern E — loop-worker** with verify / checkpoint / merge-back).
 
 ## Role boundary
 

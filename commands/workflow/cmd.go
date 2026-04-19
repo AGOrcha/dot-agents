@@ -313,11 +313,13 @@ preferences, fanout artifacts, and bridge queries.`,
 	var verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary string
 	var reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask string
 	var reviewFailedGates []string
+	var verifyVerifierType string
 	verifyRecordCmd := &cobra.Command{
 		Use:   "record",
 		Short: "Record a verification run",
 		Example: deps.ExampleBlock(
 			"  dot-agents workflow verify record --kind test --status pass --command \"go test ./...\" --summary \"all packages passed\"",
+			"  dot-agents workflow verify record --kind test --status pass --task t1 --verifier-type unit --summary \"go test ./...\"",
 			"  dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"ready to merge\"",
 		),
 		Args: deps.NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
@@ -344,7 +346,7 @@ preferences, fanout artifacts, and bridge queries.`,
 			if strings.TrimSpace(verifyStatus) == "" {
 				return fmt.Errorf("--status is required when --kind is not review")
 			}
-			return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary)
+			return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary, reviewTask, verifyVerifierType)
 		},
 	}
 	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom|review (required)")
@@ -358,7 +360,8 @@ preferences, fanout artifacts, and bridge queries.`,
 	verifyRecordCmd.Flags().StringSliceVar(&reviewFailedGates, "failed-gate", nil, "When --kind review: failed verifier or gate slug (repeatable)")
 	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
 	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
-	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "When --kind review: task id under .agents/active/delegation/<task>.yaml (defaults to sole active delegation)")
+	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id for delegation contract lookup (required for --kind review; optional for other kinds to write a typed result artifact)")
+	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, "verifier-type", "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")
 
@@ -614,7 +617,28 @@ preferences, fanout artifacts, and bridge queries.`,
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd)
+	bundleCmd := &cobra.Command{
+		Use:   "bundle",
+		Short: "Inspect delegation bundle artifacts",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow bundle stages .agents/active/delegation-bundles/del-task-001.yaml",
+		),
+	}
+	bundleStagesCmd := &cobra.Command{
+		Use:   "stages <bundle-path>",
+		Short: "Expand a delegation bundle into the ordered impl → verifier(s) → review stage list",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow bundle stages .agents/active/delegation-bundles/del-task-001.yaml",
+			"  dot-agents --json workflow bundle stages <bundle-path>",
+		),
+		Args: deps.ExactArgsWithHints(1, "Pass the path to a delegation bundle YAML file."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowBundleStages(args[0])
+		},
+	}
+	bundleCmd.AddCommand(bundleStagesCmd)
+
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
 	return cmd
 }
 

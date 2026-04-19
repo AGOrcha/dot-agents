@@ -208,7 +208,7 @@ tasks:
         - bin/tests/ralph-orchestrate.sh
       verification_required: true
       notes: |
-        New script forked from ralph-cursor-loop.sh. Key behavioral changes:
+        New script forked from ralph-worker.sh. Key behavioral changes:
         - No ITERATIONS outer loop. Runs the orchestrator agent exactly ONCE.
         - Snapshot: orient + next only (remove status from the 3-command capture).
         - Multi-task discovery:
@@ -231,7 +231,7 @@ tasks:
         Verification: run with no unblocked tasks → exits 0, no RALPH_BUNDLE lines.
         Run with one unblocked task → emits exactly one RALPH_BUNDLE line.
     - id: phase-3b-ralph-worker-rework
-      title: Phase 3b — Rework ralph-cursor-loop.sh to worker-only (--bundle required)
+      title: Phase 3b — Rework ralph-worker.sh to worker-only (--bundle required)
       status: completed
       depends_on:
         - phase-3a-ralph-orchestrate
@@ -239,11 +239,11 @@ tasks:
         - phase-3d-ralph-pipeline
       owner: dot-agents
       write_scope:
-        - bin/tests/ralph-cursor-loop.sh
+        - bin/tests/ralph-worker.sh
       verification_required: true
       notes: |
         Breaking change: --bundle <path> is now required. Without it, the script exits with:
-          "error: ralph-cursor-loop requires --bundle <delegation_bundle_path>
+          "error: ralph-worker requires --bundle <delegation_bundle_path>
            To create a bundle and select a task, use ralph-orchestrate.sh first."
 
         Key removals:
@@ -263,8 +263,8 @@ tasks:
         Kept env vars: RALPH_ITERATIONS, RALPH_MODEL, RALPH_FORCE, RALPH_NO_LOG,
         RALPH_LOG_DIR, RALPH_AGENT_OUTPUT_FORMAT, AGENT_BIN.
 
-        Verification: ./bin/tests/ralph-cursor-loop.sh (no args) → error message.
-        ./bin/tests/ralph-cursor-loop.sh --bundle <valid_path> → runs worker agent.
+        Verification: ./bin/tests/ralph-worker.sh (no args) → error message.
+        ./bin/tests/ralph-worker.sh --bundle <valid_path> → runs worker agent.
     - id: phase-3c-ralph-closeout
       title: Phase 3c — Create ralph-closeout.sh (advance + delegation closeout per merge-back)
       status: completed
@@ -311,7 +311,7 @@ tasks:
         Structure:
           LOG_DIR=.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)
           Phase 1: ralph-orchestrate.sh → parse RALPH_BUNDLE lines → collect BUNDLES array
-          Phase 2: parallel workers — for each bundle spawn ralph-cursor-loop.sh as background job
+          Phase 2: parallel workers — for each bundle spawn ralph-worker.sh as background job
           Phase 3: wait for all workers → ralph-closeout.sh
 
         Early exits:
@@ -391,7 +391,7 @@ tasks:
 
         Content:
           After workflow fanout creates the bundle, spawn a worker as a native Claude Code
-          subagent instead of shelling out to ralph-cursor-loop.sh:
+          subagent instead of shelling out to ralph-worker.sh:
 
             Agent(
               description="Implement <task_id> in <plan_id>",
@@ -412,7 +412,7 @@ tasks:
           - You want guaranteed role separation (subagent literally cannot continue orchestrating)
           - You are in an interactive Claude Code session with Agent tool available
 
-          Use ralph-cursor-loop.sh (script worker) when:
+          Use ralph-worker.sh (script worker) when:
           - Tasks require multiple hours or many implementation steps
           - Running headless/batch without an interactive Claude Code session
     - id: phase-4c-metrics-capture
@@ -425,13 +425,13 @@ tasks:
       owner: dot-agents
       write_scope:
         - bin/tests/ralph-pipeline.sh
-        - bin/tests/ralph-cursor-loop.sh
+        - bin/tests/ralph-worker.sh
       verification_required: true
       notes: |
         Extend the metrics.json stub from phase-3d and the worker script to capture the
         fields needed for script vs Pattern E comparison:
 
-        ralph-pipeline.sh and ralph-cursor-loop.sh emit:
+        ralph-pipeline.sh and ralph-worker.sh emit:
           {
             "run_id": "<log dir basename>",
             "timestamp": "<ISO8601>",

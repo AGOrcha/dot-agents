@@ -3,7 +3,7 @@
 # emits machine-parseable "RALPH_BUNDLE: <path>" lines for each bundle created.
 #
 # Run the orchestrator agent EXACTLY ONCE, then exit. No implementation loop.
-# Use ralph-cursor-loop (worker) and ralph-pipeline (E2E) for the rest.
+# Use ralph-worker (worker) and ralph-pipeline (E2E) for the rest.
 #
 # Env vars:
 #   RALPH_MAX_PARALLEL_WORKERS   max bundles to create per run (default 3)

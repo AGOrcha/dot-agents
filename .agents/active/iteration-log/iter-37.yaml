@@ -14,12 +14,12 @@ scenario_tags:
     - loop-worker-vs-impl
     - pattern-e
     - impl-handoff
-feedback_goal: "Repo-owned impl-agent overlay and impl-handoff fields documented; ralph-cursor-loop remains loop-worker; write_scope_touched / ready_for_verification / tests_unchanged_justified clarified"
+feedback_goal: "Repo-owned impl-agent overlay and impl-handoff fields documented; ralph-worker remains loop-worker; write_scope_touched / ready_for_verification / tests_unchanged_justified clarified"
 tests_added: 0
 tests_total_pass: null
 retries: 0
-scope_note: "bin/tests/ralph-cursor-loop, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md"
-summary: "Added impl-agent.project.md; LOOP_ORCHESTRATION_SPEC: role split (loop-worker vs impl-agent), impl-handoff table, Pattern E note; ralph-cursor-loop header + worker-context.env prompt_surface and impl_agent_* reference keys"
+scope_note: "bin/tests/ralph-worker, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md"
+summary: "Added impl-agent.project.md; LOOP_ORCHESTRATION_SPEC: role split (loop-worker vs impl-agent), impl-handoff table, Pattern E note; ralph-worker header + worker-context.env prompt_surface and impl_agent_* reference keys"
 self_assessment:
     read_loop_state: true
     one_item_only: true
@@ -30,7 +30,7 @@ self_assessment:
     persisted_via_workflow_commands: "yes"
     ran_cli_command: true
     exercised_new_scenario: true
-    cli_produced_actionable_feedback: "ok — workflow tasks loop-agent-pipeline; verify record + checkpoint; bash negative paths for ralph-cursor-loop"
+    cli_produced_actionable_feedback: "ok — workflow tasks loop-agent-pipeline; verify record + checkpoint; bash negative paths for ralph-worker"
     linked_traces_to_outcomes: true
     stayed_under_10_files: true
     no_destructive_commands: true

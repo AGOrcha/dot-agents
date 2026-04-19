@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# ralph-cursor-loop: worker-only implementation loop for a single delegated task.
+# ralph-worker: worker stage runner for a single delegated task.
 #
-# Pattern E (this script): loop-worker semantics — global loop-worker profile + repo project overlay
-# (.agents/active/active.loop.md) + loop-worker / iteration-close skills, then verify → checkpoint →
-# merge-back. It does NOT load .agents/prompts/impl-agent.project.md; that file is for impl-only
-# fanouts (implementation slice + impl-handoff.yaml) per docs/LOOP_ORCHESTRATION_SPEC.md.
+# Without --stage (backward compat): Pattern E loop-worker — global loop-worker profile + repo
+# project overlay + loop-worker / iteration-close skills, exits when merge-back is written.
 #
-# --bundle <path> is REQUIRED. To create a bundle and select a task, use ralph-orchestrate first.
+# With --stage impl: loads .agents/prompts/impl-agent.project.md, exits when impl-handoff.yaml
+# is written to .agents/active/verification/<task_id>/impl-handoff.yaml.
 #
-# Worker loop: reads the bundle, implements write_scope, runs /iteration-close.
-# Exits when merge-back artifact is found or implementation budget is exhausted.
+# With --stage verifier --verifier-type <type>: loads .agents/prompts/verifiers/<type>.project.md,
+# exits when .agents/active/verification/<task_id>/<type>.result.yaml is written.
+#
+# With --stage review: loads .agents/prompts/review-agent.project.md, exits when merge-back is
+# written. The review stage is responsible for workflow verify record + workflow merge-back.
+#
+# --bundle <path> is REQUIRED.
 #
 # Env vars:
 #   RALPH_ITERATIONS             implementation budget — max iterations (default 5)
@@ -31,34 +35,51 @@
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Usage:
-#   ./bin/tests/ralph-cursor-loop --bundle .agents/active/delegation-bundles/<id>.yaml
-#   RALPH_ITERATIONS=3 ./bin/tests/ralph-cursor-loop --bundle <path>
-#   RALPH_MODEL=sonnet-4 ./bin/tests/ralph-cursor-loop --bundle <path>
+#   ./bin/tests/ralph-worker --bundle <path>
+#   ./bin/tests/ralph-worker --bundle <path> --stage impl
+#   ./bin/tests/ralph-worker --bundle <path> --stage verifier --verifier-type unit
+#   ./bin/tests/ralph-worker --bundle <path> --stage review
 
 set -euo pipefail
 
 BUNDLE_PATH=""
+STAGE=""
+VERIFIER_TYPE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle) BUNDLE_PATH="$2"; shift 2 ;;
     --bundle=*) BUNDLE_PATH="${1#--bundle=}"; shift ;;
+    --stage) STAGE="$2"; shift 2 ;;
+    --stage=*) STAGE="${1#--stage=}"; shift ;;
+    --verifier-type) VERIFIER_TYPE="$2"; shift 2 ;;
+    --verifier-type=*) VERIFIER_TYPE="${1#--verifier-type=}"; shift ;;
     *) echo "error: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
 if [[ -z "$BUNDLE_PATH" ]]; then
   cat >&2 <<'EOF'
-error: ralph-cursor-loop requires --bundle <delegation_bundle_path>
+error: ralph-worker requires --bundle <delegation_bundle_path>
 
 To create a bundle and select a task, use ralph-orchestrate first:
 
   ./bin/tests/ralph-orchestrate          # creates bundles, emits RALPH_BUNDLE: lines
-  ./bin/tests/ralph-cursor-loop --bundle <path>
+  ./bin/tests/ralph-worker --bundle <path>
 
 Or use the E2E pipeline:
 
   ./bin/tests/ralph-pipeline
 EOF
+  exit 1
+fi
+
+# Validate --stage and --verifier-type
+case "${STAGE:-}" in
+  ""|impl|verifier|review) ;;
+  *) echo "error: --stage must be impl, verifier, or review (got '$STAGE')" >&2; exit 1 ;;
+esac
+if [[ "$STAGE" == "verifier" && -z "$VERIFIER_TYPE" ]]; then
+  echo "error: --verifier-type <type> is required when --stage verifier" >&2
   exit 1
 fi
 
@@ -207,7 +228,12 @@ resolve_worker_model() {
   fi
 }
 
-WORKER_ROLE="$(classify_worker_role "$TASK_ID" "$WRITE_SCOPE_CSV")"
+# When --stage is explicit, use it directly. Otherwise fall back to heuristic classification.
+if [[ -n "$STAGE" ]]; then
+  WORKER_ROLE="$STAGE"
+else
+  WORKER_ROLE="$(classify_worker_role "$TASK_ID" "$WRITE_SCOPE_CSV")"
+fi
 AGENT_BIN="$(resolve_worker_agent_bin "$WORKER_ROLE")"
 ROLE_MODEL="$(resolve_worker_model "$WORKER_ROLE")"
 
@@ -253,29 +279,61 @@ find_skill_dir() {
 WORKER_SKILL_DIR="$(find_skill_dir loop-worker || true)"
 ITER_CLOSE_DIR="$(find_skill_dir iteration-close || true)"
 
+# Stage-specific prompt surfaces
+IMPL_SURFACE_FILE="$REPO_ROOT/.agents/prompts/impl-agent.project.md"
+REVIEW_SURFACE_FILE="$REPO_ROOT/.agents/prompts/review-agent.project.md"
+VERIFIER_SURFACE_FILE=""
+if [[ -n "$VERIFIER_TYPE" ]]; then
+  VERIFIER_SURFACE_FILE="$REPO_ROOT/.agents/prompts/verifiers/${VERIFIER_TYPE}.project.md"
+fi
+
+# Done condition per stage
+merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
+impl_handoff_path="$REPO_ROOT/.agents/active/verification/${TASK_ID}/impl-handoff.yaml"
+verifier_result_path=""
+if [[ -n "$VERIFIER_TYPE" ]]; then
+  verifier_result_path="$REPO_ROOT/.agents/active/verification/${TASK_ID}/${VERIFIER_TYPE}.result.yaml"
+fi
+
+# Derive the done-condition path and label for this stage
+done_artifact=""
+done_label=""
+case "${STAGE:-}" in
+  impl)
+    done_artifact="$impl_handoff_path"
+    done_label="impl-handoff.yaml"
+    ;;
+  verifier)
+    done_artifact="$verifier_result_path"
+    done_label="${VERIFIER_TYPE}.result.yaml"
+    ;;
+  review|"")
+    done_artifact="$merge_back_path"
+    done_label="merge-back.md"
+    ;;
+esac
+
 if [[ -n "$LOG_DIR" ]]; then
   mkdir -p "$LOG_DIR"
-  echo "ralph-cursor-loop: log dir: $LOG_DIR" >&2
+  stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
+  echo "ralph-worker: log dir: $LOG_DIR (stage=$stage_label)" >&2
   {
     echo "bundle_path=${BUNDLE_PATH}"
     echo "plan_id=${PLAN_ID}"
     echo "task_id=${TASK_ID}"
+    echo "stage=${STAGE:-}"
+    echo "verifier_type=${VERIFIER_TYPE:-}"
     echo "worker_role=${WORKER_ROLE}"
     echo "write_scope_csv=${WRITE_SCOPE_CSV}"
-    echo "prompt_surface=loop-worker"
+    echo "prompt_surface=${STAGE:-loop-worker}"
     echo "resolved_agent_bin=${AGENT_BIN}"
     echo "resolved_model=${ROLE_MODEL}"
-    echo "impl_agent_prompt_file=${REPO_ROOT}/.agents/prompts/impl-agent.project.md"
-    echo "impl_agent_prompt_loaded=false"
-    echo "loop_profile_path=${LOOP_PROFILE_FILE}"
-    echo "worker_overlay_path=${WORKER_OVERLAY}"
+    echo "done_artifact=${done_artifact}"
   } >"$LOG_DIR/worker-context.env"
   [[ -f "$LOOP_PROFILE_FILE" ]] && cp -f "$LOOP_PROFILE_FILE" "$LOG_DIR/loop-worker-profile.md"
   [[ -f "$WORKER_OVERLAY" ]] && cp -f "$WORKER_OVERLAY" "$LOG_DIR/active.loop-overlay.md"
   cp -f "$BUNDLE_PATH" "$LOG_DIR/delegation-bundle.yaml"
 fi
-
-merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
 
 if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
@@ -288,12 +346,13 @@ else
 fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 
-echo "ralph-cursor-loop: starting worker for plan=$PLAN_ID task=$TASK_ID role=$WORKER_ROLE (budget: ${ITERATIONS} iterations)" >&2
+stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
+echo "ralph-worker: starting worker for plan=$PLAN_ID task=$TASK_ID stage=$stage_label (budget: ${ITERATIONS} iterations)" >&2
 
 for ((i = 1; i <= ITERATIONS; i++)); do
-  # Exit early if merge-back artifact already exists (prior iteration closed out)
-  if [[ -f "$merge_back_path" ]]; then
-    echo "ralph-cursor-loop: merge-back found at $merge_back_path — worker done after $((i-1)) iteration(s)" >&2
+  # Exit early if the stage's done artifact already exists
+  if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
+    echo "ralph-worker: ${done_label} found — stage $stage_label done after $((i-1)) iteration(s)" >&2
     break
   fi
 
@@ -303,7 +362,7 @@ for ((i = 1; i <= ITERATIONS; i++)); do
 
   {
     cat <<EOF
-You are a bounded implementation worker for task ${TASK_ID} in plan ${PLAN_ID}.
+You are a bounded ${stage_label} worker for task ${TASK_ID} in plan ${PLAN_ID}.
 
 ## Delegation bundle (your authoritative task scope)
 Bundle path: ${BUNDLE_PATH}
@@ -314,15 +373,90 @@ Write scope: ${WRITE_SCOPE_CSV}
 Read the bundle YAML for feedback_goal, context_files, and full write_scope before starting.
 
 EOF
-    if [[ -n "${WORKER_SKILL_DIR:-}" ]]; then
-      cat <<EOF
+
+    # Stage-specific role surface
+    case "${STAGE:-}" in
+      impl)
+        if [[ -f "$IMPL_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Impl-agent role surface
+File: ${IMPL_SURFACE_FILE}
+EOF
+          cat "$IMPL_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(impl-agent surface not found at $IMPL_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+When implementation is complete, write:
+  ${impl_handoff_path}
+with fields: task_id, commit_sha, write_scope_touched, ready_for_verification, impl_notes
+Then run: dot-agents workflow checkpoint --message "impl complete"
+Stop after writing impl-handoff.yaml. Do NOT write merge-back in this stage.
+
+EOF
+        ;;
+      verifier)
+        if [[ -f "$VERIFIER_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Verifier role surface (${VERIFIER_TYPE})
+File: ${VERIFIER_SURFACE_FILE}
+EOF
+          cat "$VERIFIER_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(verifier surface not found at $VERIFIER_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+Read impl-handoff.yaml at: ${impl_handoff_path}
+Run verification. Then record result via:
+  dot-agents workflow verify record --kind test --status pass|fail --task ${TASK_ID} --verifier-type ${VERIFIER_TYPE} --summary "..."
+This writes: ${verifier_result_path}
+Stop after writing the result. Do NOT write merge-back in this stage.
+
+EOF
+        ;;
+      review)
+        if [[ -f "$REVIEW_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Review-agent role surface
+File: ${REVIEW_SURFACE_FILE}
+EOF
+          cat "$REVIEW_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(review-agent surface not found at $REVIEW_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+Read verifier result artifacts in: ${REPO_ROOT}/.agents/active/verification/${TASK_ID}/
+Run review. Record decision via:
+  dot-agents workflow verify record --kind review --phase1-decision <d> --phase2-decision <d> --task ${TASK_ID} --summary "..."
+Then write merge-back via:
+  dot-agents workflow merge-back --task ${TASK_ID} --summary "..." --verification-status pass|fail
+Stop after writing merge-back.
+
+EOF
+        ;;
+      *)
+        # Original loop-worker surface (no --stage or legacy behavior)
+        if [[ -n "${WORKER_SKILL_DIR:-}" ]]; then
+          cat <<EOF
 ## Worker skill (load this)
 Skill root: ${WORKER_SKILL_DIR}
 Read SKILL.md, then instructions/startup.md and instructions/gotchas.md.
 
 EOF
-    else
-      cat <<'EOF'
+        else
+          cat <<'EOF'
 ## Worker discipline (loop-worker skill not found — follow from memory)
 - Honor write_scope: do not mutate files outside the listed paths
 - Do NOT run workflow orient, workflow next, or workflow status — bundle is your context
@@ -331,42 +465,44 @@ EOF
 - Closeout: verify record → checkpoint → workflow merge-back (NOT workflow advance)
 
 EOF
-    fi
-    cat <<EOF
+        fi
+        cat <<EOF
 ## Project overlay
 EOF
-    if [[ -f "$WORKER_OVERLAY" ]]; then
-      cat "$WORKER_OVERLAY"
-    else
-      echo "(overlay not found at $WORKER_OVERLAY)"
-    fi
-    cat <<EOF
+        if [[ -f "$WORKER_OVERLAY" ]]; then
+          cat "$WORKER_OVERLAY"
+        else
+          echo "(overlay not found at $WORKER_OVERLAY)"
+        fi
+        cat <<EOF
 
 ## Global worker profile
 EOF
-    if [[ -f "$LOOP_PROFILE_FILE" ]]; then
-      cat "$LOOP_PROFILE_FILE"
-    else
-      echo "(loop-worker profile not found at $LOOP_PROFILE_FILE)"
-    fi
-    if [[ -n "${ITER_CLOSE_DIR:-}" ]]; then
-      cat <<EOF
+        if [[ -f "$LOOP_PROFILE_FILE" ]]; then
+          cat "$LOOP_PROFILE_FILE"
+        else
+          echo "(loop-worker profile not found at $LOOP_PROFILE_FILE)"
+        fi
+        if [[ -n "${ITER_CLOSE_DIR:-}" ]]; then
+          cat <<EOF
 
 ## iteration-close skill (use at end of this iteration)
 ${ITER_CLOSE_DIR}
 EOF
-    fi
-    cat <<EOF
+        fi
+        cat <<EOF
 
 ## Iteration ${i} of ${ITERATIONS} (implementation budget)
 Implement ONE item within write_scope. Run /iteration-close when done.
 When merge-back is complete, stop — do not continue to a new task.
 EOF
+        ;;
+    esac
   } >"$prompt_file"
 
   [[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/worker-iter-${i}.txt"
 
-  echo "=== ralph-cursor-loop: worker iteration $i/$ITERATIONS ===" >&2
+  echo "=== ralph-worker: worker iteration $i/$ITERATIONS ===" >&2
   agent_rc=0
   if [[ -n "$LOG_DIR" ]]; then
     case "$OUTPUT_FORMAT" in
@@ -387,19 +523,19 @@ EOF
     set -e
   fi
   if [[ $agent_rc -ne 0 ]]; then
-    echo "ralph-cursor-loop: agent exited with code $agent_rc on iteration $i" >&2
+    echo "ralph-worker: agent exited with code $agent_rc on iteration $i" >&2
   fi
 
   trap - EXIT
   cleanup_iter
 done
 
-# Final check: did the worker produce a merge-back?
-if [[ -f "$merge_back_path" ]]; then
-  echo "ralph-cursor-loop: worker complete — merge-back at $merge_back_path" >&2
+# Final check: did the worker produce the expected done artifact?
+if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
+  echo "ralph-worker: worker complete — ${done_label} written for task $TASK_ID" >&2
 else
-  echo "ralph-cursor-loop: budget exhausted (${ITERATIONS} iterations) without merge-back for task $TASK_ID" >&2
+  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) without ${done_label} for task $TASK_ID" >&2
   echo "  → Parent should inspect and either extend budget or run ralph-closeout manually." >&2
 fi
 
-echo "ralph-cursor-loop: done." >&2
+echo "ralph-worker: done." >&2

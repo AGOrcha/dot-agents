@@ -176,7 +176,7 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 	return nil
 }
 
-func runWorkflowVerifyRecord(kind, status, command, scope, summary string) error {
+func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, verifierType string) error {
 	if strings.TrimSpace(strings.ToLower(kind)) == "review" {
 		return fmt.Errorf("internal error: use runWorkflowVerifyRecordReview for kind review")
 	}
@@ -202,15 +202,59 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary string) error
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Write typed <verifier_type>.result.yaml when --task is provided.
+	taskID = strings.TrimSpace(taskID)
+	var artifactRel string
+	if taskID != "" {
+		vt := strings.TrimSpace(verifierType)
+		if vt == "" {
+			vt = strings.TrimSpace(strings.ToLower(kind))
+		}
+		if !validVerificationVerifierTypeStem(vt) {
+			return deps.ErrorWithHints(
+				fmt.Sprintf("verifier-type %q is not a valid artifact stem (must match ^[a-z][a-z0-9_-]*$)", vt),
+				"Use a profile id like `unit`, `api`, `batch`, or omit --verifier-type to derive it from --kind.",
+			)
+		}
+		contract, cerr := loadDelegationContract(project.Path, taskID)
+		if cerr != nil {
+			return fmt.Errorf("load delegation contract for task %q: %w", taskID, cerr)
+		}
+		doc := &VerificationResultDoc{
+			SchemaVersion: 1,
+			TaskID:        taskID,
+			ParentPlanID:  contract.ParentPlanID,
+			VerifierType:  vt,
+			Status:        status,
+			Summary:       strings.TrimSpace(summary),
+			RecordedAt:    now,
+			DelegationID:  contract.ID,
+			RecordedBy:    "dot-agents workflow verify record",
+		}
+		if strings.TrimSpace(command) != "" {
+			doc.Commands = []string{command}
+		}
+		if err := writeVerificationResultYAML(project.Path, doc); err != nil {
+			return fmt.Errorf("write verification result artifact: %w", err)
+		}
+		artifactRel = filepath.ToSlash(filepath.Join(".agents", "active", "verification", taskID, vt+".result.yaml"))
+	}
+
+	artifacts := []string{}
+	if artifactRel != "" {
+		artifacts = append(artifacts, artifactRel)
+	}
 	rec := VerificationRecord{
 		SchemaVersion: 1,
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Timestamp:     now,
 		Kind:          kind,
 		Status:        status,
 		Command:       command,
 		Scope:         scope,
 		Summary:       summary,
-		Artifacts:     []string{},
+		Artifacts:     artifacts,
 		RecordedBy:    "dot-agents workflow verify record",
 	}
 	if err := appendVerificationLog(project.Name, rec); err != nil {

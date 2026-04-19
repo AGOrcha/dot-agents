@@ -9,7 +9,7 @@ Fix Ralph orchestration so it does not fan out conflicting tasks, and add per-ro
 ## Scope
 
 - `bin/tests/ralph-orchestrate`
-- `bin/tests/ralph-cursor-loop`
+- `bin/tests/ralph-worker`
 - `bin/tests/ralph-closeout`
 - `bin/tests/ralph-pipeline`
 

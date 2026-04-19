@@ -31,14 +31,14 @@ tasks:
         - p6-fanout-dispatch
       owner: dot-agents
       write_scope:
-        - bin/tests/ralph-cursor-loop
+        - bin/tests/ralph-worker
         - .agents/prompts/impl-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
       notes: |-
         **feedback_goal:** Repo-owned impl-agent overlay and impl-handoff contract updated; Pattern E loop-worker callers still work; `write_scope_touched`, `ready_for_verification`, and optional `tests_unchanged_justified` semantics clarified in spec + scripts; verification passes.
 
-        **write_scope:** bin/tests/ralph-cursor-loop, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+        **write_scope:** bin/tests/ralph-worker, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
 
         **context:** Delegation bundle `del-p2-impl-agent-surface-1776438876` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe to run in parallel** with `p1-pipeline-control` and `agents-import` — no overlap with `commands/workflow.go` or `commands/agents.go`. Worker runs verify + checkpoint + merge-back.
     - id: p3a-result-schema

@@ -28,7 +28,7 @@ Key directories:
 - `~/.claude/skills/` — user-scope global skills (agent-start, skill-architect, etc.)
 - `.agents/active/` — loop-state.md, active overlays, delegation artifacts
 - `.agents/workflow/plans/` — canonical PLAN.yaml + TASKS.yaml per initiative
-- `bin/tests/` — ralph scripts (ralph-cursor-loop currently, new scripts go here)
+- `bin/tests/` — ralph scripts (ralph-worker currently, new scripts go here)
 - `commands/workflow.go` — all `workflow *` CLI implementations (do NOT touch in this plan)
 
 **Pre-existing build break:** `internal/graphstore/postgres.go` imports `pgx/v5` which is
@@ -54,7 +54,7 @@ TASKS: `.agents/workflow/plans/loop-runtime-refactor/TASKS.yaml`
 
 **Phase 3 — Ralph scripts** (4 tasks, `bin/tests/`):
 - 3a: `ralph-orchestrate.sh` — orchestrator-only, multi-task discovery, emits RALPH_BUNDLE lines
-- 3b: `ralph-cursor-loop.sh` rework — worker-only, `--bundle` required
+- 3b: `ralph-worker.sh` rework — worker-only, `--bundle` required
 - 3c: `ralph-closeout.sh` — scans merge-backs, runs advance + delegation closeout
 - 3d: `ralph-pipeline.sh` — full E2E wrapper
 
@@ -74,7 +74,7 @@ TASKS: `.agents/workflow/plans/loop-runtime-refactor/TASKS.yaml`
 | `.agents/skills/iteration-close/instructions/workflow.md` | Phase 1e target |
 | `.agents/active/active.loop.md` | Phases 1b, 1c, 1d, 2a targets |
 | `~/.agents/profiles/loop-worker.md` | Read-only reference — the three-layer model it defines is the architectural basis for Phase 2 |
-| `bin/tests/ralph-cursor-loop` | Phase 3b base — read before reworking |
+| `bin/tests/ralph-worker` | Phase 3b base — read before reworking |
 
 ## Current State
 
@@ -135,7 +135,7 @@ TASKS: `.agents/workflow/plans/loop-runtime-refactor/TASKS.yaml`
   but don't invest time trying to understand it deeply.
 
 - **The ralph scripts are in `bin/tests/` not `scripts/`** — `scripts/` has install/verify
-  scripts. Ralph lives at `bin/tests/ralph-cursor-loop` (no `.sh` extension currently).
+  scripts. Ralph lives at `bin/tests/ralph-worker` (no `.sh` extension currently).
   New scripts should follow the same pattern: no extension, `#!/usr/bin/env bash` shebang.
 
 - **Phase 3 scripts have no tests** — shell scripts in `bin/tests/` are not tested by

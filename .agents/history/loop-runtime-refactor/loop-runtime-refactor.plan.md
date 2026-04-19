@@ -16,7 +16,7 @@ as a real multi-agent system:
    reconciliation iteration type, and auto-escalate tool-bugs. Reduces per-iteration cognitive
    overhead without touching the CLI.
 
-2. **Ralph runtime scripts** — split `ralph-cursor-loop.sh` into role-pure orchestrator,
+2. **Ralph runtime scripts** — split `ralph-worker.sh` into role-pure orchestrator,
    worker, closeout, and pipeline scripts. `ITERATIONS` becomes a worker-budget param, not
    an orchestrator re-run count.
 
@@ -51,7 +51,7 @@ as a real multi-agent system:
 - The `loop-worker` skill (Phase 4a) is a thin wrapper: it loads
   `~/.agents/profiles/loop-worker.md` (already has discipline + closeout sequence) plus
   the startup instructions. It does not duplicate the profile's content.
-- Scripts land in `bin/tests/` (same location as `ralph-cursor-loop`). They are not installed
+- Scripts land in `bin/tests/` (same location as `ralph-worker`). They are not installed
   globally; CI ignores them.
 
 ---
@@ -213,7 +213,7 @@ Workers continue to use `--project-overlay .agents/active/active.loop.md`.
 
 ### 3a. `ralph-orchestrate.sh`
 
-Fork of current `ralph-cursor-loop.sh`. Key changes:
+Fork of current `ralph-worker.sh`. Key changes:
 - Remove `ITERATIONS` outer loop — orchestrator runs exactly once per invocation
 - Snapshot: `orient + next` only (drop `status` from the 3-command snapshot)
 - Multi-task discovery: after orient/next, call `workflow tasks <plan>` for the chosen plan;
@@ -228,7 +228,7 @@ Env vars:
 - `RALPH_AUTO_FANOUT` (default 1) — orchestrator creates bundles for all unblocked tasks
 - `RALPH_FANOUT_PLAN` / `RALPH_FANOUT_TASK` — manual override (still works)
 
-### 3b. `ralph-cursor-loop.sh` (reworked to worker-only)
+### 3b. `ralph-worker.sh` (reworked to worker-only)
 
 Breaking change: `--bundle <path>` is now required. Without it the script exits with an error
 and a pointer to `ralph-orchestrate.sh`.
@@ -288,7 +288,7 @@ echo "Spawning ${#BUNDLES[@]} worker(s)..." >&2
 pids=()
 for bundle in "${BUNDLES[@]}"; do
   task_id=$(grep '^task_id:' "$bundle" | awk '{print $2}')
-  ./bin/tests/ralph-cursor-loop.sh --bundle "$bundle" \
+  ./bin/tests/ralph-worker.sh --bundle "$bundle" \
     2>&1 | tee "$LOG_DIR/worker-${task_id}.log" &
   pids+=($!)
 done
@@ -326,7 +326,7 @@ Add to `orchestrator-session-start/instructions/workflow.md` step 4 (fanout deci
 ### Pattern E: Native subagent (Claude Code Agent tool)
 
 After workflow fanout creates the bundle, the orchestrator can spawn a worker as a native
-Claude Code subagent instead of shelling out to ralph-cursor-loop.sh:
+Claude Code subagent instead of shelling out to ralph-worker.sh:
 
 Agent(
   description="Implement <task_id> in <plan_id>",
@@ -346,7 +346,7 @@ Use Pattern E for:
 - Tasks ≤ 5 files in write_scope (cold start cost is justified for clean isolation)
 - When you want guaranteed role separation (orchestrator cannot accidentally continue implementing)
 
-Use ralph-cursor-loop.sh (script worker) for:
+Use ralph-worker.sh (script worker) for:
 - Tasks requiring multiple agent sessions (long work, > 30 min)
 - Headless/batch runs without an interactive Claude Code session
 ```
@@ -483,7 +483,7 @@ split and prevents agents from being responsible for git-derivable fields.
 - Phase 2: `active.loop.md` is ~100 lines, worker-only (no wave selection, no oracle chain,
   no scenario coverage tables). `orchestrator.loop.md` exists with the extracted orchestrator
   content. Ralph fanout calls pass the correct overlay per role.
-- Phase 3: Four scripts exist in `bin/tests/`. `ralph-cursor-loop.sh --bundle <path>` works;
+- Phase 3: Four scripts exist in `bin/tests/`. `ralph-worker.sh --bundle <path>` works;
   without `--bundle` it errors with a helpful message. `ralph-pipeline.sh` runs E2E without
   manual intervention when at least one unblocked task exists.
 - Phase 4: `loop-worker` skill exists. Orchestrator instructions document Pattern E invocation.

@@ -7,7 +7,7 @@ summary: 'Phase 4 boundary: option 2 (read-only workflow future); kg and workflo
 files_changed:
     - .agents/active/loop-state.md
     - .agents/workflow/plans/typescript-port/TASKS.yaml
-    - bin/tests/ralph-cursor-loop
+    - bin/tests/ralph-worker
     - bin/tests/ralph-orchestrate
     - bin/tests/ralph-pipeline
 verification_result:
