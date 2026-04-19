@@ -208,6 +208,48 @@ jobs:
         run: |
           ./bin/dot-agents workflow plan
 
+      - name: Test workflow orient
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents workflow orient
+
+      - name: Test workflow next
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents workflow next
+
+      - name: Test kg --help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents kg --help | grep -q "knowledge graph"
+
+      - name: Test kg bridge health
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents kg bridge health
+
+      - name: Test agents list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents agents list
+
+      - name: Test hooks list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents hooks list
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}
