@@ -1,0 +1,100 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+tasks:
+    - id: sidecar-schema
+      title: Define scope-evidence sidecar schema and Go struct types
+      status: pending
+      depends_on: []
+      blocks:
+        - sidecar-manual-experiment
+        - check-scope-command
+        - skill-upgrades
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - schemas/workflow-scope-evidence.schema.json
+        - commands/workflow/plan_task.go
+        - commands/workflow/cmd.go
+      verification_required: true
+      notes: 'Add schemas/workflow-scope-evidence.schema.json covering all spec §4.2 fields. Add Go struct types for read/write in commands/workflow/plan_task.go. Unit test: unmarshal illustrative example from spec. No command routing. Do not modify TASKS.yaml schema.'
+    - id: sidecar-manual-experiment
+      title: Hand-author scope-evidence sidecars for 2 real tasks; validate shape
+      status: pending
+      depends_on:
+        - sidecar-schema
+      blocks:
+        - derive-scope-command
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/graph-bridge-command-readiness/evidence/
+        - .agents/workflow/plans/kg-command-surface-readiness/evidence/
+        - docs/
+      verification_required: false
+      notes: 'Author .scope.yaml for 2 completed tasks using real graph output and actual changed files as ground truth. Validate: did seeds produce right required_paths? Were decision_locks clear enough? Document gaps in docs/. Research task — no Go code.'
+    - id: derive-scope-command
+      title: Implement workflow plan derive-scope command
+      status: pending
+      depends_on:
+        - sidecar-schema
+        - sidecar-manual-experiment
+      blocks:
+        - check-scope-command
+        - skill-upgrades
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+        - commands/workflow/graph.go
+        - commands/workflow/deps.go
+        - internal/graphstore/crg.go
+      verification_required: true
+      notes: 'dot-agents workflow plan derive-scope <plan_id> <task_id> --seed-symbol/--seed-path. Runs scope-lane and context-lane query bundles. Writes candidate sidecar. Degrades to confidence:low when graph not ready. Does NOT auto-edit TASKS.yaml. Gate: kg-freshness-impl must be complete.'
+    - id: check-scope-command
+      title: Implement workflow plan check-scope command
+      status: pending
+      depends_on:
+        - sidecar-schema
+        - derive-scope-command
+      blocks:
+        - fanout-evidence-integration
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: 'dot-agents workflow plan check-scope <plan_id> <task_id> --changed-file/--from-git-diff. Reports: inside-scope, outside-scope, untouched required_paths, touched excluded_paths. Exit: 0=clean 1=warnings 2=no-sidecar. Read-only.'
+    - id: skill-upgrades
+      title: Update orchestrator-session-start, agent-start, plan-wave-picker to consume sidecars
+      status: pending
+      depends_on:
+        - sidecar-schema
+        - derive-scope-command
+      blocks:
+        - fanout-evidence-integration
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/orchestrator-session-start/SKILL.md
+        - .agents/skills/orchestrator-session-start/instructions
+        - .agents/skills/agent-start/SKILL.md
+        - .agents/skills/agent-start/instructions
+        - .agents/skills/plan-wave-picker/SKILL.md
+        - .agents/skills/plan-wave-picker/instructions
+      verification_required: false
+      notes: 'orchestrator-session-start: load sidecar as execution contract before fanout. agent-start: surface decision_locks and required_reads at session start. plan-wave-picker: prefer higher-confidence sidecar as tiebreaker. Skill instruction changes only — no Go code.'
+    - id: fanout-evidence-integration
+      title: Add scope-evidence warnings to workflow fanout
+      status: pending
+      depends_on:
+        - check-scope-command
+        - skill-upgrades
+      blocks: []
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+        - commands/workflow/delegation.go
+      verification_required: true
+      notes: Warn (not block) when code task has no sidecar and graph is healthy. Warn when sidecar exists but confidence is low. Both suppressible via --skip-evidence-check. Unit tests for each warning path.

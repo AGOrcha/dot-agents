@@ -204,6 +204,47 @@ tasks:
 `)
 }
 
+// addObs1776217867311807000PlanFixture seeds a synthetic plan modeled on fold-back proposal
+// obs-1776217867311807000 (advance reported success while TASKS row looked stale long task id).
+func addObs1776217867311807000PlanFixture(t *testing.T, repo string) {
+	t.Helper()
+	write := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".agents/workflow/plans/wf-advance-regress/PLAN.yaml", `schema_version: 1
+id: "wf-advance-regress"
+title: "Regression fixture for workflow advance TASKS persistence"
+status: "active"
+summary: "Synthetic plan for proposal obs-1776217867311807000"
+created_at: "2026-04-18T12:00:00Z"
+updated_at: "2026-04-18T12:00:00Z"
+owner: "test"
+success_criteria: "TASKS.yaml updates with advance"
+verification_strategy: "go test"
+current_focus_task: ""
+`)
+	write(".agents/workflow/plans/wf-advance-regress/TASKS.yaml", `schema_version: 1
+plan_id: "wf-advance-regress"
+tasks:
+  - id: "phase-5d-iter-log-schema"
+    title: "iter log schema alignment"
+    status: "pending"
+    depends_on: []
+    blocks: []
+    owner: "test"
+    write_scope: ["commands/workflow/iter_log.go"]
+    verification_required: true
+    notes: ""
+`)
+}
+
 func addCanonicalPendingPlanFixture(t *testing.T, repo string) {
 	t.Helper()
 	write := func(rel, content string) {

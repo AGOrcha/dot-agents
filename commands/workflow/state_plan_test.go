@@ -416,6 +416,48 @@ func TestRunWorkflowAdvanceUpdatesTaskAndPlan(t *testing.T) {
 	}
 }
 
+// TestObs1776217867311807000_WorkflowAdvancePersistsTaskRowOnDisk covers fold-back proposal
+// obs-1776217867311807000: `workflow advance` must update the on-disk TASKS.yaml task status
+// (not only PLAN metadata) for a long task id similar to loop-runtime-refactor/phase-5d-iter-log-schema.
+func TestObs1776217867311807000_WorkflowAdvancePersistsTaskRowOnDisk(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addObs1776217867311807000PlanFixture(t, repo)
+
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	const planID = "wf-advance-regress"
+	const taskID = "phase-5d-iter-log-schema"
+
+	if err := runWorkflowAdvance(planID, taskID, "in_progress"); err != nil {
+		t.Fatal(err)
+	}
+
+	tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", planID, "TASKS.yaml")
+	raw, err := os.ReadFile(tasksPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, taskID) {
+		t.Fatalf("TASKS.yaml on disk missing task id %q", taskID)
+	}
+	if !strings.Contains(s, "status: \"in_progress\"") && !strings.Contains(s, "status: in_progress") {
+		t.Fatalf("TASKS.yaml on disk missing in_progress status after advance:\n%s", s)
+	}
+
+	tf, err := loadCanonicalTasks(repo, planID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tf.Tasks) != 1 || tf.Tasks[0].ID != taskID || tf.Tasks[0].Status != "in_progress" {
+		t.Fatalf("reload tasks = %+v, want one row %s in_progress", tf.Tasks, taskID)
+	}
+}
+
 func TestRunWorkflowAdvanceInvalidStatus(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPlanFixture(t, repo)

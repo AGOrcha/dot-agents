@@ -1,13 +1,17 @@
 # Loop State
 
-Last updated: 2026-04-18
-Iteration: 61 (worker: phase-4-mcp-settings-lifecycle — mcp/settings CLI + merge-back recorded)
+Last updated: 2026-04-19
+Iteration: 61 (prior session) — no loop iteration this session; spec authoring + plan creation pass
 
 ## Current Position
 
-Orchestrator pass — 2026-04-18 (iter 59):
-- **`command-surface-decomposition`:** Canonical plan **`completed`**; recent commits **`12c0f1b`** / **`4a6d1e3`** close out **`c1`** + **`c2`**. Prior loop-state bullets about in-flight **`c1`/`c2`** delegations are **stale** (superseded by git + canonical TASKS).
-- **`resource-command-parity` / `phase-1-command-contract`:** **`in_progress`** — **active delegation** `del-phase-1-command-contract-1776548679` → bundle **`.agents/active/delegation-bundles/del-phase-1-command-contract-1776548679.yaml`** (commit **`d6907a9`** orchestrate fanout). Worker owns contract docs + alignment under plan **`write_scope`** (`plan/`, `docs/`, `commands/`).
+Orchestrator pass — 2026-04-19 (spec + plan authoring session):
+- **`loop-agent-pipeline` / `p10a-cli-schema-field-parity`:** **`completed`** — CLI field parity fix (`--success-criteria`, `--verification-strategy` on plan create/update; `--app-type` on task add). Fold-back `cli-schema-field-drift` resolved and archived.
+- **`kg-command-surface-readiness`:** **NEW plan, `active`** — 7 tasks, focus `kg-freshness-audit`. Entry point. Extends graph-bridge resurrection to full `kg` surface. Slices 1+2 unblock planner-evidence plan.
+- **`planner-evidence-backed-write-scope`:** **NEW plan, `active`** — 6 tasks, focus `sidecar-schema`. `sidecar-schema` and `sidecar-manual-experiment` are unblocked now. `derive-scope-command` gated on `kg-command-surface-readiness/kg-freshness-impl`.
+- **`config-distribution-model` spec:** **NEW** — canonical two-tier interface spec between `org-config-resolution` and `external-agent-sources`. Command surface migration plan in §13.
+- **`resource-command-parity`:** Prior session state (Apr 18). Active delegation `del-phase-1-command-contract-1776548679` may still be open — verify with `workflow orient` before fanning new work on overlapping paths.
+- **`replacement-agent-retry` fold-back:** Still open — `loop-agent-pipeline` summary note, no follow-on task yet. See `.agents/active/fold-back/replacement-agent-retry.yaml`.
 - **`workflow next`:** Reports **no actionable canonical task** this pass because an **active delegation** already holds the lane (`workflow orient`: **active delegations: 1**) — not a signal that phase 1 disappeared.
 
 ## Loop Health

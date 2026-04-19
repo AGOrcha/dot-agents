@@ -145,7 +145,7 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPlanGraph(planID)
 		},
 	}
-	var planCreateTitle, planCreateSummary, planCreateOwner string
+	var planCreateTitle, planCreateSummary, planCreateOwner, planCreateSuccessCriteria, planCreateVerificationStrategy string
 	planCreateCmd := &cobra.Command{
 		Use:   "create <plan-id>",
 		Short: "Create a new canonical plan directory with PLAN.yaml and TASKS.yaml stubs",
@@ -154,15 +154,17 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass a new canonical plan ID such as `repo-cleanup`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowPlanCreate(args[0], planCreateTitle, planCreateSummary, planCreateOwner)
+			return runWorkflowPlanCreate(args[0], planCreateTitle, planCreateSummary, planCreateOwner, planCreateSuccessCriteria, planCreateVerificationStrategy)
 		},
 	}
 	planCreateCmd.Flags().StringVar(&planCreateTitle, "title", "", "Plan title (required)")
 	planCreateCmd.Flags().StringVar(&planCreateSummary, "summary", "", "Short summary of the plan goal")
 	planCreateCmd.Flags().StringVar(&planCreateOwner, "owner", "dot-agents", "Plan owner")
+	planCreateCmd.Flags().StringVar(&planCreateSuccessCriteria, "success-criteria", "", "Observable conditions that prove the plan is done")
+	planCreateCmd.Flags().StringVar(&planCreateVerificationStrategy, "verification-strategy", "", "How completion will be verified (tests, smokes, manual checks)")
 	_ = planCreateCmd.MarkFlagRequired("title")
 
-	var planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus string
+	var planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus, planUpdateSuccessCriteria, planUpdateVerificationStrategy string
 	planUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
 		Short: "Update PLAN.yaml metadata fields",
@@ -171,13 +173,15 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass an existing canonical plan ID."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowPlanUpdate(args[0], planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus)
+			return runWorkflowPlanUpdate(args[0], planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus, planUpdateSuccessCriteria, planUpdateVerificationStrategy)
 		},
 	}
 	planUpdateCmd.Flags().StringVar(&planUpdateStatus, "status", "", "New plan status (draft|active|paused|completed|archived)")
 	planUpdateCmd.Flags().StringVar(&planUpdateTitle, "title", "", "New plan title")
 	planUpdateCmd.Flags().StringVar(&planUpdateSummary, "summary", "", "New plan summary")
 	planUpdateCmd.Flags().StringVar(&planUpdateFocus, "focus", "", "New current_focus_task value")
+	planUpdateCmd.Flags().StringVar(&planUpdateSuccessCriteria, "success-criteria", "", "New success criteria (replaces existing)")
+	planUpdateCmd.Flags().StringVar(&planUpdateVerificationStrategy, "verification-strategy", "", "New verification strategy (replaces existing)")
 
 	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd)
 
@@ -189,7 +193,7 @@ preferences, fanout artifacts, and bridge queries.`,
 			"  dot-agents workflow task update loop-orchestrator-layer --task phase-5 --write-scope internal/platform",
 		),
 	}
-	var taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope string
+	var taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddAppType string
 	var taskAddVerification bool
 	taskAddCmd := &cobra.Command{
 		Use:   "add <plan-id>",
@@ -199,7 +203,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that should receive the new task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskAdd(args[0], taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddVerification)
+			return runWorkflowTaskAdd(args[0], taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddAppType, taskAddVerification)
 		},
 	}
 	taskAddCmd.Flags().StringVar(&taskAddID, "id", "", "Task ID (required)")
@@ -209,6 +213,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	taskAddCmd.Flags().StringVar(&taskAddDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on")
 	taskAddCmd.Flags().StringVar(&taskAddBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks")
 	taskAddCmd.Flags().StringVar(&taskAddWriteScope, "write-scope", "", "Comma-separated file/dir patterns this task may touch")
+	taskAddCmd.Flags().StringVar(&taskAddAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service)")
 	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
 	_ = taskAddCmd.MarkFlagRequired("id")
 	_ = taskAddCmd.MarkFlagRequired("title")

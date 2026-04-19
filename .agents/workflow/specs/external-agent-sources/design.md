@@ -6,6 +6,15 @@
 
 **Locked direction (summary):** Option **B** in v1.5 (transport + auth + content split, shared auth across git/http/local) → Option **C** in v2 (registry-first, signing, rich discovery). OCI Distribution as the wire protocol; BYO registry in v1.5.
 
+**Related design tracks:**
+- The `.agentsrc.json` field surface (`sources`, `extends`, `packages`), source type
+  constraints, two-pass resolution engine, lockfile format, per-tier caching semantics,
+  audit taxonomy additions, and `da config explain` command are specified in
+  [config-distribution-model](../config-distribution-model/design.md). This document owns
+  the transport, auth, and OCI wire details that config-distribution-model delegates to.
+- Layer precedence, merge rules, repo identity, feature rollout, and workspace semantics
+  live in [org-config-resolution](../org-config-resolution/design.md).
+
 ---
 
 ## Table of contents
@@ -81,24 +90,31 @@
 - **Bundle manifest:** custom `application/vnd.dotagents.bundle.v1+json` **pointer document** listing member refs — **not** OCI Image Index.
 - **Version semantics:** tags on the wire; client resolves SemVer ranges; digest pin as `pinned:sha256:...` for reproducibility.
 
-Illustrative `.agentsrc` shapes (future integration):
+Illustrative `.agentsrc` shapes (future integration). All package refs use the
+`source-id:artifact-path@version-spec` syntax defined in
+[config-distribution-model §5](../config-distribution-model/design.md#5-reference-syntax):
 
 ```json
+"sources": [
+  { "id": "acme-pkgs", "type": "oci", "url": "oci://registry.acme.internal/dot-agents" }
+],
 "packages": [
-  "verifier/playwright-api@^1.2",
-  "agent/impl-agent@1.4",
-  "skill/review-pr@pinned:sha256:..."
+  "acme-pkgs:verifier/playwright-api@^1.2",
+  "acme-pkgs:agent/impl-agent@1.4",
+  "acme-pkgs:skill/review-pr@pinned:sha256:..."
 ]
 ```
 
 ```json
 "verifier_profiles": {
-  "unit": "verifier/unit@^1.0",
-  "api": "agents/verifiers/api-sre"
+  "unit": "acme-pkgs:verifier/unit@^1.0",
+  "api":  "acme-pkgs:verifier/api-sre@^2.0"
 }
 ```
 
-**Publish CLI (conceptual):** `dot-agents publish agent|verifier|skill|bundle` per artifact type.
+**Publish CLI:** `da packages publish agent|verifier|skill|bundle <path>` per artifact
+type — see
+[config-distribution-model §13.2](../config-distribution-model/design.md#132-new-command-subtree-da-packages).
 
 ---
 
@@ -126,6 +142,10 @@ Illustrative `.agentsrc` shapes (future integration):
 - **Sinks:** stderr default; overrides: file, syslog, JSONL, HTTP endpoint.
 - **Retention:** customer-managed; dot-agents does not centralize storage.
 - Align with existing structured-logging conventions in the product when integrated.
+- **Config-tier audit events** (`config.source.fetch`, `config.layer.resolve`,
+  `config.field.overridden`, `config.import.failed`, etc.) are defined in
+  [config-distribution-model §9](../config-distribution-model/design.md#9-audit-event-taxonomy).
+  They share this base schema and the same sink configuration.
 
 ---
 

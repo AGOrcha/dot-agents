@@ -1,0 +1,120 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+tasks:
+    - id: kg-freshness-audit
+      title: Audit kg build, kg update, and kg code-status; define graph-ready contract
+      status: pending
+      depends_on: []
+      blocks:
+        - kg-freshness-impl
+        - kg-change-impact-audit
+        - kg-advanced-surfaces-audit
+        - kg-mcp-transport-audit
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - docs/
+      verification_required: false
+      notes: Reproduce current state of kg build and update on a clean checkout. Define the graph-ready contract downstream derive-scope needs before running symbol_lookup or callers_of. Audit only — no fixes.
+    - id: kg-freshness-impl
+      title: Implement kg build/update/code-status readiness fixes and add smoke coverage
+      status: pending
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-change-impact-impl
+        - kg-mcp-transport-impl
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: Clear actionable errors when CRG preconditions missing; kg code-status machine-readable freshness; kg build/update exit non-zero with distinguishable codes. Add smoke test on minimal fixture.
+    - id: kg-change-impact-audit
+      title: Audit kg changes and kg impact; define empty-result semantics
+      status: pending
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-change-impact-impl
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - docs/
+      verification_required: false
+      notes: 'Run kg changes and kg impact on real diffs with fresh graph. Distinguish: empty-because-no-impact vs empty-because-graph-stale. Audit only.'
+    - id: kg-change-impact-impl
+      title: Implement kg changes/impact trustworthiness fixes and add smoke coverage
+      status: pending
+      depends_on:
+        - kg-freshness-impl
+        - kg-change-impact-audit
+      blocks: []
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: Distinguish empty-graph from no-impact in output and exit codes. Add --require-graph flag. Structured JSON output mode. Smoke tests on known repo fixtures.
+    - id: kg-advanced-surfaces-audit
+      title: Audit kg flows, communities, postprocess; decide agent-ready vs expert-only
+      status: pending
+      depends_on:
+        - kg-freshness-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - docs/
+      verification_required: false
+      notes: 'Run kg flows, communities, postprocess on fresh graph. Per-command decision: agent-ready (define output contract) or expert-only (add warning to help text). No implementation unless help-text only.'
+    - id: kg-mcp-transport-audit
+      title: Audit kg serve and MCP tool parity against bridge-backed equivalents
+      status: pending
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-mcp-transport-impl
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/mcp_server.go
+        - docs/
+      verification_required: false
+      notes: Enumerate MCP tools from kg serve. Compare to semantic_search_nodes_tool, query_graph_tool, get_impact_radius_tool, get_review_context_tool. Produce parity matrix with keep/implement/defer decision per tool.
+    - id: kg-mcp-transport-impl
+      title: Implement MCP parity decisions from audit
+      status: pending
+      depends_on:
+        - kg-freshness-impl
+        - kg-mcp-transport-audit
+      blocks: []
+      owner: dot-agents
+      app_type: go-cli
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/mcp_server.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: 'Implement only the implement-now entries from parity matrix. Deferred decisions go to docs only. Stop: do not redesign MCP server; do not change external tool name surface.'

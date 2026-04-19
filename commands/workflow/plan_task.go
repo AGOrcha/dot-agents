@@ -1022,7 +1022,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	return nil
 }
 
-func runWorkflowPlanCreate(planID, title, summary, owner string) error {
+func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verificationStrategy string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
@@ -1033,14 +1033,16 @@ func runWorkflowPlanCreate(planID, title, summary, owner string) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	plan := &CanonicalPlan{
-		SchemaVersion: 1,
-		ID:            planID,
-		Title:         title,
-		Status:        "draft",
-		Summary:       summary,
-		Owner:         owner,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		SchemaVersion:        1,
+		ID:                   planID,
+		Title:                title,
+		Status:               "draft",
+		Summary:              summary,
+		Owner:                owner,
+		SuccessCriteria:      successCriteria,
+		VerificationStrategy: verificationStrategy,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
 		return err
@@ -1057,7 +1059,7 @@ func runWorkflowPlanCreate(planID, title, summary, owner string) error {
 	return nil
 }
 
-func runWorkflowPlanUpdate(planID, status, title, summary, focus string) error {
+func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteria, verificationStrategy string) error {
 	if status != "" && !isValidPlanStatus(status) {
 		return deps.ErrorWithHints(
 			fmt.Sprintf("invalid plan status %q", status),
@@ -1081,6 +1083,12 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus string) error {
 	if summary != "" {
 		plan.Summary = summary
 	}
+	if successCriteria != "" {
+		plan.SuccessCriteria = successCriteria
+	}
+	if verificationStrategy != "" {
+		plan.VerificationStrategy = verificationStrategy
+	}
 	if focus != "" {
 		plan.CurrentFocusTask = focus
 	}
@@ -1092,7 +1100,7 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus string) error {
 	return nil
 }
 
-func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, writeScope string, verificationRequired bool) error {
+func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, writeScope, appType string, verificationRequired bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
@@ -1112,6 +1120,7 @@ func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, 
 		Status:               "pending",
 		Owner:                owner,
 		Notes:                notes,
+		AppType:              appType,
 		VerificationRequired: verificationRequired,
 	}
 	if dependsOn != "" {

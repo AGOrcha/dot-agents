@@ -1,0 +1,24 @@
+schema_version: 1
+id: planner-evidence-backed-write-scope
+title: Planner Evidence-Backed Write Scope
+status: active
+summary: Add durable scope-evidence sidecars to canonical workflow tasks so write_scope is a justified contract backed by code-graph evidence rather than human intuition
+created_at: "2026-04-19T19:42:50Z"
+updated_at: "2026-04-19T19:45:35Z"
+owner: dot-agents
+success_criteria: |-
+    A planner can run workflow plan derive-scope on any code task and receive a candidate
+    .scope.yaml sidecar with required_paths, optional_paths, excluded_paths, decision_locks,
+    required_reads, and verification_focus populated from graph evidence. workflow plan
+    check-scope produces a machine-readable diff between final_write_scope and actual changed
+    files. Planning skills prefer existing sidecars over broad scans when selecting next slice.
+    workflow fanout warns when a code task has no sidecar and the graph is healthy.
+verification_strategy: |-
+    Focused go test coverage for sidecar parsing, schema validation, and command flag routing.
+    Manual validation of sidecar quality on 2 real tasks before derive-scope is declared ready.
+    check-scope smoke against a known bounded task. No fanout warning enforcement until
+    Phase 3 tasks are stable.
+depends_on_plans:
+    - graph-bridge-command-readiness
+    - kg-command-surface-readiness
+current_focus_task: sidecar-schema

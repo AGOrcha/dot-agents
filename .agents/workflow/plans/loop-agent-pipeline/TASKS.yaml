@@ -325,4 +325,18 @@ tasks:
         - commands/workflow/cmd.go
         - commands/workflow/
       verification_required: true
-      notes: Completed. `commands/workflow/` has already been decomposed into feature files and a thin shim. Reopening the plan does not undo this structural work.
+      notes: |-
+        Completed. `commands/workflow/` has already been decomposed into feature files and a thin shim. Reopening the plan does not undo this structural work.
+        - (fb:cli-schema-field-drift) CLI surface drift: workflow plan create and workflow plan update do not expose success_criteria, verification_strategy, or depends_on_plans. workflow task add does not expose app_type. This means every new plan authored via da commands requires manual YAML edits to add fields that are defined in the CanonicalPlan and CanonicalTask structs. Defect — the CLI scaffolding surface is incomplete relative to the schema it writes.
+    - id: p10a-cli-schema-field-parity
+      title: Add missing flag surface to workflow plan create/update and workflow task add
+      status: completed
+      depends_on:
+        - p10-workflow-command-decomposition
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: 'Defect follow-on from p10 (fold-back: cli-schema-field-drift). workflow plan create is missing --success-criteria, --verification-strategy flags. workflow plan update is missing --success-criteria, --verification-strategy flags. workflow task add is missing --app-type flag. All three fields exist in CanonicalPlan/CanonicalTask structs and round-trip correctly in YAML — they are simply absent from flag registration and runWorkflowPlanCreate/runWorkflowTaskAdd call sites. Fix: add the flags, wire them through the run functions, update tests. Stop conditions: do not add depends_on_plans as a flag (multi-value cross-plan reference is a separate design question); do not change struct field names or YAML tags.'
