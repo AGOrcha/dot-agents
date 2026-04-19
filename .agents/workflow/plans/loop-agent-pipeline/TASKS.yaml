@@ -1,413 +1,386 @@
 schema_version: 1
 plan_id: loop-agent-pipeline
 tasks:
-  - id: p1-pipeline-control
-    title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
-    status: completed
-    depends_on: []
-    blocks:
-      - p7-post-closeout
-    owner: dot-agents
-    write_scope:
-      - bin/tests/ralph-pipeline
-      - bin/tests/ralph-orchestrate
-      - commands/workflow.go
-      - commands/workflow/
-    verification_required: true
-    notes: |-
-      Completed. Plan-scoped filtering, verification directory lifecycle, the pre-verifier TDD gate, and verifier retry-cap wiring are present in the workflow control plane.
+    - id: p1-pipeline-control
+      title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
+      status: completed
+      depends_on: []
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-orchestrate
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: Completed. Plan-scoped filtering, verification directory lifecycle, the pre-verifier TDD gate, and verifier retry-cap wiring are present in the workflow control plane.
+    - id: p2-impl-agent-surface
+      title: Separate repo-side impl-agent surface from loop-worker behavior
+      status: completed
+      depends_on: []
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-worker
+        - .agents/prompts/impl-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a surface/contract task. `.agents/prompts/impl-agent.project.md` exists and the spec defines `impl-handoff.yaml`, but the live `ralph-*` runtime still does not invoke this impl surface. Runtime integration is reopened under `p6` and `p8`.
+    - id: p3a-result-schema
+      title: Introduce canonical verification-result artifact contract
+      status: completed
+      depends_on: []
+      blocks:
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-result.schema.json
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: Completed. The canonical verification-result schema and command-side validation exist and are the shared artifact contract for verifier and review stages.
+    - id: p3b-unit-verifier
+      title: Unit verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/unit.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt/spec surface. The unit verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+    - id: p3c-api-verifier
+      title: API verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/api.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt/spec surface. The API verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+    - id: p3d-ui-verifier
+      title: UI E2E verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/ui-e2e.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt/spec surface. The UI E2E verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+    - id: p3e-batch-verifier
+      title: Batch verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/batch.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt/spec surface. The batch verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+    - id: p3f-streaming-verifier
+      title: Streaming verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/streaming.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt/spec surface. The streaming verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+    - id: p4-review-agent
+      title: Review-agent surface plus merged workflow verify record decision writer
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-decision.schema.json
+        - commands/workflow.go
+        - commands/workflow/
+        - .agents/prompts/review-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, but the live `ralph-*` runtime still does not execute a distinct review-agent phase. Runtime integration is reopened under `p6` and `p8`.
+    - id: p5-iter-log-v2
+      title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
+      status: completed
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p4-review-agent
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-iter-log.schema.json
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log_schema.go
+        - commands/workflow/iter_log.go
+        - commands/workflow/iter_log_test.go
+        - commands/workflow/testutil_test.go
+      verification_required: true
+      notes: Completed. Iter-log schema v2 and role-aware checkpoint merge behavior are landed. This task is not the blocker for the missing multi-stage runtime chain.
+    - id: p6-fanout-dispatch
+      title: App-type dispatch and verifier-sequence wiring through plan schema, .agentsrc, delegation bundles, and runtime consumption
+      status: completed
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-delegation-bundle.schema.json
+        - schemas/workflow-plan.schema.json
+        - schemas/agentsrc.schema.json
+        - src/share/templates/standard/agentsrc.json
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Make `app_type`, verifier profiles, and `verifier_sequence` drive the live role chain instead of stopping at bundle serialization.
 
-  - id: p2-impl-agent-surface
-    title: Separate repo-side impl-agent surface from loop-worker behavior
-    status: completed
-    depends_on: []
-    blocks:
-      - p5-iter-log-v2
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - bin/tests/ralph-worker
-      - .agents/prompts/impl-agent.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a surface/contract task. `.agents/prompts/impl-agent.project.md` exists and the spec defines `impl-handoff.yaml`, but the live `ralph-*` runtime still does not invoke this impl surface. Runtime integration is reopened under `p6` and `p8`.
+        **what landed already:** plan schema, `.agentsrc`, bundle schema, and `workflow fanout` can resolve and persist `app_type` / `verifier_sequence`.
 
-  - id: p3a-result-schema
-    title: Introduce canonical verification-result artifact contract
-    status: completed
-    depends_on: []
-    blocks:
-      - p3b-unit-verifier
-      - p3c-api-verifier
-      - p3d-ui-verifier
-      - p3e-batch-verifier
-      - p3f-streaming-verifier
-      - p4-review-agent
-      - p5-iter-log-v2
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - schemas/verification-result.schema.json
-      - commands/workflow.go
-      - commands/workflow/
-    verification_required: true
-    notes: |-
-      Completed. The canonical verification-result schema and command-side validation exist and are the shared artifact contract for verifier and review stages.
+        **what is still missing:** the live `ralph-*` runtime does not consume that bundle metadata to spawn typed verifier or review stages. `verifier_sequence` is currently inert at runtime. The pipeline still executes one loop-worker path per bundle rather than `impl -> verifier(s) -> review`.
 
-  - id: p3b-unit-verifier
-    title: Unit verifier surface and result contract
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - .agents/prompts/verifiers/unit.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt/spec surface. The unit verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+        **current code anchors:** keep these audited facts in view:
+        - `commands/workflow/delegation.go` already resolves and persists `app_type` plus `verifier_sequence` into delegation bundles and related workflow metadata.
+        - `commands/workflow/verification.go` already gives `workflow verify record --kind review` special handling that writes `.agents/active/verification/<task_id>/review-decision.yaml`.
+        - non-review `workflow verify record` calls still append only `verification-log.jsonl`; they do not yet write typed `<verifier>.result.yaml` artifacts.
+        - the spec and decisions docs already describe the intended staged chain, so this task is runtime alignment, not a fresh design spike.
 
-  - id: p3c-api-verifier
-    title: API verifier surface and result contract
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - .agents/prompts/verifiers/api.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt/spec surface. The API verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+        **implementation direction:** extend `workflow verify record` so verifier stages can write `.agents/active/verification/<task_id>/<verifier_type>.result.yaml` through the existing CLI surface instead of adding a sibling command that duplicates review/test logging behavior.
 
-  - id: p3d-ui-verifier
-    title: UI E2E verifier surface and result contract
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - .agents/prompts/verifiers/ui-e2e.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt/spec surface. The UI E2E verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+        **important constraint:** keep one canonical delegated task / contract per workflow task. Do not split impl, verifier, and review into separate top-level workflow tasks or separate delegation contracts.
 
-  - id: p3e-batch-verifier
-    title: Batch verifier surface and result contract
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - .agents/prompts/verifiers/batch.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt/spec surface. The batch verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+        **native command boundary:** deterministic mechanics should move into `dot-agents`, not agent prompts:
+        - resolve `app_type` / `verifier_sequence`
+        - expand bundle metadata into a concrete per-task stage plan
+        - validate verifier profile refs and prompt-file refs
+        - write typed verifier artifacts through `workflow verify record`
 
-  - id: p3f-streaming-verifier
-    title: Streaming verifier surface and result contract
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - .agents/prompts/verifiers/streaming.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt/spec surface. The streaming verifier repo prompt exists. Dispatching it from the live pipeline remains part of the reopened runtime work in `p6` and `p8`.
+        **agent boundary:** agents should still own non-deterministic work:
+        - implementation choices inside `write_scope`
+        - verifier-specific evidence gathering and pass/fail judgment
+        - review acceptance / rejection / escalation reasoning
 
-  - id: p4-review-agent
-    title: Review-agent surface plus merged workflow verify record decision writer
-    status: completed
-    depends_on:
-      - p3a-result-schema
-    blocks:
-      - p5-iter-log-v2
-      - p6-fanout-dispatch
-      - p7-post-closeout
-    owner: dot-agents
-    write_scope:
-      - schemas/verification-decision.schema.json
-      - commands/workflow.go
-      - commands/workflow/
-      - .agents/prompts/review-agent.project.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, but the live `ralph-*` runtime still does not execute a distinct review-agent phase. Runtime integration is reopened under `p6` and `p8`.
+        **command candidates in scope:** this task should leave behind deterministic helpers such as:
+        - a bundle/stage-plan readback command that expands one bundle into `impl`, ordered verifier stages, and `review`
+        - an extended `workflow verify record` mode for non-review verifier result files
+        - any minimal profile lookup helpers needed so shell no longer hand-parses bundle/runtime dispatch state
 
-  - id: p5-iter-log-v2
-    title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
-    status: completed
-    depends_on:
-      - p2-impl-agent-surface
-      - p3a-result-schema
-      - p4-review-agent
-    blocks:
-      - p7-post-closeout
-    owner: dot-agents
-    write_scope:
-      - schemas/workflow-iter-log.schema.json
-      - commands/workflow/static/workflow-iter-log.schema.json
-      - commands/workflow/iter_log_schema.go
-      - commands/workflow/iter_log.go
-      - commands/workflow/iter_log_test.go
-      - commands/workflow/testutil_test.go
-    verification_required: true
-    notes: |-
-      Completed. Iter-log schema v2 and role-aware checkpoint merge behavior are landed. This task is not the blocker for the missing multi-stage runtime chain.
+        **done means:** fanout metadata is structured so runtime dispatch can consume it deterministically, tests cover the resolved stage chain, and there is no remaining gap between bundle contract and script behavior.
+    - id: p7-post-closeout
+      title: Post-task orchestrator review gate plus fold-back / proposal update
+      status: completed
+      depends_on:
+        - p1-pipeline-control
+        - p4-review-agent
+        - p5-iter-log-v2
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-closeout
+        - bin/tests/ralph-pipeline
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Move the useful parent-side reasoning out of "session end closeout only" and into a per-task orchestrator review gate that runs immediately after a task's merge-back.
 
-  - id: p6-fanout-dispatch
-    title: App-type dispatch and verifier-sequence wiring through plan schema, .agentsrc, delegation bundles, and runtime consumption
-    status: completed
-    depends_on:
-      - p2-impl-agent-surface
-      - p3a-result-schema
-      - p3b-unit-verifier
-      - p3c-api-verifier
-      - p3d-ui-verifier
-      - p3e-batch-verifier
-      - p3f-streaming-verifier
-      - p4-review-agent
-      - p8-orchestrator-awareness
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - schemas/workflow-delegation-bundle.schema.json
-      - schemas/workflow-plan.schema.json
-      - schemas/agentsrc.schema.json
-      - src/share/templates/standard/agentsrc.json
-      - commands/workflow.go
-      - commands/workflow/
-    verification_required: true
-    notes: |-
-      **feedback_goal:** Make `app_type`, verifier profiles, and `verifier_sequence` drive the live role chain instead of stopping at bundle serialization.
+        **existing spec hooks:** the spec already expects parent review after merge-back, fold-back reconciliation, and proposal routing for larger cross-cutting changes. What is missing is a concrete runtime gate between task merge-back and "continue to the next task".
 
-      **what landed already:** plan schema, `.agentsrc`, bundle schema, and `workflow fanout` can resolve and persist `app_type` / `verifier_sequence`.
+        **current runtime anchors:** the present parent-side behavior is still too coarse:
+        - `bin/tests/ralph-closeout` scans `.agents/active/merge-back/*.md`, auto-runs `workflow delegation closeout --decision accept` plus `workflow advance`, and optionally performs a read-only `workflow fold-back list --plan <id>` audit.
+        - when `RALPH_CLOSEOUT_AUTO=0`, the review-style agent pass still happens during closeout, after worker fanout is done, rather than as a mandatory gate after each task.
+        - `workflow fold-back create|update|list` already exists, so the gap is orchestration timing and deterministic reconciliation flow, not missing persistence primitives.
 
-      **what is still missing:** the live `ralph-*` runtime does not consume that bundle metadata to spawn typed verifier or review stages. `verifier_sequence` is currently inert at runtime. The pipeline still executes one loop-worker path per bundle rather than `impl -> verifier(s) -> review`.
+        **what this task now owns:** after a task finishes its impl/verifier/review chain and writes merge-back, the parent/orchestrator should:
+        1. review merge-back plus typed verifier/review artifacts
+        2. accept or reject the task
+        3. reconcile fold-back observations and proposal-worthy architectural findings
+        4. decide whether the plan may continue automatically or must pause for planning / human review
 
-      **current code anchors:** keep these audited facts in view:
-      - `commands/workflow/delegation.go` already resolves and persists `app_type` plus `verifier_sequence` into delegation bundles and related workflow metadata.
-      - `commands/workflow/verification.go` already gives `workflow verify record --kind review` special handling that writes `.agents/active/verification/<task_id>/review-decision.yaml`.
-      - non-review `workflow verify record` calls still append only `verification-log.jsonl`; they do not yet write typed `<verifier>.result.yaml` artifacts.
-      - the spec and decisions docs already describe the intended staged chain, so this task is runtime alignment, not a fresh design spike.
+        **pipeline implication:** some logic currently concentrated in `ralph-closeout` should be split into "per-task review gate" vs "end-of-session / no-more-work cleanup". The task-scoped gate should happen before the next bundle for the same plan is delegated.
 
-      **implementation direction:** extend `workflow verify record` so verifier stages can write `.agents/active/verification/<task_id>/<verifier_type>.result.yaml` through the existing CLI surface instead of adding a sibling command that duplicates review/test logging behavior.
+        **agent boundary:** the orchestrator/architect agent should decide:
+        - whether the task is acceptable
+        - whether an observation belongs in fold-back notes vs proposal queue
+        - whether a cross-cutting finding requires a planning pause or human review
 
-      **important constraint:** keep one canonical delegated task / contract per workflow task. Do not split impl, verifier, and review into separate top-level workflow tasks or separate delegation contracts.
+        **native command boundary:** after the agent decides, deterministic actions should be command-driven:
+        - apply the parent decision
+        - run delegation closeout / task advance
+        - create or update fold-back artifacts
+        - route proposal-worthy observations
+        - checkpoint / archive task-scoped state
 
-      **native command boundary:** deterministic mechanics should move into `dot-agents`, not agent prompts:
-      - resolve `app_type` / `verifier_sequence`
-      - expand bundle metadata into a concrete per-task stage plan
-      - validate verifier profile refs and prompt-file refs
-      - write typed verifier artifacts through `workflow verify record`
+        **command candidates in scope:** evaluate whether the parent-side mechanics should collapse into a native helper such as a "parent review apply/finalize" command instead of leaving `ralph-closeout` to string together multiple workflow mutations.
 
-      **agent boundary:** agents should still own non-deterministic work:
-      - implementation choices inside `write_scope`
-      - verifier-specific evidence gathering and pass/fail judgment
-      - review acceptance / rejection / escalation reasoning
+        **done means:** the runtime has an explicit post-task orchestrator review step; fold-back / proposal handling can happen at that step; and `ralph-closeout` is reduced to terminal cleanup rather than carrying all parent reasoning.
+    - id: p8-orchestrator-awareness
+      title: Make orchestrator prompts and dispatch role-aware
+      status: completed
+      depends_on: []
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-orchestrate
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-worker
+        - .agents/active/orchestrator.loop.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Align the live `ralph-*` runtime with the spec's role-aware dispatch instead of only documenting it.
 
-      **command candidates in scope:** this task should leave behind deterministic helpers such as:
-      - a bundle/stage-plan readback command that expands one bundle into `impl`, ordered verifier stages, and `review`
-      - an extended `workflow verify record` mode for non-review verifier result files
-      - any minimal profile lookup helpers needed so shell no longer hand-parses bundle/runtime dispatch state
+        **what landed already:** D5 prompt/overlay separation is documented better, and the repo has distinct impl/verifier/review prompt surfaces.
 
-      **done means:** fanout metadata is structured so runtime dispatch can consume it deterministically, tests cover the resolved stage chain, and there is no remaining gap between bundle contract and script behavior.
+        **what is still missing:** `ralph-pipeline` still spawns only `ralph-worker`; `ralph-orchestrate` still fans out loop-worker bundles only; `ralph-worker` only uses role classification to select model or agent-bin overrides, then continues to load the loop-worker surface. It does not load `impl-agent.project.md`, verifier prompt files, or `review-agent.project.md` as distinct runtime phases.
 
-  - id: p7-post-closeout
-    title: Post-task orchestrator review gate plus fold-back / proposal update
-    status: completed
-    depends_on:
-      - p1-pipeline-control
-      - p4-review-agent
-      - p5-iter-log-v2
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - bin/tests/ralph-closeout
-      - bin/tests/ralph-pipeline
-      - commands/workflow.go
-      - commands/workflow/
-    verification_required: true
-    notes: |-
-      **feedback_goal:** Move the useful parent-side reasoning out of "session end closeout only" and into a per-task orchestrator review gate that runs immediately after a task's merge-back.
+        **current runtime anchors:** treat these as the baseline to replace:
+        - `bin/tests/ralph-pipeline` phase 2 still launches `ralph-worker --bundle <path>` once per bundle, then runs `ralph-closeout`.
+        - `bin/tests/ralph-orchestrate` still creates loop-worker-style bundles and tells the worker to load the loop-worker skill.
+        - `bin/tests/ralph-worker` remains a Pattern E loop-worker caller; it parses one bundle, loops for `RALPH_ITERATIONS`, and stops on merge-back. Role classification only affects model / agent-bin override selection.
+        - `docs/LOOP_ORCHESTRATION_SPEC.md` explicitly says Pattern E does not load `impl-agent.project.md`, which is why a staged runtime path is needed rather than more role heuristics inside the loop-worker prompt.
 
-      **existing spec hooks:** the spec already expects parent review after merge-back, fold-back reconciliation, and proposal routing for larger cross-cutting changes. What is missing is a concrete runtime gate between task merge-back and "continue to the next task".
+        **runtime target shape:** one canonical delegated task should still map to one task-scoped control-plane entry, but the runtime under that task should become a staged chain:
+        1. impl stage
+        2. zero or more verifier stages in bundle order
+        3. review stage
+        4. parent/orchestrator review gate
 
-      **current runtime anchors:** the present parent-side behavior is still too coarse:
-      - `bin/tests/ralph-closeout` scans `.agents/active/merge-back/*.md`, auto-runs `workflow delegation closeout --decision accept` plus `workflow advance`, and optionally performs a read-only `workflow fold-back list --plan <id>` audit.
-      - when `RALPH_CLOSEOUT_AUTO=0`, the review-style agent pass still happens during closeout, after worker fanout is done, rather than as a mandatory gate after each task.
-      - `workflow fold-back create|update|list` already exists, so the gap is orchestration timing and deterministic reconciliation flow, not missing persistence primitives.
+        **design guardrail:** preserve the task-scoped control plane. The refactor should introduce a task-chain runner or equivalent staged runtime beneath one bundle, not per-stage plans or per-stage delegations.
 
-      **what this task now owns:** after a task finishes its impl/verifier/review chain and writes merge-back, the parent/orchestrator should:
-      1. review merge-back plus typed verifier/review artifacts
-      2. accept or reject the task
-      3. reconcile fold-back observations and proposal-worthy architectural findings
-      4. decide whether the plan may continue automatically or must pause for planning / human review
+        **script boundary:** the scripts should remain thin wrappers around deterministic `dot-agents` commands plus agent invocations. Shell should not be the long-term home for:
+        - plan break checks
+        - stage expansion from bundle metadata
+        - lock enforcement
+        - parent-side reconciliation decisions once an agent has already produced a structured outcome
 
-      **pipeline implication:** some logic currently concentrated in `ralph-closeout` should be split into "per-task review gate" vs "end-of-session / no-more-work cleanup". The task-scoped gate should happen before the next bundle for the same plan is delegated.
+        **non-deterministic boundary:** role prompts remain agent-owned:
+        - impl prompt decides how to implement
+        - verifier prompt decides how to gather and interpret evidence
+        - review prompt decides accept/reject/escalate
 
-      **agent boundary:** the orchestrator/architect agent should decide:
-      - whether the task is acceptable
-      - whether an observation belongs in fold-back notes vs proposal queue
-      - whether a cross-cutting finding requires a planning pause or human review
+        **deterministic boundary:** `dot-agents` should own:
+        - task selection inside a scoped plan set
+        - stage sequencing from bundle metadata
+        - artifact writes
+        - plan/task lock checks
+        - final task/plan reconciliation
 
-      **native command boundary:** after the agent decides, deterministic actions should be command-driven:
-      - apply the parent decision
-      - run delegation closeout / task advance
-      - create or update fold-back artifacts
-      - route proposal-worthy observations
-      - checkpoint / archive task-scoped state
+        **done means:** the orchestrator and pipeline dispatch a real multi-stage chain, role-specific prompt surfaces are actually selected at runtime, and script behavior matches the spec's impl/verifier/review separation.
+    - id: p9-sources-design-fork
+      title: Fork external-sources design doc from the main implementation plan
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/external-agent-sources/design.md
+      verification_required: false
+      notes: Completed. This remains the doc-only D6 fork and is unrelated to the reopened runtime dispatch gap.
+    - id: p11-plan-completion-mode
+      title: Scoped plan-completion mode with planning locks and human-reviewed architectural pause points
+      status: in_progress
+      depends_on:
+        - p7-post-closeout
+        - p8-orchestrator-awareness
+        - p10-workflow-command-decomposition
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-orchestrate
+        - bin/tests/ralph-closeout
+        - commands/workflow.go
+        - commands/workflow/
+        - .agents/active/orchestrator.loop.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Support "take plan(s) to completion" behavior for a scoped plan set while preserving parent review and stopping safely when planning is needed.
 
-      **command candidates in scope:** evaluate whether the parent-side mechanics should collapse into a native helper such as a "parent review apply/finalize" command instead of leaving `ralph-closeout` to string together multiple workflow mutations.
+        **existing support:** `workflow next --plan <id>` already exists, and the spec already recognizes architect/orchestrator review, fold-back/proposal routing, and parent acceptance after merge-back. Historical design notes also called out `RALPH_RUN_PLAN` as a single id or comma-separated plan filter.
 
-      **done means:** the runtime has an explicit post-task orchestrator review step; fold-back / proposal handling can happen at that step; and `ralph-closeout` is reduced to terminal cleanup rather than carrying all parent reasoning.
+        **current code / spec anchors:** build on these instead of replacing them:
+        - `commands/workflow/cmd.go` already exposes `workflow next --plan <id>`.
+        - `.agents/workflow/specs/loop-agent-pipeline/decisions.1.md` D4 says the loop-break check should use `da --json workflow next --plan <id>` instead of parsing narrative output.
+        - the same decisions doc D14 says `RALPH_RUN_PLAN` semantics are a single id or comma-separated scoped plan filter, not a broad scan of every active plan.
+        - merge-back, delegation closeout, and fold-back persistence already exist in `commands/workflow`, so this task should compose or extend existing commands rather than recreating state transitions in shell.
 
-  - id: p8-orchestrator-awareness
-    title: Make orchestrator prompts and dispatch role-aware
-    status: completed
-    depends_on: []
-    blocks:
-      - p6-fanout-dispatch
-    owner: dot-agents
-    write_scope:
-      - bin/tests/ralph-orchestrate
-      - bin/tests/ralph-pipeline
-      - bin/tests/ralph-worker
-      - .agents/active/orchestrator.loop.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      **feedback_goal:** Align the live `ralph-*` runtime with the spec's role-aware dispatch instead of only documenting it.
+        **what is still missing:** the runtime does not yet expose a scoped completion loop that:
+        - accepts a single plan id or comma-separated list of plan ids
+        - keeps selecting work only from that scoped plan set
+        - runs the post-task orchestrator review gate after each task
+        - pauses automatic delegation when cross-cutting / architectural findings require an analysis or planning task
+        - blocks further bundles for that plan until the required planning artifact or human review is resolved
 
-      **what landed already:** D5 prompt/overlay separation is documented better, and the repo has distinct impl/verifier/review prompt surfaces.
+        **planning lock requirement:** when the orchestrator promotes an observation into a planning or architectural review item, delegation for that plan should pause so implementation drift is caught before more task fanout happens.
 
-      **what is still missing:** `ralph-pipeline` still spawns only `ralph-worker`; `ralph-orchestrate` still fans out loop-worker bundles only; `ralph-worker` only uses role classification to select model or agent-bin overrides, then continues to load the loop-worker surface. It does not load `impl-agent.project.md`, verifier prompt files, or `review-agent.project.md` as distinct runtime phases.
+        **break-check requirement:** mirror the historical D4/D14 intent: run the deterministic "is there still actionable work?" check against each scoped plan and break only when all scoped plans are drained or paused.
 
-      **current runtime anchors:** treat these as the baseline to replace:
-      - `bin/tests/ralph-pipeline` phase 2 still launches `ralph-worker --bundle <path>` once per bundle, then runs `ralph-closeout`.
-      - `bin/tests/ralph-orchestrate` still creates loop-worker-style bundles and tells the worker to load the loop-worker skill.
-      - `bin/tests/ralph-worker` remains a Pattern E loop-worker caller; it parses one bundle, loops for `RALPH_ITERATIONS`, and stops on merge-back. Role classification only affects model / agent-bin override selection.
-      - `docs/LOOP_ORCHESTRATION_SPEC.md` explicitly says Pattern E does not load `impl-agent.project.md`, which is why a staged runtime path is needed rather than more role heuristics inside the loop-worker prompt.
+        **scope semantics:** "take plan(s) to completion" does not mean "scan every active plan". It means:
+        - if one id is passed, stay within that plan
+        - if a comma-separated filter is passed, stay within that filtered set
+        - do not drift into unrelated active plans the way current broad scans can
 
-      **runtime target shape:** one canonical delegated task should still map to one task-scoped control-plane entry, but the runtime under that task should become a staged chain:
-      1. impl stage
-      2. zero or more verifier stages in bundle order
-      3. review stage
-      4. parent/orchestrator review gate
+        **lock semantics:** if a plan enters a planning-required state, the completion driver should treat that plan as paused/blocked for delegation until the planning artifact, proposal review, or human decision is resolved. Other scoped plans may continue if they are not locked.
 
-      **design guardrail:** preserve the task-scoped control plane. The refactor should introduce a task-chain runner or equivalent staged runtime beneath one bundle, not per-stage plans or per-stage delegations.
+        **command candidates in scope:** evaluate a native `workflow complete --plan <id>[,<id>...]` style driver, plus first-class plan-lock surfaces if the existing task/delegation statuses are not enough to encode "pause this plan pending planning review".
 
-      **script boundary:** the scripts should remain thin wrappers around deterministic `dot-agents` commands plus agent invocations. Shell should not be the long-term home for:
-      - plan break checks
-      - stage expansion from bundle metadata
-      - lock enforcement
-      - parent-side reconciliation decisions once an agent has already produced a structured outcome
-
-      **non-deterministic boundary:** role prompts remain agent-owned:
-      - impl prompt decides how to implement
-      - verifier prompt decides how to gather and interpret evidence
-      - review prompt decides accept/reject/escalate
-
-      **deterministic boundary:** `dot-agents` should own:
-      - task selection inside a scoped plan set
-      - stage sequencing from bundle metadata
-      - artifact writes
-      - plan/task lock checks
-      - final task/plan reconciliation
-
-      **done means:** the orchestrator and pipeline dispatch a real multi-stage chain, role-specific prompt surfaces are actually selected at runtime, and script behavior matches the spec's impl/verifier/review separation.
-
-  - id: p9-sources-design-fork
-    title: Fork external-sources design doc from the main implementation plan
-    status: completed
-    depends_on: []
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - .agents/workflow/specs/external-agent-sources/design.md
-    verification_required: false
-    notes: |-
-      Completed. This remains the doc-only D6 fork and is unrelated to the reopened runtime dispatch gap.
-
-  - id: p11-plan-completion-mode
-    title: Scoped plan-completion mode with planning locks and human-reviewed architectural pause points
-    status: pending
-    depends_on:
-      - p7-post-closeout
-      - p8-orchestrator-awareness
-      - p10-workflow-command-decomposition
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - bin/tests/ralph-pipeline
-      - bin/tests/ralph-orchestrate
-      - bin/tests/ralph-closeout
-      - commands/workflow.go
-      - commands/workflow/
-      - .agents/active/orchestrator.loop.md
-      - docs/LOOP_ORCHESTRATION_SPEC.md
-    verification_required: true
-    notes: |-
-      **feedback_goal:** Support "take plan(s) to completion" behavior for a scoped plan set while preserving parent review and stopping safely when planning is needed.
-
-      **existing support:** `workflow next --plan <id>` already exists, and the spec already recognizes architect/orchestrator review, fold-back/proposal routing, and parent acceptance after merge-back. Historical design notes also called out `RALPH_RUN_PLAN` as a single id or comma-separated plan filter.
-
-      **current code / spec anchors:** build on these instead of replacing them:
-      - `commands/workflow/cmd.go` already exposes `workflow next --plan <id>`.
-      - `.agents/workflow/specs/loop-agent-pipeline/decisions.1.md` D4 says the loop-break check should use `da --json workflow next --plan <id>` instead of parsing narrative output.
-      - the same decisions doc D14 says `RALPH_RUN_PLAN` semantics are a single id or comma-separated scoped plan filter, not a broad scan of every active plan.
-      - merge-back, delegation closeout, and fold-back persistence already exist in `commands/workflow`, so this task should compose or extend existing commands rather than recreating state transitions in shell.
-
-      **what is still missing:** the runtime does not yet expose a scoped completion loop that:
-      - accepts a single plan id or comma-separated list of plan ids
-      - keeps selecting work only from that scoped plan set
-      - runs the post-task orchestrator review gate after each task
-      - pauses automatic delegation when cross-cutting / architectural findings require an analysis or planning task
-      - blocks further bundles for that plan until the required planning artifact or human review is resolved
-
-      **planning lock requirement:** when the orchestrator promotes an observation into a planning or architectural review item, delegation for that plan should pause so implementation drift is caught before more task fanout happens.
-
-      **break-check requirement:** mirror the historical D4/D14 intent: run the deterministic "is there still actionable work?" check against each scoped plan and break only when all scoped plans are drained or paused.
-
-      **scope semantics:** "take plan(s) to completion" does not mean "scan every active plan". It means:
-      - if one id is passed, stay within that plan
-      - if a comma-separated filter is passed, stay within that filtered set
-      - do not drift into unrelated active plans the way current broad scans can
-
-      **lock semantics:** if a plan enters a planning-required state, the completion driver should treat that plan as paused/blocked for delegation until the planning artifact, proposal review, or human decision is resolved. Other scoped plans may continue if they are not locked.
-
-      **command candidates in scope:** evaluate a native `workflow complete --plan <id>[,<id>...]` style driver, plus first-class plan-lock surfaces if the existing task/delegation statuses are not enough to encode "pause this plan pending planning review".
-
-      **done means:** a scoped completion mode can drive one plan or a filtered set of plans forward task-by-task, but it yields to orchestrator review, proposal/planning flows, and plan-level locks instead of blindly draining the queue.
-
-  - id: p10-workflow-command-decomposition
-    title: Split workflow command into subpackage files to reduce worker hotspot contention
-    status: completed
-    depends_on:
-      - p7-post-closeout
-      - p8-orchestrator-awareness
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - commands/workflow.go
-      - commands/workflow/cmd.go
-      - commands/workflow/
-    verification_required: true
-    notes: |-
-      Completed. `commands/workflow/` has already been decomposed into feature files and a thin shim. Reopening the plan does not undo this structural work.
+        **done means:** a scoped completion mode can drive one plan or a filtered set of plans forward task-by-task, but it yields to orchestrator review, proposal/planning flows, and plan-level locks instead of blindly draining the queue.
+    - id: p10-workflow-command-decomposition
+      title: Split workflow command into subpackage files to reduce worker hotspot contention
+      status: completed
+      depends_on:
+        - p7-post-closeout
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow/cmd.go
+        - commands/workflow/
+      verification_required: true
+      notes: Completed. `commands/workflow/` has already been decomposed into feature files and a thin shim. Reopening the plan does not undo this structural work.
