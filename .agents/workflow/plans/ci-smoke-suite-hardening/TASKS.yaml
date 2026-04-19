@@ -3,7 +3,7 @@ plan_id: ci-smoke-suite-hardening
 tasks:
     - id: establish-toolchain-and-built-binary-baseline
       title: Add toolchain hygiene and built-binary baseline verification to CI
-      status: completed
+      status: pending
       depends_on: []
       blocks:
         - isolate-home-based-smoke-harness
@@ -15,10 +15,12 @@ tasks:
         - tests/
         - docs/
       verification_required: true
-      notes: Add the missing baseline checks such as formatting, vet, direct buildability, and built-binary smoke validation so CI stops proving only launcher-shim behavior and partial compile success.
+      notes: >
+        Add the missing baseline checks such as formatting, vet, direct buildability, and built-binary smoke validation so CI stops proving only launcher-shim behavior and partial compile success.
+        Aligns with LOOP_ORCHESTRATION_SPEC Phase 8 idea that verification should be structured and reproducible (here via CI gates rather than delegation bundles).
     - id: isolate-home-based-smoke-harness
       title: Move smoke flows to isolated HOME and AGENTS_HOME fixtures
-      status: completed
+      status: pending
       depends_on:
         - establish-toolchain-and-built-binary-baseline
       blocks:
@@ -31,10 +33,12 @@ tasks:
         - tests/
         - docs/
       verification_required: true
-      notes: Make smoke jobs run against isolated homes and deterministic PATH inputs so CI stops inheriting runner state and hidden local config assumptions.
+      notes: >
+        Make smoke jobs run against isolated homes and deterministic PATH inputs so CI stops inheriting runner state and hidden local config assumptions.
+        Matches WORKFLOW_AUTOMATION_PRODUCT_SPEC storage split (repo-local .agents/ vs user home) when simulating fresh installs.
     - id: expand-command-surface-smokes
       title: Expand CLI smoke coverage for workflow, kg, and resource lifecycle surfaces
-      status: completed
+      status: pending
       depends_on:
         - isolate-home-based-smoke-harness
       blocks:
@@ -48,7 +52,10 @@ tasks:
         - commands/
         - docs/
       verification_required: true
-      notes: Cover meaningful command surfaces that unit tests do not exercise well, especially workflow and kg entrypoints plus resource lifecycle paths where filesystem, flags, and layout assumptions tend to drift.
+      notes: >
+        Cover meaningful command surfaces that unit tests do not exercise well, especially workflow and kg entrypoints plus resource lifecycle paths where filesystem, flags, and layout assumptions tend to drift.
+        Prefer commands routed by LOOP_ORCHESTRATION_SPEC (e.g. kg bridge for code-structure intents; workflow graph query when bridge-ready) over ad hoc grep.
+        When adding scenarios, update or reference .agents/workflow/testing-matrix.yaml once introduced so coverage stays canonical.
     - id: release-packaging-and-parity
       title: Add release packaging validation and align PR CI with release CI
       status: pending
@@ -64,7 +71,9 @@ tasks:
         - scripts/
         - docs/
       verification_required: true
-      notes: Run release packaging checks before auto-release is the first place config drift breaks, and keep the PR and release workflows validating the same built-binary and smoke assumptions.
+      notes: >
+        Run release packaging checks before auto-release is the first place config drift breaks; keep PR and release workflows validating the same built-binary and smoke assumptions.
+        Concrete: replace src/bin/dot-agents with the built Go binary in auto-release; align go test with test.yml GO_TEST_FLAGS (-race -count=1 -timeout=300s); add goreleaser check (or equivalent snapshot validation) to the PR workflow; ensure smoke steps in release use the same HOME/AGENTS_HOME isolation pattern if any shell smokes remain.
     - id: define-heavy-integration-lane
       title: Define the intentional lane for heavy environment-sensitive integration checks
       status: pending
@@ -77,4 +86,7 @@ tasks:
         - tests/
         - docs/
       verification_required: false
-      notes: Decide which checks such as environment-heavy Claude or containerized flows belong in nightly or manual workflows so they stay tracked without destabilizing the main PR gate.
+      notes: >
+        Decide which checks (graph-warm-dependent kg health, containerized flows, credential-bound integrations, long soak) belong in workflow_dispatch or scheduled workflows so they stay tracked without destabilizing the main PR gate.
+        Document triggers, required secrets, and how rows relate to .agents/workflow/testing-matrix.yaml scenario families when that file exists.
+        Per LOOP_ORCHESTRATION_SPEC, hooks do not choose work; this lane is explicit automation only.

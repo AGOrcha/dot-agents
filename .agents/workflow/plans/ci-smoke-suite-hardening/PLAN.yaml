@@ -2,10 +2,18 @@ schema_version: 1
 id: ci-smoke-suite-hardening
 title: CI Smoke Suite Hardening
 status: active
-summary: Upgrade CI from basic compile-and-smoke coverage into a layered built-binary verification pipeline with isolated homes, broader command-surface coverage, and release packaging checks.
+summary: Upgrade CI from basic compile-and-smoke coverage into a layered built-binary verification pipeline with isolated homes, broader command-surface coverage, release packaging checks, alignment with docs/LOOP_ORCHESTRATION_SPEC testing-matrix and scenario direction, and an explicit heavy-integration lane.
 created_at: "2026-04-19T14:37:51Z"
-updated_at: "2026-04-19T20:25:52Z"
+updated_at: "2026-04-19T22:00:00Z"
 owner: dot-agents
-success_criteria: PR and release CI validate the built binary under isolated homes, cover high-value command surfaces beyond basic help paths, run packaging verification before release time, and keep heavy environment-sensitive integration checks in an intentional lane instead of leaving them untracked.
-verification_strategy: GitHub Actions workflow verification, focused shell smoke tests, built-binary temp-home runs in CI, and release snapshot packaging checks alongside the existing Go test suite.
-current_focus_task: Add release packaging validation and align PR CI with release CI
+success_criteria: >
+  PR and release CI validate the same built Go binary (not launcher shims) under isolated HOME/AGENTS_HOME;
+  Go test flags match between workflows (e.g. shared -race -count=1 -timeout discipline);
+  packaging drift is caught on the PR path (e.g. goreleaser check);
+  smoke coverage stays traceable against .agents/workflow/testing-matrix.yaml when that file exists;
+  heavy or graph-preflight-dependent checks live in a named lane rather than destabilizing the default gate.
+verification_strategy: >
+  GitHub Actions (test.yml, auto-release.yml); shell smokes with SMOKE_HOME/SMOKE_AGENTS_HOME;
+  optional matrix row references in workflow comments or task notes;
+  fold-back to testing-matrix.yaml for scenario additions per LOOP_ORCHESTRATION_SPEC fold-back policy where appropriate.
+current_focus_task: Add toolchain hygiene and built-binary baseline verification to CI
