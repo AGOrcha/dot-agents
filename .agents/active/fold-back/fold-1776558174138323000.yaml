@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776558174138323000
+plan_id: skill-import-streamline
+task_id: manifest-preserve-unknown
+observation: Plan completed and archived to history
+classification: small
+routed_to: task_note:skill-import-streamline/manifest-preserve-unknown
+created_at: "2026-04-19T00:22:54Z"
