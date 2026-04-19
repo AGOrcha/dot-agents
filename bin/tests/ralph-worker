@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ralph-worker: worker stage runner for a single delegated task.
 #
-# Without --stage (backward compat): Pattern E loop-worker — global loop-worker profile + repo
+# Without --stage (backward compat): legacy loop-worker mode — global loop-worker profile + repo
 # project overlay + loop-worker / iteration-close skills, exits when merge-back is written.
 #
 # With --stage impl: loads .agents/prompts/impl-agent.project.md, exits when impl-handoff.yaml
@@ -311,6 +311,43 @@ find_skill_dir() {
   return 1
 }
 
+append_codex_add_dirs() {
+  local dir
+  for dir in \
+    "$REPO_ROOT/.agents" \
+    "$REPO_ROOT/.git" \
+    "$HOME/.agents"; do
+    if [[ -e "$dir" ]]; then
+      agent_inv+=( --add-dir "$dir" )
+    fi
+  done
+}
+
+classify_worker_failure_log() {
+  local log_file="${1:-}"
+  [[ -f "$log_file" ]] || return 1
+
+  if grep -Fqi "hit your usage limit" "$log_file" || grep -Fqi "purchase more credits" "$log_file"; then
+    printf '%s' "usage_limit"
+    return 0
+  fi
+
+  if grep -Fqi ".agents/active" "$log_file" && grep -Fqi "hidden" "$log_file"; then
+    printf '%s' "workspace_permissions"
+    return 0
+  fi
+
+  if grep -Fqi "patch helper" "$log_file" || \
+     grep -Fqi "index.lock is blocked" "$log_file" || \
+     grep -Fqi "permission wall" "$log_file" || \
+     grep -Fqi "denies writes under" "$log_file"; then
+    printf '%s' "workspace_permissions"
+    return 0
+  fi
+
+  return 1
+}
+
 WORKER_SKILL_DIR="$(find_skill_dir loop-worker || true)"
 ITER_CLOSE_DIR="$(find_skill_dir iteration-close || true)"
 
@@ -382,6 +419,7 @@ elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
   else
     agent_inv+=( --full-auto )
   fi
+  append_codex_add_dirs
   [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
@@ -396,6 +434,7 @@ fi
 stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
 echo "ralph-worker: starting worker for plan=$PLAN_ID task=$TASK_ID stage=$stage_label (budget: ${ITERATIONS} iterations)" >&2
 
+terminal_failure=""
 for ((i = 1; i <= ITERATIONS; i++)); do
   # Exit early if the stage's done artifact already exists
   if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
@@ -494,7 +533,7 @@ Stop after writing merge-back.
 EOF
         ;;
       *)
-        # Original loop-worker surface (no --stage or legacy behavior)
+        # Original loop-worker surface (no --stage / legacy loop-worker mode)
         if [[ -n "${WORKER_SKILL_DIR:-}" ]]; then
           cat <<EOF
 ## Worker skill (load this)
@@ -551,6 +590,7 @@ EOF
 
   echo "=== ralph-worker: worker iteration $i/$ITERATIONS ===" >&2
   agent_rc=0
+  log_agent=""
   if [[ -n "$LOG_DIR" ]]; then
     case "$OUTPUT_FORMAT" in
       stream-json) log_agent="$LOG_DIR/worker-iter-${i}.ndjson" ;;
@@ -573,16 +613,50 @@ EOF
     echo "ralph-worker: agent exited with code $agent_rc on iteration $i" >&2
   fi
 
+  stop_iterations=0
+  if [[ -n "$done_artifact" && ! -f "$done_artifact" && -n "$log_agent" ]]; then
+    failure_class="$(classify_worker_failure_log "$log_agent" || true)"
+    case "$failure_class" in
+      usage_limit)
+        echo "ralph-worker: terminal failure for task $TASK_ID: Codex usage limit reached; stopping retries" >&2
+        terminal_failure="usage_limit"
+        stop_iterations=1
+        ;;
+      workspace_permissions)
+        echo "ralph-worker: terminal failure for task $TASK_ID: Codex sandbox/write permissions are insufficient for workspace artifacts; stopping retries" >&2
+        terminal_failure="workspace_permissions"
+        stop_iterations=1
+        ;;
+    esac
+  fi
+
   trap - EXIT
   cleanup_iter
+  [[ $stop_iterations -eq 1 ]] && break
 done
 
 # Final check: did the worker produce the expected done artifact?
 if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
   echo "ralph-worker: worker complete — ${done_label} written for task $TASK_ID" >&2
-else
-  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) without ${done_label} for task $TASK_ID" >&2
-  echo "  → Parent should inspect and either extend budget or run ralph-closeout manually." >&2
+  exit 0
 fi
 
+case "$terminal_failure" in
+  usage_limit)
+    echo "ralph-worker: done with terminal failure usage_limit for task $TASK_ID" >&2
+    exit 32
+    ;;
+  workspace_permissions)
+    echo "ralph-worker: done with terminal failure workspace_permissions for task $TASK_ID" >&2
+    exit 33
+    ;;
+esac
+
+if [[ -n "$done_artifact" ]]; then
+  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) without ${done_label} for task $TASK_ID" >&2
+else
+  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) for task $TASK_ID" >&2
+fi
+echo "  → Parent should inspect and either extend budget or run ralph-closeout manually." >&2
 echo "ralph-worker: done." >&2
+exit 1

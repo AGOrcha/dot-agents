@@ -1328,6 +1328,23 @@ func copyWorkflowArtifact(src, dst string) error {
 	return nil
 }
 
+func copyWorkflowDir(srcDir, dstDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dstDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyWorkflowArtifact(path, target)
+	})
+}
+
 func allCanonicalTasksTerminal(tasks []CanonicalTask) bool {
 	if len(tasks) == 0 {
 		return false
@@ -1391,6 +1408,7 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	archiveDir := filepath.Join(project.Path, ".agents", "history", planID, "delegate-merge-back-archive", dateStr, taskID)
 	mergeBackSrc := filepath.Join(mergeBackDir(project.Path), taskID+".md")
 	delegationSrc := filepath.Join(delegationDir(project.Path), taskID+".yaml")
+	verificationSrcDir := filepath.Join(project.Path, ".agents", "active", "verification", taskID)
 
 	if err := copyWorkflowArtifact(mergeBackSrc, filepath.Join(archiveDir, "merge-back.md")); err != nil {
 		return fmt.Errorf("archive merge-back: %w", err)
@@ -1414,6 +1432,17 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	}
 	if err := os.WriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
 		return fmt.Errorf("write closeout record: %w", err)
+	}
+
+	if decision == "accept" {
+		if st, err := os.Stat(verificationSrcDir); err == nil && st.IsDir() {
+			if err := copyWorkflowDir(verificationSrcDir, filepath.Join(archiveDir, "verification")); err != nil {
+				return fmt.Errorf("archive verification dir: %w", err)
+			}
+			if err := os.RemoveAll(verificationSrcDir); err != nil {
+				return fmt.Errorf("remove active verification dir: %w", err)
+			}
+		}
 	}
 
 	_ = os.Remove(mergeBackSrc)

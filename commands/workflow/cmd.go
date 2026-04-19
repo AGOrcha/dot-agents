@@ -264,6 +264,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Example: deps.ExampleBlock(
 			"  dot-agents workflow next",
 			"  dot-agents workflow next --plan loop-agent-pipeline",
+			"  dot-agents workflow next --plan loop-agent-pipeline,resource-command-parity",
 		),
 		Args: deps.NoArgsWithHints("`dot-agents workflow next` works on the current repository."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -271,6 +272,26 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 	nextCmd.Flags().StringVar(&workflowNextPlanID, "plan", "", "Only consider tasks from this canonical plan id")
+	nextCmd.Flags().Lookup("plan").Usage = "Only consider tasks from these canonical plan ids (comma-separated)"
+
+	var workflowCompletePlanID string
+	completeCmd := &cobra.Command{
+		Use:   "complete",
+		Short: "Probe scoped plan-completion state",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow complete --plan loop-agent-pipeline",
+			"  dot-agents --json workflow complete --plan loop-agent-pipeline,resource-command-parity",
+		),
+		Args: deps.NoArgsWithHints("Use `--plan` to scope plan-completion mode."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(workflowCompletePlanID) == "" {
+				return fmt.Errorf("--plan must not be empty")
+			}
+			return runWorkflowComplete(workflowCompletePlanID)
+		},
+	}
+	completeCmd.Flags().StringVar(&workflowCompletePlanID, "plan", "", "Only consider these canonical plan ids (comma-separated)")
+	_ = completeCmd.MarkFlagRequired("plan")
 
 	var advanceTask, advanceStatus string
 	advanceCmd := &cobra.Command{
@@ -638,7 +659,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	bundleCmd.AddCommand(bundleStagesCmd)
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, completeCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
 	return cmd
 }
 

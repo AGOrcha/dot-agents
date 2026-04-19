@@ -781,8 +781,17 @@ func listCanonicalPlanIDs(projectPath string) ([]string, error) {
 	}
 	var ids []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if !e.IsDir() {
+			continue
+		}
+		planPath := filepath.Join(base, e.Name(), "PLAN.yaml")
+		if _, err := os.Stat(planPath); err == nil {
 			ids = append(ids, e.Name())
+			continue
+		} else if os.IsNotExist(err) {
+			continue
+		} else {
+			return nil, err
 		}
 	}
 	sort.Strings(ids)

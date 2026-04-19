@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -592,6 +593,14 @@ type workflowNextTaskSuggestion struct {
 	AppType              string   `json:"app_type,omitempty"`
 }
 
+type workflowCompletionScopeState struct {
+	Scope       []string                    `json:"scope"`
+	State       string                      `json:"state"`
+	Next        *workflowNextTaskSuggestion `json:"next,omitempty"`
+	PausedPlans []string                    `json:"paused_plans,omitempty"`
+	LockedPlans []string                    `json:"locked_plans,omitempty"`
+}
+
 func runWorkflowNext(explicitPlanID string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -634,6 +643,74 @@ func runWorkflowNext(explicitPlanID string) error {
 	return nil
 }
 
+func runWorkflowComplete(explicitPlanID string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(explicitPlanID) == "" {
+		return fmt.Errorf("--plan must not be empty")
+	}
+	completion, err := collectWorkflowCompletionState(project.Path, explicitPlanID)
+	if err != nil {
+		return err
+	}
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(completion)
+	}
+
+	ui.Header("Scoped Plan Completion")
+	fmt.Fprintf(os.Stdout, "  scope: %s\n", strings.Join(completion.Scope, ", "))
+	fmt.Fprintf(os.Stdout, "  state: %s\n", completion.State)
+	if completion.Next != nil {
+		fmt.Fprintf(os.Stdout, "  next: %s  [%s]\n", completion.Next.TaskTitle, completion.Next.TaskID)
+		fmt.Fprintf(os.Stdout, "  plan: %s  [%s]\n", completion.Next.PlanTitle, completion.Next.PlanID)
+		fmt.Fprintf(os.Stdout, "  reason: %s\n", completion.Next.Reason)
+	}
+	if len(completion.PausedPlans) > 0 {
+		fmt.Fprintf(os.Stdout, "  paused plans: %s\n", strings.Join(completion.PausedPlans, ", "))
+	}
+	if len(completion.LockedPlans) > 0 {
+		fmt.Fprintf(os.Stdout, "  locked plans: %s\n", strings.Join(completion.LockedPlans, ", "))
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+func parsePlanIDFilter(planFilter string) []string {
+	planFilter = strings.TrimSpace(planFilter)
+	if planFilter == "" {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	ids := make([]string, 0, 4)
+	for _, raw := range strings.Split(planFilter, ",") {
+		id := strings.TrimSpace(raw)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func filterPlanIDsUnlocked(ids []string, locked map[string]bool) []string {
+	if len(locked) == 0 {
+		return ids
+	}
+	var out []string
+	for _, id := range ids {
+		if !locked[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // activeDelegationPlanIDs returns plan ids that currently have a pending or active delegation.
 func activeDelegationPlanIDs(delegations []DelegationContract) map[string]bool {
 	m := make(map[string]bool)
@@ -661,6 +738,82 @@ func filterPlanIDsLocked(ids []string, locked map[string]bool) []string {
 	return out
 }
 
+func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (*workflowCompletionScopeState, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return &workflowCompletionScopeState{
+			Scope: []string{},
+			State: "drained",
+		}, nil
+	}
+
+	scopeIDs := parsePlanIDFilter(explicitPlanID)
+	if len(scopeIDs) > 0 {
+		available := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			available[id] = true
+		}
+		filtered := make([]string, 0, len(scopeIDs))
+		for _, id := range scopeIDs {
+			if !available[id] {
+				return nil, fmt.Errorf("plan %q not found", id)
+			}
+			filtered = append(filtered, id)
+		}
+		scopeIDs = filtered
+	}
+
+	delegations, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	lockedPlans := activeDelegationPlanIDs(delegations)
+	pausedPlans := make([]string, 0, len(scopeIDs))
+	lockedScopePlans := make([]string, 0, len(scopeIDs))
+	for _, id := range scopeIDs {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil {
+			return nil, fmt.Errorf("load plan %q: %w", id, err)
+		}
+		switch plan.Status {
+		case "paused":
+			pausedPlans = append(pausedPlans, id)
+		case "active":
+			if lockedPlans[id] {
+				lockedScopePlans = append(lockedScopePlans, id)
+			}
+		}
+	}
+	sort.Strings(pausedPlans)
+	sort.Strings(lockedScopePlans)
+
+	suggestion, err := selectNextCanonicalTask(projectPath, explicitPlanID)
+	if err != nil {
+		return nil, err
+	}
+
+	state := "drained"
+	switch {
+	case suggestion != nil:
+		state = "actionable"
+	case len(pausedPlans) > 0:
+		state = "paused"
+	case len(lockedScopePlans) > 0:
+		state = "locked"
+	}
+
+	return &workflowCompletionScopeState{
+		Scope:       scopeIDs,
+		State:       state,
+		Next:        suggestion,
+		PausedPlans: pausedPlans,
+		LockedPlans: lockedScopePlans,
+	}, nil
+}
+
 func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
@@ -672,17 +825,21 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 
 	explicitPlanID = strings.TrimSpace(explicitPlanID)
 	if explicitPlanID != "" {
-		found := false
+		filteredIDs := parsePlanIDFilter(explicitPlanID)
+		if len(filteredIDs) == 0 {
+			return nil, nil
+		}
+		available := make(map[string]bool, len(ids))
 		for _, id := range ids {
-			if id == explicitPlanID {
-				found = true
-				break
+			available[id] = true
+		}
+		ids = ids[:0]
+		for _, id := range filteredIDs {
+			if !available[id] {
+				return nil, fmt.Errorf("plan %q not found", id)
 			}
+			ids = append(ids, id)
 		}
-		if !found {
-			return nil, fmt.Errorf("plan %q not found", explicitPlanID)
-		}
-		ids = []string{explicitPlanID}
 	}
 
 	delegations, err := listDelegationContracts(projectPath)
@@ -691,7 +848,11 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 	}
 
 	lockedPlans := activeDelegationPlanIDs(delegations)
-	ids = filterPlanIDsLocked(ids, lockedPlans)
+	if explicitPlanID == "" {
+		ids = filterPlanIDsLocked(ids, lockedPlans)
+	} else {
+		ids = filterPlanIDsUnlocked(ids, lockedPlans)
+	}
 	if len(ids) == 0 {
 		return nil, nil
 	}

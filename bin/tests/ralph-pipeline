@@ -11,6 +11,7 @@
 #   RALPH_ITERATIONS             worker implementation budget (default 5)
 #   RALPH_MAX_PARALLEL_WORKERS   max concurrent workers (default 3)
 #   RALPH_AUTO_FANOUT            1 = auto-create bundles (default)
+#   RALPH_RUN_PLAN               single id or comma-separated canonical plan scope for completion mode
 #   RALPH_DELEGATION_PROMPT_FILE optional: forwarded to ralph-orchestrate (must differ from RALPH_PROJECT_OVERLAY; see D5)
 #   RALPH_CLOSEOUT_AUTO          1 = auto-accept merge-backs (default)
 #   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  forwarded to ralph-closeout: optional read-only fold-back list per plan after closeout
@@ -42,7 +43,7 @@
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Control plane (dot-agents): fanout creates `.agents/active/verification/<task_id>/` before dispatch;
-#   `workflow next` scopes to plans that have active delegations; see `workflow next --help`.
+#   `workflow next --plan <id>[,<id>...]` scopes break checks to the filtered plan set.
 #
 # Early exits:
 #   No unblocked tasks (no RALPH_BUNDLE lines from orchestrate) → message, exit 0
@@ -117,16 +118,73 @@ fi
 
 [[ -n "$BASE_LOG_DIR" ]] && mkdir -p "$BASE_LOG_DIR"
 
-echo "=== ralph-pipeline: starting run ${RUN_TIMESTAMP} ===" >&2
+parse_plan_scope() {
+  local raw="${1:-}"
+  local -a plans=()
+  local entry trimmed
 
-# Phase 1: Orchestrate — collect RALPH_BUNDLE lines
-echo "=== ralph-pipeline: phase 1 — orchestrate ===" >&2
+  raw="${raw#./}"
+  IFS=',' read -r -a plans <<< "$raw"
+  for entry in "${plans[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+  done
+}
+
+plan_is_in_scope() {
+  local plan_id="$1"
+  [[ -z "${RALPH_RUN_PLAN:-}" ]] && return 0
+  local scope
+  while IFS= read -r scope; do
+    [[ "$scope" == "$plan_id" ]] && return 0
+  done < <(parse_plan_scope "$RALPH_RUN_PLAN")
+  return 1
+}
+
+describe_worker_exit_code() {
+  local rc="$1"
+  case "$rc" in
+    34) printf '%s' "review_gate_failed" ;;
+    32) printf '%s' "usage_limit" ;;
+    33) printf '%s' "workspace_permissions" ;;
+    *) printf '%s' "error" ;;
+  esac
+}
+
+scoped_completion_state() {
+  local plan_scope="${1:-}"
+  [[ -z "$plan_scope" ]] && return 1
+  local complete_json
+  set +e
+  complete_json="$( (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" workflow complete --json --plan "$plan_scope") 2>/dev/null )"
+  local rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    return 2
+  fi
+  complete_json="${complete_json//$'\n'/}"
+  [[ -n "$complete_json" && "$complete_json" != "null" ]] || return 1
+  printf '%s' "$complete_json" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+print(data.get('state', ''))
+" 2>/dev/null
+}
+
+run_pipeline_pass() {
+  echo "=== ralph-pipeline: starting run ${RUN_TIMESTAMP} ===" >&2
+
+  # Phase 1: Orchestrate — collect RALPH_BUNDLE lines
+  echo "=== ralph-pipeline: phase 1 — orchestrate ===" >&2
 
 ORCH_LOG_DIR="${BASE_LOG_DIR:+${BASE_LOG_DIR}/orchestrate}"
 [[ -n "$ORCH_LOG_DIR" ]] && mkdir -p "$ORCH_LOG_DIR"
 
 orch_output_file="$(mktemp "${TMPDIR:-/tmp}/ralph-orch-output.XXXXXX")"
-trap 'rm -f "$orch_output_file" 2>/dev/null || true' EXIT
 
 export RALPH_NO_LOG="${RALPH_NO_LOG:-0}"
 export RALPH_LOG_DIR="${ORCH_LOG_DIR:-}"
@@ -145,7 +203,7 @@ orch_rc=${PIPESTATUS[0]}
 set -e
 if [[ $orch_rc -ne 0 ]]; then
   echo "error: ralph-orchestrate failed (exit $orch_rc)" >&2
-  exit 1
+  return 1
 fi
 
 # Parse RALPH_BUNDLE: lines from orchestrator output
@@ -172,9 +230,23 @@ try:
     print(m.group(1).strip().strip('"') if m else "")
 except Exception:
     pass
-PY
+    PY
 )"
     [[ -z "$tid" ]] && continue
+    plan_id="$(python3 - "$f" <<'PY'
+import re, sys
+try:
+    text = open(sys.argv[1], encoding="utf-8").read()
+    m = re.search(r"^(?:parent_)?plan_id:\s*(.+)", text, re.M)
+    print(m.group(1).strip().strip('"') if m else "")
+except Exception:
+    pass
+PY
+)"
+    [[ -z "$plan_id" ]] && continue
+    if ! plan_is_in_scope "$plan_id"; then
+      continue
+    fi
     [[ -f "$REPO_ROOT/.agents/active/delegation/${tid}.yaml" ]] || continue
     BUNDLES+=( "$f" )
   done
@@ -183,6 +255,7 @@ fi
 
 # Also emit the orchestrator output to stdout
 cat "$orch_output_file"
+rm -f "$orch_output_file" 2>/dev/null || true
 
 if [[ ${#BUNDLES[@]} -eq 0 ]]; then
   echo "ralph-pipeline: no bundles created — no unblocked tasks to work on" >&2
@@ -202,7 +275,11 @@ if [[ ${#BUNDLES[@]} -eq 0 ]]; then
 }
 EOF
   fi
-  exit 0
+  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+    echo "error: scoped completion mode expected actionable work for plan(s): ${RALPH_RUN_PLAN}" >&2
+    return 1
+  fi
+  return 0
 fi
 
 echo "ralph-pipeline: ${#BUNDLES[@]} bundle(s) created — spawning workers" >&2
@@ -250,20 +327,45 @@ for bundle_path in "${BUNDLES[@]}"; do
       if [[ "$stage_line" == verifier:* ]]; then
         vtype="${stage_line#verifier:}"
         echo "ralph-pipeline: [$(basename "$bundle_path")] stage verifier:${vtype}" >&2
-        "$RALPH_WORKER" --bundle "$bundle_path" --stage verifier --verifier-type "$vtype" || { echo "ralph-pipeline: stage verifier:${vtype} exited non-zero" >&2; stage_rc=$?; }
+        set +e
+        "$RALPH_WORKER" --bundle "$bundle_path" --stage verifier --verifier-type "$vtype"
+        rc=$?
+        set -e
+        if [[ $rc -ne 0 ]]; then
+          echo "ralph-pipeline: stage verifier:${vtype} exited non-zero (status $rc: $(describe_worker_exit_code "$rc"))" >&2
+          stage_rc=$rc
+          break
+        fi
       else
         echo "ralph-pipeline: [$(basename "$bundle_path")] stage ${stage_line}" >&2
-        "$RALPH_WORKER" --bundle "$bundle_path" --stage "$stage_line" || { echo "ralph-pipeline: stage ${stage_line} exited non-zero" >&2; stage_rc=$?; }
+        set +e
+        "$RALPH_WORKER" --bundle "$bundle_path" --stage "$stage_line"
+        rc=$?
+        set -e
+        if [[ $rc -ne 0 ]]; then
+          echo "ralph-pipeline: stage ${stage_line} exited non-zero (status $rc: $(describe_worker_exit_code "$rc"))" >&2
+          stage_rc=$rc
+          break
+        fi
       fi
     done <<<"$stages_text"
+
+    if [[ $stage_rc -ne 0 ]]; then
+      exit $stage_rc
+    fi
 
     # Post-staged review gate (p7)
     gate_rc=0
     if [[ -x "$RALPH_REVIEW_GATE" ]]; then
       export RALPH_LOG_DIR=""
       "$RALPH_REVIEW_GATE" --bundle "$bundle_path" || gate_rc=$?
-      if [[ $gate_rc -ne 0 && $gate_rc -ne 2 ]]; then
+      if [[ $gate_rc -eq 2 ]]; then
+        echo "ralph-pipeline: review gate blocked closeout for $(basename "$bundle_path")" >&2
+        exit 34
+      fi
+      if [[ $gate_rc -ne 0 ]]; then
         echo "ralph-pipeline: review gate error (exit $gate_rc) for $(basename "$bundle_path")" >&2
+        exit "$gate_rc"
       fi
     fi
 
@@ -277,16 +379,26 @@ done
 
 # Wait for all workers
 worker_errors=0
+review_gate_failures=0
 for i in "${!worker_bundle_keys[@]}"; do
   bundle_path="${worker_bundle_keys[$i]}"
   pid="${worker_pids[$i]}"
   if wait "$pid"; then
     echo "ralph-pipeline: worker for $(basename "$bundle_path") completed" >&2
   else
-    echo "ralph-pipeline: worker for $(basename "$bundle_path") exited with error (pid=$pid)" >&2
+    rc=$?
+    echo "ralph-pipeline: worker for $(basename "$bundle_path") exited with $(describe_worker_exit_code "$rc") (status $rc, pid=$pid)" >&2
+    if [[ $rc -eq 34 ]]; then
+      (( review_gate_failures++ )) || true
+    fi
     (( worker_errors++ )) || true
   fi
 done
+
+if [[ $review_gate_failures -gt 0 ]]; then
+  echo "ralph-pipeline: ${review_gate_failures} bundle(s) failed the review gate — skipping closeout" >&2
+  return 1
+fi
 
 if [[ $worker_errors -gt 0 ]]; then
   echo "ralph-pipeline: $worker_errors worker(s) failed — continuing to closeout" >&2
@@ -304,7 +416,7 @@ export RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT="${RALPH_POST_CLOSEOUT_FOLD_BACK_AUDI
 
 if ! "$RALPH_CLOSEOUT"; then
   echo "error: ralph-closeout failed" >&2
-  exit 1
+  return 1
 fi
 
 # Write metrics
@@ -418,7 +530,42 @@ fi
 
 if [[ $worker_errors -gt 0 ]]; then
   echo "ralph-pipeline: done with $worker_errors worker error(s)" >&2
-  exit 1
+  return 1
 fi
 
 echo "ralph-pipeline: done." >&2
+}
+
+if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+  while true; do
+    completion_state="$(scoped_completion_state "$RALPH_RUN_PLAN")"
+    probe_rc=$?
+    if [[ $probe_rc -eq 2 ]]; then
+      echo "error: scoped completion break check failed for plan(s): ${RALPH_RUN_PLAN}" >&2
+      exit 1
+    fi
+    if [[ $probe_rc -ne 0 ]]; then
+      echo "error: scoped completion probe returned no state for plan(s): ${RALPH_RUN_PLAN}" >&2
+      exit 1
+    fi
+    case "$completion_state" in
+      actionable|locked)
+        run_pipeline_pass || exit $?
+        ;;
+      paused)
+        echo "ralph-pipeline: scoped completion paused for plan(s): ${RALPH_RUN_PLAN}" >&2
+        exit 0
+        ;;
+      drained)
+        echo "ralph-pipeline: scoped completion mode drained for plan(s): ${RALPH_RUN_PLAN}" >&2
+        exit 0
+        ;;
+      *)
+        echo "error: scoped completion probe returned unknown state $completion_state for plan(s): ${RALPH_RUN_PLAN}" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+
+run_pipeline_pass

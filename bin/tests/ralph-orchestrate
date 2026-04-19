@@ -8,6 +8,7 @@
 # Env vars:
 #   RALPH_MAX_PARALLEL_WORKERS   max bundles to create per run (default 3)
 #   RALPH_AUTO_FANOUT            1 = auto-create bundles (default), 0 = prompt-only (no fanout)
+#   RALPH_RUN_PLAN               single id or comma-separated canonical plan scope for completion mode
 #   RALPH_FANOUT_PLAN            manual plan override (requires RALPH_FANOUT_TASK)
 #   RALPH_FANOUT_TASK            manual task override
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
@@ -98,6 +99,18 @@ resolve_orchestrator_reasoning_effort() {
   fi
 }
 
+append_codex_add_dirs() {
+  local dir
+  for dir in \
+    "$REPO_ROOT/.agents" \
+    "$REPO_ROOT/.git" \
+    "$HOME/.agents"; do
+    if [[ -e "$dir" ]]; then
+      agent_inv+=( --add-dir "$dir" )
+    fi
+  done
+}
+
 AGENT_BIN="$(resolve_orchestrator_agent_bin)"
 ROLE_MODEL="$(resolve_orchestrator_model)"
 ROLE_REASONING_EFFORT="$(resolve_orchestrator_reasoning_effort)"
@@ -174,6 +187,20 @@ PY
   done
 }
 
+parse_plan_scope() {
+  local raw="${1:-}"
+  local -a plans=()
+  local entry trimmed
+
+  raw="${raw#./}"
+  IFS=',' read -r -a plans <<< "$raw"
+  for entry in "${plans[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+  done
+}
+
 delegation_bundle_path_for_task() {
   local task_id="$1"
   local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
@@ -200,6 +227,13 @@ esac
 # Returns: array of "plan_id:task_id:write_scope_csv" strings
 discover_unblocked_tasks() {
   local tasks=()
+  local selection_limit="$MAX_WORKERS"
+
+  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+    # Completion mode is intentionally serialized: one scoped task per pass so the
+    # review gate and closeout happen before the next task is delegated.
+    selection_limit=1
+  fi
 
   if [[ -n "${RALPH_FANOUT_PLAN:-}" && -n "${RALPH_FANOUT_TASK:-}" ]]; then
     local ws="${RALPH_FANOUT_WRITE_SCOPE:-}"
@@ -209,15 +243,17 @@ discover_unblocked_tasks() {
     return 0
   fi
 
-  local plan_json
-  plan_json="$(da --json workflow plan 2>/dev/null || true)"
-  [[ "${plan_json:0:1}" == "[" || "${plan_json:0:1}" == "{" ]] || {
-    echo "ralph-orchestrate: no canonical plans found — nothing to fan out" >&2
-    return 0
-  }
-
   local plan_ids
-  plan_ids="$(printf '%s' "$plan_json" | python3 -c "
+  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+    plan_ids="$(parse_plan_scope "$RALPH_RUN_PLAN")"
+  else
+    local plan_json
+    plan_json="$(da --json workflow plan 2>/dev/null || true)"
+    [[ "${plan_json:0:1}" == "[" || "${plan_json:0:1}" == "{" ]] || {
+      echo "ralph-orchestrate: no canonical plans found — nothing to fan out" >&2
+      return 0
+    }
+    plan_ids="$(printf '%s' "$plan_json" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
 plans = data if isinstance(data, list) else data.get('plans', [data])
@@ -226,8 +262,16 @@ for p in plans:
     if pid:
         print(pid)
 " 2>/dev/null || true)"
+  fi
 
-  [[ -n "$plan_ids" ]] || { echo "ralph-orchestrate: no plan IDs extracted from workflow plan output" >&2; return 0; }
+  if [[ -z "$plan_ids" ]]; then
+    if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+      echo "ralph-orchestrate: no plan IDs extracted from RALPH_RUN_PLAN" >&2
+    else
+      echo "ralph-orchestrate: no plan IDs extracted from workflow plan output" >&2
+    fi
+    return 0
+  fi
 
   local -a active_scope_rows=()
   local -a selected_scope_rows=()
@@ -237,8 +281,15 @@ for p in plans:
   done < <(active_delegation_scopes)
 
   local plan_id
-  while IFS= read -r plan_id && [[ $count -lt $MAX_WORKERS ]]; do
+  while IFS= read -r plan_id && [[ $count -lt $selection_limit ]]; do
     [[ -z "$plan_id" ]] && continue
+    local plan_next_json
+    plan_next_json="$(da --json workflow next --plan "$plan_id" 2>/dev/null || true)"
+    plan_next_json="${plan_next_json//$'\n'/}"
+    if [[ -z "$plan_next_json" || "$plan_next_json" == "null" ]]; then
+      echo "ralph-orchestrate: skipping $plan_id (no actionable task in scoped completion mode)" >&2
+      continue
+    fi
     local tasks_json
     tasks_json="$(da --json workflow tasks "$plan_id" 2>/dev/null || true)"
     [[ "${tasks_json:0:1}" == "[" || "${tasks_json:0:1}" == "{" ]] || continue
@@ -256,7 +307,7 @@ for t in items:
 " 2>/dev/null || true)"
 
     local task_id ws_csv active_row selected_row active_plan active_task active_scope selected_plan selected_task selected_scope
-    while IFS=$'\t' read -r task_id ws_csv && [[ $count -lt $MAX_WORKERS ]]; do
+    while IFS=$'\t' read -r task_id ws_csv && [[ $count -lt $selection_limit ]]; do
       [[ -z "$task_id" ]] && continue
       # Skip if delegation contract already exists
       local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
@@ -511,6 +562,7 @@ elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
   else
     agent_inv+=( --full-auto )
   fi
+  append_codex_add_dirs
   [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )

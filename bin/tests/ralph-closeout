@@ -6,6 +6,7 @@
 #   RALPH_CLOSEOUT_AUTO   1 = auto-accept all pending merge-backs (default), 0 = spawn orchestrator review pass
 #   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  1 = after each successful auto-closeout, run `workflow fold-back list --plan <id>`
 #                            for each distinct plan_id touched (read-only D2 post-closeout snapshot)
+#   RALPH_RUN_PLAN        optional single id or comma-separated canonical plan scope for completion mode
 #   Post-closeout git checkpoint stages only this task's canonical plan files, archive tree,
 #   verification dir, and removals of that task's merge-back / delegation / bundle — not whole
 #   `.agents/active/delegation*` dirs (avoids scooping parallel workers' state).
@@ -61,6 +62,30 @@ fi
 
 da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
 
+parse_plan_scope() {
+  local raw="${1:-}"
+  local -a plans=()
+  local entry trimmed
+
+  raw="${raw#./}"
+  IFS=',' read -r -a plans <<< "$raw"
+  for entry in "${plans[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+  done
+}
+
+plan_is_in_scope() {
+  local plan_id="$1"
+  [[ -z "${RALPH_RUN_PLAN:-}" ]] && return 0
+  local scope
+  while IFS= read -r scope; do
+    [[ "$scope" == "$plan_id" ]] && return 0
+  done < <(parse_plan_scope "$RALPH_RUN_PLAN")
+  return 1
+}
+
 resolve_closeout_agent_bin() {
   if [[ -n "${RALPH_CLOSEOUT_AGENT_BIN:-}" ]]; then
     printf '%s' "$RALPH_CLOSEOUT_AGENT_BIN"
@@ -87,6 +112,18 @@ resolve_closeout_reasoning_effort() {
   fi
 }
 
+append_codex_add_dirs() {
+  local dir
+  for dir in \
+    "$REPO_ROOT/.agents" \
+    "$REPO_ROOT/.git" \
+    "$HOME/.agents"; do
+    if [[ -e "$dir" ]]; then
+      agent_inv+=( --add-dir "$dir" )
+    fi
+  done
+}
+
 command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for merge-back helpers" >&2; exit 1; }
 
 MERGE_BACK_DIR="$REPO_ROOT/.agents/active/merge-back"
@@ -102,6 +139,18 @@ fi
 pending=()
 for f in "$MERGE_BACK_DIR"/*.md; do
   [[ -f "$f" ]] || continue
+  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+    plan_probe="$(python3 -c "
+import re,sys
+text=open(sys.argv[1]).read()
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
+print(m.group(1).strip().strip('\"') if m else '')
+" "$f" 2>/dev/null || true)"
+    [[ -n "$plan_probe" ]] || continue
+    if ! plan_is_in_scope "$plan_probe"; then
+      continue
+    fi
+  fi
   pending+=( "$f" )
 done
 
@@ -223,16 +272,14 @@ PY
   git -C "$REPO_ROOT" add -- \
     ".agents/workflow/plans/${plan_id}/PLAN.yaml" \
     ".agents/workflow/plans/${plan_id}/TASKS.yaml" 2>/dev/null || true
-  if [[ -d "$verification_dir" ]]; then
-    git -C "$REPO_ROOT" add -- "$verification_dir" 2>/dev/null || true
-  fi
   if [[ -d "${archive_dirs[0]}" ]]; then
     git -C "$REPO_ROOT" add -- "${archive_dirs[@]}" 2>/dev/null || true
   fi
   # Record deletions under active/ for this task only (parallel workers may still own siblings).
   git -C "$REPO_ROOT" add -u -- \
     ".agents/active/merge-back/${task_id}.md" \
-    ".agents/active/delegation/${task_id}.yaml" 2>/dev/null || true
+    ".agents/active/delegation/${task_id}.yaml" \
+    ".agents/active/verification/${task_id}" 2>/dev/null || true
   if [[ -n "${delegation_id:-}" ]]; then
     git -C "$REPO_ROOT" add -u -- ".agents/active/delegation-bundles/${delegation_id}.yaml" 2>/dev/null || true
   fi
@@ -311,6 +358,7 @@ EOF
     else
       agent_inv+=( --full-auto )
     fi
+    append_codex_add_dirs
     [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
   else
     agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )

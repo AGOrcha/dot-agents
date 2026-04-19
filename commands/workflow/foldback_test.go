@@ -297,6 +297,9 @@ func TestDelegationCloseoutAccept(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repo, ".agents", "active", "merge-back", "t1.md")); !os.IsNotExist(err) {
 		t.Fatal("expected active merge-back removed")
 	}
+	if _, err := os.Stat(filepath.Join(repo, ".agents", "active", "verification", "t1")); !os.IsNotExist(err) {
+		t.Fatal("expected active verification dir removed")
+	}
 	tf, err := loadCanonicalTasks(repo, "p1")
 	if err != nil {
 		t.Fatal(err)
@@ -314,6 +317,10 @@ func TestDelegationCloseoutAccept(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(repo, ".agents", "history", "p1", "delegate-merge-back-archive", "*", "t1", "closeout.yaml"))
 	if len(matches) != 1 {
 		t.Fatalf("expected one closeout record, got %v", matches)
+	}
+	verificationArchive := filepath.Join(filepath.Dir(matches[0]), "verification", "merge-back.result.yaml")
+	if _, err := os.Stat(verificationArchive); err != nil {
+		t.Fatalf("expected archived verification artifact at %s: %v", verificationArchive, err)
 	}
 }
 

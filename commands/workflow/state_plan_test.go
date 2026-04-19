@@ -245,6 +245,27 @@ func TestListCanonicalPlanIDs(t *testing.T) {
 	}
 }
 
+func TestListCanonicalPlanIDsSkipsDirsWithoutPlanYAML(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	ghostDir := filepath.Join(repo, ".agents", "workflow", "plans", "ghost-plan")
+	if err := os.MkdirAll(ghostDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghostDir, "TASKS.yaml"), []byte("schema_version: 1\nplan_id: ghost-plan\ntasks: []\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := listCanonicalPlanIDs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "wave-2" {
+		t.Fatalf("expected [wave-2], got %v", ids)
+	}
+}
+
 func TestLoadCanonicalPlanRoundTrip(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPlanFixture(t, repo)
@@ -339,6 +360,24 @@ func TestCollectCanonicalPlans(t *testing.T) {
 	}
 	if s.CompletedCount != 1 {
 		t.Fatalf("completed count = %d, want 1", s.CompletedCount)
+	}
+}
+
+func TestCollectCanonicalPlansIgnoresTombstonedPlanDirs(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	ghostDir := filepath.Join(repo, ".agents", "workflow", "plans", "ghost-plan")
+	if err := os.MkdirAll(ghostDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, warnings := collectCanonicalPlans(repo)
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(summaries) != 1 || summaries[0].ID != "wave-2" {
+		t.Fatalf("unexpected summaries: %+v", summaries)
 	}
 }
 
@@ -633,6 +672,102 @@ func TestSelectNextCanonicalTask_ExplicitUnknownPlan(t *testing.T) {
 	}
 }
 
+func TestSelectNextCanonicalTask_ExplicitPausedPlanReturnsNil(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+
+	plan := &CanonicalPlan{
+		SchemaVersion:    1,
+		ID:               "paused-plan",
+		Title:            "Paused Plan",
+		Status:           "paused",
+		Summary:          "paused for planning review",
+		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
+		Owner:            "test",
+		CurrentFocusTask: "needs review",
+	}
+	if err := saveCanonicalPlan(repo, plan); err != nil {
+		t.Fatal(err)
+	}
+	tf := &CanonicalTaskFile{
+		SchemaVersion: 1,
+		PlanID:        "paused-plan",
+		Tasks: []CanonicalTask{
+			{
+				ID:                   "needs-review",
+				Title:                "needs review",
+				Status:               "pending",
+				DependsOn:            nil,
+				Blocks:               nil,
+				Owner:                "test",
+				WriteScope:           []string{"commands/workflow.go"},
+				VerificationRequired: true,
+			},
+		},
+	}
+	if err := saveCanonicalTasks(repo, tf); err != nil {
+		t.Fatal(err)
+	}
+
+	suggestion, err := selectNextCanonicalTask(repo, "paused-plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion != nil {
+		t.Fatalf("expected nil for paused plan scope, got %+v", suggestion)
+	}
+}
+
+func TestSelectNextCanonicalTask_ExplicitCommaSeparatedPlans(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalPendingPlanFixture(t, repo)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-t1", ParentPlanID: "wave-2", ParentTaskID: "t1",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+
+	suggestion, err := selectNextCanonicalTask(repo, "wave-2, wave-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion == nil {
+		t.Fatal("expected suggestion, got nil")
+	}
+	if suggestion.PlanID != "wave-next" || suggestion.TaskID != "planner" {
+		t.Fatalf("unexpected suggestion: %+v", suggestion)
+	}
+}
+
+func TestSelectNextCanonicalTask_ExplicitPlanSkipsLockedPlan(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPendingPlanFixture(t, repo)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-planner", ParentPlanID: "wave-next", ParentTaskID: "planner",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+
+	suggestion, err := selectNextCanonicalTask(repo, "wave-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suggestion != nil {
+		t.Fatalf("expected nil for locked explicit plan, got %+v", suggestion)
+	}
+}
+
 func TestSelectNextCanonicalTaskChoosesUnblockedPendingTask(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPendingPlanFixture(t, repo)
@@ -702,6 +837,121 @@ func TestRunWorkflowNextPrintsHelpfulMessageWhenNoActionableTaskExists(t *testin
 	rendered := string(out)
 	if !strings.Contains(rendered, "No actionable canonical task found.") {
 		t.Fatalf("unexpected workflow next output:\n%s", rendered)
+	}
+}
+
+func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t *testing.T) {
+	t.Run("actionable", func(t *testing.T) {
+		repo := initWorkflowTestRepo(t)
+		addCanonicalPendingPlanFixture(t, repo)
+
+		state, err := collectWorkflowCompletionState(repo, "wave-next")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.State != "actionable" {
+			t.Fatalf("state = %q, want actionable", state.State)
+		}
+		if state.Next == nil || state.Next.TaskID != "planner" {
+			t.Fatalf("next = %+v, want planner", state.Next)
+		}
+		if len(state.PausedPlans) != 0 || len(state.LockedPlans) != 0 {
+			t.Fatalf("unexpected paused/locked plans: %+v", state)
+		}
+	})
+
+	t.Run("locked", func(t *testing.T) {
+		repo := initWorkflowTestRepo(t)
+		addCanonicalPendingPlanFixture(t, repo)
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		c := &DelegationContract{
+			SchemaVersion: 1, ID: "del-planner", ParentPlanID: "wave-next", ParentTaskID: "planner",
+			Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := saveDelegationContract(repo, c); err != nil {
+			t.Fatal(err)
+		}
+
+		state, err := collectWorkflowCompletionState(repo, "wave-next")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.State != "locked" {
+			t.Fatalf("state = %q, want locked", state.State)
+		}
+		if state.Next != nil {
+			t.Fatalf("next = %+v, want nil", state.Next)
+		}
+		if len(state.LockedPlans) != 1 || state.LockedPlans[0] != "wave-next" {
+			t.Fatalf("locked plans = %+v, want [wave-next]", state.LockedPlans)
+		}
+	})
+
+	t.Run("paused", func(t *testing.T) {
+		repo := initWorkflowTestRepo(t)
+		plan := &CanonicalPlan{
+			SchemaVersion:    1,
+			ID:               "paused-plan",
+			Title:            "Paused Plan",
+			Status:           "paused",
+			Summary:          "paused for planning review",
+			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
+			Owner:            "test",
+			CurrentFocusTask: "needs review",
+		}
+		if err := saveCanonicalPlan(repo, plan); err != nil {
+			t.Fatal(err)
+		}
+		tf := &CanonicalTaskFile{
+			SchemaVersion: 1,
+			PlanID:        "paused-plan",
+			Tasks: []CanonicalTask{
+				{
+					ID:                   "needs-review",
+					Title:                "needs review",
+					Status:               "pending",
+					DependsOn:            nil,
+					Blocks:               nil,
+					Owner:                "test",
+					WriteScope:           []string{"commands/workflow.go"},
+					VerificationRequired: true,
+				},
+			},
+		}
+		if err := saveCanonicalTasks(repo, tf); err != nil {
+			t.Fatal(err)
+		}
+
+		state, err := collectWorkflowCompletionState(repo, "paused-plan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.State != "paused" {
+			t.Fatalf("state = %q, want paused", state.State)
+		}
+		if state.Next != nil {
+			t.Fatalf("next = %+v, want nil", state.Next)
+		}
+		if len(state.PausedPlans) != 1 || state.PausedPlans[0] != "paused-plan" {
+			t.Fatalf("paused plans = %+v, want [paused-plan]", state.PausedPlans)
+		}
+	})
+}
+
+func TestRunWorkflowCompleteRejectsBlankPlanFilter(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowComplete("   "); err == nil || !strings.Contains(err.Error(), "--plan must not be empty") {
+		t.Fatalf("expected blank-plan error, got %v", err)
 	}
 }
 
