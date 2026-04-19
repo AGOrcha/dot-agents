@@ -94,38 +94,68 @@ jobs:
         run: |
           file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"
 
+      # ── Smoke isolation ──────────────────────────────────────────────────
+      # All smoke steps below run with an isolated HOME and AGENTS_HOME so
+      # they cannot inherit the runner's real ~/.agents config or links.
+      - name: Prepare isolated smoke HOME
+        run: |
+          SMOKE_HOME=$(mktemp -d)
+          echo "SMOKE_HOME=${SMOKE_HOME}" >> "$GITHUB_ENV"
+          echo "SMOKE_AGENTS_HOME=${SMOKE_HOME}/.agents" >> "$GITHUB_ENV"
+
       - name: Test --version
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents --version
           ./bin/dot-agents --version | grep -q "dot-agents"
 
       - name: Test --help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents --help
           ./bin/dot-agents --help | grep -q "Usage:"
 
       - name: Test init --dry-run
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents init --dry-run
 
       - name: Test init (creates ~/.agents/)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           # Remove if exists from previous run
-          rm -rf ~/.agents
+          rm -rf "${HOME}/.agents"
           ./bin/dot-agents init --yes
-          test -d ~/.agents
-          test -f ~/.agents/config.json
+          test -d "${HOME}/.agents"
+          test -f "${HOME}/.agents/config.json"
 
       - name: Test status
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents status
           ./bin/dot-agents status --json | jq .
 
       - name: Test doctor
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents doctor
 
       - name: Test add (with test project)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           mkdir -p /tmp/test-project
           ./bin/dot-agents add /tmp/test-project --name ci-test --yes
@@ -133,34 +163,59 @@ jobs:
           grep -q "ci-test" /tmp/dot-agents-status.txt
 
       - name: Test status --audit
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents status --audit
 
       - name: Test remove --dry-run
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents remove ci-test --dry-run
 
       - name: Test sync status
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents sync status
 
       - name: Test skills list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents skills list
 
       - name: Test workflow status
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents workflow status
 
       - name: Test workflow health
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents workflow health | grep -qiE "(healthy|health)"
 
       - name: Test workflow plan
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           ./bin/dot-agents workflow plan
 
       - name: Cleanup
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          rm -rf ~/.agents
+          rm -rf "${HOME}/.agents"
           rm -rf /tmp/test-project
+          rm -rf "${SMOKE_HOME}"
