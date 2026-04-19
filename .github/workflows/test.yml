@@ -52,8 +52,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: lint-workflows  # Only run tests if workflows are valid
     env:
-      SMOKE_HOME: ${{ runner.temp }}/smoke-home
-      SMOKE_AGENTS_HOME: ${{ runner.temp }}/smoke-home/.agents
+      SMOKE_HOME: /tmp/smoke-${{ github.run_id }}
+      SMOKE_AGENTS_HOME: /tmp/smoke-${{ github.run_id }}/.agents
     strategy:
       fail-fast: false
       matrix:
