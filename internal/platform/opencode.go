@@ -63,7 +63,6 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 	return nil
 }
 
-
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 

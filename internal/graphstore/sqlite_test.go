@@ -222,9 +222,9 @@ func TestUpsertEdge_Update(t *testing.T) {
 
 func TestGetEdgesBySource(t *testing.T) {
 	s := openTestStore(t)
-	_ , _ = s.UpsertEdge(makeEdge("X", "Y", graphstore.EdgeKindCalls))
-	_ , _ = s.UpsertEdge(makeEdge("X", "Z", graphstore.EdgeKindImportsFrom))
-	_ , _ = s.UpsertEdge(makeEdge("W", "X", graphstore.EdgeKindCalls))
+	_, _ = s.UpsertEdge(makeEdge("X", "Y", graphstore.EdgeKindCalls))
+	_, _ = s.UpsertEdge(makeEdge("X", "Z", graphstore.EdgeKindImportsFrom))
+	_, _ = s.UpsertEdge(makeEdge("W", "X", graphstore.EdgeKindCalls))
 
 	edges, err := s.GetEdgesBySource("X")
 	if err != nil {
@@ -635,9 +635,9 @@ func TestNoteSymbolLink_Idempotent(t *testing.T) {
 
 func TestGetLinksForSymbol(t *testing.T) {
 	s := openTestStore(t)
-	_ , _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n1", QualifiedName: "pkg::F", LinkKind: "mentions"})
-	_ , _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n2", QualifiedName: "pkg::F", LinkKind: "documents"})
-	_ , _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n3", QualifiedName: "pkg::G", LinkKind: "mentions"})
+	_, _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n1", QualifiedName: "pkg::F", LinkKind: "mentions"})
+	_, _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n2", QualifiedName: "pkg::F", LinkKind: "documents"})
+	_, _ = s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "n3", QualifiedName: "pkg::G", LinkKind: "mentions"})
 
 	links, err := s.GetLinksForSymbol("pkg::F")
 	if err != nil {

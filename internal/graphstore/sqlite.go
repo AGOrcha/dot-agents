@@ -459,8 +459,8 @@ func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes 
 	if err != nil {
 		return ImpactResult{}, err
 	}
-	fwd := map[string][]string{}  // source → targets
-	rev := map[string][]string{}  // target → sources
+	fwd := map[string][]string{} // source → targets
+	rev := map[string][]string{} // target → sources
 	for rows.Next() {
 		var src, tgt string
 		if err := rows.Scan(&src, &tgt); err != nil {

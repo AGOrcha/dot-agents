@@ -72,11 +72,27 @@ jobs:
       - name: Verify jq installed
         run: jq --version
 
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./commands ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "The following files need gofmt formatting:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./...
+
       - name: Go test
         run: go test ./... $GO_TEST_FLAGS
 
       - name: Build CLI
         run: go build -o ./bin/dot-agents ./cmd/dot-agents
+
+      - name: Verify built binary is real Go binary (not a shim)
+        run: |
+          file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"
 
       - name: Test --version
         run: |
@@ -127,6 +143,22 @@ jobs:
       - name: Test sync status
         run: |
           ./bin/dot-agents sync status
+
+      - name: Test skills list
+        run: |
+          ./bin/dot-agents skills list
+
+      - name: Test workflow status
+        run: |
+          ./bin/dot-agents workflow status
+
+      - name: Test workflow health
+        run: |
+          ./bin/dot-agents workflow health | grep -qiE "(healthy|health)"
+
+      - name: Test workflow plan
+        run: |
+          ./bin/dot-agents workflow plan
 
       - name: Cleanup
         run: |

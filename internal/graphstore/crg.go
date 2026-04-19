@@ -259,12 +259,12 @@ func parseCRGStatusOutput(out []byte) *CRGStatus {
 
 // CRGChangeReport is the JSON output of `code-review-graph detect-changes`.
 type CRGChangeReport struct {
-	Summary         string             `json:"summary"`
-	RiskScore       float64            `json:"risk_score"`
-	ChangedFunctions []CRGChangedNode  `json:"changed_functions"`
-	AffectedFlows   []CRGFlow          `json:"affected_flows"`
-	TestGaps        []CRGTestGap       `json:"test_gaps"`
-	ReviewPriorities []CRGPriority     `json:"review_priorities"`
+	Summary          string           `json:"summary"`
+	RiskScore        float64          `json:"risk_score"`
+	ChangedFunctions []CRGChangedNode `json:"changed_functions"`
+	AffectedFlows    []CRGFlow        `json:"affected_flows"`
+	TestGaps         []CRGTestGap     `json:"test_gaps"`
+	ReviewPriorities []CRGPriority    `json:"review_priorities"`
 }
 
 // CRGChangedNode represents a function or class that changed.

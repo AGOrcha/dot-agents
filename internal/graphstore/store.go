@@ -82,15 +82,15 @@ type GraphEdge struct {
 
 // GraphStats aggregates health metrics for the graph.
 type GraphStats struct {
-	TotalNodes   int
-	TotalEdges   int
-	NodesByKind  map[string]int
-	EdgesByKind  map[string]int
-	Languages    []string
-	FilesCount   int
-	LastUpdated  string
-	NotesCount   int
-	LinksCount   int
+	TotalNodes  int
+	TotalEdges  int
+	NodesByKind map[string]int
+	EdgesByKind map[string]int
+	Languages   []string
+	FilesCount  int
+	LastUpdated string
+	NotesCount  int
+	LinksCount  int
 }
 
 // ImpactResult is the output of a GetImpactRadius query.
@@ -103,15 +103,15 @@ type ImpactResult struct {
 
 // KGNote is a knowledge-graph note record in the warm database layer.
 type KGNote struct {
-	ID          string // KG note ID (matches frontmatter id)
-	Title       string
-	NoteType    string // concept, decision, entity, etc.
-	Status      string
-	Summary     string
-	FilePath    string // path to the .md file in KG_HOME
-	Version     int
-	ArchivedAt  string // RFC3339 or empty
-	IndexedAt   float64
+	ID         string // KG note ID (matches frontmatter id)
+	Title      string
+	NoteType   string // concept, decision, entity, etc.
+	Status     string
+	Summary    string
+	FilePath   string // path to the .md file in KG_HOME
+	Version    int
+	ArchivedAt string // RFC3339 or empty
+	IndexedAt  float64
 }
 
 // NoteSymbolLink connects a KG note to a code symbol.
