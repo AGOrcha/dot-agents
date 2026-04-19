@@ -17,7 +17,9 @@
 #                                 RALPH_PROJECT_OVERLAY (D5: bundle fields for overlay vs per-delegation prompt)
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_MODEL                  fallback model override when no role-specific value is set
-#   RALPH_FORCE                  1 = pass -f to agent (broader allow)
+#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex-only orchestrator reasoning effort override
+#   RALPH_REASONING_EFFORT       codex-only fallback reasoning effort override
+#   RALPH_FORCE                  1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
@@ -88,8 +90,17 @@ resolve_orchestrator_model() {
   fi
 }
 
+resolve_orchestrator_reasoning_effort() {
+  if [[ -n "${RALPH_ORCHESTRATOR_REASONING_EFFORT:-}" ]]; then
+    printf '%s' "$RALPH_ORCHESTRATOR_REASONING_EFFORT"
+  else
+    printf '%s' "${RALPH_REASONING_EFFORT:-}"
+  fi
+}
+
 AGENT_BIN="$(resolve_orchestrator_agent_bin)"
 ROLE_MODEL="$(resolve_orchestrator_model)"
+ROLE_REASONING_EFFORT="$(resolve_orchestrator_reasoning_effort)"
 
 normalize_scope_path() {
   local path="$1"
@@ -493,12 +504,23 @@ if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
+  agent_inv=( "$AGENT_BIN" exec -C "$REPO_ROOT" )
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+  else
+    agent_inv+=( --full-auto )
+  fi
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
   [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
 fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
+if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+fi
 
 echo "=== ralph-orchestrate: orchestrator pass (single run) ===" >&2
 orch_agent_rc=0

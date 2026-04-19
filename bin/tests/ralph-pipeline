@@ -21,6 +21,13 @@
 #   RALPH_REVIEW_WORKER_MODEL    review-worker model override
 #   RALPH_WORKER_MODEL           generic worker model override
 #   RALPH_MODEL                  fallback model override
+#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex-only orchestrator reasoning effort override
+#   RALPH_CLOSEOUT_REASONING_EFFORT      codex-only closeout reasoning effort override
+#   RALPH_IMPL_WORKER_REASONING_EFFORT   codex-only impl-worker reasoning effort override
+#   RALPH_VERIFIER_WORKER_REASONING_EFFORT  codex-only verifier-worker reasoning effort override
+#   RALPH_REVIEW_WORKER_REASONING_EFFORT    codex-only review-worker reasoning effort override
+#   RALPH_WORKER_REASONING_EFFORT        codex-only generic worker reasoning effort override
+#   RALPH_REASONING_EFFORT               codex-only fallback reasoning effort override
 #   RALPH_FORCE                  1 = pass -f to agent
 #   RALPH_LOG_DIR                override base log directory (subdirs created per phase)
 #   RALPH_NO_LOG                 1 = stdout only, no files

@@ -14,6 +14,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
+env:
+  GO_TEST_FLAGS: -race -count=1 -timeout=300s
+
 jobs:
   lint-workflows:
     name: Lint Workflows
@@ -24,10 +31,7 @@ jobs:
 
       - name: Validate YAML syntax
         run: |
-          for file in .github/workflows/*.yml; do
-            echo "Validating $file..."
-            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
-          done
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.yml"].sort.each { |f| puts "Validating #{f}..."; YAML.load_file(f) }'
           echo "All workflow files have valid YAML syntax"
 
       - name: Install actionlint
@@ -69,59 +73,60 @@ jobs:
         run: jq --version
 
       - name: Go test
-        run: go test ./...
+        run: go test ./... $GO_TEST_FLAGS
 
-      - name: Make CLI executable
-        run: chmod +x src/bin/dot-agents
+      - name: Build CLI
+        run: go build -o ./bin/dot-agents ./cmd/dot-agents
 
       - name: Test --version
         run: |
-          ./src/bin/dot-agents --version
-          ./src/bin/dot-agents --version | grep -q "dot-agents"
+          ./bin/dot-agents --version
+          ./bin/dot-agents --version | grep -q "dot-agents"
 
       - name: Test --help
         run: |
-          ./src/bin/dot-agents --help
-          ./src/bin/dot-agents --help | grep -q "Usage:"
+          ./bin/dot-agents --help
+          ./bin/dot-agents --help | grep -q "Usage:"
 
       - name: Test init --dry-run
         run: |
-          ./src/bin/dot-agents init --dry-run
+          ./bin/dot-agents init --dry-run
 
       - name: Test init (creates ~/.agents/)
         run: |
           # Remove if exists from previous run
           rm -rf ~/.agents
-          ./src/bin/dot-agents init --yes
+          ./bin/dot-agents init --yes
           test -d ~/.agents
           test -f ~/.agents/config.json
 
       - name: Test status
         run: |
-          ./src/bin/dot-agents status
-          ./src/bin/dot-agents status --json | jq .
+          ./bin/dot-agents status
+          ./bin/dot-agents status --json | jq .
 
       - name: Test doctor
         run: |
-          ./src/bin/dot-agents doctor
+          ./bin/dot-agents doctor
 
       - name: Test add (with test project)
         run: |
           mkdir -p /tmp/test-project
-          ./src/bin/dot-agents add /tmp/test-project --name ci-test --yes
-          ./src/bin/dot-agents status | grep -q "ci-test"
+          ./bin/dot-agents add /tmp/test-project --name ci-test --yes
+          ./bin/dot-agents status >/tmp/dot-agents-status.txt
+          grep -q "ci-test" /tmp/dot-agents-status.txt
 
       - name: Test status --audit
         run: |
-          ./src/bin/dot-agents status --audit
+          ./bin/dot-agents status --audit
 
       - name: Test remove --dry-run
         run: |
-          ./src/bin/dot-agents remove ci-test --dry-run
+          ./bin/dot-agents remove ci-test --dry-run
 
       - name: Test sync status
         run: |
-          ./src/bin/dot-agents sync status
+          ./bin/dot-agents sync status
 
       - name: Cleanup
         run: |

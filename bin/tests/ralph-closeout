@@ -14,7 +14,9 @@
 #   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
 #   RALPH_CLOSEOUT_MODEL  closeout-review model override (only used when RALPH_CLOSEOUT_AUTO=0)
 #   RALPH_MODEL           fallback model override (only used when RALPH_CLOSEOUT_AUTO=0)
-#   RALPH_FORCE           1 = pass -f to agent (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_CLOSEOUT_REASONING_EFFORT  codex-only closeout reasoning effort override
+#   RALPH_REASONING_EFFORT           codex-only fallback reasoning effort override
+#   RALPH_FORCE           1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
 #   RALPH_CLOSEOUT_AGENT_BIN closeout-review agent binary override (only used when RALPH_CLOSEOUT_AUTO=0)
 #   AGENT_BIN             fallback agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
 #   DOT_AGENTS            dot-agents binary or "go run ..." override
@@ -74,6 +76,14 @@ resolve_closeout_model() {
     printf '%s' "$RALPH_CLOSEOUT_MODEL"
   else
     printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
+
+resolve_closeout_reasoning_effort() {
+  if [[ -n "${RALPH_CLOSEOUT_REASONING_EFFORT:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_REASONING_EFFORT"
+  else
+    printf '%s' "${RALPH_REASONING_EFFORT:-}"
   fi
 }
 
@@ -246,6 +256,7 @@ else
   # Non-auto: spawn a single orchestrator agent pass to review and decide
   AGENT_BIN="$(resolve_closeout_agent_bin)"
   ROLE_MODEL="$(resolve_closeout_model)"
+  ROLE_REASONING_EFFORT="$(resolve_closeout_reasoning_effort)"
   if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
     echo "error: '$AGENT_BIN' not found on PATH (needed for RALPH_CLOSEOUT_AUTO=0 review pass)" >&2
     exit 1
@@ -293,12 +304,23 @@ EOF
     agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
     [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
     [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
+    agent_inv=( "$AGENT_BIN" exec -C "$REPO_ROOT" )
+    if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+      agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+    else
+      agent_inv+=( --full-auto )
+    fi
+    [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
   else
     agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
     [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
     [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
   fi
   [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
+  if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+  fi
 
   echo "=== ralph-closeout: orchestrator review pass ===" >&2
   if [[ -n "$LOG_DIR" ]]; then

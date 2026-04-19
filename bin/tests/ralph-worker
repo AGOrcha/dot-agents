@@ -22,7 +22,12 @@
 #   RALPH_REVIEW_WORKER_MODEL    review-worker model override
 #   RALPH_WORKER_MODEL           generic worker model override
 #   RALPH_MODEL                  fallback model override
-#   RALPH_FORCE                  1 = pass -f to agent (broader command allow)
+#   RALPH_IMPL_WORKER_REASONING_EFFORT      codex-only impl-worker reasoning effort override
+#   RALPH_VERIFIER_WORKER_REASONING_EFFORT  codex-only verifier-worker reasoning effort override
+#   RALPH_REVIEW_WORKER_REASONING_EFFORT    codex-only review-worker reasoning effort override
+#   RALPH_WORKER_REASONING_EFFORT           codex-only generic worker reasoning effort override
+#   RALPH_REASONING_EFFORT                  codex-only fallback reasoning effort override
+#   RALPH_FORCE                  1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
@@ -228,6 +233,35 @@ resolve_worker_model() {
   fi
 }
 
+resolve_worker_reasoning_effort() {
+  local role="$1"
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_REASONING_EFFORT:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_REASONING_EFFORT"
+  else
+    printf '%s' "${RALPH_REASONING_EFFORT:-}"
+  fi
+}
+
 # When --stage is explicit, use it directly. Otherwise fall back to heuristic classification.
 if [[ -n "$STAGE" ]]; then
   WORKER_ROLE="$STAGE"
@@ -236,6 +270,7 @@ else
 fi
 AGENT_BIN="$(resolve_worker_agent_bin "$WORKER_ROLE")"
 ROLE_MODEL="$(resolve_worker_model "$WORKER_ROLE")"
+ROLE_REASONING_EFFORT="$(resolve_worker_reasoning_effort "$WORKER_ROLE")"
 
 # Prefer repo checkout binary
 DOT_AGENTS_CMD=()
@@ -328,6 +363,7 @@ if [[ -n "$LOG_DIR" ]]; then
     echo "prompt_surface=${STAGE:-loop-worker}"
     echo "resolved_agent_bin=${AGENT_BIN}"
     echo "resolved_model=${ROLE_MODEL}"
+    echo "resolved_reasoning_effort=${ROLE_REASONING_EFFORT}"
     echo "done_artifact=${done_artifact}"
   } >"$LOG_DIR/worker-context.env"
   [[ -f "$LOOP_PROFILE_FILE" ]] && cp -f "$LOOP_PROFILE_FILE" "$LOG_DIR/loop-worker-profile.md"
@@ -339,12 +375,23 @@ if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
+  agent_inv=( "$AGENT_BIN" exec -C "$REPO_ROOT" )
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+  else
+    agent_inv+=( --full-auto )
+  fi
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
   [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
 fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
+if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+fi
 
 stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
 echo "ralph-worker: starting worker for plan=$PLAN_ID task=$TASK_ID stage=$stage_label (budget: ${ITERATIONS} iterations)" >&2
