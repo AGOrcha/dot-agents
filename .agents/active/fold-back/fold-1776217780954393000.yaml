@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-1776217780954393000
-plan_id: loop-runtime-refactor
-task_id: phase-5d-iter-log-schema
-observation: 'Audit 2026-04-15: workflow-iter-log.schema.json exists and --log-to-iter writes the yaml-language-server schema header, but Phase 5d is not complete yet. commands/workflow.go does not load or validate against the schema before write, tests only assert header/stub contents, and existing .agents/active/iteration-log/iter-0.yaml conflicts with schema iteration.minimum=1.'
-classification: small
-routed_to: task_note:loop-runtime-refactor/phase-5d-iter-log-schema
-created_at: "2026-04-15T01:49:40Z"

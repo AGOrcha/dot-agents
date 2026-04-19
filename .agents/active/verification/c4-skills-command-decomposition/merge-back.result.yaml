@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: c4-skills-command-decomposition
-parent_plan_id: command-surface-decomposition
-verifier_type: merge-back
-status: pass
-summary: Cherry-picked 0dcc7e3 onto fed005b; resolved iter-52 add/add conflict keeping c3 HEAD prose.
-recorded_at: "2026-04-18T19:32:21Z"
-delegation_id: del-c4-skills-command-decomposition-1776539849

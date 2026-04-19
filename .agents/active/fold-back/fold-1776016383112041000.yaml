@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-1776016383112041000
-plan_id: loop-orchestrator-layer
-task_id: phase-5-kg-first-understanding
-observation: 'Fold-back: merge-back integrated — workflow graph query forwards code-structure intents to kg bridge.'
-classification: small
-routed_to: task_note:loop-orchestrator-layer/phase-5-kg-first-understanding
-created_at: "2026-04-12T17:53:03Z"

@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-1776016382065263000
-plan_id: typescript-port
-task_id: phase-1-donor-audit-and-docs
-observation: 'Fold-back: merge-back integrated — TS port Phase 1 donor audit complete; plan aligned to current Go contracts.'
-classification: small
-routed_to: task_note:typescript-port/phase-1-donor-audit-and-docs
-created_at: "2026-04-12T17:53:02Z"

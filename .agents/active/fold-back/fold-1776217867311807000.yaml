@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-1776217867311807000
-plan_id: loop-runtime-refactor
-task_id: ""
-observation: '[tool-bug]: workflow advance reported success for loop-runtime-refactor/phase-5d-iter-log-schema and updated PLAN.yaml updated_at/current_focus_task, but TASKS.yaml task status remained unchanged on disk. Repro: go run ./cmd/dot-agents workflow advance loop-runtime-refactor --task phase-5d-iter-log-schema --status in_progress, then inspect .agents/workflow/plans/loop-runtime-refactor/TASKS.yaml.'
-classification: proposal
-routed_to: proposal:obs-1776217867311807000.md
-created_at: "2026-04-15T01:51:07Z"

@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: c2-agents-command-decomposition
-parent_plan_id: command-surface-decomposition
-verifier_type: merge-back
-status: pass
-summary: go test ./commands/agents/... ./commands/... ./... — all pass.
-recorded_at: "2026-04-18T21:43:26Z"
-delegation_id: del-c2-agents-command-decomposition-1776539822

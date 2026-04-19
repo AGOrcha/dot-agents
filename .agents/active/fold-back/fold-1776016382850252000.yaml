@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-1776016382850252000
-plan_id: crg-kg-integration
-task_id: phase-e-postgres
-observation: 'Fold-back: merge-back integrated — Phase E Postgres graphstore slice.'
-classification: small
-routed_to: task_note:crg-kg-integration/phase-e-postgres
-created_at: "2026-04-12T17:53:02Z"

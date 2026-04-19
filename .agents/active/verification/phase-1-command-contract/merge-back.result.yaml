@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: phase-1-command-contract
-parent_plan_id: resource-command-parity
-verifier_type: merge-back
-status: pass
-summary: 'Parent: reconcile phase-5 completed vs depends_on on phase-3/4 pending (DAG drift documented in contract + TASKS phase-5 notes); run workflow delegation closeout + advance phase-1-command-contract when accepting.'
-recorded_at: "2026-04-18T21:49:01Z"
-delegation_id: del-phase-1-command-contract-1776548679
