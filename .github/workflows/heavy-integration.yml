@@ -1,0 +1,42 @@
+name: Heavy Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_container_sandbox_lane:
+        description: Run the container sandbox heavy integration lane
+        required: false
+        default: true
+        type: boolean
+  # schedule:
+  #   - cron: '0 6 * * *'
+
+concurrency:
+  group: heavy-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  container-sandbox-lane:
+    name: Container Sandbox Lane
+    if: github.event_name == 'schedule' || inputs.run_container_sandbox_lane
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run container sandbox heavy lane
+        # Scenario family: container-sandbox
+        # If .agents/workflow/testing-matrix.yaml is introduced, mirror this lane there.
+        run: bash tests/heavy-sandbox-build.sh
+
+      - name: Cleanup
+        if: always()
+        run: docker rmi "dot-agents-sandbox:${{ github.run_id }}" || true
