@@ -52,6 +52,10 @@ type GraphQueryResponse struct {
 	Warnings      []string           `json:"warnings"`
 	Provider      string             `json:"provider"`
 	Timestamp     string             `json:"timestamp"`
+	// SparsityScore (0–100) indicates how incomplete the result set is.
+	// 0 = fully evidenced, 100 = no evidence found.
+	// Absent (omitted) when the query type does not support scoring.
+	SparsityScore *int `json:"sparsity_score,omitempty"`
 }
 
 var validQueryIntents = map[string]bool{

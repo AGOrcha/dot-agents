@@ -61,7 +61,24 @@ if [[ "$GATE_AUTO" == "1" ]]; then
   fi
   merge_back_exists=0
   [[ -f "$MERGE_BACK_PATH" ]] && merge_back_exists=1
-  echo "ralph-review-gate: task $TASK_ID — artifacts=${artifact_count} merge_back=${merge_back_exists} → auto-accept" >&2
+
+  # If review-decision.yaml exists, check overall_decision — reject blocks closeout.
+  review_decision_path="$VERIFICATION_DIR/review-decision.yaml"
+  if [[ -f "$review_decision_path" ]]; then
+    overall_decision="$(python3 -c "
+import re, sys
+text = open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'^overall_decision:\s*(.+)', text, re.M)
+print(m.group(1).strip().strip('\"') if m else '')
+" "$review_decision_path" 2>/dev/null || true)"
+    if [[ "$overall_decision" == "reject" ]]; then
+      echo "ralph-review-gate: task $TASK_ID — review-decision.yaml overall_decision=reject → GATE_FAIL" >&2
+      exit 2
+    fi
+    echo "ralph-review-gate: task $TASK_ID — artifacts=${artifact_count} merge_back=${merge_back_exists} review_decision=${overall_decision:-unknown} → auto-accept" >&2
+  else
+    echo "ralph-review-gate: task $TASK_ID — artifacts=${artifact_count} merge_back=${merge_back_exists} → auto-accept" >&2
+  fi
   exit 0
 fi
 

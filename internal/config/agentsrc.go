@@ -95,6 +95,23 @@ func (s *StringsOrBool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// AgentsRCKGBridge is the bridge sub-config within the KG section.
+type AgentsRCKGBridge struct {
+	Enabled        bool     `json:"enabled"`
+	AllowedIntents []string `json:"allowed_intents,omitempty"`
+}
+
+// AgentsRCKG is the knowledge-graph configuration block in agentsrc.json.
+type AgentsRCKG struct {
+	// GraphHome overrides KG_HOME env var for this project. Defaults to ~/.knowledge-graph.
+	GraphHome string `json:"graph_home,omitempty"`
+	// Backend selects the storage backend: "sqlite" (default) or "postgres".
+	// Postgres requires KG_POSTGRES_URL.
+	Backend string `json:"backend,omitempty"`
+	// Bridge configures workflow/kg bridge query behaviour for this project.
+	Bridge AgentsRCKGBridge `json:"bridge"`
+}
+
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
 type AgentsRC struct {
 	Schema   string           `json:"$schema,omitempty"`
@@ -107,6 +124,7 @@ type AgentsRC struct {
 	MCP      StringsOrBool    `json:"mcp"`
 	Settings bool             `json:"settings"`
 	Sources  []Source         `json:"sources"`
+	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
@@ -140,7 +158,7 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
-	"refresh": true,
+	"kg": true, "refresh": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -156,6 +174,7 @@ type agentsRCCore struct {
 	MCP      StringsOrBool    `json:"mcp"`
 	Settings bool             `json:"settings"`
 	Sources  []Source         `json:"sources"`
+	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 }
 
@@ -174,6 +193,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.MCP = core.MCP
 	a.Settings = core.Settings
 	a.Sources = core.Sources
+	a.KG = core.KG
 	a.Refresh = core.Refresh
 
 	var all map[string]json.RawMessage
@@ -203,6 +223,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		MCP:      a.MCP,
 		Settings: a.Settings,
 		Sources:  a.Sources,
+		KG:       a.KG,
 		Refresh:  a.Refresh,
 	}
 	data, err := json.Marshal(core)

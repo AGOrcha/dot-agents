@@ -650,7 +650,7 @@ func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) erro
 	if err != nil {
 		return nil
 	}
-	if _, ok := rc.ExtraFields["kg"]; !ok {
+	if rc.KG == nil {
 		return nil
 	}
 	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName))

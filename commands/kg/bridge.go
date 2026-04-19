@@ -580,7 +580,27 @@ func collectCodeBridgeResults(kgHomeDir, bridgeIntent, query string, limit int) 
 	if resp.Results == nil {
 		resp.Results = []GraphQueryResult{}
 	}
+	// Attach sparsity score: 0 = good evidence, 100 = no evidence.
+	nodeCount := store.CountNodes()
+	score := computeSparsityScore(len(resp.Results), nodeCount)
+	resp.SparsityScore = &score
+	if len(resp.Results) == 0 && nodeCount == 0 {
+		resp.Warnings = append(resp.Warnings,
+			fmt.Sprintf("[bridge-sparse] warm store has %d nodes — run 'dot-agents kg build' then 'dot-agents kg warm --include-code' to populate code-lane", nodeCount))
+	}
 	return resp, nil
+}
+
+// computeSparsityScore returns a 0–100 sparsity score for bridge results.
+// 0 means well-evidenced; 100 means no results and store is empty.
+func computeSparsityScore(resultCount, storeNodeCount int) int {
+	if storeNodeCount == 0 {
+		return 100
+	}
+	if resultCount == 0 {
+		return 75 // store has data but query found nothing
+	}
+	return 0 // found results — treat as evidenced
 }
 
 // ── Phase 5: KGAdapter interface ──────────────────────────────────────────────

@@ -1,7 +1,27 @@
 {
   "$schema": "./schemas/agentsrc.schema.json",
-  "version": 1,
+  "agents": [
+    "test-runner",
+    "verifier",
+    "loop-worker"
+  ],
+  "app_type_verifier_map": {
+    "go-cli": [
+      "unit"
+    ]
+  },
+  "hooks": false,
+  "mcp": false,
   "project": "dot-agents",
+  "refresh": {
+    "version": "dev",
+    "refreshedAt": "2026-04-19T17:54:13Z"
+  },
+  "rules": [
+    "global",
+    "project"
+  ],
+  "settings": false,
   "skills": [
     "agent-handoff",
     "agent-start",
@@ -21,18 +41,6 @@
     "orchestrator-session-start",
     "platform-docs-refresh"
   ],
-  "rules": [
-    "global",
-    "project"
-  ],
-  "agents": [
-    "test-runner",
-    "verifier",
-    "loop-worker"
-  ],
-  "hooks": false,
-  "mcp": false,
-  "settings": false,
   "sources": [
     {
       "type": "local"
@@ -46,14 +54,10 @@
   "verifier_profiles": {
     "unit": {
       "label": "Unit (Go)",
-      "prompt_files": [".agents/prompts/verifiers/unit.project.md"]
+      "prompt_files": [
+        ".agents/prompts/verifiers/unit.project.md"
+      ]
     }
   },
-  "app_type_verifier_map": {
-    "go-cli": ["unit"]
-  },
-  "refresh": {
-    "version": "dev",
-    "refreshedAt": "2026-04-15T04:00:00Z"
-  }
+  "version": 1
 }

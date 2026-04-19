@@ -988,3 +988,78 @@ func TestAgentsRCJSONShape(t *testing.T) {
 		t.Error("$schema should be present")
 	}
 }
+
+// ── AgentsRCKG ────────────────────────────────────────────────────────────────
+
+func TestAgentsRCKG_Unmarshal(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"project": "demo",
+		"sources": [{"type": "local"}],
+		"kg": {
+			"graph_home": "/custom/kg",
+			"backend": "sqlite",
+			"bridge": {"enabled": true, "allowed_intents": ["symbol_lookup"]}
+		}
+	}`
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc.KG == nil {
+		t.Fatal("expected KG to be non-nil")
+	}
+	if rc.KG.GraphHome != "/custom/kg" {
+		t.Errorf("GraphHome: got %q", rc.KG.GraphHome)
+	}
+	if rc.KG.Backend != "sqlite" {
+		t.Errorf("Backend: got %q", rc.KG.Backend)
+	}
+	if !rc.KG.Bridge.Enabled {
+		t.Error("expected Bridge.Enabled = true")
+	}
+	if len(rc.KG.Bridge.AllowedIntents) != 1 || rc.KG.Bridge.AllowedIntents[0] != "symbol_lookup" {
+		t.Errorf("AllowedIntents: got %v", rc.KG.Bridge.AllowedIntents)
+	}
+}
+
+func TestAgentsRCKG_NilWhenAbsent(t *testing.T) {
+	raw := `{"version":1,"project":"demo","sources":[{"type":"local"}]}`
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc.KG != nil {
+		t.Errorf("expected KG nil when absent, got %+v", rc.KG)
+	}
+}
+
+func TestAgentsRCKG_MarshalRoundTrip(t *testing.T) {
+	rc := &AgentsRC{
+		Version: 1,
+		Project: "demo",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		KG: &AgentsRCKG{
+			GraphHome: "/my/graph",
+			Backend:   "sqlite",
+			Bridge:    AgentsRCKGBridge{Enabled: true},
+		},
+	}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var rc2 AgentsRC
+	if err := json.Unmarshal(data, &rc2); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc2.KG == nil {
+		t.Fatal("KG nil after round-trip")
+	}
+	if rc2.KG.GraphHome != "/my/graph" {
+		t.Errorf("GraphHome after round-trip: got %q", rc2.KG.GraphHome)
+	}
+	if !rc2.KG.Bridge.Enabled {
+		t.Error("Bridge.Enabled false after round-trip")
+	}
+}

@@ -1789,6 +1789,7 @@ func TestRunKGWarmStats(t *testing.T) {
 func newKGWarmCmdForTest() *cobra.Command {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("type", "", "")
+	cmd.Flags().Bool("include-code", false, "")
 	return cmd
 }
 
@@ -1800,4 +1801,88 @@ func newKGLinkAddCmdForTest(kind string) *cobra.Command {
 
 func newKGLinkRemoveCmdForTest() *cobra.Command {
 	return &cobra.Command{}
+}
+
+// ── Bridge sparsity scoring ───────────────────────────────────────────────────
+
+func TestComputeSparsityScore_EmptyStore(t *testing.T) {
+	// Store has 0 nodes → can't distinguish empty from broken; score = 100
+	if got := computeSparsityScore(0, 0); got != 100 {
+		t.Errorf("empty store: want 100, got %d", got)
+	}
+}
+
+func TestComputeSparsityScore_StoreHasDataNoResults(t *testing.T) {
+	// Store has nodes but query returned nothing → score = 75 (sparse)
+	if got := computeSparsityScore(0, 500); got != 75 {
+		t.Errorf("store with data, no results: want 75, got %d", got)
+	}
+}
+
+func TestComputeSparsityScore_ResultsFound(t *testing.T) {
+	// Results found → score = 0 (well-evidenced)
+	if got := computeSparsityScore(3, 500); got != 0 {
+		t.Errorf("results found: want 0, got %d", got)
+	}
+}
+
+// ── Bridge: empty warm store emits sparsity warning ──────────────────────────
+
+func TestCollectCodeBridgeResults_EmptyStore_SparsityWarning(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// Warm store is freshly initialized — 0 code nodes imported
+	resp, err := collectCodeBridgeResults(home, "symbol_lookup", "anySymbol", 10)
+	if err != nil {
+		t.Fatalf("collectCodeBridgeResults: %v", err)
+	}
+	if resp.SparsityScore == nil {
+		t.Fatal("expected sparsity_score to be set")
+	}
+	if *resp.SparsityScore != 100 {
+		t.Errorf("expected sparsity_score=100 for empty warm store, got %d", *resp.SparsityScore)
+	}
+	foundWarn := false
+	for _, w := range resp.Warnings {
+		if len(w) > 0 && w[:len("[bridge-sparse]")] == "[bridge-sparse]" {
+			foundWarn = true
+		}
+	}
+	if !foundWarn {
+		t.Errorf("expected [bridge-sparse] warning in empty store, got warnings: %v", resp.Warnings)
+	}
+}
+
+// ── runKGWarm --include-code flag: accepted and skips gracefully if no CRG ──
+
+func TestRunKGWarm_IncludeCode_NoCRGGraceful(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	cmd := newKGWarmCmdForTest()
+	if err := cmd.Flags().Set("include-code", "true"); err != nil {
+		t.Fatalf("set include-code flag: %v", err)
+	}
+	// With no CRG db present, runKGWarm should warn but not fail
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm with --include-code and no CRG: %v", err)
+	}
+
+	// Note sync should still complete normally
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	stats, _ := store.GetStats()
+	if stats.NotesCount != 5 {
+		t.Errorf("expected 5 notes synced, got %d", stats.NotesCount)
+	}
+	// No code nodes should have been imported (CRG not available)
+	if store.CountNodes() != 0 {
+		t.Errorf("expected 0 code nodes with no CRG db, got %d", store.CountNodes())
+	}
 }

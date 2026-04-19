@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -80,6 +81,16 @@ func runWorkflowGraphQueryViaKGBridge(projectPath, intent string, queryArgs []st
 	return nil
 }
 
+// defaultGraphHome returns the default graph home path, preferring the
+// agentsrc kg.graph_home field over the ~/.knowledge-graph default.
+func defaultGraphHome(projectPath string) string {
+	if rc, err := config.LoadAgentsRC(projectPath); err == nil && rc != nil && rc.KG != nil && rc.KG.GraphHome != "" {
+		return rc.KG.GraphHome
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "knowledge-graph")
+}
+
 func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 	p := filepath.Join(projectPath, ".agents", "workflow", "graph-bridge.yaml")
 	data, err := os.ReadFile(p)
@@ -93,7 +104,35 @@ func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse graph-bridge.yaml: %w", err)
 	}
+	// Resolve graph_home from agentsrc if not set in the file.
+	if cfg.GraphHome == "" {
+		cfg.GraphHome = defaultGraphHome(projectPath)
+	}
 	return &cfg, nil
+}
+
+// scaffoldGraphBridgeConfig creates a minimal .agents/workflow/graph-bridge.yaml
+// with all defaults when the file is absent, so callers can proceed immediately.
+func scaffoldGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
+	dir := filepath.Join(projectPath, ".agents", "workflow")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create .agents/workflow dir: %w", err)
+	}
+	graphHome := defaultGraphHome(projectPath)
+	cfg := &GraphBridgeConfig{
+		SchemaVersion: 1,
+		Enabled:       true,
+		GraphHome:     graphHome,
+	}
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	p := filepath.Join(dir, "graph-bridge.yaml")
+	if err := os.WriteFile(p, out, 0o644); err != nil {
+		return nil, fmt.Errorf("write graph-bridge.yaml: %w", err)
+	}
+	return cfg, nil
 }
 
 type GraphBridgeQuery struct {
@@ -128,15 +167,20 @@ type GraphBridgeAdapter interface {
 }
 
 type GraphBridgeHealth struct {
-	SchemaVersion    int      `json:"schema_version"`
-	Timestamp        string   `json:"timestamp"`
-	AdapterAvailable bool     `json:"adapter_available"`
-	GraphHomeExists  bool     `json:"graph_home_exists"`
-	NoteCount        int      `json:"note_count"`
-	LastQueryTime    string   `json:"last_query_time,omitempty"`
-	LastQueryStatus  string   `json:"last_query_status,omitempty"`
-	Status           string   `json:"status"`
-	Warnings         []string `json:"warnings,omitempty"`
+	SchemaVersion      int      `json:"schema_version"`
+	Timestamp          string   `json:"timestamp"`
+	AdapterAvailable   bool     `json:"adapter_available"`
+	GraphHomeExists    bool     `json:"graph_home_exists"`
+	NoteCount          int      `json:"note_count"`
+	WarmStoreNodeCount int      `json:"warm_store_node_count"`
+	WarmStoreNoteCount int      `json:"warm_store_note_count"`
+	CodeLaneReady      bool     `json:"code_lane_ready"`
+	ContextLaneReady   bool     `json:"context_lane_ready"`
+	LastQueryTime      string   `json:"last_query_time,omitempty"`
+	LastQueryStatus    string   `json:"last_query_status,omitempty"`
+	Status             string   `json:"status"`
+	Note               string   `json:"note,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
 }
 
 func writeGraphBridgeHealth(project string, health GraphBridgeHealth) error {
@@ -190,7 +234,7 @@ func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 	}
 	h.AdapterAvailable = h.GraphHomeExists && configExists
 	if !h.AdapterAvailable {
-		h.Status = "warn"
+		h.Status = "degraded"
 		h.Warnings = append(h.Warnings, fmt.Sprintf("graph not initialized at %s", a.graphHome))
 		return h, nil
 	}
@@ -206,9 +250,32 @@ func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 			}
 		}
 	}
+
+	// Query warm store for node/note counts to report code-lane and context-lane readiness.
+	warmDBPath := filepath.Join(a.graphHome, "ops", "graphstore.db")
+	if store, err := graphstore.OpenSQLite(warmDBPath); err == nil {
+		defer store.Close()
+		h.WarmStoreNodeCount = store.CountNodes()
+		h.WarmStoreNoteCount = store.CountKGNotes()
+	}
+	h.CodeLaneReady = h.WarmStoreNodeCount > 0
+	h.ContextLaneReady = h.WarmStoreNoteCount > 0
+
 	h.LastQueryTime = a.lastQuery
 	h.LastQueryStatus = a.lastStatus
-	h.Status = "healthy"
+	switch {
+	case h.CodeLaneReady && h.ContextLaneReady:
+		h.Status = "healthy"
+	case h.CodeLaneReady:
+		h.Status = "partial"
+		h.Note = "code-lane ready; context-lane needs KG notes (run 'kg warm' after authoring notes)"
+	case h.ContextLaneReady:
+		h.Status = "partial"
+		h.Note = "context-lane ready; code-lane needs ETL (run 'kg warm --include-code' after 'kg build')"
+	default:
+		h.Status = "degraded"
+		h.Note = "neither lane has data — run 'kg build' then 'kg warm --include-code' to populate code-lane"
+	}
 	return h, nil
 }
 
@@ -326,10 +393,16 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load bridge config: %w", err)
 	}
 	if !cfg.Enabled {
-		return deps.ErrorWithHints(
-			"graph bridge not configured",
-			"Create `.agents/workflow/graph-bridge.yaml` with `enabled: true` to enable workflow graph queries.",
-		)
+		// Auto-scaffold a default config and continue rather than hard-failing.
+		scaffolded, serr := scaffoldGraphBridgeConfig(projectPath)
+		if serr != nil {
+			return deps.ErrorWithHints(
+				"graph bridge not configured",
+				"Create `.agents/workflow/graph-bridge.yaml` with `enabled: true` to enable workflow graph queries.",
+			)
+		}
+		cfg = scaffolded
+		fmt.Fprintln(os.Stderr, "graph-bridge.yaml created with defaults — results may be sparse until the KG is populated")
 	}
 
 	if !isValidWorkflowBridgeIntent(intent) {
@@ -405,8 +478,7 @@ func runWorkflowGraphHealth(_ *cobra.Command, _ []string) error {
 
 	graphHome := cfg.GraphHome
 	if graphHome == "" {
-		home, _ := os.UserHomeDir()
-		graphHome = filepath.Join(home, "knowledge-graph")
+		graphHome = defaultGraphHome(projectPath)
 	}
 	adapter := NewLocalGraphAdapter(graphHome)
 	health, err := adapter.Health()
@@ -421,17 +493,20 @@ func runWorkflowGraphHealth(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	badge := ui.ColorText(ui.Green, health.Status)
-	if health.Status != "healthy" {
-		badge = ui.ColorText(ui.Yellow, health.Status)
+	statusColor := ui.Green
+	if health.Status == "partial" {
+		statusColor = ui.Yellow
+	} else if health.Status == "degraded" {
+		statusColor = ui.Red
 	}
+	badge := ui.ColorText(statusColor, health.Status)
 	ui.Header(fmt.Sprintf("Graph Bridge Health  [%s]", badge))
-	ui.Info(fmt.Sprintf("  Graph home: %s", graphHome))
+	ui.Info(fmt.Sprintf("  Graph home:        %s", graphHome))
 	ui.Info(fmt.Sprintf("  Adapter available: %v", health.AdapterAvailable))
-	ui.Info(fmt.Sprintf("  Notes: %d", health.NoteCount))
-	ui.Info(fmt.Sprintf("  Bridge enabled: %v", cfg.Enabled))
-	if !cfg.Enabled {
-		ui.Warn("Bridge not enabled — create .agents/workflow/graph-bridge.yaml to enable")
+	ui.Info(fmt.Sprintf("  Code-lane ready:   %v  (%d nodes in warm store)", health.CodeLaneReady, health.WarmStoreNodeCount))
+	ui.Info(fmt.Sprintf("  Context-lane ready:%v  (%d notes in warm store)", health.ContextLaneReady, health.WarmStoreNoteCount))
+	if health.Note != "" {
+		ui.Warn(health.Note)
 	}
 	for _, w := range health.Warnings {
 		ui.Warn(w)

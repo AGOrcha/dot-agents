@@ -683,6 +683,49 @@ func TestSQLiteStore_PersistAcrossOpen(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// CountNodes / CountKGNotes
+// ---------------------------------------------------------------------------
+
+func TestCountNodes_EmptyStore(t *testing.T) {
+	s := openTestStore(t)
+	if n := s.CountNodes(); n != 0 {
+		t.Errorf("expected 0 nodes in empty store, got %d", n)
+	}
+}
+
+func TestCountNodes_AfterUpsert(t *testing.T) {
+	s := openTestStore(t)
+	_, _ = s.UpsertNode(makeNode("Foo", graphstore.NodeKindFunction, "foo.go"), "")
+	_, _ = s.UpsertNode(makeNode("Bar", graphstore.NodeKindFunction, "bar.go"), "")
+	if n := s.CountNodes(); n != 2 {
+		t.Errorf("expected 2 nodes, got %d", n)
+	}
+}
+
+func TestCountKGNotes_EmptyStore(t *testing.T) {
+	s := openTestStore(t)
+	if n := s.CountKGNotes(); n != 0 {
+		t.Errorf("expected 0 KG notes in empty store, got %d", n)
+	}
+}
+
+func TestCountKGNotes_AfterUpsert(t *testing.T) {
+	s := openTestStore(t)
+	note := graphstore.KGNote{
+		ID:       "dec-001",
+		NoteType: "decision",
+		Title:    "Use Go",
+		Status:   "active",
+	}
+	if err := s.UpsertKGNote(note); err != nil {
+		t.Fatalf("UpsertKGNote: %v", err)
+	}
+	if n := s.CountKGNotes(); n != 1 {
+		t.Errorf("expected 1 KG note, got %d", n)
+	}
+}
+
 // Ensure the test binary itself can be compiled without leaving temp files
 // under the source tree.
 func TestMain(m *testing.M) {

@@ -131,7 +131,7 @@ tasks:
         - .agents/prompts/review-agent.project.md
         - docs/LOOP_ORCHESTRATION_SPEC.md
       verification_required: true
-      notes: Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, and the review contract is explicitly two-lens: phase 1 is the broad product/domain/stability review while phase 2 is the tech-lead / architecture review. The live `ralph-*` runtime still does not execute a distinct review-agent phase, so actually running that two-lens review in the staged chain remains reopened under `p6` and `p8`.
+      notes: Completed as a prompt + CLI artifact task. The review decision schema and `workflow verify record --kind review` path exist, and the review contract is explicitly two-lens (phase 1 is the broad product/domain/stability review while phase 2 is the tech-lead / architecture review). The live `ralph-*` runtime still does not execute a distinct review-agent phase, so actually running that two-lens review in the staged chain remains reopened under `p6` and `p8`.
     - id: p5-iter-log-v2
       title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
       status: completed
@@ -177,7 +177,7 @@ tasks:
       notes: Completed. `workflow fanout` resolves and persists `app_type` / `verifier_sequence`, `workflow bundle stages` expands one bundle into `impl`, ordered verifier stages, and `review`, and non-review `workflow verify record` writes typed `<verifier_type>.result.yaml` artifacts. The remaining runtime gaps are no longer stage-expansion or verifier-artifact plumbing; they live in post-task review enforcement and scoped completion behavior tracked under `p7` and `p11`.
     - id: p7-post-closeout
       title: Post-task orchestrator review gate plus fold-back / proposal update
-      status: in_progress
+      status: completed
       depends_on:
         - p1-pipeline-control
         - p4-review-agent
@@ -255,7 +255,7 @@ tasks:
       notes: Completed. This remains the doc-only D6 fork and is unrelated to the reopened runtime dispatch gap.
     - id: p11-plan-completion-mode
       title: Scoped plan-completion mode with planning locks and human-reviewed architectural pause points
-      status: in_progress
+      status: completed
       depends_on:
         - p7-post-closeout
         - p8-orchestrator-awareness

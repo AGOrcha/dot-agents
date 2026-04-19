@@ -389,10 +389,60 @@ func noteToKGNote(note *GraphNote, filePath string) graphstore.KGNote {
 	}
 }
 
+// runKGWarmCodeImport imports CRG code nodes and edges into the warm SQLite layer.
+// It reads directly from .code-review-graph/graph.db in the repo root.
+func runKGWarmCodeImport(store *graphstore.SQLiteStore, repoRoot string) (nodesImported, edgesImported int, err error) {
+	bridge, berr := graphstore.NewCRGBridge(repoRoot)
+	if berr != nil {
+		return 0, 0, fmt.Errorf("CRG not available: %w", berr)
+	}
+	nodes, nerr := bridge.ReadNodes(0)
+	if nerr != nil {
+		return 0, 0, fmt.Errorf("read CRG nodes: %w", nerr)
+	}
+	for _, n := range nodes {
+		info := graphstore.NodeInfo{
+			Kind:       n.Kind,
+			Name:       n.Name,
+			FilePath:   n.FilePath,
+			LineStart:  n.LineStart,
+			LineEnd:    n.LineEnd,
+			Language:   n.Language,
+			ParentName: n.ParentName,
+			Params:     n.Params,
+			ReturnType: n.ReturnType,
+			IsTest:     n.IsTest,
+			Extra:      n.Extra,
+		}
+		if _, uerr := store.UpsertNode(info, n.FileHash); uerr == nil {
+			nodesImported++
+		}
+	}
+	edges, eerr := bridge.ReadEdges(0)
+	if eerr != nil {
+		return nodesImported, 0, fmt.Errorf("read CRG edges: %w", eerr)
+	}
+	for _, e := range edges {
+		info := graphstore.EdgeInfo{
+			Kind:     e.Kind,
+			Source:   e.SourceQualified,
+			Target:   e.TargetQualified,
+			FilePath: e.FilePath,
+			Line:     e.Line,
+			Extra:    e.Extra,
+		}
+		if _, uerr := store.UpsertEdge(info); uerr == nil {
+			edgesImported++
+		}
+	}
+	return nodesImported, edgesImported, nil
+}
+
 // runKGWarm syncs all hot filesystem notes into the warm SQLite layer.
 func runKGWarm(cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	noteTypeFilter, _ := cmd.Flags().GetString("type")
+	includeCode, _ := cmd.Flags().GetBool("include-code")
 
 	store, err := openKGStore(home)
 	if err != nil {
@@ -478,11 +528,27 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 
 	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
 
-	ui.SuccessBox(
-		fmt.Sprintf("Warm sync complete: %d notes indexed, %d skipped", indexed, skipped),
+	var codeMsg string
+	if includeCode {
+		repoRoot, _ := os.Getwd()
+		nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
+		if cerr != nil {
+			ui.Warn(fmt.Sprintf("code-lane import skipped: %v", cerr))
+		} else {
+			codeMsg = fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
+			_ = store.SetMetadata("last_code_import", time.Now().UTC().Format(time.RFC3339))
+		}
+	}
+
+	lines := []string{
 		"dot-agents kg link add <note-id> <symbol> — link a note to a code symbol",
 		"dot-agents kg link list <note-id>         — list all symbol links for a note",
-	)
+	}
+	summary := fmt.Sprintf("Warm sync complete: %d notes indexed, %d skipped", indexed, skipped)
+	if codeMsg != "" {
+		summary += "\n" + codeMsg
+	}
+	ui.SuccessBox(summary, lines...)
 	return nil
 }
 

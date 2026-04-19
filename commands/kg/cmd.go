@@ -162,6 +162,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		RunE:  runKGWarm,
 	}
 	kgWarmCmd.Flags().String("type", "", "Only sync notes of this type (source|entity|concept|synthesis|decision|repo|session)")
+	kgWarmCmd.Flags().Bool("include-code", false, "Also import CRG code nodes and edges into the warm store (requires 'kg build' to have run)")
 
 	kgWarmStatsCmd := &cobra.Command{
 		Use:   "stats",

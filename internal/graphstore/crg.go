@@ -9,6 +9,7 @@ package graphstore
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	_ "modernc.org/sqlite"
 )
 
 // CRGBridge shells out to the code-review-graph Python CLI.
@@ -538,4 +541,99 @@ func (b *CRGBridge) DetectChanges(opts DetectChangesOptions) (*CRGChangeReport, 
 		}
 	}
 	return &report, nil
+}
+
+// ── Direct CRG database access ────────────────────────────────────────────────
+
+// CRGDBPath returns the path to the CRG SQLite database for repoRoot.
+func CRGDBPath(repoRoot string) string {
+	return filepath.Join(repoRoot, ".code-review-graph", "graph.db")
+}
+
+// ReadNodes reads up to limit nodes directly from the CRG SQLite database.
+// If limit <= 0, all nodes are returned. Returns an empty slice if the
+// database does not exist or has no nodes.
+func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
+	dbPath := CRGDBPath(b.RepoRoot)
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, nil // no CRG db — not an error
+	}
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	if err != nil {
+		return nil, fmt.Errorf("open CRG db: %w", err)
+	}
+	defer db.Close()
+
+	q := `SELECT id,kind,name,qualified_name,file_path,
+	             COALESCE(line_start,0),COALESCE(line_end,0),
+	             COALESCE(language,''),COALESCE(parent_name,''),
+	             COALESCE(params,''),COALESCE(return_type,''),
+	             COALESCE(is_test,0),COALESCE(file_hash,''),
+	             COALESCE(extra,'{}'),updated_at
+	      FROM nodes`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("query CRG nodes: %w", err)
+	}
+	defer rows.Close()
+
+	var nodes []GraphNode
+	for rows.Next() {
+		var n GraphNode
+		var extraStr string
+		var isTest int
+		if err := rows.Scan(&n.ID, &n.Kind, &n.Name, &n.QualifiedName, &n.FilePath,
+			&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
+			&n.Params, &n.ReturnType, &isTest, &n.FileHash,
+			&extraStr, &n.UpdatedAt); err != nil {
+			continue
+		}
+		n.IsTest = isTest != 0
+		_ = json.Unmarshal([]byte(extraStr), &n.Extra)
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
+// ReadEdges reads up to limit edges directly from the CRG SQLite database.
+// If limit <= 0, all edges are returned.
+func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
+	dbPath := CRGDBPath(b.RepoRoot)
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, nil
+	}
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	if err != nil {
+		return nil, fmt.Errorf("open CRG db: %w", err)
+	}
+	defer db.Close()
+
+	q := `SELECT id,kind,source_qualified,target_qualified,
+	             COALESCE(file_path,''),COALESCE(line,0),
+	             COALESCE(extra,'{}'),updated_at
+	      FROM edges`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("query CRG edges: %w", err)
+	}
+	defer rows.Close()
+
+	var edges []GraphEdge
+	for rows.Next() {
+		var e GraphEdge
+		var extraStr string
+		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceQualified, &e.TargetQualified,
+			&e.FilePath, &e.Line, &extraStr, &e.UpdatedAt); err != nil {
+			continue
+		}
+		_ = json.Unmarshal([]byte(extraStr), &e.Extra)
+		edges = append(edges, e)
+	}
+	return edges, rows.Err()
 }
