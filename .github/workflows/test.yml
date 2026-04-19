@@ -250,6 +250,27 @@ jobs:
         run: |
           ./bin/dot-agents hooks list
 
+      - name: Test rules list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents rules list
+
+      - name: Test mcp list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents mcp list
+
+      - name: Test settings list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/dot-agents settings list
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}
