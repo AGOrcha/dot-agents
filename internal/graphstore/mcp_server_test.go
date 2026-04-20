@@ -234,3 +234,128 @@ func TestKGServeUnknownTool(t *testing.T) {
 		t.Fatalf("unexpected error message: %+v", resp.Error)
 	}
 }
+
+// TestHandleGetReviewContext_UnbuiltGraphReturnsError verifies that
+// handleGetReviewContext returns a structured JSON error (not a Go/RPC error)
+// when the graph is in the unbuilt state.
+func TestHandleGetReviewContext_UnbuiltGraphReturnsError(t *testing.T) {
+	bridge := &fakeMCPBridge{
+		statusSeq: []*CRGStatus{
+			{State: string(CRGReadinessUnbuilt), Message: "code graph has not been built yet"},
+		},
+	}
+	srv := &MCPServer{bridge: bridge}
+	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":["main.go"]}}}`)
+	if resp.Error != nil {
+		t.Fatalf("expected structured result, got RPC error: %+v", resp.Error)
+	}
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resultBytes, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["error"] == nil {
+		t.Fatalf("expected 'error' field in payload, got: %v", payload)
+	}
+	if payload["state"] != string(CRGReadinessUnbuilt) {
+		t.Fatalf("expected state=%q, got: %v", CRGReadinessUnbuilt, payload["state"])
+	}
+	if payload["hint"] == nil {
+		t.Fatalf("expected 'hint' field in payload, got: %v", payload)
+	}
+}
+
+// TestHandleGetImpactRadius_UnbuiltGraphReturnsError verifies that
+// handleGetImpactRadius returns a structured JSON error (not a Go/RPC error)
+// when the graph is in the unbuilt state.
+func TestHandleGetImpactRadius_UnbuiltGraphReturnsError(t *testing.T) {
+	bridge := &fakeMCPBridge{
+		statusSeq: []*CRGStatus{
+			{State: string(CRGReadinessUnbuilt), Message: "code graph has not been built yet"},
+		},
+	}
+	srv := &MCPServer{bridge: bridge}
+	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":"main.run","depth":2}}}`)
+	if resp.Error != nil {
+		t.Fatalf("expected structured result, got RPC error: %+v", resp.Error)
+	}
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resultBytes, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["error"] == nil {
+		t.Fatalf("expected 'error' field in payload, got: %v", payload)
+	}
+	if payload["state"] != string(CRGReadinessUnbuilt) {
+		t.Fatalf("expected state=%q, got: %v", CRGReadinessUnbuilt, payload["state"])
+	}
+	if payload["hint"] == nil {
+		t.Fatalf("expected 'hint' field in payload, got: %v", payload)
+	}
+}
+
+// TestHandleGetReviewContext_BusyGraphReturnsError verifies the busy_or_locked
+// state is handled by handleGetReviewContext.
+func TestHandleGetReviewContext_BusyGraphReturnsError(t *testing.T) {
+	bridge := &fakeMCPBridge{
+		statusSeq: []*CRGStatus{
+			{State: string(CRGReadinessBusyOrLocked), Message: "database is locked"},
+		},
+	}
+	srv := &MCPServer{bridge: bridge}
+	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":["cmd/main.go"]}}}`)
+	if resp.Error != nil {
+		t.Fatalf("expected structured result, got RPC error: %+v", resp.Error)
+	}
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resultBytes, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["state"] != string(CRGReadinessBusyOrLocked) {
+		t.Fatalf("expected state=%q, got: %v", CRGReadinessBusyOrLocked, payload["state"])
+	}
+}
+
+// TestHandleGetReviewContext_ReadyGraphProceedsNormally verifies that when the
+// graph is ready, handleGetReviewContext proceeds to call DetectChanges.
+func TestHandleGetReviewContext_ReadyGraphProceedsNormally(t *testing.T) {
+	bridge := &fakeMCPBridge{
+		statusSeq: []*CRGStatus{
+			{State: string(CRGReadinessReady), Ready: true, Nodes: 100, Edges: 200, Files: 10},
+		},
+		detect: &CRGChangeReport{
+			Summary:          "1 changed function",
+			ChangedFunctions: []CRGChangedNode{{Name: "foo", QualifiedName: "pkg.foo", FilePath: "pkg/foo.go"}},
+		},
+	}
+	srv := &MCPServer{bridge: bridge}
+	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":["pkg/foo.go"]}}}`)
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %+v", resp.Error)
+	}
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resultBytes, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["error"] != nil {
+		t.Fatalf("unexpected error field in ready-graph response: %v", payload)
+	}
+	if payload["changed_symbols"] == nil {
+		t.Fatalf("expected 'changed_symbols' in ready-graph response, got: %v", payload)
+	}
+}

@@ -371,6 +371,24 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
+	// Freshness guard: return a structured error when the graph is not ready
+	// so callers can distinguish "no impact" from "graph not built".
+	if status, stErr := bridge.Status(); stErr == nil && status != nil {
+		switch status.State {
+		case string(CRGReadinessUnbuilt):
+			return json.Marshal(map[string]any{
+				"error": "code graph not built",
+				"state": status.State,
+				"hint":  "run build_or_update_graph_tool first",
+			})
+		case string(CRGReadinessBusyOrLocked):
+			return json.Marshal(map[string]any{
+				"error": "code graph is busy or locked",
+				"state": status.State,
+				"hint":  "wait for concurrent operation to complete",
+			})
+		}
+	}
 	result, err := bridge.GetImpactRadius(ImpactOptions{
 		ChangedFiles: files,
 		MaxDepth:     depth,
@@ -490,7 +508,29 @@ func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMess
 	if err != nil {
 		return nil, err
 	}
-	report, err := bridge.DetectChanges(DetectChangesOptions{})
+	// Freshness guard: return a structured error when the graph is not ready
+	// rather than silently returning empty changed symbols.
+	if status, stErr := bridge.Status(); stErr == nil && status != nil {
+		switch status.State {
+		case string(CRGReadinessUnbuilt):
+			return json.Marshal(map[string]any{
+				"error": "code graph not built",
+				"state": status.State,
+				"hint":  "run build_or_update_graph_tool first",
+			})
+		case string(CRGReadinessBusyOrLocked):
+			return json.Marshal(map[string]any{
+				"error": "code graph is busy or locked",
+				"state": status.State,
+				"hint":  "wait for concurrent operation to complete",
+			})
+		}
+	}
+	// Pass req.Files so callers can see the scope, even though the CRG CLI
+	// detect-changes subcommand does not yet accept a --files filter (v1.x
+	// limitation). The changed_functions section reflects the HEAD~1 diff;
+	// req.Files is used below for the warm-store impact-radius query.
+	report, err := bridge.DetectChanges(DetectChangesOptions{Files: req.Files})
 	if err != nil {
 		return nil, err
 	}

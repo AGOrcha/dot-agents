@@ -598,6 +598,13 @@ type CRGPriority struct {
 type DetectChangesOptions struct {
 	Base  string
 	Brief bool
+	// Files is an optional list of repo-relative file paths to restrict change
+	// detection to. NOTE: the CRG CLI detect-changes subcommand does not accept
+	// a --files argument in v1.x; this field is reserved for a future CRG
+	// version that supports per-file scoping. When set, the caller must fall
+	// back to using Files only for impact-radius queries (warm store) and accept
+	// that changed_functions will reflect the default HEAD~1 diff.
+	Files []string
 }
 
 // ── Impact radius ─────────────────────────────────────────────────────────────
