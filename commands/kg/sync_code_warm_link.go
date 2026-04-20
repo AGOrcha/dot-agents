@@ -16,6 +16,14 @@ import (
 
 // ── Command registration ──────────────────────────────────────────────────────
 
+func commandJSON(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	v, err := cmd.Flags().GetBool("json")
+	return err == nil && v
+}
+
 // ── Phase 6C: kg sync ─────────────────────────────────────────────────────────
 
 // runKGSync is a thin wrapper: git pull (or push) followed by kg lint.
@@ -23,7 +31,7 @@ import (
 func runKGSync(cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized at %s — run 'dot-agents kg setup' first", home)
+		return fmt.Errorf("knowledge graph not initialized at %s: run 'dot-agents kg setup' first", home)
 	}
 
 	push, _ := cmd.Flags().GetBool("push")
@@ -105,11 +113,35 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
-	return bridge.Build(graphstore.BuildOptions{
+	if !commandJSON(cmd) {
+		ui.Info(fmt.Sprintf("Building code graph for %s ...", root))
+	}
+	report, err := bridge.BuildReport(graphstore.BuildOptions{
 		SkipFlows:       skipFlows,
 		SkipPostprocess: skipPost,
 	})
+	if err != nil {
+		return err
+	}
+	if commandJSON(cmd) {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+	switch report.Outcome {
+	case string(graphstore.CRGReadinessReady):
+		ui.SuccessBox(report.Summary)
+	case string(graphstore.CRGReadinessUnbuilt):
+		ui.InfoBox("Code graph remains unbuilt", report.Summary)
+	case string(graphstore.CRGReadinessBusyOrLocked):
+		ui.WarnBox("Code graph is busy or locked", report.Summary)
+	default:
+		ui.InfoBox("Code graph build status", report.Summary)
+	}
+	return nil
 }
 
 func runKGUpdate(cmd *cobra.Command, _ []string) error {
@@ -125,12 +157,36 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	ui.Info(fmt.Sprintf("Updating code graph for %s ...", root))
-	return bridge.Update(graphstore.UpdateOptions{
+	if !commandJSON(cmd) {
+		ui.Info(fmt.Sprintf("Updating code graph for %s ...", root))
+	}
+	report, err := bridge.UpdateReport(graphstore.UpdateOptions{
 		Base:            base,
 		SkipFlows:       skipFlows,
 		SkipPostprocess: skipPost,
 	})
+	if err != nil {
+		return err
+	}
+	if commandJSON(cmd) {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+	switch report.Outcome {
+	case "no_diff":
+		ui.InfoBox("No code diff to update", report.Summary)
+	case "no_mutation":
+		ui.SuccessBox(report.Summary)
+	case "updated":
+		ui.SuccessBox(report.Summary)
+	default:
+		ui.InfoBox("Code graph update status", report.Summary)
+	}
+	return nil
 }
 
 func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
@@ -138,25 +194,24 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	if root == "" {
 		root = crgRepoRoot()
 	}
-	bridge, err := graphstore.NewCRGBridge(root)
+	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
 	if err != nil {
 		return err
 	}
-	status, err := bridge.Status()
-	if err != nil {
-		return err
-	}
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, _ := json.MarshalIndent(status, "", "  ")
 		fmt.Println(string(data))
 		return nil
 	}
-	ui.Header("Code Graph Status")
+	ui.Header(fmt.Sprintf("Code Graph Status  [%s]", strings.ToUpper(status.State)))
 	ui.Info(fmt.Sprintf("  Nodes:        %d", status.Nodes))
 	ui.Info(fmt.Sprintf("  Edges:        %d", status.Edges))
 	ui.Info(fmt.Sprintf("  Files:        %d", status.Files))
 	ui.Info(fmt.Sprintf("  Languages:    %s", status.Languages))
 	ui.Info(fmt.Sprintf("  Last updated: %s", status.LastUpdated))
+	if status.Message != "" {
+		ui.Info(fmt.Sprintf("  State:        %s", status.Message))
+	}
 	return nil
 }
 
@@ -187,7 +242,7 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(data))
 		return nil
@@ -240,7 +295,7 @@ func runKGFlows(deps Deps, cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(data))
 		return nil
@@ -275,7 +330,7 @@ func runKGCommunities(deps Deps, cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(data))
 		return nil
@@ -330,7 +385,7 @@ func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, _ := json.MarshalIndent(report, "", "  ")
 		fmt.Println(string(data))
 		return nil
@@ -454,7 +509,7 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	var typeList []string
 	if noteTypeFilter != "" {
 		if !isValidNoteType(noteTypeFilter) {
-			return fmt.Errorf("invalid note type %q", noteTypeFilter)
+			return fmt.Errorf("invalid note type %q: valid values are %s", noteTypeFilter, strings.Join(allTypes, ", "))
 		}
 		typeList = []string{noteTypeFilter}
 	} else {
@@ -555,7 +610,7 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 // runKGLinkAdd creates a note→symbol link.
 func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: kg link add <note-id> <qualified-name>")
+		return fmt.Errorf("kg link add expects 2 arguments: <note-id> <qualified-name>")
 	}
 	kind, _ := cmd.Flags().GetString("kind")
 	if kind == "" {
@@ -566,7 +621,7 @@ func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 		"decides": true, "references": true,
 	}
 	if !validLinkKinds[kind] {
-		return fmt.Errorf("invalid link kind %q: must be one of mentions|implements|documents|decides|references", kind)
+		return fmt.Errorf("invalid link kind %q: valid values are mentions, implements, documents, decides, references", kind)
 	}
 
 	store, err := openKGStore(kgHome())
@@ -591,7 +646,7 @@ func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 // runKGLinkList shows all symbol links for a note.
 func runKGLinkList(_ *cobra.Command, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: kg link list <note-id>")
+		return fmt.Errorf("kg link list expects 1 argument: <note-id>")
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {
@@ -616,11 +671,11 @@ func runKGLinkList(_ *cobra.Command, args []string) error {
 // runKGLinkRemove deletes a note→symbol link by ID.
 func runKGLinkRemove(_ *cobra.Command, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: kg link remove <link-id>")
+		return fmt.Errorf("kg link remove expects 1 argument: <link-id>")
 	}
 	var id int64
 	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-		return fmt.Errorf("invalid link ID %q: must be an integer", args[0])
+		return fmt.Errorf("invalid link ID %q: expected an integer", args[0])
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {

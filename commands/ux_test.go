@@ -52,6 +52,40 @@ func TestRenderCommandErrorAddsWorkflowRecoveryHints(t *testing.T) {
 	}
 }
 
+func TestRenderCommandErrorHandlesRootParseFailures(t *testing.T) {
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"--bogus"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+
+	var cliErr *CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("expected CLIError, got %T", err)
+	}
+	if !cliErr.ShowUsage {
+		t.Fatal("expected usage to be shown")
+	}
+
+	buf.Reset()
+	RenderCommandError(&buf, root, []string{"--bogus"}, err)
+	out := buf.String()
+	for _, want := range []string{
+		"unknown flag: --bogus",
+		"Run `dot-agents --help` to see examples and supported flags.",
+		"Usage:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered root parse error missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestWorkflowHelpIncludesExamples(t *testing.T) {
 	cmd := NewWorkflowCmd()
 	var buf bytes.Buffer

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: implement-error-message-fixes
+parent_plan_id: error-message-compliance
+verifier_type: unit
+status: pass
+summary: 'ok: scoped go test -race -count=1 -timeout=120s ./commands/kg/... ./commands/agents/... passed; full go test ./... -race -count=1 -timeout=300s passed'
+recorded_at: "2026-04-19T21:42:30Z"
+delegation_id: del-implement-error-message-fixes-1776634528
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./... -race -count=1 -timeout=300s

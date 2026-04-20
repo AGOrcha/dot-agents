@@ -12,11 +12,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -160,9 +163,18 @@ type BuildOptions struct {
 	SkipPostprocess bool
 }
 
-// Build triggers a full graph rebuild via `code-review-graph build`.
-// Output is streamed to stdout/stderr.
-func (b *CRGBridge) Build(opts BuildOptions) error {
+// CRGOperationReport captures a build/update outcome for CLI callers.
+type CRGOperationReport struct {
+	Operation    string     `json:"operation"`
+	Outcome      string     `json:"outcome"`
+	Summary      string     `json:"summary"`
+	ChangedFiles []string   `json:"changed_files,omitempty"`
+	Status       *CRGStatus `json:"status,omitempty"`
+	RawOutput    string     `json:"raw_output,omitempty"`
+}
+
+// BuildReport triggers a full graph rebuild and returns a structured summary.
+func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) {
 	args := []string{"build", "--repo", b.RepoRoot}
 	if opts.SkipFlows {
 		args = append(args, "--skip-flows")
@@ -170,7 +182,48 @@ func (b *CRGBridge) Build(opts BuildOptions) error {
 	if opts.SkipPostprocess {
 		args = append(args, "--skip-postprocess")
 	}
-	return b.runStreamed(args...)
+	out, err := b.runCaptured(args...)
+	if err != nil {
+		return nil, classifyCRGRunError("build", err, out)
+	}
+	status, statusErr := b.Status()
+	if statusErr != nil {
+		return nil, statusErr
+	}
+
+	report := &CRGOperationReport{
+		Operation: "build",
+		Status:    status,
+		RawOutput: strings.TrimSpace(string(out)),
+	}
+	switch {
+	case status.Ready:
+		report.Outcome = string(CRGReadinessReady)
+		report.Summary = fmt.Sprintf("Build complete: %d nodes, %d edges, %d files", status.Nodes, status.Edges, status.Files)
+	case status.State == string(CRGReadinessUnbuilt):
+		report.Outcome = string(CRGReadinessUnbuilt)
+		report.Summary = "Build completed but the code graph is still unbuilt."
+	case status.State == string(CRGReadinessBusyOrLocked):
+		report.Outcome = string(CRGReadinessBusyOrLocked)
+		report.Summary = "Build completed, but the code graph is busy or locked."
+	default:
+		report.Outcome = string(CRGReadinessError)
+		report.Summary = status.Message
+		if report.Summary == "" {
+			report.Summary = "Build completed, but code graph status could not be determined."
+		}
+	}
+	if report.RawOutput != "" && report.Summary == "" {
+		report.Summary = report.RawOutput
+	}
+	return report, nil
+}
+
+// Build triggers a full graph rebuild via `code-review-graph build`.
+// The structured report is intentionally discarded for legacy callers.
+func (b *CRGBridge) Build(opts BuildOptions) error {
+	_, err := b.BuildReport(opts)
+	return err
 }
 
 // UpdateOptions configures an incremental graph update.
@@ -183,8 +236,8 @@ type UpdateOptions struct {
 	SkipPostprocess bool
 }
 
-// Update triggers an incremental graph update via `code-review-graph update`.
-func (b *CRGBridge) Update(opts UpdateOptions) error {
+// UpdateReport triggers an incremental graph update and returns a structured summary.
+func (b *CRGBridge) UpdateReport(opts UpdateOptions) (*CRGOperationReport, error) {
 	args := []string{"update", "--repo", b.RepoRoot}
 	if opts.Base != "" {
 		args = append(args, "--base", opts.Base)
@@ -195,7 +248,61 @@ func (b *CRGBridge) Update(opts UpdateOptions) error {
 	if opts.SkipPostprocess {
 		args = append(args, "--skip-postprocess")
 	}
-	return b.runStreamed(args...)
+	changedFiles, diffErr := b.gitChangedFiles(opts.Base)
+	if diffErr != nil {
+		return nil, diffErr
+	}
+	if len(changedFiles) == 0 {
+		status, statusErr := b.Status()
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		return &CRGOperationReport{
+			Operation:    "update",
+			Outcome:      "no_diff",
+			Summary:      "No diff to apply; code graph left unchanged.",
+			ChangedFiles: nil,
+			Status:       status,
+		}, nil
+	}
+
+	out, err := b.runCaptured(args...)
+	if err != nil {
+		return nil, classifyCRGRunError("update", err, out)
+	}
+
+	status, statusErr := b.Status()
+	if statusErr != nil {
+		return nil, statusErr
+	}
+
+	filesUpdated, nodesChanged, edgesChanged, parsed := parseCRGMutationSummary(out)
+	outcome := "updated"
+	summary := fmt.Sprintf("Update complete: %d nodes, %d edges, %d files", status.Nodes, status.Edges, status.Files)
+	if parsed && nodesChanged == 0 && edgesChanged == 0 {
+		outcome = "no_mutation"
+		if filesUpdated > 0 {
+			summary = fmt.Sprintf("Changed %d files with no graph mutations.", filesUpdated)
+		} else {
+			summary = "Update completed with no graph mutations."
+		}
+	}
+
+	return &CRGOperationReport{
+		Operation:    "update",
+		Outcome:      outcome,
+		Summary:      summary,
+		ChangedFiles: changedFiles,
+		Status:       status,
+		RawOutput:    strings.TrimSpace(string(out)),
+	}, nil
+}
+
+// Update triggers an incremental graph update via `code-review-graph update`.
+// The structured report is intentionally discarded for legacy callers.
+func (b *CRGBridge) Update(opts UpdateOptions) error {
+	_, err := b.UpdateReport(opts)
+	return err
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -207,52 +314,243 @@ type CRGStatus struct {
 	Files       int    `json:"files"`
 	Languages   string `json:"languages"`
 	LastUpdated string `json:"last_updated"`
+	State       string `json:"state"`
+	Ready       bool   `json:"ready"`
+	Message     string `json:"message,omitempty"`
 }
 
 // Status returns the current graph stats from `code-review-graph status`.
-// The CRG CLI outputs human-readable lines; we parse them to a struct.
+// The bridge reads the SQLite database directly so code-status can work even
+// when the CRG binary is unavailable.
 func (b *CRGBridge) Status() (*CRGStatus, error) {
-	out, err := b.run("status", "--repo", b.RepoRoot)
+	status := &CRGStatus{
+		LastUpdated: "never",
+		State:       string(CRGReadinessUnbuilt),
+	}
+	dbPath := CRGDBPath(b.RepoRoot)
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		status.Message = "code-review-graph database missing"
+		return status, nil
+	}
+
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	if err != nil {
+		status.State = string(CRGReadinessError)
+		status.Message = fmt.Sprintf("open CRG db: %v", err)
+		return status, nil
+	}
+	defer db.Close()
+
+	var nodes, files, edges int
+	var lastUpdated sql.NullString
+	if err := db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path), COALESCE(MAX(updated_at), '')
+		FROM nodes`).Scan(&nodes, &files, &lastUpdated); err != nil {
+		if isCRGBusyLockedError(err) {
+			status.State = string(CRGReadinessBusyOrLocked)
+			status.Message = err.Error()
+			return status, nil
+		}
+		if isCRGUnbuiltError(err) {
+			status.Message = err.Error()
+			return status, nil
+		}
+		status.State = string(CRGReadinessError)
+		status.Message = err.Error()
+		return status, nil
+	}
+
+	if err := db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&edges); err != nil {
+		if isCRGBusyLockedError(err) {
+			status.State = string(CRGReadinessBusyOrLocked)
+			status.Message = err.Error()
+			return status, nil
+		}
+		if isCRGUnbuiltError(err) {
+			status.Message = err.Error()
+			return status, nil
+		}
+		status.State = string(CRGReadinessError)
+		status.Message = err.Error()
+		return status, nil
+	}
+
+	languages, langErr := readCRGLanguages(db)
+	if langErr != nil {
+		if isCRGBusyLockedError(langErr) {
+			status.State = string(CRGReadinessBusyOrLocked)
+			status.Message = langErr.Error()
+			return status, nil
+		}
+		if isCRGUnbuiltError(langErr) {
+			status.Message = langErr.Error()
+			return status, nil
+		}
+		status.State = string(CRGReadinessError)
+		status.Message = langErr.Error()
+		return status, nil
+	}
+
+	status.Nodes = nodes
+	status.Edges = edges
+	status.Files = files
+	status.Languages = strings.Join(languages, ", ")
+	if lastUpdated.Valid && strings.TrimSpace(lastUpdated.String) != "" {
+		status.LastUpdated = normalizeCRGUpdatedAt(strings.TrimSpace(lastUpdated.String))
+	}
+	if status.Nodes > 0 && status.Files > 0 && status.LastUpdated != "never" {
+		status.State = string(CRGReadinessReady)
+		status.Ready = true
+		return status, nil
+	}
+
+	status.State = string(CRGReadinessUnbuilt)
+	if status.Message == "" {
+		status.Message = "code graph has not been built yet"
+	}
+	return status, nil
+}
+
+const (
+	CRGReadinessUnbuilt      = "unbuilt"
+	CRGReadinessReady        = "ready"
+	CRGReadinessBusyOrLocked = "busy_or_locked"
+	CRGReadinessError        = "error"
+)
+
+func (s *CRGStatus) readyOrDefault() bool {
+	return s != nil && s.State == CRGReadinessReady
+}
+
+func (b *CRGBridge) runCaptured(args ...string) ([]byte, error) {
+	cmd := exec.Command(b.Bin, args...)
+	cmd.Dir = b.RepoRoot
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	out := append(stdout.Bytes(), stderr.Bytes()...)
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return out, fmt.Errorf("crg %s: %s", strings.Join(args, " "), msg)
+	}
+	return out, nil
+}
+
+func (b *CRGBridge) gitChangedFiles(base string) ([]string, error) {
+	if base == "" {
+		base = "HEAD~1"
+	}
+	cmd := exec.Command("git", "-C", b.RepoRoot, "diff", "--name-only", "--diff-filter=ACMRTUXB", base+"...HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return nil, fmt.Errorf("git diff %s...HEAD: %s", base, msg)
+		}
+		return nil, fmt.Errorf("git diff %s...HEAD: %w", base, err)
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+func parseCRGMutationSummary(out []byte) (filesUpdated, nodesChanged, edgesChanged int, ok bool) {
+	text := string(out)
+	re := strings.NewReplacer("\r", "\n")
+	text = re.Replace(text)
+	summaryRe := regexp.MustCompile(`(?i)(\d+)\s+files?(?:\s+updated)?[^0-9]+(\d+)\s+nodes?[^0-9]+(\d+)\s+edges?`)
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "INFO:") || strings.HasPrefix(line, "WARNING:") {
+			continue
+		}
+		if match := summaryRe.FindStringSubmatch(line); len(match) == 4 {
+			var file, node, edge int
+			if _, err := fmt.Sscanf(match[1], "%d", &file); err == nil {
+				_, _ = fmt.Sscanf(match[2], "%d", &node)
+				_, _ = fmt.Sscanf(match[3], "%d", &edge)
+				return file, node, edge, true
+			}
+		}
+	}
+	return 0, 0, 0, false
+}
+
+func isCRGBusyLockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database locked") ||
+		strings.Contains(msg, "sql: database is locked") ||
+		strings.Contains(msg, "busy") ||
+		strings.Contains(msg, "locked")
+}
+
+func isCRGUnbuiltError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") ||
+		strings.Contains(msg, "missing") ||
+		strings.Contains(msg, "not found")
+}
+
+func classifyCRGRunError(op string, err error, out []byte) error {
+	if isCRGBusyLockedError(err) {
+		return fmt.Errorf("%s blocked: code graph database is busy or locked: %w", op, err)
+	}
+	msg := strings.TrimSpace(string(out))
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("crg %s failed: %s", op, msg)
+}
+
+func readCRGLanguages(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT DISTINCT COALESCE(language, '') FROM nodes WHERE COALESCE(language, '') != '' ORDER BY COALESCE(language, '')`)
 	if err != nil {
 		return nil, err
 	}
-	return parseCRGStatusOutput(out), nil
-}
+	defer rows.Close()
 
-// parseCRGStatusOutput parses the human-readable output of `crg status`.
-// Expected lines (may include INFO: log lines which we skip):
-//
-//	Nodes: 923
-//	Edges: 6281
-//	Files: 50
-//	Languages: go, ruby
-//	Last updated: 2026-04-11T00:49:52
-func parseCRGStatusOutput(out []byte) *CRGStatus {
-	s := &CRGStatus{}
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "INFO:") || strings.HasPrefix(line, "WARNING:") {
-			continue
+	var languages []string
+	for rows.Next() {
+		var lang string
+		if err := rows.Scan(&lang); err != nil {
+			return nil, err
 		}
-		key, val, ok := strings.Cut(line, ": ")
-		if !ok {
-			continue
-		}
-		val = strings.TrimSpace(val)
-		switch strings.TrimSpace(key) {
-		case "Nodes":
-			s.Nodes, _ = strconv.Atoi(val)
-		case "Edges":
-			s.Edges, _ = strconv.Atoi(val)
-		case "Files":
-			s.Files, _ = strconv.Atoi(val)
-		case "Languages":
-			s.Languages = val
-		case "Last updated":
-			s.LastUpdated = val
+		if lang != "" {
+			languages = append(languages, lang)
 		}
 	}
-	return s
+	return languages, rows.Err()
+}
+
+func normalizeCRGUpdatedAt(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "never"
+	}
+	if strings.Contains(raw, "T") {
+		return raw
+	}
+	if sec, err := strconv.ParseFloat(raw, 64); err == nil && sec > 0 {
+		whole, frac := math.Modf(sec)
+		nanos := int64(frac * 1e9)
+		return time.Unix(int64(whole), nanos).UTC().Format(time.RFC3339)
+	}
+	return raw
 }
 
 // ── Change detection ──────────────────────────────────────────────────────────

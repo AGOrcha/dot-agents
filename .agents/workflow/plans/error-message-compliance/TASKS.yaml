@@ -3,7 +3,7 @@ plan_id: error-message-compliance
 tasks:
     - id: inventory-error-message-behavior
       title: Inventory current CLI error rendering and command-specific failure patterns
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - define-error-message-contract
@@ -14,10 +14,10 @@ tasks:
         - commands/
         - docs/
       verification_required: false
-      notes: Record how CLIError, ErrorWithHints, UsageError, flag parse errors, and ad hoc fmt.Errorf paths currently render; call out commands that still leak raw internal errors or omit actionable hints.
+      notes: Inventory recorded in docs/research/error-message-inventory.md (2026-04-19). Strong compliance exists in commands/ux.go, workflow arg helpers, and the mcp/settings families; highest drift remains in commands/kg/* and commands/agents/* where many user-correctable failures still return raw fmt.Errorf or hand-authored usage strings.
     - id: define-error-message-contract
       title: Define the supported contract for actionable CLI error messages
-      status: pending
+      status: completed
       depends_on:
         - inventory-error-message-behavior
       blocks:
@@ -28,10 +28,10 @@ tasks:
         - commands/
         - docs/
       verification_required: false
-      notes: Decide which failures should show usage, which should show hints, how enum validation errors enumerate valid values, and what automation can or cannot rely on from error paths.
+      notes: 'Contract updated in docs/ERROR_MESSAGE_CONTRACT.md from the 2026-04-19 inventory. The supported decision order is now explicit: UsageError for invocation shape, ErrorWithHints for recoverable runtime/setup, raw wrapped errors only for non-actionable execution failures. The contract now also requires valid-value enumeration for finite domains, forbids hand-authored usage strings, and treats substring-only enrichCLIError matching as transitional rather than preferred.'
     - id: implement-error-message-fixes
       title: Normalize mismatched command errors onto the shared CLIError contract
-      status: pending
+      status: completed
       depends_on:
         - inventory-error-message-behavior
         - define-error-message-contract
@@ -43,10 +43,10 @@ tasks:
         - commands/
         - internal/ui/
       verification_required: true
-      notes: Prioritize command families that currently return raw fmt.Errorf strings for validation or recovery-heavy failures instead of UsageError or ErrorWithHints.
+      notes: Implement the 2026-04-19 contract fixes from docs/ERROR_MESSAGE_CONTRACT.md and docs/research/error-message-inventory.md. Prioritize commands/kg/bridge.go, commands/kg/query_lint_maintain.go, commands/kg/sync_code_warm_link.go, and commands/agents/{remove,import,promote}.go; touch commands/add.go or commands/install.go only if needed for consistency. Convert user-correctable finite-domain and recovery-heavy failures to UsageError/ErrorWithHints, enumerate valid values, and replace hand-authored usage strings with shared arg helpers. Do not introduce a machine-readable JSON error envelope in this task.
     - id: add-error-message-regression-coverage
       title: Add regression coverage for error message rendering and recovery hints
-      status: pending
+      status: completed
       depends_on:
         - define-error-message-contract
         - implement-error-message-fixes
@@ -56,4 +56,4 @@ tasks:
         - commands/*_test.go
         - cmd/dot-agents/
       verification_required: true
-      notes: Cover representative usage errors, enum validation errors, recovery hints, and root flag parse failures so future commands do not drift back to opaque messages.
+      notes: Add regression coverage in commands/kg/kg_test.go, commands/agents/agents_test.go, and commands/ux_test.go for the 2026-04-19 error-message contract updates. Cover representative finite-domain validation messages (valid values are ...), KG link/bridge usage-shape errors, agent lifecycle recovery guidance, and root parse / render paths so the new wording and hints stay stable.

@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-kg-freshness-impl-1776636903
+parent_plan_id: kg-command-surface-readiness
+parent_task_id: kg-freshness-impl
+title: Implement kg build/update/code-status readiness fixes and add smoke coverage
+summary: Delegated from plan KG Command Surface Readiness
+write_scope:
+    - commands/kg/cmd.go
+    - commands/kg/kg.go
+    - commands/kg/sync_code_warm_link.go
+    - internal/graphstore/crg.go
+    - commands/kg/*_test.go
+    - tests/
+    - docs/
+success_criteria: Implement the readiness contract proven by docs/research/kg-freshness-audit.md. Make kg code-status the authoritative freshness probe with machine-readable output and explicit states at minimum for unbuilt, ready, busy_or_locked, and error. kg health must remain note-store health only and must not be treated as code-graph readiness. kg build and kg update must surface actionable non-zero failures for missing CRG, lock/busy conditions, and runtime execution failures, and their success summaries must distinguish no-diff from no-graph-mutation outcomes. Resolve or clearly document the current mismatch between build summary counts and persisted code-status counts.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-kg-freshness-impl
+status: active
+created_at: "2026-04-19T22:15:03Z"
+updated_at: "2026-04-19T22:15:03Z"

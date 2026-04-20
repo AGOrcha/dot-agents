@@ -10,6 +10,16 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
+func agentUserError(deps Deps, message string, hints ...string) error {
+	if deps.ErrorWithHints != nil {
+		return deps.ErrorWithHints(message, hints...)
+	}
+	if len(hints) == 0 {
+		return fmt.Errorf("%s", message)
+	}
+	return fmt.Errorf("%s: %s", message, hints[0])
+}
+
 func pathExists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
@@ -20,11 +30,11 @@ func pathExists(path string) bool {
 func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
-		return fmt.Errorf("loading .agentsrc.json: %w", err)
+		return agentUserError(deps, "loading .agentsrc.json", "Run `dot-agents install --generate` or `dot-agents add .` to create the project manifest.")
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set")
+		return agentUserError(deps, ".agentsrc.json has no project name set", "Run `dot-agents install --generate` or `dot-agents add .` again to repair the manifest.")
 	}
 
 	agentsHome := config.AgentsHome()
@@ -41,13 +51,13 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 	}
 
 	if !inList && !pathExists(repoAgents) && !pathExists(repoClaude) {
-		return fmt.Errorf("agent %q is not linked in this project", name)
+		return agentUserError(deps, fmt.Sprintf("agent %q is not linked in this project", name), "Run `dot-agents agents list` to inspect the managed agents in this repository.")
 	}
 
-	if err := cleanupManagedAgentRepoPath(repoAgents, agentsHome, name); err != nil {
+	if err := cleanupManagedAgentRepoPath(deps, repoAgents, agentsHome, name); err != nil {
 		return err
 	}
-	if err := cleanupManagedAgentRepoPath(repoClaude, agentsHome, name); err != nil {
+	if err := cleanupManagedAgentRepoPath(deps, repoClaude, agentsHome, name); err != nil {
 		return err
 	}
 
@@ -96,7 +106,7 @@ func removeAgentNameFromSlice(list []string, name string) []string {
 	return out
 }
 
-func cleanupManagedAgentRepoPath(path, agentsHome, name string) error {
+func cleanupManagedAgentRepoPath(deps Deps, path, agentsHome, name string) error {
 	_ = links.RemoveIfSymlinkUnder(path, agentsHome)
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -110,12 +120,12 @@ func cleanupManagedAgentRepoPath(path, agentsHome, name string) error {
 		if rerr != nil {
 			return rerr
 		}
-		return fmt.Errorf("refusing to remove unmanaged symlink for agent %q at %s (points to %s)", name, path, dest)
+		return agentUserError(deps, fmt.Sprintf("refusing to remove unmanaged symlink for agent %q at %s (points to %s)", name, path, dest), "Remove the symlink manually or re-run `dot-agents agents remove --purge` after linking the agent through dot-agents.")
 	}
 	if fi.IsDir() {
-		return fmt.Errorf("agent %q: %s is a real directory; remove or relocate it before using agents remove", name, path)
+		return agentUserError(deps, fmt.Sprintf("agent %q: %s is a real directory", name, path), "Remove or relocate the directory before running `dot-agents agents remove` again.")
 	}
-	return fmt.Errorf("agent %q: unexpected file at %s", name, path)
+	return agentUserError(deps, fmt.Sprintf("agent %q: unexpected file at %s", name, path), "Remove the file or replace it with a managed symlink before retrying.")
 }
 
 // purgeCanonicalAgent deletes the shared canonical agent directory after confirmation.
@@ -130,10 +140,10 @@ func purgeCanonicalAgent(deps Deps, canonicalPath, name string) (bool, error) {
 		return false, err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		return false, fmt.Errorf("cannot purge %q: canonical path %s is a symlink", name, config.DisplayPath(canonicalPath))
+		return false, agentUserError(deps, fmt.Sprintf("cannot purge %q: canonical path %s is a symlink", name, config.DisplayPath(canonicalPath)), "Remove the symlink or restore the canonical directory before retrying.")
 	}
 	if !fi.IsDir() {
-		return false, fmt.Errorf("cannot purge %q: expected a directory at %s", name, config.DisplayPath(canonicalPath))
+		return false, agentUserError(deps, fmt.Sprintf("cannot purge %q: expected a directory at %s", name, config.DisplayPath(canonicalPath)), "Restore the canonical agent directory before retrying.")
 	}
 	prompt := fmt.Sprintf("Permanently delete canonical agent at %s?", config.DisplayPath(canonicalPath))
 	if !ui.Confirm(prompt, deps.Flags.Yes) {

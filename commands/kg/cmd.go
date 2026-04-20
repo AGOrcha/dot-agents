@@ -34,7 +34,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Use:   "health",
 		Short: "Show knowledge graph health",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKGHealth(deps)
+			return runKGHealth(deps, cmd)
 		},
 	}
 

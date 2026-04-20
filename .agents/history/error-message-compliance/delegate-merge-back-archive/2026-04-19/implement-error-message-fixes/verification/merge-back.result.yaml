@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: implement-error-message-fixes
+parent_plan_id: error-message-compliance
+verifier_type: merge-back
+status: pass
+summary: 'Review accepted: scoped error-message normalization matches the contract, with clearer recoverable failures and finite-domain validation across the touched KG and agent commands.'
+recorded_at: "2026-04-19T21:43:58Z"
+delegation_id: del-implement-error-message-fixes-1776634528
+artifact_paths:
+    - .agents/workflow/plans/error-message-compliance/PLAN.yaml
+    - .agents/workflow/plans/error-message-compliance/TASKS.yaml
+    - commands/agents/import.go
+    - commands/agents/promote.go
+    - commands/agents/remove.go
+    - commands/kg/bridge.go
+    - commands/kg/query_lint_maintain.go
+    - commands/kg/sync_code_warm_link.go
+    - docs/ERROR_MESSAGE_CONTRACT.md

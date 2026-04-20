@@ -81,7 +81,7 @@ func resolveBridgeQuery(bridgeIntent, query string) ([]GraphQuery, error) {
 			return queries, nil
 		}
 	}
-	return nil, fmt.Errorf("unknown bridge intent %q", bridgeIntent)
+	return nil, fmt.Errorf("unknown bridge intent %q: valid values are %s", bridgeIntent, strings.Join(sortedKeys(validBridgeIntents), ", "))
 }
 
 // mergeBridgeResults merges multiple KG responses into one, deduplicating by note ID.
@@ -575,7 +575,7 @@ func collectCodeBridgeResults(kgHomeDir, bridgeIntent, query string, limit int) 
 			return resp, err
 		}
 	default:
-		return resp, fmt.Errorf("unknown code bridge intent %q", bridgeIntent)
+		return resp, fmt.Errorf("unknown code bridge intent %q: valid values are %s", bridgeIntent, strings.Join(sortedKeys(codeBridgeIntents), ", "))
 	}
 	if resp.Results == nil {
 		resp.Results = []GraphQueryResult{}
@@ -701,7 +701,7 @@ func executeBridgeQuery(kgHomeDir, bridgeIntent, query string) (GraphQueryRespon
 	}
 	adapter := NewLocalFileAdapter(kgHomeDir)
 	if !adapter.Available() {
-		return GraphQueryResponse{}, fmt.Errorf("KG not initialized at %s", kgHomeDir)
+		return GraphQueryResponse{}, fmt.Errorf("KG not initialized at %s: run 'dot-agents kg setup' first", kgHomeDir)
 	}
 	var responses []GraphQueryResponse
 	for _, q := range queries {
@@ -754,11 +754,11 @@ func writeBridgeContract(kgHomeDir string) error {
 func runKGBridgeQuery(deps Deps, cmd *cobra.Command, args []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
 	}
 	intent, _ := cmd.Flags().GetString("intent")
 	if intent == "" {
-		return fmt.Errorf("--intent is required (valid: %s)", strings.Join(sortedKeys(validBridgeIntents), ", "))
+		return fmt.Errorf("--intent is required: valid values are %s", strings.Join(sortedKeys(validBridgeIntents), ", "))
 	}
 	query := strings.Join(args, " ")
 

@@ -563,7 +563,7 @@ func runKGSetup() error {
 
 // ── kg health ─────────────────────────────────────────────────────────────────
 
-func runKGHealth(deps Deps) error {
+func runKGHealth(deps Deps, cmd *cobra.Command) error {
 	home := kgHome()
 
 	// Verify initialized
@@ -579,7 +579,7 @@ func runKGHealth(deps Deps) error {
 		return fmt.Errorf("write health: %w", err)
 	}
 
-	if deps.Flags.JSON {
+	if commandJSON(cmd) {
 		data, err := json.MarshalIndent(health, "", "  ")
 		if err != nil {
 			return err

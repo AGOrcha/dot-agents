@@ -91,7 +91,7 @@ Impl stage:
 
 Verifier stage:
 - Read `.agents/active/verification/<task_id>/impl-handoff.yaml`
-- Run each verifier as its own dedicated subagent session
+- Run each verifier as its own dedicated subagent session (cheap)
 - Run verifier stages in the bundle's `verifier_sequence` order
 - Use the matching repo verifier prompt surface:
   - `unit`: `.agents/prompts/verifiers/unit.project.md`
@@ -105,7 +105,7 @@ Verifier stage:
 
 Review stage:
 - Load `.agents/prompts/review-agent.project.md`
-- Run as its own dedicated subagent session (cheaper agent)
+- Run as its own dedicated subagent session (medium)
 - Review verifier artifacts and `impl-handoff.yaml` using the two-lens contract:
   - phase 1: product, domain, stability
   - phase 2: tech-lead, architecture, standards

@@ -177,7 +177,7 @@ func searchNotes(kgHomeDir, noteType, query string, limit int) ([]GraphQueryResu
 func searchByLinks(kgHomeDir, noteID string) ([]GraphQueryResult, error) {
 	exists, path := noteExists(kgHomeDir, noteID)
 	if !exists {
-		return nil, fmt.Errorf("note %s not found", noteID)
+		return nil, fmt.Errorf("note %s not found in the knowledge graph", noteID)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -227,7 +227,7 @@ func executeQuery(kgHomeDir string, query GraphQuery) (GraphQueryResponse, error
 	}
 
 	if !isValidQueryIntent(query.Intent) {
-		return resp, fmt.Errorf("unknown query intent %q — valid intents: %s",
+		return resp, fmt.Errorf("unknown query intent %q: valid values are %s",
 			query.Intent, strings.Join(sortedKeys(validQueryIntents), ", "))
 	}
 
@@ -316,12 +316,12 @@ func executeBatchQuery(kgHomeDir string, queries []GraphQuery) ([]GraphQueryResp
 func runKGQuery(deps Deps, cmd *cobra.Command, args []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
 	}
 
 	intent, _ := cmd.Flags().GetString("intent")
 	if intent == "" {
-		return fmt.Errorf("--intent is required (valid: %s)", strings.Join(sortedKeys(validQueryIntents), ", "))
+		return fmt.Errorf("--intent is required: valid values are %s", strings.Join(sortedKeys(validQueryIntents), ", "))
 	}
 	limit, _ := cmd.Flags().GetInt("limit")
 	scope, _ := cmd.Flags().GetString("scope")
@@ -795,7 +795,7 @@ func findContradictions(kgHomeDir string) ([]GraphQueryResult, error) {
 func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
 	}
 
 	checkFilter, _ := cmd.Flags().GetString("check")

@@ -17,11 +17,11 @@ import (
 func ImportAgentIn(name, projectPath string) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
-		return fmt.Errorf("loading .agentsrc.json: %w", err)
+		return fmt.Errorf("loading .agentsrc.json for agent %q: %w", name, err)
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set")
+		return fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
 	}
 
 	agentsHome := config.AgentsHome()
@@ -29,7 +29,7 @@ func ImportAgentIn(name, projectPath string) error {
 	agentMD := filepath.Join(canonicalPath, "AGENT.md")
 	if _, err := os.Stat(agentMD); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("agent %q not found at canonical path %s (expected AGENT.md)", name, config.DisplayPath(canonicalPath))
+			return fmt.Errorf("agent %q not found at canonical path %s (expected AGENT.md): create the canonical agent first or run `dot-agents agents list` to confirm the name", name, config.DisplayPath(canonicalPath))
 		}
 		return fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -41,7 +41,7 @@ func ImportAgentIn(name, projectPath string) error {
 	intents := []platform.ResourceIntent{buildSingleAgentMirrorIntent(projectName, name, filepath.Join(".claude", "agents"))}
 	plan, err := platform.BuildResourcePlan(intents)
 	if err != nil {
-		return fmt.Errorf("building import plan: %w", err)
+		return fmt.Errorf("building import plan for agent %q: %w", name, err)
 	}
 	if err := plan.Execute(projectPath, agentsHome); err != nil {
 		return fmt.Errorf("importing agent %q: %w", name, err)
@@ -49,7 +49,7 @@ func ImportAgentIn(name, projectPath string) error {
 
 	rc.Agents = config.AppendUnique(rc.Agents, name)
 	if err := rc.Save(projectPath); err != nil {
-		return fmt.Errorf("updating .agentsrc.json: %w", err)
+		return fmt.Errorf("updating .agentsrc.json for agent %q: %w", name, err)
 	}
 
 	ui.SuccessBox(
@@ -78,14 +78,14 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 		if existing == canonicalPath {
 			return nil
 		}
-		return fmt.Errorf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s", name, name, existing, canonicalPath)
+		return fmt.Errorf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s; remove the stale link and retry", name, name, existing, canonicalPath)
 	}
 	if fi.IsDir() {
 		if _, err := os.Stat(filepath.Join(repoLocal, "AGENT.md")); err == nil {
-			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use 'agents promote' first", name, repoLocal)
+			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use `dot-agents agents promote` first", name, repoLocal)
 		}
 	}
-	return fmt.Errorf("agent %q: unexpected path at %s", name, repoLocal)
+	return fmt.Errorf("agent %q: unexpected path at %s; remove it before importing", name, repoLocal)
 }
 
 func buildSingleAgentMirrorIntent(project, name, targetRoot string) platform.ResourceIntent {

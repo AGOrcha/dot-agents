@@ -1,14 +1,20 @@
 package kg
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
+	_ "modernc.org/sqlite"
 )
 
 func testDeps() Deps {
@@ -27,6 +33,92 @@ func newTempKG(t *testing.T) string {
 	dir := t.TempDir()
 	t.Setenv("KG_HOME", dir)
 	return dir
+}
+
+type crgNodeFixture struct {
+	FilePath  string
+	Language  string
+	UpdatedAt string
+}
+
+func writeCRGStatusFixture(t *testing.T, repo string, nodes []crgNodeFixture) {
+	t.Helper()
+	dbPath := graphstore.CRGDBPath(repo)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE nodes (
+		file_path TEXT,
+		language TEXT,
+		updated_at TEXT
+	)`); err != nil {
+		t.Fatalf("create nodes table: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE edges (
+		id INTEGER
+	)`); err != nil {
+		t.Fatalf("create edges table: %v", err)
+	}
+	for _, node := range nodes {
+		if _, err := db.Exec(`INSERT INTO nodes (file_path, language, updated_at) VALUES (?, ?, ?)`, node.FilePath, node.Language, node.UpdatedAt); err != nil {
+			t.Fatalf("insert node: %v", err)
+		}
+	}
+}
+
+func writeFakeCRGBinary(t *testing.T, repo, body string) string {
+	t.Helper()
+	binDir := filepath.Join(repo, ".venv", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(binDir, "code-review-graph")
+	content := "#!/bin/sh\n" + body + "\n"
+	if err := os.WriteFile(binPath, []byte(content), 0755); err != nil {
+		t.Fatalf("write fake crg: %v", err)
+	}
+	return binPath
+}
+
+func initGitRepo(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	for _, kv := range [][2]string{{"user.name", "test"}, {"user.email", "test@example.com"}} {
+		if out, err := exec.Command("git", "-C", repo, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %v\n%s", kv[0], err, out)
+		}
+	}
+}
+
+func commitFile(t *testing.T, repo, relPath, content, message string) {
+	t.Helper()
+	fullPath := filepath.Join(repo, relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]string{
+		{"git", "-C", repo, "add", relPath},
+		{"git", "-C", repo, "commit", "-m", message},
+	}
+	for _, args := range commands {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
 }
 
 // ── KG config ─────────────────────────────────────────────────────────────────
@@ -430,7 +522,7 @@ func TestKGSetup_Idempotent(t *testing.T) {
 
 func TestKGHealth_NotInitialized(t *testing.T) {
 	newTempKG(t)
-	err := runKGHealth(testDeps())
+	err := runKGHealth(testDeps(), &cobra.Command{})
 	if err == nil {
 		t.Error("expected error when KG not initialized")
 	}
@@ -444,9 +536,145 @@ func TestKGHealth_AfterSetup(t *testing.T) {
 	if err := runKGSetup(); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	if err := runKGHealth(testDeps()); err != nil {
+	if err := runKGHealth(testDeps(), &cobra.Command{}); err != nil {
 		t.Fatalf("runKGHealth: %v", err)
 	}
+}
+
+func TestCRGStatus_ReadinessStates(t *testing.T) {
+	repo := t.TempDir()
+	status, err := (&graphstore.CRGBridge{RepoRoot: repo}).Status()
+	if err != nil {
+		t.Fatalf("Status missing db: %v", err)
+	}
+	if status.State != string(graphstore.CRGReadinessUnbuilt) {
+		t.Fatalf("state = %q, want %q", status.State, graphstore.CRGReadinessUnbuilt)
+	}
+	if status.LastUpdated != "never" {
+		t.Fatalf("last_updated = %q, want never", status.LastUpdated)
+	}
+
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+		{FilePath: "b.py", Language: "python", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	status, err = (&graphstore.CRGBridge{RepoRoot: repo}).Status()
+	if err != nil {
+		t.Fatalf("Status ready: %v", err)
+	}
+	if !status.Ready {
+		t.Fatalf("expected ready status, got %#v", status)
+	}
+	if status.State != string(graphstore.CRGReadinessReady) {
+		t.Fatalf("state = %q, want %q", status.State, graphstore.CRGReadinessReady)
+	}
+	if status.Nodes != 2 || status.Files != 2 {
+		t.Fatalf("counts = nodes:%d files:%d", status.Nodes, status.Files)
+	}
+	if !strings.Contains(status.Languages, "go") || !strings.Contains(status.Languages, "python") {
+		t.Fatalf("languages = %q", status.Languages)
+	}
+}
+
+func TestRunKGCodeStatus_JSONOutput(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("json", true, "")
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+		t.Fatalf("runKGCodeStatus: %v", err)
+	}
+	_ = w.Close()
+	os.Stdout = oldStdout
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status graphstore.CRGStatus
+	if err := json.Unmarshal(out, &status); err != nil {
+		t.Fatalf("json output invalid: %v\n%s", err, string(out))
+	}
+	if status.State != string(graphstore.CRGReadinessReady) || !status.Ready {
+		t.Fatalf("unexpected status payload: %#v", status)
+	}
+}
+
+func TestCRGBuildReport_UsesPersistedStatus(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+		{FilePath: "b.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	bin := writeFakeCRGBinary(t, repo, "exit 0")
+	bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
+
+	report, err := bridge.BuildReport(graphstore.BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if report.Outcome != string(graphstore.CRGReadinessReady) {
+		t.Fatalf("outcome = %q, want ready", report.Outcome)
+	}
+	if report.Status == nil || !report.Status.Ready {
+		t.Fatalf("expected ready status in report: %#v", report)
+	}
+	if !strings.Contains(report.Summary, "2 nodes") || !strings.Contains(report.Summary, "2 files") {
+		t.Fatalf("summary = %q", report.Summary)
+	}
+}
+
+func TestCRGUpdateReport_ClassifiesNoDiffAndNoMutation(t *testing.T) {
+	t.Run("no diff", func(t *testing.T) {
+		repo := t.TempDir()
+		initGitRepo(t, repo)
+		commitFile(t, repo, "a.txt", "one\n", "initial")
+		bin := writeFakeCRGBinary(t, repo, "exit 0")
+		bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
+
+		report, err := bridge.UpdateReport(graphstore.UpdateOptions{Base: "HEAD"})
+		if err != nil {
+			t.Fatalf("UpdateReport: %v", err)
+		}
+		if report.Outcome != "no_diff" {
+			t.Fatalf("outcome = %q, want no_diff", report.Outcome)
+		}
+	})
+
+	t.Run("no mutation", func(t *testing.T) {
+		repo := t.TempDir()
+		initGitRepo(t, repo)
+		commitFile(t, repo, "a.txt", "one\n", "initial")
+		commitFile(t, repo, "a.txt", "two\n", "second")
+		bin := writeFakeCRGBinary(t, repo, `case "$1" in
+update) printf '%s\n' "Incremental: 1 files updated, 0 nodes, 0 edges" ;;
+*) exit 0 ;;
+esac`)
+		bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
+
+		report, err := bridge.UpdateReport(graphstore.UpdateOptions{Base: "HEAD~1"})
+		if err != nil {
+			t.Fatalf("UpdateReport: %v", err)
+		}
+		if report.Outcome != "no_mutation" {
+			t.Fatalf("outcome = %q, want no_mutation", report.Outcome)
+		}
+		if len(report.ChangedFiles) == 0 {
+			t.Fatalf("expected changed files, got %#v", report.ChangedFiles)
+		}
+	})
 }
 
 // ── Phase 2: Raw source ────────────────────────────────────────────────────────
@@ -1343,6 +1571,10 @@ func TestResolveBridgeQuery_Unknown(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown bridge intent")
 	}
+	want := `unknown bridge intent "unknown_bridge_intent": valid values are callees_of, callers_of, change_analysis, community_context, contradictions, decision_lookup, decision_symbols, entity_context, impact_radius, plan_context, symbol_decisions, symbol_lookup, tests_for, workflow_memory`
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
+	}
 }
 
 func TestMergeBridgeResults_Deduplication(t *testing.T) {
@@ -1759,6 +1991,10 @@ func TestNoteSymbolLink_InvalidKind(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid link kind")
 	}
+	want := `invalid link kind "bad-kind": valid values are mentions, implements, documents, decides, references`
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
+	}
 }
 
 func TestNoteSymbolLink_InvalidRemoveID(t *testing.T) {
@@ -1769,6 +2005,39 @@ func TestNoteSymbolLink_InvalidRemoveID(t *testing.T) {
 	err := runKGLinkRemove(removeCmd, []string{"not-a-number"})
 	if err == nil {
 		t.Error("expected error for non-integer link ID")
+	}
+}
+
+func TestRunKGBridgeQuery_MissingIntent(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("runKGSetup: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	err := runKGBridgeQuery(testDeps(), cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for missing bridge intent")
+	}
+	want := `--intent is required: valid values are callees_of, callers_of, change_analysis, community_context, contradictions, decision_lookup, decision_symbols, entity_context, impact_radius, plan_context, symbol_decisions, symbol_lookup, tests_for, workflow_memory`
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
+	}
+}
+
+func TestRunKGLinkAdd_UsageShape(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("runKGSetup: %v", err)
+	}
+
+	err := runKGLinkAdd(newKGLinkAddCmdForTest("mentions"), nil)
+	if err == nil {
+		t.Fatal("expected error for missing link arguments")
+	}
+	want := "kg link add expects 2 arguments: <note-id> <qualified-name>"
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
 	}
 }
 

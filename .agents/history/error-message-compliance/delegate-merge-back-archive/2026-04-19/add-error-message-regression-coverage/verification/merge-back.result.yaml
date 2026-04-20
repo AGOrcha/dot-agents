@@ -1,0 +1,21 @@
+schema_version: 1
+task_id: add-error-message-regression-coverage
+parent_plan_id: error-message-compliance
+verifier_type: merge-back
+status: pass
+summary: 'Accepted review: regression coverage is aligned with the contract and verification passed.'
+recorded_at: "2026-04-19T21:51:50Z"
+delegation_id: del-add-error-message-regression-coverage-1776635147
+artifact_paths:
+    - .agents/workflow/plans/error-message-compliance/PLAN.yaml
+    - .agents/workflow/plans/error-message-compliance/TASKS.yaml
+    - commands/agents/agents_test.go
+    - commands/agents/import.go
+    - commands/agents/promote.go
+    - commands/agents/remove.go
+    - commands/kg/bridge.go
+    - commands/kg/kg_test.go
+    - commands/kg/query_lint_maintain.go
+    - commands/kg/sync_code_warm_link.go
+    - commands/ux_test.go
+    - docs/ERROR_MESSAGE_CONTRACT.md

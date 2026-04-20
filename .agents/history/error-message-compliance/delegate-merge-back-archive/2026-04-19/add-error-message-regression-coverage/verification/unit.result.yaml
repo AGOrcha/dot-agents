@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: add-error-message-regression-coverage
+parent_plan_id: error-message-compliance
+verifier_type: unit
+status: pass
+summary: Scoped unit packages (commands/kg, commands/agents, commands) passed under -race; full go test ./... suite also passed for add-error-message-regression-coverage.
+recorded_at: "2026-04-19T21:50:54Z"
+delegation_id: del-add-error-message-regression-coverage-1776635147
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./... -race -count=1 -timeout=300s

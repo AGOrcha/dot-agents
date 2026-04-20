@@ -25,17 +25,17 @@ func PromoteAgentIn(name, projectPath string, force bool) error {
 
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
-		return fmt.Errorf("loading .agentsrc.json: %w", err)
+		return fmt.Errorf("loading .agentsrc.json for agent %q: %w", name, err)
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set")
+		return fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
 	}
 
 	agentsHome := config.AgentsHome()
 	destDir := filepath.Join(agentsHome, "agents", projectName)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("creating agents directory: %w", err)
+		return fmt.Errorf("creating agents directory for %q: %w", name, err)
 	}
 	canonicalPath := filepath.Join(destDir, name)
 
@@ -45,7 +45,7 @@ func PromoteAgentIn(name, projectPath string, force bool) error {
 			return fmt.Errorf("reading existing symlink for agent %q: %w", name, err)
 		}
 		if existing != canonicalPath {
-			return fmt.Errorf("agent %q is already a symlink but points to %q, not the canonical path %q", name, existing, canonicalPath)
+			return fmt.Errorf("agent %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", name, existing, canonicalPath)
 		}
 	} else {
 		if _, err := os.Stat(filepath.Join(sourcePath, "AGENT.md")); err != nil {
@@ -80,7 +80,7 @@ func PromoteAgentIn(name, projectPath string, force bool) error {
 
 	rc.Agents = config.AppendUnique(rc.Agents, name)
 	if err := rc.Save(projectPath); err != nil {
-		return fmt.Errorf("updating .agentsrc.json: %w", err)
+		return fmt.Errorf("updating .agentsrc.json for agent %q: %w", name, err)
 	}
 
 	intents, err := platform.BuildSharedAgentMirrorIntents(projectName, filepath.Join(".claude", "agents"))

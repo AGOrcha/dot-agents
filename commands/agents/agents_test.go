@@ -12,6 +12,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+type hintError struct {
+	message string
+	hints   []string
+}
+
+func (e *hintError) Error() string {
+	return e.message
+}
+
 func stubDeps(yes bool) Deps {
 	return Deps{Flags: GlobalFlags{Yes: yes}}
 }
@@ -575,15 +584,27 @@ func TestRemoveAgentIn_DriftSymlinkWithoutManifestEntry(t *testing.T) {
 }
 
 func TestRemoveAgentIn_ErrorNotLinked(t *testing.T) {
-	d := stubDeps(false)
+	d := Deps{
+		ErrorWithHints: func(message string, hints ...string) error {
+			return &hintError{message: strings.TrimSpace(message), hints: append([]string{}, hints...)}
+		},
+	}
 	_, projectPath := setupAgentsEnv(t, "nolink")
 
 	err := RemoveAgentIn(d, "missing", projectPath, false)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "not linked") {
-		t.Errorf("error = %q", err.Error())
+	cliErr, ok := err.(*hintError)
+	if !ok {
+		t.Fatalf("expected hintError, got %T", err)
+	}
+	wantMsg := `agent "missing" is not linked in this project`
+	if cliErr.message != wantMsg {
+		t.Fatalf("unexpected error message:\n got: %q\nwant: %q", cliErr.message, wantMsg)
+	}
+	if got := strings.Join(cliErr.hints, "\n"); !strings.Contains(got, "dot-agents agents list") {
+		t.Fatalf("expected agents-list recovery hint, got %q", got)
 	}
 }
 
