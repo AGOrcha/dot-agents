@@ -1,0 +1,12 @@
+task_id: kg-fresh-build-transaction-fix
+commit_sha: 68f26281a14c66f1c84b483274f0dbb46f0c4be4
+write_scope_touched:
+  - internal/graphstore/crg.go
+  - commands/kg/kg_test.go
+  - tests/test-kg-fresh-build-transaction.sh
+ready_for_verification: true
+impl_notes:
+  - Routed CRG build/update captures through a Python wrapper that forces sqlite autocommit only for Python entrypoints, preserving shell-script fake binaries.
+  - Added a focused Go regression covering the autocommit wrapper path.
+  - Added an isolated-home shell smoke that reproduces and prevents the nested transaction failure.
+  - Local pre-verifier checks passed: `go test ./commands/kg ./internal/graphstore/...` and `bash tests/test-kg-fresh-build-transaction.sh`.

@@ -1,0 +1,17 @@
+schema_version: 1
+task_id: kg-fresh-build-transaction-fix
+parent_plan_id: kg-command-surface-readiness
+verifier_type: unit
+status: pass
+summary: >-
+  ok: scoped unit verification passed for ./commands/kg and
+  ./internal/graphstore/... including the targeted
+  TestCRGBuildReport_UsesSQLiteAutocommitWrapper regression, and the required
+  full Go suite `go test ./... -race -count=1 -timeout=300s` also passed.
+recorded_at: "2026-04-20T12:16:51Z"
+delegation_id: del-kg-fresh-build-transaction-fix-1776685855
+recorded_by: codex-verifier-unit
+commands:
+  - go test -race -count=1 -timeout=120s ./commands/kg ./internal/graphstore/...
+  - go test -race -count=1 -timeout=120s ./commands/kg -run TestCRGBuildReport_UsesSQLiteAutocommitWrapper
+  - go test ./... -race -count=1 -timeout=300s

@@ -1,0 +1,22 @@
+schema_version: 1
+task_id: p12-review-gate-hardening
+parent_plan_id: loop-agent-pipeline
+verifier_type: merge-back
+status: pass
+summary: Added workflow delegation gate for deterministic task-local readback, updated ralph-review-gate/ralph-pipeline/ralph-closeout to distinguish accept, reject, and planning-required outcomes, and covered the new behavior with focused Go and shell tests plus spec updates.
+recorded_at: "2026-04-20T03:45:40Z"
+delegation_id: del-p12-review-gate-hardening-1776655217
+artifact_paths:
+    - .agents/active/fold-back/replacement-agent-retry.yaml
+    - .agents/workflow/plans/ci-smoke-suite-hardening/ci-smoke-suite-hardening-reconcile.plan.md
+    - .agents/workflow/plans/kg-command-surface-readiness/PLAN.yaml
+    - .agents/workflow/plans/kg-command-surface-readiness/TASKS.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/PLAN.yaml
+    - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+    - .agentsrc.json
+    - bin/tests/ralph-closeout
+    - bin/tests/ralph-pipeline
+    - bin/tests/ralph-review-gate
+    - commands/workflow/cmd.go
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+    - tests/test-ralph-review-gate-auto.sh

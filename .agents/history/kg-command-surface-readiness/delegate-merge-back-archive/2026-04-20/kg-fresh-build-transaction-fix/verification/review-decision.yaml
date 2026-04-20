@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: kg-fresh-build-transaction-fix
+parent_plan_id: kg-command-surface-readiness
+delegation_id: del-kg-fresh-build-transaction-fix-1776685855
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: Unit verifier passed; impl handoff also records the isolated-home shell smoke regression proof.
+recorded_at: "2026-04-20T12:25:39Z"
+recorded_by: dot-agents workflow verify record

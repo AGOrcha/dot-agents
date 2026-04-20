@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+task_id: p13-replacement-worker-retry
+delegation_id: del-p13-replacement-worker-retry-1776656852
+decision: accept
+closed_at: "2026-04-20T11:46:50Z"

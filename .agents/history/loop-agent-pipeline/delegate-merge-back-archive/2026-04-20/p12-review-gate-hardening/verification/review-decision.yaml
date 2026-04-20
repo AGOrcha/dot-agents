@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p12-review-gate-hardening
+parent_plan_id: loop-agent-pipeline
+delegation_id: del-p12-review-gate-hardening-1776655217
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: Deterministic task-local gate evaluation now drives review-gate, pipeline, and closeout semantics; accept/reject/escalate outcomes remain observable without auto-accept-on-artifact-presence.
+recorded_at: "2026-04-20T03:45:18Z"
+recorded_by: dot-agents workflow verify record
