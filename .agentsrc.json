@@ -1,5 +1,5 @@
 {
-  "$schema": "./schemas/agentsrc.schema.json",
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
   "agents": [
     "test-runner",
     "verifier",
@@ -10,12 +10,17 @@
       "unit"
     ]
   },
-  "hooks": false,
-  "mcp": false,
+  "hooks": [
+    "PostToolUse"
+  ],
+  "mcp": [
+    "code-review-graph",
+    "sonarqube"
+  ],
   "project": "dot-agents",
   "refresh": {
     "version": "dev",
-    "refreshedAt": "2026-04-20T01:35:52Z"
+    "refreshedAt": "2026-04-20T22:34:20Z"
   },
   "rules": [
     "global",
@@ -34,12 +39,13 @@
     "self-review",
     "skill-architect",
     "split-reviewable-commits",
-    "plan-wave-picker",
     "delegation-lifecycle",
-    "provider-consumer-pair",
     "iteration-close",
+    "loop-worker",
     "orchestrator-session-start",
-    "platform-docs-refresh"
+    "plan-wave-picker",
+    "platform-docs-refresh",
+    "provider-consumer-pair"
   ],
   "sources": [
     {

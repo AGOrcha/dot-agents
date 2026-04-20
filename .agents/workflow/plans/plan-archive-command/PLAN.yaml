@@ -1,0 +1,11 @@
+schema_version: 1
+id: plan-archive-command
+title: Workflow Plan Archive Command
+status: active
+summary: Add workflow plan archive command to move completed plans from workflow/plans/ to history/, wire archived status to actual file movement, and extend drift/sweep to detect and propose archival of lingering completed plans.
+created_at: "2026-04-20T22:02:04Z"
+updated_at: "2026-04-20T22:03:40Z"
+owner: dot-agents
+success_criteria: dot-agents workflow plan archive --plan <id> moves a completed plan directory into history/, merges with existing delegation artifacts, stamps status archived, and removes the source dir. Drift detects completed plans in workflow/plans/. Sweep proposes archival with --apply support.
+verification_strategy: 'Table-driven Go tests covering: no-history fast-path (os.Rename), merge-path (history dir exists with DMA), dry-run output, guard rejection on non-completed status, --force bypass. Drift unit test asserting CompletedPlanIDs populated. Smoke: run archive against graph-bridge-command-readiness in temp fixture.'
+current_focus_task: Add historyBaseDir() helper to state.go

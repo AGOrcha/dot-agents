@@ -1,0 +1,71 @@
+schema_version: 1
+plan_id: plan-archive-command
+tasks:
+    - id: p1-historybasedir-helper
+      title: Add historyBaseDir() helper to state.go
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/state.go
+      verification_required: true
+      notes: Add func historyBaseDir(projectPath string) string alongside plansBaseDir(). Returns filepath.Join(projectPath, '.agents', 'history'). Needed by archive and drift.
+    - id: p2-archive-handler
+      title: Implement runWorkflowPlanArchive() in plan_task.go
+      status: pending
+      depends_on:
+        - p1-historybasedir-helper
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: 'Guard: status must be completed (or --force). Stamp status=archived + updated_at. Merge strategy: os.Rename if history dir absent, per-file copyWorkflowDir if present (skip existing files except always overwrite PLAN.yaml and TASKS.yaml). os.RemoveAll source after successful merge. Print archived/skipped summary.'
+    - id: p3-wire-cmd
+      title: Wire planArchiveCmd into cmd.go under planCmd
+      status: pending
+      depends_on:
+        - p2-archive-handler
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+      verification_required: true
+      notes: 'Add planArchiveCmd alongside planCreateCmd and planUpdateCmd. Flags: --plan (required), --force (bool). Call runWorkflowPlanArchive(). Dry-run support via global -n flag.'
+    - id: p4-drift-extension
+      title: 'Extend drift detection: CompletedPlanIDs field'
+      status: pending
+      depends_on:
+        - p1-historybasedir-helper
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/drift.go
+      verification_required: true
+      notes: Add CompletedPlanIDs []string to RepoDriftReport. Populate in detectRepoDrift by loading each PLAN.yaml in workflow/plans/ and collecting IDs where status==completed or (status==archived and dir still exists). Update drift JSON output and human-readable render.
+    - id: p5-sweep-extension
+      title: 'Extend sweep: SweepActionArchiveCompletedPlans'
+      status: pending
+      depends_on:
+        - p4-drift-extension
+        - p2-archive-handler
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/sweep.go
+      verification_required: true
+      notes: 'Add SweepActionArchiveCompletedPlans SweepActionType. planSweep() emits one action per CompletedPlanID from drift report. applySweepAction() calls runWorkflowPlanArchive() for each. RequiresConfirmation=true (destructive: removes source dir). Per-plan confirm loop mirrors existing sweep apply pattern.'
+    - id: p6-tests
+      title: Write table-driven tests for archive + drift changes
+      status: pending
+      depends_on:
+        - p3-wire-cmd
+        - p5-sweep-extension
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task_test.go
+        - commands/workflow/drift_sweep_test.go
+      verification_required: true
+      notes: 'archive tests: (1) no-history dir → os.Rename fast path, (2) history dir exists with DMA → merge, PLAN+TASKS overwritten, DMA untouched, source removed, (3) dry-run → no filesystem changes, (4) non-completed status → error, (5) --force bypasses guard. drift test: CompletedPlanIDs populated for completed plans, empty for active-only fixture.'
