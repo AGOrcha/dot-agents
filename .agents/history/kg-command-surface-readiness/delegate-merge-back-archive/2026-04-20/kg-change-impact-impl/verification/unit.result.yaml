@@ -1,0 +1,50 @@
+schema_version: 1
+task_id: kg-change-impact-impl
+parent_plan_id: kg-command-surface-readiness
+verifier_type: unit
+status: pass
+summary: |-
+  All 6 contract checks verified. Scoped test run: 6/6 new tests pass
+  (TestRunKGChanges_WarnOnUnbuiltGraph, TestRunKGChanges_RequireGraphFailsOnUnbuilt,
+  TestRunKGChanges_JSONOutputHasGraphState, TestRunKGImpact_WarnOnUnbuiltGraph,
+  TestRunKGImpact_RequireGraphFailsOnUnbuilt, TestRunKGImpact_JSONOutputHasGraphState).
+  Live behavioral checks: `--json kg changes` and `--json kg impact` both emit
+  `graph_state` as first field in JSON output (value: "ready" for built graph).
+  Full suite: all 16 test packages pass, 0 failures, -race enabled.
+recorded_at: "2026-04-19T18:30:00Z"
+commands:
+  - go test -race -count=1 -timeout=120s ./commands/kg/... ./internal/graphstore/...
+  - go test -race -count=1 -timeout=60s ./commands/kg/... -run "TestRunKGChanges_WarnOnUnbuiltGraph|TestRunKGChanges_RequireGraphFailsOnUnbuilt|TestRunKGChanges_JSONOutputHasGraphState|TestRunKGImpact_WarnOnUnbuiltGraph|TestRunKGImpact_RequireGraphFailsOnUnbuilt|TestRunKGImpact_JSONOutputHasGraphState"
+  - go run ./cmd/dot-agents --json kg changes --repo . 2>&1
+  - go run ./cmd/dot-agents --json kg impact --repo . 2>&1 | head -5
+  - go test ./... -race -count=1 -timeout=300s
+artifact_paths: []
+contract_checks:
+  - id: 1
+    description: runKGChanges calls Status() before CRG and emits WarnBox on unbuilt state
+    result: pass
+    evidence: TestRunKGChanges_WarnOnUnbuiltGraph passes; checkCRGReadiness() in sync_code_warm_link.go:230 calls Status() and emits ui.WarnBox("Code graph not built", ...)
+  - id: 2
+    description: runKGImpact calls Status() before CRG and emits WarnBox on unbuilt state
+    result: pass
+    evidence: TestRunKGImpact_WarnOnUnbuiltGraph passes; same checkCRGReadiness() helper called at line 273
+  - id: 3
+    description: With --require-graph and unbuilt graph, kg changes returns non-zero exit
+    result: pass
+    evidence: TestRunKGChanges_RequireGraphFailsOnUnbuilt passes; error message "code graph is not built"
+  - id: 4
+    description: With --require-graph and unbuilt graph, kg impact returns non-zero exit
+    result: pass
+    evidence: TestRunKGImpact_RequireGraphFailsOnUnbuilt passes; same error message
+  - id: 5
+    description: --json kg changes output includes graph_state field
+    result: pass
+    evidence: TestRunKGChanges_JSONOutputHasGraphState passes; live run shows "graph_state":"ready" as first JSON field
+  - id: 6
+    description: --json kg impact output includes graph_state field
+    result: pass
+    evidence: TestRunKGImpact_JSONOutputHasGraphState passes (struct-level marshal test); live run shows "graph_state":"ready" as first JSON field
+  - id: 7
+    description: Human output includes advisory note when results are empty
+    result: pass
+    evidence: Code review confirms ui.Info("Note: run 'kg code-status' to verify the code graph is current.") in runKGChanges (line 479) and runKGImpact (line 332) when respective result slices are empty

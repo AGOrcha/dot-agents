@@ -22,7 +22,7 @@ tasks:
       app_type: go-cli
     - id: kg-freshness-impl
       title: Implement kg build/update/code-status readiness fixes and add smoke coverage
-      status: in_progress
+      status: completed
       depends_on:
         - kg-freshness-audit
       blocks:
@@ -41,7 +41,7 @@ tasks:
       app_type: go-cli
     - id: kg-change-impact-audit
       title: Audit kg changes and kg impact; define empty-result semantics
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-audit
       blocks:
@@ -52,11 +52,19 @@ tasks:
         - commands/kg/kg.go
         - docs/
       verification_required: false
-      notes: 'Run kg changes and kg impact on real diffs with fresh graph. Distinguish: empty-because-no-impact vs empty-because-graph-stale. Audit only.'
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-change-impact-audit.md.
+        Both commands work correctly on a fresh graph with real diffs. Core gap: neither
+        runKGChanges nor runKGImpact check code-status before running, so empty results are
+        indistinguishable between no-impact and graph-stale/unbuilt. JSON output has no
+        graph_state field; CRGImpactResult.status is always "ok" when CRG runs.
+        Implementation must add: (1) Status() pre-flight in changes and impact with WarnBox
+        on unbuilt/busy states; (2) --require-graph flag; (3) graph_state in JSON output;
+        (4) advisory note in human output when results are empty.
       app_type: go-cli
     - id: kg-change-impact-impl
       title: Implement kg changes/impact trustworthiness fixes and add smoke coverage
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-impl
         - kg-change-impact-audit
@@ -73,7 +81,7 @@ tasks:
       app_type: go-cli
     - id: kg-advanced-surfaces-audit
       title: Audit kg flows, communities, postprocess; decide agent-ready vs expert-only
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-audit
       blocks: []
@@ -83,10 +91,16 @@ tasks:
         - commands/kg/kg.go
         - docs/
       verification_required: false
-      notes: 'Run kg flows, communities, postprocess on fresh graph. Per-command decision: agent-ready (define output contract) or expert-only (add warning to help text). No implementation unless help-text only.'
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-advanced-surfaces-audit.md.
+        Decisions: kg flows=expert-only (step_count=0, entry_point="" on all flows; function names
+        not domain flows), kg communities=agent-ready with caveats (names/sizes reliable; members
+        always empty; node_modules noise in size sort), kg postprocess=expert-only operator command
+        (runs automatically via build/update). Help-text advisories added to cmd.go for all three.
+        No structural implementation needed.
     - id: kg-mcp-transport-audit
       title: Audit kg serve and MCP tool parity against bridge-backed equivalents
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-audit
       blocks:
@@ -98,11 +112,18 @@ tasks:
         - internal/graphstore/mcp_server.go
         - docs/
       verification_required: false
-      notes: Enumerate MCP tools from kg serve. Compare to semantic_search_nodes_tool, query_graph_tool, get_impact_radius_tool, get_review_context_tool. Produce parity matrix with keep/implement/defer decision per tool.
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-mcp-transport-audit.md.
+        8 tools in kg serve exactly match code-review-graph MCP server names. Primary gap:
+        handleGetReviewContext ignores the files parameter for DetectChanges (always uses HEAD~1
+        diff) and has no freshness guard. Parity decision: 7 of 8 tools KEEP,
+        get_review_context_tool IMPLEMENT (pass files to DetectChanges + add freshness guard).
+        Optional: add same freshness guard to get_impact_radius_tool. Do not redesign server
+        or rename tools.
       app_type: go-cli
     - id: kg-mcp-transport-impl
       title: Implement MCP parity decisions from audit
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-impl
         - kg-mcp-transport-audit

@@ -16,6 +16,6 @@ success_criteria: Implement the readiness contract proven by docs/research/kg-fr
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: isp-kg-freshness-impl
-status: active
+status: completed
 created_at: "2026-04-19T22:15:03Z"
-updated_at: "2026-04-19T22:15:03Z"
+updated_at: "2026-04-20T00:51:42Z"

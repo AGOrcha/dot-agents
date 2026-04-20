@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+task_id: kg-mcp-transport-impl
+delegation_id: del-kg-mcp-transport-impl-1776647625
+decision: accept
+closed_at: "2026-04-20T01:27:03Z"

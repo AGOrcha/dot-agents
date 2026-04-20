@@ -417,10 +417,6 @@ const (
 	CRGReadinessError        = "error"
 )
 
-func (s *CRGStatus) readyOrDefault() bool {
-	return s != nil && s.State == CRGReadinessReady
-}
-
 func (b *CRGBridge) runCaptured(args ...string) ([]byte, error) {
 	cmd := exec.Command(b.Bin, args...)
 	cmd.Dir = b.RepoRoot

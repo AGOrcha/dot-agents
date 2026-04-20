@@ -1,3 +1,24 @@
+## 6. kg-mcp-transport-impl (2026-04-20)
+
+**Status:** completed — both lenses accept.
+
+**What changed (3 files in `internal/graphstore/`):**
+
+- `crg.go`: added `Files []string` to `DetectChangesOptions`. Wired through with a comment noting CRG v1.x CLI does not accept `--files`; field is thread-safe for when upstream support lands.
+- `mcp_server.go`:
+  - `handleGetReviewContext` — added `bridge.Status()` pre-check returning `{"error","state","hint"}` payload on `unbuilt`/`busy_or_locked`; passes `DetectChangesOptions{Files: req.Files}` to `DetectChanges`.
+  - `handleGetImpactRadius` — same `Status()` freshness guard inserted before `bridge.GetImpactRadius()`.
+- `mcp_server_test.go` (new file): 4 tests using `fakeMCPBridge`: unbuilt→structured error for both handlers, busy_or_locked→structured error, ready→proceeds to DetectChanges.
+
+**Key decisions recorded:**
+- Error response is a structured JSON result payload (not a Go/RPC error) so MCP callers can introspect state.
+- `get_docs_section_tool` hardcoded paths, `query_graph_tool` scope routing, MCP server transport redesign — all deferred per audit.
+- Removed unused `readyOrDefault()` method added by impl worker (dead code, no callers).
+
+**Commit:** `7fe6b152` (impl worker) + dead-code removal patch.
+
+---
+
 ## 1. kg-freshness-audit
 
 Recorded the audit in `docs/research/kg-freshness-audit.md`.

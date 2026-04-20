@@ -1,0 +1,17 @@
+schema_version: 1
+task_id: kg-mcp-transport-impl
+parent_plan_id: kg-command-surface-readiness
+verifier_type: merge-back
+status: pass
+summary: 'No conflicts. Only write-scope files touched: internal/graphstore/mcp_server.go, internal/graphstore/crg.go, internal/graphstore/mcp_server_test.go. cmd.go, kg.go, sync_code_warm_link.go untouched.'
+recorded_at: "2026-04-20T01:21:52Z"
+delegation_id: del-kg-mcp-transport-impl-1776647625
+artifact_paths:
+    - .agents/active/delegation-bundles/del-kg-freshness-impl-1776636903.yaml
+    - .agents/active/delegation/kg-freshness-impl.yaml
+    - .agents/active/verification/kg-freshness-impl/impl-handoff.yaml
+    - .agents/workflow/plans/kg-command-surface-readiness/PLAN.yaml
+    - .agents/workflow/plans/kg-command-surface-readiness/TASKS.yaml
+    - commands/kg/cmd.go
+    - commands/kg/kg_test.go
+    - commands/kg/sync_code_warm_link.go

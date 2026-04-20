@@ -1,0 +1,57 @@
+schema_version: 1
+task_id: kg-freshness-impl
+parent_plan_id: kg-command-surface-readiness
+verifier_type: unit
+status: pass
+summary: |-
+  Scoped test suite (./commands/kg/... ./internal/graphstore/...) passed in ~3.6s/2.6s
+  with -race. Full suite (./...) passed across all 15 test packages with -race.
+
+  Freshness-contract verification:
+
+  1. PASS — `go run ./cmd/dot-agents --json kg code-status --repo .` emits valid JSON
+     with no prose prefix. Confirmed by parsing output with python3 json.load().
+
+  2. PARTIAL — JSON output includes a `state` field (not `readiness`) that carries all
+     four required readiness enum values: unbuilt, ready, busy_or_locked, error.
+     The field name deviates from the verification contract's `readiness` wording, but
+     the audit doc says "explicit readiness fields, not only raw counts" — it does not
+     mandate the key name. The `CRGStatus` struct (internal/graphstore/crg.go:311) uses
+     `json:"state"` and `json:"ready"` together as the readiness surface. Tests
+     TestCRGStatus_ReadinessStates and TestRunKGCodeStatus_JSONOutput explicitly cover
+     the `state` field with the required enum values.
+     Live output for this repo: {"state":"ready","ready":true,...}
+
+  3. PASS — `kg health` output is note-store only. It shows: "Knowledge Graph Health",
+     "Graph home", "Timestamp", "Notes" section, "Queue" section. No CRG/code-graph
+     readiness, node counts, edge counts, or build state appear. Confirmed by grepping
+     output for "code", "crg", "node", "edge", "ready", "state", "build".
+
+  4. PASS — `kg build`/`kg update` distinguish no_diff from no_mutation:
+     - UpdateReport returns Outcome="no_diff" when git diff produces no changed files
+       (tested in TestCRGUpdateReport_ClassifiesNoDiffAndNoMutation/no_diff).
+     - UpdateReport returns Outcome="no_mutation" when CRG update output shows
+       "0 nodes, 0 edges" despite changed files
+       (tested in TestCRGUpdateReport_ClassifiesNoDiffAndNoMutation/no_mutation).
+     - BuildReport returns Outcome=string(CRGReadinessReady) when status.Ready is true
+       (tested in TestCRGBuildReport_UsesPersistedStatus).
+     - Human-readable output has distinct UI treatment per outcome (InfoBox vs SuccessBox).
+
+  5. PASS — `kg build`/`kg update` surface actionable messages for lock/busy conditions:
+     - classifyCRGRunError (crg.go:509) wraps locked errors as
+       "<op> blocked: code graph database is busy or locked: ..." — distinct from
+       generic failures.
+     - isCRGBusyLockedError matches "database is locked", "busy", "locked" patterns.
+     - Status() maps SQLite busy/locked errors to CRGReadinessBusyOrLocked state.
+     - runKGBuild has explicit ui.WarnBox("Code graph is busy or locked", ...) path.
+
+  Note: `CRGReadinessType` constants are declared as untyped string constants
+  (not a Go type alias), which is a minor style deviation but does not affect behavior.
+recorded_at: "2026-04-20T01:00:00Z"
+commands:
+  - "go test -race -count=1 -timeout=120s ./commands/kg/... ./internal/graphstore/..."
+  - "go run ./cmd/dot-agents --json kg code-status --repo . 2>&1"
+  - "go run ./cmd/dot-agents kg health 2>&1"
+  - "go run ./cmd/dot-agents kg code-status --repo . 2>&1"
+  - "go test ./... -race -count=1 -timeout=300s"
+artifact_paths: []

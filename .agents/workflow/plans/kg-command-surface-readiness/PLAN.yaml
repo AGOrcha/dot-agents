@@ -1,10 +1,10 @@
 schema_version: 1
 id: kg-command-surface-readiness
 title: KG Command Surface Readiness
-status: active
+status: completed
 summary: 'Extend graph-bridge resurrection to the full kg command surface: freshness/provenance, change/impact trustworthiness, advanced surfaces, and MCP parity'
 created_at: "2026-04-19T19:42:47Z"
-updated_at: "2026-04-19T22:14:31Z"
+updated_at: "2026-04-20T01:27:06Z"
 owner: dot-agents
 success_criteria: |-
     kg build and kg update produce a usable, verifiable code graph from a clean checkout with
@@ -16,4 +16,4 @@ verification_strategy: |-
     Focused go test coverage in commands/kg/ and internal/graphstore/. Command-level smoke
     verification on known repo fixtures after each implementation task. Explicit repro cases
     for missing-config, stale-graph, and empty-result behavior.
-current_focus_task: Implement kg build/update/code-status readiness fixes and add smoke coverage
+current_focus_task: ""

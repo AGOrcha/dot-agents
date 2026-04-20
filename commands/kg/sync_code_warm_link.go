@@ -215,6 +215,51 @@ func runKGCodeStatus(deps Deps, cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// crgStatusState calls Status() on a CRGBridge and returns the state string.
+// If Status() fails (e.g. CRG not installed), "unknown" is returned.
+func crgStatusState(root string) string {
+	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	if err != nil || status == nil {
+		return "unknown"
+	}
+	return status.State
+}
+
+// checkCRGReadiness calls Status() and emits warnings for unbuilt/busy states.
+// When requireGraph is true and the graph is not ready, an error is returned.
+func checkCRGReadiness(root string, requireGraph bool) error {
+	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	if err != nil {
+		// Status() failed — CRG may not be installed; warn but don't block.
+		return nil
+	}
+	switch status.State {
+	case graphstore.CRGReadinessUnbuilt:
+		ui.WarnBox("Code graph not built", "Run 'kg build' first — results will be empty or incomplete.")
+		if requireGraph {
+			return fmt.Errorf("code graph is not built")
+		}
+	case graphstore.CRGReadinessBusyOrLocked:
+		ui.WarnBox("Code graph is busy or locked", "Wait for concurrent operation to finish and retry.")
+		if requireGraph {
+			return fmt.Errorf("code graph is busy or locked")
+		}
+	}
+	return nil
+}
+
+// kgImpactJSONOutput is the JSON wrapper for kg impact output, adding graph_state.
+type kgImpactJSONOutput struct {
+	GraphState    string `json:"graph_state"`
+	*graphstore.CRGImpactResult
+}
+
+// kgChangesJSONOutput is the JSON wrapper for kg changes output, adding graph_state.
+type kgChangesJSONOutput struct {
+	GraphState string `json:"graph_state"`
+	*graphstore.CRGChangeReport
+}
+
 func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 	root, _ := cmd.Flags().GetString("repo")
 	if root == "" {
@@ -223,6 +268,11 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 	base, _ := cmd.Flags().GetString("base")
 	maxDepth, _ := cmd.Flags().GetInt("depth")
 	maxResults, _ := cmd.Flags().GetInt("limit")
+	requireGraph, _ := cmd.Flags().GetBool("require-graph")
+
+	if err := checkCRGReadiness(root, requireGraph); err != nil {
+		return err
+	}
 
 	var files []string
 	if len(args) > 0 {
@@ -243,7 +293,10 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if commandJSON(cmd) {
-		data, _ := json.MarshalIndent(result, "", "  ")
+		data, _ := json.MarshalIndent(kgImpactJSONOutput{
+			GraphState:      crgStatusState(root),
+			CRGImpactResult: result,
+		}, "", "  ")
 		fmt.Println(string(data))
 		return nil
 	}
@@ -275,6 +328,9 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 	}
 	if result.Truncated {
 		ui.Info(fmt.Sprintf("  (results truncated — %d total impacted)", result.TotalImpacted))
+	}
+	if len(result.ChangedNodes) == 0 && len(result.ImpactedNodes) == 0 {
+		ui.Info("Note: run 'kg code-status' to verify the code graph is current.")
 	}
 	return nil
 }
@@ -373,6 +429,11 @@ func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
 	}
 	base, _ := cmd.Flags().GetString("base")
 	brief, _ := cmd.Flags().GetBool("brief")
+	requireGraph, _ := cmd.Flags().GetBool("require-graph")
+
+	if err := checkCRGReadiness(root, requireGraph); err != nil {
+		return err
+	}
 
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
@@ -386,7 +447,10 @@ func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if commandJSON(cmd) {
-		data, _ := json.MarshalIndent(report, "", "  ")
+		data, _ := json.MarshalIndent(kgChangesJSONOutput{
+			GraphState:      crgStatusState(root),
+			CRGChangeReport: report,
+		}, "", "  ")
 		fmt.Println(string(data))
 		return nil
 	}
@@ -409,6 +473,9 @@ func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
 		for _, p := range report.ReviewPriorities {
 			ui.Bullet("found", fmt.Sprintf("[risk=%.2f] %s — %s", p.RiskScore, p.QualifiedName, p.Reason))
 		}
+	}
+	if len(report.ChangedFunctions) == 0 {
+		ui.Info("Note: run 'kg code-status' to verify the code graph is current.")
 	}
 	return nil
 }

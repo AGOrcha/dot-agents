@@ -234,6 +234,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgChangesCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
 	kgChangesCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
 	kgChangesCmd.Flags().Bool("brief", false, "Show brief summary only")
+	kgChangesCmd.Flags().Bool("require-graph", false, "Return non-zero exit if graph is not ready (unbuilt or locked)")
 
 	// Phase C: impact, flows, communities, postprocess
 	kgImpactCmd := &cobra.Command{
@@ -247,10 +248,17 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgImpactCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
 	kgImpactCmd.Flags().Int("depth", 2, "Max hop depth for impact traversal")
 	kgImpactCmd.Flags().Int("limit", 50, "Max impacted nodes to return")
+	kgImpactCmd.Flags().Bool("require-graph", false, "Return non-zero exit if graph is not ready (unbuilt or locked)")
 
 	kgFlowsCmd := &cobra.Command{
 		Use:   "flows",
 		Short: "List detected execution flows",
+		Long: `List detected execution flows from the code graph.
+
+Note: flow step chains and entry points are not currently populated by the
+underlying graph engine. Results show highly-connected functions sorted by
+criticality score, not full execution paths. Use 'kg impact' for blast-radius
+analysis instead.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGFlows(deps, cmd, args)
 		},
@@ -262,6 +270,13 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgCommunitiesCmd := &cobra.Command{
 		Use:   "communities",
 		Short: "List detected code communities",
+		Long: `List detected code communities from the code graph.
+
+Community names, sizes, and dominant language are reliable. Member lists are
+not currently populated (members field is always empty) — use 'kg impact' to
+analyze specific files within a community. Results include all indexed languages;
+third-party dependency directories (e.g. node_modules) may appear prominently
+when sorting by size.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKGCommunities(deps, cmd, args)
 		},
@@ -273,7 +288,12 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgPostprocessCmd := &cobra.Command{
 		Use:   "postprocess",
 		Short: "Rebuild flows, communities, and FTS index",
-		RunE:  runKGPostprocess,
+		Long: `Rebuild derived graph data: execution flows, code communities, and the
+full-text search index.
+
+This command runs automatically as part of 'kg build' and 'kg update'. Run it
+manually only to repair stale derived data without rebuilding the full graph.`,
+		RunE: runKGPostprocess,
 	}
 	kgPostprocessCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
 	kgPostprocessCmd.Flags().Bool("no-flows", false, "Skip flow detection")

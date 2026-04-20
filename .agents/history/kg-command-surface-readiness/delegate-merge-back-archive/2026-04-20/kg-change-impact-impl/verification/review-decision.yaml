@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: kg-change-impact-impl
+parent_plan_id: kg-command-surface-readiness
+delegation_id: del-kg-change-impact-impl-1776646638
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+recorded_at: "2026-04-20T01:06:15Z"
+recorded_by: dot-agents workflow verify record

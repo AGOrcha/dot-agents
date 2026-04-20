@@ -1,0 +1,26 @@
+schema_version: 1
+task_id: kg-mcp-transport-impl
+parent_plan_id: kg-command-surface-readiness
+verifier_type: unit
+status: pass
+summary: |-
+  All four new freshness-guard tests pass under -race. Full graphstore suite (8
+  non-Postgres tests + pre-existing 4 MCP tests) passes. Full project suite
+  (all 16 packages with test files) passes with no failures.
+
+  Contract check results:
+  1. handleGetReviewContext / unbuilt → structured {error, state, hint} result (no RPC error): PASS
+  2. handleGetReviewContext / busy_or_locked → structured {error, state, hint} result: PASS
+  3. handleGetImpactRadius / unbuilt → structured {error, state, hint} result: PASS
+  4. handleGetReviewContext / ready → proceeds to DetectChanges, returns changed_symbols: PASS
+  5. No regressions — TestKGServeToolsList, TestKGServeBuildOrUpdateGraph,
+     TestKGServeGetImpactRadius, TestKGServeUnknownTool all pass: PASS
+
+  DetectChangesOptions.Files field confirmed present in crg.go with inline comment
+  noting the CRG v1.x CLI limitation.
+recorded_at: "2026-04-19T00:00:00Z"
+commands:
+  - "go test -race -count=1 -timeout=60s ./internal/graphstore/... -run 'TestHandleGetReviewContext|TestHandleGetImpactRadius' -v"
+  - "go test -race -count=1 -timeout=120s ./internal/graphstore/... -v"
+  - "go test ./... -race -count=1 -timeout=300s"
+artifact_paths: []

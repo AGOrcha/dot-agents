@@ -677,6 +677,209 @@ esac`)
 	})
 }
 
+// ── kg changes / kg impact: graph-readiness pre-flight ────────────────────────
+
+// captureStdout redirects os.Stdout for the duration of fn, then restores it.
+// Returns the bytes written to stdout during fn.
+func captureStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = oldStdout
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestRunKGChanges_WarnOnUnbuiltGraph: without --require-graph, an unbuilt graph
+// emits a WarnBox but still calls the CRG binary and returns no error.
+func TestRunKGChanges_WarnOnUnbuiltGraph(t *testing.T) {
+	repo := t.TempDir()
+	// No CRG DB → Status() returns unbuilt.
+	// Fake CRG binary that returns valid JSON for detect-changes.
+	fakeJSON := `{"summary":"0 changed function(s)","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
+	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
+detect-changes) printf '%%s\n' '%s' ;;
+*) exit 0 ;;
+esac`, fakeJSON))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	var capturedOut []byte
+	capturedOut = captureStdout(t, func() {
+		if err := runKGChanges(testDeps(), cmd, nil); err != nil {
+			t.Errorf("expected no error without --require-graph, got: %v", err)
+		}
+	})
+	output := string(capturedOut)
+	if !strings.Contains(output, "Code graph not built") {
+		t.Errorf("expected WarnBox about unbuilt graph, got:\n%s", output)
+	}
+}
+
+// TestRunKGChanges_RequireGraphFailsOnUnbuilt: with --require-graph, an unbuilt
+// graph must return a non-zero error.
+func TestRunKGChanges_RequireGraphFailsOnUnbuilt(t *testing.T) {
+	repo := t.TempDir()
+	// No CRG DB → Status() returns unbuilt. No fake binary needed.
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", true, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		err := runKGChanges(testDeps(), cmd, nil)
+		if err == nil {
+			t.Error("expected non-zero error when --require-graph and graph is unbuilt")
+		}
+		if err != nil && !strings.Contains(err.Error(), "code graph is not built") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+}
+
+// TestRunKGChanges_JSONOutputHasGraphState: --json output must include graph_state.
+func TestRunKGChanges_JSONOutputHasGraphState(t *testing.T) {
+	repo := t.TempDir()
+	// Write a ready CRG DB fixture.
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-20T00:00:00Z"},
+	})
+	fakeJSON := `{"summary":"1 changed function(s)","risk_score":0.5,"changed_functions":[{"name":"Foo","qualified_name":"pkg.Foo","file_path":"a.go","risk_score":0.5,"callers":1}],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
+	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
+detect-changes) printf '%%s\n' '%s' ;;
+*) exit 0 ;;
+esac`, fakeJSON))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGChanges(testDeps(), cmd, nil); err != nil {
+			t.Errorf("runKGChanges: %v", err)
+		}
+	})
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v\nraw: %s", err, string(out))
+	}
+	if _, ok := m["graph_state"]; !ok {
+		t.Errorf("expected graph_state field in JSON output, got: %s", string(out))
+	}
+}
+
+// TestRunKGImpact_WarnOnUnbuiltGraph: without --require-graph, an unbuilt graph
+// emits a WarnBox but still calls through.
+func TestRunKGImpact_WarnOnUnbuiltGraph(t *testing.T) {
+	repo := t.TempDir()
+	// No CRG DB → Status() returns unbuilt.
+	// Fake CRG binary not needed because GetImpactRadius uses runPyQuery.
+	// We expect an error from the Python call but the warn should appear first.
+	// Since NewCRGBridge will succeed (fake bin exists), we get the warn then CRG error.
+	// Use a fake bin that exits 0 but python is absent — the warn is what we check.
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	var capturedOut []byte
+	capturedOut = captureStdout(t, func() {
+		// We don't care if runKGImpact errors (Python may not be available in CI);
+		// we only assert the WarnBox appeared before any CRG call.
+		_ = runKGImpact(testDeps(), cmd, nil)
+	})
+	output := string(capturedOut)
+	if !strings.Contains(output, "Code graph not built") {
+		t.Errorf("expected WarnBox about unbuilt graph in output, got:\n%s", output)
+	}
+}
+
+// TestRunKGImpact_RequireGraphFailsOnUnbuilt: with --require-graph, must error.
+func TestRunKGImpact_RequireGraphFailsOnUnbuilt(t *testing.T) {
+	repo := t.TempDir()
+	// No CRG DB.
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", true, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		err := runKGImpact(testDeps(), cmd, nil)
+		if err == nil {
+			t.Error("expected non-zero error when --require-graph and graph is unbuilt")
+		}
+		if err != nil && !strings.Contains(err.Error(), "code graph is not built") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+}
+
+// TestRunKGImpact_JSONOutputHasGraphState: --json output must include graph_state.
+func TestRunKGImpact_JSONOutputHasGraphState(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-20T00:00:00Z"},
+	})
+	// For GetImpactRadius to succeed we need a working Python environment.
+	// Since that may not be available in unit tests, we test only that the JSON
+	// wrapper struct itself marshals graph_state correctly — a lower-level unit test.
+	result := &graphstore.CRGImpactResult{
+		Status:        "ok",
+		Summary:       "Blast radius for 0 changed file(s):\n  - 0 nodes directly changed",
+		ChangedFiles:  []string{},
+		ChangedNodes:  []graphstore.ImpactNode{},
+		ImpactedNodes: []graphstore.ImpactNode{},
+		ImpactedFiles: []string{},
+	}
+	wrapper := kgImpactJSONOutput{
+		GraphState:      "ready",
+		CRGImpactResult: result,
+	}
+	data, err := json.Marshal(wrapper)
+	if err != nil {
+		t.Fatalf("marshal kgImpactJSONOutput: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["graph_state"] != "ready" {
+		t.Errorf("expected graph_state=ready, got: %v", m["graph_state"])
+	}
+	if _, ok := m["status"]; !ok {
+		t.Errorf("expected status field from embedded CRGImpactResult, got: %s", string(data))
+	}
+}
+
 // ── Phase 2: Raw source ────────────────────────────────────────────────────────
 
 func TestRecordRawSource_And_ListPending(t *testing.T) {

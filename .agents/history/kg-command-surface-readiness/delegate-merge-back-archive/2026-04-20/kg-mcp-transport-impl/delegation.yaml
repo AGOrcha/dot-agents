@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-kg-mcp-transport-impl-1776647625
+parent_plan_id: kg-command-surface-readiness
+parent_task_id: kg-mcp-transport-impl
+title: Implement MCP parity decisions from audit
+summary: Delegated from plan KG Command Surface Readiness
+write_scope:
+    - internal/graphstore/mcp_server.go
+    - internal/graphstore/crg.go
+    - tests/
+success_criteria: 'Implement only the implement-now entries from parity matrix. Deferred decisions go to docs only. Stop: do not redesign MCP server; do not change external tool name surface.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-kg-mcp-transport-impl
+status: completed
+created_at: "2026-04-20T01:13:45Z"
+updated_at: "2026-04-20T01:21:52Z"
