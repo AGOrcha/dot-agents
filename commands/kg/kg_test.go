@@ -85,6 +85,36 @@ func writeFakeCRGBinary(t *testing.T, repo, body string) string {
 	return binPath
 }
 
+func writeFakeCRGPythonEntrypoint(t *testing.T, repo, body string) string {
+	t.Helper()
+	binDir := filepath.Join(repo, ".venv", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(binDir, "code-review-graph")
+	content := "#!/usr/bin/env python3\n" + body + "\n"
+	if err := os.WriteFile(binPath, []byte(content), 0755); err != nil {
+		t.Fatalf("write fake python crg: %v", err)
+	}
+	return binPath
+}
+
+func symlinkPythonIntoFakeVenv(t *testing.T, repo string) {
+	t.Helper()
+	binDir := filepath.Join(repo, ".venv", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	linkPath := filepath.Join(binDir, "python3")
+	if err := os.Symlink(py, linkPath); err != nil && !os.IsExist(err) {
+		t.Fatalf("symlink python3: %v", err)
+	}
+}
+
 func initGitRepo(t *testing.T, repo string) {
 	t.Helper()
 	if err := os.MkdirAll(repo, 0755); err != nil {
@@ -633,6 +663,28 @@ func TestCRGBuildReport_UsesPersistedStatus(t *testing.T) {
 	}
 	if !strings.Contains(report.Summary, "2 nodes") || !strings.Contains(report.Summary, "2 files") {
 		t.Fatalf("summary = %q", report.Summary)
+	}
+}
+
+func TestCRGBuildReport_UsesSQLiteAutocommitWrapper(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	symlinkPythonIntoFakeVenv(t, repo)
+	bin := writeFakeCRGPythonEntrypoint(t, repo, `
+import sqlite3
+conn = sqlite3.connect(":memory:")
+assert conn.isolation_level is None, conn.isolation_level
+`)
+	bridge := &graphstore.CRGBridge{RepoRoot: repo, Bin: bin}
+
+	report, err := bridge.BuildReport(graphstore.BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildReport with sqlite autocommit wrapper: %v", err)
+	}
+	if report.Outcome != string(graphstore.CRGReadinessReady) {
+		t.Fatalf("outcome = %q, want ready", report.Outcome)
 	}
 }
 

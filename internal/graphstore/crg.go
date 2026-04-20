@@ -418,12 +418,15 @@ const (
 )
 
 func (b *CRGBridge) runCaptured(args ...string) ([]byte, error) {
-	cmd := exec.Command(b.Bin, args...)
+	cmd, err := b.commandWithSQLiteAutocommit(args...)
+	if err != nil {
+		return nil, err
+	}
 	cmd.Dir = b.RepoRoot
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	out := append(stdout.Bytes(), stderr.Bytes()...)
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
@@ -433,6 +436,43 @@ func (b *CRGBridge) runCaptured(args ...string) ([]byte, error) {
 		return out, fmt.Errorf("crg %s: %s", strings.Join(args, " "), msg)
 	}
 	return out, nil
+}
+
+func (b *CRGBridge) commandWithSQLiteAutocommit(args ...string) (*exec.Cmd, error) {
+	if !isPythonEntrypoint(b.Bin) {
+		return exec.Command(b.Bin, args...), nil
+	}
+	py := b.pythonBin()
+	script := fmt.Sprintf(`
+import runpy
+import sqlite3
+import sys
+
+target = %q
+orig_connect = sqlite3.connect
+
+def patched_connect(*args, **kwargs):
+    kwargs.setdefault("isolation_level", None)
+    return orig_connect(*args, **kwargs)
+
+sqlite3.connect = patched_connect
+sys.argv = [target] + sys.argv[1:]
+runpy.run_path(target, run_name="__main__")
+`, b.Bin)
+	return exec.Command(py, append([]string{"-c", script}, args...)...), nil
+}
+
+func isPythonEntrypoint(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	firstLine := string(data)
+	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
+		firstLine = firstLine[:idx]
+	}
+	firstLine = strings.ToLower(strings.TrimSpace(firstLine))
+	return strings.HasPrefix(firstLine, "#!") && strings.Contains(firstLine, "python")
 }
 
 func (b *CRGBridge) gitChangedFiles(base string) ([]string, error) {

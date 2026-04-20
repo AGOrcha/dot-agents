@@ -139,3 +139,20 @@ tasks:
       verification_required: true
       notes: 'Implement only the implement-now entries from parity matrix. Deferred decisions go to docs only. Stop: do not redesign MCP server; do not change external tool name surface.'
       app_type: go-cli
+    - id: kg-fresh-build-transaction-fix
+      title: Fix fresh KG build transaction failure and add isolated-home regression coverage
+      status: completed
+      depends_on:
+        - kg-freshness-impl
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: 'Fresh isolated repro on 2026-04-19 still fails: dot-agents kg build --repo . on a new KG_HOME hits sqlite3.OperationalError cannot start a transaction within a transaction. Narrow scope to the clean-home build path only. Fix the transaction lifecycle in the CRG-backed build path, document the failure mode, and add regression coverage that exercises fresh HOME, AGENTS_HOME, and KG_HOME so this path is not hidden by repo-local persisted graph state. Keep kg code-status semantics honest: ready persisted state in the repo must not be treated as proof that a fresh isolated build works.'
+      app_type: go-cli
