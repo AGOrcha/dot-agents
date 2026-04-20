@@ -613,7 +613,20 @@ preferences, fanout artifacts, and bridge queries.`,
 	_ = delegationCloseoutCmd.MarkFlagRequired("plan")
 	_ = delegationCloseoutCmd.MarkFlagRequired("task")
 	_ = delegationCloseoutCmd.MarkFlagRequired("decision")
-	delegationCmd.AddCommand(delegationCloseoutCmd)
+	delegationGateCmd := &cobra.Command{
+		Use:   "gate",
+		Short: "Evaluate task-local review evidence into an accept/reject/escalate parent-gate outcome",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow delegation gate --task my-task",
+			"  dot-agents --json workflow delegation gate --plan my-plan --task my-task",
+		),
+		Args: deps.NoArgsWithHints("Use `--task` and optional `--plan` instead of positional arguments."),
+		RunE: runWorkflowDelegationGate,
+	}
+	delegationGateCmd.Flags().String("plan", "", "Canonical plan ID (optional; validated against the delegation contract when set)")
+	delegationGateCmd.Flags().String("task", "", "Delegated task ID (required)")
+	_ = delegationGateCmd.MarkFlagRequired("task")
+	delegationCmd.AddCommand(delegationCloseoutCmd, delegationGateCmd)
 
 	driftCmd := &cobra.Command{
 		Use:   "drift",

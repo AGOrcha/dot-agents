@@ -3,7 +3,7 @@
 # run delegation closeout + workflow advance for each.
 #
 # Env vars:
-#   RALPH_CLOSEOUT_AUTO   1 = auto-accept all pending merge-backs (default), 0 = spawn orchestrator review pass
+#   RALPH_CLOSEOUT_AUTO   1 = auto-close only accepted pending merge-backs (default), 0 = spawn orchestrator review pass
 #   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  1 = after each successful auto-closeout, run `workflow fold-back list --plan <id>`
 #                            for each distinct plan_id touched (read-only D2 post-closeout snapshot)
 #   RALPH_RUN_PLAN        optional single id or comma-separated canonical plan scope for completion mode
@@ -209,6 +209,27 @@ if m:
 
   if [[ -z "$plan_id" ]]; then
     echo "error: could not extract plan_id for task=$task_id (checked merge-back + delegation contract)" >&2
+    return 1
+  fi
+
+  local gate_json gate_outcome gate_closeout_allowed gate_planning_required gate_reason
+  gate_json="$(da --json workflow delegation gate --plan "$plan_id" --task "$task_id")"
+  IFS=$'\t' read -r gate_outcome gate_closeout_allowed gate_planning_required gate_reason < <(printf '%s' "$gate_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print('\t'.join([
+    d.get('outcome', ''),
+    'true' if d.get('closeout_allowed') else 'false',
+    'true' if d.get('planning_required') else 'false',
+    (d.get('reason') or '').replace('\n', ' ').strip(),
+]))
+")
+  if [[ "$gate_closeout_allowed" != "true" || "$gate_outcome" != "accept" ]]; then
+    if [[ "$gate_planning_required" == "true" || "$gate_outcome" == "escalate" ]]; then
+      echo "ralph-closeout: skipping task=$task_id — planning or human review required before closeout (${gate_reason:-no reason})" >&2
+    else
+      echo "ralph-closeout: skipping task=$task_id — review gate outcome=${gate_outcome:-reject} (${gate_reason:-no reason})" >&2
+    fi
     return 1
   fi
 

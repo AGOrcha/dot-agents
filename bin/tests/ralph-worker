@@ -36,6 +36,7 @@
 #   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
 #   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
 #   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
+#   RALPH_WORKER_AGENT_BIN_OVERRIDE  per-invocation override (set by ralph-pipeline replacement retry)
 #   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
@@ -175,6 +176,10 @@ classify_worker_role() {
 
 resolve_worker_agent_bin() {
   local role="$1"
+  if [[ -n "${RALPH_WORKER_AGENT_BIN_OVERRIDE:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_AGENT_BIN_OVERRIDE"
+    return 0
+  fi
   case "$role" in
     impl)
       if [[ -n "${RALPH_IMPL_WORKER_AGENT_BIN:-}" ]]; then

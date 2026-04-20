@@ -2,11 +2,9 @@ schema_version: 1
 id: loop-agent-pipeline
 title: Loop Agent Pipeline Plan
 status: completed
-summary: |-
-    Revived after runtime audit. Repo-owned impl/verifier/review prompt surfaces, typed artifacts, staged bundle expansion, and stage-specific worker prompts landed, but the live ralph pipeline still has remaining control-plane gaps around post-task review enforcement, task-scoped closeout cleanup, and scoped completion behavior for planning locks and replacement workers. The reopened task notes embed the runtime audit, existing command/spec anchors, and the deterministic-command vs agent-owned boundary so future runtime agents can execute from plan artifacts alone.
-    - (fb:replacement-agent-retry) p11 done criteria includes replacement-agent retry logic for rate-limited/usage-capped provider bins (see RALPH_<ROLE>_AGENT_BIN fallback knobs in TASKS.yaml notes). This was not implemented in the p11 delivery. Env var knobs are documented in ralph-pipeline/ralph-worker headers. A follow-on task should wire retry-with-fallback-bin logic into ralph-pipeline stage dispatch when a stage exits with a rate-limit error code.
+summary: 'Runtime staging surfaces are landed, but the completed-bundle audit found two remaining control-plane follow-ons before this bundle should be treated as fully closed: p12-review-gate-hardening for real post-task orchestrator review application, and p13-replacement-worker-retry for resumable stage retry with fallback runtime selection after terminal provider failures. Historical p8 prompt-file vs project-overlay drift is resolved in current source and is not part of the reopened scope.'
 created_at: "2026-04-17T08:39:50Z"
-updated_at: "2026-04-19T19:54:08Z"
+updated_at: "2026-04-20T11:46:50Z"
 owner: dot-agents
 success_criteria: The live ralph pipeline consumes fanout/bundle role metadata, dispatches real impl/verifier/review stages end-to-end, records verifier artifacts through an extended workflow verify record path, runs a post-task orchestrator review gate after merge-back, supports driving a scoped plan set (single id or comma-separated ids) to completion safely, blocks further delegation for a plan when planning or architectural review is required, and leaves enough task-local runtime context in plan artifacts that a follow-on runtime agent does not need prior chat history to understand the gap or target shape.
 verification_strategy: Focused workflow tests, ralph script coverage for orchestration, dispatch, and post-task review branches, prompt/path checks for repo-local role surfaces, plan-lock / plan-target tests, and a final go test ./... pass after the runtime chain is wired.

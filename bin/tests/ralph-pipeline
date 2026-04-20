@@ -39,6 +39,7 @@
 #   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
 #   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
 #   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
+#   RALPH_STAGE_RETRY_MAX            max replacement retries per stage for resumable terminal failures (default 2)
 #   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
@@ -145,11 +146,191 @@ plan_is_in_scope() {
 describe_worker_exit_code() {
   local rc="$1"
   case "$rc" in
-    34) printf '%s' "review_gate_failed" ;;
+    34) printf '%s' "review_gate_rejected" ;;
+    35) printf '%s' "planning_required" ;;
     32) printf '%s' "usage_limit" ;;
     33) printf '%s' "workspace_permissions" ;;
     *) printf '%s' "error" ;;
   esac
+}
+
+split_bin_candidates() {
+  local raw="${1:-}"
+  local part trimmed
+  [[ -n "${raw//[[:space:]]/}" ]] || return 0
+  while :; do
+    if [[ "$raw" == *,* ]]; then
+      part="${raw%%,*}"
+      raw="${raw#*,}"
+    else
+      part="$raw"
+      raw=""
+    fi
+    trimmed="${part#"${part%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+    [[ -z "$raw" ]] && break
+  done
+}
+
+collect_stage_agent_bins() {
+  local stage_role="$1"
+  local role_bins=""
+  local generic_bins="${RALPH_WORKER_AGENT_BIN:-}"
+  local fallback_bins="${AGENT_BIN:-}"
+  local candidate seen_bins="|"
+
+  case "$stage_role" in
+    impl) role_bins="${RALPH_IMPL_WORKER_AGENT_BIN:-}" ;;
+    verifier) role_bins="${RALPH_VERIFIER_WORKER_AGENT_BIN:-}" ;;
+    review) role_bins="${RALPH_REVIEW_WORKER_AGENT_BIN:-}" ;;
+    *) role_bins="" ;;
+  esac
+
+  while IFS= read -r candidate; do
+    [[ -z "$candidate" ]] && continue
+    [[ "$seen_bins" == *"|${candidate}|"* ]] && continue
+    seen_bins="${seen_bins}${candidate}|"
+    printf '%s\n' "$candidate"
+  done < <(
+    split_bin_candidates "$role_bins"
+    split_bin_candidates "$generic_bins"
+    split_bin_candidates "$fallback_bins"
+    printf '%s\n' "agent"
+  )
+}
+
+stage_role_from_stage_line() {
+  local stage_line="$1"
+  if [[ "$stage_line" == verifier:* ]]; then
+    printf '%s' "verifier"
+  elif [[ "$stage_line" == "impl" ]]; then
+    printf '%s' "impl"
+  elif [[ "$stage_line" == "review" ]]; then
+    printf '%s' "review"
+  else
+    printf '%s' "worker"
+  fi
+}
+
+write_stage_metrics() {
+  local stage_dir="$1"
+  local stage_line="$2"
+  local stage_role="$3"
+  [[ -n "$stage_dir" && -d "$stage_dir" ]] || return 0
+
+  python3 - "$stage_dir" "$stage_line" "$stage_role" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+stage_dir = Path(sys.argv[1])
+stage_line = sys.argv[2]
+stage_role = sys.argv[3]
+
+def read_env(path: Path):
+    data = {}
+    if not path.exists():
+        return data
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        data[key.strip()] = value.strip()
+    return data
+
+def parse_int(value):
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+def attempt_index(path: Path):
+    try:
+        return int(path.name.split("-", 1)[1])
+    except Exception:
+        return 0
+
+attempts = []
+totals = {
+    "attempt_count": 0,
+    "iterations": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "tool_uses": 0,
+    "duration_ms": 0,
+}
+
+for attempt_dir in sorted((p for p in stage_dir.iterdir() if p.is_dir() and p.name.startswith("attempt-")), key=attempt_index):
+    status = read_env(attempt_dir / "attempt-status.env")
+    context = read_env(attempt_dir / "worker-context.env")
+
+    iter_files = sorted(attempt_dir.glob("worker-iter-*.ndjson"))
+    fallback_files = []
+    if not iter_files:
+        fallback_files.extend(sorted(attempt_dir.glob("worker-iter-*.json")))
+        fallback_files.extend(sorted(attempt_dir.glob("worker-iter-*.txt")))
+    iteration_count = len(iter_files) if iter_files else len(fallback_files)
+
+    input_tokens = 0
+    output_tokens = 0
+    cache_read_tokens = 0
+    tool_uses = 0
+    duration_ms = 0
+
+    for ndjson in iter_files:
+        for raw in ndjson.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            if data.get("type") == "result":
+                usage = data.get("usage", {})
+                input_tokens += int(usage.get("inputTokens", 0) or 0)
+                output_tokens += int(usage.get("outputTokens", 0) or 0)
+                cache_read_tokens += int(usage.get("cacheReadTokens", 0) or 0)
+                duration_ms += int(data.get("duration_ms", 0) or 0)
+            if data.get("type") == "tool_call" and data.get("subtype") == "started":
+                tool_uses += 1
+
+    attempt = {
+        "attempt": parse_int(status.get("attempt", attempt_dir.name.split("-", 1)[-1])),
+        "agent_bin": status.get("agent_bin", context.get("resolved_agent_bin", "")),
+        "exit_code": parse_int(status.get("exit_code", "0")),
+        "exit_label": status.get("exit_label", ""),
+        "completed": status.get("completed", "false").lower() == "true",
+        "iterations": iteration_count,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "tool_uses": tool_uses,
+        "duration_ms": duration_ms,
+    }
+    attempts.append(attempt)
+    totals["attempt_count"] += 1
+    totals["iterations"] += iteration_count
+    totals["input_tokens"] += input_tokens
+    totals["output_tokens"] += output_tokens
+    totals["cache_read_tokens"] += cache_read_tokens
+    totals["tool_uses"] += tool_uses
+    totals["duration_ms"] += duration_ms
+
+out = {
+    "schema_version": 1,
+    "stage": stage_line,
+    "stage_role": stage_role,
+    "attempts": attempts,
+    "totals": totals,
+    "final_exit_label": attempts[-1]["exit_label"] if attempts else "unknown",
+    "completed": attempts[-1]["completed"] if attempts else False,
+}
+
+(stage_dir / "stage-metrics.json").write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+PY
 }
 
 scoped_completion_state() {
@@ -177,6 +358,8 @@ print(data.get('state', ''))
 
 run_pipeline_pass() {
   echo "=== ralph-pipeline: starting run ${RUN_TIMESTAMP} ===" >&2
+  pipeline_stage_retry_max="${RALPH_STAGE_RETRY_MAX:-2}"
+  [[ "$pipeline_stage_retry_max" =~ ^[0-9]+$ ]] || pipeline_stage_retry_max=2
 
   # Phase 1: Orchestrate — collect RALPH_BUNDLE lines
   echo "=== ralph-pipeline: phase 1 — orchestrate ===" >&2
@@ -319,36 +502,151 @@ for bundle_path in "${BUNDLES[@]}"; do
 
     # Run each stage sequentially; give each stage its own log subdir
     stage_rc=0
+    stage_retry_max="$pipeline_stage_retry_max"
+    bundle_retry_attempts=0
+    bundle_retry_recovered=0
+    bundle_last_terminal_failure="none"
+    replacement_retry_log="${wlog:+${wlog}/replacement-retry.log}"
+    replacement_retry_env="${wlog:+${wlog}/replacement-retry.env}"
+    [[ -n "$replacement_retry_log" ]] && : > "$replacement_retry_log"
     while IFS= read -r stage_line; do
       [[ -z "$stage_line" ]] && continue
       stage_log="${wlog:+${wlog}/stage-${stage_line//:/+}}"
       [[ -n "$stage_log" ]] && mkdir -p "$stage_log"
-      export RALPH_LOG_DIR="${stage_log:-}"
-      if [[ "$stage_line" == verifier:* ]]; then
-        vtype="${stage_line#verifier:}"
-        echo "ralph-pipeline: [$(basename "$bundle_path")] stage verifier:${vtype}" >&2
-        set +e
-        "$RALPH_WORKER" --bundle "$bundle_path" --stage verifier --verifier-type "$vtype"
-        rc=$?
-        set -e
-        if [[ $rc -ne 0 ]]; then
-          echo "ralph-pipeline: stage verifier:${vtype} exited non-zero (status $rc: $(describe_worker_exit_code "$rc"))" >&2
-          stage_rc=$rc
+
+      stage_role="$(stage_role_from_stage_line "$stage_line")"
+      stage_bins=()
+      while IFS= read -r stage_bin; do
+        [[ -n "$stage_bin" ]] && stage_bins+=( "$stage_bin" )
+      done < <(collect_stage_agent_bins "$stage_role")
+
+      stage_bin_index=0
+      stage_retries_used=0
+      stage_completed=0
+      stage_usage_limit_exhausted=0
+      while [[ $stage_completed -eq 0 ]]; do
+        if [[ $stage_bin_index -ge ${#stage_bins[@]} ]]; then
+          echo "ralph-pipeline: stage ${stage_line} has no remaining fallback agent bin candidates" >&2
+          bundle_last_terminal_failure="usage_limit"
+          stage_usage_limit_exhausted=1
+          stage_rc=32
           break
         fi
-      else
-        echo "ralph-pipeline: [$(basename "$bundle_path")] stage ${stage_line}" >&2
+
+        stage_bin="${stage_bins[$stage_bin_index]}"
+        attempt_no=$((stage_retries_used + 1))
+        stage_attempt_log="${stage_log:+${stage_log}/attempt-${attempt_no}}"
+        [[ -n "$stage_attempt_log" ]] && mkdir -p "$stage_attempt_log"
+        export RALPH_LOG_DIR="${stage_attempt_log:-}"
+        export RALPH_WORKER_AGENT_BIN_OVERRIDE="$stage_bin"
+        echo "ralph-pipeline: [$(basename "$bundle_path")] stage ${stage_line} attempt ${attempt_no}/$((stage_retry_max + 1)) (agent_bin=${stage_bin})" >&2
+
         set +e
-        "$RALPH_WORKER" --bundle "$bundle_path" --stage "$stage_line"
+        if [[ "$stage_line" == verifier:* ]]; then
+          vtype="${stage_line#verifier:}"
+          "$RALPH_WORKER" --bundle "$bundle_path" --stage verifier --verifier-type "$vtype"
+        else
+          "$RALPH_WORKER" --bundle "$bundle_path" --stage "$stage_line"
+        fi
         rc=$?
         set -e
-        if [[ $rc -ne 0 ]]; then
-          echo "ralph-pipeline: stage ${stage_line} exited non-zero (status $rc: $(describe_worker_exit_code "$rc"))" >&2
-          stage_rc=$rc
-          break
+        unset RALPH_WORKER_AGENT_BIN_OVERRIDE
+
+        exit_label="$(describe_worker_exit_code "$rc")"
+        if [[ $rc -eq 0 ]]; then
+          exit_label="success"
         fi
+        if [[ -n "${stage_attempt_log:-}" ]]; then
+          {
+            echo "attempt=${attempt_no}"
+            echo "stage=${stage_line}"
+            echo "stage_role=${stage_role}"
+            echo "agent_bin=${stage_bin}"
+            echo "exit_code=${rc}"
+            echo "exit_label=${exit_label}"
+            if [[ $rc -eq 0 ]]; then
+              echo "completed=true"
+            else
+              echo "completed=false"
+            fi
+          } > "${stage_attempt_log}/attempt-status.env"
+        fi
+
+        if [[ $rc -eq 0 ]]; then
+          if [[ $stage_retries_used -gt 0 ]]; then
+            (( bundle_retry_recovered++ )) || true
+            [[ -n "$replacement_retry_log" ]] && {
+              printf 'stage=%s outcome=recovered retries=%d final_bin=%s\n' \
+                "$stage_line" "$stage_retries_used" "$stage_bin" >> "$replacement_retry_log"
+            }
+          fi
+          stage_completed=1
+          continue
+        fi
+
+        echo "ralph-pipeline: stage ${stage_line} exited non-zero (status $rc: ${exit_label})" >&2
+
+        if [[ $rc -eq 32 ]]; then
+          bundle_last_terminal_failure="usage_limit"
+          if [[ $stage_retries_used -ge $stage_retry_max ]]; then
+            stage_usage_limit_exhausted=1
+            [[ -n "$replacement_retry_log" ]] && {
+              printf 'stage=%s outcome=retry_exhausted retries=%d last_bin=%s reason=usage_limit\n' \
+                "$stage_line" "$stage_retries_used" "$stage_bin" >> "$replacement_retry_log"
+            }
+            stage_rc=$rc
+            break
+          fi
+          next_index=$((stage_bin_index + 1))
+          if [[ $next_index -ge ${#stage_bins[@]} ]]; then
+            stage_usage_limit_exhausted=1
+            [[ -n "$replacement_retry_log" ]] && {
+              printf 'stage=%s outcome=no_fallback retries=%d last_bin=%s reason=usage_limit\n' \
+                "$stage_line" "$stage_retries_used" "$stage_bin" >> "$replacement_retry_log"
+            }
+            stage_rc=$rc
+            break
+          fi
+          next_bin="${stage_bins[$next_index]}"
+          stage_bin_index=$next_index
+          (( stage_retries_used++ )) || true
+          (( bundle_retry_attempts++ )) || true
+          echo "ralph-pipeline: resumable terminal failure usage_limit in stage ${stage_line}; replacement retry ${stage_retries_used}/${stage_retry_max} using fallback agent_bin=${next_bin}" >&2
+          [[ -n "$replacement_retry_log" ]] && {
+            printf 'stage=%s outcome=retrying retry=%d/%d failed_bin=%s next_bin=%s reason=usage_limit\n' \
+              "$stage_line" "$stage_retries_used" "$stage_retry_max" "$stage_bin" "$next_bin" >> "$replacement_retry_log"
+          }
+          continue
+        fi
+
+        if [[ $rc -eq 33 ]]; then
+          bundle_last_terminal_failure="workspace_permissions"
+          [[ -n "$replacement_retry_log" ]] && {
+            printf 'stage=%s outcome=hard_stop retries=%d last_bin=%s reason=workspace_permissions\n' \
+              "$stage_line" "$stage_retries_used" "$stage_bin" >> "$replacement_retry_log"
+          }
+        fi
+        stage_rc=$rc
+        break
+      done
+
+      write_stage_metrics "${stage_log:-}" "$stage_line" "$stage_role"
+
+      if [[ $stage_completed -eq 0 ]]; then
+        if [[ $stage_usage_limit_exhausted -eq 1 ]]; then
+          echo "ralph-pipeline: stage ${stage_line} hit usage_limit with no remaining retries/fallback bins; stopping bundle" >&2
+        fi
+        break
       fi
     done <<<"$stages_text"
+
+    if [[ -n "$replacement_retry_env" ]]; then
+      {
+        echo "replacement_retry_attempts=${bundle_retry_attempts}"
+        echo "replacement_retry_recovered=${bundle_retry_recovered}"
+        echo "replacement_retry_last_failure=${bundle_last_terminal_failure}"
+      } > "$replacement_retry_env"
+    fi
 
     if [[ $stage_rc -ne 0 ]]; then
       exit $stage_rc
@@ -360,8 +658,12 @@ for bundle_path in "${BUNDLES[@]}"; do
       export RALPH_LOG_DIR=""
       "$RALPH_REVIEW_GATE" --bundle "$bundle_path" || gate_rc=$?
       if [[ $gate_rc -eq 2 ]]; then
-        echo "ralph-pipeline: review gate blocked closeout for $(basename "$bundle_path")" >&2
+        echo "ralph-pipeline: review gate blocked closeout for $(basename "$bundle_path") (rejected)" >&2
         exit 34
+      fi
+      if [[ $gate_rc -eq 3 ]]; then
+        echo "ralph-pipeline: review gate blocked closeout for $(basename "$bundle_path") (planning required)" >&2
+        exit 35
       fi
       if [[ $gate_rc -ne 0 ]]; then
         echo "ralph-pipeline: review gate error (exit $gate_rc) for $(basename "$bundle_path")" >&2
@@ -379,7 +681,10 @@ done
 
 # Wait for all workers
 worker_errors=0
-review_gate_failures=0
+review_gate_rejections=0
+review_gate_pauses=0
+usage_limit_hard_stops=0
+workspace_permissions_hard_stops=0
 for i in "${!worker_bundle_keys[@]}"; do
   bundle_path="${worker_bundle_keys[$i]}"
   pid="${worker_pids[$i]}"
@@ -389,14 +694,34 @@ for i in "${!worker_bundle_keys[@]}"; do
     rc=$?
     echo "ralph-pipeline: worker for $(basename "$bundle_path") exited with $(describe_worker_exit_code "$rc") (status $rc, pid=$pid)" >&2
     if [[ $rc -eq 34 ]]; then
-      (( review_gate_failures++ )) || true
+      (( review_gate_rejections++ )) || true
+    fi
+    if [[ $rc -eq 35 ]]; then
+      (( review_gate_pauses++ )) || true
+    fi
+    if [[ $rc -eq 32 ]]; then
+      (( usage_limit_hard_stops++ )) || true
+    fi
+    if [[ $rc -eq 33 ]]; then
+      (( workspace_permissions_hard_stops++ )) || true
     fi
     (( worker_errors++ )) || true
   fi
 done
 
-if [[ $review_gate_failures -gt 0 ]]; then
-  echo "ralph-pipeline: ${review_gate_failures} bundle(s) failed the review gate — skipping closeout" >&2
+if [[ $review_gate_rejections -gt 0 || $review_gate_pauses -gt 0 ]]; then
+  if [[ $review_gate_rejections -gt 0 ]]; then
+    echo "ralph-pipeline: ${review_gate_rejections} bundle(s) were rejected by the review gate — skipping closeout" >&2
+  fi
+  if [[ $review_gate_pauses -gt 0 ]]; then
+    echo "ralph-pipeline: ${review_gate_pauses} bundle(s) require planning or human review — skipping closeout" >&2
+  fi
+  return 1
+fi
+
+if [[ $usage_limit_hard_stops -gt 0 || $workspace_permissions_hard_stops -gt 0 ]]; then
+  [[ $usage_limit_hard_stops -gt 0 ]] && echo "ralph-pipeline: ${usage_limit_hard_stops} bundle(s) stopped after usage_limit retry exhaustion — skipping closeout" >&2
+  [[ $workspace_permissions_hard_stops -gt 0 ]] && echo "ralph-pipeline: ${workspace_permissions_hard_stops} bundle(s) hit non-resumable workspace_permissions — skipping closeout" >&2
   return 1
 fi
 
@@ -425,6 +750,12 @@ if [[ -n "$BASE_LOG_DIR" ]]; then
   worker_iter_entries=""
   persisted_entries=""
   token_entries=""
+  stage_metrics_entries=""
+  retry_attempt_entries=""
+  retry_recovered_entries=""
+  retry_failure_entries=""
+  retry_total_attempts=0
+  retry_total_recovered=0
 
   for bundle_path in "${BUNDLES[@]}"; do
     bundle_base="$(basename "$bundle_path" .yaml)"
@@ -438,40 +769,53 @@ print(m.group(1).strip() if m else '')
 " 2>/dev/null || true)"
     [[ -z "$task_id" ]] && continue
 
-    # Count worker iterations from log files
+    # Aggregate per-stage metrics from stage-owned manifests.
     wlog="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}}"
     iter_count=0
     tokens_in=0; tokens_out=0; tokens_cache_read=0; tool_uses=0; duration_ms=0
+    stage_metrics_json='{"stages":[],"totals":{"attempt_count":0,"iterations":0,"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"tool_uses":0,"duration_ms":0}}'
     if [[ -n "$wlog" && -d "$wlog" ]]; then
-      iter_count="$(ls "$wlog"/worker-iter-*.{ndjson,json,txt} 2>/dev/null | wc -l | tr -d ' ')"
-      # Extract token usage + tool count from ndjson result lines
-      for ndjson in "$wlog"/worker-iter-*.ndjson; do
-        [[ -f "$ndjson" ]] || continue
-        read -r t_in t_out t_cr t_uses t_dur < <(python3 -c "
-import json, sys
-ti=to=tcr=tuses=tdur=0
-for line in open('$ndjson'):
-    line=line.strip()
-    if not line: continue
+      stage_metrics_payload="$(python3 - "$wlog" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+wlog = Path(sys.argv[1])
+stage_files = sorted(wlog.glob("stage-*/stage-metrics.json"))
+stages = []
+totals = {
+    "attempt_count": 0,
+    "iterations": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "tool_uses": 0,
+    "duration_ms": 0,
+}
+
+for path in stage_files:
     try:
-        d=json.loads(line)
-    except: continue
-    if d.get('type')=='result':
-        u=d.get('usage',{})
-        ti+=u.get('inputTokens',0)
-        to+=u.get('outputTokens',0)
-        tcr+=u.get('cacheReadTokens',0)
-        tdur+=d.get('duration_ms',0)
-    if d.get('type')=='tool_call' and d.get('subtype')=='started':
-        tuses+=1
-print(ti, to, tcr, tuses, tdur)
-" 2>/dev/null || echo "0 0 0 0 0")
-        tokens_in=$((tokens_in + t_in))
-        tokens_out=$((tokens_out + t_out))
-        tokens_cache_read=$((tokens_cache_read + t_cr))
-        tool_uses=$((tool_uses + t_uses))
-        duration_ms=$((duration_ms + t_dur))
-      done
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    stages.append(data)
+    stage_totals = data.get("totals", {})
+    for key in totals:
+        totals[key] += int(stage_totals.get(key, 0) or 0)
+
+payload = {"stages": stages, "totals": totals}
+print("\t".join([
+    str(totals["iterations"]),
+    str(totals["input_tokens"]),
+    str(totals["output_tokens"]),
+    str(totals["cache_read_tokens"]),
+    str(totals["tool_uses"]),
+    str(totals["duration_ms"]),
+    json.dumps(payload, separators=(",", ":")),
+]))
+PY
+)"
+      IFS=$'\t' read -r iter_count tokens_in tokens_out tokens_cache_read tool_uses duration_ms stage_metrics_json <<< "$stage_metrics_payload"
     fi
 
     # merge-back status + persisted check
@@ -504,12 +848,37 @@ print(m.group(1) if m else 'unknown')
 
     [[ -n "$token_entries" ]] && token_entries+=","
     token_entries+="\"${task_id}\": {\"input_tokens\": ${tokens_in}, \"output_tokens\": ${tokens_out}, \"cache_read_tokens\": ${tokens_cache_read}, \"tool_uses\": ${tool_uses}, \"duration_ms\": ${duration_ms}}"
+
+    [[ -n "$stage_metrics_entries" ]] && stage_metrics_entries+=","
+    stage_metrics_entries+="\"${task_id}\": ${stage_metrics_json}"
+
+    retry_env="${WORKER_LOG_DIR:+${WORKER_LOG_DIR}/${bundle_base}/replacement-retry.env}"
+    retry_attempts=0
+    retry_recovered=0
+    retry_last_failure="none"
+    if [[ -n "$retry_env" && -f "$retry_env" ]]; then
+      retry_attempts="$(awk -F= '/^replacement_retry_attempts=/{print $2}' "$retry_env" | tail -1)"
+      retry_recovered="$(awk -F= '/^replacement_retry_recovered=/{print $2}' "$retry_env" | tail -1)"
+      retry_last_failure="$(awk -F= '/^replacement_retry_last_failure=/{print $2}' "$retry_env" | tail -1)"
+      [[ "$retry_attempts" =~ ^[0-9]+$ ]] || retry_attempts=0
+      [[ "$retry_recovered" =~ ^[0-9]+$ ]] || retry_recovered=0
+      [[ -n "$retry_last_failure" ]] || retry_last_failure="none"
+    fi
+    retry_total_attempts=$((retry_total_attempts + retry_attempts))
+    retry_total_recovered=$((retry_total_recovered + retry_recovered))
+    [[ -n "$retry_attempt_entries" ]] && retry_attempt_entries+=","
+    retry_attempt_entries+="\"${task_id}\": ${retry_attempts}"
+    [[ -n "$retry_recovered_entries" ]] && retry_recovered_entries+=","
+    retry_recovered_entries+="\"${task_id}\": ${retry_recovered}"
+    [[ -n "$retry_failure_entries" ]] && retry_failure_entries+=","
+    retry_failure_entries+="\"${task_id}\": \"${retry_last_failure}\""
   done
 
   merge_back_status="{${merge_back_entries}}"
   worker_iterations="{${worker_iter_entries}}"
   persisted_via="${persisted_entries:-}"
   token_detail="${token_entries:-}"
+  stage_metrics="${stage_metrics_entries:-}"
 
   cat >"$BASE_LOG_DIR/metrics.json" <<EOF
 {
@@ -521,6 +890,15 @@ print(m.group(1) if m else 'unknown')
   "worker_iterations": ${worker_iterations},
   "merge_back_status": ${merge_back_status},
   "persisted_via_workflow_commands": {${persisted_via}},
+  "replacement_retry": {
+    "max_per_stage": ${pipeline_stage_retry_max},
+    "total_attempts": ${retry_total_attempts},
+    "recovered": ${retry_total_recovered},
+    "task_attempts": {${retry_attempt_entries}},
+    "task_recovered": {${retry_recovered_entries}},
+    "task_last_failure": {${retry_failure_entries}}
+  },
+  "stage_metrics": {${stage_metrics}},
   "token_detail": {${token_detail}},
   "context_tokens_approx": null
 }
@@ -549,8 +927,12 @@ if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
       exit 1
     fi
     case "$completion_state" in
-      actionable|locked)
+      actionable)
         run_pipeline_pass || exit $?
+        ;;
+      locked)
+        echo "ralph-pipeline: scoped completion locked for plan(s): ${RALPH_RUN_PLAN}" >&2
+        exit 0
         ;;
       paused)
         echo "ralph-pipeline: scoped completion paused for plan(s): ${RALPH_RUN_PLAN}" >&2

@@ -1,0 +1,8 @@
+schema_version: 1
+id: staged-worker-metrics-stage-subdirs
+plan_id: loop-agent-pipeline
+task_id: p13-replacement-worker-retry
+observation: Replacement-retry metrics in ralph-pipeline currently undercount staged runs because metrics collection scans only the bundle log root for worker-iter files while staged workers now write per-iteration logs under stage-specific subdirectories like stage-impl/ and stage-verifier+unit/. This leaves worker_iterations and token_detail at zero or empty for successful staged runs. Follow-on should make metrics aggregation recurse through stage subdirectories or aggregate from a stage-owned manifest so staged execution preserves accurate observability.
+classification: small
+routed_to: task_note:loop-agent-pipeline/p13-replacement-worker-retry
+created_at: "2026-04-20T17:05:26Z"

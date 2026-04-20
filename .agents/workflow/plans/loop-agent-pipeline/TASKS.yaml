@@ -340,3 +340,37 @@ tasks:
         - commands/workflow/plan_task.go
       verification_required: true
       notes: 'Defect follow-on from p10 (fold-back: cli-schema-field-drift). workflow plan create is missing --success-criteria, --verification-strategy flags. workflow plan update is missing --success-criteria, --verification-strategy flags. workflow task add is missing --app-type flag. All three fields exist in CanonicalPlan/CanonicalTask structs and round-trip correctly in YAML — they are simply absent from flag registration and runWorkflowPlanCreate/runWorkflowTaskAdd call sites. Fix: add the flags, wire them through the run functions, update tests. Stop conditions: do not add depends_on_plans as a flag (multi-value cross-plan reference is a separate design question); do not change struct field names or YAML tags.'
+    - id: p12-review-gate-hardening
+      title: Replace heuristic auto-accept with real post-task orchestrator review application
+      status: completed
+      depends_on:
+        - p7-post-closeout
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-review-gate
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-closeout
+        - commands/workflow/
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+        - tests/
+      verification_required: true
+      notes: 'Focused follow-on from the completed-bundle audit. Goal: make the post-task review gate real in the default runtime path rather than artifact-presence auto-accept, and keep I_S_P behavior in sync with the scripted staged runtime. Scope: (1) replace or sharply narrow RALPH_REVIEW_GATE_AUTO=1 auto-accept semantics, (2) route fold-back/proposal-worthy findings through deterministic command-owned apply/finalize helpers where possible, (3) make per-task accept/reject/pause outcomes observable in task-local artifacts and logs, (4) keep end-of-session closeout separate from per-task review judgment, (5) update the I_S_P path and its prompts/contracts whenever scripted review-gate semantics change so the interactive/manual staged runtime does not diverge from ralph-pipeline. Current anchor points for this pass: `bin/tests/ralph-review-gate` still treats artifact presence as enough to auto-accept and currently allows `overall_decision=escalate` to pass; `bin/tests/ralph-pipeline` only distinguishes pass vs fail at the gate boundary; `bin/tests/ralph-closeout` still auto-accepts merge-backs in auto mode. Verification: add focused script coverage for gate-pass, gate-reject, gate-pause/planning-required, and closeout-skip behavior, plus readback/spec checks that I_S_P still follows the same impl -> verifier(s) -> review -> parent-gate contract. Stop: do not broaden this task into replacement-worker scheduling or general plan-completion control flow.'
+    - id: p13-replacement-worker-retry
+      title: Add resumable stage retry with fallback runtime selection after terminal provider failures
+      status: completed
+      depends_on:
+        - p11-plan-completion-mode
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-worker
+        - bin/tests/ralph-orchestrate
+        - commands/workflow/
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+        - tests/
+      verification_required: true
+      notes: |-
+        Focused follow-on from the completed-bundle audit. Goal: when a staged worker exits for a resumable terminal reason such as usage_limit or rate-limit/provider cap, schedule a fresh worker for the same bundle+stage and prefer a different resolved runtime path when fallback bins exist, while keeping I_S_P completion semantics aligned with scripted retry/fallback decisions. Scope: (1) classify resumable vs non-resumable terminal failures using existing worker exit codes/logs, (2) add bounded replacement budgets and observable retry state, (3) switch away from the same capped agent bin using RALPH_<ROLE>_AGENT_BIN / RALPH_WORKER_AGENT_BIN / AGENT_BIN fallback ordering, (4) preserve task-local artifacts so completed earlier stages are not rerun unnecessarily, (5) update I_S_P control-flow expectations and prompt/contracts whenever scripted replacement-worker or pause behavior changes so the interactive/manual staged runtime preserves the same stop/retry rules. Current anchor points for this pass: `bin/tests/ralph-worker` already classifies `usage_limit` and `workspace_permissions` terminal failures and exits 32/33; `bin/tests/ralph-pipeline` currently stops on those exits without scheduling a replacement stage; runtime headers already expose role-specific bin overrides (`RALPH_IMPL_WORKER_AGENT_BIN`, `RALPH_VERIFIER_WORKER_AGENT_BIN`, `RALPH_REVIEW_WORKER_AGENT_BIN`, `RALPH_WORKER_AGENT_BIN`, `AGENT_BIN`) that fallback selection should honor. Verification: focused script tests for usage_limit retry, fallback-bin selection, non-resumable hard stop, and metrics/log visibility, plus readback/spec checks that I_S_P and scripted scoped-completion semantics still match on retry, pause, and hard-stop behavior. Stop: do not redesign delegation bundles or expand this task into generic closeout review logic.
+        - (fb:staged-worker-metrics-stage-subdirs) Replacement-retry metrics in ralph-pipeline currently undercount staged runs because metrics collection scans only the bundle log root for worker-iter files while staged workers now write per-iteration logs under stage-specific subdirectories like stage-impl/ and stage-verifier+unit/. This leaves worker_iterations and token_detail at zero or empty for successful staged runs. Follow-on should make metrics aggregation recurse through stage subdirectories or aggregate from a stage-owned manifest so staged execution preserves accurate observability.
