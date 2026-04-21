@@ -183,7 +183,40 @@ preferences, fanout artifacts, and bridge queries.`,
 	planUpdateCmd.Flags().StringVar(&planUpdateSuccessCriteria, "success-criteria", "", "New success criteria (replaces existing)")
 	planUpdateCmd.Flags().StringVar(&planUpdateVerificationStrategy, "verification-strategy", "", "New verification strategy (replaces existing)")
 
-	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd)
+	var planArchivePlanIDs string
+	var planArchiveForce bool
+	planArchiveCmd := &cobra.Command{
+		Use:   "archive",
+		Short: "Archive one or more completed canonical plans",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow plan archive --plan repo-cleanup",
+			"  dot-agents workflow plan archive --plan plan-a,plan-b --force",
+			"  dot-agents -n workflow plan archive --plan repo-cleanup",
+		),
+		Args: deps.NoArgsWithHints("Use --plan to specify one or more plan IDs (comma-separated)."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := currentWorkflowProject()
+			if err != nil {
+				return err
+			}
+			ids := strings.Split(planArchivePlanIDs, ",")
+			cleaned := ids[:0]
+			for _, id := range ids {
+				if s := strings.TrimSpace(id); s != "" {
+					cleaned = append(cleaned, s)
+				}
+			}
+			if len(cleaned) == 0 {
+				return fmt.Errorf("--plan must specify at least one plan ID")
+			}
+			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun())
+		},
+	}
+	planArchiveCmd.Flags().StringVar(&planArchivePlanIDs, "plan", "", "Comma-separated plan IDs to archive (required)")
+	planArchiveCmd.Flags().BoolVar(&planArchiveForce, "force", false, "Skip completed-status guard and archive regardless of plan status")
+	_ = planArchiveCmd.MarkFlagRequired("plan")
+
+	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd)
 
 	taskCmd := &cobra.Command{
 		Use:   "task",
