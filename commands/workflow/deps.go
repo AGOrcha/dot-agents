@@ -4,8 +4,9 @@ import "github.com/spf13/cobra"
 
 // GlobalFlags mirrors the subset of commands.Flags read by workflow subcommands at runtime.
 type GlobalFlags struct {
-	JSON func() bool
-	Yes  func() bool
+	JSON   func() bool
+	Yes    func() bool
+	DryRun func() bool
 }
 
 // Deps carries UX helpers and sentinels from package commands without an import cycle.

@@ -19,8 +19,9 @@ func workflowBridgeDeps() wf.Deps {
 	return wf.Deps{
 		ErrNoProject: errNoWorkflowProject,
 		Flags: wf.GlobalFlags{
-			JSON: func() bool { return Flags.JSON },
-			Yes:  func() bool { return Flags.Yes },
+			JSON:   func() bool { return Flags.JSON },
+			Yes:    func() bool { return Flags.Yes },
+			DryRun: func() bool { return Flags.DryRun },
 		},
 		ErrorWithHints:        ErrorWithHints,
 		UsageError:            UsageError,
