@@ -361,7 +361,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 	eligibleCmd.Flags().StringVar(&eligiblePlanFilter, "plan", "", "Only consider tasks from these canonical plan ids (comma-separated)")
-	eligibleCmd.Flags().IntVar(&eligibleLimit, "limit", 0, "Maximum number of eligible tasks to return (0 = no limit)")
+	eligibleCmd.Flags().IntVar(&eligibleLimit, "limit", 0, "Override max_parallel_workers pref (0 = use pref, >0 = explicit limit)")
 
 	var workflowNextPlanID string
 	nextCmd := &cobra.Command{

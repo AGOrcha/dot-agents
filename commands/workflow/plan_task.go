@@ -1215,15 +1215,29 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		return err
 	}
 
+	prefs, err := resolvePreferences(project.Path, project.Name)
+	if err != nil {
+		return err
+	}
+	maxWorkers := 1
+	if prefs.Execution.MaxParallelWorkers != nil {
+		maxWorkers = *prefs.Execution.MaxParallelWorkers
+	}
+	// --limit 0 (unset) means use max_parallel_workers pref; >0 is an explicit override.
+	effectiveLimit := maxWorkers
+	if limit > 0 {
+		effectiveLimit = limit
+	}
+
 	planIDs := parsePlanIDFilter(planFilter)
 	tasks, err := selectAllEligibleTasks(project.Path, planIDs)
 	if err != nil {
 		return err
 	}
 
-	// Apply --limit if set.
-	if limit > 0 && len(tasks) > limit {
-		tasks = tasks[:limit]
+	// Apply effective limit (pref or explicit --limit).
+	if effectiveLimit > 0 && len(tasks) > effectiveLimit {
+		tasks = tasks[:effectiveLimit]
 	}
 
 	annotated := annotateEligibleTasks(project.Path, tasks)
@@ -1280,7 +1294,6 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		}
 	}
 	fmt.Fprintln(os.Stdout)
-	maxWorkers := 1 // default until p4 wires the pref
 	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by max_parallel_workers=%d)\n",
 		out.TotalEligible, out.MaxParallel, maxWorkers)
 	if len(out.MaxBatch) > 0 {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,8 +38,9 @@ type WorkflowReviewPrefs struct {
 }
 
 type WorkflowExecutionPrefs struct {
-	PackageManager *string `json:"package_manager,omitempty" yaml:"package_manager,omitempty"`
-	Formatter      *string `json:"formatter,omitempty" yaml:"formatter,omitempty"`
+	PackageManager     *string `json:"package_manager,omitempty" yaml:"package_manager,omitempty"`
+	Formatter          *string `json:"formatter,omitempty" yaml:"formatter,omitempty"`
+	MaxParallelWorkers *int    `json:"max_parallel_workers,omitempty" yaml:"max_parallel_workers,omitempty"`
 }
 
 type WorkflowPreferencesFile struct {
@@ -60,6 +62,7 @@ func defaultWorkflowPreferences() WorkflowPreferences {
 	reviewOrder := "findings-first"
 	pkgMgr := "go"
 	formatter := "gofmt"
+	maxParallelWorkers := 1
 	return WorkflowPreferences{
 		Verification: WorkflowVerificationPrefs{
 			TestCommand:                    &testCmd,
@@ -75,8 +78,9 @@ func defaultWorkflowPreferences() WorkflowPreferences {
 			RequireFindingsFirst: &trueVal,
 		},
 		Execution: WorkflowExecutionPrefs{
-			PackageManager: &pkgMgr,
-			Formatter:      &formatter,
+			PackageManager:     &pkgMgr,
+			Formatter:          &formatter,
+			MaxParallelWorkers: &maxParallelWorkers,
 		},
 	}
 }
@@ -163,6 +167,9 @@ func mergeExecutionPrefs(dst *WorkflowExecutionPrefs, src WorkflowExecutionPrefs
 	if src.Formatter != nil {
 		dst.Formatter = src.Formatter
 	}
+	if src.MaxParallelWorkers != nil {
+		dst.MaxParallelWorkers = src.MaxParallelWorkers
+	}
 }
 
 func resolvePreferences(projectPath, project string) (WorkflowPreferences, error) {
@@ -196,6 +203,7 @@ var knownPreferenceKeys = map[string]struct{}{
 	"review.require_findings_first":                  {},
 	"execution.package_manager":                      {},
 	"execution.formatter":                            {},
+	"execution.max_parallel_workers":                 {},
 }
 
 func isValidPreferenceKey(key string) bool {
@@ -251,6 +259,12 @@ func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 		p.Execution.PackageManager = &value
 	case "execution.formatter":
 		p.Execution.Formatter = &value
+	case "execution.max_parallel_workers":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 8 {
+			return fmt.Errorf("execution.max_parallel_workers must be an integer between 1 and 8")
+		}
+		p.Execution.MaxParallelWorkers = &n
 	default:
 		return deps.ErrorWithHints(
 			fmt.Sprintf("unknown preference key %q", key),
@@ -299,6 +313,16 @@ func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSou
 		return "default"
 	}
 
+	intSrc := func(_, r, l *int) string {
+		if l != nil {
+			return "local"
+		}
+		if r != nil {
+			return "repo"
+		}
+		return "default"
+	}
+
 	return []preferenceSource{
 		{"verification.test_command", strPtrVal(resolved.Verification.TestCommand), strSrc(defaults.Verification.TestCommand, repo.Verification.TestCommand, local.Verification.TestCommand)},
 		{"verification.lint_command", strPtrVal(resolved.Verification.LintCommand), strSrc(defaults.Verification.LintCommand, repo.Verification.LintCommand, local.Verification.LintCommand)},
@@ -309,6 +333,7 @@ func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSou
 		{"review.require_findings_first", boolPtrStr(resolved.Review.RequireFindingsFirst), boolSrc(defaults.Review.RequireFindingsFirst, repo.Review.RequireFindingsFirst, local.Review.RequireFindingsFirst)},
 		{"execution.package_manager", strPtrVal(resolved.Execution.PackageManager), strSrc(defaults.Execution.PackageManager, repo.Execution.PackageManager, local.Execution.PackageManager)},
 		{"execution.formatter", strPtrVal(resolved.Execution.Formatter), strSrc(defaults.Execution.Formatter, repo.Execution.Formatter, local.Execution.Formatter)},
+		{"execution.max_parallel_workers", intPtrStr(resolved.Execution.MaxParallelWorkers), intSrc(defaults.Execution.MaxParallelWorkers, repo.Execution.MaxParallelWorkers, local.Execution.MaxParallelWorkers)},
 	}, nil
 }
 
@@ -317,6 +342,13 @@ func strPtrVal(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+func intPtrStr(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
 }
 
 func boolPtrStr(p *bool) string {
