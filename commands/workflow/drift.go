@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -46,22 +47,41 @@ func loadManagedProjects() ([]ManagedProject, error) {
 
 // RepoDriftReport captures drift conditions for one managed project.
 type RepoDriftReport struct {
-	Project              ManagedProject `json:"project"`
-	Reachable            bool           `json:"reachable"`              // false if path doesn't exist
-	MissingCheckpoint    bool           `json:"missing_checkpoint"`     // no checkpoint file
-	StaleCheckpoint      bool           `json:"stale_checkpoint"`       // checkpoint older than threshold
-	CheckpointAgeDays    int            `json:"checkpoint_age_days"`    // -1 if no checkpoint
-	StaleProposalCount   int            `json:"stale_proposal_count"`   // proposals older than threshold
-	MissingWorkflowDir   bool           `json:"missing_workflow_dir"`   // no .agents/workflow/
-	MissingPlanStructure bool           `json:"missing_plan_structure"` // no .agents/workflow/plans/
-	Warnings             []string       `json:"warnings"`
-	Status               string         `json:"status"` // healthy|warn|unreachable
+	Project                    ManagedProject `json:"project"`
+	Reachable                  bool           `json:"reachable"`                    // false if path doesn't exist
+	MissingCheckpoint          bool           `json:"missing_checkpoint"`           // no checkpoint file
+	StaleCheckpoint            bool           `json:"stale_checkpoint"`             // checkpoint older than threshold
+	CheckpointAgeDays          int            `json:"checkpoint_age_days"`          // -1 if no checkpoint
+	StaleProposalCount         int            `json:"stale_proposal_count"`         // proposals older than threshold
+	MissingWorkflowDir         bool           `json:"missing_workflow_dir"`         // no .agents/workflow/
+	MissingPlanStructure       bool           `json:"missing_plan_structure"`       // no .agents/workflow/plans/
+	CompletedPlanIDs           []string       `json:"completed_plan_ids"`           // plans with status==completed (hygiene signal)
+	InconsistentArchivedPlanIDs []string      `json:"inconsistent_archived_plan_ids"` // plans with status==archived still in workflow/plans/ (error-level)
+	Warnings                   []string       `json:"warnings"`
+	Status                     string         `json:"status"` // healthy|warn|unreachable
+}
+
+// extractPlanStatus reads the status field from a PLAN.yaml byte slice.
+// Returns empty string if parsing fails or status is absent.
+func extractPlanStatus(data []byte) string {
+	var plan struct {
+		Status string `yaml:"status"`
+	}
+	if err := yaml.Unmarshal(data, &plan); err != nil {
+		return ""
+	}
+	return plan.Status
 }
 
 // detectRepoDrift inspects one managed project for workflow drift.
 // All checks are read-only.
 func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleDays int) RepoDriftReport {
-	report := RepoDriftReport{Project: project, CheckpointAgeDays: -1}
+	report := RepoDriftReport{
+		Project:                     project,
+		CheckpointAgeDays:           -1,
+		CompletedPlanIDs:            []string{},
+		InconsistentArchivedPlanIDs: []string{},
+	}
 
 	// 1. Reachability
 	if _, err := os.Stat(project.Path); err != nil {
@@ -122,6 +142,31 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 		// Only warn if workflow dir exists (otherwise workflow dir warning is enough)
 		if !report.MissingWorkflowDir {
 			report.Warnings = append(report.Warnings, "no .agents/workflow/plans/ directory — no canonical plans")
+		}
+	}
+
+	// 6. Completed and inconsistently-archived plans
+	if !report.MissingPlanStructure {
+		if entries, err := os.ReadDir(plansDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				planFile := filepath.Join(plansDir, e.Name(), "PLAN.yaml")
+				data, err := os.ReadFile(planFile)
+				if err != nil {
+					continue
+				}
+				status := extractPlanStatus(data)
+				switch status {
+				case "completed":
+					report.CompletedPlanIDs = append(report.CompletedPlanIDs, e.Name())
+					report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q is completed but not archived", e.Name()))
+				case "archived":
+					report.InconsistentArchivedPlanIDs = append(report.InconsistentArchivedPlanIDs, e.Name())
+					report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q has status=archived but still exists in workflow/plans/ — archive may be incomplete", e.Name()))
+				}
+			}
 		}
 	}
 
@@ -250,6 +295,12 @@ func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
 		for _, w := range r.Warnings {
 			fmt.Fprintf(os.Stdout, "    %s↳ %s%s\n", ui.Dim, ui.Reset, w)
 		}
+		if len(r.CompletedPlanIDs) > 0 {
+			fmt.Fprintf(os.Stdout, "    %s↳ completed plans pending archive: %s%s\n", ui.Dim, ui.Reset, joinIDs(r.CompletedPlanIDs))
+		}
+		if len(r.InconsistentArchivedPlanIDs) > 0 {
+			fmt.Fprintf(os.Stdout, "    %s↳ %sinconsistent archived plans: %s\n", ui.Dim, ui.Reset, joinIDs(r.InconsistentArchivedPlanIDs))
+		}
 	}
 	fmt.Fprintln(os.Stdout)
 
@@ -258,4 +309,9 @@ func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
 		agg.HealthyCount, agg.WarnCount, agg.UnreachableCount)
 	fmt.Fprintf(os.Stdout, "  report saved: %s\n", config.DisplayPath(driftReportPath()))
 	return nil
+}
+
+// joinIDs joins a slice of IDs with ", " for display.
+func joinIDs(ids []string) string {
+	return strings.Join(ids, ", ")
 }
