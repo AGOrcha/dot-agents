@@ -125,3 +125,48 @@ Full schema: `schemas/workflow-scope-evidence.schema.json` (added by `sidecar-sc
 - Changes to TASKS.yaml schema
 - Graph building (owned by kg-command-surface-readiness)
 - review-pr, review-delta, self-review skill upgrades (Phase 3+)
+
+---
+
+## Ralph Pipeline Notes
+
+**Direct impact: low. No ralph-facing commands change. One quality gate opportunity.**
+
+### What ralph does not consume
+
+Ralph does not use evidence sidecars, `derive-scope`, or skills. The `orchestrator-session-start`
+and `plan-wave-picker` skill changes in this plan have zero effect on ralph's operation.
+The PE-WS spec §10 explicitly excludes ralph from the scope of evidence-backed planning.
+
+### `workflow plan check-scope` as a ralph quality gate
+
+`check-scope` is the most ralph-relevant new command this plan introduces. After a task worker
+completes and closeout runs, ralph could call:
+
+```
+dot-agents workflow plan check-scope <plan_id> <task_id> --from-git-diff
+```
+
+This compares actual changed files to the task's `final_write_scope` and warns on:
+- Files changed outside scope (escaped scope)
+- Required paths that were not touched (incomplete implementation)
+- Excluded paths that were touched anyway (scope violation)
+
+Exit codes (`0=clean`, `1=warnings`, `2=no-sidecar`) are machine-readable. Ralph can gate
+closeout approval on exit code 0 or treat exit 1 as a review flag rather than a hard block.
+
+### `fanout-evidence-integration` warning surfaces in ralph indirectly
+
+The fanout warning ("code task has no sidecar and graph is healthy") fires during `workflow
+fanout` — which ralph calls as part of its task delegation flow. This means ralph sessions
+will see the warning in their output once `fanout-evidence-integration` lands. The warning is
+suppressible via `--skip-evidence-check`. Ralph pipeline owners should decide whether to
+suppress globally or treat as a soft signal to run `derive-scope` before the next planning pass.
+
+### Insight: `check-scope` as a CI gate
+
+The most impactful follow-on for ralph: run `workflow plan check-scope` in CI after each PR
+that closes a workflow task. A scope violation in CI is earlier and cheaper than discovering it
+during orchestrator closeout or review. This requires no changes to PE-WS — just a CI step
+that calls `check-scope --from-git-diff` and fails the build on exit code 2 (no sidecar,
+task was supposed to have one) or exits 1 as a review annotation.

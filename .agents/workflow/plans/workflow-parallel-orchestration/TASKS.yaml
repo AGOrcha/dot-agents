@@ -1,0 +1,174 @@
+schema_version: 1
+plan_id: workflow-parallel-orchestration
+tasks:
+    - id: p1-select-all-eligible
+      title: Implement selectAllEligibleTasks() — cross-plan unblocked task set
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: |-
+        New function alongside selectNextCanonicalTask in plan_task.go. Accepts projectPath +
+        optional plan ID filter (same as next). Returns []workflowNextTaskSuggestion — ALL tasks
+        across active plans where: plan.Status==active, task.Status pending or in_progress, no
+        incomplete dependencies, no active delegation lock. selectNextCanonicalTask becomes a
+        wrapper that calls this and returns [0]. write_scope already on the suggestion struct —
+        no schema change needed.
+
+        Cross-plan dep resolution (spec §4.3): a depends_on entry containing ''/'' is a cross-plan
+        reference. Split on first ''/'' to get planID + taskID. Load
+        workflow/plans/<planID>/TASKS.yaml and check that task''s status == completed. If the
+        referenced plan or task cannot be loaded, treat the dep as unsatisfied and emit a warning.
+        This is the only place dep resolution logic lives — p2 and p3 reuse this function.
+    - id: p2-conflict-detection
+      title: Implement write-scope conflict detection and batch grouping
+      status: pending
+      depends_on:
+        - p1-select-all-eligible
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: |-
+        Given []workflowNextTaskSuggestion, compute ConflictsWith []string per task (other task IDs
+        whose write_scope overlaps). Two tasks conflict if any path in one scope is a prefix of or
+        equal to any path in the other (directory-aware: ''commands/workflow/'' conflicts with
+        ''commands/workflow/plan_task.go''). Also compute MaxNonConflictingBatch: the largest subset
+        of eligible tasks with zero pairwise conflicts (greedy, order by priority).
+        Output struct: EligibleTasks []AnnotatedTask, MaxBatch []string (task IDs), ConflictGraph
+        map[string][]string.
+        Schema rule (additive struct pattern): ConflictsWith []string in AnnotatedTask must be
+        initialized as []string{} not nil. MaxBatch []string{} not nil. ConflictGraph values must
+        be []string{} not nil for each key. All render/display functions for AnnotatedTask are
+        introduced in p3 (eligible cmd) — ensure p3's renderer surfaces all new fields.
+    - id: p3-eligible-cmd
+      title: Implement workflow eligible command
+      status: pending
+      depends_on:
+        - p2-conflict-detection
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: |-
+        New top-level workflow subcommand (not under plan). Flags: --plan (optional
+        comma-separated), --limit N (override max_parallel_workers pref). Calls
+        selectAllEligibleTasks + conflict detection. Output: per-task rows showing plan_id,
+        task_id, title, write_scope, conflicts_with. Summary line: ''N tasks eligible, M can run
+        in parallel (limited by max_parallel_workers=K)''. JSON: full AnnotatedTask slice +
+        MaxBatch field + per-task has_evidence (bool: sidecar file exists at
+        evidence/<task_id>.scope.yaml) + evidence_confidence (''none''|''low''|''medium''|''high''
+        from sidecar confidence field; ''none'' when no sidecar). workflow next is unchanged.
+        Schema rule: EvidenceConfidence must never be empty string — normalize to ''none'' when
+        no sidecar exists. has_evidence=false and evidence_confidence=''none'' must always
+        co-occur; assert this invariant in p6 tests. All AnnotatedTask renderers introduced here
+        must surface ConflictsWith, HasEvidence, EvidenceConfidence, and WriteScope fields.
+        Empty write_scope caution (spec §4.2): add WriteScope_declared bool field to AnnotatedTask
+        (default true; false when write_scope is empty). Human renderer appends ''[no write_scope
+        declared]'' to the task row. JSON output includes write_scope_declared field. Applies to
+        all task types — code and non-code (skills, prompts, YAML) alike.
+    - id: p4-max-parallel-pref
+      title: Add max_parallel_workers workflow preference key
+      status: pending
+      depends_on:
+        - p3-eligible-cmd
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/prefs.go
+      verification_required: true
+      notes: 'Add ''max_parallel_workers'' as a valid preference key in the prefs system (prefs.go). Type: int string (''1''-''8''). Default: 1 (safe — serialized). Resolved by resolvePreferences() alongside existing keys. workflow eligible reads this as the default --limit when no flag given. workflow prefs output includes it. Validation: must be integer 1-8.'
+    - id: p5-isp-prompt-update
+      title: Convert ISP prompt to skill; update orchestrator-session-start to chain eligible + ISP
+      status: pending
+      depends_on:
+        - p4-max-parallel-pref
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/isp.prompt.md
+        - .agents/skills/isp/
+        - .agents/skills/orchestrator-session-start/
+      verification_required: true
+      notes: |-
+        Use /skill-architect for both skill updates.
+
+        orchestrator-session-start (redesign via /skill-architect):
+        - Accept plan IDs as scope input
+        - Call workflow eligible --json --plan <scope> --limit <max_parallel_workers>
+        - Check active delegation state (open bundles?)
+        - Present orientation summary: eligible count, max_batch, per-task evidence_confidence
+        - Chain to ISP skill with pre-gathered context
+
+        ISP skill (convert from isp.prompt.md via /skill-architect):
+        - Step 1 (startup): simplified — orientation already done by orchestrator-session-start
+        - Step 2 (task selection): use pre-gathered eligible output; max_batch is the fanout set;
+          parallel mode trigger already resolved (max_batch > 1 AND no active delegations)
+        - Step 3 (direct vs fanout): unchanged from isp.prompt.md
+        - Step 4 (fanout): parallel mode creates one bundle per task in max_batch; if task
+          evidence_confidence is medium or high, load sidecar required_reads + decision_locks
+          into bundle context; note thin context for low/none
+        - Step 5 (staged runtime): unchanged; subagent spawn discipline unchanged
+
+        Remove ghost ''parallel worker limit'' reference from isp.prompt.md before conversion.
+    - id: p6-tests
+      title: Tests for eligible command, conflict detection, and evidence fields
+      status: pending
+      depends_on:
+        - p5-isp-prompt-update
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/plan_task_test.go
+      verification_required: true
+      notes: |-
+        selectAllEligibleTasks: (1) single plan, 2 unblocked tasks returned; (2) task with
+        incomplete dep excluded; (3) active-delegation-locked task excluded; (4) non-active plan
+        tasks excluded; (5) --plan filter scopes correctly across multi-plan fixture;
+        (6) cross-plan dep (''other-plan/task-id'') satisfied when referenced task is completed —
+        task included; (7) cross-plan dep unsatisfied (referenced task pending) — task excluded;
+        (8) cross-plan dep with missing plan/task — treated as unsatisfied, warning emitted.
+        conflict detection: (6) exact path match conflicts; (7) directory prefix conflicts
+        (''commands/workflow/'' vs ''commands/workflow/plan_task.go''); (8) non-overlapping paths
+        → no conflict; (9) MaxBatch is maximal non-conflicting set.
+        eligible command: (10) --limit respected; (11) --json output has MaxBatch field; (12)
+        max_parallel_workers pref used as default limit; (13) has_evidence=true when sidecar
+        file exists at evidence/<task_id>.scope.yaml; (14) has_evidence=false + evidence_confidence=
+        ''none'' when no sidecar; (15) evidence_confidence reads sidecar confidence field correctly;
+        (16) task with empty write_scope shows write_scope_declared=false in JSON and appends
+        ''[no write_scope declared]'' in human output; (17) task with non-empty write_scope shows
+        write_scope_declared=true.
+    - id: p7-skill-architect-wave-picker
+      title: Transform plan-wave-picker skill via /skill-architect to interpret workflow eligible output
+      status: pending
+      depends_on:
+        - p5-isp-prompt-update
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/plan-wave-picker/
+      verification_required: false
+      notes: |-
+        Use /skill-architect to redesign plan-wave-picker. New role: interpreter + presenter,
+        not priority computer. All deterministic logic lives in Go (priority sort, conflict
+        detection, max_batch computation). The skill adds the interpretation layer.
+
+        Skill behavior:
+        - Call workflow eligible --json --plan <scope>
+        - Read max_batch from output (pre-computed — do not recompute)
+        - Annotate each task in max_batch with a readiness label from evidence_confidence:
+            high/medium → delegation-ready
+            low         → delegation-possible (flag thin context, suggest review)
+            none        → cautious (recommend derive-scope first if graph is ready)
+        - Output: recommended batch (max_batch), per-task readiness label, per-task one-line
+          next-step guidance
+        - Surface any empty write_scope tasks as a caution (spec §Q3 / §4.2)
+
+        The skill does not touch priority math or conflict graphs — those are settled before
+        the skill is invoked.

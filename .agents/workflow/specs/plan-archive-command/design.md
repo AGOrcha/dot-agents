@@ -93,6 +93,12 @@ result without re-copying unchanged files.
 `os.Rename` the entire directory (atomic on same filesystem). Then open and stamp `PLAN.yaml`
 `status: archived` + `updated_at: <now>` in the new location.
 
+**`evidence/` subdirectory:** `.agents/workflow/plans/<plan_id>/evidence/` sidecar files
+(produced by the planner-evidence-backed-write-scope system) are treated as "other files"
+(sha256+mtime check). They are planner research artifacts, not canonical execution state —
+the time+hash rule (overwrite if source is newer or different; skip if identical; warn if
+history copy is newer) is appropriate and preserves the most recent planner reasoning.
+
 **Failure recovery (§3.3a):**
 If `os.RemoveAll` of the source directory fails after a successful merge, retry once
 automatically in code before surfacing the error. Because the merge is idempotent (hash check
@@ -219,7 +225,7 @@ Flags:
 ### 4.6 Reusable helpers
 
 - `historyBaseDir(projectPath string) string` added to `state.go` alongside `plansBaseDir`.
-- `copyWorkflowArtifact` from `delegation.go` reused for individual file copy.
+- `copyWorkflowArtifact` (extracted from `delegation.go` into `fs.go` by p0-extract-fs-helpers) reused for individual file copy.
 - New `mergeWorkflowPlanDir` function (in `plan_task.go` or new `archive.go`) owns the
   content-aware merge walk — does NOT reuse `copyWorkflowDir` directly since it needs
   per-file classification and hash logic.

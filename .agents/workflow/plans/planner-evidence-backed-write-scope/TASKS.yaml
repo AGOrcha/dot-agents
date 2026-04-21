@@ -16,7 +16,17 @@ tasks:
         - commands/workflow/plan_task.go
         - commands/workflow/cmd.go
       verification_required: true
-      notes: 'Add schemas/workflow-scope-evidence.schema.json covering all spec §4.2 fields. Add Go struct types for read/write in commands/workflow/plan_task.go. Unit test: unmarshal illustrative example from spec. No command routing. Do not modify TASKS.yaml schema.'
+      notes: |-
+        Add schemas/workflow-scope-evidence.schema.json covering all spec §4.2 fields. Add Go
+        struct types for read/write in commands/workflow/plan_task.go. Unit test: unmarshal
+        illustrative example from spec. No command routing. Do not modify TASKS.yaml schema.
+        Schema rule (additive struct pattern): all list fields in the Go sidecar struct (Queries,
+        RequiredPaths, OptionalPaths, ExcludedPaths, DecisionLocks, RequiredReads, Provides,
+        Consumes) must use []T{} not nil — JSON must marshal to [] not null.
+        Schema rule (Go struct ↔ JSON schema sync): after defining the Go struct, verify every
+        field in schemas/workflow-scope-evidence.schema.json maps 1:1 to a struct field and vice
+        versa. Use additionalProperties: false on nested objects in the JSON schema to catch
+        future drift at validation time.
     - id: sidecar-manual-experiment
       title: Hand-author scope-evidence sidecars for 2 real tasks; validate shape
       status: pending
@@ -71,6 +81,8 @@ tasks:
       depends_on:
         - sidecar-schema
         - derive-scope-command
+        - workflow-parallel-orchestration/p5-isp-prompt-update
+        - workflow-parallel-orchestration/p7-skill-architect-wave-picker
       blocks:
         - fanout-evidence-integration
       owner: dot-agents
@@ -82,13 +94,30 @@ tasks:
         - .agents/skills/plan-wave-picker/SKILL.md
         - .agents/skills/plan-wave-picker/instructions
       verification_required: false
-      notes: 'orchestrator-session-start: load sidecar as execution contract before fanout. agent-start: surface decision_locks and required_reads at session start. plan-wave-picker: prefer higher-confidence sidecar as tiebreaker. Skill instruction changes only — no Go code.'
+      notes: |-
+        Use /skill-architect for both orchestrator-session-start and plan-wave-picker updates.
+
+        orchestrator-session-start: the structural redesign (eligible chaining + ISP skill
+        chaining) is handled in workflow-parallel-orchestration p5 (formal dep above — do not
+        start until p5 is complete). This task adds evidence-specific behavior ON TOP: surface
+        sidecar required_reads and decision_locks for tasks with medium/high confidence as
+        additional context for the ISP skill when building delegation bundles.
+
+        plan-wave-picker: the full interpreter redesign is handled in workflow-parallel-orchestration
+        p7 (formal dep above — do not start until p7 is complete). This task adds sidecar
+        confidence interpretation guidance to the WPO-redesigned skill. Do not duplicate the
+        core eligible-calling logic.
+
+        agent-start: surface decision_locks and required_reads from sidecar at session start.
+        Skill instruction changes only — no Go code.
     - id: fanout-evidence-integration
       title: Add scope-evidence warnings to workflow fanout
       status: pending
       depends_on:
         - check-scope-command
         - skill-upgrades
+        - plan-archive-command/p0-extract-fs-helpers
+        - workflow-parallel-orchestration/p4-max-parallel-pref
       blocks: []
       owner: dot-agents
       app_type: go-cli
@@ -97,4 +126,14 @@ tasks:
         - commands/workflow/plan_task.go
         - commands/workflow/delegation.go
       verification_required: true
-      notes: Warn (not block) when code task has no sidecar and graph is healthy. Warn when sidecar exists but confidence is low. Both suppressible via --skip-evidence-check. Unit tests for each warning path.
+      notes: |-
+        Warn (not block) when code task has no sidecar and graph is healthy. Warn when sidecar
+        exists but confidence is low. Both suppressible via --skip-evidence-check. Unit tests for
+        each warning path.
+
+        Coordination: sequencing enforced by formal cross-plan deps above.
+        plan-archive-command/p0-extract-fs-helpers: copyWorkflowArtifact/copyWorkflowDir live
+        in fs.go after p0 — build on the restructured file to avoid merge conflicts.
+        workflow-parallel-orchestration/p4-max-parallel-pref: workflow eligible is fully
+        available after p4; fanout warnings should call selectAllEligibleTasks rather than
+        reimplementing eligibility logic independently.
