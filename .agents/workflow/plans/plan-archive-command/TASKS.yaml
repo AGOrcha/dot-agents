@@ -3,7 +3,7 @@ plan_id: plan-archive-command
 tasks:
     - id: p1-historybasedir-helper
       title: Add historyBaseDir() helper to state.go
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -50,6 +50,11 @@ tasks:
         CompletedPlanIDs: plans in workflow/plans/ where status==completed (hygiene signal).
         InconsistentArchivedPlanIDs: plans in workflow/plans/ where status==archived (error-level — archive was interrupted).
         Update drift JSON output and human-readable render for both fields.
+        Schema rule (additive struct pattern): initialize both fields as []string{} not nil —
+        JSON must marshal to [] not null. Update all render/display functions that loop over
+        RepoDriftReport in this same task (not deferred). Write one constructor-level test
+        asserting both fields are populated (non-nil) even when empty — p6 covers behavior tests
+        but the constructor test belongs here.
     - id: p5-sweep-extension
       title: 'Extend sweep: SweepActionArchiveCompletedPlans'
       status: pending
@@ -67,6 +72,10 @@ tasks:
         CompletedPlanID from drift report. applySweepAction() calls runWorkflowPlanArchive() for each.
         RequiresConfirmation=true (destructive: removes source dir). Per-plan confirm loop mirrors
         existing sweep apply pattern. Archive failure for one plan → log and continue (no early exit).
+        Schema rule: SweepActionArchiveCompletedPlans is a new SweepActionType const — grep all
+        switch-on-SweepActionType statements across the package before marking done. An unhandled
+        case silently falls through with no compile error. Ensure exhaustive case coverage in
+        applySweepAction() and any other switch that dispatches on this type.
     - id: p6-tests
       title: Write table-driven tests for archive + drift + health changes
       status: pending

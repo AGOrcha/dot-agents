@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-p1-historybasedir-helper-1776745216
+parent_plan_id: plan-archive-command
+parent_task_id: p1-historybasedir-helper
+title: Add historyBaseDir() helper to state.go
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/state.go
+success_criteria: Add func historyBaseDir(projectPath string) string alongside plansBaseDir(). Returns filepath.Join(projectPath, '.agents', 'history'). Needed by archive and drift.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: active
+created_at: "2026-04-21T04:20:16Z"
+updated_at: "2026-04-21T04:20:16Z"
