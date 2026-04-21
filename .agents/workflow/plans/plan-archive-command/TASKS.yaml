@@ -57,7 +57,7 @@ tasks:
         but the constructor test belongs here.
     - id: p5-sweep-extension
       title: 'Extend sweep: SweepActionArchiveCompletedPlans'
-      status: pending
+      status: in_progress
       depends_on:
         - p4-drift-extension
         - p4b-health-extension
