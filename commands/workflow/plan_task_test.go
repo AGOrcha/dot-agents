@@ -365,3 +365,267 @@ func TestRunWorkflowPlanArchive_BulkPartialFailure(t *testing.T) {
 		t.Errorf("plan-ok should still be archived after plan-bad failure: %v", err)
 	}
 }
+
+// ── selectAllEligibleTasks tests ───────────────────────────────────────────────
+
+// writePlanFixture writes a PLAN.yaml + TASKS.yaml pair into proj under
+// .agents/workflow/plans/<planID>/.
+func writePlanFixture(t *testing.T, proj, planID, status string, tasks []CanonicalTask) {
+	t.Helper()
+	dir := filepath.Join(proj, ".agents", "workflow", "plans", planID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	plan := CanonicalPlan{
+		SchemaVersion: 1, ID: planID, Title: planID + " plan", Status: status,
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	planData, _ := yaml.Marshal(plan)
+	if err := os.WriteFile(filepath.Join(dir, "PLAN.yaml"), planData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	tf := CanonicalTaskFile{SchemaVersion: 1, PlanID: planID, Tasks: tasks}
+	tfData, _ := yaml.Marshal(tf)
+	if err := os.WriteFile(filepath.Join(dir, "TASKS.yaml"), tfData, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeDelegationFixture writes an active delegation contract for the given task.
+func writeDelegationFixture(t *testing.T, proj, planID, taskID string) {
+	t.Helper()
+	c := &DelegationContract{
+		SchemaVersion: 1,
+		ID:            "del-" + taskID,
+		ParentPlanID:  planID,
+		ParentTaskID:  taskID,
+		Title:         "test delegation for " + taskID,
+		WriteScope:    []string{"commands/"},
+		Status:        "active",
+		CreatedAt:     "2026-01-01T00:00:00Z",
+		UpdatedAt:     "2026-01-01T00:00:00Z",
+	}
+	if err := saveDelegationContract(proj, c); err != nil {
+		t.Fatalf("save delegation: %v", err)
+	}
+}
+
+// TestSelectAllEligibleTasks_ReturnsUnblockedTasks verifies that two unblocked
+// pending tasks from a single active plan are both returned (positive test).
+func TestSelectAllEligibleTasks_ReturnsUnblockedTasks(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-a", "active", []CanonicalTask{
+		{ID: "t1", Title: "Task 1", Status: "pending"},
+		{ID: "t2", Title: "Task 2", Status: "pending"},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 eligible tasks, got %d: %v", len(got), got)
+	}
+	ids := map[string]bool{got[0].TaskID: true, got[1].TaskID: true}
+	if !ids["t1"] || !ids["t2"] {
+		t.Errorf("expected both t1 and t2; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_ExcludesActiveDelegationTask verifies that a task
+// with an active delegation is NOT returned (negative test — delegation lock).
+func TestSelectAllEligibleTasks_ExcludesActiveDelegationTask(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-b", "active", []CanonicalTask{
+		{ID: "free", Title: "Free task", Status: "pending"},
+		{ID: "locked", Title: "Locked task", Status: "pending"},
+	})
+	writeDelegationFixture(t, proj, "plan-b", "locked")
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, s := range got {
+		if s.TaskID == "locked" {
+			t.Errorf("locked task should be excluded but was returned: %+v", s)
+		}
+	}
+	if len(got) != 1 || got[0].TaskID != "free" {
+		t.Errorf("expected only 'free' task; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_ExcludesBlockedByDependency verifies that a task
+// whose dependency is not yet completed is excluded (negative test — blocked dep).
+func TestSelectAllEligibleTasks_ExcludesBlockedByDependency(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-c", "active", []CanonicalTask{
+		{ID: "dep", Title: "Dep task", Status: "pending"},
+		{ID: "blocked", Title: "Blocked task", Status: "pending", DependsOn: []string{"dep"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, s := range got {
+		if s.TaskID == "blocked" {
+			t.Errorf("task with incomplete dep should be excluded but was returned: %+v", s)
+		}
+	}
+	// Only the dep task itself (which has no deps) should be eligible.
+	if len(got) != 1 || got[0].TaskID != "dep" {
+		t.Errorf("expected only 'dep' task eligible; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_ExcludesNonActivePlans verifies that tasks in a
+// paused plan are excluded entirely.
+func TestSelectAllEligibleTasks_ExcludesNonActivePlans(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "active-plan", "active", []CanonicalTask{
+		{ID: "good", Title: "Good task", Status: "pending"},
+	})
+	writePlanFixture(t, proj, "paused-plan", "paused", []CanonicalTask{
+		{ID: "paused-task", Title: "Paused task", Status: "pending"},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, s := range got {
+		if s.PlanID == "paused-plan" {
+			t.Errorf("task from non-active plan should be excluded: %+v", s)
+		}
+	}
+	if len(got) != 1 || got[0].TaskID != "good" {
+		t.Errorf("expected only 'good' task; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_PlanFilterScopes verifies that the planFilter
+// parameter restricts results to only the named plans.
+func TestSelectAllEligibleTasks_PlanFilterScopes(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-x", "active", []CanonicalTask{
+		{ID: "tx", Title: "TX", Status: "pending"},
+	})
+	writePlanFixture(t, proj, "plan-y", "active", []CanonicalTask{
+		{ID: "ty", Title: "TY", Status: "pending"},
+	})
+
+	got, err := selectAllEligibleTasks(proj, []string{"plan-x"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].PlanID != "plan-x" {
+		t.Errorf("expected only plan-x tasks; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_CrossPlanDepSatisfied verifies that a task with a
+// cross-plan dependency pointing to a completed task IS returned.
+func TestSelectAllEligibleTasks_CrossPlanDepSatisfied(t *testing.T) {
+	proj := t.TempDir()
+	// other-plan has task-done which is completed.
+	writePlanFixture(t, proj, "other-plan", "active", []CanonicalTask{
+		{ID: "task-done", Title: "Done", Status: "completed"},
+	})
+	// main-plan has a task depending on other-plan/task-done.
+	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
+		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"other-plan/task-done"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, s := range got {
+		if s.TaskID == "main-task" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("main-task with satisfied cross-plan dep should be eligible; got %v", got)
+	}
+}
+
+// TestSelectAllEligibleTasks_CrossPlanDepUnsatisfied verifies that a task with a
+// cross-plan dependency pointing to a non-completed task is excluded.
+func TestSelectAllEligibleTasks_CrossPlanDepUnsatisfied(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "other-plan", "active", []CanonicalTask{
+		{ID: "task-pending", Title: "Pending", Status: "pending"},
+	})
+	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
+		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"other-plan/task-pending"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, s := range got {
+		if s.TaskID == "main-task" {
+			t.Errorf("main-task with unsatisfied cross-plan dep should be excluded; got %+v", s)
+		}
+	}
+}
+
+// TestSelectAllEligibleTasks_CrossPlanDepMissingPlan verifies that a cross-plan
+// dep referencing a non-existent plan is treated as unsatisfied (task excluded).
+func TestSelectAllEligibleTasks_CrossPlanDepMissingPlan(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
+		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"ghost-plan/any-task"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, s := range got {
+		if s.TaskID == "main-task" {
+			t.Errorf("main-task with missing cross-plan dep should be excluded; got %+v", s)
+		}
+	}
+}
+
+// TestSelectAllEligibleTasks_InProgressBeforePending verifies that in_progress
+// tasks appear before pending tasks in the returned slice.
+func TestSelectAllEligibleTasks_InProgressBeforePending(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-order", "active", []CanonicalTask{
+		{ID: "p1", Title: "Pending 1", Status: "pending"},
+		{ID: "ip", Title: "In Progress", Status: "in_progress"},
+		{ID: "p2", Title: "Pending 2", Status: "pending"},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) < 1 {
+		t.Fatal("expected at least one result")
+	}
+	if got[0].TaskID != "ip" {
+		t.Errorf("expected in_progress task first; got %q", got[0].TaskID)
+	}
+}
+
+// TestSelectAllEligibleTasks_ReturnsEmptySliceNotNil verifies that the function
+// returns an empty slice (not nil) when no eligible tasks exist.
+func TestSelectAllEligibleTasks_ReturnsEmptySliceNotNil(t *testing.T) {
+	proj := t.TempDir()
+	// No plans at all.
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected empty slice, not nil")
+	}
+}

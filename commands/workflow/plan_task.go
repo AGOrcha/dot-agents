@@ -1244,112 +1244,86 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 	}
 
 	explicitPlanID = strings.TrimSpace(explicitPlanID)
-	if explicitPlanID != "" {
-		filteredIDs := parsePlanIDFilter(explicitPlanID)
-		if len(filteredIDs) == 0 {
-			return nil, nil
-		}
+	planFilter := parsePlanIDFilter(explicitPlanID)
+	if explicitPlanID != "" && len(planFilter) == 0 {
+		return nil, nil
+	}
+	if len(planFilter) > 0 {
 		available := make(map[string]bool, len(ids))
 		for _, id := range ids {
 			available[id] = true
 		}
-		ids = ids[:0]
-		for _, id := range filteredIDs {
+		for _, id := range planFilter {
 			if !available[id] {
 				return nil, fmt.Errorf("plan %q not found", id)
 			}
-			ids = append(ids, id)
 		}
 	}
 
+	// Apply delegation-based plan locking: when no explicit plan is given, only
+	// consider plans that are locked (have active delegations). When explicit, only
+	// consider plans that are NOT locked.
 	delegations, err := listDelegationContracts(projectPath)
 	if err != nil {
 		return nil, err
 	}
-
 	lockedPlans := activeDelegationPlanIDs(delegations)
-	if explicitPlanID == "" {
-		ids = filterPlanIDsLocked(ids, lockedPlans)
+
+	effectiveIDs := ids
+	if len(planFilter) > 0 {
+		effectiveIDs = planFilter
+		effectiveIDs = filterPlanIDsUnlocked(effectiveIDs, lockedPlans)
 	} else {
-		ids = filterPlanIDsUnlocked(ids, lockedPlans)
+		effectiveIDs = filterPlanIDsLocked(effectiveIDs, lockedPlans)
 	}
-	if len(ids) == 0 {
+	if len(effectiveIDs) == 0 {
 		return nil, nil
 	}
-	activeDelegations := make(map[string]bool, len(delegations))
-	for _, c := range delegations {
-		if c.Status == "pending" || c.Status == "active" {
-			activeDelegations[c.ParentTaskID] = true
-		}
+
+	// Use selectAllEligibleTasks scoped to effectiveIDs to get the candidate pool.
+	candidates, err := selectAllEligibleTasks(projectPath, effectiveIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
 	}
 
-	type candidate struct {
-		suggestion workflowNextTaskSuggestion
-		priority   int
+	// Re-rank candidates by priority using focus-task information.
+	type ranked struct {
+		s        workflowNextTaskSuggestion
+		priority int
 	}
-
-	var best *candidate
-	for _, id := range ids {
-		plan, err := loadCanonicalPlan(projectPath, id)
-		if err != nil || plan.Status != "active" {
-			continue
-		}
-		tf, err := loadCanonicalTasks(projectPath, id)
-		if err != nil {
-			return nil, fmt.Errorf("load tasks for plan %q: %w", id, err)
-		}
-		for _, task := range tf.Tasks {
-			if activeDelegations[task.ID] {
-				continue
-			}
-			if task.Status != "in_progress" && task.Status != "pending" {
-				continue
-			}
-			if len(incompleteCanonicalDependencies(tf.Tasks, task.DependsOn)) > 0 {
-				continue
-			}
-
-			c := candidate{
-				suggestion: workflowNextTaskSuggestion{
-					PlanID:               plan.ID,
-					PlanTitle:            plan.Title,
-					TaskID:               task.ID,
-					TaskTitle:            task.Title,
-					Status:               task.Status,
-					WriteScope:           append([]string(nil), task.WriteScope...),
-					VerificationRequired: task.VerificationRequired,
-					DependsOn:            append([]string(nil), task.DependsOn...),
-					AppType:              task.AppType,
-				},
-				priority: 3,
-			}
-
+	var best *ranked
+	for _, sug := range candidates {
+		plan, loadErr := loadCanonicalPlan(projectPath, sug.PlanID)
+		r := ranked{s: sug, priority: 3}
+		if loadErr == nil {
 			switch {
-			case task.Status == "in_progress" && plan.CurrentFocusTask == task.Title:
-				c.priority = 0
-				c.suggestion.Reason = "current focus task is already in progress"
-			case task.Status == "in_progress":
-				c.priority = 1
-				c.suggestion.Reason = "task is already in progress and unblocked"
-			case plan.CurrentFocusTask == task.Title:
-				c.priority = 2
-				c.suggestion.Reason = "current focus task is pending and all dependencies are complete"
+			case sug.Status == "in_progress" && plan.CurrentFocusTask == sug.TaskTitle:
+				r.priority = 0
+				r.s.Reason = "current focus task is already in progress"
+			case sug.Status == "in_progress":
+				r.priority = 1
+				r.s.Reason = "task is already in progress and unblocked"
+			case plan.CurrentFocusTask == sug.TaskTitle:
+				r.priority = 2
+				r.s.Reason = "current focus task is pending and all dependencies are complete"
 			default:
-				c.priority = 3
-				c.suggestion.Reason = "first pending unblocked task in an active canonical plan"
+				r.priority = 3
+				r.s.Reason = "first pending unblocked task in an active canonical plan"
 			}
-
-			if best == nil || c.priority < best.priority {
-				tmp := c
-				best = &tmp
-			}
+		}
+		if best == nil || r.priority < best.priority {
+			tmp := r
+			best = &tmp
 		}
 	}
 
 	if best == nil {
 		return nil, nil
 	}
-	return &best.suggestion, nil
+	return &best.s, nil
 }
 
 func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []string {
@@ -1369,6 +1343,197 @@ func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []str
 		}
 	}
 	return incomplete
+}
+
+// incompleteCanonicalDependenciesCrossplan checks whether all deps are satisfied,
+// resolving cross-plan references (entries containing "/") by loading the referenced
+// plan's TASKS.yaml. Intra-plan deps are checked against localTasks.
+// If a cross-plan reference cannot be loaded, it is treated as unsatisfied and a
+// warning is appended to warnings.
+func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []CanonicalTask, deps []string, warnings *[]string) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+
+	statusByID := make(map[string]string, len(localTasks))
+	for _, task := range localTasks {
+		statusByID[task.ID] = task.Status
+	}
+
+	// Cache loaded cross-plan task files to avoid redundant IO.
+	crossPlanCache := make(map[string]*CanonicalTaskFile)
+
+	var incomplete []string
+	for _, dep := range deps {
+		if !strings.Contains(dep, "/") {
+			// Intra-plan dependency.
+			if statusByID[dep] != "completed" {
+				incomplete = append(incomplete, dep)
+			}
+			continue
+		}
+
+		// Cross-plan dependency: format is "<planID>/<taskID>".
+		slashIdx := strings.Index(dep, "/")
+		refPlanID := dep[:slashIdx]
+		refTaskID := dep[slashIdx+1:]
+
+		tf, ok := crossPlanCache[refPlanID]
+		if !ok {
+			var loadErr error
+			tf, loadErr = loadCanonicalTasks(projectPath, refPlanID)
+			if loadErr != nil {
+				if warnings != nil {
+					*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: cannot load plan %q tasks: %v", dep, refPlanID, loadErr))
+				}
+				incomplete = append(incomplete, dep)
+				crossPlanCache[refPlanID] = nil // cache miss marker
+				continue
+			}
+			crossPlanCache[refPlanID] = tf
+		}
+		if tf == nil {
+			// Already failed to load; treat as unsatisfied.
+			incomplete = append(incomplete, dep)
+			continue
+		}
+
+		found := false
+		satisfied := false
+		for _, t := range tf.Tasks {
+			if t.ID == refTaskID {
+				found = true
+				satisfied = t.Status == "completed"
+				break
+			}
+		}
+		if !found {
+			if warnings != nil {
+				*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: task %q not found in plan %q", dep, refTaskID, refPlanID))
+			}
+			incomplete = append(incomplete, dep)
+			continue
+		}
+		if !satisfied {
+			incomplete = append(incomplete, dep)
+		}
+	}
+	return incomplete
+}
+
+// selectAllEligibleTasks returns ALL unblocked pending/in_progress tasks across active
+// plans, optionally filtered to the plans named in planFilter (comma-separated IDs or
+// a pre-split []string passed directly). Tasks are excluded when:
+//   - their plan has status != "active"
+//   - the task has an active delegation lock (pending or active DelegationContract)
+//   - any dependency is incomplete (intra-plan or cross-plan)
+//
+// The returned slice is ordered: in_progress before pending, then by plan order and
+// task order within each plan. Each entry carries the same workflowNextTaskSuggestion
+// shape that selectNextCanonicalTask uses. Returns an empty slice (not nil) when no
+// eligible tasks exist.
+func selectAllEligibleTasks(projectPath string, planFilter []string) ([]workflowNextTaskSuggestion, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return []workflowNextTaskSuggestion{}, err
+	}
+	if len(ids) == 0 {
+		return []workflowNextTaskSuggestion{}, nil
+	}
+
+	// Apply plan filter if provided.
+	if len(planFilter) > 0 {
+		filterSet := make(map[string]bool, len(planFilter))
+		for _, id := range planFilter {
+			filterSet[id] = true
+		}
+		filtered := ids[:0]
+		for _, id := range ids {
+			if filterSet[id] {
+				filtered = append(filtered, id)
+			}
+		}
+		ids = filtered
+		// Validate that every requested plan exists.
+		for _, wantID := range planFilter {
+			found := false
+			for _, id := range ids {
+				if id == wantID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("plan %q not found", wantID)
+			}
+		}
+	}
+
+	// Build active-delegation lookup keyed by task ID.
+	delegations, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return []workflowNextTaskSuggestion{}, err
+	}
+	activeDelegations := make(map[string]bool, len(delegations))
+	for _, c := range delegations {
+		if c.Status == "pending" || c.Status == "active" {
+			activeDelegations[c.ParentTaskID] = true
+		}
+	}
+
+	var eligible []workflowNextTaskSuggestion
+	for _, id := range ids {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil || plan.Status != "active" {
+			continue
+		}
+		tf, err := loadCanonicalTasks(projectPath, id)
+		if err != nil {
+			continue
+		}
+		for _, task := range tf.Tasks {
+			if task.Status != "pending" && task.Status != "in_progress" {
+				continue
+			}
+			if activeDelegations[task.ID] {
+				continue
+			}
+			var depWarnings []string
+			if len(incompleteCanonicalDependenciesCrossplan(projectPath, tf.Tasks, task.DependsOn, &depWarnings)) > 0 {
+				continue
+			}
+			ws := task.WriteScope
+			if ws == nil {
+				ws = []string{}
+			}
+			eligible = append(eligible, workflowNextTaskSuggestion{
+				PlanID:               plan.ID,
+				PlanTitle:            plan.Title,
+				TaskID:               task.ID,
+				TaskTitle:            task.Title,
+				Status:               task.Status,
+				Reason:               "eligible: active plan, unblocked, no active delegation",
+				WriteScope:           append([]string(nil), ws...),
+				VerificationRequired: task.VerificationRequired,
+				DependsOn:            append([]string(nil), task.DependsOn...),
+				AppType:              task.AppType,
+			})
+		}
+	}
+
+	// Stable sort: in_progress before pending, preserve declaration order otherwise.
+	sort.SliceStable(eligible, func(i, j int) bool {
+		si, sj := eligible[i].Status, eligible[j].Status
+		if si == sj {
+			return false
+		}
+		return si == "in_progress"
+	})
+
+	if eligible == nil {
+		eligible = []workflowNextTaskSuggestion{}
+	}
+	return eligible, nil
 }
 
 // effectivePlanFocusTask returns the title that should represent plan focus for orient/status.
