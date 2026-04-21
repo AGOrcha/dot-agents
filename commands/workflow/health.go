@@ -30,6 +30,9 @@ func computeWorkflowHealth(state *workflowOrientState) WorkflowHealthSnapshot {
 	h.Workflow.HasCheckpoint = state.Checkpoint != nil
 	h.Workflow.PendingProposals = state.Proposals.PendingCount
 	h.Workflow.CanonicalPlanCount = len(state.CanonicalPlans)
+	if state.LocalDrift != nil {
+		h.Workflow.CompletedPlansPendingArchive = len(state.LocalDrift.CompletedPlanIDs)
+	}
 	h.Tooling.MCP = "unknown"
 	h.Tooling.Auth = "unknown"
 	h.Tooling.Formatter = "unknown"
@@ -113,6 +116,9 @@ func runWorkflowHealth() error {
 	fmt.Fprintf(os.Stdout, "  canonical plans: %d\n", health.Workflow.CanonicalPlanCount)
 	fmt.Fprintf(os.Stdout, "  has checkpoint: %v\n", health.Workflow.HasCheckpoint)
 	fmt.Fprintf(os.Stdout, "  pending proposals: %d\n", health.Workflow.PendingProposals)
+	if health.Workflow.CompletedPlansPendingArchive > 0 {
+		fmt.Fprintf(os.Stdout, "  completed plans pending archive: %d\n", health.Workflow.CompletedPlansPendingArchive)
+	}
 	fmt.Fprintln(os.Stdout)
 
 	if len(health.Warnings) > 0 {

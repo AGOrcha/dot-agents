@@ -251,10 +251,11 @@ type WorkflowHealthSnapshot struct {
 		DirtyFileCount int    `json:"dirty_file_count"`
 	} `json:"git"`
 	Workflow struct {
-		HasActivePlan      bool `json:"has_active_plan"`
-		HasCheckpoint      bool `json:"has_checkpoint"`
-		PendingProposals   int  `json:"pending_proposals"`
-		CanonicalPlanCount int  `json:"canonical_plan_count"`
+		HasActivePlan               bool `json:"has_active_plan"`
+		HasCheckpoint               bool `json:"has_checkpoint"`
+		PendingProposals            int  `json:"pending_proposals"`
+		CanonicalPlanCount          int  `json:"canonical_plan_count"`
+		CompletedPlansPendingArchive int  `json:"completed_plans_pending_archive"`
 	} `json:"workflow"`
 	Tooling struct {
 		MCP       string `json:"mcp"`
