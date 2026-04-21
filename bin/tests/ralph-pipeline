@@ -950,6 +950,139 @@ fi
 echo "ralph-pipeline: done." >&2
 }
 
+# ── Self-tests ────────────────────────────────────────────────────────────────
+# Run with: ./bin/tests/ralph-pipeline --self-test
+# Exercises pipeline helper logic without spawning agents or requiring a live repo state.
+if [[ "${1:-}" == "--self-test" ]]; then
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  _collect_lines() {
+    local -a arr=()
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && arr+=("$line")
+    done < <("$@")
+    printf '%s\n' "${arr[@]:-}"
+  }
+
+  echo "=== ralph-pipeline --self-test ==="
+  echo ""
+
+  echo "--- stage_role_from_stage_line ---"
+  _assert_eq "impl stage" "$(stage_role_from_stage_line impl)" "impl"
+  _assert_eq "review stage" "$(stage_role_from_stage_line review)" "review"
+  _assert_eq "verifier:unit stage" "$(stage_role_from_stage_line verifier:unit)" "verifier"
+  _assert_eq "verifier:integration stage" "$(stage_role_from_stage_line verifier:integration)" "verifier"
+  _assert_eq "unknown stage → worker" "$(stage_role_from_stage_line something-else)" "worker"
+
+  echo ""
+  echo "--- split_bin_candidates ---"
+  result="$(split_bin_candidates "claude,codex" | tr '\n' ',')"
+  _assert_eq "two CSV bins" "$result" "claude,codex,"
+  result="$(split_bin_candidates " claude , codex " | tr '\n' ',')"
+  _assert_eq "whitespace trimmed" "$result" "claude,codex,"
+  result="$(split_bin_candidates "" 2>/dev/null || true)"
+  _assert_eq "empty input → no output" "$result" ""
+  result="$(split_bin_candidates "claude" | tr '\n' ',')"
+  _assert_eq "single bin" "$result" "claude,"
+
+  echo ""
+  echo "--- collect_stage_agent_bins: per-role precedence ---"
+  # impl role: RALPH_IMPL_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN > agent
+  (
+    unset RALPH_IMPL_WORKER_AGENT_BIN RALPH_VERIFIER_WORKER_AGENT_BIN \
+          RALPH_REVIEW_WORKER_AGENT_BIN RALPH_WORKER_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    first_bin="$(collect_stage_agent_bins impl | head -1)"
+    _assert_eq "impl: all unset → first candidate is 'agent'" "$first_bin" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_AGENT_BIN RALPH_WORKER_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    first_bin="$(collect_stage_agent_bins impl | head -1)"
+    _assert_eq "impl: AGENT_BIN is first candidate when role bins unset" "$first_bin" "claude"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_AGENT_BIN 2>/dev/null || true
+    RALPH_WORKER_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    first_bin="$(collect_stage_agent_bins impl | head -1)"
+    _assert_eq "impl: RALPH_WORKER_AGENT_BIN comes before AGENT_BIN" "$first_bin" "codex"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_IMPL_WORKER_AGENT_BIN="impl-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback"
+    first_bin="$(collect_stage_agent_bins impl | head -1)"
+    _assert_eq "impl: RALPH_IMPL_WORKER_AGENT_BIN is first candidate" "$first_bin" "impl-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: impl role should NOT start with verifier-specific bin
+  (
+    unset RALPH_IMPL_WORKER_AGENT_BIN 2>/dev/null || true
+    RALPH_VERIFIER_WORKER_AGENT_BIN="verifier-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback"
+    first_bin="$(collect_stage_agent_bins impl | head -1)"
+    if [[ "$first_bin" != "verifier-bin" ]]; then
+      echo "  ok: impl role does not start with verifier-specific bin (got '$first_bin')"
+      exit 0
+    else
+      echo "  FAIL: impl role incorrectly used verifier bin" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # verifier role: RALPH_VERIFIER_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN
+  (
+    RALPH_VERIFIER_WORKER_AGENT_BIN="verifier-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback"
+    first_bin="$(collect_stage_agent_bins verifier | head -1)"
+    _assert_eq "verifier: RALPH_VERIFIER_WORKER_AGENT_BIN is first candidate" "$first_bin" "verifier-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # review role: RALPH_REVIEW_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN
+  (
+    RALPH_REVIEW_WORKER_AGENT_BIN="review-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback"
+    first_bin="$(collect_stage_agent_bins review | head -1)"
+    _assert_eq "review: RALPH_REVIEW_WORKER_AGENT_BIN is first candidate" "$first_bin" "review-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Dedup: same bin listed twice should appear only once
+  (
+    unset RALPH_IMPL_WORKER_AGENT_BIN 2>/dev/null || true
+    RALPH_WORKER_AGENT_BIN="claude"
+    AGENT_BIN="claude"
+    bins="$(collect_stage_agent_bins impl | tr '\n' ',')"
+    # 'claude' + 'agent' — 'claude' deduped, so: claude,agent,
+    _assert_eq "dedup: claude appears once even if in RALPH_WORKER_AGENT_BIN and AGENT_BIN" \
+      "$bins" "claude,agent,"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
   while true; do
     completion_state="$(scoped_completion_state "$RALPH_RUN_PLAN")"

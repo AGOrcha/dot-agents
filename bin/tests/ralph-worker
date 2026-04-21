@@ -57,6 +57,7 @@ set -euo pipefail
 BUNDLE_PATH=""
 STAGE=""
 VERIFIER_TYPE=""
+SELF_TEST=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle) BUNDLE_PATH="$2"; shift 2 ;;
@@ -65,9 +66,227 @@ while [[ $# -gt 0 ]]; do
     --stage=*) STAGE="${1#--stage=}"; shift ;;
     --verifier-type) VERIFIER_TYPE="$2"; shift 2 ;;
     --verifier-type=*) VERIFIER_TYPE="${1#--verifier-type=}"; shift ;;
+    --self-test) SELF_TEST=1; shift ;;
     *) echo "error: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+# ── Self-tests ────────────────────────────────────────────────────────────────
+# Run with: ./bin/tests/ralph-worker --self-test
+# Does NOT require a live agent binary or a bundle file.
+if [[ "$SELF_TEST" -eq 1 ]]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  # Paste resolver functions inline so they run in clean env without bundle parsing.
+  resolve_worker_agent_bin() {
+    local role="$1"
+    if [[ -n "${RALPH_WORKER_AGENT_BIN_OVERRIDE:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_AGENT_BIN_OVERRIDE"
+      return 0
+    fi
+    case "$role" in
+      impl)
+        if [[ -n "${RALPH_IMPL_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_IMPL_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+      verifier)
+        if [[ -n "${RALPH_VERIFIER_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_VERIFIER_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+      review)
+        if [[ -n "${RALPH_REVIEW_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_REVIEW_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+    esac
+    if [[ -n "${RALPH_WORKER_AGENT_BIN:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_AGENT_BIN"
+    elif [[ -n "${AGENT_BIN:-}" ]]; then
+      printf '%s' "$AGENT_BIN"
+    else
+      printf '%s' "agent"
+    fi
+  }
+
+  resolve_worker_model() {
+    local role="$1"
+    case "$role" in
+      impl)
+        if [[ -n "${RALPH_IMPL_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_IMPL_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+      verifier)
+        if [[ -n "${RALPH_VERIFIER_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_VERIFIER_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+      review)
+        if [[ -n "${RALPH_REVIEW_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_REVIEW_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+    esac
+    if [[ -n "${RALPH_WORKER_MODEL:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_MODEL"
+    else
+      printf '%s' "${RALPH_MODEL:-}"
+    fi
+  }
+
+  echo "=== ralph-worker --self-test ==="
+  echo ""
+
+  # ── resolve_worker_agent_bin: impl role ─────────────────────────────────
+  echo "--- resolve_worker_agent_bin: impl role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "impl: all unset → 'agent'" "$(resolve_worker_agent_bin impl)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    _assert_eq "impl: AGENT_BIN fallback" "$(resolve_worker_agent_bin impl)" "claude"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN 2>/dev/null || true
+    RALPH_WORKER_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_WORKER_AGENT_BIN wins over AGENT_BIN" "$(resolve_worker_agent_bin impl)" "codex"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_IMPL_WORKER_AGENT_BIN="codex-impl"
+    RALPH_WORKER_AGENT_BIN="copilot"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_IMPL_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin impl)" "codex-impl"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_WORKER_AGENT_BIN_OVERRIDE="override-bin"
+    RALPH_IMPL_WORKER_AGENT_BIN="codex-impl"
+    RALPH_WORKER_AGENT_BIN="copilot"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_WORKER_AGENT_BIN_OVERRIDE wins over everything" \
+      "$(resolve_worker_agent_bin impl)" "override-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_agent_bin: verifier role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_VERIFIER_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "verifier: all unset → 'agent'" "$(resolve_worker_agent_bin verifier)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_VERIFIER_WORKER_AGENT_BIN="verifier-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback-bin"
+    _assert_eq "verifier: RALPH_VERIFIER_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin verifier)" "verifier-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_agent_bin: review role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_REVIEW_WORKER_AGENT_BIN="review-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback-bin"
+    _assert_eq "review: RALPH_REVIEW_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin review)" "review-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_model: per-role precedence ---"
+  (
+    unset RALPH_IMPL_WORKER_MODEL RALPH_WORKER_MODEL RALPH_MODEL 2>/dev/null || true
+    _assert_eq "impl: all unset → empty (binary default)" "$(resolve_worker_model impl)" ""
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_MODEL RALPH_WORKER_MODEL 2>/dev/null || true
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_MODEL fallback" "$(resolve_worker_model impl)" "ralph-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_MODEL 2>/dev/null || true
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_WORKER_MODEL wins over RALPH_MODEL" "$(resolve_worker_model impl)" "worker-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_IMPL_WORKER_MODEL="impl-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_IMPL_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model impl)" "impl-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_VERIFIER_WORKER_MODEL="verifier-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "verifier: RALPH_VERIFIER_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model verifier)" "verifier-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_REVIEW_WORKER_MODEL="review-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "review: RALPH_REVIEW_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model review)" "review-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: generic role should NOT use role-specific vars
+  (
+    RALPH_IMPL_WORKER_MODEL="impl-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "worker: generic role uses RALPH_WORKER_MODEL (not impl-specific)" \
+      "$(resolve_worker_model worker)" "worker-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
 
 if [[ -z "$BUNDLE_PATH" ]]; then
   cat >&2 <<'EOF'

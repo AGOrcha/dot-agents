@@ -36,6 +36,116 @@
 
 set -euo pipefail
 
+# Handle --self-test before any other setup (no agent binary or merge-back dir needed)
+if [[ "${1:-}" == "--self-test" ]]; then
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  resolve_closeout_agent_bin() {
+    if [[ -n "${RALPH_CLOSEOUT_AGENT_BIN:-}" ]]; then
+      printf '%s' "$RALPH_CLOSEOUT_AGENT_BIN"
+    elif [[ -n "${AGENT_BIN:-}" ]]; then
+      printf '%s' "$AGENT_BIN"
+    else
+      printf '%s' "agent"
+    fi
+  }
+
+  resolve_closeout_model() {
+    if [[ -n "${RALPH_CLOSEOUT_MODEL:-}" ]]; then
+      printf '%s' "$RALPH_CLOSEOUT_MODEL"
+    else
+      printf '%s' "${RALPH_MODEL:-}"
+    fi
+  }
+
+  echo "=== ralph-closeout --self-test ==="
+  echo ""
+
+  echo "--- resolve_closeout_agent_bin: precedence ---"
+  (
+    unset RALPH_CLOSEOUT_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "all unset → 'agent'" "$(resolve_closeout_agent_bin)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_CLOSEOUT_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    _assert_eq "AGENT_BIN fallback" "$(resolve_closeout_agent_bin)" "claude"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_CLOSEOUT_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    _assert_eq "RALPH_CLOSEOUT_AGENT_BIN wins over AGENT_BIN" "$(resolve_closeout_agent_bin)" "codex"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: AGENT_BIN should NOT win over RALPH_CLOSEOUT_AGENT_BIN
+  (
+    RALPH_CLOSEOUT_AGENT_BIN="role-specific"
+    AGENT_BIN="fallback"
+    got="$(resolve_closeout_agent_bin)"
+    if [[ "$got" != "fallback" ]]; then
+      echo "  ok: AGENT_BIN does not override RALPH_CLOSEOUT_AGENT_BIN (got '$got')"
+      exit 0
+    else
+      echo "  FAIL: AGENT_BIN incorrectly overrode RALPH_CLOSEOUT_AGENT_BIN" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_closeout_model: precedence ---"
+  (
+    unset RALPH_CLOSEOUT_MODEL RALPH_MODEL 2>/dev/null || true
+    _assert_eq "all unset → empty" "$(resolve_closeout_model)" ""
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_CLOSEOUT_MODEL 2>/dev/null || true
+    RALPH_MODEL="model-fallback"
+    _assert_eq "RALPH_MODEL fallback" "$(resolve_closeout_model)" "model-fallback"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_CLOSEOUT_MODEL="closeout-specific"
+    RALPH_MODEL="model-fallback"
+    _assert_eq "RALPH_CLOSEOUT_MODEL wins over RALPH_MODEL" "$(resolve_closeout_model)" "closeout-specific"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: RALPH_MODEL should NOT win over RALPH_CLOSEOUT_MODEL
+  (
+    RALPH_CLOSEOUT_MODEL="role-model"
+    RALPH_MODEL="generic-model"
+    got="$(resolve_closeout_model)"
+    if [[ "$got" != "generic-model" ]]; then
+      echo "  ok: RALPH_MODEL does not override RALPH_CLOSEOUT_MODEL (got '$got')"
+      exit 0
+    else
+      echo "  FAIL: RALPH_MODEL incorrectly overrode RALPH_CLOSEOUT_MODEL" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 

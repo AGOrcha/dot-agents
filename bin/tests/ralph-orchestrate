@@ -215,17 +215,20 @@ delegation_bundle_path_for_task() {
   printf '%s' "$REPO_ROOT/.agents/active/delegation-bundles/${did}.yaml"
 }
 
-if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
-  echo "error: '$AGENT_BIN' not found on PATH (set AGENT_BIN to an installed agent binary: claude, codex, copilot, or agent)" >&2
-  exit 1
+if [[ "${1:-}" != "--self-test" ]]; then
+  if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+    echo "error: '$AGENT_BIN' not found on PATH (set AGENT_BIN to an installed agent binary: claude, codex, copilot, or agent)" >&2
+    exit 1
+  fi
+
+  command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for JSON parsing" >&2; exit 1; }
+
+  case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
+    echo "error: RALPH_AGENT_OUTPUT_FORMAT must be text, json, or stream-json (got $OUTPUT_FORMAT)" >&2
+    exit 1
+  esac
 fi
 
-command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for JSON parsing" >&2; exit 1; }
-
-case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
-  echo "error: RALPH_AGENT_OUTPUT_FORMAT must be text, json, or stream-json (got $OUTPUT_FORMAT)" >&2
-  exit 1
-esac
 
 # Discover unblocked pending tasks using workflow eligible --json.
 # workflow eligible already filters active delegations, dependency blocks, and
@@ -405,6 +408,220 @@ find_skill_dir() {
 }
 
 ORCH_DIR="$(find_skill_dir orchestrator-session-start || true)"
+
+# ── Self-tests ────────────────────────────────────────────────────────────────
+# Run with: ./bin/tests/ralph-orchestrate --self-test
+# Does NOT require a live agent binary. Tests helper functions in isolation.
+if [[ "${1:-}" == "--self-test" ]]; then
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  _assert_overlap() {
+    local label="$1" left="$2" right="$3"
+    if scope_lists_overlap "$left" "$right"; then
+      echo "  ok: $label (overlap detected)"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — expected overlap but got none" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  _assert_no_overlap() {
+    local label="$1" left="$2" right="$3"
+    if ! scope_lists_overlap "$left" "$right"; then
+      echo "  ok: $label (no overlap)"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — expected no overlap but detected one" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  echo "=== ralph-orchestrate --self-test ==="
+  echo ""
+
+  # ── normalize_scope_path ─────────────────────────────────────────────────
+  echo "--- normalize_scope_path ---"
+  _assert_eq "strip leading ./" "$(normalize_scope_path "./commands/foo.go")" "commands/foo.go"
+  _assert_eq "strip trailing slash" "$(normalize_scope_path "commands/")" "commands"
+  _assert_eq "bare path unchanged" "$(normalize_scope_path "commands/foo.go")" "commands/foo.go"
+  _assert_eq "root slash preserved" "$(normalize_scope_path "/")" "/"
+
+  echo ""
+  echo "--- scope_lists_overlap: positive cases ---"
+  _assert_overlap "exact path match" "commands/foo.go" "commands/foo.go"
+  _assert_overlap "directory prefix contains file" "commands/" "commands/foo.go"
+  _assert_overlap "file inside directory" "commands/foo.go" "commands/"
+  _assert_overlap "parent dir vs child file (no trailing slash)" "commands" "commands/foo.go"
+  _assert_overlap "two CSV entries, one matches" "internal/config,commands/foo.go" "commands/foo.go"
+
+  echo ""
+  echo "--- scope_lists_overlap: negative cases ---"
+  _assert_no_overlap "completely separate paths" "commands/foo.go" "internal/bar.go"
+  _assert_no_overlap "dir that is prefix of another dir but different tree" "cmd" "commands/foo.go"
+  _assert_no_overlap "different dirs same prefix word" "commands/foo.go" "commands-old/foo.go"
+
+  echo ""
+  echo "--- discover_unblocked_tasks: conflict guard ---"
+  # Mock da() to return eligible JSON where t1 and t2 share a write_scope path.
+  # t1 is in max_batch, t2 is excluded (conflict). discover_unblocked_tasks should
+  # only return the tasks listed in max_batch (t1 only).
+  da() {
+    # Emit JSON simulating workflow eligible --json response:
+    # t1 and t2 both overlap on "commands/foo.go"; max_batch contains only t1.
+    cat <<'JSON'
+{
+  "eligible_tasks": [
+    {"plan_id": "test-plan", "task_id": "t1", "write_scope": ["commands/foo.go"]},
+    {"plan_id": "test-plan", "task_id": "t2", "write_scope": ["commands/foo.go"]}
+  ],
+  "max_batch": ["t1"],
+  "conflict_graph": {"t1": ["t2"], "t2": ["t1"]},
+  "total_eligible": 2,
+  "max_parallel": 1
+}
+JSON
+  }
+
+  tasks_from_discover=()
+  while IFS= read -r entry && [[ -n "$entry" ]]; do
+    tasks_from_discover+=("$entry")
+  done < <(discover_unblocked_tasks)
+
+  # Should contain exactly one entry: t1 (t2 excluded because it's not in max_batch)
+  if [[ ${#tasks_from_discover[@]} -eq 1 && "${tasks_from_discover[0]}" == "test-plan:t1:"* ]]; then
+    echo "  ok: conflict guard — only t1 (max_batch entry) returned; t2 excluded"
+    (( _test_passed += 1 )) || true
+  else
+    echo "  FAIL: conflict guard — expected 1 entry for t1, got: ${tasks_from_discover[*]:-<empty>}" >&2
+    (( _test_failed += 1 )) || true
+  fi
+
+  # Negative test: when max_batch is empty, discover_unblocked_tasks returns nothing.
+  da() {
+    cat <<'JSON'
+{
+  "eligible_tasks": [],
+  "max_batch": [],
+  "conflict_graph": {},
+  "total_eligible": 0,
+  "max_parallel": 0
+}
+JSON
+  }
+
+  empty_tasks=()
+  while IFS= read -r entry && [[ -n "$entry" ]]; do
+    empty_tasks+=("$entry")
+  done < <(discover_unblocked_tasks)
+
+  if [[ ${#empty_tasks[@]} -eq 0 ]]; then
+    echo "  ok: empty max_batch — discover_unblocked_tasks returns nothing"
+    (( _test_passed += 1 )) || true
+  else
+    echo "  FAIL: empty max_batch — expected 0 entries, got: ${empty_tasks[*]}" >&2
+    (( _test_failed += 1 )) || true
+  fi
+
+  echo ""
+  echo "--- resolve_orchestrator_agent_bin: precedence ---"
+  (
+    unset RALPH_ORCHESTRATOR_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    result="$(resolve_orchestrator_agent_bin)"
+    if [[ "$result" == "agent" ]]; then
+      echo "  ok: fallback default is 'agent'"
+      exit 0
+    else
+      echo "  FAIL: fallback default — got '$result' want 'agent'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_ORCHESTRATOR_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    result="$(resolve_orchestrator_agent_bin)"
+    if [[ "$result" == "claude" ]]; then
+      echo "  ok: AGENT_BIN wins over default"
+      exit 0
+    else
+      echo "  FAIL: AGENT_BIN fallback — got '$result' want 'claude'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_ORCHESTRATOR_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    result="$(resolve_orchestrator_agent_bin)"
+    if [[ "$result" == "codex" ]]; then
+      echo "  ok: RALPH_ORCHESTRATOR_AGENT_BIN wins over AGENT_BIN"
+      exit 0
+    else
+      echo "  FAIL: orchestrator bin precedence — got '$result' want 'codex'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_orchestrator_model: precedence ---"
+  (
+    unset RALPH_ORCHESTRATOR_MODEL RALPH_MODEL 2>/dev/null || true
+    result="$(resolve_orchestrator_model)"
+    if [[ -z "$result" ]]; then
+      echo "  ok: no vars set — model is empty (uses binary default)"
+      exit 0
+    else
+      echo "  FAIL: no vars — expected empty model, got '$result'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_ORCHESTRATOR_MODEL 2>/dev/null || true
+    RALPH_MODEL="claude-3-haiku"
+    result="$(resolve_orchestrator_model)"
+    if [[ "$result" == "claude-3-haiku" ]]; then
+      echo "  ok: RALPH_MODEL fallback used when RALPH_ORCHESTRATOR_MODEL unset"
+      exit 0
+    else
+      echo "  FAIL: RALPH_MODEL fallback — got '$result' want 'claude-3-haiku'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_ORCHESTRATOR_MODEL="claude-3-opus"
+    RALPH_MODEL="claude-3-haiku"
+    result="$(resolve_orchestrator_model)"
+    if [[ "$result" == "claude-3-opus" ]]; then
+      echo "  ok: RALPH_ORCHESTRATOR_MODEL wins over RALPH_MODEL"
+      exit 0
+    else
+      echo "  FAIL: orchestrator model precedence — got '$result' want 'claude-3-opus'" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
 
 if [[ -n "$LOG_DIR" ]]; then
   mkdir -p "$LOG_DIR"
