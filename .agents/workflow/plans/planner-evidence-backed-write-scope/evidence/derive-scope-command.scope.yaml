@@ -1,0 +1,42 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+task_id: derive-scope-command
+status: draft
+mode: code
+goal: dot-agents workflow plan derive-scope <plan_id> <task_id> --seed-symbol/--seed-path. Runs scope-lane and context-lane qu…
+confidence: low
+decision_locks: []
+required_reads: []
+seeds:
+    symbols:
+        - runWorkflowPlanDeriveScope
+    paths:
+        - commands/workflow/plan_task.go
+queries: []
+required_paths:
+    - path: commands/workflow/cmd.go
+      because:
+        - listed in TASKS.yaml write_scope
+    - path: commands/workflow/plan_task.go
+      because:
+        - listed in TASKS.yaml write_scope
+    - path: commands/workflow/graph.go
+      because:
+        - listed in TASKS.yaml write_scope
+    - path: commands/workflow/deps.go
+      because:
+        - listed in TASKS.yaml write_scope
+    - path: internal/graphstore/crg.go
+      because:
+        - listed in TASKS.yaml write_scope
+optional_paths: []
+excluded_paths: []
+provides: []
+consumes: []
+final_write_scope: []
+verification_focus: []
+allowed_local_choices: []
+stop_conditions: []
+open_gaps:
+    - scope-lane graph queries skipped (code-lane not ready; run 'kg build' then 'kg warm --include-code')
+    - context-lane queries skipped (context-lane not ready; run 'kg warm' after authoring notes)

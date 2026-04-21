@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -102,6 +103,334 @@ func NewScopeEvidence(planID, taskID string) *ScopeEvidence {
 		AllowedLocalChoices: []string{},
 		StopConditions:      []string{},
 		OpenGaps:            []string{},
+	}
+}
+
+// deriveScopeEvidencePath returns the canonical sidecar output path for a task.
+func deriveScopeEvidencePath(projectPath, planID, taskID string) string {
+	return filepath.Join(plansBaseDir(projectPath), planID, "evidence", taskID+".scope.yaml")
+}
+
+// runWorkflowPlanDeriveScope implements `workflow plan derive-scope <plan_id> <task_id>`.
+// It runs scope-lane and context-lane query bundles against the KG/CRG graph and
+// writes a candidate .scope.yaml sidecar. Degrades gracefully to confidence:low
+// when the graph is not ready. Does NOT auto-edit TASKS.yaml.
+func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	projectPath := project.Path
+
+	// Load the task to derive mode and goal from notes.
+	tf, err := loadCanonicalTasks(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+	}
+	var task *CanonicalTask
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == taskID {
+			task = &tf.Tasks[i]
+			break
+		}
+	}
+	if task == nil {
+		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+	}
+
+	// Determine mode from task notes or app_type heuristic.
+	mode := deriveScopeMode(task)
+
+	// Check graph health to decide confidence and whether to run scope-lane queries.
+	cfg, _ := loadGraphBridgeConfig(projectPath)
+	if cfg == nil {
+		cfg = &GraphBridgeConfig{Enabled: false}
+	}
+	graphHome := cfg.GraphHome
+	if graphHome == "" {
+		graphHome = defaultGraphHome(projectPath)
+	}
+	adapter := NewLocalGraphAdapter(graphHome)
+	health, _ := adapter.Health()
+
+	ev := NewScopeEvidence(planID, taskID)
+	ev.Mode = mode
+	ev.Goal = strings.TrimSpace(task.Notes)
+	if len(ev.Goal) > 120 {
+		ev.Goal = ev.Goal[:120] + "…"
+	}
+
+	// Populate seeds from flags.
+	if len(seedSymbols) > 0 || len(seedPaths) > 0 {
+		ev.Seeds = &ScopeSeeds{
+			Symbols: append([]string{}, seedSymbols...),
+			Paths:   append([]string{}, seedPaths...),
+		}
+	}
+
+	// Populate write_scope from TASKS.yaml as a baseline for required_paths.
+	for _, p := range task.WriteScope {
+		ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{
+			Path:    p,
+			Because: []string{"listed in TASKS.yaml write_scope"},
+		})
+	}
+
+	// Determine confidence based on graph health and seeds.
+	hasScopeInputs := len(seedSymbols) > 0 || len(seedPaths) > 0
+	codeReady := health.CodeLaneReady
+	contextReady := health.ContextLaneReady
+
+	// Run scope-lane queries only for code mode when graph is ready and seeds exist.
+	var scopeWarnings []string
+	if mode == "code" && codeReady && hasScopeInputs {
+		queryFiles := deriveScopeRunScopeLane(projectPath, seedSymbols, seedPaths, ev)
+		_ = queryFiles
+	} else if mode != "code" {
+		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (mode: "+mode+")")
+	} else if !codeReady {
+		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (code-lane not ready; run 'kg build' then 'kg warm --include-code')")
+	} else if !hasScopeInputs {
+		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (no --seed-symbol or --seed-path provided)")
+	}
+
+	// Run context-lane queries for plan_context and decision_lookup.
+	if contextReady {
+		deriveScopeRunContextLane(planID, taskID, adapter, ev)
+	} else {
+		scopeWarnings = append(scopeWarnings, "context-lane queries skipped (context-lane not ready; run 'kg warm' after authoring notes)")
+	}
+
+	// Set confidence.
+	ev.Confidence = deriveScopeConfidence(mode, codeReady, contextReady, hasScopeInputs, len(ev.Queries))
+	if len(scopeWarnings) > 0 {
+		ev.OpenGaps = append(ev.OpenGaps, scopeWarnings...)
+	}
+
+	// Write sidecar.
+	outPath := deriveScopeEvidencePath(projectPath, planID, taskID)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+		return fmt.Errorf("create evidence dir: %w", err)
+	}
+	data, err := yaml.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("marshal sidecar: %w", err)
+	}
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		return fmt.Errorf("write sidecar: %w", err)
+	}
+
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(ev)
+	}
+	ui.Success(fmt.Sprintf("Wrote scope evidence sidecar: %s", config.DisplayPath(outPath)))
+	fmt.Fprintf(os.Stdout, "  confidence: %s\n", ev.Confidence)
+	fmt.Fprintf(os.Stdout, "  required_paths: %d  queries: %d\n", len(ev.RequiredPaths), len(ev.Queries))
+	if len(scopeWarnings) > 0 {
+		for _, w := range scopeWarnings {
+			ui.Warn(w)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+// deriveScopeMode derives the task mode from app_type and notes heuristics.
+func deriveScopeMode(task *CanonicalTask) string {
+	if task.AppType != "" {
+		// Any declared app_type implies code mode.
+		return "code"
+	}
+	notes := strings.ToLower(task.Notes)
+	// Research/doc markers in notes.
+	if strings.Contains(notes, "research task") || strings.Contains(notes, "no go code") ||
+		strings.Contains(notes, "doc only") || strings.Contains(notes, "docs only") ||
+		strings.Contains(notes, "skill instruction") {
+		return "research"
+	}
+	// Check write_scope: if it only contains non-Go paths it's likely doc/research.
+	allDocs := len(task.WriteScope) > 0
+	for _, p := range task.WriteScope {
+		if strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "/") ||
+			strings.HasPrefix(p, "commands/") || strings.HasPrefix(p, "internal/") {
+			allDocs = false
+			break
+		}
+	}
+	if allDocs && len(task.WriteScope) > 0 {
+		return "doc"
+	}
+	return "code"
+}
+
+// deriveScopeConfidence calculates a confidence level string based on lane readiness.
+func deriveScopeConfidence(mode string, codeReady, contextReady, hasScopeInputs bool, queryCount int) string {
+	if mode != "code" {
+		if contextReady {
+			return "medium"
+		}
+		return "low"
+	}
+	// code mode
+	switch {
+	case codeReady && hasScopeInputs && queryCount > 0:
+		return "medium"
+	case codeReady && hasScopeInputs:
+		return "medium"
+	case codeReady || contextReady:
+		return "low"
+	default:
+		return "low"
+	}
+}
+
+// deriveScopeRunScopeLane runs symbol_lookup, callers_of, and impact_radius queries
+// for all provided seed symbols and seed paths, populating ev.Queries and ev.RequiredPaths.
+func deriveScopeRunScopeLane(projectPath string, seedSymbols, seedPaths []string, ev *ScopeEvidence) []string {
+	var allFiles []string
+	seen := make(map[string]bool)
+	addFiles := func(files []string) {
+		for _, f := range files {
+			if !seen[f] {
+				seen[f] = true
+				allFiles = append(allFiles, f)
+			}
+		}
+	}
+
+	// symbol_lookup and callers_of for each seed symbol.
+	for _, sym := range seedSymbols {
+		for _, intent := range []string{"symbol_lookup", "callers_of"} {
+			files := deriveScopeKGBridgeQuery(projectPath, intent, sym)
+			q := ScopeQuery{
+				Tool:    "kg",
+				Kind:    "bridge_query",
+				Intent:  intent,
+				Subject: sym,
+			}
+			if len(files) > 0 {
+				q.Summary = &ScopeQuerySummary{Files: files}
+				addFiles(files)
+			}
+			ev.Queries = append(ev.Queries, q)
+		}
+	}
+
+	// impact_radius for each seed path.
+	for _, p := range seedPaths {
+		files := deriveScopeKGBridgeQuery(projectPath, "impact_radius", p)
+		q := ScopeQuery{
+			Tool:    "kg",
+			Kind:    "bridge_query",
+			Intent:  "impact_radius",
+			Subject: p,
+		}
+		if len(files) > 0 {
+			q.Summary = &ScopeQuerySummary{Files: files}
+			addFiles(files)
+		}
+		ev.Queries = append(ev.Queries, q)
+	}
+
+	// Merge query-discovered files into required_paths (dedup against existing).
+	existingPaths := make(map[string]bool)
+	for _, rp := range ev.RequiredPaths {
+		existingPaths[rp.Path] = true
+	}
+	for _, f := range allFiles {
+		if !existingPaths[f] {
+			ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{
+				Path:    f,
+				Because: []string{"discovered via scope-lane graph query"},
+			})
+			existingPaths[f] = true
+		}
+	}
+	return allFiles
+}
+
+// deriveScopeKGBridgeQuery runs one kg bridge query subcommand and returns the
+// list of file paths extracted from the JSON response. Returns nil on any error
+// (graceful degradation).
+func deriveScopeKGBridgeQuery(projectPath, intent, subject string) []string {
+	exe, err := workflowDotAgentsExe()
+	if err != nil {
+		return nil
+	}
+	argv := []string{"--json", "kg", "bridge", "query", "--intent", intent, subject}
+	cmd := exec.Command(exe, argv...)
+	cmd.Dir = projectPath
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	// Parse the JSON response to extract file paths from results.
+	var resp struct {
+		Results []struct {
+			Path     string `json:"path"`
+			FilePath string `json:"file_path"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var files []string
+	for _, r := range resp.Results {
+		p := r.FilePath
+		if p == "" {
+			p = r.Path
+		}
+		if p != "" && !seen[p] {
+			seen[p] = true
+			files = append(files, p)
+		}
+	}
+	return files
+}
+
+// deriveScopeRunContextLane runs plan_context and decision_lookup queries against
+// the context-lane and populates ev.RequiredReads with the results.
+func deriveScopeRunContextLane(planID, taskID string, adapter *LocalGraphAdapter, ev *ScopeEvidence) {
+	for _, intent := range []string{"plan_context", "decision_lookup"} {
+		q := strings.TrimSpace(planID + " " + taskID)
+		resp, err := adapter.Query(GraphBridgeQuery{
+			Intent: intent,
+			Query:  q,
+		})
+		if err != nil {
+			continue
+		}
+		sq := ScopeQuery{
+			Tool:    "kg",
+			Kind:    "bridge_query",
+			Intent:  intent,
+			Subject: q,
+		}
+		if len(resp.Results) > 0 {
+			var files []string
+			for _, r := range resp.Results {
+				if r.Path != "" {
+					files = append(files, r.Path)
+				}
+			}
+			if len(files) > 0 {
+				sq.Summary = &ScopeQuerySummary{Files: files}
+			}
+			// Add as required_reads entries.
+			for _, r := range resp.Results {
+				if r.Path != "" {
+					ev.RequiredReads = append(ev.RequiredReads, ScopeRequiredRead{
+						Path: r.Path,
+						Why:  r.Title + " — " + r.Summary,
+					})
+				}
+			}
+		}
+		ev.Queries = append(ev.Queries, sq)
 	}
 }
 

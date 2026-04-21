@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -223,5 +224,136 @@ func TestScopeEvidenceUnmarshalInvalid(t *testing.T) {
 	err := yaml.Unmarshal([]byte(bad), &ev)
 	if err == nil {
 		t.Error("expected error on malformed YAML, got nil")
+	}
+}
+
+func TestDeriveScopeMode(t *testing.T) {
+	// Positive: app_type always means code mode.
+	task := &CanonicalTask{AppType: "go-cli"}
+	if got := deriveScopeMode(task); got != "code" {
+		t.Errorf("deriveScopeMode(app_type=go-cli) = %q, want code", got)
+	}
+
+	// Positive: notes with "research task" → research mode.
+	task2 := &CanonicalTask{Notes: "Research task — no Go code."}
+	if got := deriveScopeMode(task2); got != "research" {
+		t.Errorf("deriveScopeMode(research task note) = %q, want research", got)
+	}
+
+	// Positive: default with Go write_scope → code mode.
+	task3 := &CanonicalTask{WriteScope: []string{"commands/workflow/cmd.go"}}
+	if got := deriveScopeMode(task3); got != "code" {
+		t.Errorf("deriveScopeMode(go write_scope) = %q, want code", got)
+	}
+
+	// Negative: docs-only write_scope → doc mode.
+	task4 := &CanonicalTask{WriteScope: []string{"docs/spec.md", "docs/notes.md"}}
+	if got := deriveScopeMode(task4); got != "doc" {
+		t.Errorf("deriveScopeMode(docs-only write_scope) = %q, want doc", got)
+	}
+}
+
+func TestDeriveScopeConfidence(t *testing.T) {
+	// Positive: code mode, both lanes ready, seeds provided, queries run → medium.
+	if got := deriveScopeConfidence("code", true, true, true, 2); got != "medium" {
+		t.Errorf("want medium, got %q", got)
+	}
+
+	// Positive: research mode, context-lane ready → medium.
+	if got := deriveScopeConfidence("research", false, true, false, 0); got != "medium" {
+		t.Errorf("want medium for research+context-ready, got %q", got)
+	}
+
+	// Negative: nothing ready → low.
+	if got := deriveScopeConfidence("code", false, false, false, 0); got != "low" {
+		t.Errorf("want low when nothing ready, got %q", got)
+	}
+
+	// Negative: research mode, no context lane → low.
+	if got := deriveScopeConfidence("research", false, false, false, 0); got != "low" {
+		t.Errorf("want low for research+no context, got %q", got)
+	}
+}
+
+func TestRunWorkflowPlanDeriveScopeDegradesGracefully(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	// Write a minimal plan+tasks fixture with a code task.
+	planDir := repo + "/.agents/workflow/plans/test-derive-plan"
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planDir+"/PLAN.yaml", []byte(`schema_version: 1
+id: test-derive-plan
+title: Test Derive Plan
+status: active
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planDir+"/TASKS.yaml", []byte(`schema_version: 1
+plan_id: test-derive-plan
+tasks:
+  - id: my-task
+    title: My Task
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: test
+    app_type: go-cli
+    write_scope:
+      - commands/workflow/cmd.go
+    verification_required: true
+    notes: "Implement the feature"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// Positive: command must succeed and write a sidecar with confidence:low (no graph available).
+	if err := runWorkflowPlanDeriveScope("test-derive-plan", "my-task", []string{"MySymbol"}, nil); err != nil {
+		t.Fatalf("runWorkflowPlanDeriveScope: %v", err)
+	}
+
+	sidecarPath := planDir + "/evidence/my-task.scope.yaml"
+	data, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		t.Fatalf("sidecar not written: %v", err)
+	}
+	var ev ScopeEvidence
+	if err := yaml.Unmarshal(data, &ev); err != nil {
+		t.Fatalf("unmarshal sidecar: %v", err)
+	}
+	if ev.PlanID != "test-derive-plan" {
+		t.Errorf("PlanID = %q, want test-derive-plan", ev.PlanID)
+	}
+	if ev.TaskID != "my-task" {
+		t.Errorf("TaskID = %q, want my-task", ev.TaskID)
+	}
+	if ev.Confidence != "low" {
+		t.Errorf("Confidence = %q, want low (no graph)", ev.Confidence)
+	}
+	if ev.Mode != "code" {
+		t.Errorf("Mode = %q, want code", ev.Mode)
+	}
+	if ev.Seeds == nil || len(ev.Seeds.Symbols) == 0 {
+		t.Error("Seeds.Symbols not populated from --seed-symbol")
+	}
+	if len(ev.RequiredPaths) == 0 {
+		t.Error("RequiredPaths empty, expected at least write_scope paths")
+	}
+	// Verify warnings captured in open_gaps.
+	if len(ev.OpenGaps) == 0 {
+		t.Error("OpenGaps should contain graph-not-ready warnings")
+	}
+
+	// Negative: nonexistent task must return an error, not write a sidecar.
+	if err := runWorkflowPlanDeriveScope("test-derive-plan", "nonexistent", nil, nil); err == nil {
+		t.Error("expected error for nonexistent task, got nil")
 	}
 }

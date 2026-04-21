@@ -229,7 +229,24 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 
-	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd)
+	var deriveScopeSymbols, deriveScopePaths []string
+	planDeriveScopeCmd := &cobra.Command{
+		Use:   "derive-scope <plan-id> <task-id>",
+		Short: "Derive a candidate scope-evidence sidecar for a task using KG/CRG graph queries",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow plan derive-scope my-plan my-task --seed-symbol RunWorkflowFanout --seed-symbol runWorkflowAdvance",
+			"  dot-agents workflow plan derive-scope my-plan my-task --seed-path commands/workflow/delegation.go",
+			"  dot-agents --json workflow plan derive-scope my-plan my-task --seed-symbol RunWorkflowFanout",
+		),
+		Args: deps.ExactArgsWithHints(2, "Pass a canonical plan ID and task ID."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowPlanDeriveScope(args[0], args[1], deriveScopeSymbols, deriveScopePaths)
+		},
+	}
+	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopeSymbols, "seed-symbol", nil, "Seed symbol for scope-lane queries (repeatable)")
+	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopePaths, "seed-path", nil, "Seed file path for scope-lane queries (repeatable)")
+
+	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd, planDeriveScopeCmd)
 
 	taskCmd := &cobra.Command{
 		Use:   "task",
