@@ -1011,6 +1011,99 @@ type workflowNextTaskSuggestion struct {
 	VerificationRequired bool     `json:"verification_required"`
 	DependsOn            []string `json:"depends_on,omitempty"`
 	AppType              string   `json:"app_type,omitempty"`
+	ConflictsWith        []string `json:"conflicts_with"`
+}
+
+// AnnotatedTask enriches a workflowNextTaskSuggestion with conflict detection
+// and evidence fields populated by computeWriteScopeConflicts and the eligible command.
+// All slice fields are initialized to []string{} (not nil) so they marshal to [] not null.
+type AnnotatedTask struct {
+	workflowNextTaskSuggestion
+	ConflictsWith []string `json:"conflicts_with"`
+}
+
+// writeScopeConflictResult is the output of computeWriteScopeConflicts.
+// All slice/map fields use non-nil zero values per the additive struct pattern.
+type writeScopeConflictResult struct {
+	EligibleTasks []workflowNextTaskSuggestion `json:"eligible_tasks"`
+	MaxBatch      []string                     `json:"max_batch"`
+	ConflictGraph map[string][]string          `json:"conflict_graph"`
+}
+
+// writeScopesConflict reports whether two write_scope lists overlap.
+// Two scopes conflict when any path in one is a prefix of (or equal to) any path in the other.
+// Prefix matching is directory-aware: "commands/workflow/" conflicts with
+// "commands/workflow/plan_task.go", and exact matches also conflict.
+// Uses the package-level scopePathsOverlap (defined in delegation.go).
+func writeScopesConflict(a, b []string) bool {
+	for _, pa := range a {
+		for _, pb := range b {
+			if scopePathsOverlap(pa, pb) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// computeWriteScopeConflicts annotates each task in the input slice with
+// ConflictsWith (the IDs of other tasks whose write_scope overlaps its own),
+// then computes the MaxNonConflictingBatch (the largest subset of tasks with
+// zero pairwise conflicts, greedy by input order) and builds a ConflictGraph.
+//
+// Schema rule: ConflictsWith per task is []string{} not nil. MaxBatch is []string{} not nil.
+// ConflictGraph values are []string{} not nil for every key.
+func computeWriteScopeConflicts(tasks []workflowNextTaskSuggestion) writeScopeConflictResult {
+	n := len(tasks)
+
+	// Initialize ConflictsWith on every task to []string{} per schema rule.
+	for i := range tasks {
+		tasks[i].ConflictsWith = []string{}
+	}
+
+	// Build conflict graph: for each pair (i,j) check scope overlap.
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if writeScopesConflict(tasks[i].WriteScope, tasks[j].WriteScope) {
+				tasks[i].ConflictsWith = append(tasks[i].ConflictsWith, tasks[j].TaskID)
+				tasks[j].ConflictsWith = append(tasks[j].ConflictsWith, tasks[i].TaskID)
+			}
+		}
+	}
+
+	// Build ConflictGraph map from populated ConflictsWith slices.
+	conflictGraph := make(map[string][]string, n)
+	for _, t := range tasks {
+		if t.ConflictsWith == nil {
+			conflictGraph[t.TaskID] = []string{}
+		} else {
+			conflictGraph[t.TaskID] = t.ConflictsWith
+		}
+	}
+
+	// Greedy MaxNonConflictingBatch: iterate in input order, add a task if it
+	// does not conflict with any already-included task.
+	inBatch := make(map[string]bool, n)
+	maxBatch := []string{}
+	for _, t := range tasks {
+		canAdd := true
+		for _, conflictID := range t.ConflictsWith {
+			if inBatch[conflictID] {
+				canAdd = false
+				break
+			}
+		}
+		if canAdd {
+			inBatch[t.TaskID] = true
+			maxBatch = append(maxBatch, t.TaskID)
+		}
+	}
+
+	return writeScopeConflictResult{
+		EligibleTasks: tasks,
+		MaxBatch:      maxBatch,
+		ConflictGraph: conflictGraph,
+	}
 }
 
 type workflowCompletionScopeState struct {

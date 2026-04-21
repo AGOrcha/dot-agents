@@ -594,6 +594,119 @@ func TestSelectAllEligibleTasks_CrossPlanDepMissingPlan(t *testing.T) {
 	}
 }
 
+// ── computeWriteScopeConflicts tests ─────────────────────────────────────────
+
+// TestComputeWriteScopeConflicts_ExactPathMatch verifies that two tasks sharing
+// an exact write_scope path are detected as conflicting (positive test).
+func TestComputeWriteScopeConflicts_ExactPathMatch(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{TaskID: "t1", WriteScope: []string{"commands/workflow/plan_task.go"}},
+		{TaskID: "t2", WriteScope: []string{"commands/workflow/plan_task.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	if len(result.EligibleTasks[0].ConflictsWith) != 1 || result.EligibleTasks[0].ConflictsWith[0] != "t2" {
+		t.Errorf("t1 should conflict with t2; got ConflictsWith=%v", result.EligibleTasks[0].ConflictsWith)
+	}
+	if len(result.EligibleTasks[1].ConflictsWith) != 1 || result.EligibleTasks[1].ConflictsWith[0] != "t1" {
+		t.Errorf("t2 should conflict with t1; got ConflictsWith=%v", result.EligibleTasks[1].ConflictsWith)
+	}
+	if len(result.ConflictGraph["t1"]) != 1 || result.ConflictGraph["t1"][0] != "t2" {
+		t.Errorf("ConflictGraph[t1] should be [t2]; got %v", result.ConflictGraph["t1"])
+	}
+}
+
+// TestComputeWriteScopeConflicts_DirectoryPrefixConflict verifies that a
+// directory prefix scope conflicts with a file inside that directory (positive test).
+func TestComputeWriteScopeConflicts_DirectoryPrefixConflict(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{TaskID: "dir-task", WriteScope: []string{"commands/workflow/"}},
+		{TaskID: "file-task", WriteScope: []string{"commands/workflow/plan_task.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	if len(result.EligibleTasks[0].ConflictsWith) == 0 {
+		t.Error("dir-task should conflict with file-task (directory prefix)")
+	}
+	if len(result.EligibleTasks[1].ConflictsWith) == 0 {
+		t.Error("file-task should conflict with dir-task (directory prefix)")
+	}
+}
+
+// TestComputeWriteScopeConflicts_NonOverlappingNoConflict verifies that tasks
+// with completely separate write_scopes do NOT conflict (negative test).
+func TestComputeWriteScopeConflicts_NonOverlappingNoConflict(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{TaskID: "a", WriteScope: []string{"commands/workflow/plan_task.go"}},
+		{TaskID: "b", WriteScope: []string{"internal/config/agentsrc.go"}},
+		{TaskID: "c", WriteScope: []string{"commands/review.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	for _, task := range result.EligibleTasks {
+		if len(task.ConflictsWith) != 0 {
+			t.Errorf("task %q should have no conflicts; got %v", task.TaskID, task.ConflictsWith)
+		}
+	}
+}
+
+// TestComputeWriteScopeConflicts_MaxBatchIsMaximalNonConflictingSet verifies that
+// MaxBatch contains the largest subset of tasks with no pairwise conflicts.
+func TestComputeWriteScopeConflicts_MaxBatchIsMaximal(t *testing.T) {
+	// t1 and t2 conflict (same directory), t3 is separate.
+	// Expected MaxBatch: [t1, t3] or [t2, t3] (greedy picks t1 first, then t3).
+	tasks := []workflowNextTaskSuggestion{
+		{TaskID: "t1", WriteScope: []string{"commands/workflow/"}},
+		{TaskID: "t2", WriteScope: []string{"commands/workflow/plan_task.go"}},
+		{TaskID: "t3", WriteScope: []string{"internal/config/agentsrc.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	// MaxBatch must have exactly 2 tasks (t1 and t3, greedy order).
+	if len(result.MaxBatch) != 2 {
+		t.Fatalf("MaxBatch should have 2 tasks; got %v", result.MaxBatch)
+	}
+	// t1 should be first (greedy picks first non-conflicting task).
+	if result.MaxBatch[0] != "t1" {
+		t.Errorf("MaxBatch[0] should be t1; got %q", result.MaxBatch[0])
+	}
+	// t3 should be included (no conflict with t1).
+	found := false
+	for _, id := range result.MaxBatch {
+		if id == "t3" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("MaxBatch should include t3; got %v", result.MaxBatch)
+	}
+	// t2 should NOT be in MaxBatch (conflicts with t1).
+	for _, id := range result.MaxBatch {
+		if id == "t2" {
+			t.Errorf("MaxBatch should not include t2 (conflicts with t1); got %v", result.MaxBatch)
+		}
+	}
+}
+
+// TestComputeWriteScopeConflicts_ConflictsWithNeverNil verifies that ConflictsWith
+// is always []string{} (not nil) even for tasks with no conflicts.
+func TestComputeWriteScopeConflicts_ConflictsWithNeverNil(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{TaskID: "solo", WriteScope: []string{"commands/workflow/plan_task.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	if result.EligibleTasks[0].ConflictsWith == nil {
+		t.Error("ConflictsWith should be []string{}, not nil")
+	}
+	if result.MaxBatch == nil {
+		t.Error("MaxBatch should be []string{}, not nil")
+	}
+	if result.ConflictGraph["solo"] == nil {
+		t.Error("ConflictGraph[solo] should be []string{}, not nil")
+	}
+}
+
 // TestSelectAllEligibleTasks_InProgressBeforePending verifies that in_progress
 // tasks appear before pending tasks in the returned slice.
 func TestSelectAllEligibleTasks_InProgressBeforePending(t *testing.T) {
