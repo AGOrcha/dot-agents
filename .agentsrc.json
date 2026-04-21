@@ -45,7 +45,8 @@
     "orchestrator-session-start",
     "plan-wave-picker",
     "platform-docs-refresh",
-    "provider-consumer-pair"
+    "provider-consumer-pair",
+    "isp"
   ],
   "sources": [
     {

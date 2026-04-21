@@ -27,6 +27,6 @@ success_criteria: |-
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: loop-worker
-status: active
+status: completed
 created_at: "2026-04-21T13:13:17Z"
-updated_at: "2026-04-21T13:13:17Z"
+updated_at: "2026-04-21T13:58:03Z"

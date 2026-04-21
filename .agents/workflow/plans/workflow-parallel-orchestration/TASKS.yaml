@@ -47,7 +47,7 @@ tasks:
         introduced in p3 (eligible cmd) — ensure p3's renderer surfaces all new fields.
     - id: p3-eligible-cmd
       title: Implement workflow eligible command
-      status: in_progress
+      status: completed
       depends_on:
         - p2-conflict-detection
       blocks: []
@@ -75,7 +75,7 @@ tasks:
         all task types — code and non-code (skills, prompts, YAML) alike.
     - id: p4-max-parallel-pref
       title: Add max_parallel_workers workflow preference key
-      status: pending
+      status: completed
       depends_on:
         - p3-eligible-cmd
       blocks: []

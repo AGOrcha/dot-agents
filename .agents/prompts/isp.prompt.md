@@ -29,7 +29,7 @@ Step 2: Select the next scoped task
 - Use `dot-agents workflow next --plan <id>[,<id>...]` to select the next actionable canonical task inside the scoped plan set
 - Prefer canonical task state over ad hoc notes or checkpoint hints
 - If no task is returned, treat the scope as unavailable rather than searching outside the scoped plan set
-- If the runtime is not in scoped-completion mode and multiple eligible tasks remain, select every non-overlapping task the pipeline is allowed to fan out in this pass, up to the parallel worker limit
+- If the runtime is not in scoped-completion mode and multiple eligible tasks remain, select every non-overlapping task the pipeline is allowed to fan out in this pass, up to the `max_parallel_workers` preference limit
 
 Step 3: Decide direct work vs fanout
 - Work directly only when the task is research, planning, architecture, or interactive user collaboration with no bounded write_scope
