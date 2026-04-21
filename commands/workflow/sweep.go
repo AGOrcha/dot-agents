@@ -21,6 +21,7 @@ const (
 	SweepActionCreatePlanStructure      SweepActionType = "create_plan_structure"
 	SweepActionCreateCheckpointReminder SweepActionType = "create_checkpoint_reminder"
 	SweepActionFlagStaleProposals       SweepActionType = "flag_stale_proposals"
+	SweepActionArchiveCompletedPlans    SweepActionType = "archive_completed_plans"
 )
 
 // SweepActionItem is one actionable fix in a sweep plan.
@@ -29,6 +30,7 @@ type SweepActionItem struct {
 	Action               SweepActionType `json:"action"`
 	Description          string          `json:"description"`
 	RequiresConfirmation bool            `json:"requires_confirmation"`
+	PlanID               string          `json:"plan_id,omitempty"`
 }
 
 // SweepPlan is the collection of planned actions for a sweep run.
@@ -76,6 +78,15 @@ func planSweep(reports []RepoDriftReport) SweepPlan {
 				RequiresConfirmation: false, // flagging only, not deleting
 			})
 		}
+		for _, planID := range r.CompletedPlanIDs {
+			plan.Actions = append(plan.Actions, SweepActionItem{
+				Project:              r.Project,
+				Action:               SweepActionArchiveCompletedPlans,
+				Description:          fmt.Sprintf("Archive completed plan %q in %s", planID, r.Project.Name),
+				RequiresConfirmation: true,
+				PlanID:               planID,
+			})
+		}
 	}
 	return plan
 }
@@ -117,6 +128,8 @@ func applySweepAction(item SweepActionItem) error {
 	case SweepActionCreateCheckpointReminder, SweepActionFlagStaleProposals:
 		// These are informational; logged but no filesystem mutation
 		return nil
+	case SweepActionArchiveCompletedPlans:
+		return runWorkflowPlanArchive(item.Project.Path, []string{item.PlanID}, false, false)
 	default:
 		return fmt.Errorf("unknown sweep action %q", item.Action)
 	}
