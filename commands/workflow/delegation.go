@@ -747,6 +747,51 @@ func checkPreVerifierTDDGate(projectPath string, writeScope []string, verificati
 	return fmt.Errorf("pre-verifier TDD gate: verification-required task with Go write_scope needs at least one *_test.go in the same directory (or list a *_test.go path); use --skip-tdd-gate for doc-only or non-Go work")
 }
 
+// checkFanoutScopeEvidenceWarnings emits non-blocking warnings to stderr when:
+// (1) no scope-evidence sidecar exists for the task and the KG graph adapter is available, or
+// (2) a sidecar exists but its confidence is "low".
+// Both warnings are suppressed when skipCheck is true.
+func checkFanoutScopeEvidenceWarnings(projectPath, planID, taskID string, skipCheck bool) {
+	if skipCheck {
+		return
+	}
+	sidecarPath := deriveScopeEvidencePath(projectPath, planID, taskID)
+	_, statErr := os.Stat(sidecarPath)
+	if os.IsNotExist(statErr) {
+		// No sidecar — warn only when graph is available so the message is actionable.
+		cfg, _ := loadGraphBridgeConfig(projectPath)
+		if cfg == nil {
+			cfg = &GraphBridgeConfig{Enabled: false}
+		}
+		graphHome := cfg.GraphHome
+		if graphHome == "" {
+			graphHome = defaultGraphHome(projectPath)
+		}
+		adapter := NewLocalGraphAdapter(graphHome)
+		health, _ := adapter.Health()
+		if health.AdapterAvailable {
+			fmt.Fprintf(os.Stderr, "warning: no scope-evidence sidecar for %s; run workflow plan derive-scope first\n", taskID)
+		}
+		return
+	}
+	if statErr != nil {
+		// Unexpected stat error — skip silently; do not block fanout.
+		return
+	}
+	// Sidecar exists — check confidence.
+	data, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		return
+	}
+	var ev ScopeEvidence
+	if err := yaml.Unmarshal(data, &ev); err != nil {
+		return
+	}
+	if ev.Confidence == "low" {
+		fmt.Fprintf(os.Stderr, "warning: scope-evidence confidence is low for %s; consider re-running derive-scope\n", taskID)
+	}
+}
+
 func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -839,6 +884,9 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	if err := checkPreVerifierTDDGate(project.Path, writeScope, targetTask.VerificationRequired, skipTDD); err != nil {
 		return err
 	}
+
+	skipEvidenceCheck, _ := cmd.Flags().GetBool("skip-evidence-check")
+	checkFanoutScopeEvidenceWarnings(project.Path, planID, taskID, skipEvidenceCheck)
 
 	existing, err := listDelegationContracts(project.Path)
 	if err != nil {

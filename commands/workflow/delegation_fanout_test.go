@@ -722,4 +722,197 @@ func TestCollectDelegationSummary_CompletedNotCounted(t *testing.T) {
 	}
 }
 
+// ── fanout-evidence-integration: scope-evidence sidecar warnings ──────────────
+
+// setupGraphHome creates a minimal graph home directory that satisfies
+// LocalGraphAdapter.Health() AdapterAvailable == true.
+func setupGraphHome(t *testing.T, projectPath string) string {
+	t.Helper()
+	graphHome := filepath.Join(projectPath, ".kg")
+	if err := os.MkdirAll(filepath.Join(graphHome, "self"), 0755); err != nil {
+		t.Fatalf("mkdir graph self: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(graphHome, "self", "config.yaml"), []byte("version: 1\n"), 0644); err != nil {
+		t.Fatalf("write graph config: %v", err)
+	}
+	// Write graph-bridge.yaml so loadGraphBridgeConfig picks up the custom graphHome.
+	bridgeDir := filepath.Join(projectPath, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatalf("mkdir bridge dir: %v", err)
+	}
+	bridgeCfg := "schema_version: 1\nenabled: true\ngraph_home: " + graphHome + "\n"
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"), []byte(bridgeCfg), 0644); err != nil {
+		t.Fatalf("write graph-bridge.yaml: %v", err)
+	}
+	return graphHome
+}
+
+// captureStderr redirects os.Stderr to a pipe, calls fn, then returns the captured text.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = old
+	var buf strings.Builder
+	b := make([]byte, 4096)
+	for {
+		n, err := r.Read(b)
+		if n > 0 {
+			buf.Write(b[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf.String()
+}
+
+// TestFanoutEvidenceWarning_NoSidecarGraphHealthy asserts a warning is emitted when there
+// is no sidecar and the graph adapter is available.
+func TestFanoutEvidenceWarning_NoSidecarGraphHealthy(t *testing.T) {
+	repo := setupTestProject(t)
+	setupGraphHome(t, repo)
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
+	})
+	if !strings.Contains(got, "no scope-evidence sidecar") {
+		t.Fatalf("expected no-sidecar warning in stderr, got: %q", got)
+	}
+	if !strings.Contains(got, "task-001") {
+		t.Fatalf("expected task id in warning, got: %q", got)
+	}
+}
+
+// TestFanoutEvidenceWarning_NoSidecarGraphDegraded asserts no warning is emitted when
+// the graph adapter is not available (graph home absent or not configured).
+func TestFanoutEvidenceWarning_NoSidecarGraphDegraded(t *testing.T) {
+	repo := setupTestProject(t)
+	// Write a graph-bridge.yaml pointing to a non-existent graph home so the
+	// adapter reports AdapterAvailable == false regardless of the host machine state.
+	bridgeDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatalf("mkdir bridge dir: %v", err)
+	}
+	nonExistentHome := filepath.Join(repo, ".kg-absent")
+	bridgeCfg := "schema_version: 1\nenabled: true\ngraph_home: " + nonExistentHome + "\n"
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"), []byte(bridgeCfg), 0644); err != nil {
+		t.Fatalf("write graph-bridge.yaml: %v", err)
+	}
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
+	})
+	if strings.Contains(got, "no scope-evidence sidecar") {
+		t.Fatalf("expected no warning when graph degraded, got: %q", got)
+	}
+}
+
+// TestFanoutEvidenceWarning_SidecarLowConfidence asserts a warning is emitted when a
+// sidecar exists but its confidence is "low".
+func TestFanoutEvidenceWarning_SidecarLowConfidence(t *testing.T) {
+	repo := setupTestProject(t)
+
+	// Write a low-confidence sidecar.
+	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "evidence")
+	if err := os.MkdirAll(evidenceDir, 0755); err != nil {
+		t.Fatalf("mkdir evidence: %v", err)
+	}
+	ev := NewScopeEvidence("plan-001", "task-001")
+	ev.Confidence = "low"
+	data, err := yaml.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	sidecarPath := deriveScopeEvidencePath(repo, "plan-001", "task-001")
+	if err := os.WriteFile(sidecarPath, data, 0644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
+	})
+	if !strings.Contains(got, "confidence is low") {
+		t.Fatalf("expected low-confidence warning in stderr, got: %q", got)
+	}
+	if !strings.Contains(got, "task-001") {
+		t.Fatalf("expected task id in warning, got: %q", got)
+	}
+}
+
+// TestFanoutEvidenceWarning_SidecarHighConfidence asserts no warning when sidecar has
+// confidence != "low" (negative path for the low-confidence warning).
+func TestFanoutEvidenceWarning_SidecarHighConfidence(t *testing.T) {
+	repo := setupTestProject(t)
+
+	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "evidence")
+	if err := os.MkdirAll(evidenceDir, 0755); err != nil {
+		t.Fatalf("mkdir evidence: %v", err)
+	}
+	ev := NewScopeEvidence("plan-001", "task-001")
+	ev.Confidence = "high"
+	data, err := yaml.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	sidecarPath := deriveScopeEvidencePath(repo, "plan-001", "task-001")
+	if err := os.WriteFile(sidecarPath, data, 0644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
+	})
+	if got != "" {
+		t.Fatalf("expected no warning for high confidence sidecar, got: %q", got)
+	}
+}
+
+// TestFanoutEvidenceWarning_SkipCheckSuppressesNoSidecar asserts --skip-evidence-check
+// suppresses the no-sidecar warning even when graph is healthy.
+func TestFanoutEvidenceWarning_SkipCheckSuppressesNoSidecar(t *testing.T) {
+	repo := setupTestProject(t)
+	setupGraphHome(t, repo)
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", true /* skip */)
+	})
+	if got != "" {
+		t.Fatalf("expected no warning when skip=true, got: %q", got)
+	}
+}
+
+// TestFanoutEvidenceWarning_SkipCheckSuppressesLowConfidence asserts --skip-evidence-check
+// suppresses the low-confidence warning.
+func TestFanoutEvidenceWarning_SkipCheckSuppressesLowConfidence(t *testing.T) {
+	repo := setupTestProject(t)
+
+	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "evidence")
+	if err := os.MkdirAll(evidenceDir, 0755); err != nil {
+		t.Fatalf("mkdir evidence: %v", err)
+	}
+	ev := NewScopeEvidence("plan-001", "task-001")
+	ev.Confidence = "low"
+	data, err := yaml.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal sidecar: %v", err)
+	}
+	if err := os.WriteFile(deriveScopeEvidencePath(repo, "plan-001", "task-001"), data, 0644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	got := captureStderr(t, func() {
+		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", true /* skip */)
+	})
+	if got != "" {
+		t.Fatalf("expected no warning when skip=true, got: %q", got)
+	}
+}
+
 // ── Wave 7: Drift & Sweep ─────────────────────────────────────────────────────
