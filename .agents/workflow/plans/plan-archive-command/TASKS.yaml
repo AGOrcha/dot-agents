@@ -26,7 +26,7 @@ tasks:
       notes: 'Guard: status must be completed (or --force). Stamp status=archived + updated_at BEFORE move. Merge strategy: os.Rename if history dir absent. If history exists: content-aware merge walk — DMA artifacts always skip; PLAN.yaml/TASKS.yaml/<id>.plan.md always overwrite; all other files: compute `sha256.Sum256` of the source file via crypto/sha256 + mtime check (overwrite if newer or different, skip if identical, warn if history is newer). On RemoveAll failure: retry once automatically. Implement mergeWorkflowPlanDir() — do NOT reuse copyWorkflowDir directly (needs per-file classification + hash logic). Bulk: --plan accepts comma-separated IDs; archive each in sequence, log failure and continue.'
     - id: p3-wire-cmd
       title: Wire planArchiveCmd into cmd.go under planCmd
-      status: pending
+      status: in_progress
       depends_on:
         - p2-archive-handler
       blocks: []
