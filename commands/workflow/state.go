@@ -770,6 +770,10 @@ func plansBaseDir(projectPath string) string {
 	return filepath.Join(projectPath, ".agents", "workflow", "plans")
 }
 
+func historyBaseDir(projectPath string) string {
+	return filepath.Join(projectPath, ".agents", "history")
+}
+
 func listCanonicalPlanIDs(projectPath string) ([]string, error) {
 	base := plansBaseDir(projectPath)
 	entries, err := os.ReadDir(base)
