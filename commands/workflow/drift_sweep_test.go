@@ -237,4 +237,116 @@ func TestDetectRepoDrift_InconsistentArchivedPlanIDs(t *testing.T) {
 	}
 }
 
+// ── p6-tests: CompletedPlanIDs + InconsistentArchivedPlanIDs behavior ─────────
+
+// TestDetectRepoDrift_BothFieldsPopulated verifies both fields are populated when
+// a fixture has one plan of each kind.
+func TestDetectRepoDrift_BothFieldsPopulated(t *testing.T) {
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans")
+
+	for planID, status := range map[string]string{
+		"plan-done":    "completed",
+		"plan-stray":   "archived",
+		"plan-active":  "active",
+	} {
+		d := filepath.Join(plansDir, planID)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := []byte("schema_version: 1\nid: " + planID + "\nstatus: " + status + "\n")
+		if err := os.WriteFile(filepath.Join(d, "PLAN.yaml"), content, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	project := ManagedProject{Name: "mixed", Path: dir}
+	report := detectRepoDrift(project, 7, 30)
+
+	if len(report.CompletedPlanIDs) != 1 || report.CompletedPlanIDs[0] != "plan-done" {
+		t.Errorf("CompletedPlanIDs = %v, want [plan-done]", report.CompletedPlanIDs)
+	}
+	if len(report.InconsistentArchivedPlanIDs) != 1 || report.InconsistentArchivedPlanIDs[0] != "plan-stray" {
+		t.Errorf("InconsistentArchivedPlanIDs = %v, want [plan-stray]", report.InconsistentArchivedPlanIDs)
+	}
+}
+
+// TestDetectRepoDrift_EmptyFieldsWhenNoMatchingPlans confirms both slice fields
+// remain empty (not nil) when there are only active plans.
+func TestDetectRepoDrift_EmptyFieldsWhenNoMatchingPlans(t *testing.T) {
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "plan-active")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"),
+		[]byte("schema_version: 1\nid: plan-active\nstatus: active\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	project := ManagedProject{Name: "only-active", Path: dir}
+	report := detectRepoDrift(project, 7, 30)
+
+	if report.CompletedPlanIDs == nil {
+		t.Error("CompletedPlanIDs must not be nil")
+	}
+	if len(report.CompletedPlanIDs) != 0 {
+		t.Errorf("expected no completed plans, got %v", report.CompletedPlanIDs)
+	}
+	if report.InconsistentArchivedPlanIDs == nil {
+		t.Error("InconsistentArchivedPlanIDs must not be nil")
+	}
+	if len(report.InconsistentArchivedPlanIDs) != 0 {
+		t.Errorf("expected no inconsistent plans, got %v", report.InconsistentArchivedPlanIDs)
+	}
+}
+
+// TestPlanSweep_ArchiveCompletedPlansAction verifies that planSweep emits one
+// SweepActionArchiveCompletedPlans action per CompletedPlanID.
+func TestPlanSweep_ArchiveCompletedPlansAction(t *testing.T) {
+	reports := []RepoDriftReport{
+		{
+			Project:          ManagedProject{Name: "proj", Path: "/tmp/proj"},
+			Reachable:        true,
+			CompletedPlanIDs: []string{"plan-alpha", "plan-beta"},
+			Status:           "warn",
+		},
+	}
+	plan := planSweep(reports)
+
+	var archiveActions []SweepActionItem
+	for _, a := range plan.Actions {
+		if a.Action == SweepActionArchiveCompletedPlans {
+			archiveActions = append(archiveActions, a)
+		}
+	}
+	if len(archiveActions) != 2 {
+		t.Errorf("expected 2 archive_completed_plans actions, got %d", len(archiveActions))
+	}
+	for _, a := range archiveActions {
+		if !a.RequiresConfirmation {
+			t.Errorf("archive_completed_plans action should require confirmation (destructive)")
+		}
+	}
+}
+
+// TestPlanSweep_NoArchiveActionsForCleanProject verifies no archive actions are
+// emitted when CompletedPlanIDs is empty.
+func TestPlanSweep_NoArchiveActionsForCleanProject(t *testing.T) {
+	reports := []RepoDriftReport{
+		{
+			Project:          ManagedProject{Name: "clean", Path: "/tmp/clean"},
+			Reachable:        true,
+			CompletedPlanIDs: []string{},
+			Status:           "healthy",
+		},
+	}
+	plan := planSweep(reports)
+	for _, a := range plan.Actions {
+		if a.Action == SweepActionArchiveCompletedPlans {
+			t.Error("expected no archive_completed_plans for healthy project")
+		}
+	}
+}
+
 // ── Phase 6: fold-back ───────────────────────────────────────────────────────
