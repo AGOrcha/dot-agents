@@ -1362,3 +1362,171 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 	ui.Success(fmt.Sprintf("Updated task %q in plan %q", taskID, planID))
 	return nil
 }
+
+// PlanScheduleTask is a task entry in the schedule output.
+type PlanScheduleTask struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Status     string   `json:"status"`
+	WriteScope []string `json:"write_scope"`
+}
+
+// PlanScheduleWave is a single wave (parallel group) in the schedule.
+type PlanScheduleWave struct {
+	Wave  int                `json:"wave"`
+	Tasks []PlanScheduleTask `json:"tasks"`
+}
+
+// PlanScheduleResult is the full schedule output.
+type PlanScheduleResult struct {
+	PlanID              string             `json:"plan_id"`
+	Waves               []PlanScheduleWave `json:"waves"`
+	CriticalPathLength  int                `json:"critical_path_length"`
+	MaxIntraParallelism int                `json:"max_intra_plan_parallelism"`
+}
+
+// computePlanSchedule runs Kahn's BFS topological sort on the tasks in tf,
+// assigning each task a wave number. Cross-plan dep entries (containing "/")
+// are ignored for intra-plan scheduling. Returns a PlanScheduleResult.
+func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
+	// Build id → task index map.
+	idxByID := make(map[string]int, len(tf.Tasks))
+	for i, t := range tf.Tasks {
+		idxByID[t.ID] = i
+	}
+
+	// Build in-degree and adjacency list: adj[i] = list of task indices that depend on task i.
+	inDegree := make([]int, len(tf.Tasks))
+	adj := make([][]int, len(tf.Tasks))
+
+	for i, t := range tf.Tasks {
+		for _, dep := range t.DependsOn {
+			// Skip cross-plan dependencies.
+			if strings.Contains(dep, "/") {
+				continue
+			}
+			j, ok := idxByID[dep]
+			if !ok {
+				continue
+			}
+			adj[j] = append(adj[j], i)
+			inDegree[i]++
+		}
+	}
+
+	// wave[i] holds the 0-based wave index for task i (wave 1 = index 0).
+	waveIdx := make([]int, len(tf.Tasks))
+	processed := 0
+
+	// Seed with all zero in-degree tasks.
+	queue := []int{}
+	for i, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, i)
+		}
+	}
+
+	// waveSlots groups task indices by their wave index.
+	waveSlots := map[int][]int{}
+
+	for len(queue) > 0 {
+		var nextQueue []int
+		for _, idx := range queue {
+			w := waveIdx[idx]
+			waveSlots[w] = append(waveSlots[w], idx)
+			processed++
+			for _, dep := range adj[idx] {
+				inDegree[dep]--
+				if waveIdx[dep] < w+1 {
+					waveIdx[dep] = w + 1
+				}
+				if inDegree[dep] == 0 {
+					nextQueue = append(nextQueue, dep)
+				}
+			}
+		}
+		queue = nextQueue
+	}
+
+	if processed != len(tf.Tasks) {
+		return nil, fmt.Errorf("plan %q has a dependency cycle (processed %d of %d tasks)", tf.PlanID, processed, len(tf.Tasks))
+	}
+
+	// Build sorted wave list.
+	waveNums := make([]int, 0, len(waveSlots))
+	for w := range waveSlots {
+		waveNums = append(waveNums, w)
+	}
+	sort.Ints(waveNums)
+
+	waves := make([]PlanScheduleWave, 0, len(waveNums))
+	maxPar := 0
+	for _, w := range waveNums {
+		indices := waveSlots[w]
+		waveTasks := make([]PlanScheduleTask, 0, len(indices))
+		for _, idx := range indices {
+			t := tf.Tasks[idx]
+			ws := t.WriteScope
+			if ws == nil {
+				ws = []string{}
+			}
+			waveTasks = append(waveTasks, PlanScheduleTask{
+				ID:         t.ID,
+				Title:      t.Title,
+				Status:     t.Status,
+				WriteScope: ws,
+			})
+		}
+		sort.Slice(waveTasks, func(a, b int) bool { return waveTasks[a].ID < waveTasks[b].ID })
+		waves = append(waves, PlanScheduleWave{Wave: w + 1, Tasks: waveTasks})
+		if len(waveTasks) > maxPar {
+			maxPar = len(waveTasks)
+		}
+	}
+
+	return &PlanScheduleResult{
+		PlanID:              tf.PlanID,
+		Waves:               waves,
+		CriticalPathLength:  len(waves),
+		MaxIntraParallelism: maxPar,
+	}, nil
+}
+
+func runWorkflowPlanSchedule(planID string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	tf, err := loadCanonicalTasks(project.Path, planID)
+	if err != nil {
+		return fmt.Errorf("load tasks for plan %q: %w", planID, err)
+	}
+
+	result, err := computePlanSchedule(tf)
+	if err != nil {
+		return err
+	}
+
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+
+	ui.Header(fmt.Sprintf("Plan Schedule: %s", planID))
+	for _, w := range result.Waves {
+		fmt.Fprintf(os.Stdout, "\nWave %d (%d task(s)):\n", w.Wave, len(w.Tasks))
+		for _, t := range w.Tasks {
+			scope := strings.Join(t.WriteScope, ", ")
+			if scope == "" {
+				scope = "(none)"
+			}
+			fmt.Fprintf(os.Stdout, "  [%s] %s — %s\n    write_scope: %s\n", t.Status, t.ID, t.Title, scope)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "Critical path length : %d wave(s)\n", result.CriticalPathLength)
+	fmt.Fprintf(os.Stdout, "Max intra-plan parallelism: %d task(s)\n", result.MaxIntraParallelism)
+	fmt.Fprintln(os.Stdout)
+	return nil
+}

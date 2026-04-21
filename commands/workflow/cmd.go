@@ -216,7 +216,20 @@ preferences, fanout artifacts, and bridge queries.`,
 	planArchiveCmd.Flags().BoolVar(&planArchiveForce, "force", false, "Skip completed-status guard and archive regardless of plan status")
 	_ = planArchiveCmd.MarkFlagRequired("plan")
 
-	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd)
+	planScheduleCmd := &cobra.Command{
+		Use:   "schedule <plan-id>",
+		Short: "Show wave schedule (Kahn BFS topological sort) for a plan's tasks",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow plan schedule plan-archive-command",
+			"  dot-agents --json workflow plan schedule plan-archive-command",
+		),
+		Args: deps.ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowPlanSchedule(args[0])
+		},
+	}
+
+	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd)
 
 	taskCmd := &cobra.Command{
 		Use:   "task",
