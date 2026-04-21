@@ -246,7 +246,25 @@ preferences, fanout artifacts, and bridge queries.`,
 	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopeSymbols, "seed-symbol", nil, "Seed symbol for scope-lane queries (repeatable)")
 	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopePaths, "seed-path", nil, "Seed file path for scope-lane queries (repeatable)")
 
-	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd, planDeriveScopeCmd)
+	var checkScopeFiles []string
+	var checkScopeFromGitDiff bool
+	planCheckScopeCmd := &cobra.Command{
+		Use:   "check-scope <plan-id> <task-id>",
+		Short: "Check changed files against the scope-evidence sidecar for a task",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow plan check-scope my-plan my-task --from-git-diff",
+			"  dot-agents workflow plan check-scope my-plan my-task --changed-file commands/workflow/cmd.go --changed-file commands/workflow/plan_task.go",
+			"  dot-agents --json workflow plan check-scope my-plan my-task --from-git-diff",
+		),
+		Args: deps.ExactArgsWithHints(2, "Pass a canonical plan ID and task ID."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowPlanCheckScope(args[0], args[1], checkScopeFiles, checkScopeFromGitDiff)
+		},
+	}
+	planCheckScopeCmd.Flags().StringArrayVar(&checkScopeFiles, "changed-file", nil, "Changed file path (repeatable)")
+	planCheckScopeCmd.Flags().BoolVar(&checkScopeFromGitDiff, "from-git-diff", false, "Read changed files from git diff HEAD")
+
+	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd, planDeriveScopeCmd, planCheckScopeCmd)
 
 	taskCmd := &cobra.Command{
 		Use:   "task",

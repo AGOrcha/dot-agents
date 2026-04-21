@@ -1821,6 +1821,202 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 	}, nil
 }
 
+// checkScopeResult holds the output of a check-scope run.
+type checkScopeResult struct {
+	PlanID              string   `json:"plan_id"`
+	TaskID              string   `json:"task_id"`
+	SidecarPath         string   `json:"sidecar_path"`
+	ChangedFiles        []string `json:"changed_files"`
+	InsideScope         []string `json:"inside_scope"`
+	OutsideScope        []string `json:"outside_scope"`
+	UntouchedRequired   []string `json:"untouched_required"`
+	TouchedExcluded     []string `json:"touched_excluded"`
+	Clean               bool     `json:"clean"`
+}
+
+// runWorkflowPlanCheckScope implements `workflow plan check-scope <plan_id> <task_id>`.
+// It reads the .scope.yaml sidecar, collects changed files from flags or git diff, and
+// reports which files are inside/outside final_write_scope, which required_paths were
+// untouched, and which excluded_paths were touched.
+// Exit code: 0=clean, 1=warning (outside-scope or excluded touched), 2=no-sidecar.
+func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fromGitDiff bool) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	projectPath := project.Path
+
+	sidecarPath := deriveScopeEvidencePath(projectPath, planID, taskID)
+	data, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "no scope sidecar found at %s\n", config.DisplayPath(sidecarPath))
+			fmt.Fprintln(os.Stderr, "Run 'dot-agents workflow plan derive-scope' to generate one.")
+			os.Exit(2)
+		}
+		return fmt.Errorf("read sidecar: %w", err)
+	}
+	var ev ScopeEvidence
+	if err := yaml.Unmarshal(data, &ev); err != nil {
+		return fmt.Errorf("parse sidecar: %w", err)
+	}
+
+	// Collect changed files.
+	if fromGitDiff {
+		gitFiles, err := checkScopeGitDiffFiles(projectPath)
+		if err != nil {
+			ui.Warn("--from-git-diff: " + err.Error())
+		} else {
+			changedFiles = append(changedFiles, gitFiles...)
+		}
+	}
+	// Dedup changed files.
+	seen := make(map[string]bool, len(changedFiles))
+	deduped := make([]string, 0, len(changedFiles))
+	for _, f := range changedFiles {
+		if !seen[f] {
+			seen[f] = true
+			deduped = append(deduped, f)
+		}
+	}
+	changedFiles = deduped
+
+	// Build lookup sets.
+	finalScopeSet := make(map[string]bool, len(ev.FinalWriteScope))
+	for _, p := range ev.FinalWriteScope {
+		finalScopeSet[p] = true
+	}
+	requiredSet := make(map[string]bool, len(ev.RequiredPaths))
+	for _, rp := range ev.RequiredPaths {
+		requiredSet[rp.Path] = true
+	}
+	excludedSet := make(map[string]bool, len(ev.ExcludedPaths))
+	for _, ep := range ev.ExcludedPaths {
+		excludedSet[ep.Path] = true
+	}
+
+	var insideScope, outsideScope, touchedExcluded []string
+	touchedFiles := make(map[string]bool, len(changedFiles))
+	for _, f := range changedFiles {
+		touchedFiles[f] = true
+		if finalScopeSet[f] || requiredSet[f] {
+			insideScope = append(insideScope, f)
+		} else if excludedSet[f] {
+			touchedExcluded = append(touchedExcluded, f)
+		} else {
+			outsideScope = append(outsideScope, f)
+		}
+	}
+
+	var untouchedRequired []string
+	for _, rp := range ev.RequiredPaths {
+		if !touchedFiles[rp.Path] {
+			untouchedRequired = append(untouchedRequired, rp.Path)
+		}
+	}
+
+	sort.Strings(insideScope)
+	sort.Strings(outsideScope)
+	sort.Strings(untouchedRequired)
+	sort.Strings(touchedExcluded)
+
+	clean := len(outsideScope) == 0 && len(touchedExcluded) == 0
+
+	result := checkScopeResult{
+		PlanID:            planID,
+		TaskID:            taskID,
+		SidecarPath:       config.DisplayPath(sidecarPath),
+		ChangedFiles:      changedFiles,
+		InsideScope:       insideScope,
+		OutsideScope:      outsideScope,
+		UntouchedRequired: untouchedRequired,
+		TouchedExcluded:   touchedExcluded,
+		Clean:             clean,
+	}
+
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		if !clean {
+			os.Exit(1)
+		}
+		return nil
+	}
+
+	ui.Header(fmt.Sprintf("Scope Check: %s / %s", planID, taskID))
+	fmt.Fprintf(os.Stdout, "  sidecar: %s\n", config.DisplayPath(sidecarPath))
+	fmt.Fprintf(os.Stdout, "  changed files: %d\n\n", len(changedFiles))
+
+	if len(insideScope) > 0 {
+		ui.Section("Inside Scope")
+		for _, f := range insideScope {
+			fmt.Fprintf(os.Stdout, "  + %s\n", f)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+
+	if len(outsideScope) > 0 {
+		ui.Section("Outside Scope (warning)")
+		for _, f := range outsideScope {
+			fmt.Fprintf(os.Stdout, "  ! %s\n", f)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+
+	if len(untouchedRequired) > 0 {
+		ui.Section("Untouched Required Paths")
+		for _, f := range untouchedRequired {
+			fmt.Fprintf(os.Stdout, "  - %s\n", f)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+
+	if len(touchedExcluded) > 0 {
+		ui.Section("Touched Excluded Paths (warning)")
+		for _, f := range touchedExcluded {
+			fmt.Fprintf(os.Stdout, "  x %s\n", f)
+		}
+		fmt.Fprintln(os.Stdout)
+	}
+
+	if clean {
+		ui.Success("clean — all changes are within scope, no excluded paths touched")
+	} else {
+		ui.Warn("scope warnings present (outside-scope or excluded paths touched)")
+		fmt.Fprintln(os.Stdout)
+		os.Exit(1)
+	}
+	return nil
+}
+
+// checkScopeGitDiffFiles returns the list of files with uncommitted changes using
+// `git diff --name-only HEAD`. Returns an error on failure (used for graceful degradation).
+func checkScopeGitDiffFiles(projectPath string) ([]string, error) {
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = projectPath
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		// Also try index-only (staged but not committed).
+		cmd2 := exec.Command("git", "diff", "--name-only", "--cached")
+		cmd2.Dir = projectPath
+		cmd2.Env = os.Environ()
+		out2, err2 := cmd2.Output()
+		if err2 != nil {
+			return nil, fmt.Errorf("git diff HEAD: %v; git diff --cached: %v", err, err2)
+		}
+		out = out2
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
 func runWorkflowPlanSchedule(planID string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
