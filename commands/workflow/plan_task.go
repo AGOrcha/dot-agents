@@ -1623,12 +1623,24 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 			var loadErr error
 			tf, loadErr = loadCanonicalTasks(projectPath, refPlanID)
 			if loadErr != nil {
-				if warnings != nil {
-					*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: cannot load plan %q tasks: %v", dep, refPlanID, loadErr))
+				// Plan not found in workflow/plans/ — check history/ as fallback.
+				// Archived plans are completed; their tasks may satisfy cross-plan deps.
+				histPath := filepath.Join(historyBaseDir(projectPath), refPlanID, "TASKS.yaml")
+				if histContent, histErr := os.ReadFile(histPath); histErr == nil {
+					var histTF CanonicalTaskFile
+					if yaml.Unmarshal(histContent, &histTF) == nil {
+						tf = &histTF
+						loadErr = nil
+					}
 				}
-				incomplete = append(incomplete, dep)
-				crossPlanCache[refPlanID] = nil // cache miss marker
-				continue
+				if loadErr != nil {
+					if warnings != nil {
+						*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: cannot load plan %q tasks: %v", dep, refPlanID, loadErr))
+					}
+					incomplete = append(incomplete, dep)
+					crossPlanCache[refPlanID] = nil // cache miss marker
+					continue
+				}
 			}
 			crossPlanCache[refPlanID] = tf
 		}

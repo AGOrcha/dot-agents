@@ -595,6 +595,45 @@ func TestSelectAllEligibleTasks_CrossPlanDepMissingPlan(t *testing.T) {
 	}
 }
 
+// TestSelectAllEligibleTasks_CrossPlanDepSatisfiedViaHistory verifies that a
+// cross-plan dep referencing an archived plan (in history/) is treated as
+// satisfied when the referenced task is completed there.
+func TestSelectAllEligibleTasks_CrossPlanDepSatisfiedViaHistory(t *testing.T) {
+	proj := t.TempDir()
+	// Main plan references "archived-plan/done-task" which lives in history.
+	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
+		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"archived-plan/done-task"}},
+	})
+	// Write archived plan into history/ (not workflow/plans/).
+	histDir := filepath.Join(proj, ".agents", "history", "archived-plan")
+	if err := os.MkdirAll(histDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	archivedTF := CanonicalTaskFile{
+		SchemaVersion: 1, PlanID: "archived-plan",
+		Tasks: []CanonicalTask{{ID: "done-task", Status: "completed"}},
+	}
+	data, _ := yaml.Marshal(archivedTF)
+	if err := os.WriteFile(filepath.Join(histDir, "TASKS.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, s := range got {
+		if s.TaskID == "main-task" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("main-task should be eligible when cross-plan dep is completed in history/")
+	}
+}
+
 // ── computeWriteScopeConflicts tests ─────────────────────────────────────────
 
 // TestComputeWriteScopeConflicts_ExactPathMatch verifies that two tasks sharing
