@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-scope-evidence.schema.json",
+  "title": "dot-agents workflow scope evidence sidecar",
+  "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/evidence/<task-id>.scope.yaml. Matches workflow.ScopeEvidence in commands/workflow/plan_task.go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_id", "task_id", "status", "confidence"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "reviewed", "superseded"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["code", "research", "doc"]
+    },
+    "goal": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "decision_locks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_reads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "why"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "why": { "type": "string" }
+        }
+      }
+    },
+    "seeds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "symbols": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rationale": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "kind", "intent", "subject"],
+        "properties": {
+          "tool": { "type": "string" },
+          "kind": { "type": "string" },
+          "intent": { "type": "string" },
+          "subject": { "type": "string" },
+          "summary": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "required_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "because"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "because": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "optional_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "because"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "because": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "excluded_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "rationale"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "rationale": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "provides": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "consumes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "final_write_scope": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "verification_focus": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "allowed_local_choices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stop_conditions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "open_gaps": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -14,6 +14,97 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// ScopeEvidence is the Go representation of a .scope.yaml sidecar file located at
+// .agents/workflow/plans/<plan_id>/evidence/<task_id>.scope.yaml.
+// All slice fields use []string{} (not nil) so JSON marshals to [] not null.
+type ScopeEvidence struct {
+	SchemaVersion      int                    `json:"schema_version"          yaml:"schema_version"`
+	PlanID             string                 `json:"plan_id"                 yaml:"plan_id"`
+	TaskID             string                 `json:"task_id"                 yaml:"task_id"`
+	Status             string                 `json:"status"                  yaml:"status"`
+	Mode               string                 `json:"mode,omitempty"          yaml:"mode,omitempty"`
+	Goal               string                 `json:"goal,omitempty"          yaml:"goal,omitempty"`
+	Confidence         string                 `json:"confidence"              yaml:"confidence"`
+	DecisionLocks      []string               `json:"decision_locks"          yaml:"decision_locks"`
+	RequiredReads      []ScopeRequiredRead    `json:"required_reads"          yaml:"required_reads"`
+	Seeds              *ScopeSeeds            `json:"seeds,omitempty"         yaml:"seeds,omitempty"`
+	Queries            []ScopeQuery           `json:"queries"                 yaml:"queries"`
+	RequiredPaths      []ScopePath            `json:"required_paths"          yaml:"required_paths"`
+	OptionalPaths      []ScopePath            `json:"optional_paths"          yaml:"optional_paths"`
+	ExcludedPaths      []ScopeExcludedPath    `json:"excluded_paths"          yaml:"excluded_paths"`
+	Provides           []string               `json:"provides"                yaml:"provides"`
+	Consumes           []string               `json:"consumes"                yaml:"consumes"`
+	FinalWriteScope    []string               `json:"final_write_scope"       yaml:"final_write_scope"`
+	VerificationFocus  []string               `json:"verification_focus"      yaml:"verification_focus"`
+	AllowedLocalChoices []string              `json:"allowed_local_choices"   yaml:"allowed_local_choices"`
+	StopConditions     []string               `json:"stop_conditions"         yaml:"stop_conditions"`
+	OpenGaps           []string               `json:"open_gaps"               yaml:"open_gaps"`
+}
+
+// ScopeRequiredRead is an entry in ScopeEvidence.RequiredReads.
+type ScopeRequiredRead struct {
+	Path string `json:"path" yaml:"path"`
+	Why  string `json:"why"  yaml:"why"`
+}
+
+// ScopeSeeds captures the starting symbols or paths the planner identified.
+type ScopeSeeds struct {
+	Symbols   []string `json:"symbols,omitempty"   yaml:"symbols,omitempty"`
+	Paths     []string `json:"paths,omitempty"     yaml:"paths,omitempty"`
+	Rationale []string `json:"rationale,omitempty" yaml:"rationale,omitempty"`
+}
+
+// ScopeQuerySummary holds the result files returned by a graph query.
+type ScopeQuerySummary struct {
+	Files []string `json:"files" yaml:"files"`
+}
+
+// ScopeQuery represents a single graph query run during scope derivation.
+type ScopeQuery struct {
+	Tool    string             `json:"tool"              yaml:"tool"`
+	Kind    string             `json:"kind"              yaml:"kind"`
+	Intent  string             `json:"intent"            yaml:"intent"`
+	Subject string             `json:"subject"           yaml:"subject"`
+	Summary *ScopeQuerySummary `json:"summary,omitempty" yaml:"summary,omitempty"`
+}
+
+// ScopePath is a required or optional path entry with explanatory reasons.
+type ScopePath struct {
+	Path    string   `json:"path"    yaml:"path"`
+	Because []string `json:"because" yaml:"because"`
+}
+
+// ScopeExcludedPath is a path intentionally excluded from write_scope.
+type ScopeExcludedPath struct {
+	Path      string   `json:"path"      yaml:"path"`
+	Rationale []string `json:"rationale" yaml:"rationale"`
+}
+
+// NewScopeEvidence returns a ScopeEvidence with all slice fields initialized to
+// empty slices so they marshal to [] rather than null.
+func NewScopeEvidence(planID, taskID string) *ScopeEvidence {
+	return &ScopeEvidence{
+		SchemaVersion:       1,
+		PlanID:              planID,
+		TaskID:              taskID,
+		Status:              "draft",
+		Confidence:          "low",
+		DecisionLocks:       []string{},
+		RequiredReads:       []ScopeRequiredRead{},
+		Queries:             []ScopeQuery{},
+		RequiredPaths:       []ScopePath{},
+		OptionalPaths:       []ScopePath{},
+		ExcludedPaths:       []ScopeExcludedPath{},
+		Provides:            []string{},
+		Consumes:            []string{},
+		FinalWriteScope:     []string{},
+		VerificationFocus:   []string{},
+		AllowedLocalChoices: []string{},
+		StopConditions:      []string{},
+		OpenGaps:            []string{},
+	}
+}
+
 func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
 	path := filepath.Join(plansBaseDir(projectPath), planID, "PLAN.yaml")
 	content, err := os.ReadFile(path)
