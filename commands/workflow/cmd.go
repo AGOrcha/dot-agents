@@ -343,6 +343,26 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 
+	var eligiblePlanFilter string
+	var eligibleLimit int
+	eligibleCmd := &cobra.Command{
+		Use:   "eligible",
+		Short: "List all unblocked eligible tasks across active plans with conflict detection",
+		Example: deps.ExampleBlock(
+			"  dot-agents workflow eligible",
+			"  dot-agents workflow eligible --plan loop-agent-pipeline",
+			"  dot-agents workflow eligible --plan loop-agent-pipeline,resource-command-parity",
+			"  dot-agents workflow eligible --limit 3",
+			"  dot-agents --json workflow eligible --plan loop-agent-pipeline",
+		),
+		Args: deps.NoArgsWithHints("`dot-agents workflow eligible` works on the current repository."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowEligible(eligiblePlanFilter, eligibleLimit)
+		},
+	}
+	eligibleCmd.Flags().StringVar(&eligiblePlanFilter, "plan", "", "Only consider tasks from these canonical plan ids (comma-separated)")
+	eligibleCmd.Flags().IntVar(&eligibleLimit, "limit", 0, "Maximum number of eligible tasks to return (0 = no limit)")
+
 	var workflowNextPlanID string
 	nextCmd := &cobra.Command{
 		Use:   "next",
@@ -758,7 +778,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	bundleCmd.AddCommand(bundleStagesCmd)
 
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, nextCmd, completeCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
+	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, eligibleCmd, nextCmd, completeCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
 	return cmd
 }
 

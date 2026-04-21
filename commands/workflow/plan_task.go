@@ -1019,7 +1019,19 @@ type workflowNextTaskSuggestion struct {
 // All slice fields are initialized to []string{} (not nil) so they marshal to [] not null.
 type AnnotatedTask struct {
 	workflowNextTaskSuggestion
-	ConflictsWith []string `json:"conflicts_with"`
+	ConflictsWith      []string `json:"conflicts_with"`
+	HasEvidence        bool     `json:"has_evidence"`
+	EvidenceConfidence string   `json:"evidence_confidence"`
+	WriteScopeDeclared bool     `json:"write_scope_declared"`
+}
+
+// eligibleOutput is the full JSON output of `workflow eligible`.
+type eligibleOutput struct {
+	EligibleTasks []AnnotatedTask     `json:"eligible_tasks"`
+	MaxBatch      []string            `json:"max_batch"`
+	ConflictGraph map[string][]string `json:"conflict_graph"`
+	TotalEligible int                 `json:"total_eligible"`
+	MaxParallel   int                 `json:"max_parallel"`
 }
 
 // writeScopeConflictResult is the output of computeWriteScopeConflicts.
@@ -1151,6 +1163,128 @@ func runWorkflowNext(explicitPlanID string) error {
 		fmt.Fprintln(os.Stdout, "  verification: required")
 	} else {
 		fmt.Fprintln(os.Stdout, "  verification: optional")
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+// annotateEligibleTasks enriches a slice of workflowNextTaskSuggestion with
+// conflict detection (ConflictsWith), evidence sidecar data (HasEvidence,
+// EvidenceConfidence), and write_scope_declared.
+func annotateEligibleTasks(projectPath string, tasks []workflowNextTaskSuggestion) []AnnotatedTask {
+	// Run conflict detection first (populates ConflictsWith on each task in-place).
+	conflictResult := computeWriteScopeConflicts(tasks)
+
+	annotated := make([]AnnotatedTask, len(conflictResult.EligibleTasks))
+	for i, t := range conflictResult.EligibleTasks {
+		at := AnnotatedTask{
+			workflowNextTaskSuggestion: t,
+			ConflictsWith:              t.ConflictsWith,
+			WriteScopeDeclared:         len(t.WriteScope) > 0,
+		}
+
+		// Check for evidence sidecar.
+		sidecarPath := deriveScopeEvidencePath(projectPath, t.PlanID, t.TaskID)
+		data, err := os.ReadFile(sidecarPath)
+		if err == nil {
+			at.HasEvidence = true
+			// Parse confidence from sidecar.
+			var ev struct {
+				Confidence string `yaml:"confidence"`
+			}
+			if parseErr := yaml.Unmarshal(data, &ev); parseErr == nil && ev.Confidence != "" {
+				at.EvidenceConfidence = ev.Confidence
+			} else {
+				at.EvidenceConfidence = "none"
+			}
+		} else {
+			at.HasEvidence = false
+			at.EvidenceConfidence = "none"
+		}
+
+		annotated[i] = at
+	}
+	return annotated
+}
+
+// runWorkflowEligible implements `workflow eligible`: lists all unblocked tasks
+// across active plans, annotated with conflict detection and evidence data.
+func runWorkflowEligible(planFilter string, limit int) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+
+	planIDs := parsePlanIDFilter(planFilter)
+	tasks, err := selectAllEligibleTasks(project.Path, planIDs)
+	if err != nil {
+		return err
+	}
+
+	// Apply --limit if set.
+	if limit > 0 && len(tasks) > limit {
+		tasks = tasks[:limit]
+	}
+
+	annotated := annotateEligibleTasks(project.Path, tasks)
+
+	// Re-derive conflict graph and max batch from the annotated slice.
+	// We need to re-run conflict detection on the (possibly truncated) set.
+	taskSuggestions := make([]workflowNextTaskSuggestion, len(annotated))
+	for i, at := range annotated {
+		taskSuggestions[i] = at.workflowNextTaskSuggestion
+	}
+	conflictResult := computeWriteScopeConflicts(taskSuggestions)
+
+	// Sync ConflictsWith back to annotated (truncated slice may differ).
+	for i := range annotated {
+		if i < len(conflictResult.EligibleTasks) {
+			annotated[i].ConflictsWith = conflictResult.EligibleTasks[i].ConflictsWith
+		}
+	}
+
+	out := eligibleOutput{
+		EligibleTasks: annotated,
+		MaxBatch:      conflictResult.MaxBatch,
+		ConflictGraph: conflictResult.ConflictGraph,
+		TotalEligible: len(annotated),
+		MaxParallel:   len(conflictResult.MaxBatch),
+	}
+	if out.EligibleTasks == nil {
+		out.EligibleTasks = []AnnotatedTask{}
+	}
+
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+
+	// Human-readable output.
+	ui.Header("Eligible Tasks")
+	for _, at := range out.EligibleTasks {
+		scopeStr := strings.Join(at.WriteScope, ", ")
+		if !at.WriteScopeDeclared {
+			scopeStr = "(none) [no write_scope declared]"
+		}
+		conflictsStr := ""
+		if len(at.ConflictsWith) > 0 {
+			conflictsStr = "  conflicts: " + strings.Join(at.ConflictsWith, ", ")
+		}
+		evidenceStr := fmt.Sprintf("  evidence: %s (confidence: %s)", fmt.Sprintf("%v", at.HasEvidence), at.EvidenceConfidence)
+		fmt.Fprintf(os.Stdout, "  [%s/%s] %s  (%s)\n", at.PlanID, at.TaskID, at.TaskTitle, at.Status)
+		fmt.Fprintf(os.Stdout, "      scope: %s\n", scopeStr)
+		fmt.Fprintf(os.Stdout, "     %s\n", evidenceStr)
+		if conflictsStr != "" {
+			fmt.Fprintf(os.Stdout, "     %s\n", conflictsStr)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	maxWorkers := 1 // default until p4 wires the pref
+	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by max_parallel_workers=%d)\n",
+		out.TotalEligible, out.MaxParallel, maxWorkers)
+	if len(out.MaxBatch) > 0 {
+		fmt.Fprintf(os.Stdout, "  max batch: %s\n", strings.Join(out.MaxBatch, ", "))
 	}
 	fmt.Fprintln(os.Stdout)
 	return nil
