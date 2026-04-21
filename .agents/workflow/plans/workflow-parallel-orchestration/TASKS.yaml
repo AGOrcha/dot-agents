@@ -86,7 +86,7 @@ tasks:
       notes: 'Add ''max_parallel_workers'' as a valid preference key in the prefs system (prefs.go). Type: int string (''1''-''8''). Default: 1 (safe — serialized). Resolved by resolvePreferences() alongside existing keys. workflow eligible reads this as the default --limit when no flag given. workflow prefs output includes it. Validation: must be integer 1-8.'
     - id: p5-isp-prompt-update
       title: Convert ISP prompt to skill; update orchestrator-session-start to chain eligible + ISP
-      status: pending
+      status: completed
       depends_on:
         - p4-max-parallel-pref
       blocks: []
@@ -119,7 +119,7 @@ tasks:
         Remove ghost ''parallel worker limit'' reference from isp.prompt.md before conversion.
     - id: p6-tests
       title: Tests for eligible command, conflict detection, and evidence fields
-      status: pending
+      status: completed
       depends_on:
         - p5-isp-prompt-update
       blocks: []
@@ -146,7 +146,7 @@ tasks:
         write_scope_declared=true.
     - id: p7-skill-architect-wave-picker
       title: Transform plan-wave-picker skill via /skill-architect to interpret workflow eligible output
-      status: pending
+      status: completed
       depends_on:
         - p5-isp-prompt-update
       blocks: []
