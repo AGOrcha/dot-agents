@@ -43,6 +43,21 @@
 #   AGENT_BIN                    fallback agent binary (default: agent; supports: claude, codex, copilot, agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
+# Per-role override precedence (all roles follow the same chain pattern):
+#   orchestrator  model: RALPH_ORCHESTRATOR_MODEL > RALPH_MODEL > (implicit binary default)
+#                 bin:   RALPH_ORCHESTRATOR_AGENT_BIN > AGENT_BIN > "agent"
+#   closeout      model: RALPH_CLOSEOUT_MODEL > RALPH_MODEL > (implicit binary default)
+#                 bin:   RALPH_CLOSEOUT_AGENT_BIN > AGENT_BIN > "agent"
+#   impl-worker   model: RALPH_IMPL_WORKER_MODEL > RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#                 bin:   RALPH_IMPL_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN > "agent"
+#   verifier      model: RALPH_VERIFIER_WORKER_MODEL > RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#                 bin:   RALPH_VERIFIER_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN > "agent"
+#   review-worker model: RALPH_REVIEW_WORKER_MODEL > RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#                 bin:   RALPH_REVIEW_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN > AGENT_BIN > "agent"
+#   generic-worker model: RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#                  bin:   RALPH_WORKER_AGENT_BIN_OVERRIDE > RALPH_WORKER_AGENT_BIN > AGENT_BIN > "agent"
+# ralph-pipeline explicitly exports all role-specific vars so sub-scripts inherit them.
+#
 # Control plane (dot-agents): fanout creates `.agents/active/verification/<task_id>/` before dispatch;
 #   `workflow next --plan <id>[,<id>...]` scopes break checks to the filtered plan set.
 #
@@ -378,6 +393,27 @@ export RALPH_FORCE="${RALPH_FORCE:-0}"
 export RALPH_AGENT_OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
 export AGENT_BIN="${AGENT_BIN:-agent}"
 export DOT_AGENTS="${DOT_AGENTS:-}"
+# Per-role overrides: forward all role-specific vars to sub-scripts so each script's
+# resolver sees them regardless of whether the caller exported them.
+export RALPH_ORCHESTRATOR_MODEL="${RALPH_ORCHESTRATOR_MODEL:-}"
+export RALPH_ORCHESTRATOR_AGENT_BIN="${RALPH_ORCHESTRATOR_AGENT_BIN:-}"
+export RALPH_ORCHESTRATOR_REASONING_EFFORT="${RALPH_ORCHESTRATOR_REASONING_EFFORT:-}"
+export RALPH_CLOSEOUT_MODEL="${RALPH_CLOSEOUT_MODEL:-}"
+export RALPH_CLOSEOUT_AGENT_BIN="${RALPH_CLOSEOUT_AGENT_BIN:-}"
+export RALPH_CLOSEOUT_REASONING_EFFORT="${RALPH_CLOSEOUT_REASONING_EFFORT:-}"
+export RALPH_IMPL_WORKER_MODEL="${RALPH_IMPL_WORKER_MODEL:-}"
+export RALPH_IMPL_WORKER_AGENT_BIN="${RALPH_IMPL_WORKER_AGENT_BIN:-}"
+export RALPH_IMPL_WORKER_REASONING_EFFORT="${RALPH_IMPL_WORKER_REASONING_EFFORT:-}"
+export RALPH_VERIFIER_WORKER_MODEL="${RALPH_VERIFIER_WORKER_MODEL:-}"
+export RALPH_VERIFIER_WORKER_AGENT_BIN="${RALPH_VERIFIER_WORKER_AGENT_BIN:-}"
+export RALPH_VERIFIER_WORKER_REASONING_EFFORT="${RALPH_VERIFIER_WORKER_REASONING_EFFORT:-}"
+export RALPH_REVIEW_WORKER_MODEL="${RALPH_REVIEW_WORKER_MODEL:-}"
+export RALPH_REVIEW_WORKER_AGENT_BIN="${RALPH_REVIEW_WORKER_AGENT_BIN:-}"
+export RALPH_REVIEW_WORKER_REASONING_EFFORT="${RALPH_REVIEW_WORKER_REASONING_EFFORT:-}"
+export RALPH_WORKER_MODEL="${RALPH_WORKER_MODEL:-}"
+export RALPH_WORKER_AGENT_BIN="${RALPH_WORKER_AGENT_BIN:-}"
+export RALPH_WORKER_REASONING_EFFORT="${RALPH_WORKER_REASONING_EFFORT:-}"
+export RALPH_REASONING_EFFORT="${RALPH_REASONING_EFFORT:-}"
 
 orch_rc=0
 set +e

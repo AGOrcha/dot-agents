@@ -26,6 +26,10 @@
 #   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
 #   RALPH_ORCHESTRATOR_AGENT_BIN orchestrator-only agent binary override
 #   AGENT_BIN                    fallback agent binary (default: agent)
+#
+# Override precedence (orchestrator role):
+#   model:     RALPH_ORCHESTRATOR_MODEL > RALPH_MODEL > (implicit binary default)
+#   agent_bin: RALPH_ORCHESTRATOR_AGENT_BIN > AGENT_BIN > "agent"
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Output:

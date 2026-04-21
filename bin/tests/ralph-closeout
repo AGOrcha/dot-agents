@@ -22,6 +22,10 @@
 #   AGENT_BIN             fallback agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
 #   DOT_AGENTS            dot-agents binary or "go run ..." override
 #
+# Override precedence (closeout role; only relevant when RALPH_CLOSEOUT_AUTO=0):
+#   model:     RALPH_CLOSEOUT_MODEL > RALPH_MODEL > (implicit binary default)
+#   agent_bin: RALPH_CLOSEOUT_AGENT_BIN > AGENT_BIN > "agent"
+#
 # Exit codes:
 #   0  — all merge-backs processed (or none found)
 #   1  — one or more closeouts failed

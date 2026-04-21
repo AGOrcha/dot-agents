@@ -40,6 +40,12 @@
 #   AGENT_BIN                    fallback agent binary (default: agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
+# Override precedence per role:
+#   model:     RALPH_<ROLE>_WORKER_MODEL > RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#              where <ROLE> is IMPL, VERIFIER, or REVIEW
+#   agent_bin: RALPH_WORKER_AGENT_BIN_OVERRIDE > RALPH_<ROLE>_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN
+#              > AGENT_BIN > "agent"
+#
 # Usage:
 #   ./bin/tests/ralph-worker --bundle <path>
 #   ./bin/tests/ralph-worker --bundle <path> --stage impl
