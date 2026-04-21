@@ -1,0 +1,221 @@
+schema_version: 1
+plan_id: graph-bridge-command-readiness
+task_id: implement-graph-bridge-readiness-fixes
+status: draft
+mode: code
+goal: |-
+  Fix repo bridge config expectations, query normalization, symbol lookup behavior,
+  and planner-facing error handling in workflow graph query and kg bridge commands.
+confidence: high
+
+decision_locks:
+  - |-
+    workflow graph query scaffolds/defaults repo bridge config on missing-config
+    rather than hard-erroring; degradation message must be actionable.
+  - |-
+    AgentsRC gets a typed KG field (not ExtraFields); all ExtraFields["kg"] guards
+    must be replaced with nil checks on the typed field after promotion.
+  - |-
+    crg.go receives query normalization and symbol lookup improvements; sqlite.go
+    gets transaction lifecycle fixes for the clean-home build path.
+  - |-
+    agentsrc.schema.json updated atomically with Go struct changes; additionalProperties:false
+    on nested KG object.
+  - |-
+    Smoke coverage lives in tests/test-ralph-review-gate-auto.sh rather than a new file.
+
+required_reads:
+  - path: docs/research/graph-bridge-inventory.md
+    why: Ground truth on missing-config failure modes and weak-result patterns captured in previous audit task
+  - path: .agents/workflow/specs/graph-bridge-contract/design.md
+    why: Contract decisions (which intents are trustworthy, degradation semantics) that implementation must satisfy
+  - path: internal/config/agentsrc.go
+    why: AgentsRC struct definition; must update atomically with schema and marshal/unmarshal
+  - path: commands/workflow/graph.go
+    why: Entry point for workflow graph query subcommand; receives scaffolding fix
+  - path: internal/graphstore/crg.go
+    why: CRG query normalization, symbol lookup, and fresh-build transaction lifecycle
+  - path: schemas/agentsrc.schema.json
+    why: JSON schema must stay in sync with Go struct changes
+
+seeds:
+  symbols:
+    - runWorkflowGraphQuery
+    - AgentsRC
+    - AgentsRCKG
+    - GraphBridgeHealth
+    - syncCodeWarmLink
+  paths:
+    - commands/workflow/graph.go
+    - commands/kg/bridge.go
+    - commands/kg/sync_code_warm_link.go
+    - internal/config/agentsrc.go
+    - internal/graphstore/crg.go
+    - internal/graphstore/sqlite.go
+    - schemas/agentsrc.schema.json
+  rationale:
+    - runWorkflowGraphQuery is the command function that needed the missing-config scaffolding fix
+    - AgentsRC / AgentsRCKG are the struct types promoted from ExtraFields; critical for ExtraFields guard fix
+    - syncCodeWarmLink handles warm-link lifecycle between KG and code-review-graph
+    - crg.go owns symbol lookup and query normalization; sqlite.go owns transaction lifecycle
+
+queries:
+  - tool: git-diff
+    kind: scope-lane
+    intent: symbol_lookup
+    subject: runWorkflowGraphQuery
+    summary:
+      files:
+        - commands/workflow/graph.go
+  - tool: git-diff
+    kind: scope-lane
+    intent: symbol_lookup
+    subject: AgentsRCKG
+    summary:
+      files:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - schemas/agentsrc.schema.json
+  - tool: git-diff
+    kind: scope-lane
+    intent: callers
+    subject: syncCodeWarmLink
+    summary:
+      files:
+        - commands/kg/sync_code_warm_link.go
+        - commands/kg/bridge.go
+  - tool: git-diff
+    kind: context-lane
+    intent: decision_lookup
+    subject: graph-bridge-contract design.md
+    summary:
+      files:
+        - .agents/workflow/specs/graph-bridge-contract/design.md
+
+required_paths:
+  - path: commands/workflow/graph.go
+    because:
+      - Contains runWorkflowGraphQuery which needs missing-config scaffolding and degradation message fix
+  - path: commands/kg/bridge.go
+    because:
+      - Bridge config registration and warm-link hook changes live here
+  - path: commands/kg/sync_code_warm_link.go
+    because:
+      - Warm-link sync logic changed significantly (72 line delta); callers of syncCodeWarmLink must be updated together
+  - path: internal/config/agentsrc.go
+    because:
+      - AgentsRCKG typed field added; all 4 marshal/unmarshal callsites must be updated atomically
+  - path: internal/graphstore/crg.go
+    because:
+      - Query normalization and symbol lookup improvements; fresh-build transaction fix
+  - path: internal/graphstore/sqlite.go
+    because:
+      - Transaction lifecycle fix for clean-home build path (14 line addition)
+  - path: schemas/agentsrc.schema.json
+    because:
+      - Must stay in sync with AgentsRC struct; additionalProperties:false on KG nested object
+  - path: commands/kg/kg_test.go
+    because:
+      - 85 lines of new tests covering bridge readiness and query normalization
+  - path: internal/config/agentsrc_test.go
+    because:
+      - 75 lines of tests covering AgentsRCKG round-trip and ExtraFields guard behavior
+  - path: internal/graphstore/sqlite_test.go
+    because:
+      - 43 lines covering clean-home transaction regression
+
+optional_paths:
+  - path: commands/add.go
+    because:
+      - 2-line change to use typed KG field; low risk but touches AgentsRC consumers
+  - path: commands/kg/query_lint_maintain.go
+    because:
+      - 4-line addition; query lint extended but not core to bridge readiness contract
+  - path: commands/kg/cmd.go
+    because:
+      - 1-line routing addition for new bridge subcommand; minimal but required for discoverability
+  - path: tests/test-ralph-review-gate-auto.sh
+    because:
+      - Smoke script extended (109 new lines) to demonstrate both scope-lane and context-lane usefulness
+
+excluded_paths:
+  - path: .agents/workflow/plans/
+    rationale:
+      - PLAN.yaml and TASKS.yaml updates are orchestrator scope, not implementation scope
+  - path: .agents/history/
+    rationale:
+      - History artifacts written by orchestrator closeout, not by this task's implementation worker
+  - path: .agents/active/
+    rationale:
+      - Delegation bundles and fold-backs are orchestrator artifacts
+
+provides:
+  - |-
+    Trustworthy planner-facing graph bridge for symbol_lookup, callers, plan_context, decision_lookup intents
+  - |-
+    AgentsRCKG typed config field (replaces ExtraFields guard)
+  - |-
+    Fresh-build sqlite transaction fix (no more "cannot start a transaction within a transaction")
+  - |-
+    Scaffolded missing-config degradation in workflow graph query
+
+consumes:
+  - |-
+    graph-bridge-inventory.md audit findings (from inventory-current-bridge-behavior)
+  - |-
+    graph-bridge-contract design.md decisions (from define-graph-bridge-contract)
+
+final_write_scope:
+  - commands/workflow/graph.go
+  - commands/kg/bridge.go
+  - commands/kg/sync_code_warm_link.go
+  - commands/kg/cmd.go
+  - commands/kg/query_lint_maintain.go
+  - commands/kg/kg_test.go
+  - internal/config/agentsrc.go
+  - internal/config/agentsrc_test.go
+  - internal/graphstore/crg.go
+  - internal/graphstore/sqlite.go
+  - internal/graphstore/sqlite_test.go
+  - schemas/agentsrc.schema.json
+  - commands/add.go
+  - tests/test-ralph-review-gate-auto.sh
+
+verification_focus:
+  - |-
+    go test ./internal/config/... passes with AgentsRCKG round-trip and ExtraFields nil guard
+  - |-
+    go test ./internal/graphstore/... passes including fresh-home transaction regression
+  - |-
+    go test ./commands/kg/... passes including new bridge and query normalization tests
+  - |-
+    workflow graph query on repo with missing bridge config produces actionable degradation message, exit 0
+  - |-
+    tests/test-ralph-review-gate-auto.sh exercises both scope-lane and context-lane intents with non-empty results
+
+allowed_local_choices:
+  - |-
+    Which crg.go query normalization edge cases to handle first (symbol vs path seeds)
+  - |-
+    Exact wording of missing-config degradation message in graph.go
+  - |-
+    Whether to add a WarnBox or simple stderr line for scaffolded bridge config
+
+stop_conditions:
+  - |-
+    Any change to TASKS.yaml schema or workflow command routing beyond bridge subcommand addition
+  - |-
+    Redesign of MCP server tool surface (deferred to kg-mcp-transport-impl)
+  - |-
+    Changes to kg code-status readiness states (deferred to kg-freshness-impl)
+
+open_gaps:
+  - |-
+    The mismatch between build summary counts and persisted code-status counts was documented
+    but not fully resolved in this task — kg-freshness-impl owns that resolution.
+  - |-
+    ExtraFields["kg"] grep was not exhaustive in this commit; future additions to AgentsRC
+    consumers may still reference old ExtraFields guard pattern.
+  - |-
+    Smoke script (test-ralph-review-gate-auto.sh) verifies non-empty results but does not
+    assert specific symbol names — brittle to repo refactors.
