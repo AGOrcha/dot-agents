@@ -223,18 +223,17 @@ case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
   exit 1
 esac
 
-# Discover unblocked pending tasks
-# Returns: array of "plan_id:task_id:write_scope_csv" strings
+# Discover unblocked pending tasks using workflow eligible --json.
+# workflow eligible already filters active delegations, dependency blocks, and
+# write-scope conflicts across plans. max_batch is the largest non-conflicting
+# set that fits within the worker limit.
+#
+# Returns: lines of "plan_id:task_id:write_scope_csv" (one per task in max_batch).
 discover_unblocked_tasks() {
   local tasks=()
-  local selection_limit="$MAX_WORKERS"
 
-  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
-    # Completion mode is intentionally serialized: one scoped task per pass so the
-    # review gate and closeout happen before the next task is delegated.
-    selection_limit=1
-  fi
-
+  # Manual plan/task override path: skip eligible, build the entry directly.
+  # scope_lists_overlap() is retained for this path only.
   if [[ -n "${RALPH_FANOUT_PLAN:-}" && -n "${RALPH_FANOUT_TASK:-}" ]]; then
     local ws="${RALPH_FANOUT_WRITE_SCOPE:-}"
     [[ -z "$ws" ]] && { echo "error: RALPH_FANOUT_WRITE_SCOPE required with manual plan/task override" >&2; return 1; }
@@ -243,100 +242,49 @@ discover_unblocked_tasks() {
     return 0
   fi
 
-  local plan_ids
+  # Build the eligible call arguments.
+  # Completion mode is intentionally serialized: one scoped task per pass so the
+  # review gate and closeout happen before the next task is delegated.
+  local -a eligible_args=( --json workflow eligible --limit "$MAX_WORKERS" )
   if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
-    plan_ids="$(parse_plan_scope "$RALPH_RUN_PLAN")"
-  else
-    local plan_json
-    plan_json="$(da --json workflow plan 2>/dev/null || true)"
-    [[ "${plan_json:0:1}" == "[" || "${plan_json:0:1}" == "{" ]] || {
-      echo "ralph-orchestrate: no canonical plans found — nothing to fan out" >&2
-      return 0
-    }
-    plan_ids="$(printf '%s' "$plan_json" | python3 -c "
-import json,sys
-data=json.load(sys.stdin)
-plans = data if isinstance(data, list) else data.get('plans', [data])
-for p in plans:
-    pid = p.get('id') or p.get('plan_id')
-    if pid:
-        print(pid)
-" 2>/dev/null || true)"
+    eligible_args=( --json workflow eligible --plan "$RALPH_RUN_PLAN" --limit 1 )
   fi
 
-  if [[ -z "$plan_ids" ]]; then
-    if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
-      echo "ralph-orchestrate: no plan IDs extracted from RALPH_RUN_PLAN" >&2
-    else
-      echo "ralph-orchestrate: no plan IDs extracted from workflow plan output" >&2
-    fi
+  local eligible_json
+  eligible_json="$(da "${eligible_args[@]}" 2>/dev/null || true)"
+  if [[ -z "$eligible_json" || "${eligible_json:0:1}" != "{" ]]; then
+    echo "ralph-orchestrate: no eligible tasks found — nothing to fan out" >&2
     return 0
   fi
 
-  local -a active_scope_rows=()
-  local -a selected_scope_rows=()
-  local count=0
-  while IFS= read -r row; do
-    [[ -n "$row" ]] && active_scope_rows+=( "$row" )
-  done < <(active_delegation_scopes)
-
-  local plan_id
-  while IFS= read -r plan_id && [[ $count -lt $selection_limit ]]; do
-    [[ -z "$plan_id" ]] && continue
-    local plan_next_json
-    plan_next_json="$(da --json workflow next --plan "$plan_id" 2>/dev/null || true)"
-    plan_next_json="${plan_next_json//$'\n'/}"
-    if [[ -z "$plan_next_json" || "$plan_next_json" == "null" ]]; then
-      echo "ralph-orchestrate: skipping $plan_id (no actionable task in scoped completion mode)" >&2
-      continue
-    fi
-    local tasks_json
-    tasks_json="$(da --json workflow tasks "$plan_id" 2>/dev/null || true)"
-    [[ "${tasks_json:0:1}" == "[" || "${tasks_json:0:1}" == "{" ]] || continue
-
-    local pending
-    pending="$(printf '%s' "$tasks_json" | python3 -c "
-import json,sys
-data=json.load(sys.stdin)
-items = data if isinstance(data, list) else data.get('tasks', [])
-for t in items:
-    if t.get('status','') == 'pending':
-        tid = t.get('id') or t.get('task_id','')
-        ws = ','.join(t.get('write_scope') or [])
-        print(tid + '\t' + ws)
+  # Extract task entries for tasks in max_batch.
+  # Output: tab-separated plan_id<TAB>task_id<TAB>write_scope_csv per max_batch entry.
+  local batch_rows
+  batch_rows="$(printf '%s' "$eligible_json" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+max_batch = set(data.get('max_batch') or [])
+if not max_batch:
+    sys.exit(0)
+by_id = {t['task_id']: t for t in (data.get('eligible_tasks') or [])}
+for tid in (data.get('max_batch') or []):
+    t = by_id.get(tid)
+    if not t:
+        continue
+    ws = ','.join(t.get('write_scope') or [])
+    print(t['plan_id'] + '\t' + tid + '\t' + ws)
 " 2>/dev/null || true)"
 
-    local task_id ws_csv active_row selected_row active_plan active_task active_scope selected_plan selected_task selected_scope
-    while IFS=$'\t' read -r task_id ws_csv && [[ $count -lt $selection_limit ]]; do
-      [[ -z "$task_id" ]] && continue
-      # Skip if delegation contract already exists
-      local contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
-      [[ -f "$contract" ]] && { echo "ralph-orchestrate: skipping $task_id (delegation already exists)" >&2; continue; }
-      if [[ -n "$ws_csv" ]]; then
-        if [[ ${#active_scope_rows[@]} -gt 0 ]]; then
-          for active_row in "${active_scope_rows[@]}"; do
-            IFS=$'\t' read -r active_plan active_task active_scope <<< "$active_row"
-            if scope_lists_overlap "$ws_csv" "$active_scope"; then
-              echo "ralph-orchestrate: skipping $task_id (write_scope overlaps active delegation ${active_plan}/${active_task})" >&2
-              continue 2
-            fi
-          done
-        fi
-        if [[ ${#selected_scope_rows[@]} -gt 0 ]]; then
-          for selected_row in "${selected_scope_rows[@]}"; do
-            IFS=$'\t' read -r selected_plan selected_task selected_scope <<< "$selected_row"
-            if scope_lists_overlap "$ws_csv" "$selected_scope"; then
-              echo "ralph-orchestrate: skipping $task_id (write_scope overlaps same-pass selection ${selected_plan}/${selected_task})" >&2
-              continue 2
-            fi
-          done
-        fi
-      fi
-      tasks+=( "${plan_id}:${task_id}:${ws_csv}" )
-      selected_scope_rows+=( "${plan_id}"$'\t'"${task_id}"$'\t'"${ws_csv}" )
-      (( count++ )) || true
-    done <<< "$pending"
-  done <<< "$plan_ids"
+  if [[ -z "$batch_rows" ]]; then
+    echo "ralph-orchestrate: no unblocked pending tasks found — nothing to fan out" >&2
+    return 0
+  fi
+
+  local plan_id task_id ws_csv
+  while IFS=$'\t' read -r plan_id task_id ws_csv; do
+    [[ -z "$task_id" ]] && continue
+    tasks+=( "${plan_id}:${task_id}:${ws_csv}" )
+  done <<< "$batch_rows"
 
   if [[ ${#tasks[@]} -gt 0 ]]; then
     printf '%s\n' "${tasks[@]}"
