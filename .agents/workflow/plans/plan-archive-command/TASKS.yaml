@@ -13,7 +13,7 @@ tasks:
       notes: Add func historyBaseDir(projectPath string) string alongside plansBaseDir(). Returns filepath.Join(projectPath, '.agents', 'history'). Needed by archive and drift.
     - id: p2-archive-handler
       title: Implement runWorkflowPlanArchive() in plan_task.go
-      status: pending
+      status: in_progress
       depends_on:
         - p0-extract-fs-helpers
         - p1-historybasedir-helper
