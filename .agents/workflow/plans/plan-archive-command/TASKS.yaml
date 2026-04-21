@@ -15,13 +15,15 @@ tasks:
       title: Implement runWorkflowPlanArchive() in plan_task.go
       status: pending
       depends_on:
+        - p0-extract-fs-helpers
         - p1-historybasedir-helper
       blocks: []
       owner: dot-agents
       write_scope:
         - commands/workflow/plan_task.go
+        - commands/workflow/fs.go
       verification_required: true
-      notes: 'Guard: status must be completed (or --force). Stamp status=archived + updated_at. Merge strategy: os.Rename if history dir absent, per-file copyWorkflowDir if present (skip existing files except always overwrite PLAN.yaml and TASKS.yaml). os.RemoveAll source after successful merge. Print archived/skipped summary.'
+      notes: 'Guard: status must be completed (or --force). Stamp status=archived + updated_at BEFORE move. Merge strategy: os.Rename if history dir absent. If history exists: content-aware merge walk — DMA artifacts always skip; PLAN.yaml/TASKS.yaml/<id>.plan.md always overwrite; all other files: compute `sha256.Sum256` of the source file via crypto/sha256 + mtime check (overwrite if newer or different, skip if identical, warn if history is newer). On RemoveAll failure: retry once automatically. Implement mergeWorkflowPlanDir() — do NOT reuse copyWorkflowDir directly (needs per-file classification + hash logic). Bulk: --plan accepts comma-separated IDs; archive each in sequence, log failure and continue.'
     - id: p3-wire-cmd
       title: Wire planArchiveCmd into cmd.go under planCmd
       status: pending
@@ -32,9 +34,9 @@ tasks:
       write_scope:
         - commands/workflow/cmd.go
       verification_required: true
-      notes: 'Add planArchiveCmd alongside planCreateCmd and planUpdateCmd. Flags: --plan (required), --force (bool). Call runWorkflowPlanArchive(). Dry-run support via global -n flag.'
+      notes: 'Add planArchiveCmd alongside planCreateCmd and planUpdateCmd. Flags: --plan (required, comma-separated), --force (bool). Call runWorkflowPlanArchive() per plan ID in sequence. Dry-run support via global -n flag — print per-file merge plan for each plan ID.'
     - id: p4-drift-extension
-      title: 'Extend drift detection: CompletedPlanIDs field'
+      title: 'Extend drift detection: CompletedPlanIDs and InconsistentArchivedPlanIDs fields'
       status: pending
       depends_on:
         - p1-historybasedir-helper
@@ -43,21 +45,30 @@ tasks:
       write_scope:
         - commands/workflow/drift.go
       verification_required: true
-      notes: Add CompletedPlanIDs []string to RepoDriftReport. Populate in detectRepoDrift by loading each PLAN.yaml in workflow/plans/ and collecting IDs where status==completed or (status==archived and dir still exists). Update drift JSON output and human-readable render.
+      notes: |-
+        Add CompletedPlanIDs []string and InconsistentArchivedPlanIDs []string to RepoDriftReport.
+        CompletedPlanIDs: plans in workflow/plans/ where status==completed (hygiene signal).
+        InconsistentArchivedPlanIDs: plans in workflow/plans/ where status==archived (error-level — archive was interrupted).
+        Update drift JSON output and human-readable render for both fields.
     - id: p5-sweep-extension
       title: 'Extend sweep: SweepActionArchiveCompletedPlans'
       status: pending
       depends_on:
         - p4-drift-extension
+        - p4b-health-extension
         - p2-archive-handler
       blocks: []
       owner: dot-agents
       write_scope:
         - commands/workflow/sweep.go
       verification_required: true
-      notes: 'Add SweepActionArchiveCompletedPlans SweepActionType. planSweep() emits one action per CompletedPlanID from drift report. applySweepAction() calls runWorkflowPlanArchive() for each. RequiresConfirmation=true (destructive: removes source dir). Per-plan confirm loop mirrors existing sweep apply pattern.'
+      notes: |-
+        Add SweepActionArchiveCompletedPlans SweepActionType. planSweep() emits one action per
+        CompletedPlanID from drift report. applySweepAction() calls runWorkflowPlanArchive() for each.
+        RequiresConfirmation=true (destructive: removes source dir). Per-plan confirm loop mirrors
+        existing sweep apply pattern. Archive failure for one plan → log and continue (no early exit).
     - id: p6-tests
-      title: Write table-driven tests for archive + drift changes
+      title: Write table-driven tests for archive + drift + health changes
       status: pending
       depends_on:
         - p3-wire-cmd
@@ -68,4 +79,46 @@ tasks:
         - commands/workflow/plan_task_test.go
         - commands/workflow/drift_sweep_test.go
       verification_required: true
-      notes: 'archive tests: (1) no-history dir → os.Rename fast path, (2) history dir exists with DMA → merge, PLAN+TASKS overwritten, DMA untouched, source removed, (3) dry-run → no filesystem changes, (4) non-completed status → error, (5) --force bypasses guard. drift test: CompletedPlanIDs populated for completed plans, empty for active-only fixture.'
+      notes: |-
+        archive tests: (1) no-history dir → os.Rename fast path, (2) history dir exists with DMA →
+        merge, DMA untouched, PLAN+TASKS+plan.md overwritten, source removed, (3) identical sha256 →
+        skipped, (4) differing file + source newer → overwritten, (5) history file newer → skipped +
+        warning, (6) dry-run → no filesystem changes + per-file plan printed, (7) non-completed status
+        → error with hint, (8) --force bypasses guard, (9) RemoveAll failure → retry once → correct
+        error, (10) bulk --plan a,b → archives each in sequence, logs failure and continues.
+        drift tests: CompletedPlanIDs and InconsistentArchivedPlanIDs populated correctly per fixture.
+        health test: completed_plans_pending_archive count present in JSON and human output.
+    - id: p4b-health-extension
+      title: 'Extend workflow health: completed_plans_pending_archive count'
+      status: pending
+      depends_on:
+        - p4-drift-extension
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/health.go
+      verification_required: true
+      notes: 'Add completed_plans_pending_archive int to health JSON output. Human-readable: ''completed plans pending archive: N'' line when N > 0. Informational only — does not change healthy/partial/degraded status. Reuse CompletedPlanIDs from drift logic (p4-drift-extension).'
+    - id: p0-extract-fs-helpers
+      title: Extract workflow FS helpers from delegation.go into fs.go
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/fs.go
+        - commands/workflow/delegation.go
+      verification_required: true
+      notes: Create commands/workflow/fs.go. Move copyWorkflowArtifact and copyWorkflowDir from delegation.go (keep call sites in delegation.go importing the same package — no behavior change). Add mergeWorkflowPlanDir stub here too (implemented in p2). This is the shared filesystem primitives layer for plan lifecycle operations. delegation.go, plan_task.go, and future archive code all import from the same package-level functions.
+    - id: p7-plan-schedule-cmd
+      title: Add workflow plan schedule subcommand
+      status: pending
+      depends_on:
+        - p3-wire-cmd
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: 'New read-only subcommand under planCmd. Reads TASKS.yaml, runs Kahn''s algorithm (BFS topological sort) to assign each task a wave number. Output: wave → task list (id, title, status, write_scope), critical path length (N waves), max intra-plan parallelism (max tasks in any wave). JSON output via --json. Does not store schedule — always computed fresh. This is design-time / human-readable; cross-plan runtime eligibility is workflow-parallel-orchestration spec.'
