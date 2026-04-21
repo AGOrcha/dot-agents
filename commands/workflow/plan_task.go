@@ -1150,6 +1150,72 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 	return nil
 }
 
+// runWorkflowPlanArchive archives one or more plans (comma-separated planIDs) by
+// merging each plan source directory into .agents/history/<planID>/ and stamping
+// the PLAN.yaml status=archived before the move.
+//
+// Guard: plan status must be "completed" unless --force is set.
+// Bulk: each plan is archived in sequence; a failure for one plan is logged and
+// iteration continues.
+func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun bool) error {
+	var firstErr error
+	for _, planID := range planIDs {
+		if err := archiveSinglePlan(projectPath, planID, force, dryRun); err != nil {
+			fmt.Fprintf(os.Stderr, "archive plan %q: %v\n", planID, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+func archiveSinglePlan(projectPath, planID string, force, dryRun bool) error {
+	plan, err := loadCanonicalPlan(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf("plan %q not found: %w", planID, err)
+	}
+
+	// Guard: status must be completed (or --force).
+	if plan.Status != "completed" && !force {
+		return deps.ErrorWithHints(
+			fmt.Sprintf("plan %q has status %q (expected completed)", planID, plan.Status),
+			"Use --force to archive regardless of status.",
+		)
+	}
+
+	srcDir := filepath.Join(plansBaseDir(projectPath), planID)
+	dstDir := filepath.Join(historyBaseDir(projectPath), planID)
+
+	// Stamp status=archived + updated_at BEFORE move.
+	if !dryRun {
+		plan.Status = "archived"
+		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := saveCanonicalPlan(projectPath, plan); err != nil {
+			return fmt.Errorf("stamp archived status: %w", err)
+		}
+	} else {
+		fmt.Printf("  [dry-run] stamp %s status=archived\n", planID)
+	}
+
+	// Merge or rename into history.
+	if err := mergeWorkflowPlanDir(planID, srcDir, dstDir, dryRun); err != nil {
+		return fmt.Errorf("merge plan dir: %w", err)
+	}
+
+	// Remove the source directory after a successful merge.
+	if !dryRun {
+		if err := removeAllWithRetry(srcDir); err != nil {
+			return fmt.Errorf("remove source dir %s: %w", srcDir, err)
+		}
+		ui.Success(fmt.Sprintf("Archived plan %q to %s", planID, config.DisplayPath(dstDir)))
+	} else {
+		fmt.Printf("  [dry-run] remove source dir %s\n", srcDir)
+	}
+
+	return nil
+}
+
 func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteria, verificationStrategy string) error {
 	if status != "" && !isValidPlanStatus(status) {
 		return deps.ErrorWithHints(
