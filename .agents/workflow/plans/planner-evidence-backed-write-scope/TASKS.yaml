@@ -112,7 +112,7 @@ tasks:
         Skill instruction changes only — no Go code.
     - id: fanout-evidence-integration
       title: Add scope-evidence warnings to workflow fanout
-      status: pending
+      status: completed
       depends_on:
         - check-scope-command
         - skill-upgrades
