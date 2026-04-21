@@ -381,6 +381,17 @@ EOF
     fi
     append_codex_add_dirs
     [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" ]]; then
+    # copilot supports "text" or "json" (JSONL); stream-json maps to json
+    agent_inv=( "$AGENT_BIN" -p )
+    [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --output-format json )
+    # non-interactive mode requires at minimum --allow-all-tools
+    if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+      agent_inv+=( --allow-all )
+    else
+      agent_inv+=( --allow-all-tools --allow-all-paths )
+    fi
+    append_codex_add_dirs
   else
     agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
     [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
@@ -389,6 +400,10 @@ EOF
   [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
   if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
     agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( --reasoning-effort "$ROLE_REASONING_EFFORT" )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( --effort "$ROLE_REASONING_EFFORT" )
   fi
 
   echo "=== ralph-closeout: orchestrator review pass ===" >&2

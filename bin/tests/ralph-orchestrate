@@ -18,8 +18,8 @@
 #                                 RALPH_PROJECT_OVERLAY (D5: bundle fields for overlay vs per-delegation prompt)
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_MODEL                  fallback model override when no role-specific value is set
-#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex-only orchestrator reasoning effort override
-#   RALPH_REASONING_EFFORT       codex-only fallback reasoning effort override
+#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex/copilot/claude orchestrator reasoning effort override
+#   RALPH_REASONING_EFFORT       codex/copilot/claude fallback reasoning effort override
 #   RALPH_FORCE                  1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
 #   RALPH_LOG_DIR                override log directory
 #   RALPH_NO_LOG                 1 = stdout only, no log files
@@ -212,7 +212,7 @@ delegation_bundle_path_for_task() {
 }
 
 if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
-  echo "error: '$AGENT_BIN' not found on PATH (install Cursor Agent CLI or set AGENT_BIN)" >&2
+  echo "error: '$AGENT_BIN' not found on PATH (set AGENT_BIN to an installed agent binary: claude, codex, copilot, or agent)" >&2
   exit 1
 fi
 
@@ -564,6 +564,17 @@ elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
   fi
   append_codex_add_dirs
   [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" ]]; then
+  # copilot supports "text" or "json" (JSONL); stream-json maps to json
+  agent_inv=( "$AGENT_BIN" -p )
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --output-format json )
+  # non-interactive mode requires at minimum --allow-all-tools
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --allow-all )
+  else
+    agent_inv+=( --allow-all-tools --allow-all-paths )
+  fi
+  append_codex_add_dirs
 else
   agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
   [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
@@ -572,6 +583,10 @@ fi
 [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
 if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
   agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( --reasoning-effort "$ROLE_REASONING_EFFORT" )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( --effort "$ROLE_REASONING_EFFORT" )
 fi
 
 echo "=== ralph-orchestrate: orchestrator pass (single run) ===" >&2

@@ -22,25 +22,25 @@
 #   RALPH_REVIEW_WORKER_MODEL    review-worker model override
 #   RALPH_WORKER_MODEL           generic worker model override
 #   RALPH_MODEL                  fallback model override
-#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex-only orchestrator reasoning effort override
-#   RALPH_CLOSEOUT_REASONING_EFFORT      codex-only closeout reasoning effort override
-#   RALPH_IMPL_WORKER_REASONING_EFFORT   codex-only impl-worker reasoning effort override
-#   RALPH_VERIFIER_WORKER_REASONING_EFFORT  codex-only verifier-worker reasoning effort override
-#   RALPH_REVIEW_WORKER_REASONING_EFFORT    codex-only review-worker reasoning effort override
-#   RALPH_WORKER_REASONING_EFFORT        codex-only generic worker reasoning effort override
-#   RALPH_REASONING_EFFORT               codex-only fallback reasoning effort override
-#   RALPH_FORCE                  1 = pass -f to agent
+#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex/copilot/claude orchestrator reasoning effort override
+#   RALPH_CLOSEOUT_REASONING_EFFORT      codex/copilot/claude closeout reasoning effort override
+#   RALPH_IMPL_WORKER_REASONING_EFFORT   codex/copilot/claude impl-worker reasoning effort override
+#   RALPH_VERIFIER_WORKER_REASONING_EFFORT  codex/copilot/claude verifier-worker reasoning effort override
+#   RALPH_REVIEW_WORKER_REASONING_EFFORT    codex/copilot/claude review-worker reasoning effort override
+#   RALPH_WORKER_REASONING_EFFORT        codex/copilot/claude generic worker reasoning effort override
+#   RALPH_REASONING_EFFORT               codex/copilot/claude fallback reasoning effort override
+#   RALPH_FORCE                  1 = force mode (codex: --dangerously-bypass-approvals-and-sandbox; copilot: --allow-all; agent: -f)
 #   RALPH_LOG_DIR                override base log directory (subdirs created per phase)
 #   RALPH_NO_LOG                 1 = stdout only, no files
-#   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
-#   RALPH_ORCHESTRATOR_AGENT_BIN orchestrator-only agent binary override
+#   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json; copilot maps stream-json→json)
+#   RALPH_ORCHESTRATOR_AGENT_BIN orchestrator-only agent binary override (claude, codex, copilot, or agent)
 #   RALPH_CLOSEOUT_AGENT_BIN     closeout-review agent binary override
 #   RALPH_IMPL_WORKER_AGENT_BIN      impl-worker agent binary override
 #   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
 #   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
 #   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
 #   RALPH_STAGE_RETRY_MAX            max replacement retries per stage for resumable terminal failures (default 2)
-#   AGENT_BIN                    fallback agent binary (default: agent)
+#   AGENT_BIN                    fallback agent binary (default: agent; supports: claude, codex, copilot, agent)
 #   DOT_AGENTS                   dot-agents binary or "go run ..." override
 #
 # Control plane (dot-agents): fanout creates `.agents/active/verification/<task_id>/` before dispatch;
