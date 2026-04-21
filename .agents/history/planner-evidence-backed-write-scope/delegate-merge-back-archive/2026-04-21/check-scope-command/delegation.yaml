@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-check-scope-command-1776776189
+parent_plan_id: planner-evidence-backed-write-scope
+parent_task_id: check-scope-command
+title: Implement workflow plan check-scope command
+summary: Delegated from plan Planner Evidence-Backed Write Scope
+write_scope:
+    - commands/workflow/cmd.go
+    - commands/workflow/plan_task.go
+success_criteria: 'dot-agents workflow plan check-scope <plan_id> <task_id> --changed-file/--from-git-diff. Reports: inside-scope, outside-scope, untouched required_paths, touched excluded_paths. Exit: 0=clean 1=warnings 2=no-sidecar. Read-only.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:56:29Z"
+updated_at: "2026-04-21T12:58:25Z"

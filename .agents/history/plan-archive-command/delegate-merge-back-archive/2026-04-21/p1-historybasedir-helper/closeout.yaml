@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: plan-archive-command
+task_id: p1-historybasedir-helper
+delegation_id: del-p1-historybasedir-helper-1776745216
+decision: accept
+closed_at: "2026-04-21T12:00:43Z"

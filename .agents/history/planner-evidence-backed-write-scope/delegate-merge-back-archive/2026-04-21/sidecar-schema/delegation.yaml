@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-sidecar-schema-1776772737
+parent_plan_id: planner-evidence-backed-write-scope
+parent_task_id: sidecar-schema
+title: Define scope-evidence sidecar schema and Go struct types
+summary: Delegated from plan Planner Evidence-Backed Write Scope
+write_scope:
+    - schemas/workflow-scope-evidence.schema.json
+    - commands/workflow/plan_task.go
+    - commands/workflow/cmd.go
+success_criteria: |-
+    Add schemas/workflow-scope-evidence.schema.json covering all spec §4.2 fields. Add Go
+    struct types for read/write in commands/workflow/plan_task.go. Unit test: unmarshal
+    illustrative example from spec. No command routing. Do not modify TASKS.yaml schema.
+    Schema rule (additive struct pattern): all list fields in the Go sidecar struct (Queries,
+    RequiredPaths, OptionalPaths, ExcludedPaths, DecisionLocks, RequiredReads, Provides,
+    Consumes) must use []T{} not nil — JSON must marshal to [] not null.
+    Schema rule (Go struct ↔ JSON schema sync): after defining the Go struct, verify every
+    field in schemas/workflow-scope-evidence.schema.json maps 1:1 to a struct field and vice
+    versa. Use additionalProperties: false on nested objects in the JSON schema to catch
+    future drift at validation time.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T11:58:57Z"
+updated_at: "2026-04-21T12:01:22Z"

@@ -1,0 +1,24 @@
+schema_version: 1
+task_id: sidecar-manual-experiment
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: merge-back
+status: pass
+summary: '3 new files committed (df865fa). Changes are purely in write_scope: .agents/workflow/plans/*/evidence/ and docs/. No Go code changes. No conflicts expected.'
+recorded_at: "2026-04-21T12:46:45Z"
+delegation_id: del-sidecar-manual-experiment-1776775343
+artifact_paths:
+    - .agents/active/delegation-bundles/del-p1-historybasedir-helper-1776745216.yaml
+    - .agents/active/delegation-bundles/del-p2-archive-handler-1776746536.yaml
+    - .agents/active/delegation-bundles/del-p3-wire-cmd-1776746947.yaml
+    - .agents/active/delegation-bundles/del-p4-drift-extension-1776746947.yaml
+    - .agents/active/delegation-bundles/del-p5-sweep-extension-1776746947.yaml
+    - .agents/active/delegation/p1-historybasedir-helper.yaml
+    - .agents/active/delegation/p2-archive-handler.yaml
+    - .agents/active/delegation/p3-wire-cmd.yaml
+    - .agents/active/delegation/p4-drift-extension.yaml
+    - .agents/active/delegation/p5-sweep-extension.yaml
+    - .agents/workflow/plans/plan-archive-command/PLAN.yaml
+    - .agents/workflow/plans/plan-archive-command/TASKS.yaml
+    - .agents/workflow/plans/plan-archive-command/plan-archive-command.plan.md
+    - .agents/workflow/plans/planner-evidence-backed-write-scope/PLAN.yaml
+    - .agents/workflow/plans/planner-evidence-backed-write-scope/TASKS.yaml

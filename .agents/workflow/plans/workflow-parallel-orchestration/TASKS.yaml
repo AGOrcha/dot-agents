@@ -3,7 +3,7 @@ plan_id: workflow-parallel-orchestration
 tasks:
     - id: p1-select-all-eligible
       title: Implement selectAllEligibleTasks() — cross-plan unblocked task set
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -25,7 +25,7 @@ tasks:
         This is the only place dep resolution logic lives — p2 and p3 reuse this function.
     - id: p2-conflict-detection
       title: Implement write-scope conflict detection and batch grouping
-      status: pending
+      status: completed
       depends_on:
         - p1-select-all-eligible
       blocks: []
@@ -47,7 +47,7 @@ tasks:
         introduced in p3 (eligible cmd) — ensure p3's renderer surfaces all new fields.
     - id: p3-eligible-cmd
       title: Implement workflow eligible command
-      status: pending
+      status: in_progress
       depends_on:
         - p2-conflict-detection
       blocks: []

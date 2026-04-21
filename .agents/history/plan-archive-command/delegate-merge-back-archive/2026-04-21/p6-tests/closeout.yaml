@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: plan-archive-command
+task_id: p6-tests
+delegation_id: del-p6-tests-1776774925
+decision: accept
+closed_at: "2026-04-21T12:38:30Z"

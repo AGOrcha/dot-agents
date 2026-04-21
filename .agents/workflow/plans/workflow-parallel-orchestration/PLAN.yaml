@@ -4,8 +4,8 @@ title: Workflow Parallel Orchestration Surface
 status: active
 summary: Extend the workflow command surface so orchestrators can discover all currently eligible tasks across active plans in one call, detect write-scope conflicts, and apply a parallelism ceiling — enabling genuine multi-task fanout in ISP and ralph pipeline sessions.
 created_at: "2026-04-21T01:05:03Z"
-updated_at: "2026-04-21T01:05:39Z"
+updated_at: "2026-04-21T13:13:05Z"
 owner: dot-agents
 success_criteria: workflow eligible returns all unblocked tasks across active plans with conflict annotations. max_parallel_workers pref respected. ISP prompt updated to use eligible for parallel fanout mode. workflow next unchanged for single-task use.
 verification_strategy: 'Unit tests for selectAllEligibleTasks across multi-plan fixtures with overlapping and non-overlapping write scopes. Integration smoke: eligible returns 2 tasks from plan-archive-command fixture when p0 and p1 are both pending with no deps. ISP prompt readback confirms eligible is the fanout selector.'
-current_focus_task: Implement selectAllEligibleTasks across active plans
+current_focus_task: Implement workflow eligible command

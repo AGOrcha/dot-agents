@@ -3,14 +3,13 @@ plan_id: planner-evidence-backed-write-scope
 tasks:
     - id: sidecar-schema
       title: Define scope-evidence sidecar schema and Go struct types
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - sidecar-manual-experiment
         - check-scope-command
         - skill-upgrades
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - schemas/workflow-scope-evidence.schema.json
         - commands/workflow/plan_task.go
@@ -27,9 +26,10 @@ tasks:
         field in schemas/workflow-scope-evidence.schema.json maps 1:1 to a struct field and vice
         versa. Use additionalProperties: false on nested objects in the JSON schema to catch
         future drift at validation time.
+      app_type: go-cli
     - id: sidecar-manual-experiment
       title: Hand-author scope-evidence sidecars for 2 real tasks; validate shape
-      status: pending
+      status: completed
       depends_on:
         - sidecar-schema
       blocks:
@@ -43,7 +43,7 @@ tasks:
       notes: 'Author .scope.yaml for 2 completed tasks using real graph output and actual changed files as ground truth. Validate: did seeds produce right required_paths? Were decision_locks clear enough? Document gaps in docs/. Research task — no Go code.'
     - id: derive-scope-command
       title: Implement workflow plan derive-scope command
-      status: pending
+      status: completed
       depends_on:
         - sidecar-schema
         - sidecar-manual-experiment
@@ -51,7 +51,6 @@ tasks:
         - check-scope-command
         - skill-upgrades
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/workflow/cmd.go
         - commands/workflow/plan_task.go
@@ -60,21 +59,22 @@ tasks:
         - internal/graphstore/crg.go
       verification_required: true
       notes: 'dot-agents workflow plan derive-scope <plan_id> <task_id> --seed-symbol/--seed-path. Runs scope-lane and context-lane query bundles. Writes candidate sidecar. Degrades to confidence:low when graph not ready. Does NOT auto-edit TASKS.yaml. Gate: kg-freshness-impl must be complete.'
+      app_type: go-cli
     - id: check-scope-command
       title: Implement workflow plan check-scope command
-      status: pending
+      status: completed
       depends_on:
         - sidecar-schema
         - derive-scope-command
       blocks:
         - fanout-evidence-integration
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/workflow/cmd.go
         - commands/workflow/plan_task.go
       verification_required: true
       notes: 'dot-agents workflow plan check-scope <plan_id> <task_id> --changed-file/--from-git-diff. Reports: inside-scope, outside-scope, untouched required_paths, touched excluded_paths. Exit: 0=clean 1=warnings 2=no-sidecar. Read-only.'
+      app_type: go-cli
     - id: skill-upgrades
       title: Update orchestrator-session-start, agent-start, plan-wave-picker to consume sidecars
       status: pending
@@ -120,7 +120,6 @@ tasks:
         - workflow-parallel-orchestration/p4-max-parallel-pref
       blocks: []
       owner: dot-agents
-      app_type: go-cli
       write_scope:
         - commands/workflow/cmd.go
         - commands/workflow/plan_task.go
@@ -137,3 +136,4 @@ tasks:
         workflow-parallel-orchestration/p4-max-parallel-pref: workflow eligible is fully
         available after p4; fanout warnings should call selectAllEligibleTasks rather than
         reimplementing eligibility logic independently.
+      app_type: go-cli
