@@ -3,7 +3,7 @@ plan_id: ralph-fanout-and-runtime-overrides
 tasks:
     - id: detect-overlap-conflicts
       title: Detect overlapping fanout conflicts
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -16,7 +16,7 @@ tasks:
       notes: Make orchestrate skip pending tasks whose write scope overlaps an active delegation, and avoid selecting multiple new overlapping tasks in the same pass. The task should preserve current runtime routing while tightening selection safety.
     - id: role-runtime-overrides
       title: Add per-role runtime overrides
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -31,7 +31,7 @@ tasks:
       notes: Support separate model and AGENT_BIN overrides for orchestrator, closeout, generic worker, impl worker, verifier worker, and review worker. Keep the override precedence explicit and readable so the runtime stays deterministic.
     - id: smoke-and-precedence-tests
       title: Add fanout and precedence coverage
-      status: pending
+      status: completed
       depends_on:
         - detect-overlap-conflicts
         - role-runtime-overrides
