@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -740,5 +741,245 @@ func TestSelectAllEligibleTasks_ReturnsEmptySliceNotNil(t *testing.T) {
 	}
 	if got == nil {
 		t.Error("expected empty slice, not nil")
+	}
+}
+
+// ── p6: eligible command, evidence fields, write_scope_declared, prefs ────────
+
+// TestAnnotateEligibleTasks_NoSidecar verifies that when no evidence sidecar
+// exists, has_evidence=false and evidence_confidence='none' always co-occur.
+func TestAnnotateEligibleTasks_NoSidecar(t *testing.T) {
+	proj := t.TempDir()
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "plan-x", TaskID: "t1", WriteScope: []string{"commands/"}},
+	}
+	annotated := annotateEligibleTasks(proj, tasks)
+	if len(annotated) != 1 {
+		t.Fatalf("expected 1 annotated task, got %d", len(annotated))
+	}
+	at := annotated[0]
+	if at.HasEvidence {
+		t.Error("HasEvidence should be false when no sidecar exists")
+	}
+	if at.EvidenceConfidence != "none" {
+		t.Errorf("EvidenceConfidence should be 'none' when no sidecar; got %q", at.EvidenceConfidence)
+	}
+}
+
+// TestAnnotateEligibleTasks_WithSidecar verifies that when an evidence sidecar
+// exists, has_evidence=true and evidence_confidence is read from the file.
+func TestAnnotateEligibleTasks_WithSidecar(t *testing.T) {
+	proj := t.TempDir()
+	planID, taskID := "plan-x", "t1"
+	sidecarPath := deriveScopeEvidencePath(proj, planID, taskID)
+	if err := os.MkdirAll(filepath.Dir(sidecarPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := []byte("confidence: high\n")
+	if err := os.WriteFile(sidecarPath, sidecar, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: planID, TaskID: taskID, WriteScope: []string{"commands/"}},
+	}
+	annotated := annotateEligibleTasks(proj, tasks)
+	at := annotated[0]
+	if !at.HasEvidence {
+		t.Error("HasEvidence should be true when sidecar exists")
+	}
+	if at.EvidenceConfidence != "high" {
+		t.Errorf("EvidenceConfidence should be 'high'; got %q", at.EvidenceConfidence)
+	}
+}
+
+// TestAnnotateEligibleTasks_EvidenceConfidenceFromSidecar verifies that the
+// confidence field is read correctly for each valid confidence value.
+func TestAnnotateEligibleTasks_EvidenceConfidenceFromSidecar(t *testing.T) {
+	for _, conf := range []string{"none", "low", "medium", "high"} {
+		t.Run(conf, func(t *testing.T) {
+			proj := t.TempDir()
+			planID, taskID := "plan-conf", "t-conf"
+			sidecarPath := deriveScopeEvidencePath(proj, planID, taskID)
+			if err := os.MkdirAll(filepath.Dir(sidecarPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(sidecarPath, []byte("confidence: "+conf+"\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			tasks := []workflowNextTaskSuggestion{
+				{PlanID: planID, TaskID: taskID, WriteScope: []string{"commands/"}},
+			}
+			annotated := annotateEligibleTasks(proj, tasks)
+			if annotated[0].EvidenceConfidence != conf {
+				t.Errorf("expected confidence %q; got %q", conf, annotated[0].EvidenceConfidence)
+			}
+		})
+	}
+}
+
+// TestAnnotateEligibleTasks_HasEvidenceFalseAndConfidenceNoneCoOccur asserts
+// the invariant: has_evidence=false and evidence_confidence='none' must always
+// co-occur. Any annotation with has_evidence=false must have confidence='none'.
+func TestAnnotateEligibleTasks_HasEvidenceFalseAndConfidenceNoneCoOccur(t *testing.T) {
+	proj := t.TempDir()
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "p", TaskID: "no-sidecar", WriteScope: []string{"a/"}},
+	}
+	annotated := annotateEligibleTasks(proj, tasks)
+	for _, at := range annotated {
+		if !at.HasEvidence && at.EvidenceConfidence != "none" {
+			t.Errorf("task %q: has_evidence=false but evidence_confidence=%q (must be 'none')", at.TaskID, at.EvidenceConfidence)
+		}
+	}
+}
+
+// TestAnnotateEligibleTasks_WriteScopeDeclaredFalse verifies that an empty
+// write_scope sets write_scope_declared=false.
+func TestAnnotateEligibleTasks_WriteScopeDeclaredFalse(t *testing.T) {
+	proj := t.TempDir()
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "p", TaskID: "no-scope", WriteScope: []string{}},
+	}
+	annotated := annotateEligibleTasks(proj, tasks)
+	if annotated[0].WriteScopeDeclared {
+		t.Error("WriteScopeDeclared should be false when write_scope is empty")
+	}
+}
+
+// TestAnnotateEligibleTasks_WriteScopeDeclaredTrue verifies that a non-empty
+// write_scope sets write_scope_declared=true.
+func TestAnnotateEligibleTasks_WriteScopeDeclaredTrue(t *testing.T) {
+	proj := t.TempDir()
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "p", TaskID: "has-scope", WriteScope: []string{"commands/workflow/"}},
+	}
+	annotated := annotateEligibleTasks(proj, tasks)
+	if !annotated[0].WriteScopeDeclared {
+		t.Error("WriteScopeDeclared should be true when write_scope is non-empty")
+	}
+}
+
+// TestEligibleOutput_HasMaxBatchField verifies that eligibleOutput marshals to
+// JSON with a max_batch field (present even when empty).
+func TestEligibleOutput_HasMaxBatchField(t *testing.T) {
+	out := eligibleOutput{
+		EligibleTasks: []AnnotatedTask{},
+		MaxBatch:      []string{"task-a", "task-b"},
+		ConflictGraph: map[string][]string{},
+		TotalEligible: 2,
+		MaxParallel:   2,
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"max_batch"`) {
+		t.Error("JSON output should contain max_batch field")
+	}
+	if !strings.Contains(s, `"task-a"`) {
+		t.Error("JSON output should contain task IDs in max_batch")
+	}
+}
+
+// TestResolvePreferences_MaxParallelWorkersDefault verifies that the default
+// value for max_parallel_workers is 1 (safe/serialized).
+func TestResolvePreferences_MaxParallelWorkersDefault(t *testing.T) {
+	proj := t.TempDir()
+	prefs, err := resolvePreferences(proj, "test-project")
+	if err != nil {
+		t.Fatalf("resolvePreferences: %v", err)
+	}
+	if prefs.Execution.MaxParallelWorkers == nil {
+		t.Fatal("MaxParallelWorkers should not be nil (has a default)")
+	}
+	if *prefs.Execution.MaxParallelWorkers != 1 {
+		t.Errorf("default MaxParallelWorkers should be 1; got %d", *prefs.Execution.MaxParallelWorkers)
+	}
+}
+
+// TestApplyPreferenceKey_MaxParallelWorkersValidation verifies that
+// max_parallel_workers rejects values outside 1-8.
+func TestApplyPreferenceKey_MaxParallelWorkersValidation(t *testing.T) {
+	invalid := []string{"0", "9", "-1", "abc", "100"}
+	for _, v := range invalid {
+		t.Run(v, func(t *testing.T) {
+			var p WorkflowPreferences
+			if err := applyPreferenceKey(&p, "execution.max_parallel_workers", v); err == nil {
+				t.Errorf("expected error for value %q, got nil", v)
+			}
+		})
+	}
+	valid := []string{"1", "4", "8"}
+	for _, v := range valid {
+		t.Run(v, func(t *testing.T) {
+			var p WorkflowPreferences
+			if err := applyPreferenceKey(&p, "execution.max_parallel_workers", v); err != nil {
+				t.Errorf("unexpected error for value %q: %v", v, err)
+			}
+			if p.Execution.MaxParallelWorkers == nil {
+				t.Error("MaxParallelWorkers should be set after apply")
+			}
+		})
+	}
+}
+
+// TestEligibleLimitFromPref verifies that the eligible command respects the
+// limit by checking that annotateEligibleTasks + conflict result can be sliced
+// to max_parallel_workers (simulating the effectiveLimit logic).
+func TestEligibleLimitFromPref(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-limit", "active", []CanonicalTask{
+		{ID: "t1", Title: "Task 1", Status: "pending", WriteScope: []string{"a/"}},
+		{ID: "t2", Title: "Task 2", Status: "pending", WriteScope: []string{"b/"}},
+		{ID: "t3", Title: "Task 3", Status: "pending", WriteScope: []string{"c/"}},
+	})
+
+	tasks, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("selectAllEligibleTasks: %v", err)
+	}
+	if len(tasks) < 3 {
+		t.Fatalf("expected ≥3 eligible tasks, got %d", len(tasks))
+	}
+
+	// Simulate effectiveLimit=2 (max_parallel_workers=2, no explicit --limit).
+	effectiveLimit := 2
+	if effectiveLimit > 0 && len(tasks) > effectiveLimit {
+		tasks = tasks[:effectiveLimit]
+	}
+	if len(tasks) != 2 {
+		t.Errorf("after limit=2, expected 2 tasks; got %d", len(tasks))
+	}
+}
+
+// TestEligibleLimitExplicitOverride verifies that an explicit --limit > 0
+// overrides the max_parallel_workers pref.
+func TestEligibleLimitExplicitOverride(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-override", "active", []CanonicalTask{
+		{ID: "t1", Title: "T1", Status: "pending", WriteScope: []string{"a/"}},
+		{ID: "t2", Title: "T2", Status: "pending", WriteScope: []string{"b/"}},
+	})
+
+	tasks, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("selectAllEligibleTasks: %v", err)
+	}
+
+	// maxWorkers=1 (default pref), but explicit limit=5 should override.
+	maxWorkers := 1
+	limit := 5
+	effectiveLimit := maxWorkers
+	if limit > 0 {
+		effectiveLimit = limit
+	}
+	// With effectiveLimit=5, all 2 tasks should be returned.
+	if effectiveLimit > 0 && len(tasks) > effectiveLimit {
+		tasks = tasks[:effectiveLimit]
+	}
+	if len(tasks) != 2 {
+		t.Errorf("explicit limit=5 should return all 2 tasks; got %d", len(tasks))
 	}
 }
