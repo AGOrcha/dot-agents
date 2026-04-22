@@ -1,8 +1,8 @@
 schema_version: 1
 id: graph-warm-build-transaction-defect
 plan_id: kg-command-surface-readiness
-task_id: kg-freshness-audit
-observation: 'Fresh isolated heavy-lane verification exposed a live defect: ''dot-agents kg build'' fails on a new KG_HOME with sqlite3.OperationalError: cannot start a transaction within a transaction. Treat graph-warm-health as escalated into working scope, not deferred heavy-lane debt; fold this into kg-freshness-audit and route follow-on implementation through kg-command-surface-readiness.'
+task_id: kg-fresh-build-transaction-fix
+observation: 'Fresh isolated heavy-lane verification exposed a live defect: ''dot-agents kg build'' fails on a new KG_HOME with sqlite3.OperationalError: cannot start a transaction within a transaction. Manual isolated repro on 2026-04-19 confirmed the defect still exists on current code. Treat graph-warm-health as escalated into working scope, not deferred heavy-lane debt; route follow-on implementation through kg-fresh-build-transaction-fix under kg-command-surface-readiness.'
 classification: small
-routed_to: task_note:kg-command-surface-readiness/kg-freshness-audit
+routed_to: task_note:kg-command-surface-readiness/kg-fresh-build-transaction-fix
 created_at: "2026-04-19T21:06:14Z"

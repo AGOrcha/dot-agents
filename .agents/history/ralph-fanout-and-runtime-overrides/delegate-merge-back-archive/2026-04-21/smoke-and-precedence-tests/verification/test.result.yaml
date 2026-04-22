@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: smoke-and-precedence-tests
+parent_plan_id: ralph-fanout-and-runtime-overrides
+verifier_type: test
+status: pass
+summary: 'bash --self-test: ralph-orchestrate 20/20 pass (conflict guard: discover_unblocked_tasks returns max_batch only; scope overlap; orchestrator model/bin precedence). ralph-worker 15/15 pass (per-role model/bin precedence for impl/verifier/review/worker). ralph-closeout 8/8 pass. ralph-pipeline 17/17 pass. go test ./commands/... all pass.'
+recorded_at: "2026-04-21T17:44:11Z"
+delegation_id: del-smoke-and-precedence-tests-1776790069
+recorded_by: dot-agents workflow verify record

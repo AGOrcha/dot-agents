@@ -86,15 +86,18 @@ func PromoteSkillIn(name, projectPath string) error {
 	}
 
 	// Refresh platform-level skill mirrors using the shared executor.
+	// Use relative target roots with homeDir as repoPath so intent.TargetPath
+	// stays relative (e.g. ".claude/skills/name") and passes isAllowlistedSharedMirrorTarget.
+	// Absolute roots would produce intent paths like "/home/user/.claude/skills/name"
+	// which fail the allowlist prefix checks when an existing directory needs replacement.
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		ui.Bullet("warn", "could not determine home directory; skipping platform mirrors: "+err.Error())
 	} else {
-		targetRoots := []string{
-			filepath.Join(homeDir, ".agents", "skills"),
-			filepath.Join(homeDir, ".claude", "skills"),
-		}
-		if err := platform.ExecuteSharedSkillMirrorPlan(projectName, projectPath, targetRoots...); err != nil {
+		if err := platform.ExecuteSharedSkillMirrorPlan(projectName, homeDir,
+			filepath.Join(".agents", "skills"),
+			filepath.Join(".claude", "skills"),
+		); err != nil {
 			ui.Bullet("warn", "platform mirror refresh failed: "+err.Error())
 		}
 	}

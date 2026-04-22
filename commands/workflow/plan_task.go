@@ -1294,8 +1294,12 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		}
 	}
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by max_parallel_workers=%d)\n",
-		out.TotalEligible, out.MaxParallel, maxWorkers)
+	limitLabel := fmt.Sprintf("max_parallel_workers=%d", maxWorkers)
+	if limit > 0 {
+		limitLabel = fmt.Sprintf("--limit=%d", limit)
+	}
+	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by %s)\n",
+		out.TotalEligible, out.MaxParallel, limitLabel)
 	if len(out.MaxBatch) > 0 {
 		fmt.Fprintf(os.Stdout, "  max batch: %s\n", strings.Join(out.MaxBatch, ", "))
 	}

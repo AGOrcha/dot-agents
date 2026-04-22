@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: fanout-evidence-integration
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: unit
+status: pass
+summary: 'go test ./commands/workflow/...: 6 new TestFanoutEvidenceWarning tests pass (no-sidecar-healthy, no-sidecar-degraded, low-confidence, high-confidence, skip-suppresses-no-sidecar, skip-suppresses-low-confidence); full package 0 failures. go test ./...: all packages pass.'
+recorded_at: "2026-04-21T18:26:49Z"
+delegation_id: del-fanout-evidence-integration-1776795466
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./commands/workflow/... -run TestFanoutEvidenceWarning

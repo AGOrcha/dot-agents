@@ -302,3 +302,79 @@ func TestPromoteSkillIn_ErrorExistingNonSymlink(t *testing.T) {
 		t.Errorf("error message = %q; want 'real directory' substring", err.Error())
 	}
 }
+
+// TestPromoteSkillIn_MirrorSucceedsWhenClaudeSkillsDirAlreadyExists is the regression
+// test for the "absolute target root → allowlist miss" bug.
+//
+// Scenario: a user manually created (or a previous run left) a real directory at
+// homeDir/.claude/skills/<name>/ with SKILL.md.  When PromoteSkillIn runs its mirror
+// step it must replace that directory with a managed symlink.
+//
+// Pre-fix the mirror step passed absolute target roots to ExecuteSharedSkillMirrorPlan,
+// producing an intent.TargetPath of "/abs/path/.claude/skills/name".
+// isAllowlistedSharedMirrorTarget only recognises ".claude/skills/" prefixes, so the
+// allowlist check failed and the mirror step warned "target … is not allowlisted".
+//
+// Post-fix: relative roots + homeDir as repoPath → intent.TargetPath = ".claude/skills/name"
+// → allowlist passes → existing directory is replaced with the managed symlink.
+func TestPromoteSkillIn_MirrorSucceedsWhenClaudeSkillsDirAlreadyExists(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agentshome")
+	fakeHome := filepath.Join(tmp, "home")
+	projectPath := filepath.Join(tmp, "repo")
+	for _, d := range []string{agentsHome, fakeHome, projectPath} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", fakeHome)
+
+	projectName := "mirrortest"
+	skillName := "article-extract"
+
+	// Write .agentsrc.json
+	rc := &config.AgentsRC{Version: 1, Project: projectName, Sources: []config.Source{{Type: "local"}}}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatalf("rc.Save: %v", err)
+	}
+	writeSkillMD(t, projectPath, skillName)
+
+	// Pre-create a real directory at the Claude skills target — this is the
+	// scenario that triggered the bug: skill was placed directly in ~/.claude/skills/
+	// before the promote command was run.
+	claudeSkillsDir := filepath.Join(fakeHome, ".claude", "skills", skillName)
+	if err := os.MkdirAll(claudeSkillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeSkillsDir, "SKILL.md"), []byte("# old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PromoteSkillIn(skillName, projectPath); err != nil {
+		t.Fatalf("PromoteSkillIn: %v", err)
+	}
+
+	// The canonical path must be a real directory.
+	canonicalPath := filepath.Join(agentsHome, "skills", projectName, skillName)
+	if fi, err := os.Lstat(canonicalPath); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("canonical path should be a real directory: err=%v", err)
+	}
+
+	// ~/.claude/skills/<name> must now be a managed symlink → canonical.
+	claudeLink := filepath.Join(fakeHome, ".claude", "skills", skillName)
+	fi, err := os.Lstat(claudeLink)
+	if err != nil {
+		t.Fatalf("~/.claude/skills/%s missing after promote: %v", skillName, err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("~/.claude/skills/%s should be a symlink, got %v", skillName, fi.Mode())
+	}
+	target, err := os.Readlink(claudeLink)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if target != canonicalPath {
+		t.Errorf("~/.claude/skills/%s → %q, want %q", skillName, target, canonicalPath)
+	}
+}

@@ -1,10 +1,10 @@
 schema_version: 1
 id: kg-command-surface-readiness
 title: KG Command Surface Readiness
-status: completed
+status: active
 summary: Most kg command-surface readiness work is landed, but fresh isolated kg build still fails on a new KG_HOME with a sqlite transaction error. Reopened narrowly around the clean-home build-path defect and regression coverage.
 created_at: "2026-04-19T19:42:47Z"
-updated_at: "2026-04-20T12:26:36Z"
+updated_at: "2026-04-21T22:24:54Z"
 owner: dot-agents
 success_criteria: |-
     kg build and kg update produce a usable, verifiable code graph from a clean checkout with
@@ -15,5 +15,9 @@ success_criteria: |-
 verification_strategy: |-
     Focused go test coverage in commands/kg/ and internal/graphstore/. Command-level smoke
     verification on known repo fixtures after each implementation task. Explicit repro cases
-    for missing-config, stale-graph, and empty-result behavior.
-current_focus_task: ""
+    for missing-config, stale-graph, and empty-result behavior. For the fresh-build transaction
+    follow-on, do not rely only on fake CRG binaries or stub Python entrypoints: require at
+    least one isolated-home verification path against the real code-review-graph runtime and
+    direct inspection/assertion of the resulting SQLite database state so wrapper-level tests
+    cannot mask underlying DB transaction defects.
+current_focus_task: kg-fresh-build-transaction-fix

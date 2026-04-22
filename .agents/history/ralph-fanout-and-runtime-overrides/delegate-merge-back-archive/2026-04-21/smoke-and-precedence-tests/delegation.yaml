@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-smoke-and-precedence-tests-1776790069
+parent_plan_id: ralph-fanout-and-runtime-overrides
+parent_task_id: smoke-and-precedence-tests
+title: Add fanout and precedence coverage
+summary: Delegated from plan Ralph Fanout And Runtime Overrides
+write_scope:
+    - bin/tests/ralph-orchestrate
+    - bin/tests/ralph-worker
+    - bin/tests/ralph-closeout
+    - bin/tests/ralph-pipeline
+    - commands/workflow_test.go
+success_criteria: Cover the selection logic and env precedence with focused script or workflow tests. Verify the conflict guard and per-role override behavior against the existing Ralph runtime contract.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T16:47:49Z"
+updated_at: "2026-04-21T17:44:23Z"

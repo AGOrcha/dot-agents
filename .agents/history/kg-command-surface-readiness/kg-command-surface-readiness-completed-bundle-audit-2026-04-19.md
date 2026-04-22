@@ -8,7 +8,7 @@ after it was marked `completed` in canonical state. This audit follows the metho
 
 ## Verdict
 
-`completed-with-evidence-gaps`
+`reopen-recommended`
 
 The current codebase appears to have implemented most of the bundle's intended readiness fixes:
 
@@ -20,15 +20,14 @@ The current codebase appears to have implemented most of the bundle's intended r
 
 So the bundle no longer looks blocked on the exact gaps described in the original audit docs.
 
-The remaining problem is not primarily stale markdown status. It is a verification/evidence gap:
+The remaining problem is no longer just an evidence gap:
 
-- an active fold-back still records the graph-warm transaction defect against
-  `kg-freshness-audit`
-- I did not find direct regression evidence in the repo that this specific defect was fixed or
-  intentionally deferred after the fold-back was created
+- an active fold-back still records the graph-warm transaction defect
+- a fresh isolated manual repro on 2026-04-19 confirmed the defect still exists on current code
+- the canonical bundle had been marked `completed` even though a clean-home `kg build` still fails
 
-That means the bundle looks more complete than `loop-agent-pipeline`, but less settled than
-`ci-smoke-suite-hardening`.
+That means the bundle needs a narrow reopen, not a broad rollback of all KG surface work. The
+follow-on scope is now captured canonically as `kg-fresh-build-transaction-fix`.
 
 ## Spec Anchors
 
@@ -142,7 +141,7 @@ Direct evidence:
 - [kg-change-impact-audit.md:163](../../../docs/research/kg-change-impact-audit.md:163)
 - [kg-mcp-transport-audit.md:136](../../../docs/research/kg-mcp-transport-audit.md:136)
 
-### 2. The graph-warm transaction defect still lacks closure evidence
+### 2. The graph-warm transaction defect is still reproducible
 
 There is an active fold-back saying a fresh isolated `kg build` failed with:
 
@@ -152,41 +151,40 @@ and that this should be treated as working-scope product debt rather than deferr
 
 - [graph-warm-build-transaction-defect.yaml](../../active/fold-back/graph-warm-build-transaction-defect.yaml:1)
 
-I did not find a direct regression test, implementation-result note, or explicit closure artifact
-that says this specific defect was resolved.
+That defect was then reproduced directly on current code in a fresh temp setup with isolated
+`HOME`, `AGENTS_HOME`, and `KG_HOME`:
 
-That does not prove the defect is still present. It does mean the completed-bundle evidence is
-not strong enough to say the issue was fully closed.
+```text
+./bin/dot-agents kg build --repo .
+sqlite3.OperationalError: cannot start a transaction within a transaction
+```
 
-### 3. The fold-back is still routed to a completed audit task
+This means the bundle's old `completed` status was materially wrong for the clean-home build path.
 
-The active fold-back is attached to `kg-freshness-audit`, not to an implementation task or a
+### 3. The fold-back had been routed to a completed audit task
+
+The active fold-back had been attached to `kg-freshness-audit`, not to an implementation task or a
 follow-on task:
 
 - [graph-warm-build-transaction-defect.yaml](../../active/fold-back/graph-warm-build-transaction-defect.yaml:3)
 
-That is structurally awkward now that the bundle is marked `completed`. Either:
+That was structurally awkward once the bundle was marked `completed`. This is now corrected by the
+new canonical follow-on task:
 
-- the defect was fixed and the fold-back should be resolved/archived, or
-- it still needs a new canonical task / reopened follow-on scope
+- `kg-fresh-build-transaction-fix`
 
 ## Open Questions
 
-1. Is the `cannot start a transaction within a transaction` graph-warm defect still reproducible
-   on current code, or was it fixed without the fold-back being closed?
-2. If it is fixed, where is the closure evidence that should let this bundle move from
-   `completed-with-evidence-gaps` to `verified-complete`?
-3. If it is not fixed, should the follow-on live under `kg-command-surface-readiness`, or be
-   forked into a narrower KG defect plan/task?
+1. Is the root cause inside the CRG Python store transaction lifecycle, the Go bridge invocation
+   pattern, or an interaction between postprocess/warm-side effects?
+2. Should this defect stay as a narrow follow-on inside `kg-command-surface-readiness`, or does it
+   justify a more explicit CRG bridge/runtime stabilization bundle if deeper failures emerge?
 
 ## Required Follow-Up
 
-1. Reproduce or explicitly dismiss the graph-warm transaction defect on current code.
-2. If reproduced:
-   - create or route to a concrete canonical follow-on task instead of leaving the fold-back on
-     `kg-freshness-audit`
-3. If not reproduced:
-   - close or archive the active fold-back
-   - update the KG audit/research notes so they stop describing already-landed fixes as missing
-4. Keep the bundle `completed` for now only if the team accepts this remaining evidence gap. If
-   not, reopen narrowly around the graph-warm defect rather than the broader command-surface work.
+1. Fix `kg build` so a fresh isolated `KG_HOME` no longer fails with the nested-transaction error.
+2. Add regression coverage for a fresh-home build path so repo-local persisted graph state cannot
+   hide the failure.
+3. Keep the reopened scope narrow: do not reopen already-landed change/impact or MCP parity work.
+4. After the fix lands, update stale research notes so they stop describing already-landed fixes as
+   missing and record closure evidence for the fresh-build defect.

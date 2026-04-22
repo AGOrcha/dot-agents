@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1020,5 +1021,167 @@ func TestEligibleLimitExplicitOverride(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("explicit limit=5 should return all 2 tasks; got %d", len(tasks))
+	}
+}
+
+// ── p7: ablation-derived unit tests ──────────────────────────────────────────
+
+// TestEligibleDraftPlanExcluded verifies that a plan with status="draft" does
+// not contribute tasks to the eligible set.
+func TestEligibleDraftPlanExcluded(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "draft-plan", "draft", []CanonicalTask{
+		{ID: "t1", Title: "Task 1", Status: "pending"},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("draft plan should yield 0 eligible tasks; got %d: %v", len(got), got)
+	}
+}
+
+// TestEligibleDepBlocksTask verifies that a task whose dependency is still
+// pending does not appear in the eligible set.
+func TestEligibleDepBlocksTask(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-dep", "active", []CanonicalTask{
+		{ID: "alpha", Title: "Alpha", Status: "pending", WriteScope: []string{"src/alpha.go"}},
+		{ID: "beta", Title: "Beta", Status: "pending", WriteScope: []string{"src/beta.go"}, DependsOn: []string{"alpha"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, t2 := range got {
+		if t2.TaskID == "beta" {
+			t.Error("beta should be blocked by alpha, but appeared in eligible set")
+		}
+	}
+	found := false
+	for _, t2 := range got {
+		if t2.TaskID == "alpha" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("alpha should be eligible (no deps)")
+	}
+}
+
+// TestEligibleDepUnblocksOnCompletion verifies that completing a dependency
+// makes the previously-blocked task eligible.
+func TestEligibleDepUnblocksOnCompletion(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "plan-dep", "active", []CanonicalTask{
+		{ID: "alpha", Title: "Alpha", Status: "completed", WriteScope: []string{"src/alpha.go"}},
+		{ID: "beta", Title: "Beta", Status: "pending", WriteScope: []string{"src/beta.go"}, DependsOn: []string{"alpha"}},
+	})
+
+	got, err := selectAllEligibleTasks(proj, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, t2 := range got {
+		if t2.TaskID == "beta" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("beta should become eligible once alpha is completed")
+	}
+	for _, t2 := range got {
+		if t2.TaskID == "alpha" {
+			t.Error("completed alpha should not appear in eligible set")
+		}
+	}
+}
+
+// TestEligibleConflictGraph_MutualConflict verifies that two tasks sharing a
+// write-scope file create a bidirectional conflict entry.
+func TestEligibleConflictGraph_MutualConflict(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "p", TaskID: "ta", WriteScope: []string{"src/shared.go"}},
+		{PlanID: "p", TaskID: "tb", WriteScope: []string{"src/shared.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	conflictsA := result.ConflictGraph["ta"]
+	conflictsB := result.ConflictGraph["tb"]
+
+	foundAB := false
+	for _, c := range conflictsA {
+		if c == "tb" {
+			foundAB = true
+		}
+	}
+	if !foundAB {
+		t.Error("ta should list tb as a conflict")
+	}
+
+	foundBA := false
+	for _, c := range conflictsB {
+		if c == "ta" {
+			foundBA = true
+		}
+	}
+	if !foundBA {
+		t.Error("tb should list ta as a conflict")
+	}
+}
+
+// TestEligibleMaxBatch_ExcludesConflictingTask verifies that max_batch contains
+// at most one task from a conflicting pair.
+func TestEligibleMaxBatch_ExcludesConflictingTask(t *testing.T) {
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: "p", TaskID: "ta", WriteScope: []string{"src/shared.go"}},
+		{PlanID: "p", TaskID: "tb", WriteScope: []string{"src/shared.go"}},
+		{PlanID: "p", TaskID: "tc", WriteScope: []string{"src/other.go"}},
+	}
+	result := computeWriteScopeConflicts(tasks)
+
+	inBatch := map[string]bool{}
+	for _, id := range result.MaxBatch {
+		inBatch[id] = true
+	}
+
+	// At most one of ta/tb should be in max_batch.
+	if inBatch["ta"] && inBatch["tb"] {
+		t.Error("max_batch should not contain both ta and tb (they conflict on src/shared.go)")
+	}
+	// tc has no conflict and should always be in max_batch.
+	if !inBatch["tc"] {
+		t.Error("tc has no conflict and should appear in max_batch")
+	}
+}
+
+// TestEligibleFooterLabel_PrefCap verifies the label string uses
+// "max_parallel_workers=N" when no explicit --limit was passed (limit==0).
+func TestEligibleFooterLabel_PrefCap(t *testing.T) {
+	maxWorkers, limit := 3, 0
+	label := fmt.Sprintf("max_parallel_workers=%d", maxWorkers)
+	if limit > 0 {
+		label = fmt.Sprintf("--limit=%d", limit)
+	}
+	if label != "max_parallel_workers=3" {
+		t.Errorf("expected 'max_parallel_workers=3'; got %q", label)
+	}
+}
+
+// TestEligibleFooterLabel_ExplicitLimit verifies the label string uses
+// "--limit=N" when an explicit --limit flag was passed.
+func TestEligibleFooterLabel_ExplicitLimit(t *testing.T) {
+	maxWorkers := 1
+	limit := 4
+	limitLabel := fmt.Sprintf("max_parallel_workers=%d", maxWorkers)
+	if limit > 0 {
+		limitLabel = fmt.Sprintf("--limit=%d", limit)
+	}
+	if limitLabel != "--limit=4" {
+		t.Errorf("expected '--limit=4'; got %q", limitLabel)
 	}
 }

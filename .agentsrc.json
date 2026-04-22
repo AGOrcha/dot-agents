@@ -20,7 +20,7 @@
   "project": "dot-agents",
   "refresh": {
     "version": "dev",
-    "refreshedAt": "2026-04-20T22:34:20Z"
+    "refreshedAt": "2026-04-22T00:13:55Z"
   },
   "rules": [
     "global",
@@ -46,7 +46,8 @@
     "plan-wave-picker",
     "platform-docs-refresh",
     "provider-consumer-pair",
-    "isp"
+    "isp",
+    "article-extract"
   ],
   "sources": [
     {

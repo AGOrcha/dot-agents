@@ -141,7 +141,7 @@ tasks:
       app_type: go-cli
     - id: kg-fresh-build-transaction-fix
       title: Fix fresh KG build transaction failure and add isolated-home regression coverage
-      status: completed
+      status: pending
       depends_on:
         - kg-freshness-impl
       blocks: []
@@ -154,5 +154,5 @@ tasks:
         - tests/
         - docs/
       verification_required: true
-      notes: 'Fresh isolated repro on 2026-04-19 still fails: dot-agents kg build --repo . on a new KG_HOME hits sqlite3.OperationalError cannot start a transaction within a transaction. Narrow scope to the clean-home build path only. Fix the transaction lifecycle in the CRG-backed build path, document the failure mode, and add regression coverage that exercises fresh HOME, AGENTS_HOME, and KG_HOME so this path is not hidden by repo-local persisted graph state. Keep kg code-status semantics honest: ready persisted state in the repo must not be treated as proof that a fresh isolated build works.'
+      notes: 'Fresh isolated repro on 2026-04-19 still fails: dot-agents kg build --repo . on a new KG_HOME hits sqlite3.OperationalError cannot start a transaction within a transaction. Narrow scope to the clean-home build path only. Fix the transaction lifecycle in the CRG-backed build path, document the failure mode, and add regression coverage that exercises fresh HOME, AGENTS_HOME, and KG_HOME so this path is not hidden by repo-local persisted graph state. Keep kg code-status semantics honest: ready persisted state in the repo must not be treated as proof that a fresh isolated build works. Current masking risk: tests/test-kg-fresh-build-transaction.sh uses a stubbed code-review-graph binary, commands/kg/kg_test.go relies heavily on fake CRG binaries / fake Python entrypoints, and internal/graphstore/mcp_server_test.go uses a fake bridge. Keep those fast wrapper tests, but add at least one verification path against the real code-review-graph runtime plus direct assertions on the produced .code-review-graph/graph.db contents/state so the underlying SQLite layer is exercised rather than inferred.'
       app_type: go-cli

@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: role-runtime-overrides
+parent_plan_id: ralph-fanout-and-runtime-overrides
+verifier_type: merge-back
+status: pass
+summary: No changes to commands/workflow.go or workflow_test.go required; the task scope was entirely in the ralph shell scripts.
+recorded_at: "2026-04-21T16:47:10Z"
+delegation_id: del-role-runtime-overrides-1776789322
+artifact_paths:
+    - .agents/workflow/plans/ralph-fanout-and-runtime-overrides/PLAN.yaml
+    - .agents/workflow/plans/ralph-fanout-and-runtime-overrides/TASKS.yaml
+    - .agentsrc.json
