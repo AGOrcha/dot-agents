@@ -55,7 +55,7 @@ coverage/
 .pytest_cache/
 .tox/
 htmlcov/
-
+.playwright-cli/
 # Temporary files
 *.tmp
 *.temp
@@ -78,6 +78,9 @@ AGENTS.md
 .agents/skills/
 .agents/agents/
 .github/agents/
+
+research/articles/images/
+
 # macOS
 .AppleDouble
 .LSOverride
