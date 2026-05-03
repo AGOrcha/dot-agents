@@ -1,8 +1,14 @@
 package graphstore_test
 
 import (
+	"database/sql"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 )
@@ -51,6 +57,77 @@ func TestParseCRGStatusOutput_noInfoLines(t *testing.T) {
 }
 
 // ── DiscoverCRGBin ────────────────────────────────────────────────────────────
+
+// TestCRGBridgeFreshBuildRealCRG exercises the full build path with the actual
+// code-review-graph binary and asserts that graph.db is produced and readable.
+// This covers the nested-transaction defect path that stub-based tests cannot
+// reach: commandWithSQLiteAutocommit must patch isolation_level before CRG
+// opens SQLite so explicit BEGIN/COMMIT calls don't collide with Python's
+// implicit transaction management.
+//
+// Skipped when the real CRG binary is not discoverable (e.g. CI without a venv).
+func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
+	_, testFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(testFile), "..", "..")
+
+	crgBin, err := graphstore.DiscoverCRGBin(repoRoot)
+	if err != nil {
+		t.Skipf("real CRG not available: %v", err)
+	}
+
+	// One Go file so CRG has something to parse.
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Explicit Bin bypasses DiscoverCRGBin on the temp dir; pythonBin() resolves
+	// python3 from the same real .venv/bin directory so site-packages are present.
+	bridge := &graphstore.CRGBridge{RepoRoot: tmpDir, Bin: crgBin}
+	report, err := bridge.BuildReport(graphstore.BuildOptions{
+		SkipFlows:       true,
+		SkipPostprocess: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildReport failed (possible nested-transaction defect): %v", err)
+	}
+	if report.Outcome != graphstore.CRGReadinessReady {
+		t.Fatalf("expected outcome=%q, got %q; summary: %s", graphstore.CRGReadinessReady, report.Outcome, report.Summary)
+	}
+	if report.Status == nil || report.Status.Nodes == 0 {
+		t.Fatalf("expected non-zero nodes, got status=%+v", report.Status)
+	}
+
+	// Direct SQLite assertion: the produced graph.db must have rows in nodes.
+	dbPath := graphstore.CRGDBPath(tmpDir)
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("graph.db not found at %s: %v", dbPath, err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open graph.db: %v", err)
+	}
+	defer db.Close()
+	var nodeCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&nodeCount); err != nil {
+		t.Fatalf("SELECT COUNT(*) FROM nodes: %v", err)
+	}
+	if nodeCount == 0 {
+		t.Fatal("graph.db has zero rows in nodes table after fresh build")
+	}
+
+	// Status() must agree with what CRG wrote into graph.db.
+	status, err := bridge.Status()
+	if err != nil {
+		t.Fatalf("Status(): %v", err)
+	}
+	if !status.Ready {
+		t.Errorf("Status().Ready=false after successful build (state=%s, message=%s)", status.State, status.Message)
+	}
+	if status.Nodes != nodeCount {
+		t.Errorf("Status().Nodes=%d disagrees with graph.db COUNT(*)=%d", status.Nodes, nodeCount)
+	}
+}
 
 func TestDiscoverCRGBin_returnsErrorWhenMissing(t *testing.T) {
 	// Use a temp dir with no .venv and no code-review-graph on PATH.
