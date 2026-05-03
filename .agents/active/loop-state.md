@@ -1,53 +1,67 @@
 # Loop State
 
-Last updated: 2026-04-19
-Iteration: 61 (prior session) — no loop iteration this session; spec authoring + plan creation pass
+Last updated: 2026-05-03
+Iteration: orchestrator pass — workspace pivot to `self-review-iteration-close-wiring` plan; ISP run pending.
 
 ## Current Position
 
-Orchestrator pass — 2026-04-19 (spec + plan authoring session):
-- **`loop-agent-pipeline` / `p10a-cli-schema-field-parity`:** **`completed`** — CLI field parity fix (`--success-criteria`, `--verification-strategy` on plan create/update; `--app-type` on task add). Fold-back `cli-schema-field-drift` resolved and archived.
-- **`kg-command-surface-readiness`:** **NEW plan, `active`** — 7 tasks, focus `kg-freshness-audit`. Entry point. Extends graph-bridge resurrection to full `kg` surface. Slices 1+2 unblock planner-evidence plan.
-- **`planner-evidence-backed-write-scope`:** **NEW plan, `active`** — 6 tasks, focus `sidecar-schema`. `sidecar-schema` and `sidecar-manual-experiment` are unblocked now. `derive-scope-command` gated on `kg-command-surface-readiness/kg-freshness-impl`.
-- **`config-distribution-model` spec:** **NEW** — canonical two-tier interface spec between `org-config-resolution` and `external-agent-sources`. Command surface migration plan in §13.
-- **`resource-command-parity`:** Prior session state (Apr 18). Active delegation `del-phase-1-command-contract-1776548679` may still be open — verify with `workflow orient` before fanning new work on overlapping paths.
-- **`replacement-agent-retry` fold-back:** Still open — `loop-agent-pipeline` summary note, no follow-on task yet. See `.agents/active/fold-back/replacement-agent-retry.yaml`.
-- **`workflow next`:** Reports **no actionable canonical task** this pass because an **active delegation** already holds the lane (`workflow orient`: **active delegations: 1**) — not a signal that phase 1 disappeared.
+**Active plan:** `self-review-iteration-close-wiring` (status: `active`, current_focus_task: `t1-audit-decide-output-schema`).
+
+This plan closes three audit-identified gaps with one fix surface:
+- Self-review skill is orphaned (chat-only, persists nothing).
+- iter-log v2 review block is dead-coded (writer exists, no caller).
+- Older `crg-kg-integration` graduated `dot-agents kg changes --brief` into self-review; the later skill-architect rework lost it. Regression to restore.
+
+Plan files at `.agents/workflow/plans/self-review-iteration-close-wiring/{PLAN.yaml, TASKS.yaml, *.plan.md}`.
+Foundation ADR at `docs/adr/0001-adopt-architecture-decision-records.md` (accepted).
+Architecture note at `.agents/proposals/agent-context-resolution-architecture.md` (revised 2026-05-03 with §1.5 resource graduation matrix, §1.6 execution telemetry pillar, §6.5 audit-confirmed pipeline state).
+
+**Just-archived plan (2026-05-03):** `kg-command-surface-readiness` — moved to `.agents/history/kg-command-surface-readiness/` (PLAN.yaml, TASKS.yaml, .plan.md, evidence/, plus the resolved fold-back under `fold-back/`). All 8 tasks complete; final `kg-fresh-build-transaction-fix` resolved with `TestCRGBridgeFreshBuildRealCRG` Go integration + `tests/test-kg-real-crg-build.sh` shell test.
+
+**Resurrected plan (2026-05-03):** `typescript-port` — new PLAN.yaml + TASKS.yaml + .plan.md tracking the Go ↔ TS sync pipeline. 4 tasks (tp1 audit / tp2 boundary spec / tp3 CI sync check / tp4 close any must-mirror gaps). Phase 4 boundary at `docs/TYPESCRIPT_PORT_BOUNDARY.md` is the canonical contract; this plan operationalizes drift detection.
+
+**Other active plans needing attention:**
+- `refresh-skill-relink` — status `paused`. Awaiting shared executor replacing per-platform `syncScopedDirSymlinksTargets`. Not eligible for ISP this pass.
+- `test-archive-p2` — metadata-incoherent (empty PLAN/TASKS). Per `project-audit-plan-sync-expansion/design.md` §3.4: needs metadata repair or removal, not normal execution. Defer.
+
+## Hygiene completed 2026-05-03
+
+- `kg-command-surface-readiness` archived to history (active dir removed).
+- Four stale fold-backs swept to their respective plan-history dirs:
+  - `kg-command-surface-readiness/fold-back/graph-warm-build-transaction-defect.yaml`
+  - `loop-agent-pipeline/fold-back/replacement-agent-retry.yaml`
+  - `loop-agent-pipeline/fold-back/staged-worker-metrics-stage-subdirs.yaml`
+  - `plan-archive-command/fold-back/fold-1776747454344734000.yaml`
+- `.agents/active/isp-prompt-orchestrator.plan.md` → `.agents/history/loop-agent-pipeline/isp-prompt-orchestrator.plan.md`
+- `.agents/active/research-evaluation-kg-adjacent-enrichment.plan.md` → `.agents/history/research-evaluation-kg-adjacent-enrichment/`
+- `.agents/active/fold-back/` directory now empty — clean orientation surface for next ISP pass.
+
+Architecture note §4 mapping (auto-archive observation when referenced plan/task closes) is the future command-level instance of what was done by hand here.
 
 ## Loop Health
 
-- **`workflow orient` vs checkpoint:** Checkpoint **`next_action`** / SHA can lag git; **canonical PLAN.yaml + TASKS.yaml + orient warnings** win (checkpoint still referenced older “Split agents…” at last read).
-- **`workflow next` vs delegations:** “No actionable task” with **`phase-1-command-contract`** still **`in_progress`** is **expected** while **`active delegations: 1`** — wait for worker merge-back before fanning another lane on overlapping paths.
-- **Phase 3 worker (iter 60):** Merge-back **`.agents/active/merge-back/phase-3-rules-lifecycle.md`** — parent should **`workflow delegation closeout`** + **`workflow advance resource-command-parity phase-3-rules-lifecycle completed`** after review; canonical **`TASKS.yaml`** still shows **`phase-3-rules-lifecycle`** as **`in_progress`** until advance.
-- **Phase 4 worker (iter 61):** Merge-back **`.agents/active/merge-back/phase-4-mcp-settings-lifecycle.md`** — parent should **`workflow delegation closeout`** + **`workflow advance resource-command-parity phase-4-mcp-settings-lifecycle completed`** after review; canonical **`TASKS.yaml`** still shows **`phase-4-mcp-settings-lifecycle`** as **`in_progress`** until advance.
-- **DAG hygiene (`resource-command-parity`):** **`phase-5-readback-alignment`** is **`completed`** while **`depends_on`** historically lagged **`phase-3`/`phase-4`** — contract doc + TASKS called this out; **`phase-4`** implementation is now in merge-back for parent reconciliation.
-- **D5:** Bundles use **`.agents/active/active.loop.md`** as project overlay only (not duplicated as **`--prompt-file`**).
+- **Audit baseline (2026-05-03):** 1/12 conversion rate from auto-emissions → action; 24/42 history dirs have `impl-results.md`. The new plan is the first to be measured against these baselines.
+- **Methodology:** plan + tasks adopt hard-test + common-false-positive (annimaniac), four-question lens, resource graduation matrix view (architecture note §1.5), and execution-telemetry seed framing (§1.6).
+- **ISP routing hints:** every task in TASKS.yaml notes declares `mode` (direct | fanout-amenable), `verifier` kind, `review` kind, anti-scope, bundle-context (for fanout), and output contract.
+- **CLAUDE.md:** updated 2026-05-03 — Task Management section now matches actual toolchain (`workflow plan create / advance / merge-back / plan archive`), drops obsolete impl-results condensation rule, fixes broken `.agents/lessons.md` reference to `.agents/lessons/index.md`.
 
 ## Next Iteration Playbook
 
-1. **Parent:** Review **`.agents/active/merge-back/phase-4-mcp-settings-lifecycle.md`** (`mcp`/`settings` `list`/`show`/`remove` + **`docs/RESOURCE_COMMAND_CONTRACT.md`**); run **`workflow delegation closeout`** + **`workflow advance resource-command-parity phase-4-mcp-settings-lifecycle completed`** when accepting.
-2. **Parent (older lanes):** **`phase-3-rules-lifecycle`** / **`phase-1-command-contract`** merge-backs may still need closeout — reconcile with **`workflow tasks resource-command-parity`** + **`workflow orient`**.
-3. **DAG follow-up:** After phase 4 advance, reconcile **`phase-5-readback-alignment`** `depends_on` vs shipped upstream lifecycle — parent owns **`TASKS.yaml`** graph honesty.
-4. **Evidence:** `go run ./cmd/dot-agents workflow tasks resource-command-parity`; `go run ./cmd/dot-agents mcp list`; `go run ./cmd/dot-agents settings list`; `go run ./cmd/dot-agents workflow orient`.
+1. **Commits + push** (proposed batches; awaiting user confirmation):
+   - **Commit A — research batch:** `research/articles/{akshay_pachaar,annimaniac,ashwingop-*-part-2,ashwingop-*-part-3,shivsakhuja}.md`, `research/evaluations/*.md`, `research/articles-evaluation-kg-and-adjacent.md`, `research/evaluations/workflow-spec-plan-inventory.md`
+   - **Commit B — architecture note + ADR foundation:** `.agents/proposals/agent-context-resolution-architecture.md`, `docs/adr/`
+   - **Commit C — self-review-iteration-close-wiring plan:** `.agents/workflow/plans/self-review-iteration-close-wiring/`
+   - **Commit D — typescript-port plan resurrection:** `.agents/workflow/plans/typescript-port/`
+   - **Commit E — workflow specs (untracked):** `.agents/workflow/specs/{project-audit-plan-sync-expansion,skill-tiering-contract}/`
+   - **Commit F — workspace hygiene:** all the renames (kg-command-surface-readiness archive, fold-back sweep, orphan plan moves), `.agents/active/loop-state.md` refresh
+   - **Commit G — kg-fresh-build fix evidence:** `internal/graphstore/crg_test.go`, `tests/test-kg-real-crg-build.sh` (the actual fix landed earlier; this is the regression-test evidence)
+   - Push branch — CI will run as the double-check verifier on the kg-command-surface-readiness work and everything else.
+2. **Run `orchestrator-session-start`** (or its CLI equivalent `dot-agents workflow eligible --json --plan self-review-iteration-close-wiring`) to gather the eligible task set with `evidence_confidence` annotations.
+3. **Chain ISP** with `--plan self-review-iteration-close-wiring`. Expected first pick: `t1-audit-decide-output-schema`.
+4. **t1 is direct (per ISP routing hint)** — orchestrator authors the three ADRs. No fanout.
+5. **t2 is fanout-amenable** — largest write_scope; clean isolation; subagent can produce three skill files in parallel against pre-decided ADR-0002 schema.
+6. **t3 stays direct** — coordinates closely with t2's output schema; integration risk if delegated separately.
+7. **t4 runs parallel with t2/t3** (no shared write scope).
+8. **t5 (verification) and t6 (archive) run last** — orchestrator-driven, real iteration on this branch.
 
-## Scenario Coverage
-
-| Family | Last exercised |
-|--------|----------------|
-| orchestrator-selection | 2026-04-18 — **delegation saturation** (`workflow next` empty + active bundle) |
-| delegation-lifecycle | 2026-04-18 — **merge-back** `resource-command-parity` / **`phase-4-mcp-settings-lifecycle`** |
-
-## Command Coverage
-
-| Command | Tested | Last Iteration |
-|---------|--------|----------------|
-| `workflow orient` | yes | 59 |
-| `workflow next` | yes | 59 |
-| `workflow tasks resource-command-parity` | yes | 59 |
-| `rules list` | yes | 60 |
-| `mcp --help` | yes | 61 |
-| `settings list --help` | yes | 61 |
-
-## Iteration Log
-
-_(Workers append here; orchestrator does not replace Current Position from worker turns.)_
+**Side note: binary rename (`dot-agents` → `da`).** User has begun the rename per UV convention. Uncommitted `.github/workflows/auto-release.yml` and `.goreleaser.yaml` modifications appear related. Out of scope for this prep; these are NOT included in commits A–G. The rename should land via its own dedicated commit/PR with a sweep of all `dot-agents` references in docs, plans, ADRs, skills, hooks, and tests. Worth its own short plan (or a single sweep commit if it's purely mechanical).

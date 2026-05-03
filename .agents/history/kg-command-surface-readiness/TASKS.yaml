@@ -141,7 +141,7 @@ tasks:
       app_type: go-cli
     - id: kg-fresh-build-transaction-fix
       title: Fix fresh KG build transaction failure and add isolated-home regression coverage
-      status: pending
+      status: completed
       depends_on:
         - kg-freshness-impl
       blocks: []
