@@ -2,7 +2,7 @@
 
 **Written:** 2026-04-21
 **Scope:** How the articles speak to dot-agents' runtime layer — the orchestrator, loop-worker, verifier, review pipeline, delegation bundles, write-scopes, parallel orchestration, and the ISP pipeline. Execution is distinct from orchestration: orchestration decides *what* and *in what order*; execution is *how agents run, communicate, and produce output*.
-**Siblings:** `workflow-orchestration.md`, `hooks-and-platform.md`, `skills-rules-graduation.md`, `lessons-and-memory.md`, `../articles-evaluation-kg-and-adjacent.md`.
+**Siblings:** `workflow-orchestration.md`, `hooks-and-platform.md`, `skills-rules-graduation.md`, `lessons-and-memory.md`, `workflow-spec-plan-inventory.md`, `../articles-evaluation-kg-and-adjacent.md`.
 
 **Rubric:** Core / Pros / Cons / Risk profile (Failure mode / Evidence / Reversibility / Second-order) / Mapping (`[OVERLAP-SHARPEN] / [GAP-ADOPT] / [WE-AHEAD]`).
 
@@ -303,6 +303,33 @@ Before turning any P0/P1 here into a plan:
 4. Always cite Evidence + Reversibility when pitching a recommendation.
 
 See `workflow-orchestration.md` Part D for the full trust-gate exposition.
+
+---
+
+## Part E — 2026-04-27 Inventory Addendum
+
+Execution recommendations now need three extra constraints from the workflow specs:
+
+- **Verifier changes should be profile-versioned.** `app-type-profiles` defines behavior-preservation gates for verifier/profile evolution. E.4 and any verifier removal/simplification should use rejection-rate evidence plus a profile/version migration path.
+- **Parallel verification is not generally serial-verifier replacement.** E.5 is valid only when the orchestrator has an independent eligible batch and the next task does not depend on the unverified output.
+- **Skill tiering already has a draft contract.** The runtime "job description" framing should align with `skill-tiering-contract`: atoms/molecules/compounds carry different verifier, review, and attendance expectations.
+- **Supervisor health should include plan-audit state.** E.7's bundle invalidation and any supervisor context-health audit should treat completed-plan audits and fold-back observations as first-class inputs, not just runtime task status.
+
+---
+
+## Part F — Second-pass enrichment (2026-04-27)
+
+*Added after re-reading `skill-tiering-contract/design.md`, `app-type-profiles/design.md`, `scoped-knowledge-graphs/design.md`, and the audit specs.*
+
+- **F.1 — Architect ≠ orchestrator.** Part B-3 of this doc maps `intuitiveml`'s Architect role to the runtime orchestrator. `skill-tiering-contract/design.md` §3 reframes specs as T3 cells (human-authored or agent-proposed-human-approved) and plans+bundles as T2 compounds (the orchestrator's domain). The Architect is the cell author — the human writing specs, rules, profiles, and proposals — not the runtime that orchestrates compounds. Compounds are executed; cells are written. Update §B-naming to: "**Architect** = author of cell-tier artifacts (specs, rules, verifier profiles); **orchestrator** = supervisor of compound-tier execution (plans, fanout)." This also resolves a contradiction with skills-rules-graduation Part C-S.2 which already maps Architect to the rule/skill authoring role.
+
+- **F.2 — Verifier removal (E.4) is governed by app-type-profiles §6.2, not by rejection-rate alone.** The recommendation to track per-verifier rejection rate and retire near-zero performers is correct as *evidence*; it is insufficient as *governance*. App-type-profiles §6.1 says removing a check is a major bump; §6.2 requires the behavior-preservation gate to run against a stored corpus before publishing. Rejection rate identifies candidates; the gate decides whether removal is safe. Refined E.4: emit per-verifier rejection-rate; gate any actual removal on the §6.2 corpus diff; never remove a verifier from a profile without a major bump and migration notes.
+
+- **F.3 — Bundle tier resolves D2 in delegation invalidation (E.7).** `skill-tiering-contract/design.md` D2 (open) — "task tier inherited from bundle vs explicit" — directly governs the bundle invalidation signal. A T2 bundle whose root task is T1 inherits T1; the verifier+review compound gate does not apply, and mid-flight invalidation can target the molecule cleanly. A T2 bundle whose root is T2 must drop the *whole* compound on invalidation, because compound state is not safely partial-recoverable. Refined E.7: bundle-mid-flight invalidation policy is tier-aware; T1 invalidation cancels the molecule, T2 invalidation cancels the compound and rebundles its molecules.
+
+- **F.4 — Fresh subagent per phase (current §A — arscontexta) clashes with `kg-fresh-build-transaction-fix`.** The active plan in `kg-command-surface-readiness` says fresh KG_HOME builds still hit a sqlite transaction error. Every "fresh subagent" delegation that needs KG context implicitly assumes a buildable warm store. Until the fix lands, fanout that requires graph context must either reuse the parent's warm store path (breaking arscontexta's isolation principle) or skip graph reads. Add to §B: "fresh-subagent isolation requires the warm store to be cold-buildable; until kg-fresh-build-transaction-fix lands, isolated workers must inherit warm-store path or run in graph-skipped mode."
+
+- **F.5 — Three-lens parallel review (E.6) plus contradiction protocol = correct shape for cross-scope review.** `scoped-knowledge-graphs/design.md` §3.2/§5.12 says cross-scope disagreements appear in `contradictions` metadata at read time; precedence picks the answer; both sides remain fresh. A reviewer reading impl output that walked multiple scopes will see `contradictions` rows. The "arch-consistency" lens proposed in E.6 should explicitly read the `contradictions` field and decide: legitimate scope drift (team override repo for a reason) vs precedence misconfiguration. Without this, reviews silently pick the most-local answer and miss when a team policy was supposed to win.
 
 ---
 

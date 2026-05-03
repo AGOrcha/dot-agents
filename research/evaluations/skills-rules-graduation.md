@@ -2,7 +2,7 @@
 
 **Written:** 2026-04-21
 **Scope:** How the articles speak to dot-agents' agent-authorship surfaces: skills (`.agents/skills/<name>/` → `dot-agents skills promote` → shared), rules (`.agents/rules/<ns>/` via proposal/review loop), prompts (shared prompt library), and the graduation pipeline that moves experimental artifacts from project-local to globally-shared. Also covers progressive disclosure design for skills/tools.
-**Siblings:** `workflow-orchestration.md`, `agent-execution.md`, `hooks-and-platform.md`, `lessons-and-memory.md`, `../articles-evaluation-kg-and-adjacent.md`.
+**Siblings:** `workflow-orchestration.md`, `agent-execution.md`, `hooks-and-platform.md`, `lessons-and-memory.md`, `workflow-spec-plan-inventory.md`, `../articles-evaluation-kg-and-adjacent.md`.
 
 **Rubric:** Core / Pros / Cons / Risk profile (Failure mode / Evidence / Reversibility / Second-order) / Mapping.
 
@@ -218,7 +218,7 @@
 
 **Medium-term:**
 - **S.7** — Generalize project-local proposals: `dot-agents review approve` covers project-local artifacts (skills, lessons, plans), not just global rules. Depends on CLI extension referenced in `proposal-routing.md`.
-- **S.8** — "Rewrite on contradiction" skill/hook: when a new lesson or skill contradicts an older one, flag both for review. Composes with contradiction protocol from the_smart_ape (KG doc C.5).
+- **S.8** — "Rewrite on contradiction" skill/hook: when a new lesson or skill contradicts an older one, flag both for review. Composes with contradiction protocol from the_smart_ape and scoped-KG's same-scope contradiction / cross-scope metadata split.
 
 **Explicitly deferred:**
 - Per-project skill/artifact renaming (arscontexta's "notes/ → reflections/ → claims/"). Bad idea for cross-project tooling.
@@ -241,6 +241,37 @@ Before turning any P0/P1 here into a plan:
 4. Always cite Evidence + Reversibility when pitching a recommendation.
 
 See `workflow-orchestration.md` Part D for the full trust-gate exposition.
+
+---
+
+## Part E — 2026-04-27 Inventory Addendum
+
+The new workflow specs sharpen this layer:
+
+- **Tiering is no longer just a recommendation.** `skill-tiering-contract` exists as a draft spec. S.3/S.7 should not invent a parallel lint vocabulary; they should resolve the draft's D1-D5 and then implement its `tier`, `calls`, verifier, review gate, and attendance invariants.
+- **`author` does not equal authority.** Keep the two-author primitive, but combine it with scope/origin, `cites` / `derived_from`, trust tier, and revocation semantics from scoped-KG before treating an artifact as durable.
+- **Prose titles should be display metadata when IDs are contracts.** Lessons and skills benefit from readable names, but plan IDs, task IDs, and distributed skill IDs should stay stable. Use `title` / aliases where renaming would break links or schemas.
+- **Graduation should be profile/package aware.** For reusable skills and verifiers, graduation needs versioning and behavior-preservation gates, not only human approval.
+
+---
+
+## Part F — Second-pass enrichment (2026-04-27)
+
+*Added after re-reading `skill-tiering-contract/design.md` (full draft contract), `app-type-profiles/design.md` (graduation must be profile/version-aware), and `scoped-knowledge-graphs/design.md` (note schema as the cross-store trust shape).*
+
+- **F.1 — Architect = cell-tier author. Definitively.** The agent-execution evaluation maps Architect to the runtime orchestrator; this doc maps Architect to the rule/skill author. Skill-tiering-contract §3 resolves the conflict: specs are T3 cells, written by humans (or agent-proposed-human-approved). The Architect is the cell author. The orchestrator is a T2 compound *runtime*. Update both this doc's S.2 ("Architect role" paragraph) and the agent-execution doc's §B-3 ("Architect role implicit in our stack") to use this single definition.
+
+- **F.2 — D5 (first rollout scope) is a research-evidence question, not just a tooling question.** Skill-tiering D5 lists three rollout options: (a) skills only, (b) skills + bundles, (c) skills + bundles + tasks. The shivsakhuja-derived research argues "compound-tier reliability degrades past ~8–10 molecules" — a *runtime* claim. Option (a) cannot test that claim because skills don't have the runtime tier model attached. Option (b) attaches tier to bundles, which surfaces the compound-tier reliability claim in fanout traces. The research-grounded recommendation is (b), aligning with the spec's current default. Adopt (b); collect runtime data on compound-with-N-molecules behavior; revisit D5 in 90 days with evidence rather than additional anecdote.
+
+- **F.3 — Cross-reference fields (S.5) should ride the canonical note schema.** S.5 proposes `lessons: [...]` and `skills: [...]` cross-reference fields as freestanding frontmatter additions. Lessons-and-memory F.1 collapses three stores into one canonical `KGNote` schema. Cross-references should be `derived_from` cites in that canonical schema (per scoped-KG §5.8), not a parallel field-name. Refined S.5: lesson→skill citations and skill→lesson citations are `derived_from` rows in the warm store; lint reads from there. No new frontmatter dialect.
+
+- **F.4 — `author` flip is graduation only when paired with versioning.** The two-author pattern (S.4) treats graduation as flipping `author: agent → author: human`. App-type-profiles §6 says reusable verifiers and skills must version-bump on behavior change and pass the §6.2 behavior-preservation gate before re-publishing. A flip with no version bump silently graduates *and* updates behavior in one step. Refined S.4: `author` flip plus a `version: x.y.z` bump (semver) plus, for behavior-changing skills/verifiers, the §6.2 corpus diff. Three steps; each step is independently auditable; no silent graduation.
+
+- **F.5 — Skill descriptions (S.3 lint) need the dispatch hint, not just `invoke when:`.** Skill-tiering-contract §3 says agents reliably dispatch through 1–2 hops; past that, dispatch degrades. The "invoke when" lint catches whether a description names a trigger; it does not catch whether the description names which downstream skill to dispatch to. Refined S.3: lint requires both `invoke when:` (trigger legibility) AND `tier:` (dispatch depth bound) AND, for T1+ skills, `calls:` (declared downstream). The three together are what makes the skill dispatchable.
+
+- **F.6 — Generalized graduation (S.7) must respect scope routing.** S.7 generalizes proposal/review beyond global rules. Under scoped-KG §3.3 every write names a target scope. A repo-local proposal that graduates a project skill writes into `repo` scope. A proposal that graduates a global rule writes into `user` (or `team`/`org` if shared). Refined S.7: project-local proposals graduate to repo-scope artifacts; global proposals graduate via the existing `~/.agents/proposals/` flow into user/team/org-scope artifacts. The proposal-routing rule (`.agents/rules/dot-agents/proposal-routing.md`) is the routing key; graduation respects it.
+
+- **F.7 — Three-space mapping (S.1) does not survive scoped-KG cleanly.** arscontexta's self/notes/ops split assumes one tree per role. Scoped-KG splits the tree across `repo`/`user`/`team`/`org` scopes — a "self" artifact (rule) can live in any scope; a "note" can too. The three-space framing is therefore a *projection* layered on top of scope. Refined S.1: name self/notes/ops as a *display projection* in `workflow-artifact-model.md`; do not treat it as a directory invariant. Otherwise the introduction of team/org scopes will require a per-scope three-space rebuild.
 
 ---
 

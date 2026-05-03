@@ -2,7 +2,7 @@
 
 **Written:** 2026-04-21
 **Scope:** How the articles speak to dot-agents' hook layer (PreToolUse, PostToolUse, SessionStart, SessionEnd, UserPromptSubmit) and our multi-platform distribution surface — generating and refreshing configs for Claude Code, Cursor, Codex, and GitHub Copilot from a single source in `.agents/`. Also covers scheduled jobs and cross-machine/shared-environment concerns.
-**Siblings:** `workflow-orchestration.md`, `agent-execution.md`, `skills-rules-graduation.md`, `lessons-and-memory.md`, `../articles-evaluation-kg-and-adjacent.md`.
+**Siblings:** `workflow-orchestration.md`, `agent-execution.md`, `skills-rules-graduation.md`, `lessons-and-memory.md`, `workflow-spec-plan-inventory.md`, `../articles-evaluation-kg-and-adjacent.md`.
 
 **Rubric:** Core / Pros / Cons / Risk profile (Failure mode / Evidence / Reversibility / Second-order) / Mapping.
 
@@ -211,6 +211,47 @@ Before turning any P0/P1 here into a plan:
 4. Always cite Evidence + Reversibility when pitching a recommendation.
 
 See `workflow-orchestration.md` Part D for the full trust-gate exposition.
+
+---
+
+## Part E — 2026-04-27 Inventory Addendum
+
+The platform recommendations need to be restated through the managed dot-agents surfaces:
+
+- **Canonical policy is not a Claude-only file.** Recommendations that say `agents.md`, `CLAUDE.md`, or Claude Code hooks should be read as canonical rule/config/profile sources rendered per platform.
+- **Enforcement degrades by platform.** Claude Code can enforce richer hook behavior than Cursor, Codex, or Copilot. H.1's capability matrix is therefore a blocker for any "hook-enforced invariant" claim.
+- **Verifier and review policy belongs in profiles.** `app-type-profiles` gives reusable, versioned verifier/review chains. Hook recommendations should not duplicate profile behavior; hooks enforce preconditions and guardrails, profiles define what verification means.
+- **Scheduled jobs must respect event-driven KG semantics.** Fold-back triage and memory refresh jobs can raise review nudges or plan updates, but they must not invent time-based staleness that conflicts with scoped-KG.
+
+---
+
+## Part F — Second-pass enrichment (2026-04-27)
+
+*Added after re-reading `app-type-profiles/design.md` (verifier evolution + behavior-preservation gate), `scoped-knowledge-graphs/design.md` (legacy diagnostic, scope-targeted writes), and `skill-tiering-contract/design.md` (tier invariants).*
+
+- **F.1 — H.1's per-platform capability matrix needs a concrete first row.** The addendum names the requirement; here is a usable first cut to graduate into the rule:
+
+  | Capability                         | Claude Code     | Cursor          | Codex CLI       | GitHub Copilot   |
+  |------------------------------------|-----------------|-----------------|-----------------|------------------|
+  | PreToolUse hook (block writes)     | yes (full)      | no              | no              | no               |
+  | SessionStart hook (load context)   | yes (full)      | partial (rules) | partial         | partial (instructions) |
+  | UserPromptSubmit hook              | yes             | no              | no              | no               |
+  | Stop / SessionEnd hook             | yes             | no              | no              | no               |
+  | MCP tool registration              | yes (native)    | yes (project)   | partial         | no               |
+  | Cron / scheduled agent             | yes (CronCreate)| no              | no              | no               |
+  | Project rule loading               | yes (CLAUDE.md) | yes (.cursorrules) | yes (codex prompt) | yes (instructions) |
+
+  Any recommendation that says "enforce X via hook" must declare which row it lives on. Recommendations on rows below "rule loading" must also declare the rule-only fallback for the platforms that don't support the hook.
+
+- **F.2 — `author: human` write-block (H.3) degrades on three of four platforms.** The hook is Claude-Code-native PreToolUse. On Cursor/Codex/Copilot the same invariant must be expressed as: (a) a rule-corpus declaration "agents must not edit `author: human` files; if you must, raise a proposal", (b) a CI-side post-hoc audit that fails the pipeline on a violation, (c) PR-review-time visibility via `dot-agents kg lint` (per KG doc P1 #8) emitting a violation report. Refined H.3: write-block on Claude Code; rule + CI audit + PR-time lint elsewhere. Don't ship as a single cross-platform invariant.
+
+- **F.3 — Scheduled jobs (H.5 fold-back triage) must respect scoped-KG §3.3 write-targeting.** A nightly triage job that writes plan-update proposals must declare `--scope` per write. Dedup across `repo`-scope fold-back and `user`-scope fold-back is a scope-routing decision: dedup within a scope is fine; cross-scope merge is not allowed (it would erase the scope-precedence chain). Refined H.5: scheduled jobs always specify `--scope` per write; cross-scope dedup is a separate read-time projection, not a write.
+
+- **F.4 — Memory-refresh hooks (H.6 SessionStart pulse) must respect the legacy KG diagnostic.** Scoped-KG §3.1+§5.13 mandates a one-time runtime diagnostic when the runtime detects a legacy `kg` block (no `scopes` list). The SessionStart "project state pulse" must include that diagnostic when present — otherwise the pulse silently makes the legacy state look healthy. Refined H.6: pulse content must surface the legacy diagnostic alongside active plans / fold-back / branch state.
+
+- **F.5 — Verifier hooks ride app-type-profiles, not freelance scripts.** Today's hook examples in `claude-code-hooks-automation` (run tests on edit, lint on commit) bake test/lint commands directly into hook definitions. App-type-profiles §3 says verifier choice belongs in the profile, with versioning and the §6.2 behavior-preservation gate. A hook that hard-codes `go test ./...` becomes incompatible with a `research` profile (whose verifiers are citation-presence / source-freshness / rubric-check). Refined principle: write-validate hooks invoke `dot-agents profile verify <change>` and the profile decides which verifiers run. Hooks enforce *that verification happens*; profiles define *what verification means*.
+
+- **F.6 — Auto-memory is Claude-Code-only; "add author to auto-memory" must be reframed.** The lessons/memory cross-link to "add `author:` to auto-memory" implicitly assumes `~/.claude/projects/<hash>/memory/`. Cursor has Project Rules; Codex has its own surface; Copilot has none. The cross-platform pattern is to define the trust schema as `user`-scope notes in scoped-KG, then let each platform's memory adapter project from the warm store. Auto-memory becomes a cache, not a source of truth — and the `author:` field lives in the canonical note schema once, not per-platform.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Written:** 2026-04-21
 **Scope:** How the articles in `research/articles/` speak to dot-agents' workflow layer — the `workflow/specs/` → `workflow/plans/` → `TASKS.yaml` → `active/` → `history/` lifecycle, fanout and dep-graph mechanics, conflict detection, ISP pipeline, and the Research → Plan → Implement discipline.
-**Siblings:** `articles-evaluation-kg-and-adjacent.md`, plus the four other non-KG eval docs in this directory.
+**Siblings:** `articles-evaluation-kg-and-adjacent.md`, the four other non-KG eval docs in this directory, and `workflow-spec-plan-inventory.md`.
 
 **Per-article rubric:** Core / Pros / Cons / Risk profile / Mapping.
 
@@ -136,7 +136,7 @@
 
 **Mapping.**
 - **[OVERLAP-SHARPEN]** — our loop-close / verifier / reviewer stages are already phase-structured. Make the phase ordering explicit in one place (today it's implicit in skill files).
-- **[GAP-ADOPT — P2]** — adopt the "three parallel review passes at fixed lenses" pattern for review-heavy plans. Today `/review` is one generic pass; split into quality / security / dependency + arch lenses for PR-grade work. Composes with the planning-lenses idea from the KG doc (§C.7 there).
+- **[GAP-ADOPT — P2]** — adopt the "three parallel review passes at fixed lenses" pattern for review-heavy plans. Today `/review` is one generic pass; split into quality / security / dependency + arch lenses for PR-grade work. Composes with the planning-lenses idea from the KG doc's P2 recommendations.
 - **[WE-AHEAD]** — our spec/plan/history discipline is more structured than CREAO's ad-hoc Linear triage; we shouldn't adopt their flat ticket model.
 
 ---
@@ -161,7 +161,7 @@
 
 **Mapping.**
 - **[OVERLAP-SHARPEN]** — audit our bundle-prompt template against this checklist; specifically add a "known failure modes / anti-scope" block and a structured output contract section.
-- **[GAP-ADOPT — P2]** — **dynamic output contracts on delegation bundles**: typed output schema per task; deterministic fan-in. Same recommendation as the KG doc's §C.9, and the place it most naturally lands is here.
+- **[GAP-ADOPT — P2]** — **dynamic output contracts on delegation bundles**: typed output schema per task; deterministic fan-in. Post-inventory refinement: this belongs in `app-type-profiles` / profile resolution, not as ad-hoc bundle prose.
 
 ---
 
@@ -303,6 +303,51 @@ Before turning any P0/P1 here into a plan:
 
 This trust gate applies equally to the sibling evaluation docs and the
 original `articles-evaluation-kg-and-adjacent.md`.
+
+---
+
+## Part E — 2026-04-27 Inventory Addendum
+
+The workflow tree moved after this evaluation was drafted. Apply these corrections before turning W.* recommendations into plans:
+
+- **Non-code workflow is profile-shaped.** `app-type-profiles` already defines `research` as `write_scope_kind: document` with citation/rubric verifiers and citation graph review. W.3/W.4/W.6 should use that profile contract rather than treating research or writing as code-shaped tasks with prose checks.
+- **Completed status is not enough evidence.** `completed-plan-audit-analysis` and `project-audit-plan-sync-expansion` define a required audit queue for soft-complete plans. Run that audit program before assuming completed workflow bundles are stable foundations for new orchestration work.
+- **Parallel verification is batch-limited.** W.7 is safe only for independent tasks from the same non-conflicting `workflow eligible` batch where the next task does not consume unverified output. Otherwise verifier failure causes cascading re-bundles.
+- **Prefer managed rule/profile surfaces over platform files.** If a recommendation says `agents.md` or `CLAUDE.md`, read it as "canonical dot-agents rule/profile source, rendered per platform."
+
+---
+
+## Part F — Second-pass enrichment (2026-04-27)
+
+*Added after re-reading `scoped-knowledge-graphs/design.md`, `app-type-profiles/design.md`, `skill-tiering-contract/design.md`, and the audit specs. Part E captured inventory; Part F captures contract-level couplings the workflow recommendations were still missing.*
+
+- **F.1 — `open_questions:` is additive metadata, not a frontmatter migration.** W.3 currently reads as "rewrite spec frontmatter to declare open questions." Existing canonical specs (`scoped-knowledge-graphs/design.md` §4 with nine prose questions; `app-type-profiles/design.md` §10 with six; `skill-tiering-contract/design.md` §8 with five lettered D1-D5) hold these as load-bearing prose with rationale and proposed defaults. Migrating loses both. Refined W.3: `open_questions:` frontmatter is *additive* — when present, `workflow open-questions` reads it; when absent, the extractor parses the prose `## Open questions` / `## Open decisions` section heading. New specs declare frontmatter; existing specs are not rewritten unless their open-question prose has already churned.
+
+- **F.2 — Reweave (W.5) and KG derivation propagation (scoped-KG §2.6) are the same primitive on different stores.** Both walk outward along stored citation edges and stamp reachable entries with a tag. Today the synthesis treats them as parallel ideas; the workflow primitive is "given a mutated entry, walk `derived_from` edges up to a bounded depth and emit `review_due` (not `stale`) on reachable entries." For the plan graph, edges are "this plan's decisions cite that spec's contract" + "this plan supersedes that plan." For the KG, edges are `NoteSymbolLink` + `derived_from`. Refined W.5: implement reweave as a thin wrapper over a shared propagation walker that scoped-KG defines; do not write a parallel walker in the plan tree.
+
+- **F.3 — Tier-aware fanout changes parallel-verification (W.7) safety conditions.** `skill-tiering-contract/design.md` §4 binds the verifier+review gate to T2 (compound). A T1 (molecule) task does not require its own review gate. W.7's "verifier runs concurrent with next impl, gated at fan-in" is correct for T1→T1 fanout in the same eligible batch. It is **unsafe** when the next eligible task is T2 — a compound's review gate cannot run before the prior compound's verifier returns, because compound-tier reviewers consume verified output. Refined W.7: parallel verification is enabled when both the in-flight verification and the next-impl write are at tier ≤ T1, OR when the next-impl explicitly declares no `derived_from` dependence on the in-flight task's output.
+
+- **F.4 — The audit playbook should split contract audit from execution audit.** `completed-plan-audit-analysis/design.md` §3 prescribes one evidence-precedence ladder; `skill-tiering-contract/design.md` §3 says specs are T3 cells (decisions + done criteria) and plans are T2 compounds (orchestration). These are different shapes. A spec audit asks: "are open questions resolved? does done-criteria still cover live behavior? has implementation drift made the contract a fiction?" A plan audit asks: "do tasks correspond to shipped behavior? does the merge-back archive carry sufficient evidence?" New W-level recommendation: extend the audit playbook with a spec-audit (cell-tier) lane separate from the plan-audit (compound-tier) lane.
+
+- **F.5 — `cross-app-dependency-impact` is the spec slot for cross-plan reweave.** App-type-profiles' completeness note announces a companion spec for "how changes to one profile or one repo propagate through the dependency graph to affected repos." This is the exact destination for the cross-plan analog of reweave: when one plan's spec contract changes, which downstream plans' assumptions are now `review_due`? The workflow doc should reserve W.9 as the cross-plan propagation slot once that spec lands.
+
+---
+
+## Part G — 2026-05-03 annimaniac addendum (six-level adoption frame)
+
+*Added after extracting annimaniac's "Six Levels of AI-Pilled Organizations" (full evaluation in `articles-evaluation-kg-and-adjacent.md` §A.5). The article is the most directly relevant external framing for the workflow / dispatch layer; this addendum captures workflow-specific implications.*
+
+- **G.1 — Adopt the four-question lens at the workflow tier.** annimaniac's *what can AI see / do / extend / change* maps cleanly onto our orchestration surface. For the workflow doc specifically: "what can AI do" is bounded by tier (skill-tiering); "who can extend" is the proposal/skill-graduation flow; "how has the org changed" is the verifier chain selected per app-type. New W-level rule: every new workflow primitive proposal answers all four questions in its design note before it earns a plan.
+
+- **G.2 — L4 "managed compounding" is the right name for our promotion gate.** The phrase — "lifecycle, observability, evaluation; not chaotic proliferation" — names what our dual-motion gate (auto + peer review) is for. Refined positioning: in `agent-context-resolution-architecture.md` and the future synthesis spec, replace "promotion gate / crystallization" with **managed compounding** as the in-spec terminology. Lifecycle (observe → evaluate → retire) becomes a first-class axis, not just a write-time gate.
+
+- **G.3 — The L4→L5 leap sharpens the escape-hatch contract.** The article's framing — "at L4 the system improves because humans direct it; at L5 because it notices it should" — is the cleanest articulation of the boundary our escape-hatch protocol must police. For workflow: an escape-hatch firing because the worker's declared scope was exceeded is L4 behavior (human direction recovers it). An escape-hatch firing because the orchestrator *noticed* a contradiction without being asked is L5 behavior. Today's commitment: target L4 explicitly; reserve L5 as a deferred axis named in the synthesis spec.
+
+- **G.4 — Hard test + common false positive becomes a workflow drafting convention.** Each W.* recommendation should declare (a) the behavioral test that proves it works and (b) the failure mode that *looks* like success but isn't. Apply retroactively to W.5 (Reweave): hard test = "given a plan close, name three superseded prior plans the system flagged that the human had not noticed"; false positive = "a long list of `review_due` tags that nobody actions = inert reweave queue." The audit specs (Part F.4) similarly need this split.
+
+- **G.5 — Acceptance criterion for the synthesis spec is borrowed verbatim.** L5's hard test: *"What important thing did the system notice, decide, act on, and learn from recently without a human initiating the process?"* — becomes the behavioral acceptance test for `agent-context-resolution`. If the dispatch contract is doing its job, the orchestrator can point at one such event. Stricter than "tests pass"; closer to "the workflow demonstrably crossed the L4→L5 line at least once."
+
+- **G.6 — Caveat: AV ladder analogy strains at compound systems.** Single-driver AV autonomy maps poorly onto orchestration with concurrent decision loops at different scopes. Workflow doc commitment: borrow the four-question lens and the hard-test-plus-false-positive convention; do *not* import the linear ladder as our internal framing. Different surfaces (KG read, skill graduation, dispatch) sit at different levels simultaneously, and that asymmetry is the point.
 
 ---
 
