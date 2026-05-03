@@ -246,9 +246,9 @@ func TestDetectRepoDrift_BothFieldsPopulated(t *testing.T) {
 	plansDir := filepath.Join(dir, ".agents", "workflow", "plans")
 
 	for planID, status := range map[string]string{
-		"plan-done":    "completed",
-		"plan-stray":   "archived",
-		"plan-active":  "active",
+		"plan-done":   "completed",
+		"plan-stray":  "archived",
+		"plan-active": "active",
 	} {
 		d := filepath.Join(plansDir, planID)
 		if err := os.MkdirAll(d, 0755); err != nil {

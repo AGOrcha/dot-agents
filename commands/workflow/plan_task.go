@@ -19,27 +19,27 @@ import (
 // .agents/workflow/plans/<plan_id>/evidence/<task_id>.scope.yaml.
 // All slice fields use []string{} (not nil) so JSON marshals to [] not null.
 type ScopeEvidence struct {
-	SchemaVersion      int                    `json:"schema_version"          yaml:"schema_version"`
-	PlanID             string                 `json:"plan_id"                 yaml:"plan_id"`
-	TaskID             string                 `json:"task_id"                 yaml:"task_id"`
-	Status             string                 `json:"status"                  yaml:"status"`
-	Mode               string                 `json:"mode,omitempty"          yaml:"mode,omitempty"`
-	Goal               string                 `json:"goal,omitempty"          yaml:"goal,omitempty"`
-	Confidence         string                 `json:"confidence"              yaml:"confidence"`
-	DecisionLocks      []string               `json:"decision_locks"          yaml:"decision_locks"`
-	RequiredReads      []ScopeRequiredRead    `json:"required_reads"          yaml:"required_reads"`
-	Seeds              *ScopeSeeds            `json:"seeds,omitempty"         yaml:"seeds,omitempty"`
-	Queries            []ScopeQuery           `json:"queries"                 yaml:"queries"`
-	RequiredPaths      []ScopePath            `json:"required_paths"          yaml:"required_paths"`
-	OptionalPaths      []ScopePath            `json:"optional_paths"          yaml:"optional_paths"`
-	ExcludedPaths      []ScopeExcludedPath    `json:"excluded_paths"          yaml:"excluded_paths"`
-	Provides           []string               `json:"provides"                yaml:"provides"`
-	Consumes           []string               `json:"consumes"                yaml:"consumes"`
-	FinalWriteScope    []string               `json:"final_write_scope"       yaml:"final_write_scope"`
-	VerificationFocus  []string               `json:"verification_focus"      yaml:"verification_focus"`
-	AllowedLocalChoices []string              `json:"allowed_local_choices"   yaml:"allowed_local_choices"`
-	StopConditions     []string               `json:"stop_conditions"         yaml:"stop_conditions"`
-	OpenGaps           []string               `json:"open_gaps"               yaml:"open_gaps"`
+	SchemaVersion       int                 `json:"schema_version"          yaml:"schema_version"`
+	PlanID              string              `json:"plan_id"                 yaml:"plan_id"`
+	TaskID              string              `json:"task_id"                 yaml:"task_id"`
+	Status              string              `json:"status"                  yaml:"status"`
+	Mode                string              `json:"mode,omitempty"          yaml:"mode,omitempty"`
+	Goal                string              `json:"goal,omitempty"          yaml:"goal,omitempty"`
+	Confidence          string              `json:"confidence"              yaml:"confidence"`
+	DecisionLocks       []string            `json:"decision_locks"          yaml:"decision_locks"`
+	RequiredReads       []ScopeRequiredRead `json:"required_reads"          yaml:"required_reads"`
+	Seeds               *ScopeSeeds         `json:"seeds,omitempty"         yaml:"seeds,omitempty"`
+	Queries             []ScopeQuery        `json:"queries"                 yaml:"queries"`
+	RequiredPaths       []ScopePath         `json:"required_paths"          yaml:"required_paths"`
+	OptionalPaths       []ScopePath         `json:"optional_paths"          yaml:"optional_paths"`
+	ExcludedPaths       []ScopeExcludedPath `json:"excluded_paths"          yaml:"excluded_paths"`
+	Provides            []string            `json:"provides"                yaml:"provides"`
+	Consumes            []string            `json:"consumes"                yaml:"consumes"`
+	FinalWriteScope     []string            `json:"final_write_scope"       yaml:"final_write_scope"`
+	VerificationFocus   []string            `json:"verification_focus"      yaml:"verification_focus"`
+	AllowedLocalChoices []string            `json:"allowed_local_choices"   yaml:"allowed_local_choices"`
+	StopConditions      []string            `json:"stop_conditions"         yaml:"stop_conditions"`
+	OpenGaps            []string            `json:"open_gaps"               yaml:"open_gaps"`
 }
 
 // ScopeRequiredRead is an entry in ScopeEvidence.RequiredReads.
@@ -2244,15 +2244,15 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 
 // checkScopeResult holds the output of a check-scope run.
 type checkScopeResult struct {
-	PlanID              string   `json:"plan_id"`
-	TaskID              string   `json:"task_id"`
-	SidecarPath         string   `json:"sidecar_path"`
-	ChangedFiles        []string `json:"changed_files"`
-	InsideScope         []string `json:"inside_scope"`
-	OutsideScope        []string `json:"outside_scope"`
-	UntouchedRequired   []string `json:"untouched_required"`
-	TouchedExcluded     []string `json:"touched_excluded"`
-	Clean               bool     `json:"clean"`
+	PlanID            string   `json:"plan_id"`
+	TaskID            string   `json:"task_id"`
+	SidecarPath       string   `json:"sidecar_path"`
+	ChangedFiles      []string `json:"changed_files"`
+	InsideScope       []string `json:"inside_scope"`
+	OutsideScope      []string `json:"outside_scope"`
+	UntouchedRequired []string `json:"untouched_required"`
+	TouchedExcluded   []string `json:"touched_excluded"`
+	Clean             bool     `json:"clean"`
 }
 
 // runWorkflowPlanCheckScope implements `workflow plan check-scope <plan_id> <task_id>`.

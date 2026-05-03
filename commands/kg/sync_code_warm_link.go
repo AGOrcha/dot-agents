@@ -250,7 +250,7 @@ func checkCRGReadiness(root string, requireGraph bool) error {
 
 // kgImpactJSONOutput is the JSON wrapper for kg impact output, adding graph_state.
 type kgImpactJSONOutput struct {
-	GraphState    string `json:"graph_state"`
+	GraphState string `json:"graph_state"`
 	*graphstore.CRGImpactResult
 }
 

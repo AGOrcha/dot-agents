@@ -73,7 +73,7 @@ func isDMAFile(relPath string) bool {
 // isCanonicalPlanFile returns true for the three files that always overwrite in a merge.
 func isCanonicalPlanFile(relPath, planID string) bool {
 	switch relPath {
-	case "PLAN.yaml", "TASKS.yaml", planID+".plan.md":
+	case "PLAN.yaml", "TASKS.yaml", planID + ".plan.md":
 		return true
 	}
 	return false

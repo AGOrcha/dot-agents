@@ -47,18 +47,18 @@ func loadManagedProjects() ([]ManagedProject, error) {
 
 // RepoDriftReport captures drift conditions for one managed project.
 type RepoDriftReport struct {
-	Project                    ManagedProject `json:"project"`
-	Reachable                  bool           `json:"reachable"`                    // false if path doesn't exist
-	MissingCheckpoint          bool           `json:"missing_checkpoint"`           // no checkpoint file
-	StaleCheckpoint            bool           `json:"stale_checkpoint"`             // checkpoint older than threshold
-	CheckpointAgeDays          int            `json:"checkpoint_age_days"`          // -1 if no checkpoint
-	StaleProposalCount         int            `json:"stale_proposal_count"`         // proposals older than threshold
-	MissingWorkflowDir         bool           `json:"missing_workflow_dir"`         // no .agents/workflow/
-	MissingPlanStructure       bool           `json:"missing_plan_structure"`       // no .agents/workflow/plans/
-	CompletedPlanIDs           []string       `json:"completed_plan_ids"`           // plans with status==completed (hygiene signal)
-	InconsistentArchivedPlanIDs []string      `json:"inconsistent_archived_plan_ids"` // plans with status==archived still in workflow/plans/ (error-level)
-	Warnings                   []string       `json:"warnings"`
-	Status                     string         `json:"status"` // healthy|warn|unreachable
+	Project                     ManagedProject `json:"project"`
+	Reachable                   bool           `json:"reachable"`                      // false if path doesn't exist
+	MissingCheckpoint           bool           `json:"missing_checkpoint"`             // no checkpoint file
+	StaleCheckpoint             bool           `json:"stale_checkpoint"`               // checkpoint older than threshold
+	CheckpointAgeDays           int            `json:"checkpoint_age_days"`            // -1 if no checkpoint
+	StaleProposalCount          int            `json:"stale_proposal_count"`           // proposals older than threshold
+	MissingWorkflowDir          bool           `json:"missing_workflow_dir"`           // no .agents/workflow/
+	MissingPlanStructure        bool           `json:"missing_plan_structure"`         // no .agents/workflow/plans/
+	CompletedPlanIDs            []string       `json:"completed_plan_ids"`             // plans with status==completed (hygiene signal)
+	InconsistentArchivedPlanIDs []string       `json:"inconsistent_archived_plan_ids"` // plans with status==archived still in workflow/plans/ (error-level)
+	Warnings                    []string       `json:"warnings"`
+	Status                      string         `json:"status"` // healthy|warn|unreachable
 }
 
 // extractPlanStatus reads the status field from a PLAN.yaml byte slice.

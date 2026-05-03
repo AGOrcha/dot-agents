@@ -1355,7 +1355,6 @@ func mustGetStringSlice(cmd *cobra.Command, name string) []string {
 	return s
 }
 
-
 func allCanonicalTasksTerminal(tasks []CanonicalTask) bool {
 	if len(tasks) == 0 {
 		return false
