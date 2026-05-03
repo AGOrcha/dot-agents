@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: binary-rename-da-sweep
+title: Binary Rename — dot-agents → da (UV-style abbreviation)
+status: active
+summary: |-
+    Rename the user-facing binary from `dot-agents` to `da` across all
+    documentation, plans, specs, skills, rules, tests, CI, and build
+    configs. Convention follows UV / similar single-letter+abbreviation
+    binaries that are quick to type. Decision in flight by the user;
+    initial WIP touched .goreleaser.yaml, .github/workflows/auto-release.yml,
+    .agentsrc.json. This plan operationalizes the broader sweep so the
+    rename actually lands cleanly without leaving stale references.
+
+    Hard scope discipline:
+      * Renames: only the user-facing binary name and CLI invocations
+        (`dot-agents <cmd>` → `da <cmd>`).
+      * STAYS: Go module path `github.com/NikashPrakash/dot-agents`,
+        source dir `cmd/dot-agents/`, project name "dot-agents", all
+        directory names (`.agents/`, `~/.agents/`).
+      * UNTOUCHED: `.agents/history/` is the historical record of what
+        was actually run; renaming there would falsify the past.
+
+    Strategy options (resolved by t1 → ADR-0006):
+      * (A) Compat shim: ship both `da` and `dot-agents` binaries from
+        the same Go entrypoint; `dot-agents` prints a one-line stderr
+        deprecation notice; existing user scripts/hooks keep working.
+      * (B) Hard cutover: rename in one sweep PR; force ecosystem
+        update.
+    Recommendation in the architecture analysis: hybrid. Ship shim now
+    (t2), sweep docs at a comfortable pace (t3-t5), drop shim after a
+    deprecation window (t7).
+created_at: "2026-05-03T22:00:00Z"
+updated_at: "2026-05-03T22:00:00Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: After t6 completes, every user-facing reference to the
+    binary in this repo and in `~/.agents/` + `~/.claude/CLAUDE.md` reads
+    `da` (or carries an explicit compat-shim note for the deprecation
+    window). Running `da --version`, `da init --yes`, `da workflow status`,
+    `da kg health`, and `da review` works identically to running the
+    same commands as `dot-agents` did pre-rename. New PRs that introduce
+    a fresh `dot-agents` invocation in a user-facing position are caught
+    (by convention checklist or future lint).
+
+    Common false positive: shim ships and CI passes because every
+    test still uses `dot-agents` (which the shim handles), and the
+    documentation sweep claims "done" while skills/instructions still
+    show `dot-agents <cmd>`. Verification must include a sample of
+    user-reading flows (run `/agent-start` and `/orchestrator-session-start`
+    in a clean session, confirm the agent's output uses `da`).
+verification_strategy: |-
+    Per-task verification gates. Final end-to-end check via:
+      * `grep -rE "dot-agents [a-z]" docs/ .agents/ research/` returns
+        only entries inside `.agents/history/` or explicit
+        compat-shim references.
+      * `da --help` and `dot-agents --help` (during shim window) both
+        produce the same surface; deprecation notice on the latter.
+      * Smoke test `tests/test-claude-configs.sh` passes against `da`.
+      * One human-driven session run starting from a clean shell:
+        `/orchestrator-session-start`, observe agent output uses `da`.
+current_focus_task: t1-decide-shim-or-cutover
