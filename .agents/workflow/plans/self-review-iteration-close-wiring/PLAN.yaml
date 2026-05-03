@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-plan.schema.json
+schema_version: 1
+id: self-review-iteration-close-wiring
+title: Self-Review ↔ Iteration-Close Wiring
+status: active
+summary: |-
+    Close three audit-identified pipeline gaps with one well-scoped change.
+    (1) Self-review skill writes nothing today (chat-only) — orphaned. (2)
+    iter-log v2 review block is dead-coded — schema requires it, no caller
+    populates it (22/22 v2 logs have empty review). (3) The earlier
+    crg-kg-integration phase G added `dot-agents kg changes --brief` to
+    self-review, but the later skill-architect rework lost the call;
+    structurally identical regression. Wire self-review to write a structured
+    review-decision.yaml; restore the kg-changes/kg-impact context calls;
+    extend iteration-close to invoke self-review and call
+    `workflow checkpoint --log-to-iter --role review`. Produces ADR-0002,
+    ADR-0003, ADR-0004, ADR-0005. First concrete instance of the §1.6
+    execution-telemetry pillar in `agent-context-resolution-architecture.md`.
+created_at: "2026-05-03T20:00:00Z"
+updated_at: "2026-05-03T20:00:00Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: After plan archive, a fresh iteration through `iteration-close`
+    produces an `iter-N.yaml` where `review.overall_decision` is non-empty
+    AND `review.verify_record_appended: true` AND the populated content
+    traces back to a `review-decision.yaml` written by self-review (not
+    faked). The §3 impact-score formula in
+    `agent-context-resolution-architecture.md` becomes computable for the
+    first time on real data. The restored `dot-agents kg changes --brief` +
+    `kg impact` calls fire as Step 0 of self-review on a real diff.
+
+    Common false positive: schema looks correct on inspection but the
+    call-site is not actually invoked, so new iter-logs still emit
+    `overall_decision: ""`. Or: self-review writes the file but the contents
+    are placeholder/stub. Verifier MUST read produced content, not just
+    check field presence.
+verification_strategy: |-
+    Per-task verification gates plus a final end-to-end verify against a
+    real iteration on this branch. Smoke tests where applicable
+    (commands/workflow/, ~/.agents/skills/dot-agents/{self-review,
+    iteration-close}/). Acceptance criterion is dual: (a) iter-N.yaml
+    review block populated from a non-stub review-decision.yaml, captured
+    as a before/after diff in t5; (b) ADR-0002 through ADR-0005 are
+    written to docs/adr/, indexed, and reference each other where
+    relationships exist.
+current_focus_task: t1-audit-decide-output-schema

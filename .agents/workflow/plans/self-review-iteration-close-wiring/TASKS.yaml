@@ -1,0 +1,326 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: self-review-iteration-close-wiring
+tasks:
+    - id: t1-audit-decide-output-schema
+      title: Audit current self-review output and decide output destination + schema
+      status: pending
+      depends_on: []
+      blocks:
+        - t2-extend-self-review-skill
+        - t3-extend-iteration-close
+        - t4-trace-schema-seed-doc
+      owner: dot-agents
+      write_scope:
+        - docs/adr/0002-self-review-output-schema.md
+        - docs/adr/0003-self-review-fire-ordering.md
+        - docs/adr/0005-restore-kg-context-in-self-review.md
+        - docs/adr/README.md
+      verification_required: false
+      app_type: research
+      notes: |-
+        Tier: T2 (compound — produces three coupled architectural decisions).
+
+        Decisions to record:
+          * ADR-0002 — output destination (`.agents/active/verification/<task_id>/review-decision.yaml`)
+            and schema (envelope shape: status, decision-axis verdicts, reviewer notes,
+            improvement signals; aligned with §1.6 execution-telemetry trace shape).
+          * ADR-0003 — when self-review fires inside iteration-close
+            (before verify-record-test? after? in parallel?). Affects whether review
+            can reject before tests commit, and how reruns are sequenced.
+          * ADR-0005 — restore `dot-agents kg changes --brief` + `dot-agents kg impact`
+            as Step 0 of self-review. The crg-kg-integration phase G call was lost in
+            the skill-architect rework; this is a regression fix masquerading as a
+            new feature. ADR captures *why* the restoration happened so the next
+            rework doesn't drop it again.
+
+        Hard test:
+          Three ADR files exist under docs/adr/, each with populated Context /
+          Decision / Consequences. docs/adr/README.md index updated to mark them
+          accepted (status flipped from proposed). Each ADR cross-references the
+          others where relationships exist. The chosen output schema is documented
+          well enough that t2 can implement against it without further design work.
+
+        Common false positive:
+          ADRs exist but lack Consequences sections (decisions recorded without
+          rollback cost). Or schema is described in prose but no concrete YAML
+          example shown — t2 then has to design from scratch, defeating the
+          purpose of t1.
+
+        Reads:
+          ~/.agents/skills/dot-agents/self-review/SKILL.md (current orchestrator)
+          ~/.agents/skills/dot-agents/self-review/instructions/*.md (instruction modules)
+          src/share/templates/standard/skills/global/self-review/SKILL.md (older version with kg-changes call)
+          .agents/history/crg-kg-integration/ (rationale for the original kg integration)
+          schemas/workflow-iter-log.schema.json lines 8-17 (review block expectations)
+          commands/workflow/iter_log.go lines 397-426 (mergeReviewIterLog writer)
+          commands/workflow/verification.go lines 100-176 (verify record review writer)
+          .agents/proposals/agent-context-resolution-architecture.md §1.6, §6.5
+
+        ISP routing:
+          mode: direct (orchestrator-authored research/decision task; no code change; small enough to keep in main context)
+          verifier: manual (decision-quality review on the three ADRs)
+          review: decision-quality — does each ADR have populated Context / Decision / Consequences? Are tradeoffs explicit?
+          anti-scope: do NOT modify any SKILL.md or instructions/ files in this task; that is t2's owned scope
+          bundle-context (if fanout): docs/adr/0001 + agent-context-resolution-architecture.md §1.6/§6.5 + commands/workflow/iter_log.go (mergeReviewIterLog) + the older self-review template at src/share/templates/standard/skills/global/self-review/SKILL.md
+          output contract: three new ADR files at docs/adr/000{2,3,5}-*.md + updated docs/adr/README.md index
+
+    - id: t2-extend-self-review-skill
+      title: Extend self-review skill to write review-decision.yaml; restore kg-context calls; add tier+contract frontmatter
+      status: pending
+      depends_on:
+        - t1-audit-decide-output-schema
+      blocks:
+        - t3-extend-iteration-close
+        - t5-verify-end-to-end
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/dot-agents/self-review/SKILL.md
+        - .agents/skills/dot-agents/self-review/instructions/kg-context.md
+        - .agents/skills/dot-agents/self-review/instructions/output-format.md
+      verification_required: true
+      app_type: skill
+      notes: |-
+        Tier: T2 (compound — modifies SKILL.md orchestrator + adds two instruction
+        modules + frontmatter contract).
+
+        Concrete changes:
+          1. New `instructions/kg-context.md` as Step 0 (before code-quality):
+             runs `dot-agents kg changes --brief` and `dot-agents kg impact <files>`
+             on the staged diff; surfaces blast-radius before per-file review.
+             Restores the lost crg-kg-integration phase G integration.
+          2. New `instructions/output-format.md` defines the
+             review-decision.yaml schema (per ADR-0002) with a worked example.
+             Skill writes to the path declared by ADR-0002.
+          3. SKILL.md frontmatter gains `tier: T2`, `contract:` block with
+             reads/writes/escape_hatches. This frontmatter becomes the reusable
+             template for upgrading review-pr, review-delta, plan-wave-picker, etc.
+             in follow-up plans.
+          4. Existing instructions/{code-quality,gotchas,performance,security,
+             advisory-board,checklist}.md kept as-is — orchestrator structure is
+             preserved; the additions are ADDITIVE.
+
+        Note: the path `.agents/skills/dot-agents/self-review/` is symlinked from
+        `.agents/skills/self-review/`; edits land in the canonical location at
+        `~/.agents/skills/dot-agents/self-review/`. After editing, run
+        `dot-agents skills promote self-review` (if needed) and `dot-agents refresh`.
+
+        Hard test:
+          Invoking `/self-review` directly (without iteration-close) on a real diff:
+          (a) writes a parseable review-decision.yaml at the ADR-0002 path,
+          (b) the file contains non-stub agent-authored verdicts on the actual
+              changed files (not a placeholder template),
+          (c) Step 0 produces visible kg-changes/kg-impact output before per-file
+              review begins,
+          (d) SKILL.md frontmatter declares tier: T2 and a contract block that
+              parses as valid YAML.
+
+        Common false positive:
+          SKILL.md updated to claim it writes the file, but the actual run produces
+          stub prose without inspecting the diff. Verifier MUST diff the produced
+          file's content against an empty/template baseline and confirm material
+          per-file analysis.
+
+        ISP routing:
+          mode: fanout-amenable (largest write_scope of the plan; clean isolation; subagent can produce the three new files in parallel against pre-decided ADR-0002 schema)
+          verifier: smoke + manual (smoke = invoke /self-review on the temp diff; manual = review SKILL.md frontmatter + new instruction modules for clarity)
+          review: code review (does the orchestrator structure remain intact? does the new step ordering make sense? does the contract block parse?)
+          anti-scope: do NOT touch iteration-close — that is t3's scope. Do NOT redesign the existing instruction modules (code-quality, gotchas, performance, security, advisory-board, checklist) — additions are ADDITIVE.
+          bundle-context (if fanout): ADR-0002 (output schema, accepted by t1) + ADR-0005 (kg-context restoration, accepted by t1) + current SKILL.md content + the older template at src/share/templates/.../self-review/SKILL.md (for the kg-changes call to restore)
+          output contract: SKILL.md with tier+contract frontmatter, two new instructions/{kg-context,output-format}.md, no changes to the six existing instruction modules
+
+    - id: t3-extend-iteration-close
+      title: Wire iteration-close to invoke self-review and call workflow checkpoint --role review
+      status: pending
+      depends_on:
+        - t1-audit-decide-output-schema
+        - t2-extend-self-review-skill
+      blocks:
+        - t5-verify-end-to-end
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/dot-agents/iteration-close/SKILL.md
+        - .agents/skills/dot-agents/iteration-close/instructions/workflow.md
+      verification_required: true
+      app_type: skill
+      notes: |-
+        Tier: T2 (compound — modifies SKILL.md orchestrator + workflow instruction).
+
+        Concrete changes:
+          1. iteration-close instruction trail gains a new step that invokes
+             `/self-review` at the ordering chosen in ADR-0003 (before/after/parallel
+             with verify-record-test).
+          2. After self-review writes review-decision.yaml, iteration-close calls
+             `dot-agents workflow checkpoint --log-to-iter <N> --role review` so
+             mergeReviewIterLog reads the review-decision.yaml and populates the
+             iter-log review block. This is the path that has been dead-coded
+             since v2 of the schema landed.
+          3. iteration-close SKILL.md frontmatter gains `tier: T2` and a
+             `contract:` block matching t2's pattern.
+
+        Hard test:
+          Running iteration-close on a fresh dummy iteration produces an
+          iter-N.yaml where:
+          - review.overall_decision is non-empty (accept | reject | conditional)
+          - review.verify_record_appended: true
+          - review.reviewer_notes contains text traceable to the
+            review-decision.yaml from t2 (NOT a verbatim copy — the writer
+            extracts the structured verdict, not the prose)
+
+        Common false positive:
+          iteration-close calls workflow checkpoint --log-to-iter but omits
+          --role review. The iter-log gains a checkpoint entry but the review
+          block remains empty. OR: review block populates but with hardcoded
+          values rather than reading from review-decision.yaml — no actual
+          link between self-review output and iter-log content.
+
+        ISP routing:
+          mode: direct (single skill, mostly instructions/workflow.md edit; needs to coordinate closely with t2's output schema)
+          verifier: smoke (run iteration-close end-to-end on a tiny dummy edit, confirm review block populates)
+          review: code review + integration (does the call sequence respect ADR-0003 ordering? does mergeReviewIterLog actually fire?)
+          anti-scope: do NOT redesign mergeReviewIterLog or verify-record. Just call them correctly. Do NOT add new flags to workflow checkpoint — use --role review path that already exists.
+          bundle-context (if fanout): ADR-0003 (fire ordering, accepted by t1) + commands/workflow/iter_log.go mergeReviewIterLog + commands/workflow/verification.go review-record writer + iteration-close current instructions/workflow.md
+          output contract: SKILL.md with tier+contract; instructions/workflow.md with the new self-review invocation step + the --role review checkpoint call
+
+    - id: t4-trace-schema-seed-doc
+      title: Document review-decision.yaml as the first execution-telemetry trace; produce ADR-0004
+      status: pending
+      depends_on:
+        - t1-audit-decide-output-schema
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/adr/0004-execution-telemetry-schema-seed.md
+        - docs/adr/README.md
+        - .agents/proposals/agent-context-resolution-architecture.md
+      verification_required: false
+      app_type: research
+      notes: |-
+        Tier: T1 (molecule — single ADR + cross-reference update; no code).
+
+        Concrete changes:
+          1. ADR-0004 records that the review-decision.yaml schema chosen in
+             ADR-0002 is the FIRST CONCRETE INSTANCE of the
+             `agent-context-resolution-architecture.md` §1.6 execution-telemetry
+             pillar trace envelope.
+          2. ADR-0004 names the consequences:
+               - Future hook traces, subagent traces, rule-read traces follow the
+                 same envelope.
+               - If §1.6 evolves, this seed must evolve with it (or §1.6 evolves
+                 because the seed taught us something).
+               - The score formula in §3 of the architecture note can be computed
+                 from this envelope's fields once enough traces accumulate.
+          3. agent-context-resolution-architecture.md §1.6 gains a forward
+             reference to ADR-0004 ("seeded by review-decision.yaml; see ADR-0004").
+
+        Hard test:
+          docs/adr/0004 exists, is indexed, and cross-references ADR-0002, ADR-0003.
+          architecture-note §1.6 contains a concrete reference back to ADR-0004
+          (cite by ID, not by file path).
+
+        Common false positive:
+          ADR-0004 exists but only restates §1.6 prose — adds no decision content.
+          The ADR's job is to RECORD that we chose the review-decision.yaml shape
+          AS the telemetry seed; restating §1.6 isn't a decision.
+
+        ISP routing:
+          mode: direct (single ADR + small cross-reference edit; runs in parallel with t2/t3 since write scope doesn't overlap)
+          verifier: manual (decision-quality on the ADR + presence of cross-reference)
+          review: doc review (ADR populated cleanly; architecture note cross-link by ID, not by file path)
+          anti-scope: do NOT modify §1.6 trace schema substantively — this task only documents that ADR-0002's review-decision.yaml IS the seed. Schema changes belong in t1.
+          bundle-context (if fanout): ADR-0002 (output schema) + agent-context-resolution-architecture.md §1.6 current text
+          output contract: docs/adr/0004-execution-telemetry-schema-seed.md + a cross-reference line in §1.6
+
+    - id: t5-verify-end-to-end
+      title: Run a real iteration through the new chain; capture before/after iter-log diff
+      status: pending
+      depends_on:
+        - t2-extend-self-review-skill
+        - t3-extend-iteration-close
+      blocks:
+        - t6-archive-and-baseline
+      owner: dot-agents
+      write_scope:
+        - .agents/active/iteration-log/iter-N.yaml (real, written by closeout chain)
+      verification_required: true
+      app_type: verifier
+      notes: |-
+        Tier: T1 (molecule — verification, not a new compound).
+
+        Procedure:
+          1. Make a small dummy edit on this branch that produces a measurable
+             diff (e.g. update a comment in commands/kg/cmd.go).
+          2. Run iteration-close per the new chain (verify → self-review →
+             checkpoint --role review → advance|merge-back).
+          3. Capture the produced iter-N.yaml. Side-by-side against the most
+             recent v2 iter-log with empty review (e.g. iter-61.yaml).
+          4. Confirm the diff shows: empty review fields → populated review
+             fields, with content traceable to the produced
+             review-decision.yaml.
+
+        Hard test:
+          Real iter-log produced by a real iteration shows non-stub review block
+          content. Side-by-side diff captured as evidence in
+          .agents/active/merge-back/<task>.md.
+
+        Common false positive:
+          Only synthetic test data was used (no real diff was reviewed); or the
+          verifier reads only field presence, not content quality. The verifier
+          must paste the produced review-decision.yaml content INTO the merge-back
+          for human cross-check.
+
+        ISP routing:
+          mode: direct (verification task; orchestrator runs the iteration; no fanout)
+          verifier: integration (the iteration itself IS the test; produces a real iter-log file as evidence)
+          review: verification review — was the test actually run on a real diff? Is the produced review-decision.yaml content quoted in the merge-back?
+          anti-scope: do NOT make this a synthetic/mocked test. Use a real (small) edit on this branch.
+          rollback: if verification fails, t5 escalates back to t2 or t3 via fold-back rather than papering over the failure
+          bundle-context (if fanout): not applicable — this is the orchestrator's verification turn
+          output contract: a fresh iter-N.yaml on disk with populated review block + a captured before/after diff in the merge-back
+
+    - id: t6-archive-and-baseline
+      title: workflow plan archive; record updated baseline in architecture note §6.5
+      status: pending
+      depends_on:
+        - t5-verify-end-to-end
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/self-review-iteration-close-wiring/
+        - .agents/proposals/agent-context-resolution-architecture.md
+        - docs/adr/README.md
+      verification_required: false
+      app_type: workflow
+      notes: |-
+        Tier: T1 (molecule — archive + record).
+
+        Procedure:
+          1. Run `dot-agents workflow plan archive --plan self-review-iteration-close-wiring`.
+          2. Confirm `.agents/history/self-review-iteration-close-wiring/` contains
+             PLAN.yaml, TASKS.yaml, the .plan.md, and the
+             delegate-merge-back-archive/ directory if delegated work was used.
+          3. Update `agent-context-resolution-architecture.md` §6.5 with a
+             one-line addendum:
+               "2026-05-XX: self-review-iteration-close-wiring plan archived.
+                v2 review-block population path is live; baseline measurement
+                of new conversion rate begins."
+          4. Update docs/adr/README.md to flip ADR-0002, 0003, 0004, 0005 from
+             proposed → accepted (if not already done in prior tasks).
+
+        Hard test:
+          history/<plan>/ has all expected artifacts. Architecture note §6.5
+          shows the one-line addendum. ADR index has all four produced ADRs as
+          accepted.
+
+        Common false positive:
+          Archive runs but baseline isn't recorded — future audits cannot
+          measure improvement from the 1/12 / 24-of-42 starting points. Verify
+          by grepping the architecture note for the new addendum line.
+
+        ISP routing:
+          mode: direct (CLI command + small doc edits)
+          verifier: smoke (workflow plan archive completes successfully; history dir contains expected files)
+          review: closeout review (history complete; baseline recorded; ADR statuses flipped)
+          anti-scope: do NOT modify the produced ADRs substantively at archive time — only flip status from proposed → accepted in the index if t1/t4 left them as proposed
+          bundle-context (if fanout): not applicable — closeout is the orchestrator's turn
+          output contract: .agents/history/self-review-iteration-close-wiring/ populated; architecture note §6.5 has the addendum line; docs/adr/README.md index has all four ADRs marked accepted; PLAN.yaml status flipped to completed
