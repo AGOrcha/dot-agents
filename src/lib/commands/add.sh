@@ -497,6 +497,7 @@ cmd_add() {
   show_test_commands \
     "dot-agents status" \
     "ls -la $display_path/.cursor/rules/"
+  return 0
 }
 
 # Mirror a project backup file into AGENTS_HOME/resources/<project-slug>/...

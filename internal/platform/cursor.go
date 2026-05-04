@@ -270,7 +270,7 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	)
 }
 
-func (c *cursor) createAgentsLinks(_ string, _ string, _ string) error {
+func (c *cursor) createAgentsLinks(_, _, _ string) error {
 	// `.claude/agents/*` mirrors match Claude's layout; command layer runs CollectAndExecuteSharedTargetPlan first.
 	return nil
 }

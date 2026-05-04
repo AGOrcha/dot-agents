@@ -703,7 +703,7 @@ func processImportOutput(c importCandidate, output importOutput, agentsHome, tim
 			if _, err := os.Stat(altDest); os.IsNotExist(err) {
 				resolved := c
 				resolved.destRel = altRel
-				return importPreservedConflictCandidate(resolved, agentsHome, output.destRel, altRel, altDest, output.content, timestamp, output.Origin)
+				return importPreservedConflictCandidate(resolved, agentsHome, output, altRel, altDest, timestamp)
 			}
 		}
 	}
@@ -748,13 +748,13 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 	return importResult{imported: 1}
 }
 
-func importPreservedConflictCandidate(c importCandidate, agentsHome, primaryRel, altRel, altDest string, content []byte, timestamp, origin string) importResult {
+func importPreservedConflictCandidate(c importCandidate, agentsHome string, output importOutput, altRel, altDest string, timestamp string) importResult {
 	if Flags.DryRun {
-		ui.DryRun(fmt.Sprintf("Import conflict: preserve %s; write alternate %s", primaryRel, altRel))
+		ui.DryRun(fmt.Sprintf("Import conflict: preserve %s; write alternate %s", output.destRel, altRel))
 		return importResult{imported: 1}
 	}
 
-	if err := writeImportConflictReviewNote(agentsHome, c.project, primaryRel, altRel, origin); err != nil {
+	if err := writeImportConflictReviewNote(agentsHome, c.project, output.destRel, altRel, output.Origin); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("could not write import conflict review note: %v", err))
 	}
 
@@ -763,12 +763,12 @@ func importPreservedConflictCandidate(c importCandidate, agentsHome, primaryRel,
 		ui.Bullet("warn", fmt.Sprintf("Failed to create %s: %v", altRel, err))
 		return importResult{skipped: 1}
 	}
-	if err := os.WriteFile(altDest, content, 0644); err != nil {
+	if err := os.WriteFile(altDest, output.content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
 
-	ui.Bullet("ok", fmt.Sprintf("Preserved %s; imported alternate -> %s", primaryRel, altRel))
+	ui.Bullet("ok", fmt.Sprintf("Preserved %s; imported alternate -> %s", output.destRel, altRel))
 	return importResult{imported: 1}
 }
 

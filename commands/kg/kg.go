@@ -163,7 +163,7 @@ type IndexEntry struct {
 	Path           string
 }
 
-func appendLogEntry(kgHomeDir string, entry string) error {
+func appendLogEntry(kgHomeDir, entry string) error {
 	logPath := filepath.Join(kgHomeDir, "notes", kgLogFileName)
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
@@ -762,7 +762,7 @@ func recordRawSource(kgHomeDir string, source RawSource, content []byte) error {
 }
 
 // moveToImported moves a raw source from inbox to imported.
-func moveToImported(kgHomeDir string, sourceID string) error {
+func moveToImported(kgHomeDir, sourceID string) error {
 	src := filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md")
 	dst := filepath.Join(kgHomeDir, "raw", "imported", sourceID+".md")
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {

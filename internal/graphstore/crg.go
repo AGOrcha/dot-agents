@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/execabs"
+	// _ "modernc.org/sqlite": side-effect registers SQLite driver in database/sql
 	_ "modernc.org/sqlite"
 )
 

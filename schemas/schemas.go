@@ -1,6 +1,7 @@
 package schemas
 
 import (
+	// _ "embed": pull in embedded schema files via go:embed
 	_ "embed"
 	"encoding/json"
 	"fmt"

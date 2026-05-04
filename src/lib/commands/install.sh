@@ -159,6 +159,7 @@ cmd_install() {
   else
     install_run "$strict"
   fi
+  return 0
 }
 
 # ─── install_run ─────────────────────────────────────────────────────────────

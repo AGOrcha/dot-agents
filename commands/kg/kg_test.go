@@ -14,6 +14,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
+	// _ "modernc.org/sqlite": side-effect registers SQLite driver in database/sql
 	_ "modernc.org/sqlite"
 )
 

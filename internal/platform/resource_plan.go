@@ -175,20 +175,7 @@ func ensureDirSymlinkIntent(src, target string, intent ResourceIntent) error {
 }
 
 func ensureFileSymlinkIntent(src, target string, intent ResourceIntent) error {
-	info, err := os.Lstat(target)
-	switch {
-	case err == nil:
-		if info.Mode()&os.ModeSymlink != 0 {
-			return links.Symlink(src, target)
-		}
-		if err := prepareIntentTargetForReplacement(target, intent); err != nil {
-			return err
-		}
-	case os.IsNotExist(err):
-	default:
-		return err
-	}
-	return links.Symlink(src, target)
+	return ensureDirSymlinkIntent(src, target, intent)
 }
 
 func executeRenderSingleWrite(intent ResourceIntent, repoPath, agentsHome string) error {
@@ -541,10 +528,7 @@ func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
 func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome string) error {
 	target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 	switch {
-	case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
-		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
-		return nil
-	case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
+	case (intent.Shape == ResourceShapeDirectDir || intent.Shape == ResourceShapeDirectFile) && intent.Transport == ResourceTransportSymlink:
 		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
 		return nil
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
