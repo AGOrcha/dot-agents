@@ -3,12 +3,12 @@ package workflow
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -616,35 +616,10 @@ func TestWorkflow_EmptyStateGraceful(t *testing.T) {
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	// Minimal git repo with .agentsrc.json — no plans, no checkpoint
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test",
-			"GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test",
-			"GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
-		}
-	}
-	run("init")
-	run("config", "user.name", "Test")
-	run("config", "user.email", "test@example.com")
-
-	rcPath := filepath.Join(repo, ".agentsrc.json")
-	if err := os.WriteFile(rcPath, []byte(`{"project":"empty-proj","version":1,"sources":[{"type":"local"}]}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	readmePath := filepath.Join(repo, "README.md")
-	if err := os.WriteFile(readmePath, []byte("empty\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run("add", ".")
-	run("commit", "-m", "init")
+	testutil.InitGitRepo(t, repo, map[string]string{
+		".agentsrc.json": `{"project":"empty-proj","version":1,"sources":[{"type":"local"}]}`,
+		"README.md":      "empty\n",
+	})
 
 	oldwd, _ := os.Getwd()
 	defer os.Chdir(oldwd)

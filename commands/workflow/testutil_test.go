@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
@@ -105,43 +106,18 @@ func runKGSetupViaCLI(t *testing.T) {
 func initWorkflowTestRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test",
-			"GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test",
-			"GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
-		}
+	testutil.InitGitRepo(t, repo, map[string]string{
+		".agentsrc.json":                  `{"project":"workflow-proj","version":1,"sources":[{"type":"local"}]}`,
+		".agents/active/sample.plan.md":   "# Sample Plan\n\n- [ ] First pending task\n- [ ] Second pending task\n",
+		".agents/active/handoffs/next.md": "# Next Handoff\n",
+		".agents/lessons.md":              "- lesson one\n- lesson two\n",
+		"README.md":                       "hello\n",
+	})
+	// Mutate the working tree post-commit so dirty-status tests have content
+	// to detect.
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello world\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
-
-	run("init")
-	run("config", "user.name", "Test")
-	run("config", "user.email", "test@example.com")
-
-	write := func(rel, content string) {
-		path := filepath.Join(repo, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	write(".agentsrc.json", `{"project":"workflow-proj","version":1,"sources":[{"type":"local"}]}`)
-	write(".agents/active/sample.plan.md", "# Sample Plan\n\n- [ ] First pending task\n- [ ] Second pending task\n")
-	write(".agents/active/handoffs/next.md", "# Next Handoff\n")
-	write(".agents/lessons.md", "- lesson one\n- lesson two\n")
-	write("README.md", "hello\n")
-	run("add", ".")
-	run("commit", "-m", "initial")
-	write("README.md", "hello world\n")
 	return repo
 }
 
