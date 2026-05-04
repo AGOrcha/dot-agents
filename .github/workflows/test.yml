@@ -111,6 +111,12 @@ jobs:
 
       - name: Validate GoReleaser snapshot packaging (Linux)
         if: matrix.os == 'ubuntu-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOT_AGENTS_PAT: ${{ secrets.DOT_AGENTS_PAT }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
         run: goreleaser release --snapshot --clean
 
       # ── Smoke isolation ──────────────────────────────────────────────────
