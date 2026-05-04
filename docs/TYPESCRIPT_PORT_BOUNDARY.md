@@ -63,3 +63,4 @@ The Go CLI’s **`~/.agents` canonical store** is defined in `internal/platform/
 
 - `docs/TYPESCRIPT_PORT_TDD_PLAN.md` — overall port strategy and MVP list
 - `.agents/workflow/plans/typescript-port/` — phased tasks and write scopes
+- Machine-readable form: `docs/typescript-port-boundary.json` (consumed by `ports/typescript/scripts/check-boundary.*` in CI per tp3)

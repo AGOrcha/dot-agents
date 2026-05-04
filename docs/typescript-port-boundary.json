@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "stage1_commands": [
+    "init",
+    "add",
+    "refresh",
+    "status",
+    "doctor",
+    "skills",
+    "agents",
+    "hooks"
+  ],
+  "stage1_flag_lock": {
+    "init": [
+      "--dry-run",
+      "--force"
+    ],
+    "add": [
+      "--name",
+      "--force"
+    ],
+    "refresh": [],
+    "status": [],
+    "doctor": [
+      "--verbose"
+    ],
+    "skills": [
+      "list",
+      "new"
+    ],
+    "agents": [
+      "list",
+      "new"
+    ],
+    "hooks": [
+      "list"
+    ]
+  },
+  "phase4_optouts": [
+    "explain",
+    "import",
+    "install",
+    "kg",
+    "mcp",
+    "remove",
+    "review",
+    "rules",
+    "settings",
+    "sync",
+    "workflow"
+  ],
+  "phase5_deferred": [
+    "workflow:read-only-cli-subset",
+    "status:plugins-section"
+  ],
+  "stage2_deferred_subitems": [
+    "init:--yes",
+    "init:starter-template-writes",
+    "init:workflow-hook-bundle-scaffolding",
+    "init:kg-mcp-config-writeout",
+    "init:per-platform-link-writes",
+    "add:--dry-run",
+    "add:project-name-validation",
+    "add:repo-scan-ai-config-discovery",
+    "add:backup-existing-configs",
+    "add:per-platform-link-creation",
+    "add:restore-from-resources",
+    "add:kg-mcp-config-writeout",
+    "refresh:--import",
+    "refresh:--dry-run",
+    "refresh:per-platform-link-refresh",
+    "refresh:manifest-refresh-writeback",
+    "status:--audit",
+    "status:--agent",
+    "status:--json",
+    "doctor:--dry-run",
+    "doctor:platform-installation-detection",
+    "doctor:user-level-config-link-health",
+    "doctor:manifest-health-checks",
+    "skills:append-to-agentsrc",
+    "skills:ensure-user-skill-links",
+    "skills:promote",
+    "agents:promote",
+    "agents:promote--force",
+    "agents:import",
+    "agents:remove",
+    "agents:remove--purge",
+    "hooks:show",
+    "hooks:remove",
+    "workflow:mutating-subcommands",
+    "kg:all-subcommands"
+  ]
+}
