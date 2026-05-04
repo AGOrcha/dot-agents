@@ -160,9 +160,9 @@ func TestInitGitRepo_CreatesCommittedTreeWithIdentity(t *testing.T) {
 	repo := t.TempDir()
 
 	testutil.InitGitRepo(t, repo, map[string]string{
-		"README.md":           "hello\n",
-		".agents/handoff.md":  "# handoff\n",
-		"a/b/c/deep.txt":      "deep\n",
+		"README.md":          "hello\n",
+		".agents/handoff.md": "# handoff\n",
+		"a/b/c/deep.txt":     "deep\n",
 	})
 
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
