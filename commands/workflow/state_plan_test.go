@@ -552,47 +552,13 @@ func TestRunWorkflowPlanGraphRendersPlanAndTasks(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	addCanonicalSliceFixture(t, repo, "wave-2")
 
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
-
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-
-	if err := runWorkflowPlanGraph("wave-2"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = old
-
-	rendered := string(out)
-	for _, want := range []string{
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanGraph("wave-2") },
 		"Canonical Plan Graph: wave-2",
 		"[wave-2] Wave 2 Test Plan",
 		"-> [t1] implement structs",
 		"=> [slice-read-surface] Read surface",
 		"depends_on: implement structs",
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered graph missing %q:\n%s", want, rendered)
-		}
-	}
+	)
 }
 
 func TestLoadCanonicalSlicesRoundTrip(t *testing.T) {
@@ -620,46 +586,12 @@ func TestRunWorkflowSlicesRendersSlices(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	addCanonicalSliceFixture(t, repo, "wave-2")
 
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
-
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-
-	if err := runWorkflowSlices("wave-2"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = old
-
-	rendered := string(out)
-	for _, want := range []string{
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowSlices("wave-2") },
 		"Slices: wave-2",
 		"[slice-read-surface] Read surface",
 		"task: t1",
 		"write scope: commands/workflow.go, commands/workflow_test.go",
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered slices missing %q:\n%s", want, rendered)
-		}
-	}
+	)
 }
 
 func TestSelectNextCanonicalTaskPrefersInProgressFocusTask(t *testing.T) {
@@ -685,16 +617,7 @@ func TestSelectNextCanonicalTask_ScopedToPlansWithActiveDelegation(t *testing.T)
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPlanFixture(t, repo)
 	addCanonicalPendingPlanFixture(t, repo)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	c := &DelegationContract{
-		SchemaVersion: 1, ID: "del-t1", ParentPlanID: "wave-2", ParentTaskID: "t1",
-		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := saveDelegationContract(repo, c); err != nil {
-		t.Fatal(err)
-	}
+	writeActiveDelegationContract(t, repo, "del-t1", "wave-2", "t1")
 
 	suggestion, err := selectNextCanonicalTask(repo, "")
 	if err != nil {
@@ -716,40 +639,7 @@ func TestSelectNextCanonicalTask_ExplicitUnknownPlan(t *testing.T) {
 
 func TestSelectNextCanonicalTask_ExplicitPausedPlanReturnsNil(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
-
-	plan := &CanonicalPlan{
-		SchemaVersion:    1,
-		ID:               "paused-plan",
-		Title:            "Paused Plan",
-		Status:           "paused",
-		Summary:          "paused for planning review",
-		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
-		UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
-		Owner:            "test",
-		CurrentFocusTask: "needs review",
-	}
-	if err := saveCanonicalPlan(repo, plan); err != nil {
-		t.Fatal(err)
-	}
-	tf := &CanonicalTaskFile{
-		SchemaVersion: 1,
-		PlanID:        "paused-plan",
-		Tasks: []CanonicalTask{
-			{
-				ID:                   "needs-review",
-				Title:                "needs review",
-				Status:               "pending",
-				DependsOn:            nil,
-				Blocks:               nil,
-				Owner:                "test",
-				WriteScope:           []string{"commands/workflow.go"},
-				VerificationRequired: true,
-			},
-		},
-	}
-	if err := saveCanonicalTasks(repo, tf); err != nil {
-		t.Fatal(err)
-	}
+	savePausedPlanFixture(t, repo)
 
 	suggestion, err := selectNextCanonicalTask(repo, "paused-plan")
 	if err != nil {
@@ -764,16 +654,7 @@ func TestSelectNextCanonicalTask_ExplicitCommaSeparatedPlans(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPlanFixture(t, repo)
 	addCanonicalPendingPlanFixture(t, repo)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	c := &DelegationContract{
-		SchemaVersion: 1, ID: "del-t1", ParentPlanID: "wave-2", ParentTaskID: "t1",
-		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := saveDelegationContract(repo, c); err != nil {
-		t.Fatal(err)
-	}
+	writeActiveDelegationContract(t, repo, "del-t1", "wave-2", "t1")
 
 	suggestion, err := selectNextCanonicalTask(repo, "wave-2, wave-next")
 	if err != nil {
@@ -790,16 +671,7 @@ func TestSelectNextCanonicalTask_ExplicitCommaSeparatedPlans(t *testing.T) {
 func TestSelectNextCanonicalTask_ExplicitPlanSkipsLockedPlan(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	addCanonicalPendingPlanFixture(t, repo)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	c := &DelegationContract{
-		SchemaVersion: 1, ID: "del-planner", ParentPlanID: "wave-next", ParentTaskID: "planner",
-		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := saveDelegationContract(repo, c); err != nil {
-		t.Fatal(err)
-	}
+	writeActiveDelegationContract(t, repo, "del-planner", "wave-next", "planner")
 
 	suggestion, err := selectNextCanonicalTask(repo, "wave-next")
 	if err != nil {
@@ -933,39 +805,7 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 
 	t.Run("paused", func(t *testing.T) {
 		repo := initWorkflowTestRepo(t)
-		plan := &CanonicalPlan{
-			SchemaVersion:    1,
-			ID:               "paused-plan",
-			Title:            "Paused Plan",
-			Status:           "paused",
-			Summary:          "paused for planning review",
-			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
-			UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
-			Owner:            "test",
-			CurrentFocusTask: "needs review",
-		}
-		if err := saveCanonicalPlan(repo, plan); err != nil {
-			t.Fatal(err)
-		}
-		tf := &CanonicalTaskFile{
-			SchemaVersion: 1,
-			PlanID:        "paused-plan",
-			Tasks: []CanonicalTask{
-				{
-					ID:                   "needs-review",
-					Title:                "needs review",
-					Status:               "pending",
-					DependsOn:            nil,
-					Blocks:               nil,
-					Owner:                "test",
-					WriteScope:           []string{"commands/workflow.go"},
-					VerificationRequired: true,
-				},
-			},
-		}
-		if err := saveCanonicalTasks(repo, tf); err != nil {
-			t.Fatal(err)
-		}
+		savePausedPlanFixture(t, repo)
 
 		state, err := collectWorkflowCompletionState(repo, "paused-plan")
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -703,6 +704,93 @@ func setupFoldBackTwoPlanProject(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+// captureStdoutWhileRunning chdirs to repo, captures os.Stdout output
+// from run(), then asserts every wantSubstring appears. Restores cwd
+// via t.Cleanup. Replaces the ~28-line stdout-pipe pattern repeated
+// in multiple state_plan/render tests.
+func captureStdoutWhileRunning(t *testing.T, repo string, run func() error, wantSubstrings ...string) {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+
+	if err := run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rendered := string(out)
+	for _, want := range wantSubstrings {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("output missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// writeActiveDelegationContract saves a minimal active DelegationContract
+// pointing at planID/taskID. Used by state_plan tests that need an
+// in-flight delegation gate.
+func writeActiveDelegationContract(t *testing.T, repo, contractID, planID, taskID string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: contractID,
+		ParentPlanID: planID, ParentTaskID: taskID,
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// savePausedPlanFixture writes a CanonicalPlan + CanonicalTaskFile pair
+// representing a paused-status plan with one pending task. Shared by
+// state_plan tests that exercise paused-plan scope behavior.
+func savePausedPlanFixture(t *testing.T, repo string) {
+	t.Helper()
+	plan := &CanonicalPlan{
+		SchemaVersion: 1, ID: "paused-plan", Title: "Paused Plan",
+		Status: "paused", Summary: "paused for planning review",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Owner:     "test", CurrentFocusTask: "needs review",
+	}
+	if err := saveCanonicalPlan(repo, plan); err != nil {
+		t.Fatal(err)
+	}
+	tf := &CanonicalTaskFile{
+		SchemaVersion: 1, PlanID: "paused-plan",
+		Tasks: []CanonicalTask{{
+			ID: "needs-review", Title: "needs review", Status: "pending",
+			Owner: "test", WriteScope: []string{"commands/workflow.go"},
+			VerificationRequired: true,
+		}},
+	}
+	if err := saveCanonicalTasks(repo, tf); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func executeWorkflowCommandOutput(t *testing.T, repo string, args ...string) string {
