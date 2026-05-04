@@ -100,6 +100,18 @@ ADR records one of three options:
 
 ADR must include the per-cluster numbers above. Anti-scope: sq4 does not start mass-deduping; it is the *decision* — work (option A) or follow-up plan (B/C) is its own plan. If (B)/(C), cluster F's `commands/{agents,skills}/list.go` shared-renderer extraction is the cheapest in-PR cherry; sq2 can pick it up as a 6th sub-task.
 
+### Decision (sq4) — recorded 2026-05-04 in [ADR-0008](../../../../docs/adr/0008-pr10-duplication-scope.md)
+
+**Chosen path: option (B) — accept duplication failure as a known waiver with follow-up plans tracking cleanup; merge PR #10 anyway after reviewer affirms the waiver.**
+
+- Reliability (§1) and security hotspots (§3) are still in-PR via sq2 and sq3. The waiver applies *only* to `new_duplicated_lines_density`.
+- Follow-up plan IDs reserved for the deferred work:
+  - **`go-test-fixture-extraction`** — Cluster D test-fixture debt (~2,500 lines across 18+ `*_test.go` files; the bulk of the 4.7 % density).
+  - **`production-code-helper-extraction`** — Cluster E cross-module list/render/promote duplication; needs design review before extraction.
+- Cherry exception: sq2 *may* include Cluster F (`commands/{agents,skills}/list.go` shared-renderer extraction) as a one-commit scope-bump if cheap; if any non-trivial complication surfaces it folds back into `production-code-helper-extraction` instead.
+- Anti-scope: this decision does **not** authorize mass-deduping inside PR #10. ADR-0008 is decision-only; the follow-up plans are tracked but not yet created.
+- Reviewer must affirm the waiver at merge time (PR description links ADR-0008).
+
 ---
 
 ## 3. `new_security_hotspots_reviewed` — 0.0 % -> must be 100 %

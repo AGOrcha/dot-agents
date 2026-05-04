@@ -127,6 +127,7 @@ convention is the markdown format and index below.
 | [0005](0005-restore-kg-context-in-self-review.md) | accepted | Restore KG-context calls in self-review (regression fix) | dot-agents | 2026-05-03 |
 | [0006](0006-da-rename-strategy.md) | accepted | Binary rename strategy — `dot-agents` → `da` via hard cutover | dot-agents | 2026-05-03 |
 | [0007](0007-ts-port-binary-naming.md) | accepted | TS port binary name — `da-ts` | dot-agents | 2026-05-03 |
+| [0008](0008-pr10-duplication-scope.md) | accepted | PR #10 duplication-density scope — accept waiver, defer cleanup | dot-agents | 2026-05-04 |
 
 ---
 
