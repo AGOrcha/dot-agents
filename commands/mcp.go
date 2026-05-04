@@ -2,12 +2,10 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -100,77 +98,57 @@ links stay consistent.`,
 	}
 }
 
+// mcpCanonicalSpec wires mcp.go's runMCP* helpers into
+// cmdutil.RunCanonical{List,Show,Remove}.
+func mcpCanonicalSpec() cmdutil.CanonicalFileSpec {
+	return cmdutil.CanonicalFileSpec{
+		Kind:        "MCP",
+		DirSegment:  "mcp",
+		SingularRem: "MCP file",
+		EmptyHint: func(scope string) string {
+			return "No MCP config files (.json/.yaml/.yml/.toml) under ~/.agents/mcp/" + scope + "/"
+		},
+		MissingDirHint: func(scope string) string {
+			return "No ~/.agents/mcp/" + scope + "/ directory yet (no canonical MCP files for this scope)."
+		},
+		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+			specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]cmdutil.CanonicalFileEntry, len(specs))
+			for i, sp := range specs {
+				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+			}
+			return out, nil
+		},
+		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+			sp, err := findMCPSpec(agentsHome, scope, name)
+			if err != nil {
+				return cmdutil.CanonicalFileEntry{}, err
+			}
+			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+		},
+		EnsureScope: platform.EnsureUnderMCPScopeTree,
+	}
+}
+
 func runMCPList(scope string) error {
-	agentsHome := config.AgentsHome()
-	specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
-	if err != nil {
-		if os.IsNotExist(err) {
-			ui.Info("No ~/.agents/mcp/" + scope + "/ directory yet (no canonical MCP files for this scope).")
-			return nil
-		}
-		return err
-	}
-	if len(specs) == 0 {
-		ui.Info("No MCP config files (.json/.yaml/.yml/.toml) under ~/.agents/mcp/" + scope + "/")
-		return nil
-	}
-	ui.Header("MCP (" + scope + ")")
-	for _, spec := range specs {
-		fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Cyan, spec.BaseName, ui.Reset)
-		fmt.Fprintf(os.Stdout, "    %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
+	return cmdutil.RunCanonicalList(scope, mcpCanonicalSpec())
 }
 
 func runMCPShow(scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findMCPSpec(agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	info, statErr := os.Stat(spec.SourcePath)
-	ui.Header("MCP " + spec.BaseName + " (" + scope + ")")
-	fmt.Fprintf(os.Stdout, "  %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	if statErr == nil {
-		fmt.Fprintf(os.Stdout, "  %ssize:%s %d bytes\n", ui.Dim, ui.Reset, info.Size())
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
+	return cmdutil.RunCanonicalShow(scope, name, mcpCanonicalSpec())
 }
 
 func runMCPRemove(deps mcpDeps, scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findMCPSpec(agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	if err := platform.EnsureUnderMCPScopeTree(agentsHome, scope, spec.SourcePath); err != nil {
-		return err
-	}
-
-	ui.Header("dot-agents mcp remove")
-	fmt.Fprintf(os.Stdout, "Remove MCP file %q from scope %s\n", name, ui.BoldText(scope))
-	fmt.Fprintf(os.Stdout, "  %s\n", config.DisplayPath(spec.SourcePath))
-
-	if deps.Flags.DryRun {
-		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
-		return nil
-	}
-	if !deps.Flags.Yes && !deps.Flags.Force {
-		if !ui.Confirm("Remove this file from ~/.agents/mcp/?", false) {
-			ui.Info("Cancelled.")
-			return nil
-		}
-	}
-
-	if err := os.Remove(spec.SourcePath); err != nil {
-		return fmt.Errorf("removing MCP file: %w", err)
-	}
-	ui.Success(fmt.Sprintf("Removed MCP file %q from scope %s.", spec.BaseName, scope))
-	return nil
+	return cmdutil.RunCanonicalRemove(cmdutil.RemoveDeps{
+		DryRun: deps.Flags.DryRun, Yes: deps.Flags.Yes, Force: deps.Flags.Force,
+	}, scope, name, mcpCanonicalSpec())
 }
 
+// findMCPSpec looks up an MCP file by basename or stem. Kept package-
+// private because TestFindMCPSpecNotFound calls it directly.
 func findMCPSpec(agentsHome, scope, name string) (*platform.MCPFileSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

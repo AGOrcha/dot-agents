@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -116,46 +116,59 @@ links stay consistent.`,
 	}
 }
 
+// rulesCanonicalSpec wires rules.go's runRules* helpers into
+// cmdutil.RunCanonical{List,Show,Remove}. The deps parameter threads
+// the rulesDeps error/usage hooks into findRuleSpec, which is how
+// existing tests assert on hint-aware errors.
+func rulesCanonicalSpec(deps rulesDeps) cmdutil.CanonicalFileSpec {
+	return cmdutil.CanonicalFileSpec{
+		Kind:        "Rule",
+		DirSegment:  "rules",
+		SingularRem: "rule file",
+		EmptyHint: func(scope string) string {
+			return "No rule files (.mdc/.md/.txt) under ~/.agents/rules/" + scope + "/"
+		},
+		MissingDirHint: func(scope string) string {
+			return "No ~/.agents/rules/" + scope + "/ directory yet (no canonical rule files for this scope)."
+		},
+		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+			specs, err := platform.ListCanonicalRuleFiles(agentsHome, scope)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]cmdutil.CanonicalFileEntry, len(specs))
+			for i, sp := range specs {
+				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+			}
+			return out, nil
+		},
+		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+			sp, err := findRuleSpec(deps, agentsHome, scope, name)
+			if err != nil {
+				return cmdutil.CanonicalFileEntry{}, err
+			}
+			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+		},
+		EnsureScope: platform.EnsureUnderRulesScopeTree,
+	}
+}
+
 func runRulesList(scope string) error {
-	agentsHome := config.AgentsHome()
-	specs, err := platform.ListCanonicalRuleFiles(agentsHome, scope)
-	if err != nil {
-		if os.IsNotExist(err) {
-			ui.Info("No ~/.agents/rules/" + scope + "/ directory yet (no canonical rule files for this scope).")
-			return nil
-		}
-		return err
+	// rulesList path doesn't need rulesDeps — error hints only fire on
+	// resolve, not on list/missing-dir paths. Use a zero-value deps.
+	return cmdutil.RunCanonicalList(scope, rulesCanonicalSpec(rulesCommandDeps()))
+}
+
+// rulesShowFrontmatterExtra appends a `description:` line to the show
+// output when the rule file has a non-empty frontmatter description.
+func rulesShowFrontmatterExtra(srcPath string) {
+	if desc := extractRuleFrontmatterDescription(srcPath); desc != "" {
+		fmt.Fprintf(os.Stdout, "  %sdescription:%s %s\n", ui.Dim, ui.Reset, desc)
 	}
-	if len(specs) == 0 {
-		ui.Info("No rule files (.mdc/.md/.txt) under ~/.agents/rules/" + scope + "/")
-		return nil
-	}
-	ui.Header("Rules (" + scope + ")")
-	for _, spec := range specs {
-		fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Cyan, spec.BaseName, ui.Reset)
-		fmt.Fprintf(os.Stdout, "    %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
 }
 
 func runRulesShow(deps rulesDeps, scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findRuleSpec(deps, agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	info, statErr := os.Stat(spec.SourcePath)
-	ui.Header("Rule " + spec.BaseName + " (" + scope + ")")
-	fmt.Fprintf(os.Stdout, "  %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	if statErr == nil {
-		fmt.Fprintf(os.Stdout, "  %ssize:%s %d bytes\n", ui.Dim, ui.Reset, info.Size())
-	}
-	if desc := extractRuleFrontmatterDescription(spec.SourcePath); desc != "" {
-		fmt.Fprintf(os.Stdout, "  %sdescription:%s %s\n", ui.Dim, ui.Reset, desc)
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
+	return cmdutil.RunCanonicalShow(scope, name, rulesCanonicalSpec(deps), rulesShowFrontmatterExtra)
 }
 
 func extractRuleFrontmatterDescription(path string) string {
@@ -192,35 +205,9 @@ func extractRuleFrontmatterDescription(path string) string {
 }
 
 func runRulesRemove(deps rulesDeps, scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findRuleSpec(deps, agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	if err := platform.EnsureUnderRulesScopeTree(agentsHome, scope, spec.SourcePath); err != nil {
-		return err
-	}
-
-	ui.Header("dot-agents rules remove")
-	fmt.Fprintf(os.Stdout, "Remove rule %q from scope %s\n", name, ui.BoldText(scope))
-	fmt.Fprintf(os.Stdout, "  %s\n", config.DisplayPath(spec.SourcePath))
-
-	if deps.Flags.DryRun {
-		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
-		return nil
-	}
-	if !deps.Flags.Yes && !deps.Flags.Force {
-		if !ui.Confirm("Remove this file from ~/.agents/rules/?", false) {
-			ui.Info("Cancelled.")
-			return nil
-		}
-	}
-
-	if err := os.Remove(spec.SourcePath); err != nil {
-		return fmt.Errorf("removing rule file: %w", err)
-	}
-	ui.Success(fmt.Sprintf("Removed rule file %q from scope %s.", spec.BaseName, scope))
-	return nil
+	return cmdutil.RunCanonicalRemove(cmdutil.RemoveDeps{
+		DryRun: deps.Flags.DryRun, Yes: deps.Flags.Yes, Force: deps.Flags.Force,
+	}, scope, name, rulesCanonicalSpec(deps))
 }
 
 func findRuleSpec(deps rulesDeps, agentsHome, scope, name string) (*platform.RuleFileSpec, error) {

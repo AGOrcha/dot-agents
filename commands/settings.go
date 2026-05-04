@@ -2,12 +2,10 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -100,77 +98,56 @@ links stay consistent.`,
 	}
 }
 
+// settingsCanonicalSpec wires settings.go's runSettings* helpers into
+// cmdutil.RunCanonical{List,Show,Remove}.
+func settingsCanonicalSpec() cmdutil.CanonicalFileSpec {
+	return cmdutil.CanonicalFileSpec{
+		Kind:        "Settings",
+		DirSegment:  "settings",
+		SingularRem: "settings file",
+		EmptyHint: func(scope string) string {
+			return "No settings files under ~/.agents/settings/" + scope + "/"
+		},
+		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+			specs, err := platform.ListCanonicalSettingsFiles(agentsHome, scope)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]cmdutil.CanonicalFileEntry, len(specs))
+			for i, sp := range specs {
+				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+			}
+			return out, nil
+		},
+		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+			sp, err := findSettingsSpec(agentsHome, scope, name)
+			if err != nil {
+				return cmdutil.CanonicalFileEntry{}, err
+			}
+			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+		},
+		EnsureScope: platform.EnsureUnderSettingsScopeTree,
+	}
+}
+
 func runSettingsList(scope string) error {
-	agentsHome := config.AgentsHome()
-	specs, err := platform.ListCanonicalSettingsFiles(agentsHome, scope)
-	if err != nil {
-		if os.IsNotExist(err) {
-			ui.Info("No ~/.agents/settings/" + scope + "/ directory yet (no canonical settings files for this scope).")
-			return nil
-		}
-		return err
-	}
-	if len(specs) == 0 {
-		ui.Info("No settings files under ~/.agents/settings/" + scope + "/")
-		return nil
-	}
-	ui.Header("Settings (" + scope + ")")
-	for _, spec := range specs {
-		fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Cyan, spec.BaseName, ui.Reset)
-		fmt.Fprintf(os.Stdout, "    %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
+	return cmdutil.RunCanonicalList(scope, settingsCanonicalSpec())
 }
 
 func runSettingsShow(scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findSettingsSpec(agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	info, statErr := os.Stat(spec.SourcePath)
-	ui.Header("Settings " + spec.BaseName + " (" + scope + ")")
-	fmt.Fprintf(os.Stdout, "  %spath:%s %s\n", ui.Dim, ui.Reset, config.DisplayPath(spec.SourcePath))
-	if statErr == nil {
-		fmt.Fprintf(os.Stdout, "  %ssize:%s %d bytes\n", ui.Dim, ui.Reset, info.Size())
-	}
-	fmt.Fprintln(os.Stdout)
-	return nil
+	return cmdutil.RunCanonicalShow(scope, name, settingsCanonicalSpec())
 }
 
 func runSettingsRemove(deps settingsDeps, scope, name string) error {
-	agentsHome := config.AgentsHome()
-	spec, err := findSettingsSpec(agentsHome, scope, name)
-	if err != nil {
-		return err
-	}
-	if err := platform.EnsureUnderSettingsScopeTree(agentsHome, scope, spec.SourcePath); err != nil {
-		return err
-	}
-
-	ui.Header("dot-agents settings remove")
-	fmt.Fprintf(os.Stdout, "Remove settings file %q from scope %s\n", name, ui.BoldText(scope))
-	fmt.Fprintf(os.Stdout, "  %s\n", config.DisplayPath(spec.SourcePath))
-
-	if deps.Flags.DryRun {
-		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
-		return nil
-	}
-	if !deps.Flags.Yes && !deps.Flags.Force {
-		if !ui.Confirm("Remove this file from ~/.agents/settings/?", false) {
-			ui.Info("Cancelled.")
-			return nil
-		}
-	}
-
-	if err := os.Remove(spec.SourcePath); err != nil {
-		return fmt.Errorf("removing settings file: %w", err)
-	}
-	ui.Success(fmt.Sprintf("Removed settings file %q from scope %s.", spec.BaseName, scope))
-	return nil
+	return cmdutil.RunCanonicalRemove(cmdutil.RemoveDeps{
+		DryRun: deps.Flags.DryRun, Yes: deps.Flags.Yes, Force: deps.Flags.Force,
+	}, scope, name, settingsCanonicalSpec())
 }
 
+// findSettingsSpec looks up a settings file by basename or stem and
+// wraps not-found errors with a hint pointing at `settings list`. Kept
+// as a package-private helper because TestFindSettingsSpecNotFound
+// calls it directly.
 func findSettingsSpec(agentsHome, scope, name string) (*platform.SettingsFileSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

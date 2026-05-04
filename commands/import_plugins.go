@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -478,7 +477,7 @@ func canonicalPackagePluginManifestOutputs(c importCandidate, platformID, name s
 		spec.License = strings.TrimSpace(manifest.License)
 		spec.Marketplace = platform.PluginMarketplace{
 			Repo: strings.TrimSpace(manifest.Repository),
-			Tags: sortedUniqueStrings(append([]string(nil), manifest.Keywords...)),
+			Tags: platform.SortedUniqueStrings(append([]string(nil), manifest.Keywords...)),
 		}
 		if display := strings.TrimSpace(manifest.DisplayName); display != "" {
 			spec.DisplayName = display
@@ -625,7 +624,7 @@ func packagePluginComponentPath(trimmed, platformID string) (component, rest str
 
 func importedPackageAuthors(manifest importedPackagePluginManifest) []string {
 	if len(manifest.Authors) > 0 {
-		return sortedUniqueStrings(manifest.Authors)
+		return platform.SortedUniqueStrings(manifest.Authors)
 	}
 	if name := strings.TrimSpace(manifest.Author.Name); name != "" {
 		return []string{name}
@@ -633,23 +632,3 @@ func importedPackageAuthors(manifest importedPackagePluginManifest) []string {
 	return nil
 }
 
-func sortedUniqueStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}

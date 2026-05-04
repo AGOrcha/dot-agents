@@ -93,17 +93,17 @@ func LoadPluginSpec(pluginDir string) (PluginSpec, error) {
 	spec.Version = strings.TrimSpace(spec.Version)
 	spec.DisplayName = strings.TrimSpace(spec.DisplayName)
 	spec.Description = strings.TrimSpace(spec.Description)
-	spec.Authors = sortedUniqueStrings(spec.Authors)
+	spec.Authors = SortedUniqueStrings(spec.Authors)
 	spec.Homepage = strings.TrimSpace(spec.Homepage)
 	spec.License = strings.TrimSpace(spec.License)
-	spec.Platforms = sortedUniqueStrings(spec.Platforms)
-	spec.Resources.Agents = sortedUniqueStrings(spec.Resources.Agents)
-	spec.Resources.Skills = sortedUniqueStrings(spec.Resources.Skills)
-	spec.Resources.Commands = sortedUniqueStrings(spec.Resources.Commands)
-	spec.Resources.Hooks = sortedUniqueStrings(spec.Resources.Hooks)
-	spec.Resources.MCP = sortedUniqueStrings(spec.Resources.MCP)
+	spec.Platforms = SortedUniqueStrings(spec.Platforms)
+	spec.Resources.Agents = SortedUniqueStrings(spec.Resources.Agents)
+	spec.Resources.Skills = SortedUniqueStrings(spec.Resources.Skills)
+	spec.Resources.Commands = SortedUniqueStrings(spec.Resources.Commands)
+	spec.Resources.Hooks = SortedUniqueStrings(spec.Resources.Hooks)
+	spec.Resources.MCP = SortedUniqueStrings(spec.Resources.MCP)
 	spec.Marketplace.Repo = strings.TrimSpace(spec.Marketplace.Repo)
-	spec.Marketplace.Tags = sortedUniqueStrings(spec.Marketplace.Tags)
+	spec.Marketplace.Tags = SortedUniqueStrings(spec.Marketplace.Tags)
 	for platformID, overrides := range spec.PlatformOverrides {
 		if len(overrides) == 0 {
 			delete(spec.PlatformOverrides, platformID)
@@ -178,7 +178,10 @@ func listPluginSpecsInScope(root, scope string) ([]PluginSpec, error) {
 	return specs, nil
 }
 
-func sortedUniqueStrings(values []string) []string {
+// SortedUniqueStrings trims whitespace, drops empties + duplicates,
+// and returns values sorted. Exported so commands/import_plugins.go
+// can share the implementation instead of duplicating it.
+func SortedUniqueStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
