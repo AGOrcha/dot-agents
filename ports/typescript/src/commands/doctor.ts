@@ -87,26 +87,28 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorResult>
       pathExists = false;
     }
 
-    if (!pathExists) {
+    if (pathExists) {
+      if (agentsRcFound) {
+        if (opts.verbose) {
+          checks.push({
+            name: `project:${name}`,
+            status: "ok",
+            message: `Project "${name}" healthy`,
+          });
+        }
+      } else {
+        checks.push({
+          name: `project:${name}`,
+          status: "warn",
+          message: `Project "${name}" has no .agentsrc.json`,
+        });
+      }
+    } else {
       checks.push({
         name: `project:${name}`,
         status: "warn",
         message: `Project "${name}" path not found: ${path}`,
       });
-    } else if (!agentsRcFound) {
-      checks.push({
-        name: `project:${name}`,
-        status: "warn",
-        message: `Project "${name}" has no .agentsrc.json`,
-      });
-    } else {
-      if (opts.verbose) {
-        checks.push({
-          name: `project:${name}`,
-          status: "ok",
-          message: `Project "${name}" healthy`,
-        });
-      }
     }
 
     projects.push({ name, path, pathExists, agentsRcFound });

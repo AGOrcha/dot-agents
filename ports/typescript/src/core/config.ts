@@ -91,8 +91,8 @@ export async function loadConfig(home?: string): Promise<Config> {
     return { version: 1, projects: {}, agents: {} };
   }
   const cfg = JSON.parse(data) as Config;
-  if (!cfg.projects) cfg.projects = {};
-  if (!cfg.agents) cfg.agents = {};
+  cfg.projects ??= {};
+  cfg.agents ??= {};
   return cfg;
 }
 

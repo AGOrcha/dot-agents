@@ -8,9 +8,8 @@
  *      return named events from non-empty hook arrays (project scope before global).
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { readdir, stat } from "node:fs/promises";
 import type { StringsOrBool } from "./agentsrc.js";
 
 /**

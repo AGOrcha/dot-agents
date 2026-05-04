@@ -81,7 +81,7 @@ export async function runKgHealth(opts: KgHealthOptions = {}): Promise<KgHealthR
  * Intentional stub: full KG query is Go-only per phase-4 boundary decision.
  */
 export async function runKgQuery(query: string, opts: KgQueryOptions = {}): Promise<KgQueryResult> {
-  void opts.kgHomeOverride;
+  // opts.kgHomeOverride is unused but accepted for API symmetry
   return {
     query,
     result: KG_QUERY_STUB,

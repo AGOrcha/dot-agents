@@ -57,7 +57,7 @@ export async function runAdd(projectPath: string, opts: AddOptions = {}): Promis
     return { status: "already_registered", name, path: existing };
   }
 
-  const status: AddStatus = existing !== undefined ? "updated" : "added";
+  const status: AddStatus = existing === undefined ? "added" : "updated";
   addProject(cfg, name, absPath);
   await saveConfig(cfg, home);
   return { status, name, path: absPath };

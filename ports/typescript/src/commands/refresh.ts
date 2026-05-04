@@ -49,14 +49,14 @@ export async function runRefresh(opts: RefreshOptions = {}): Promise<RefreshResu
   for (const name of filtered) {
     const path = getProjectPath(cfg, name) ?? "";
     let status: ProjectRefreshStatus = "ok";
-    if (!path) {
-      status = "not_found";
-    } else {
+    if (path) {
       try {
         await stat(path);
       } catch {
         status = "missing_path";
       }
+    } else {
+      status = "not_found";
     }
     entries.push({ name, path, status });
   }

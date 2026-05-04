@@ -97,9 +97,10 @@ export function renderCodexAgentTomlFromContent(content: string, agentMDPath: st
   const description = (meta["description"] ?? "").trim();
   const model = (meta["model"] ?? "").trim();
 
-  const lines: string[] = [];
-  lines.push(`name = ${JSON.stringify(name)}`);
-  lines.push(`description = ${JSON.stringify(description)}`);
+  const lines: string[] = [
+    `name = ${JSON.stringify(name)}`,
+    `description = ${JSON.stringify(description)}`,
+  ];
   if (model !== "") {
     lines.push(`model = ${JSON.stringify(model)}`);
   }

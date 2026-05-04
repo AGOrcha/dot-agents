@@ -7,7 +7,7 @@
  * Commands under test: init, add, refresh, status, doctor, skills, agents, hooks.
  */
 
-import { mkdtemp, mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";

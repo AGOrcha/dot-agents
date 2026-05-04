@@ -83,14 +83,14 @@ export async function runWorkflowOrient(
   }
 
   // Extract plan: - **Plan:** `<plan-id>`
-  const planMatch = section.match(/\*\*Plan:\*\*\s*`([^`]+)`/);
+  const planMatch = /\*\*Plan:\*\*\s*`([^`]+)`/.exec(section);
   const plan = planMatch ? planMatch[1] : null;
   if (!plan) {
     warnings.push("Could not parse Plan from ## Current Position");
   }
 
   // Extract task: - **Task:** `<task-id>` or **Task:** `<task-id>` — ...
-  const taskMatch = section.match(/\*\*Task:\*\*\s*`([^`]+)`/);
+  const taskMatch = /\*\*Task:\*\*\s*`([^`]+)`/.exec(section);
   const task = taskMatch ? taskMatch[1] : null;
   if (!task) {
     warnings.push("Could not parse Task from ## Current Position");
@@ -190,7 +190,7 @@ export async function runWorkflowTasks(
 function parseTasksYaml(raw: string, warnings: string[]): WorkflowTask[] {
   // Split on task entries: each task begins with `    - id:` (4-space indent list item).
   // The first line of the file contains `tasks:` — we skip header lines before the first `- id:`.
-  const taskBlocks = raw.split(/\n(?=    - id:)/);
+  const taskBlocks = raw.split(/\n(?= {4}- id:)/);
 
   const tasks: WorkflowTask[] = [];
   for (const block of taskBlocks) {
@@ -227,9 +227,10 @@ function parseTasksYaml(raw: string, warnings: string[]): WorkflowTask[] {
 function extractScalar(block: string, key: string): string | null {
   // Match `  key: value` and also `  - key: value` (YAML list item marker before the first key)
   const re = new RegExp(String.raw`^\s+(?:- )?${key}:\s+(.+)$`, "m");
-  const m = block.match(re);
+  const m = re.exec(block);
   if (!m) return null;
   return m[1].trim().replaceAll(/^["']|["']$/g, "");
+
 }
 
 /** Extract an inline or block list:
@@ -245,14 +246,14 @@ function extractStringList(block: string, key: string): string[] {
 
   // Inline with values: `key: [a, b]`
   const inlineRe = new RegExp(String.raw`^\s+${key}:\s*\[([^\]]+)\]`, "m");
-  const inlineM = block.match(inlineRe);
+  const inlineM = inlineRe.exec(block);
   if (inlineM) {
     return inlineM[1].split(",").map((s) => s.trim().replaceAll(/^["']|["']$/g, "")).filter(Boolean);
   }
 
   // Block list: find the key then collect `        - item` lines
   const blockRe = new RegExp(String.raw`^(\s+)${key}:\s*\n((?:\s+- .+\n?)*)`, "m");
-  const blockM = block.match(blockRe);
+  const blockM = blockRe.exec(block);
   if (blockM) {
     return blockM[2]
       .split("\n")
@@ -266,7 +267,7 @@ function extractStringList(block: string, key: string): string[] {
 /** Extract a block scalar value (notes: | or notes: |-). */
 function extractBlockScalar(block: string, key: string): string {
   const blockRe = new RegExp(String.raw`^(\s+)${key}:\s*\|[-]?\n((?:\1  [^\n]*\n?)*)`, "m");
-  const m = block.match(blockRe);
+  const m = blockRe.exec(block);
   if (!m) return extractScalar(block, key) ?? "";
   // Strip the common leading indent
   const indent = m[1].length + 2;

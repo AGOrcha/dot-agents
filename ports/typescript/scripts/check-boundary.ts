@@ -134,7 +134,7 @@ export function loadSpec(repoRoot: string = REPO_ROOT): BoundarySpec {
     "stage2_deferred_subitems",
   ] as const) {
     if (!Array.isArray(spec[key])) {
-      throw new Error(
+      throw new TypeError(
         `Boundary spec at ${path} is missing required array field "${key}".`,
       );
     }

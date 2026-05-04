@@ -56,7 +56,7 @@ function parseStringsOrBool(raw: unknown, field: string): StringsOrBool {
     return raw ? { all: true, names: [] } : { all: false, names: [] };
   }
   if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) {
-    return { all: false, names: raw as string[] };
+    return { all: false, names: raw };
   }
   throw new Error(`${field} must be a boolean or string array`);
 }
@@ -73,17 +73,17 @@ function readSources(raw: unknown): Source[] {
     return [];
   }
   if (!Array.isArray(raw)) {
-    throw new Error("sources must be an array");
+    throw new TypeError("sources must be an array");
   }
   const out: Source[] = [];
   for (const item of raw) {
     if (item === null || typeof item !== "object" || Array.isArray(item)) {
-      throw new Error("each source must be an object");
+      throw new TypeError("each source must be an object");
     }
     const o = item as Record<string, unknown>;
     const type = o.type;
     if (typeof type !== "string") {
-      throw new Error('source must have string "type"');
+      throw new TypeError('source must have string "type"');
     }
     const s: Source = { type };
     if (typeof o.path === "string") {
@@ -107,7 +107,7 @@ function readStringArray(raw: unknown, field: string): string[] | undefined {
   if (!Array.isArray(raw) || !raw.every((x) => typeof x === "string")) {
     throw new Error(`${field} must be an array of strings`);
   }
-  return raw as string[];
+  return raw;
 }
 
 /** Parse JSON text into AgentsRc, splitting unknown top-level keys into extraFields. */
@@ -132,12 +132,12 @@ export function parseAgentsRcJson(text: string): AgentsRc {
 
   const version = all.version;
   if (typeof version !== "number" || !Number.isInteger(version)) {
-    throw new Error("version must be an integer");
+    throw new TypeError("version must be an integer");
   }
 
   const project = all.project;
   if (project !== undefined && typeof project !== "string") {
-    throw new Error("project must be a string");
+    throw new TypeError("project must be a string");
   }
 
   const schema = all.$schema;

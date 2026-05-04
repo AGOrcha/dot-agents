@@ -284,52 +284,48 @@ function printHelp(): void {
 
 // ---- Main dispatcher ----
 
-async function main(): Promise<void> {
-  const [, , command, ...rest] = process.argv;
+const [, , command, ...rest] = process.argv;
 
-  if (!command || command === "--help" || command === "-h" || command === "help") {
-    printHelp();
-    process.exit(0);
-  }
-
-  let exitCode = 0;
-  try {
-    switch (command) {
-      case "init":
-        exitCode = await cmdInit(rest);
-        break;
-      case "add":
-        exitCode = await cmdAdd(rest);
-        break;
-      case "refresh":
-        exitCode = await cmdRefresh(rest);
-        break;
-      case "status":
-        exitCode = await cmdStatus(rest);
-        break;
-      case "doctor":
-        exitCode = await cmdDoctor(rest);
-        break;
-      case "skills":
-        exitCode = await cmdSkills(rest);
-        break;
-      case "agents":
-        exitCode = await cmdAgents(rest);
-        break;
-      case "hooks":
-        exitCode = await cmdHooks(rest);
-        break;
-      default:
-        printError(`Unknown command: ${command}`);
-        printHelp();
-        exitCode = 1;
-    }
-  } catch (e) {
-    printError(String(e));
-    exitCode = 2;
-  }
-
-  process.exit(exitCode);
+if (!command || command === "--help" || command === "-h" || command === "help") {
+  printHelp();
+  process.exit(0);
 }
 
-main();
+let exitCode = 0;
+try {
+  switch (command) {
+    case "init":
+      exitCode = await cmdInit(rest);
+      break;
+    case "add":
+      exitCode = await cmdAdd(rest);
+      break;
+    case "refresh":
+      exitCode = await cmdRefresh(rest);
+      break;
+    case "status":
+      exitCode = await cmdStatus(rest);
+      break;
+    case "doctor":
+      exitCode = await cmdDoctor(rest);
+      break;
+    case "skills":
+      exitCode = await cmdSkills(rest);
+      break;
+    case "agents":
+      exitCode = await cmdAgents(rest);
+      break;
+    case "hooks":
+      exitCode = await cmdHooks(rest);
+      break;
+    default:
+      printError(`Unknown command: ${command}`);
+      printHelp();
+      exitCode = 1;
+  }
+} catch (e) {
+  printError(String(e));
+  exitCode = 2;
+}
+
+process.exit(exitCode);

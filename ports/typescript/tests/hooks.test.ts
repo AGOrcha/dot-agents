@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { detectHookEvents } from "../src/index.js";
 
