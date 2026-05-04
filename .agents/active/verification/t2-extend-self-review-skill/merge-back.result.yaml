@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: t2-extend-self-review-skill
+parent_plan_id: self-review-iteration-close-wiring
+verifier_type: merge-back
+status: pass
+summary: Did NOT modify iteration-close (t3 scope). Existing instruction modules (code-quality, gotchas, performance, security, advisory-board, checklist) preserved verbatim. Pre-existing dirty state outside write_scope (binary-rename-da-sweep, sonarqube-pr10, typescript-port plan files) left untouched per loop-worker discipline. Standalone-mode adhoc-<RFC3339> task_id resolution documented; iteration-close path uses verify record --kind review (Mechanism 1).
+recorded_at: "2026-05-04T03:28:29Z"
+delegation_id: del-t2-extend-self-review-skill-1777864417
+artifact_paths:
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/binary-rename-da-sweep.plan.md
+    - .agents/workflow/plans/self-review-iteration-close-wiring/PLAN.yaml
+    - .agents/workflow/plans/self-review-iteration-close-wiring/TASKS.yaml
+    - .agents/workflow/plans/sonarqube-pr10/PLAN.yaml
+    - .agents/workflow/plans/sonarqube-pr10/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/PLAN.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml

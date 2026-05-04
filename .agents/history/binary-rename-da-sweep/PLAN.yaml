@@ -1,0 +1,62 @@
+schema_version: 1
+id: binary-rename-da-sweep
+title: Binary Rename — dot-agents → da (UV-style abbreviation)
+status: archived
+summary: |-
+    Rename the user-facing binary from `dot-agents` to `da` across all
+    documentation, plans, specs, skills, rules, tests, CI, and build
+    configs. Convention follows UV / similar single-letter+abbreviation
+    binaries that are quick to type. Decision in flight by the user;
+    initial WIP touched .goreleaser.yaml, .github/workflows/auto-release.yml,
+    .agentsrc.json. This plan operationalizes the broader sweep so the
+    rename actually lands cleanly without leaving stale references.
+
+    Hard scope discipline:
+      * Renames: only the user-facing binary name and CLI invocations
+        (`dot-agents <cmd>` → `da <cmd>`).
+      * STAYS: Go module path `github.com/NikashPrakash/dot-agents`,
+        source dir `cmd/dot-agents/`, project name "dot-agents", all
+        directory names (`.agents/`, `~/.agents/`).
+      * UNTOUCHED: `.agents/history/` is the historical record of what
+        was actually run; renaming there would falsify the past.
+
+    User intent (2026-05-03): hard cutover. t1/ADR-0006 should record
+    that decision and its consequences explicitly rather than treating a
+    shim-first rollout as the default.
+
+    Strategy options (recorded by t1 → ADR-0006):
+      * (A) Compat shim: ship both `da` and `dot-agents` binaries from
+        the same Go entrypoint; `dot-agents` prints a one-line stderr
+        deprecation notice; existing user scripts/hooks keep working.
+      * (B) Hard cutover: rename in one sweep PR; force ecosystem
+        update.
+    Current planning assumption: hard cutover unless implementation
+    evidence forces reconsideration during t1.
+created_at: "2026-05-03T22:00:00Z"
+updated_at: "2026-05-04T03:02:43Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: After t6 completes, every user-facing reference to the
+    binary in this repo and in `~/.agents/` + `~/.claude/CLAUDE.md` reads
+    `da`. Running `da --version`, `da init --yes`, `da workflow status`,
+    `da kg health`, and `da review` works identically to running the
+    same commands as `dot-agents` did pre-rename. New PRs that introduce
+    a fresh `dot-agents` invocation in a user-facing position are caught
+    (by convention checklist or future lint).
+
+    Common false positive: the primary binary is renamed in build config,
+    but stale docs, skills, or tests still use `dot-agents`, and the
+    documentation sweep claims "done" while skills/instructions still
+    show `dot-agents <cmd>`. Verification must include a sample of
+    user-reading flows (run `/agent-start` and `/orchestrator-session-start`
+    in a clean session, confirm the agent's output uses `da`).
+verification_strategy: |-
+    Per-task verification gates. Final end-to-end check via:
+      * `grep -rE "dot-agents [a-z]" docs/ .agents/ research/` returns
+        only entries inside `.agents/history/`.
+      * `da --help` produces the expected surface; no default-path docs,
+        tests, or workflows rely on `dot-agents`.
+      * Smoke test `tests/test-claude-configs.sh` passes against `da`.
+      * One human-driven session run starting from a clean shell:
+        `/orchestrator-session-start`, observe agent output uses `da`.
+current_focus_task: ""

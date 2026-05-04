@@ -1,10 +1,9 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
 plan_id: sonarqube-pr10
 tasks:
     - id: sq1-current-state-audit
       title: Audit current SonarCloud state on PR#10; classify remaining findings
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - sq2-reliability-rating-fixes
@@ -14,7 +13,6 @@ tasks:
       write_scope:
         - .agents/workflow/plans/sonarqube-pr10/findings.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T1 (molecule — research + memo).
 
@@ -51,7 +49,7 @@ tasks:
           anti-scope: do NOT make code fixes in this task. Audit-only.
           bundle-context (if fanout): the source .agents/active/sonarqube-pr10.plan.md (now copied here as sonarqube-pr10.plan.md), SonarCloud project URL, current branch tip
           output contract: findings.md with per-condition classifications + recommended task-scope split
-
+      app_type: research
     - id: sq2-reliability-rating-fixes
       title: Address new_reliability_rating findings classified as fixable
       status: pending
@@ -66,7 +64,6 @@ tasks:
         - tests/
         - .github/workflows/
       verification_required: true
-      app_type: code-fix
       notes: |-
         Tier: T2 (compound — touches multiple files; size depends on sq1
         findings).
@@ -104,7 +101,7 @@ tasks:
           anti-scope: do NOT add suppression comments without justification. Do NOT touch unrelated code in the same cluster.
           bundle-context (if fanout): sq1's findings.md, the specific cluster's file list, SonarCloud rule docs (mcp__sonarqube__show_rule)
           output contract: lower new_reliability_rating; merge-back captures per-cluster fix rationale
-
+      app_type: code-fix
     - id: sq3-security-hotspots-sweep
       title: Review and resolve security hotspots flagged on PR#10
       status: pending
@@ -119,7 +116,6 @@ tasks:
         - tests/
         - .github/workflows/
       verification_required: true
-      app_type: code-fix
       notes: |-
         Tier: T2 (compound — security review per hotspot).
 
@@ -151,7 +147,7 @@ tasks:
           anti-scope: do NOT mass-mark without review. Do NOT change rule severity or threshold to paper over the failure.
           bundle-context (if fanout): sq1's hotspot list, SonarCloud project URL
           output contract: new_security_hotspots_reviewed above threshold; per-hotspot rationale visible in SonarCloud
-
+      app_type: code-fix
     - id: sq4-duplication-debt-decision
       title: Decide scope on new_duplicated_lines_density (this PR vs follow-up plan)
       status: pending
@@ -164,7 +160,6 @@ tasks:
         - docs/adr/README.md
         - .agents/workflow/plans/sonarqube-pr10/findings.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T2 (compound — load-bearing decision affecting PR#10
         merge readiness).
@@ -205,7 +200,7 @@ tasks:
           anti-scope: do NOT start mass-deduping in this task — that's option (A)'s implementation, which would spawn its own plan
           bundle-context (if fanout): sq1's findings.md (duplication numbers), SonarCloud project URL, PR#10 description for scope context
           output contract: docs/adr/0008-*.md + index updated + a concrete answer in findings.md "duplication path forward"
-
+      app_type: research
     - id: sq5-archive-on-pr-merge
       title: Archive plan when PR#10 merges (or closes without merge)
       status: pending
@@ -218,7 +213,6 @@ tasks:
       write_scope:
         - .agents/history/sonarqube-pr10/
       verification_required: false
-      app_type: workflow
       notes: |-
         Tier: T1 (molecule — archival + outcome note).
 
@@ -245,3 +239,4 @@ tasks:
           anti-scope: do NOT archive while PR is open
           bundle-context (if fanout): not applicable — orchestrator's closeout turn
           output contract: history dir populated; PLAN.yaml status flipped to completed
+      app_type: workflow

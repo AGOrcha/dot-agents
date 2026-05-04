@@ -1,0 +1,129 @@
+schema_version: 1
+task_id: t2-extend-self-review-skill
+parent_plan_id: self-review-iteration-close-wiring
+delegation_id: del-t2-extend-self-review-skill-1777864417
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: |-
+  ## KG Context (Step 0)
+
+  ### kg changes --brief
+  Change Impact
+  ────────────────────────────────────────
+    Analyzed 13 changed file(s):
+    - 0 changed function(s)/class(es)
+    - 0 affected flow(s)
+    - 0 test gap(s)
+    - Overall risk score: 0.00
+    Note: run 'kg code-status' to verify the code graph is current.
+
+  ### kg impact .agents/skills/dot-agents/self-review/SKILL.md .agents/skills/dot-agents/self-review/instructions/kg-context.md .agents/skills/dot-agents/self-review/instructions/output-format.md
+  Impact Radius
+  ────────────────────────────────────────
+    Blast radius for 3 changed file(s):
+    - 0 nodes directly changed
+    - 0 nodes impacted (within 2 hops)
+    - 0 additional files affected
+    Note: run 'kg code-status' to verify the code graph is current.
+
+  Step 0 produced non-degraded output. The diff is documentation-only
+  (skill markdown), so the graph correctly reports 0 code-node impact.
+
+  ## Per-file review
+
+  ### SKILL.md (modified)
+  - Code-quality: clear section ordering; YAML frontmatter additive
+    (tier + contract block); existing Steps 1-7 preserved verbatim; new
+    Step 0 (kg-context) and Step 8 (output-format) inserted at the
+    correct positions per ADR-0003.
+  - Security: N/A (skill markdown; no auth, secrets, external boundary).
+  - Performance: N/A (markdown).
+  - Gotchas: contract block uses `reads:` / `writes:` / `escape_hatches:`
+    keys per the bundle's frontmatter spec — verified the keys are
+    present and not typo'd.
+  - Verdict: accept.
+
+  ### instructions/kg-context.md (new)
+  - Code-quality: scope frontmatter set; procedure split into A/B/C/D;
+    graceful-degradation rules explicit (skip, do not abort, capture
+    warning into reviewer_notes); explicit non-action (do not invoke
+    `da kg setup` or `da kg build` from inside Step 0).
+  - Security: N/A.
+  - Performance: bounded — two CLI calls per review.
+  - Gotchas: verbatim-capture rule preserves audit trail even if KG
+    output format drifts later.
+  - Verdict: accept.
+
+  ### instructions/output-format.md (new)
+  - Code-quality: documents on-disk strict schema (additionalProperties:
+    false) authoritative, with field table; documents §1.6 envelope as
+    reviewer_notes packing today (forward-compat for future schema
+    migration). Worked example is concrete and parseable.
+  - Security: N/A.
+  - Performance: N/A.
+  - Gotchas: explicit "common false positives" section flags the
+    stub-prose-no-file regression that the bundle's hard test guards
+    against; flags the additionalProperties: false trap.
+  - Verdict: accept.
+
+  ## Advisory Board (compressed)
+  - Senior reviewer: contract block on SKILL.md is the reusable template
+    the t1 ADR set aspires to; reads/writes/escape_hatches keys match
+    bundle. Accept.
+  - Skeptic: confirmed the file MUST live at the strict-schema path or
+    `mergeReviewIterLog` cannot consume it; output-format.md packs
+    envelope into `reviewer_notes` to avoid additionalProperties: false
+    rejection — the right call for today, with explicit migration path
+    documented. Accept.
+  - Style reviewer: instruction modules consistent with existing
+    code-quality.md / gotchas.md voice (frontmatter `scope:` line,
+    headers, bulleted directives). Accept.
+
+  ## Checklist
+  - [x] write_scope respected — only `.agents/skills/dot-agents/self-review/`.
+  - [x] Existing instruction modules untouched (code-quality, gotchas,
+        performance, security; advisory-board.md and checklist.md live
+        under eval/, also untouched).
+  - [x] iteration-close NOT modified (t3 owns that scope).
+  - [x] tier: T2 + contract block present in SKILL.md frontmatter.
+  - [x] kg-context inserted as Step 0 in SKILL.md workflow.
+  - [x] output-format inserted as final step in SKILL.md workflow.
+  - [x] ADR-0002 path used: .agents/active/verification/<task_id>/review-decision.yaml.
+  - [x] ADR-0005 graceful degradation documented in kg-context.md.
+
+  ## §1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: "2026-05-04T03:35:00Z"
+  invoked_by: loop-worker
+  plan_id: self-review-iteration-close-wiring
+  task_id: t2-extend-self-review-skill
+
+  outcome:
+    declared: success
+    agent_self_assessment: "Skill extended per ADRs 0002/0003/0005. Hard test: artifact written at ADR-0002 path with non-stub per-file analysis; Step 0 produced visible kg-changes/kg-impact output (non-degraded); SKILL.md frontmatter declares tier: T2 and parseable contract block."
+
+  post_invocation:
+    agent_actions_after_skill_returned: []
+    user_corrections: []
+    retries_in_loop: 0
+
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap:
+      present: true
+      note: "Skill files at ~/.agents/skills/dot-agents/self-review/ are outside the project git tree (symlinked). `git diff` against the skill changes returns nothing, so kg-changes/kg-impact reports 0 code-node impact even when skill content changed materially. Future improvement: kg-context.md could fall back to listing the symlink target's modified files when the project diff is empty but skill files were edited. Tracked separately from t2 scope."
+    script_gap:
+      present: false
+      note: ""
+    instruction_gap:
+      present: false
+      note: ""
+  ```
+recorded_at: "2026-05-04T03:35:00Z"
+recorded_by: self-review (skill, hard-test of t2-extend-self-review-skill)

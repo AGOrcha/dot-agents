@@ -1,0 +1,45 @@
+schema_version: 1
+delegation_id: del-tp1-current-gap-audit-1777864446
+plan_id: typescript-port
+task_id: tp1-current-gap-audit
+owner: loop-worker
+worker:
+    profile: loop-worker
+    project_overlay_files:
+        - .agents/active/active.loop.md
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-04T03:14:06Z"
+    reason: Foundation for tp2 boundary spec and tp3 sync pipeline; isolated write scope (single doc); read-only audit
+scope:
+    write_scope:
+        - docs/TYPESCRIPT_PORT_GAP.md
+prompt:
+    inline:
+        - 'Produce docs/TYPESCRIPT_PORT_GAP.md per the task notes. Three sections: (1) Top-level command parity — for each top-level Go command'
+        - classify TS coverage as Stage 1 missing / Phase 4 opt-out / Phase 5 deferred. (2) Subcommand depth per Stage 1 command — for init
+        - add
+        - refresh
+        - status
+        - doctor
+        - skills
+        - agents
+        - 'hooks: list Go subcommands and flags; mark TS as implemented/partial/missing/deferred-by-design. (3) Stage 2 deferred items already named (plugin spec listing in status etc; any Stage 2 surfaces added since boundary doc was written). Anti-scope: do NOT modify ports/typescript/ source — read-only audit. Hard test: memo classification matches docs/TYPESCRIPT_PORT_BOUNDARY.md Phase 4 contract.'
+context:
+    required_files:
+        - docs/TYPESCRIPT_PORT_BOUNDARY.md
+        - ports/typescript/README.md
+        - ports/typescript/tests/boundary.test.ts
+verification:
+    feedback_goal: Three-section gap memo at docs/TYPESCRIPT_PORT_GAP.md classifying every Go vs TS divergence as 'Stage 1 + missing', 'Phase 4 opt-out', or 'Phase 5 deferred'
+    scenario_tags:
+        - ts-port-gap-audit
+    app_type: research
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

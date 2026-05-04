@@ -1,10 +1,9 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
 plan_id: typescript-port
 tasks:
     - id: tp1-current-gap-audit
       title: Audit current Go ↔ TS command surface gap; produce checked-in gap memo
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - tp2-boundary-spec
@@ -13,7 +12,6 @@ tasks:
       write_scope:
         - docs/TYPESCRIPT_PORT_GAP.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T1 (molecule — research + memo).
 
@@ -51,7 +49,7 @@ tasks:
           anti-scope: do NOT modify ports/typescript/ source. This task is read-only audit.
           bundle-context (if fanout): docs/TYPESCRIPT_PORT_BOUNDARY.md, ports/typescript/README.md, ports/typescript/src/commands/*.ts, commands/*.go listings, ports/typescript/tests/boundary.test.ts
           output contract: docs/TYPESCRIPT_PORT_GAP.md with three sections (top-level / subcommand depth / Stage 2 deferred), each row classified
-
+      app_type: research
     - id: tp2-boundary-spec
       title: Define machine-readable boundary spec the sync pipeline can consume
       status: pending
@@ -64,7 +62,6 @@ tasks:
         - docs/typescript-port-boundary.json
         - docs/TYPESCRIPT_PORT_BOUNDARY.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T1 (molecule — schema design + cross-reference update).
 
@@ -94,7 +91,7 @@ tasks:
           anti-scope: do NOT change the Phase 4 decision content. The JSON encodes the existing prose; deviations require a superseding ADR.
           bundle-context (if fanout): docs/TYPESCRIPT_PORT_BOUNDARY.md (current), docs/TYPESCRIPT_PORT_GAP.md (from tp1)
           output contract: docs/typescript-port-boundary.json (parses as valid JSON; matches the schema above) + the cross-reference line in TYPESCRIPT_PORT_BOUNDARY.md
-
+      app_type: research
     - id: tp3-sync-pipeline
       title: Implement CI sync check that diffs Go command tree against the boundary spec
       status: pending
@@ -109,7 +106,6 @@ tasks:
         - ports/typescript/tests/boundary-sync.test.ts
         - .github/workflows/typescript-port.yml
       verification_required: true
-      app_type: ci-tooling
       notes: |-
         Tier: T2 (compound — script + test + CI workflow).
 
@@ -149,7 +145,7 @@ tasks:
           anti-scope: do NOT introduce a new Go subcommand `__dump-tree` in this task — if the parser fallback is sufficient, ship that; the Go-side dump-tree command is a separate, smaller follow-up if parser fragility shows up.
           bundle-context (if fanout): docs/typescript-port-boundary.json (from tp2), ports/typescript/src/cli.ts, commands/root.go (Go cobra root), existing CI workflows under .github/workflows/ for style consistency
           output contract: passing CI on this branch with the new workflow active; the validation experiment (fake-Go-command-fails) noted in merge-back
-
+      app_type: ci-tooling
     - id: tp4-close-mirror-gaps
       title: Close any must-mirror gaps surfaced by tp1 audit
       status: pending
@@ -163,7 +159,6 @@ tasks:
         - ports/typescript/src/cli.ts
         - ports/typescript/tests/
       verification_required: true
-      app_type: typescript
       notes: |-
         Tier: T2 (compound — implementation work; size depends on tp1 findings).
 
@@ -184,3 +179,4 @@ tasks:
           anti-scope: do NOT exceed the Phase 4 boundary. Read-only workflow surfaces are allowed; mutating workflow / KG / orchestration are NOT.
           bundle-context (if fanout): docs/TYPESCRIPT_PORT_GAP.md (from tp1), the Go source for the command being mirrored, existing TS commands as style reference, ports/typescript/tests/ for the testing pattern
           output contract: TS files for each newly-mirrored command; passing CI including the tp3 sync check; ports/typescript/README.md updated if user-facing surface changed
+      app_type: typescript

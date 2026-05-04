@@ -1,10 +1,9 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
 plan_id: self-review-iteration-close-wiring
 tasks:
     - id: t1-audit-decide-output-schema
       title: Audit current self-review output and decide output destination + schema
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-extend-self-review-skill
@@ -17,7 +16,6 @@ tasks:
         - docs/adr/0005-restore-kg-context-in-self-review.md
         - docs/adr/README.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T2 (compound — produces three coupled architectural decisions).
 
@@ -64,10 +62,10 @@ tasks:
           anti-scope: do NOT modify any SKILL.md or instructions/ files in this task; that is t2's owned scope
           bundle-context (if fanout): docs/adr/0001 + agent-context-resolution-architecture.md §1.6/§6.5 + commands/workflow/iter_log.go (mergeReviewIterLog) + the older self-review template at src/share/templates/standard/skills/global/self-review/SKILL.md
           output contract: three new ADR files at docs/adr/000{2,3,5}-*.md + updated docs/adr/README.md index
-
+      app_type: research
     - id: t2-extend-self-review-skill
       title: Extend self-review skill to write review-decision.yaml; restore kg-context calls; add tier+contract frontmatter
-      status: pending
+      status: in_progress
       depends_on:
         - t1-audit-decide-output-schema
       blocks:
@@ -79,7 +77,6 @@ tasks:
         - .agents/skills/dot-agents/self-review/instructions/kg-context.md
         - .agents/skills/dot-agents/self-review/instructions/output-format.md
       verification_required: true
-      app_type: skill
       notes: |-
         Tier: T2 (compound — modifies SKILL.md orchestrator + adds two instruction
         modules + frontmatter contract).
@@ -128,7 +125,7 @@ tasks:
           anti-scope: do NOT touch iteration-close — that is t3's scope. Do NOT redesign the existing instruction modules (code-quality, gotchas, performance, security, advisory-board, checklist) — additions are ADDITIVE.
           bundle-context (if fanout): ADR-0002 (output schema, accepted by t1) + ADR-0005 (kg-context restoration, accepted by t1) + current SKILL.md content + the older template at src/share/templates/.../self-review/SKILL.md (for the kg-changes call to restore)
           output contract: SKILL.md with tier+contract frontmatter, two new instructions/{kg-context,output-format}.md, no changes to the six existing instruction modules
-
+      app_type: skill
     - id: t3-extend-iteration-close
       title: Wire iteration-close to invoke self-review and call workflow checkpoint --role review
       status: pending
@@ -142,7 +139,6 @@ tasks:
         - .agents/skills/dot-agents/iteration-close/SKILL.md
         - .agents/skills/dot-agents/iteration-close/instructions/workflow.md
       verification_required: true
-      app_type: skill
       notes: |-
         Tier: T2 (compound — modifies SKILL.md orchestrator + workflow instruction).
 
@@ -181,7 +177,7 @@ tasks:
           anti-scope: do NOT redesign mergeReviewIterLog or verify-record. Just call them correctly. Do NOT add new flags to workflow checkpoint — use --role review path that already exists.
           bundle-context (if fanout): ADR-0003 (fire ordering, accepted by t1) + commands/workflow/iter_log.go mergeReviewIterLog + commands/workflow/verification.go review-record writer + iteration-close current instructions/workflow.md
           output contract: SKILL.md with tier+contract; instructions/workflow.md with the new self-review invocation step + the --role review checkpoint call
-
+      app_type: skill
     - id: t4-trace-schema-seed-doc
       title: Document review-decision.yaml as the first execution-telemetry trace; produce ADR-0004
       status: pending
@@ -194,7 +190,6 @@ tasks:
         - docs/adr/README.md
         - .agents/proposals/agent-context-resolution-architecture.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T1 (molecule — single ADR + cross-reference update; no code).
 
@@ -230,7 +225,7 @@ tasks:
           anti-scope: do NOT modify §1.6 trace schema substantively — this task only documents that ADR-0002's review-decision.yaml IS the seed. Schema changes belong in t1.
           bundle-context (if fanout): ADR-0002 (output schema) + agent-context-resolution-architecture.md §1.6 current text
           output contract: docs/adr/0004-execution-telemetry-schema-seed.md + a cross-reference line in §1.6
-
+      app_type: research
     - id: t5-verify-end-to-end
       title: Run a real iteration through the new chain; capture before/after iter-log diff
       status: pending
@@ -243,7 +238,6 @@ tasks:
       write_scope:
         - .agents/active/iteration-log/iter-N.yaml (real, written by closeout chain)
       verification_required: true
-      app_type: verifier
       notes: |-
         Tier: T1 (molecule — verification, not a new compound).
 
@@ -277,7 +271,7 @@ tasks:
           rollback: if verification fails, t5 escalates back to t2 or t3 via fold-back rather than papering over the failure
           bundle-context (if fanout): not applicable — this is the orchestrator's verification turn
           output contract: a fresh iter-N.yaml on disk with populated review block + a captured before/after diff in the merge-back
-
+      app_type: verifier
     - id: t6-archive-and-baseline
       title: workflow plan archive; record updated baseline in architecture note §6.5
       status: pending
@@ -290,7 +284,6 @@ tasks:
         - .agents/proposals/agent-context-resolution-architecture.md
         - docs/adr/README.md
       verification_required: false
-      app_type: workflow
       notes: |-
         Tier: T1 (molecule — archive + record).
 
@@ -324,3 +317,4 @@ tasks:
           anti-scope: do NOT modify the produced ADRs substantively at archive time — only flip status from proposed → accepted in the index if t1/t4 left them as proposed
           bundle-context (if fanout): not applicable — closeout is the orchestrator's turn
           output contract: .agents/history/self-review-iteration-close-wiring/ populated; architecture note §6.5 has the addendum line; docs/adr/README.md index has all four ADRs marked accepted; PLAN.yaml status flipped to completed
+      app_type: workflow

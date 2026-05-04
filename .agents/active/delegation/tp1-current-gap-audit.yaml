@@ -1,0 +1,51 @@
+schema_version: 1
+id: del-tp1-current-gap-audit-1777864446
+parent_plan_id: typescript-port
+parent_task_id: tp1-current-gap-audit
+title: Audit current Go ↔ TS command surface gap; produce checked-in gap memo
+summary: Delegated from plan TypeScript Port — Sync Pipeline & Boundary Maintenance
+write_scope:
+    - docs/TYPESCRIPT_PORT_GAP.md
+success_criteria: |-
+    Tier: T1 (molecule — research + memo).
+
+    Concrete deliverable: docs/TYPESCRIPT_PORT_GAP.md captures the
+    current state at three levels of detail:
+
+    1. Top-level command parity:
+         Go has — add, agents, doctor, explain, hooks, import, init,
+         install, kg, mcp, refresh, remove, review, rules, settings,
+         skills, status, sync, workflow.
+         TS has — add, agents, doctor, hooks, init, kg, refresh,
+         skills, status, workflow.
+         Per the Phase 4 boundary: missing-but-intentional are
+         explain, import, install, mcp, remove, review, rules,
+         settings, sync. Each gets a one-line classification:
+         "Stage 1 + missing" (must mirror), "Phase 4 opt-out"
+         (deferred by design), or "Phase 5 deferred" (Stage 2 work).
+
+    2. Subcommand depth per Stage 1 command:
+         For init, add, refresh, status, doctor, skills, agents, hooks:
+         list every Go subcommand and flag; mark TS coverage as
+         "implemented", "partial", "missing", or "deferred-by-design".
+         This is the row-level diff that the future sync pipeline
+         will lock in.
+
+    3. Stage 2 deferred items already named:
+         plugin spec listing in status (Go: printPluginsSection /
+         ListPluginSpecs; TS: deferred). Any new Stage 2 surfaces
+         since the boundary doc was written get added here.
+
+    ISP routing:
+      mode: direct (research; produces a single memo)
+      verifier: manual (memo is well-formed and accurate)
+      review: doc review (does the memo's classification match the boundary contract?)
+      anti-scope: do NOT modify ports/typescript/ source. This task is read-only audit.
+      bundle-context (if fanout): docs/TYPESCRIPT_PORT_BOUNDARY.md, ports/typescript/README.md, ports/typescript/src/commands/*.ts, commands/*.go listings, ports/typescript/tests/boundary.test.ts
+      output contract: docs/TYPESCRIPT_PORT_GAP.md with three sections (top-level / subcommand depth / Stage 2 deferred), each row classified
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:14:06Z"
+updated_at: "2026-05-04T03:19:42Z"
