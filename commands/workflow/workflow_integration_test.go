@@ -12,15 +12,33 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-func TestWorkflow_CheckpointThenOrient(t *testing.T) {
+// writeRepoFile creates parent directories under repo and writes
+// content to repo/rel. Replaces the inline write closure repeated
+// across multiple workflow_integration tests.
+func writeRepoFile(t *testing.T, repo, rel, content string) {
+	t.Helper()
+	path := filepath.Join(repo, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setupCheckpointStateTest seeds a workflow-proj repo with a checkpoint
+// fixture (nextAction/status/timestamp), chdirs to it via t.Cleanup,
+// runs collectWorkflowState, and asserts a non-nil checkpoint loads.
+// Returns the loaded state for further per-test assertions.
+func setupCheckpointStateTest(t *testing.T, nextAction, status, timestamp, missingMsg string) *workflowOrientState {
+	t.Helper()
 	repo := initWorkflowTestRepo(t)
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
-
-	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "Continue wave-3 implementation", "pass", "2026-04-10T10:00:00Z")
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, nextAction, status, timestamp)
 
 	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +48,16 @@ func TestWorkflow_CheckpointThenOrient(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Checkpoint == nil {
-		t.Fatal("expected checkpoint, got nil")
+		t.Fatal(missingMsg)
 	}
+	return state
+}
+
+func TestWorkflow_CheckpointThenOrient(t *testing.T) {
+	state := setupCheckpointStateTest(t,
+		"Continue wave-3 implementation", "pass", "2026-04-10T10:00:00Z",
+		"expected checkpoint, got nil")
+
 	if state.Checkpoint.Verification.Status != "pass" {
 		t.Fatalf("checkpoint verification status = %q, want pass", state.Checkpoint.Verification.Status)
 	}
@@ -299,26 +325,11 @@ func TestWorkflow_VerifyRecordReview_Cobra(t *testing.T) {
 // that collectWorkflowState succeeds, returns the checkpoint without error, and that the
 // orient output renders the old timestamp (no crash or data loss).
 func TestWorkflow_StaleCheckpointState(t *testing.T) {
-	repo := initWorkflowTestRepo(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-
 	// Checkpoint >7 days old relative to "now" (2026-04-10); use 2026-04-01
-	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "old task", "unknown", "2026-04-01T00:00:00Z")
+	state := setupCheckpointStateTest(t,
+		"old task", "unknown", "2026-04-01T00:00:00Z",
+		"expected stale checkpoint to be loaded, got nil")
 
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
-
-	state, err := collectWorkflowState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Checkpoint == nil {
-		t.Fatal("expected stale checkpoint to be loaded, got nil")
-	}
 	if state.Checkpoint.Timestamp != "2026-04-01T00:00:00Z" {
 		t.Fatalf("checkpoint timestamp = %q, want 2026-04-01T00:00:00Z", state.Checkpoint.Timestamp)
 	}
@@ -382,16 +393,7 @@ func TestWorkflow_DerivedFocusIgnoresStaleCurrentFocusTask(t *testing.T) {
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	write := func(rel, content string) {
-		t.Helper()
-		path := filepath.Join(repo, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	write := func(rel, content string) { writeRepoFile(t, repo, rel, content) }
 
 	write(".agents/workflow/plans/z-stale-focus/PLAN.yaml", `schema_version: 1
 id: "z-stale-focus"
@@ -487,16 +489,7 @@ func TestWorkflow_MultiPlanPriority(t *testing.T) {
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	write := func(rel, content string) {
-		t.Helper()
-		path := filepath.Join(repo, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	write := func(rel, content string) { writeRepoFile(t, repo, rel, content) }
 
 	// Active plan
 	write(".agents/workflow/plans/alpha/PLAN.yaml", `schema_version: 1

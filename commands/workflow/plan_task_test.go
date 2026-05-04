@@ -527,17 +527,17 @@ func TestSelectAllEligibleTasks_PlanFilterScopes(t *testing.T) {
 	}
 }
 
-// TestSelectAllEligibleTasks_CrossPlanDepSatisfied verifies that a task with a
-// cross-plan dependency pointing to a completed task IS returned.
-func TestSelectAllEligibleTasks_CrossPlanDepSatisfied(t *testing.T) {
+// runCrossPlanDepEligibility seeds two plans where main-plan/main-task
+// depends on other-plan/task-x and other-plan/task-x has the supplied
+// status. Asserts main-task's eligibility matches wantEligible.
+func runCrossPlanDepEligibility(t *testing.T, otherTaskStatus string, wantEligible bool) {
+	t.Helper()
 	proj := t.TempDir()
-	// other-plan has task-done which is completed.
 	writePlanFixture(t, proj, "other-plan", "active", []CanonicalTask{
-		{ID: "task-done", Title: "Done", Status: "completed"},
+		{ID: "task-x", Title: "Other", Status: otherTaskStatus},
 	})
-	// main-plan has a task depending on other-plan/task-done.
 	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
-		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"other-plan/task-done"}},
+		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"other-plan/task-x"}},
 	})
 
 	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
@@ -550,31 +550,21 @@ func TestSelectAllEligibleTasks_CrossPlanDepSatisfied(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Errorf("main-task with satisfied cross-plan dep should be eligible; got %v", got)
+	if found != wantEligible {
+		t.Errorf("main-task eligible=%v, want %v (other-task status=%q); got %+v", found, wantEligible, otherTaskStatus, got)
 	}
+}
+
+// TestSelectAllEligibleTasks_CrossPlanDepSatisfied verifies that a task with a
+// cross-plan dependency pointing to a completed task IS returned.
+func TestSelectAllEligibleTasks_CrossPlanDepSatisfied(t *testing.T) {
+	runCrossPlanDepEligibility(t, "completed", true)
 }
 
 // TestSelectAllEligibleTasks_CrossPlanDepUnsatisfied verifies that a task with a
 // cross-plan dependency pointing to a non-completed task is excluded.
 func TestSelectAllEligibleTasks_CrossPlanDepUnsatisfied(t *testing.T) {
-	proj := t.TempDir()
-	writePlanFixture(t, proj, "other-plan", "active", []CanonicalTask{
-		{ID: "task-pending", Title: "Pending", Status: "pending"},
-	})
-	writePlanFixture(t, proj, "main-plan", "active", []CanonicalTask{
-		{ID: "main-task", Title: "Main", Status: "pending", DependsOn: []string{"other-plan/task-pending"}},
-	})
-
-	got, err := selectAllEligibleTasks(proj, []string{"main-plan"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	for _, s := range got {
-		if s.TaskID == "main-task" {
-			t.Errorf("main-task with unsatisfied cross-plan dep should be excluded; got %+v", s)
-		}
-	}
+	runCrossPlanDepEligibility(t, "pending", false)
 }
 
 // TestSelectAllEligibleTasks_CrossPlanDepMissingPlan verifies that a cross-plan

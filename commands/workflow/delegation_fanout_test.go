@@ -552,11 +552,20 @@ func TestMergeBack_InvalidVerificationStatus(t *testing.T) {
 
 // ── p6-fanout-dispatch: typed verifier artifact from verify record ────────────
 
-func TestVerifyRecord_WritesTypedArtifact_WithTask(t *testing.T) {
+// setupFanoutSliceDispatch creates an in_progress fanout slice project
+// and runs `workflow fanout --plan p1 --slice s1 --owner w` so the
+// task fixture is ready for downstream `verify record` calls.
+func setupFanoutSliceDispatch(t *testing.T) string {
+	t.Helper()
 	repo := setupFanoutSliceProject(t, "in_progress")
 	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
 		t.Fatal(err)
 	}
+	return repo
+}
+
+func TestVerifyRecord_WritesTypedArtifact_WithTask(t *testing.T) {
+	repo := setupFanoutSliceDispatch(t)
 	err := executeWorkflowCommand(t, repo,
 		"verify", "record",
 		"--kind", "test",
@@ -596,10 +605,7 @@ func TestVerifyRecord_WritesTypedArtifact_WithTask(t *testing.T) {
 }
 
 func TestVerifyRecord_DefaultsVerifierTypeToKind(t *testing.T) {
-	repo := setupFanoutSliceProject(t, "in_progress")
-	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w"); err != nil {
-		t.Fatal(err)
-	}
+	repo := setupFanoutSliceDispatch(t)
 	// --task provided without --verifier-type: falls back to --kind as stem
 	err := executeWorkflowCommand(t, repo,
 		"verify", "record",
