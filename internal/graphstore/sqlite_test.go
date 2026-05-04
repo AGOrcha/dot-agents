@@ -6,7 +6,12 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/NikashPrakash/dot-agents/internal/graphstore/internal/storetest"
 )
+
+// openTestStoreInterface adapts openTestStore (returns *SQLiteStore) to
+// the storetest.OpenStore signature (returns graphstore.Store).
+func openTestStoreInterface(t *testing.T) graphstore.Store { return openTestStore(t) }
 
 // openTestStore opens a fresh in-memory-like SQLite database in a temp dir.
 func openTestStore(t *testing.T) *graphstore.SQLiteStore {
@@ -131,27 +136,7 @@ func TestUpsertNode_Update(t *testing.T) {
 }
 
 func TestGetNode_RoundTrip(t *testing.T) {
-	s := openTestStore(t)
-	node := graphstore.NodeInfo{
-		Kind: graphstore.NodeKindFunction, Name: "run",
-		FilePath: "cmd/main.go", Language: "go",
-		LineStart: 5, LineEnd: 20,
-	}
-	_, err := s.UpsertNode(node, "abc123")
-	if err != nil {
-		t.Fatalf("UpsertNode: %v", err)
-	}
-
-	got, err := s.GetNode("cmd/main.go::run")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetNode returned nil")
-	}
-	if got.Name != "run" || got.Language != "go" || got.LineStart != 5 {
-		t.Errorf("unexpected node: %+v", got)
-	}
+	storetest.RunNodeRoundTrip(t, openTestStoreInterface)
 }
 
 func TestGetNode_NotFound(t *testing.T) {
@@ -501,30 +486,7 @@ func TestGetImpactRadius_MaxNodesLimit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestUpsertGetKGNote(t *testing.T) {
-	s := openTestStore(t)
-	note := graphstore.KGNote{
-		ID:       "decision-001",
-		Title:    "Use SQLite as warm layer",
-		NoteType: "decision",
-		Status:   "active",
-		Summary:  "Chosen for pure-Go, zero-dep deployment.",
-		FilePath: "/kg/notes/decision-001.md",
-		Version:  1,
-	}
-	if err := s.UpsertKGNote(note); err != nil {
-		t.Fatalf("UpsertKGNote: %v", err)
-	}
-
-	got, err := s.GetKGNote("decision-001")
-	if err != nil {
-		t.Fatalf("GetKGNote: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetKGNote returned nil")
-	}
-	if got.Title != note.Title || got.NoteType != note.NoteType || got.Version != 1 {
-		t.Errorf("unexpected note: %+v", got)
-	}
+	storetest.RunKGNoteRoundTrip(t, openTestStoreInterface)
 }
 
 func TestGetKGNote_NotFound(t *testing.T) {
@@ -555,22 +517,7 @@ func TestUpsertKGNote_UpdatesInPlace(t *testing.T) {
 }
 
 func TestSearchKGNotes(t *testing.T) {
-	s := openTestStore(t)
-	for _, n := range []graphstore.KGNote{
-		{ID: "n1", Title: "SQLite architecture", NoteType: "decision", Status: "active", FilePath: "a.md"},
-		{ID: "n2", Title: "Graph theory", Summary: "concepts for SQLite graph", NoteType: "concept", Status: "active", FilePath: "b.md"},
-		{ID: "n3", Title: "Unrelated", NoteType: "entity", Status: "active", FilePath: "c.md"},
-	} {
-		_ = s.UpsertKGNote(n)
-	}
-
-	results, err := s.SearchKGNotes("SQLite", 10)
-	if err != nil {
-		t.Fatalf("SearchKGNotes: %v", err)
-	}
-	if len(results) != 2 {
-		t.Errorf("want 2 SQLite notes, got %d", len(results))
-	}
+	storetest.RunKGNoteSearch(t, openTestStoreInterface)
 }
 
 func TestListArchivedKGNotes(t *testing.T) {

@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/NikashPrakash/dot-agents/internal/graphstore/internal/storetest"
 )
+
+// openPGTestStoreInterface adapts openPGTestStore to storetest.OpenStore.
+func openPGTestStoreInterface(t *testing.T) graphstore.Store { return openPGTestStore(t) }
 
 // openPGTestStore opens a PostgresStore using the TEST_PG_URL environment variable.
 // If the variable is not set the test is skipped.
@@ -130,27 +134,7 @@ func TestPG_UpsertNode_Update(t *testing.T) {
 }
 
 func TestPG_GetNode_RoundTrip(t *testing.T) {
-	s := openPGTestStore(t)
-	node := graphstore.NodeInfo{
-		Kind: graphstore.NodeKindFunction, Name: "pgRun",
-		FilePath: "pg_cmd/main.go", Language: "go",
-		LineStart: 5, LineEnd: 20,
-	}
-	_, err := s.UpsertNode(node, "pgabc123")
-	if err != nil {
-		t.Fatalf("UpsertNode: %v", err)
-	}
-
-	got, err := s.GetNode("pg_cmd/main.go::pgRun")
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetNode returned nil")
-	}
-	if got.Name != "pgRun" || got.Language != "go" || got.LineStart != 5 {
-		t.Errorf("unexpected node: %+v", got)
-	}
+	storetest.RunNodeRoundTrip(t, openPGTestStoreInterface)
 }
 
 func TestPG_GetNode_NotFound(t *testing.T) {
@@ -365,30 +349,7 @@ func TestPG_GetEdgesAmong_Empty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPG_UpsertGetKGNote(t *testing.T) {
-	s := openPGTestStore(t)
-	note := graphstore.KGNote{
-		ID:       "pg-decision-001",
-		Title:    "Use Postgres as warm layer",
-		NoteType: "decision",
-		Status:   "active",
-		Summary:  "Chosen for scalability.",
-		FilePath: "/kg/notes/pg-decision-001.md",
-		Version:  1,
-	}
-	if err := s.UpsertKGNote(note); err != nil {
-		t.Fatalf("UpsertKGNote: %v", err)
-	}
-
-	got, err := s.GetKGNote("pg-decision-001")
-	if err != nil {
-		t.Fatalf("GetKGNote: %v", err)
-	}
-	if got == nil {
-		t.Fatal("GetKGNote returned nil")
-	}
-	if got.Title != note.Title || got.NoteType != note.NoteType || got.Version != 1 {
-		t.Errorf("unexpected note: %+v", got)
-	}
+	storetest.RunKGNoteRoundTrip(t, openPGTestStoreInterface)
 }
 
 func TestPG_GetKGNote_NotFound(t *testing.T) {
@@ -419,22 +380,7 @@ func TestPG_UpsertKGNote_UpdatesInPlace(t *testing.T) {
 }
 
 func TestPG_SearchKGNotes(t *testing.T) {
-	s := openPGTestStore(t)
-	for _, n := range []graphstore.KGNote{
-		{ID: "pg-sn1", Title: "Postgres architecture", NoteType: "decision", Status: "active", FilePath: "pg_a.md"},
-		{ID: "pg-sn2", Title: "Graph theory", Summary: "concepts for Postgres graph", NoteType: "concept", Status: "active", FilePath: "pg_b.md"},
-		{ID: "pg-sn3", Title: "Unrelated PG Note", NoteType: "entity", Status: "active", FilePath: "pg_c.md"},
-	} {
-		_ = s.UpsertKGNote(n)
-	}
-
-	results, err := s.SearchKGNotes("Postgres", 10)
-	if err != nil {
-		t.Fatalf("SearchKGNotes: %v", err)
-	}
-	if len(results) < 2 {
-		t.Errorf("want at least 2 Postgres notes, got %d", len(results))
-	}
+	storetest.RunKGNoteSearch(t, openPGTestStoreInterface)
 }
 
 func TestPG_ListArchivedKGNotes(t *testing.T) {
