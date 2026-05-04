@@ -278,9 +278,24 @@ func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]Res
 	return intents, nil
 }
 
-func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+// sharedMirrorIntentSpec parameterizes the per-bucket symlink-mirror
+// intent shape used by buildShared{Skill,Plugin,Agent}MirrorIntentsForRoot.
+type sharedMirrorIntentSpec struct {
+	Bucket       string             // "skills" | "plugins" | "agents"
+	ManifestName string             // marker file inside each entry
+	SourceKind   ResourceSourceKind // CanonicalDir | CanonicalBundle
+	Origin       string             // SourceRef.Origin
+	Materializer string             // ResourceIntent.Materializer
+}
+
+// buildSharedMirrorIntentsForRoot returns ResourceIntents for every
+// bucket entry under ~/.agents/<spec.Bucket>/<project>/ that owns
+// spec.ManifestName, projecting them into targetRoot via symlink.
+// All three per-bucket helpers (skill / plugin / agent) delegate
+// here.
+func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) []ResourceIntent {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, skillManifestName)
+	entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, project, spec.ManifestName)
 	if err != nil {
 		return nil
 	}
@@ -289,28 +304,38 @@ func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []Resource
 	for _, entry := range entries {
 		targetPath := filepath.Join(targetRoot, entry.Name)
 		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("skills.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			IntentID:    fmt.Sprintf("%s.%s.%s.%s", spec.Bucket, project, entry.Name, sanitizeIntentRoot(targetRoot)),
 			Project:     project,
-			Bucket:      "skills",
+			Bucket:      spec.Bucket,
 			LogicalName: entry.Name,
 			TargetPath:  targetPath,
 			Ownership:   ResourceOwnershipSharedRepo,
 			SourceRef: ResourceSourceRef{
 				Scope:        project,
-				Bucket:       "skills",
+				Bucket:       spec.Bucket,
 				RelativePath: entry.Name,
-				Kind:         ResourceSourceCanonicalDir,
-				Origin:       "shared-skill-mirror",
+				Kind:         spec.SourceKind,
+				Origin:       spec.Origin,
 			},
 			Shape:         ResourceShapeDirectDir,
 			Transport:     ResourceTransportSymlink,
-			Materializer:  "shared-skill-dir-symlink",
+			Materializer:  spec.Materializer,
 			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{skillManifestName},
+			MarkerFiles:   []string{spec.ManifestName},
 		})
 	}
 	return intents
+}
+
+func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
+		Bucket:       "skills",
+		ManifestName: skillManifestName,
+		SourceKind:   ResourceSourceCanonicalDir,
+		Origin:       "shared-skill-mirror",
+		Materializer: "shared-skill-dir-symlink",
+	})
 }
 
 // BuildSharedPluginBundleIntents returns ResourceIntents for each canonical plugin bundle
@@ -332,38 +357,13 @@ func BuildSharedPluginBundleIntents(project string, targetRoots ...string) ([]Re
 }
 
 func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []ResourceIntent {
-	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "plugins", project, PluginManifestName)
-	if err != nil {
-		return nil
-	}
-
-	intents := make([]ResourceIntent, 0, len(entries))
-	for _, entry := range entries {
-		targetPath := filepath.Join(targetRoot, entry.Name)
-		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("plugins.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
-			Project:     project,
-			Bucket:      "plugins",
-			LogicalName: entry.Name,
-			TargetPath:  targetPath,
-			Ownership:   ResourceOwnershipSharedRepo,
-			SourceRef: ResourceSourceRef{
-				Scope:        project,
-				Bucket:       "plugins",
-				RelativePath: entry.Name,
-				Kind:         ResourceSourceCanonicalBundle,
-				Origin:       "shared-plugin-bundle",
-			},
-			Shape:         ResourceShapeDirectDir,
-			Transport:     ResourceTransportSymlink,
-			Materializer:  "shared-plugin-dir-symlink",
-			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
-			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{PluginManifestName},
-		})
-	}
-	return intents
+	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
+		Bucket:       "plugins",
+		ManifestName: PluginManifestName,
+		SourceKind:   ResourceSourceCanonicalBundle,
+		Origin:       "shared-plugin-bundle",
+		Materializer: "shared-plugin-dir-symlink",
+	})
 }
 
 func sanitizeIntentRoot(root string) string {
@@ -456,38 +456,13 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 }
 
 func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
-	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
-	if err != nil {
-		return nil
-	}
-
-	intents := make([]ResourceIntent, 0, len(entries))
-	for _, entry := range entries {
-		targetPath := filepath.Join(targetRoot, entry.Name)
-		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("agents.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
-			Project:     project,
-			Bucket:      "agents",
-			LogicalName: entry.Name,
-			TargetPath:  targetPath,
-			Ownership:   ResourceOwnershipSharedRepo,
-			SourceRef: ResourceSourceRef{
-				Scope:        project,
-				Bucket:       "agents",
-				RelativePath: entry.Name,
-				Kind:         ResourceSourceCanonicalDir,
-				Origin:       "shared-agent-mirror",
-			},
-			Shape:         ResourceShapeDirectDir,
-			Transport:     ResourceTransportSymlink,
-			Materializer:  "shared-agent-dir-symlink",
-			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
-			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{agentManifestName},
-		})
-	}
-	return intents
+	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
+		Bucket:       "agents",
+		ManifestName: agentManifestName,
+		SourceKind:   ResourceSourceCanonicalDir,
+		Origin:       "shared-agent-mirror",
+		Materializer: "shared-agent-dir-symlink",
+	})
 }
 
 func collectSharedTargetIntents(project string, platforms []Platform) ([]ResourceIntent, error) {
