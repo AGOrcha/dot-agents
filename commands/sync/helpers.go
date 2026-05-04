@@ -3,11 +3,11 @@ package sync
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"golang.org/x/sys/execabs"
 )
 
 func hasGitManifests() bool {
@@ -57,7 +57,7 @@ func postPullRefresh(deps Deps, hasManifests bool) error {
 }
 
 func printBranchStatus(agentsHome string) {
-	branch, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branch, _ := execabs.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	branchStr := strings.TrimSpace(string(branch))
 	if branchStr != "" {
 		fmt.Fprintf(os.Stdout, "  Branch:  %s%s%s\n", ui.Bold, branchStr, ui.Reset)
@@ -65,7 +65,7 @@ func printBranchStatus(agentsHome string) {
 }
 
 func printRemoteStatus(agentsHome string) bool {
-	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
+	remoteOut, _ := execabs.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
 	remoteStr := strings.TrimSpace(string(remoteOut))
 	hasRemote := remoteStr != ""
 	if hasRemote {
@@ -80,7 +80,7 @@ func printAheadBehind(agentsHome string, hasRemote bool) {
 	if !hasRemote {
 		return
 	}
-	aheadBehind, _ := exec.Command("git", "-C", agentsHome, "rev-list", "--count", "--left-right", "origin/HEAD...HEAD").Output()
+	aheadBehind, _ := execabs.Command("git", "-C", agentsHome, "rev-list", "--count", "--left-right", "origin/HEAD...HEAD").Output()
 	ab := strings.Fields(strings.TrimSpace(string(aheadBehind)))
 	if len(ab) != 2 {
 		return
@@ -114,7 +114,7 @@ func CountPorcelainLines(porcelain string) (staged, unstaged, untracked int) {
 }
 
 func countPorcelainStatus(agentsHome string) (int, int, int) {
-	porcelain, _ := exec.Command("git", "-C", agentsHome, "status", "--porcelain").Output()
+	porcelain, _ := execabs.Command("git", "-C", agentsHome, "status", "--porcelain").Output()
 	return CountPorcelainLines(string(porcelain))
 }
 

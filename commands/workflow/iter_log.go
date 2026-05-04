@@ -3,13 +3,13 @@ package workflow
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 type iterLogEntry struct {
@@ -129,7 +129,7 @@ type iterLogDiffStat struct {
 }
 
 func gitIterDiffStat(projectPath string) iterLogDiffStat {
-	cmd := exec.Command("git", "-C", projectPath, "rev-parse", "HEAD~1")
+	cmd := execabs.Command("git", "-C", projectPath, "rev-parse", "HEAD~1")
 	if err := cmd.Run(); err != nil {
 		return iterLogDiffStat{FirstCommit: true}
 	}

@@ -3,12 +3,12 @@ package sync
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 func newCommitCmd(deps Deps) *cobra.Command {
@@ -28,10 +28,10 @@ func newCommitCmd(deps Deps) *cobra.Command {
 				message = strings.Join(args, " ")
 			}
 			if message == "" {
-				out, _ := exec.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
+				out, _ := execabs.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
 				if len(out) == 0 {
-					exec.Command("git", "-C", agentsHome, "add", "-A").Run()
-					out, _ = exec.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
+					execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
+					out, _ = execabs.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
 				}
 				message = "Update ~/.agents/ configuration"
 				_ = out
@@ -43,8 +43,8 @@ func newCommitCmd(deps Deps) *cobra.Command {
 				return nil
 			}
 
-			exec.Command("git", "-C", agentsHome, "add", "-A").Run()
-			out, err := exec.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
+			execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
+			out, err := execabs.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
 			output := strings.TrimSpace(string(out))
 			if err != nil {
 				if strings.Contains(output, "nothing to commit") {

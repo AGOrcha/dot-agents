@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/execabs"
 	_ "modernc.org/sqlite"
 )
 
@@ -481,7 +482,7 @@ func (b *CRGBridge) gitChangedFiles(base string) ([]string, error) {
 	if base == "" {
 		base = "HEAD~1"
 	}
-	cmd := exec.Command("git", "-C", b.RepoRoot, "diff", "--name-only", "--diff-filter=ACMRTUXB", base+"...HEAD")
+	cmd := execabs.Command("git", "-C", b.RepoRoot, "diff", "--name-only", "--diff-filter=ACMRTUXB", base+"...HEAD")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if msg := strings.TrimSpace(string(out)); msg != "" {

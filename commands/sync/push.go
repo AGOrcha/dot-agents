@@ -3,12 +3,12 @@ package sync
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 func newPushCmd(deps Deps) *cobra.Command {
@@ -22,7 +22,7 @@ func newPushCmd(deps Deps) *cobra.Command {
 				message = "Update ~/.agents/ configuration"
 			}
 
-			pendingOut, _ := exec.Command("git", "-C", agentsHome, "log", "--oneline", "origin/HEAD..HEAD").Output()
+			pendingOut, _ := execabs.Command("git", "-C", agentsHome, "log", "--oneline", "origin/HEAD..HEAD").Output()
 			pending := strings.TrimSpace(string(pendingOut))
 
 			if pending != "" {
@@ -39,8 +39,8 @@ func newPushCmd(deps Deps) *cobra.Command {
 				return nil
 			}
 
-			exec.Command("git", "-C", agentsHome, "add", "-A").Run()
-			commitOut, _ := exec.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
+			execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
+			commitOut, _ := execabs.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
 			commitStr := strings.TrimSpace(string(commitOut))
 			if commitStr != "" && !strings.Contains(commitStr, "nothing to commit") {
 				fmt.Fprintln(os.Stdout, commitStr)
@@ -53,7 +53,7 @@ func newPushCmd(deps Deps) *cobra.Command {
 				}
 			}
 
-			out, err := exec.Command("git", "-C", agentsHome, "push").CombinedOutput()
+			out, err := execabs.Command("git", "-C", agentsHome, "push").CombinedOutput()
 			fmt.Fprint(os.Stdout, string(out))
 			if err != nil {
 				return fmt.Errorf("git push: %w", err)

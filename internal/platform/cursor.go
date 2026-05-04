@@ -10,6 +10,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	"golang.org/x/sys/execabs"
 )
 
 type cursor struct{}
@@ -60,7 +61,7 @@ func (c *cursor) Version() string {
 func macOSCursorAppShortVersion() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "defaults", "read",
+	cmd := execabs.CommandContext(ctx, "defaults", "read",
 		"/Applications/Cursor.app/Contents/Info.plist",
 		"CFBundleShortVersionString")
 	cmd.WaitDelay = cliExecPipeWaitDelay

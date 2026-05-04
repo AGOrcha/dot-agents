@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 func runWorkflowStatus() error {
@@ -721,12 +721,12 @@ func splitWorkflowLogEntries(content string) []string {
 }
 
 func isGitRepo(projectPath string) bool {
-	cmd := exec.Command("git", "-C", projectPath, "rev-parse", "--is-inside-work-tree")
+	cmd := execabs.Command("git", "-C", projectPath, "rev-parse", "--is-inside-work-tree")
 	return cmd.Run() == nil
 }
 
 func gitOutput(projectPath string, args ...string) string {
-	cmd := exec.Command("git", append([]string{"-C", projectPath}, args...)...)
+	cmd := execabs.Command("git", append([]string{"-C", projectPath}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

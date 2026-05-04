@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 // ── Command registration ──────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ func runKGSync(cmd *cobra.Command, _ []string) error {
 	}
 
 	ui.Info(fmt.Sprintf("Running git %s in %s ...", op, home))
-	gitCmd := exec.Command("git", gitArgs...)
+	gitCmd := execabs.Command("git", gitArgs...)
 	gitCmd.Stdout = os.Stdout
 	gitCmd.Stderr = os.Stderr
 	if err := gitCmd.Run(); err != nil {

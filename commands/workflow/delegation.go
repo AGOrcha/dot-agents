@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 type CoordinationIntent string
@@ -967,7 +967,7 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	}
 
 	var filesChanged []string
-	gitOut, err := exec.Command("git", "-C", project.Path, "diff", "--name-only", "HEAD").Output()
+	gitOut, err := execabs.Command("git", "-C", project.Path, "diff", "--name-only", "HEAD").Output()
 	if err == nil {
 		for _, f := range strings.Split(strings.TrimSpace(string(gitOut)), "\n") {
 			if f != "" {

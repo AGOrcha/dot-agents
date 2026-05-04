@@ -3,12 +3,12 @@ package sync
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 func newInitCmd(deps Deps) *cobra.Command {
@@ -27,7 +27,7 @@ func newInitCmd(deps Deps) *cobra.Command {
 				ui.Info("~/.agents/ is already a git repository.")
 				fmt.Fprintln(os.Stdout)
 
-				out, _ := exec.Command("git", "-C", agentsHome, "remote", "-v").Output()
+				out, _ := execabs.Command("git", "-C", agentsHome, "remote", "-v").Output()
 				remote := strings.TrimSpace(string(out))
 				if remote != "" {
 					ui.Info("Remote configured:")
@@ -58,7 +58,7 @@ func newInitCmd(deps Deps) *cobra.Command {
 				return nil
 			}
 
-			out, err := exec.Command("git", "-C", agentsHome, "init").CombinedOutput()
+			out, err := execabs.Command("git", "-C", agentsHome, "init").CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("git init: %w\n%s", err, out)
 			}
@@ -68,8 +68,8 @@ func newInitCmd(deps Deps) *cobra.Command {
 				_ = os.WriteFile(gitignorePath, []byte("local/\n*.dot-agents-backup\n"), 0644)
 			}
 
-			exec.Command("git", "-C", agentsHome, "add", ".").Run()
-			exec.Command("git", "-C", agentsHome, "commit", "-m", "Initial commit").Run()
+			execabs.Command("git", "-C", agentsHome, "add", ".").Run()
+			execabs.Command("git", "-C", agentsHome, "commit", "-m", "Initial commit").Run()
 
 			ui.Success("Initialized git repository in ~/.agents/")
 			fmt.Fprintln(os.Stdout)

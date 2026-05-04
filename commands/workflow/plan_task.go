@@ -13,6 +13,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 const (
@@ -2422,13 +2423,13 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 // checkScopeGitDiffFiles returns the list of files with uncommitted changes using
 // `git diff --name-only HEAD`. Returns an error on failure (used for graceful degradation).
 func checkScopeGitDiffFiles(projectPath string) ([]string, error) {
-	cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+	cmd := execabs.Command("git", "diff", "--name-only", "HEAD")
 	cmd.Dir = projectPath
 	cmd.Env = os.Environ()
 	out, err := cmd.Output()
 	if err != nil {
 		// Also try index-only (staged but not committed).
-		cmd2 := exec.Command("git", "diff", "--name-only", "--cached")
+		cmd2 := execabs.Command("git", "diff", "--name-only", "--cached")
 		cmd2.Dir = projectPath
 		cmd2.Env = os.Environ()
 		out2, err2 := cmd2.Output()
