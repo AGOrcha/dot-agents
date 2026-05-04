@@ -973,7 +973,18 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	bundle, err := buildDelegationBundleForFanout(project.Path, cmd, planID, taskID, sliceID, plan, targetTask, contract, writeScope, now)
+	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
+		ProjectPath:      project.Path,
+		Cmd:              cmd,
+		PlanID:           planID,
+		TaskID:           taskID,
+		SliceID:          sliceID,
+		Plan:             plan,
+		TargetTask:       targetTask,
+		Contract:         contract,
+		WriteScope:       writeScope,
+		CreatedAtRFC3339: now,
+	})
 	if err != nil {
 		return err
 	}
@@ -1318,18 +1329,8 @@ func validateFanoutBundleFlagPaths(projectPath string, f *fanoutBundleFlags) err
 	return nil
 }
 
-func newDelegationEvidencePolicy() *struct {
-	RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-	ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
-	SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-	PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
-} {
-	return &struct {
-		RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-		ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
-		SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-		PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
-	}{}
+func newDelegationEvidencePolicy() *delegationEvidencePolicy {
+	return &delegationEvidencePolicy{}
 }
 
 func applyFanoutEvidencePolicy(b *delegationBundleYAML, f *fanoutBundleFlags) {
@@ -1353,33 +1354,40 @@ func applyFanoutEvidencePolicy(b *delegationBundleYAML, f *fanoutBundleFlags) {
 	}
 }
 
-func buildDelegationBundleForFanout(
-	projectPath string,
-	cmd *cobra.Command,
-	planID, taskID, sliceID string,
-	plan *CanonicalPlan,
-	targetTask *CanonicalTask,
-	contract *DelegationContract,
-	writeScope []string,
-	createdAtRFC3339 string,
-) (*delegationBundleYAML, error) {
-	f := collectFanoutBundleFlags(cmd)
-	if err := validateFanoutBundleFlagPaths(projectPath, f); err != nil {
+// fanoutBundleRequest bundles the inputs to buildDelegationBundleForFanout so
+// the function stays under the parameter limit while keeping each value
+// individually addressable from the caller.
+type fanoutBundleRequest struct {
+	ProjectPath      string
+	Cmd              *cobra.Command
+	PlanID           string
+	TaskID           string
+	SliceID          string
+	Plan             *CanonicalPlan
+	TargetTask       *CanonicalTask
+	Contract         *DelegationContract
+	WriteScope       []string
+	CreatedAtRFC3339 string
+}
+
+func buildDelegationBundleForFanout(req fanoutBundleRequest) (*delegationBundleYAML, error) {
+	f := collectFanoutBundleFlags(req.Cmd)
+	if err := validateFanoutBundleFlagPaths(req.ProjectPath, f); err != nil {
 		return nil, err
 	}
 
-	owner := strings.TrimSpace(contract.Owner)
+	owner := strings.TrimSpace(req.Contract.Owner)
 	if owner == "" {
 		owner = "unspecified"
 	}
 
 	var b delegationBundleYAML
 	b.SchemaVersion = 1
-	b.DelegationID = contract.ID
-	b.PlanID = planID
-	b.TaskID = taskID
-	if sliceID != "" {
-		b.SliceID = sliceID
+	b.DelegationID = req.Contract.ID
+	b.PlanID = req.PlanID
+	b.TaskID = req.TaskID
+	if req.SliceID != "" {
+		b.SliceID = req.SliceID
 	}
 	b.Owner = owner
 
@@ -1394,11 +1402,11 @@ func buildDelegationBundleForFanout(
 		Reason     string `yaml:"reason,omitempty"`
 	}{
 		SelectedBy: "workflow fanout",
-		SelectedAt: createdAtRFC3339,
+		SelectedAt: req.CreatedAtRFC3339,
 		Reason:     strings.TrimSpace(f.selReason),
 	}
 
-	b.Scope.WriteScope = append([]string(nil), writeScope...)
+	b.Scope.WriteScope = append([]string(nil), req.WriteScope...)
 
 	if len(f.promptLines) > 0 {
 		b.Prompt.Inline = f.promptLines
@@ -1421,7 +1429,7 @@ func buildDelegationBundleForFanout(
 		b.Verification.HigherLayerValidationQueue = f.validationQueue
 	}
 
-	appType, verifierSeq, err := resolveFanoutVerifierDispatch(projectPath, cmd, plan, targetTask)
+	appType, verifierSeq, err := resolveFanoutVerifierDispatch(req.ProjectPath, req.Cmd, req.Plan, req.TargetTask)
 	if err != nil {
 		return nil, err
 	}
@@ -1441,7 +1449,7 @@ func buildDelegationBundleForFanout(
 }
 
 func mustGetStringSlice(cmd *cobra.Command, name string) []string {
-	if f := cmd.Flags().Lookup(name); f == nil {
+	if cmd.Flags().Lookup(name) == nil {
 		return nil
 	}
 	s, err := cmd.Flags().GetStringSlice(name)

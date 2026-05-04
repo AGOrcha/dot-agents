@@ -370,7 +370,18 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that should receive the new task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskAdd(args[0], taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddAppType, taskAddVerification)
+			return runWorkflowTaskAdd(taskAddInputs{
+				PlanID:               args[0],
+				TaskID:               taskAddID,
+				Title:                taskAddTitle,
+				Notes:                taskAddNotes,
+				Owner:                taskAddOwner,
+				DependsOn:            taskAddDependsOn,
+				Blocks:               taskAddBlocks,
+				WriteScope:           taskAddWriteScope,
+				AppType:              taskAddAppType,
+				VerificationRequired: taskAddVerification,
+			})
 		},
 	}
 	taskAddCmd.Flags().StringVar(&taskAddID, "id", "", "Task ID (required)")
@@ -608,7 +619,18 @@ func runWorkflowVerifyRecordDispatch(verifyKind, verifyStatus, verifyCommand, ve
 				"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
 			)
 		}
-		return runWorkflowVerifyRecordReview(verifyCommand, verifyScope, verifySummary, reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, reviewFailedGates)
+		return runWorkflowVerifyRecordReview(reviewRecordInputs{
+			Command:       verifyCommand,
+			Scope:         verifyScope,
+			Summary:       verifySummary,
+			Phase1In:      reviewPhase1,
+			Phase2In:      reviewPhase2,
+			OverallIn:     reviewOverall,
+			Escalation:    reviewEscalation,
+			ReviewerNotes: reviewNotes,
+			TaskFlag:      reviewTask,
+			FailedGates:   reviewFailedGates,
+		})
 	}
 	if strings.TrimSpace(verifyStatus) == "" {
 		return fmt.Errorf("--status is required when --kind is not review")

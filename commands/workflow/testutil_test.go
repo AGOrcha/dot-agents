@@ -347,28 +347,42 @@ blockers: []
 	}
 }
 
-func writeCheckpointFixtureWithGitOverride(t *testing.T, agentsHome, projectName, repo string, nextAction, verStatus, timestamp, branch, sha string) {
+// checkpointFixtureGitOverride bundles the inputs to
+// writeCheckpointFixtureWithGitOverride so the helper stays under the
+// parameter limit while keeping each value individually addressable.
+type checkpointFixtureGitOverride struct {
+	AgentsHome  string
+	ProjectName string
+	Repo        string
+	NextAction  string
+	VerStatus   string
+	Timestamp   string
+	Branch      string
+	SHA         string
+}
+
+func writeCheckpointFixtureWithGitOverride(t *testing.T, in checkpointFixtureGitOverride) {
 	t.Helper()
-	contextDir := filepath.Join(agentsHome, "context", projectName)
+	contextDir := filepath.Join(in.AgentsHome, "context", in.ProjectName)
 	if err := os.MkdirAll(contextDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	checkpoint := `schema_version: 1
-timestamp: "` + timestamp + `"
+timestamp: "` + in.Timestamp + `"
 project:
-  name: "` + projectName + `"
-  path: "` + repo + `"
+  name: "` + in.ProjectName + `"
+  path: "` + in.Repo + `"
 git:
-  branch: "` + branch + `"
-  sha: "` + sha + `"
+  branch: "` + in.Branch + `"
+  sha: "` + in.SHA + `"
   dirty_file_count: 0
 files:
   modified: []
 message: ""
 verification:
-  status: "` + verStatus + `"
+  status: "` + in.VerStatus + `"
   summary: "tests passed"
-next_action: "` + nextAction + `"
+next_action: "` + in.NextAction + `"
 blockers: []
 `
 	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte(checkpoint), 0644); err != nil {

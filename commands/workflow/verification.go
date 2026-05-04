@@ -120,10 +120,26 @@ func resolveReviewDelegationContract(projectPath, taskFlag string) (string, *Del
 	return taskID, contract, nil
 }
 
-func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, overallIn, escalation, reviewerNotes, taskFlag string, failedGatesInput []string) error {
-	if !isValidVerificationScope(scope) {
+// reviewRecordInputs bundles inputs for runWorkflowVerifyRecordReview so the
+// call site stays under the function-parameter limit while keeping each field
+// individually addressable from the caller.
+type reviewRecordInputs struct {
+	Command       string
+	Scope         string
+	Summary       string
+	Phase1In      string
+	Phase2In      string
+	OverallIn     string
+	Escalation    string
+	ReviewerNotes string
+	TaskFlag      string
+	FailedGates   []string
+}
+
+func runWorkflowVerifyRecordReview(in reviewRecordInputs) error {
+	if !isValidVerificationScope(in.Scope) {
 		return deps.ErrorWithHints(
-			fmt.Sprintf("invalid scope %q", scope),
+			fmt.Sprintf("invalid scope %q", in.Scope),
 			"Valid verification scopes: `file`, `package`, `repo`, `custom`.",
 		)
 	}
@@ -131,25 +147,25 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 	if err != nil {
 		return err
 	}
-	phase1, err := parseReviewPhaseDecision("--phase1-decision", phase1In)
+	phase1, err := parseReviewPhaseDecision("--phase1-decision", in.Phase1In)
 	if err != nil {
 		return err
 	}
-	phase2, err := parseReviewPhaseDecision("--phase2-decision", phase2In)
+	phase2, err := parseReviewPhaseDecision("--phase2-decision", in.Phase2In)
 	if err != nil {
 		return err
 	}
-	overall, err := resolveReviewOverallDecision(phase1, phase2, overallIn, escalation)
-	if err != nil {
-		return err
-	}
-
-	taskID, contract, err := resolveReviewDelegationContract(project.Path, taskFlag)
+	overall, err := resolveReviewOverallDecision(phase1, phase2, in.OverallIn, in.Escalation)
 	if err != nil {
 		return err
 	}
 
-	failedGates := trimStringSlice(failedGatesInput)
+	taskID, contract, err := resolveReviewDelegationContract(project.Path, in.TaskFlag)
+	if err != nil {
+		return err
+	}
+
+	failedGates := trimStringSlice(in.FailedGates)
 	if failedGates == nil {
 		failedGates = []string{}
 	}
@@ -164,8 +180,8 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 		Phase2Decision:   phase2,
 		OverallDecision:  overall,
 		FailedGates:      failedGates,
-		EscalationReason: strings.TrimSpace(escalation),
-		ReviewerNotes:    strings.TrimSpace(reviewerNotes),
+		EscalationReason: strings.TrimSpace(in.Escalation),
+		ReviewerNotes:    strings.TrimSpace(in.ReviewerNotes),
 		RecordedAt:       now,
 		RecordedBy:       verifyRecordedByLabel,
 	}
@@ -179,16 +195,16 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 		Timestamp:     now,
 		Kind:          "review",
 		Status:        overallDecisionToVerificationStatus(overall),
-		Command:       strings.TrimSpace(command),
-		Scope:         scope,
-		Summary:       strings.TrimSpace(summary),
+		Command:       strings.TrimSpace(in.Command),
+		Scope:         in.Scope,
+		Summary:       strings.TrimSpace(in.Summary),
 		Artifacts:     []string{artifactRel},
 		RecordedBy:    verifyRecordedByLabel,
 	}
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err
 	}
-	ui.Success(fmt.Sprintf("Review decision recorded for task %s: overall=%s (%s)", taskID, overall, strings.TrimSpace(summary)))
+	ui.Success(fmt.Sprintf("Review decision recorded for task %s: overall=%s (%s)", taskID, overall, strings.TrimSpace(in.Summary)))
 	return nil
 }
 

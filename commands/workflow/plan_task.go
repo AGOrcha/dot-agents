@@ -1526,7 +1526,7 @@ func deriveCompletionState(suggestion *workflowNextTaskSuggestion, paused, locke
 	}
 }
 
-func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (*workflowCompletionScopeState, error) {
+func collectWorkflowCompletionState(projectPath, explicitPlanID string) (*workflowCompletionScopeState, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
 		return nil, err
@@ -1618,7 +1618,7 @@ func rankNextTaskCandidate(projectPath string, sug workflowNextTaskSuggestion) (
 	return sug, priority
 }
 
-func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
+func selectNextCanonicalTask(projectPath, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
 		return nil, err
@@ -2115,43 +2115,59 @@ func splitTrimmedCSV(csv string) []string {
 	return out
 }
 
-func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, writeScope, appType string, verificationRequired bool) error {
+// taskAddInputs bundles the inputs to runWorkflowTaskAdd so the call site stays
+// under the function-parameter limit while keeping each field individually
+// addressable from the caller.
+type taskAddInputs struct {
+	PlanID               string
+	TaskID               string
+	Title                string
+	Notes                string
+	Owner                string
+	DependsOn            string
+	Blocks               string
+	WriteScope           string
+	AppType              string
+	VerificationRequired bool
+}
+
+func runWorkflowTaskAdd(in taskAddInputs) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
-	tf, err := loadCanonicalTasks(project.Path, planID)
+	tf, err := loadCanonicalTasks(project.Path, in.PlanID)
 	if err != nil {
-		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, err)
 	}
 	for _, t := range tf.Tasks {
-		if t.ID == taskID {
-			return fmt.Errorf("task %q already exists in plan %q", taskID, planID)
+		if t.ID == in.TaskID {
+			return fmt.Errorf("task %q already exists in plan %q", in.TaskID, in.PlanID)
 		}
 	}
 	task := CanonicalTask{
-		ID:                   taskID,
-		Title:                title,
+		ID:                   in.TaskID,
+		Title:                in.Title,
 		Status:               "pending",
-		Owner:                owner,
-		Notes:                notes,
-		AppType:              appType,
-		VerificationRequired: verificationRequired,
-		DependsOn:            splitTrimmedCSV(dependsOn),
-		Blocks:               splitTrimmedCSV(blocks),
-		WriteScope:           splitTrimmedCSV(writeScope),
+		Owner:                in.Owner,
+		Notes:                in.Notes,
+		AppType:              in.AppType,
+		VerificationRequired: in.VerificationRequired,
+		DependsOn:            splitTrimmedCSV(in.DependsOn),
+		Blocks:               splitTrimmedCSV(in.Blocks),
+		WriteScope:           splitTrimmedCSV(in.WriteScope),
 	}
 	tf.Tasks = append(tf.Tasks, task)
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err
 	}
-	plan, err := loadCanonicalPlan(project.Path, planID)
+	plan, err := loadCanonicalPlan(project.Path, in.PlanID)
 	if err != nil {
 		return err
 	}
 	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_ = saveCanonicalPlan(project.Path, plan)
-	ui.Success(fmt.Sprintf("Added task %q to plan %q", taskID, planID))
+	ui.Success(fmt.Sprintf("Added task %q to plan %q", in.TaskID, in.PlanID))
 	return nil
 }
 

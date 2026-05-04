@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	// _ "embed": pull in static/verification-decision.schema.json via go:embed.
 	_ "embed"
 	"encoding/json"
 	"fmt"

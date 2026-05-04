@@ -241,8 +241,14 @@ func TestWorkflow_VerifyRecordReview_WritesArtifactAndLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runWorkflowVerifyRecordReview("", "repo", "LGTM scoped surface",
-		"accept", "accept", "", "", "", "slice-99", []string{"unit", "api"}); err != nil {
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:       "repo",
+		Summary:     "LGTM scoped surface",
+		Phase1In:    "accept",
+		Phase2In:    "accept",
+		TaskFlag:    "slice-99",
+		FailedGates: []string{"unit", "api"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -287,16 +293,32 @@ func TestWorkflow_VerifyRecordReview_Errors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runWorkflowVerifyRecordReview("", "repo", "x",
-		"escalate", "accept", "", "", "", "slice-err", nil); err == nil {
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Summary:  "x",
+		Phase1In: "escalate",
+		Phase2In: "accept",
+		TaskFlag: "slice-err",
+	}); err == nil {
 		t.Fatal("expected error for escalate without escalation reason")
 	}
-	if err := runWorkflowVerifyRecordReview("", "repo", "x",
-		"accept", "accept", "reject", "", "", "slice-err", nil); err == nil {
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:     "repo",
+		Summary:   "x",
+		Phase1In:  "accept",
+		Phase2In:  "accept",
+		OverallIn: "reject",
+		TaskFlag:  "slice-err",
+	}); err == nil {
 		t.Fatal("expected error when overall disagrees with phases")
 	}
-	if err := runWorkflowVerifyRecordReview("", "repo", "x",
-		"maybe", "accept", "", "", "", "slice-err", nil); err == nil {
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Summary:  "x",
+		Phase1In: "maybe",
+		Phase2In: "accept",
+		TaskFlag: "slice-err",
+	}); err == nil {
 		t.Fatal("expected error for invalid phase decision")
 	}
 }
@@ -358,7 +380,16 @@ func TestWorkflow_PrefersCanonicalWhenCheckpointGitStateIsStale(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 	addCanonicalPlanFixture(t, repo)
 
-	writeCheckpointFixtureWithGitOverride(t, agentsHome, "workflow-proj", repo, "stale checkpoint task", "pass", "2026-04-10T10:00:00Z", "other-branch", "deadbee")
+	writeCheckpointFixtureWithGitOverride(t, checkpointFixtureGitOverride{
+		AgentsHome:  agentsHome,
+		ProjectName: "workflow-proj",
+		Repo:        repo,
+		NextAction:  "stale checkpoint task",
+		VerStatus:   "pass",
+		Timestamp:   "2026-04-10T10:00:00Z",
+		Branch:      "other-branch",
+		SHA:         "deadbee",
+	})
 
 	oldwd, _ := os.Getwd()
 	defer os.Chdir(oldwd)

@@ -157,6 +157,15 @@ type workflowDelegationCloseoutRecord struct {
 	ClosedAt      string `json:"closed_at" yaml:"closed_at"`
 }
 
+// delegationEvidencePolicy is the evidence_policy block under
+// delegationBundleYAML.Verification (schemas/workflow-delegation-bundle.schema.json).
+type delegationEvidencePolicy struct {
+	RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+	ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+	SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+	PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+}
+
 // delegationBundleYAML matches schemas/workflow-delegation-bundle.schema.json (Phase 8).
 type delegationBundleYAML struct {
 	SchemaVersion int    `yaml:"schema_version"`
@@ -188,20 +197,15 @@ type delegationBundleYAML struct {
 		OptionalFiles []string `yaml:"optional_files,omitempty"`
 	} `yaml:"context"`
 	Verification struct {
-		FeedbackGoal               string   `yaml:"feedback_goal"`
-		ScenarioTags               []string `yaml:"scenario_tags,omitempty"`
-		RegressionArtifacts        []string `yaml:"regression_artifacts,omitempty"`
-		HigherLayerValidationQueue string   `yaml:"higher_layer_validation_queue,omitempty"`
-		FocusedCommands            []string `yaml:"focused_commands,omitempty"`
-		RegressionCommands         []string `yaml:"regression_commands,omitempty"`
-		AppType                    string   `yaml:"app_type,omitempty"`
-		VerifierSequence           []string `yaml:"verifier_sequence,omitempty"`
-		EvidencePolicy             *struct {
-			RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-			ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
-			SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-			PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
-		} `yaml:"evidence_policy,omitempty"`
+		FeedbackGoal               string                    `yaml:"feedback_goal"`
+		ScenarioTags               []string                  `yaml:"scenario_tags,omitempty"`
+		RegressionArtifacts        []string                  `yaml:"regression_artifacts,omitempty"`
+		HigherLayerValidationQueue string                    `yaml:"higher_layer_validation_queue,omitempty"`
+		FocusedCommands            []string                  `yaml:"focused_commands,omitempty"`
+		RegressionCommands         []string                  `yaml:"regression_commands,omitempty"`
+		AppType                    string                    `yaml:"app_type,omitempty"`
+		VerifierSequence           []string                  `yaml:"verifier_sequence,omitempty"`
+		EvidencePolicy             *delegationEvidencePolicy `yaml:"evidence_policy,omitempty"`
 	} `yaml:"verification"`
 	Closeout struct {
 		WorkerMust []string `yaml:"worker_must,omitempty"`
