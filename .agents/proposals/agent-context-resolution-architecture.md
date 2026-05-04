@@ -113,6 +113,12 @@ a structured trace. The `iter-N.yaml` v2 schema already has the bones
 of this for *iterations*; generalizing it to *per-resource-use* is the
 move.
 
+**Seeded by** the `review-decision.yaml` envelope from ADR-0002
+(see [`docs/adr/0004-execution-telemetry-schema-seed.md`](../../docs/adr/0004-execution-telemetry-schema-seed.md)).
+The on-disk authoring guide is
+`~/.agents/skills/dot-agents/self-review/instructions/output-format.md`.
+Future hook/subagent/rule traces reuse this envelope shape.
+
 Schema sketch (per skill invocation; analogous shapes for hook fire,
 subagent spawn, rule read):
 
