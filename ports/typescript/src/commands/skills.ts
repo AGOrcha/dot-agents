@@ -4,10 +4,10 @@
  * Supports list and new subcommands. Aligned with commands/skills.go.
  */
 
-import type { Dirent } from "node:fs";
-import { readdir, stat, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentsHome } from "../core/config.js";
+import { listBucket, type BucketEntry } from "../lib/projectsync.js";
 
 export interface SkillsOptions {
   /** Custom agents home override (used in tests). */
@@ -25,64 +25,17 @@ export interface SkillsListResult {
   skills: SkillEntry[];
 }
 
-/** Read the description field from a SKILL.md front-matter (if present). */
-async function readSkillDescription(skillMd: string): Promise<string | undefined> {
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const content = await readFile(skillMd, "utf8");
-    // Simple frontmatter parse: look for description: value
-    for (const rawLine of content.split("\n")) {
-      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-      if (!line.startsWith("description:")) continue;
-      return stripOuterQuotes(line.slice("description:".length).trim());
-    }
-  } catch {
-    // ignore
-  }
-  return undefined;
-}
-
-function stripOuterQuotes(value: string): string {
-  if (value.length < 2) return value;
-  const first = value[0];
-  const last = value[value.length - 1];
-  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
 /**
  * List skills in the given scope (default: global).
  */
 export async function runSkillsList(scope = "global", opts: SkillsOptions = {}): Promise<SkillsListResult> {
   const home = opts.agentsHomeOverride ?? agentsHome();
-  const skillsDir = join(home, "skills", scope);
-  const skills: SkillEntry[] = [];
-
-  let entries: Dirent[];
-  try {
-    entries = await readdir(skillsDir, { withFileTypes: true });
-  } catch {
-    return { scope, skills };
-  }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const skillPath = join(skillsDir, entry.name);
-    const skillMd = join(skillPath, "SKILL.md");
-    let hasSkillMd = false;
-    let description: string | undefined;
-    try {
-      await stat(skillMd);
-      hasSkillMd = true;
-      description = await readSkillDescription(skillMd);
-    } catch {
-      hasSkillMd = false;
-    }
-    skills.push({ name: entry.name, description, hasSkillMd });
-  }
-
+  const entries = await listBucket(home, scope, { bucket: "skills", manifestName: "SKILL.md" });
+  const skills: SkillEntry[] = entries.map((e: BucketEntry) => ({
+    name: e.name,
+    description: e.description,
+    hasSkillMd: e.hasManifest,
+  }));
   return { scope, skills };
 }
 
