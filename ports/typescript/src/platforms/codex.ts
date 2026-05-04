@@ -56,7 +56,7 @@ export function extractAgentBody(content: string): string {
  * embedded triple-quotes (mirrors Go tomlMultilineString).
  */
 export function tomlMultilineString(value: string): string {
-  const escaped = value.replaceAll("\\", "\\\\").replaceAll('"""', '\\"\\"\\"');
+  const escaped = value.replaceAll("\\", "\\\\").replaceAll('"""', String.raw`\"\"\"`);
   return `"""\n${escaped}\n"""`;
 }
 

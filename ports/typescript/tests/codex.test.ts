@@ -64,12 +64,12 @@ describe("tomlMultilineString", () => {
 
   it('escapes embedded triple-quotes', () => {
     const result = tomlMultilineString('say """hi"""');
-    expect(result).toContain('\\"\\"\\"hi\\"\\"\\"');
+    expect(result).toContain(String.raw`\"\"\"hi\"\"\"`);
   });
 
   it("escapes backslashes", () => {
-    const result = tomlMultilineString("path\\to\\file");
-    expect(result).toContain("path\\\\to\\\\file");
+    const result = tomlMultilineString(String.raw`path\to\file`);
+    expect(result).toContain(String.raw`path\\to\\file`);
   });
 });
 

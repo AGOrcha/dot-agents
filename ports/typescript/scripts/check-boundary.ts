@@ -203,7 +203,7 @@ function locateConstructor(
   // Prefer non-test files.
   const nonTest = candidates.filter((f) => !f.endsWith("_test.go"));
   // Match `func <ctor>(` — argument list may be empty or take a Deps struct.
-  const re = new RegExp(`^func\\s+${ctor}\\s*\\(`, "m");
+  const re = new RegExp(String.raw`^func\s+${ctor}\s*\(`, "m");
   for (const path of nonTest) {
     const src = readFileSync(path, "utf8");
     if (re.test(src)) {
@@ -259,7 +259,7 @@ function resolvePackageDir(
 ): string | undefined {
   // Aliased import: `wf "github.com/.../workflow"`
   const aliasRe = new RegExp(
-    `\\b${alias}\\s+"([^"]+)"`,
+    String.raw`\b${alias}\s+"([^"]+)"`,
   );
   const aliasMatch = aliasRe.exec(ctorSrc);
   if (aliasMatch) {
@@ -275,7 +275,7 @@ function resolvePackageDir(
   }
   // Bare import: `"github.com/.../commands/agents"` whose last segment
   // matches the alias name.
-  const bareRe = new RegExp(`"([^"]*\\/commands\\/${alias}(?:\\/[^"]+)?)"`);
+  const bareRe = new RegExp(String.raw`"([^"]*\/commands\/${alias}(?:\/[^"]+)?)"`);
   const bareMatch = bareRe.exec(ctorSrc);
   if (bareMatch) {
     const importPath = bareMatch[1];
@@ -534,7 +534,7 @@ export function parseTSCommandTree(repoRoot: string = REPO_ROOT): TSCommandTree 
 // --- Diff core ---------------------------------------------------------------
 
 function escapeRegex(s: string): string {
-  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 function classifyTopLevel(
@@ -613,7 +613,7 @@ function diffStage1Surface(
       (!item.startsWith("--") &&
         deferredCmdEntries.some((d) =>
           new RegExp(
-            `(^|:|--|\\b)${escapeRegex(item)}(--|$|\\b)`,
+            String.raw`(^|:|--|\\b)${escapeRegex(item)}(--|$|\\b)`,
           ).test(d),
         ));
     if (isDeferred) continue;

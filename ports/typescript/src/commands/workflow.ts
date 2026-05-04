@@ -226,7 +226,7 @@ function parseTasksYaml(raw: string, warnings: string[]): WorkflowTask[] {
 /** Extract a simple scalar value: `  key: value` or `  - key: value` (list-item first line). */
 function extractScalar(block: string, key: string): string | null {
   // Match `  key: value` and also `  - key: value` (YAML list item marker before the first key)
-  const re = new RegExp(`^\\s+(?:- )?${key}:\\s+(.+)$`, "m");
+  const re = new RegExp(String.raw`^\s+(?:- )?${key}:\s+(.+)$`, "m");
   const m = block.match(re);
   if (!m) return null;
   return m[1].trim().replaceAll(/^["']|["']$/g, "");
@@ -240,18 +240,18 @@ function extractScalar(block: string, key: string): string | null {
  */
 function extractStringList(block: string, key: string): string[] {
   // Inline empty: `key: []`
-  const inlineEmpty = new RegExp(`^\\s+${key}:\\s*\\[\\]`, "m");
+  const inlineEmpty = new RegExp(String.raw`^\s+${key}:\s*\[\]`, "m");
   if (inlineEmpty.test(block)) return [];
 
   // Inline with values: `key: [a, b]`
-  const inlineRe = new RegExp(`^\\s+${key}:\\s*\\[([^\\]]+)\\]`, "m");
+  const inlineRe = new RegExp(String.raw`^\s+${key}:\s*\[([^\]]+)\]`, "m");
   const inlineM = block.match(inlineRe);
   if (inlineM) {
     return inlineM[1].split(",").map((s) => s.trim().replaceAll(/^["']|["']$/g, "")).filter(Boolean);
   }
 
   // Block list: find the key then collect `        - item` lines
-  const blockRe = new RegExp(`^(\\s+)${key}:\\s*\\n((?:\\s+- .+\\n?)*)`, "m");
+  const blockRe = new RegExp(String.raw`^(\s+)${key}:\s*\n((?:\s+- .+\n?)*)`, "m");
   const blockM = block.match(blockRe);
   if (blockM) {
     return blockM[2]
@@ -265,7 +265,7 @@ function extractStringList(block: string, key: string): string[] {
 
 /** Extract a block scalar value (notes: | or notes: |-). */
 function extractBlockScalar(block: string, key: string): string {
-  const blockRe = new RegExp(`^(\\s+)${key}:\\s*\\|[-]?\\n((?:\\1  [^\\n]*\\n?)*)`, "m");
+  const blockRe = new RegExp(String.raw`^(\s+)${key}:\s*\|[-]?\n((?:\1  [^\n]*\n?)*)`, "m");
   const m = block.match(blockRe);
   if (!m) return extractScalar(block, key) ?? "";
   // Strip the common leading indent
