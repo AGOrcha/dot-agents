@@ -34,44 +34,51 @@ binary refs in §4 / §6.5; the self-review plan's t4 cross-references
 §1.6 of the same file). Coordinate via task ordering, not via
 write-scope conflicts.
 
-## 2. Plan-level contract (hard test + common false positive)
+## 2. Decision note
+
+User intent as of 2026-05-03: **hard cutover**. This plan should now
+optimize for a one-sweep rename to `da`, not for a shim-first rollout.
+`t1` still writes ADR-0006 so the choice is documented formally, but it
+should record hard cutover unless implementation evidence uncovers a
+specific blocker.
+
+## 3. Plan-level contract (hard test + common false positive)
 
 > **Hard test:** After t6 completes, every user-facing reference to the
 > binary in this repo and in `~/.agents/` + `~/.claude/CLAUDE.md` reads
-> `da` (or carries an explicit compat-shim note for the deprecation
-> window). Running `da --version`, `da init --yes`, `da workflow status`,
+> `da`. Running `da --version`, `da init --yes`, `da workflow status`,
 > `da kg health`, and `da review` works identically to running the same
 > commands as `dot-agents` did pre-rename. New PRs that introduce a
 > fresh `dot-agents` invocation in a user-facing position are caught
 > (by convention checklist or future lint).
 >
-> **Common false positive:** the shim ships and CI passes because every
-> test still uses `dot-agents` (which the shim handles), and the
+> **Common false positive:** build outputs are renamed to `da`, but
+> docs, skills, tests, or workflows still use `dot-agents`, and the
 > documentation sweep claims "done" while skills/instructions still
 > show `dot-agents <cmd>`. Verification must include a sample of
 > user-reading flows (run `/agent-start` and `/orchestrator-session-start`
 > in a clean session, confirm the agent's output uses `da`).
 
-## 3. Methodology lens — applied at plan level
+## 4. Methodology lens — applied at plan level
 
-### 3.1 Four-question lens (annimaniac)
+### 4.1 Four-question lens (annimaniac)
 
 | Question | Today | Post-plan |
 |---|---|---|
 | What can AI **see**? | references to `dot-agents` in docs and skills emit stale guidance to agents | references read `da` consistently; agents emit current invocations |
-| What can AI **do**? | `dot-agents <cmd>` works (legacy binary); after t2 + shim, both names work | both names work during deprecation; only `da` works post-t7 |
+| What can AI **do**? | `dot-agents <cmd>` works (legacy binary) | `da <cmd>` is the canonical and only supported binary surface |
 | Who can **extend**? | unchanged — anyone editing docs/skills | unchanged, but a convention note in CONTRIBUTING flags new `dot-agents` references for review |
 | How has the **org** changed? | mid-rename inconsistency in WIP | binary name is `da`; docs/agents/users converged |
 
-### 3.2 Resource graduation matrix view
+### 4.2 Resource graduation matrix view
 
 This plan does not move a resource graduation tier — it's a global
 naming refactor, not a tier promotion. Worth noting because **this
-makes it a good candidate for a "validate the rename pipeline before
-committing to it" approach**: ship the shim (t2), verify it works in
-a session, then sweep docs (t3-t5) at a comfortable pace.
+makes it a good candidate for a disciplined sweep rather than a partial
+rename**: land the binary cutover in t2, then complete the text and
+instruction sweeps immediately enough that agent guidance does not drift.
 
-### 3.3 Anti-scope discipline
+### 4.3 Anti-scope discipline
 
 Renames target **only the user-facing binary name and CLI invocations**:
 
@@ -91,7 +98,7 @@ Renames target **only the user-facing binary name and CLI invocations**:
   research, tests, CI workflows, top-level CLAUDE.md
 - The TS port binary (decision in t6: `da-ts` vs `dot-agents-ts`)
 
-## 4. Task graph
+## 5. Task graph
 
 ```
 t1-decide-shim-or-cutover  (produces ADR-0006)
@@ -104,31 +111,30 @@ t1-decide-shim-or-cutover  (produces ADR-0006)
      ├──────► t4-sweep-plans-specs-research (parallel)
      └──────► t5-sweep-skills-rules-claude-md (parallel)
                     │
-                    └──► (joins t2, t6) ──► t7-drop-dot-agents-shim  (calendar-gated)
+                    └──► (joins t2, t6) ──► t7-drop-dot-agents-shim  (not-applicable if hard cutover is confirmed)
 ```
 
 `t3`, `t4`, `t5` are independent (non-overlapping write scope) and run in
-parallel. `t6` is a smaller decision that depends on `t2`. `t7` is
-calendar-gated — only run after the deprecation window in ADR-0006 has
-elapsed (recommended 6-12 months).
+parallel. `t6` is a smaller decision that depends on `t2`. `t7` becomes
+not-applicable if ADR-0006 confirms hard cutover.
 
-## 5. ADRs produced
+## 6. ADRs produced
 
 | ADR | Title | Produced by | When |
 |---|---|---|---|
-| 0006 | Binary rename strategy: shim vs cutover (recommendation: hybrid) | t1 | this plan, immediately |
+| 0006 | Binary rename strategy: shim vs cutover (decision expected: hard cutover) | t1 | this plan, immediately |
 | 0007 | TS port binary naming (`da-ts` vs `dot-agents-ts`) | t6 | only if non-trivial; can fold into ADR-0006 if trivial |
 
-## 6. Out of scope
+## 7. Out of scope
 
 - **Renaming `~/.agents/skills/dot-agents/` or `~/.agents/rules/dot-agents/` namespace dirs.** That namespace is the project name, not the binary name. Keep.
 - **Renaming the source dir `cmd/dot-agents/`.** Stays. Goreleaser's `main: ./cmd/dot-agents` line stays.
 - **Renaming the Go module path.** Stays.
 - **The repo name on GitHub.** Stays.
 - **Backfilling ADRs for prior decisions** (managed compounding terminology, async peer review, etc.). That's a separate retro task — not part of this rename.
-- **Telemetry to measure deprecation usage.** If we had it, t7 would consult it before dropping the shim. We don't, so t7 is calendar-gated only.
+- **Telemetry to measure deprecation usage.** Only relevant if ADR-0006 reverses to a shim path.
 
-## 7. Coordination with peer plans
+## 8. Coordination with peer plans
 
 Three active plans run concurrently:
 
@@ -140,29 +146,25 @@ For ISP execution: the orchestrator should pick whichever plan has the
 most evidence-confidence and run it to completion (or to a natural break)
 before pivoting. Don't fan out across all three plans in one batch.
 
-## 8. Verification gates per task
+## 9. Verification gates per task
 
 Each task in `TASKS.yaml` declares its own hard-test + false-positive
-in the `notes:` block. The end-to-end gate is t6 (or t7 if shim path):
+in the `notes:` block. The end-to-end gate is t6:
 clean grep across docs + a real session run that observes agent output
 using `da`.
 
-## 9. Closeout signals
+## 10. Closeout signals
 
 - ADR-0006 accepted, ADR-0007 accepted (if produced).
-- `da` binary works; `dot-agents` binary still works during deprecation
-  (if shim path) and prints the deprecation notice.
+- `da` binary works.
 - `grep -rE "dot-agents [a-z]" docs/ .agents/workflow/ research/ ~/.agents/skills ~/.agents/rules ~/.claude/CLAUDE.md`
-  returns only entries inside `.agents/history/` or explicit
-  compat-shim references.
-- `dot-agents workflow plan archive --plan binary-rename-da-sweep`
-  (or `da workflow plan archive` post-rename — both work via shim).
-- t7 archived as not-applicable if cutover path was chosen, OR
-  scheduled for a future session if shim path was chosen.
+  returns only entries inside `.agents/history/`.
+- `da workflow plan archive --plan binary-rename-da-sweep`.
+- t7 archived as not-applicable once hard cutover is confirmed in ADR-0006.
 
 ---
 
-## 10. ISP execution notes
+## 11. ISP execution notes
 
 ### Suggested ISP turn sequence
 
@@ -171,8 +173,7 @@ turn 1 → t1-decide-shim-or-cutover         (direct; produces ADR-0006)
 turn 2 → t2-ship-shim-or-cutover-binary    (direct; build/CI; smoke-tested)
 turn 3 → fanout: { t3, t4, t5 }            (parallel; non-overlapping write scope)
 turn 4 → t6-ts-port-binary-decision        (direct)
-turn 5 → archive (PLAN.yaml status → completed; t7 deferred to future)
-turn 6 (months later) → t7-drop-dot-agents-shim  (calendar-gated; potentially scheduled agent)
+turn 5 → archive (PLAN.yaml status → completed; t7 marked not-applicable)
 ```
 
 ### Pre-flight requirements

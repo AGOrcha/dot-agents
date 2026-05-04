@@ -45,7 +45,8 @@ archives:
     builds:
       - dot-agents-unix
     name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats:
+      - tar.gz
     files:
       - README.md
       - LICENSE
@@ -54,7 +55,8 @@ archives:
     builds:
       - dot-agents-windows
     name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: zip
+    formats: 
+      - zip
     files:
       - README.md
       - LICENSE

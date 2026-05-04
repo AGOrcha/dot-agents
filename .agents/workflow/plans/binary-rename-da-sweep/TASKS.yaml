@@ -22,14 +22,17 @@ tasks:
         Tier: T2 (compound — load-bearing decision affecting downstream
         sweep mechanics).
 
+        User intent to capture: hard cutover. ADR-0006 should treat that
+        as the chosen direction unless t1 uncovers a concrete blocker that
+        forces reopening the decision.
+
         Concrete deliverable: docs/adr/0006-da-rename-strategy.md captures:
           * Strategy options (A) compat shim, (B) hard cutover, (C) hybrid
-          * Recommendation: hybrid (ship shim + gradual sweep + delayed drop)
+          * Recommendation aligned to user intent: hard cutover
           * Consequences: shim cost (one extra goreleaser builds: block,
-            ~10 lines, no behavioral change in Go), maintenance (deprecation
-            timeline), user-comms requirements
-          * Decision: ship shim NOW, sweep docs over 1-2 sessions, drop
-            shim 6-12 months later
+            maintenance (deprecation timeline) vs cutover cost (one-shot
+            ecosystem break + broader sweep discipline), user-comms requirements
+          * Decision: hard cutover unless explicit blocker documented
           * Cross-references: ADR-0001 (ADR conventions), ADR-0007 if t6
             spawns a TS port naming decision
 
@@ -63,7 +66,9 @@ tasks:
       notes: |-
         Tier: T2 (compound — build config + CI workflow + smoke test).
 
-        If ADR-0006 chose compat shim:
+        Hard-cutover path is the planned default.
+
+        If ADR-0006 chose compat shim despite current user intent:
           * Add a second `builds:` entry in .goreleaser.yaml producing
             `dot-agents` (legacy name) from the SAME `main: ./cmd/dot-agents`.
           * Modify cmd/dot-agents/main.go (or commands/root.go) to detect
@@ -79,17 +84,16 @@ tasks:
           * Single rename across .goreleaser.yaml + CI workflows + Makefile.
           * Release notes block in the goreleaser config calling out the
             breaking change.
+          * No legacy `dot-agents` binary is built, installed, or smoke-tested.
 
         Resolve the inconsistency the user-WIP currently has in
         .goreleaser.yaml: line 85 still says `bin.install "dot-agents"`
-        but the test below uses `da`. Either rename the install line
-        (cutover) or add the shim install (compat).
+        but the test below uses `da`. For the intended cutover path,
+        rename the install line and any downstream smoke/install assumptions.
 
         Hard test:
           * Build locally: `go build -o ./bin/da ./cmd/dot-agents`.
           * `./bin/da --version` works.
-          * If shim path: `./bin/dot-agents --version` works AND prints
-            the deprecation notice on stderr.
           * .agentsrc.json change validates with the existing schema
             (no new keys; rename only).
           * `tests/test-claude-configs.sh` passes (against `da`).
@@ -107,7 +111,7 @@ tasks:
           review: code review (goreleaser config valid; CI workflow syntactically correct; deprecation message clear)
           anti-scope: do NOT touch any of the doc-sweep targets in this task. Build/release only.
           bundle-context (if fanout): user WIP diff, ADR-0006 (decision), goreleaser docs, current commands/root.go
-          output contract: passing CI on this branch with `da` as primary binary; if shim, both binaries work and the legacy one prints deprecation
+          output contract: passing CI on this branch with `da` as primary binary; if the decision is revised to shim, ADR-0006 must explain why
 
     - id: t3-sweep-priority-docs
       title: Sweep README, docs/, ADRs, architecture note
