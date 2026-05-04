@@ -33,7 +33,7 @@ async function readSkillDescription(skillMd: string): Promise<string | undefined
     // Simple frontmatter parse: look for description: value
     const match = content.match(/^description:\s*(.+)$/m);
     if (match) {
-      return match[1].trim().replace(/^['"]|['"]$/g, "");
+      return match[1].trim().replaceAll(/^['"]|['"]$/g, "");
     }
   } catch {
     // ignore

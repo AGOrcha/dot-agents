@@ -445,7 +445,7 @@ describe("runHooksList", () => {
 
     const result = await runHooksList("global", { agentsHomeOverride: home });
     expect(result.kind).toBe("legacy");
-    const events = (result.legacyEvents ?? []).map((e) => e.event).sort();
+    const events = (result.legacyEvents ?? []).map((e) => e.event).sort((a, b) => a.localeCompare(b));
     expect(events).toContain("PreToolUse");
     expect(events).toContain("PostToolUse");
   });

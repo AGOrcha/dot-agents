@@ -221,7 +221,7 @@ function extractScalar(block: string, key: string): string | null {
   const re = new RegExp(`^\\s+(?:- )?${key}:\\s+(.+)$`, "m");
   const m = block.match(re);
   if (!m) return null;
-  return m[1].trim().replace(/^["']|["']$/g, "");
+  return m[1].trim().replaceAll(/^["']|["']$/g, "");
 }
 
 /** Extract an inline or block list:
@@ -239,7 +239,7 @@ function extractStringList(block: string, key: string): string[] {
   const inlineRe = new RegExp(`^\\s+${key}:\\s*\\[([^\\]]+)\\]`, "m");
   const inlineM = block.match(inlineRe);
   if (inlineM) {
-    return inlineM[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    return inlineM[1].split(",").map((s) => s.trim().replaceAll(/^["']|["']$/g, "")).filter(Boolean);
   }
 
   // Block list: find the key then collect `        - item` lines
@@ -248,7 +248,7 @@ function extractStringList(block: string, key: string): string[] {
   if (blockM) {
     return blockM[2]
       .split("\n")
-      .map((l) => l.replace(/^\s+- /, "").trim().replace(/^["']|["']$/g, ""))
+      .map((l) => l.replace(/^\s+- /, "").trim().replaceAll(/^["']|["']$/g, ""))
       .filter(Boolean);
   }
 

@@ -32,7 +32,7 @@ async function readAgentDescription(agentMd: string): Promise<string | undefined
     const content = await readFile(agentMd, "utf8");
     const match = content.match(/^description:\s*(.+)$/m);
     if (match) {
-      return match[1].trim().replace(/^['"]|['"]$/g, "");
+      return match[1].trim().replaceAll(/^['"]|['"]$/g, "");
     }
   } catch {
     // ignore

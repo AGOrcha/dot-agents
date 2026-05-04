@@ -74,7 +74,7 @@ async function readLegacyHookEvents(
   }
 
   if (events.length === 0) return null;
-  return events.sort();
+  return events.sort((a, b) => a.localeCompare(b));
 }
 
 /**

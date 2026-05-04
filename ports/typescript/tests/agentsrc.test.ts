@@ -24,14 +24,14 @@ describe("parseAgentsRcJson / serializeAgentsRc", () => {
     const rc = parseAgentsRcJson(input);
 
     expect(rc.project).toBe("myproject");
-    expect(Object.keys(rc.extraFields).sort()).toEqual(["myteam", "refresh"]);
+    expect(Object.keys(rc.extraFields).sort((a, b) => a.localeCompare(b))).toEqual(["myteam", "refresh"]);
 
     rc.project = "renamed";
     const out = serializeAgentsRc(rc);
     const again = parseAgentsRcJson(out);
 
     expect(again.project).toBe("renamed");
-    expect(Object.keys(again.extraFields).sort()).toEqual(["myteam", "refresh"]);
+    expect(Object.keys(again.extraFields).sort((a, b) => a.localeCompare(b))).toEqual(["myteam", "refresh"]);
 
     const refresh = again.extraFields["refresh"] as Record<string, unknown>;
     expect(refresh.interval).toBe("daily");

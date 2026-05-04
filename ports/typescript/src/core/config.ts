@@ -105,7 +105,7 @@ export async function saveConfig(cfg: Config, home?: string): Promise<void> {
 
 /** List all registered project names in sorted order. */
 export function listProjects(cfg: Config): string[] {
-  return Object.keys(cfg.projects).sort();
+  return Object.keys(cfg.projects).sort((a, b) => a.localeCompare(b));
 }
 
 /** Add a project entry to the config. */

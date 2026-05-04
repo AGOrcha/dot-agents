@@ -14,7 +14,7 @@ import { readFile } from "node:fs/promises";
  * Returns an empty map if there is no frontmatter.
  */
 export function parseFrontmatter(content: string): Record<string, string> {
-  const normalized = content.replace(/\r\n/g, "\n");
+  const normalized = content.replaceAll("\r\n", "\n");
   if (!normalized.startsWith("---\n")) {
     return {};
   }
@@ -28,7 +28,7 @@ export function parseFrontmatter(content: string): Record<string, string> {
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     const rawVal = line.slice(colonIdx + 1).trim();
-    result[key] = rawVal.replace(/^['"]|['"]$/g, "");
+    result[key] = rawVal.replaceAll(/^['"]|['"]$/g, "");
   }
   return result;
 }
@@ -39,7 +39,7 @@ export function parseFrontmatter(content: string): Record<string, string> {
  * If there is no frontmatter the entire content is returned (mirrors Go readAgentBody).
  */
 export function extractAgentBody(content: string): string {
-  const normalized = content.replace(/\r\n/g, "\n");
+  const normalized = content.replaceAll("\r\n", "\n");
   if (!normalized.startsWith("---\n")) {
     return normalized;
   }
@@ -56,7 +56,7 @@ export function extractAgentBody(content: string): string {
  * embedded triple-quotes (mirrors Go tomlMultilineString).
  */
 export function tomlMultilineString(value: string): string {
-  const escaped = value.replace(/\\/g, "\\\\").replace(/"""/g, '\\"\\"\\"');
+  const escaped = value.replaceAll("\\", "\\\\").replaceAll('"""', '\\"\\"\\"');
   return `"""\n${escaped}\n"""`;
 }
 
@@ -89,7 +89,7 @@ export function renderCodexAgentTomlFromContent(content: string, agentMDPath: st
   let name = (meta["name"] ?? "").trim();
   if (name === "") {
     // Derive from the parent directory name, stripping extension
-    const parts = agentMDPath.replace(/\\/g, "/").split("/");
+    const parts = agentMDPath.replaceAll("\\", "/").split("/");
     const dirName = parts.at(-2) ?? parts.at(-1) ?? "unknown";
     name = dirName.replace(/\.[^.]+$/, "");
   }
