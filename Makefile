@@ -5,10 +5,10 @@ run:
 	go run ./cmd/dot-agents
 
 build:
-	go build -o ./bin/dot-agents ./cmd/dot-agents
+	go build -o ./bin/da ./cmd/dot-agents
 
 build-prod:
-	go build -ldflags "-s -w" -o ./bin/dot-agents ./cmd/dot-agents
+	go build -ldflags "-s -w" -o ./bin/da ./cmd/dot-agents
 
 test:
 	go test ./...

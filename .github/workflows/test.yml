@@ -91,11 +91,11 @@ jobs:
         run: go test $GO_TEST_FLAGS ./...
 
       - name: Build CLI
-        run: go build -o ./bin/dot-agents ./cmd/dot-agents
+        run: go build -o ./bin/da ./cmd/dot-agents
 
       - name: Verify built binary is real Go binary (not a shim)
         run: |
-          file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"
+          file ./bin/da | grep -qE "(ELF|Mach-O|PE32)"
 
       - name: Install GoReleaser (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -136,7 +136,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/dot-agents --version)"
+          output="$(./bin/da --version)"
           printf '%s\n' "$output"
           grep -q "dot-agents" <<<"$output"
 
@@ -145,7 +145,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/dot-agents --help)"
+          output="$(./bin/da --help)"
           printf '%s\n' "$output"
           grep -q "Usage:" <<<"$output"
 
@@ -154,7 +154,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents init --dry-run
+          ./bin/da init --dry-run
 
       - name: Test init (creates ~/.agents/)
         env:
@@ -163,7 +163,7 @@ jobs:
         run: |
           # Remove if exists from previous run
           rm -rf "${HOME}/.agents"
-          ./bin/dot-agents init --yes
+          ./bin/da init --yes
           test -d "${HOME}/.agents"
           test -f "${HOME}/.agents/config.json"
 
@@ -172,15 +172,15 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents status
-          ./bin/dot-agents status --json | jq .
+          ./bin/da status
+          ./bin/da status --json | jq .
 
       - name: Test doctor
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents doctor
+          ./bin/da doctor
 
       - name: Test add (with test project)
         env:
@@ -189,8 +189,8 @@ jobs:
         run: |
           TEST_PROJECT="${SMOKE_HOME}/test-project"
           mkdir -p "${TEST_PROJECT}"
-          ./bin/dot-agents add "${TEST_PROJECT}" --name ci-test --yes
-          ./bin/dot-agents status >/tmp/dot-agents-status.txt
+          ./bin/da add "${TEST_PROJECT}" --name ci-test --yes
+          ./bin/da status >/tmp/dot-agents-status.txt
           grep -q "ci-test" /tmp/dot-agents-status.txt
 
       - name: Test status --audit
@@ -198,42 +198,42 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents status --audit
+          ./bin/da status --audit
 
       - name: Test remove --dry-run
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents remove ci-test --dry-run
+          ./bin/da remove ci-test --dry-run
 
       - name: Test sync status
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents sync status
+          ./bin/da sync status
 
       - name: Test skills list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents skills list
+          ./bin/da skills list
 
       - name: Test workflow status
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow status
+          ./bin/da workflow status
 
       - name: Test workflow health
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/dot-agents workflow health)"
+          output="$(./bin/da workflow health)"
           printf '%s\n' "$output"
           grep -qiE "(healthy|health)" <<<"$output"
 
@@ -242,28 +242,28 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow plan
+          ./bin/da workflow plan
 
       - name: Test workflow orient
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow orient
+          ./bin/da workflow orient
 
       - name: Test workflow next
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow next
+          ./bin/da workflow next
 
       - name: Test workflow complete (scoped JSON)
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow complete --json --plan ci-smoke-suite-hardening > /tmp/workflow-complete.json
+          ./bin/da workflow complete --json --plan ci-smoke-suite-hardening > /tmp/workflow-complete.json
           jq -e '.scope[0] == "ci-smoke-suite-hardening"' /tmp/workflow-complete.json
           jq -e '.state | type == "string"' /tmp/workflow-complete.json
 
@@ -272,7 +272,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/dot-agents kg --help)"
+          output="$(./bin/da kg --help)"
           printf '%s\n' "$output"
           grep -q "knowledge graph" <<<"$output"
 
@@ -281,42 +281,42 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents kg bridge health
+          ./bin/da kg bridge health
 
       - name: Test agents list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents agents list
+          ./bin/da agents list
 
       - name: Test hooks list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents hooks list
+          ./bin/da hooks list
 
       - name: Test rules list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents rules list
+          ./bin/da rules list
 
       - name: Test mcp list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents mcp list
+          ./bin/da mcp list
 
       - name: Test settings list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents settings list
+          ./bin/da settings list
 
       - name: Cleanup
         env:
