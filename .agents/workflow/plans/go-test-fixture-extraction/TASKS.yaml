@@ -1,0 +1,338 @@
+schema_version: 1
+plan_id: go-test-fixture-extraction
+tasks:
+    - id: t1-audit-and-helper-design
+      title: Audit Cluster D fixtures; design canonical helper signatures
+      status: pending
+      depends_on: []
+      blocks:
+        - t2-create-internal-testutil
+      owner: ""
+      write_scope:
+        - .agents/workflow/specs/go-test-fixture-extraction/design.md
+      verification_required: false
+      notes: |-
+        Tier: T1 (research + design memo).
+
+        Concrete deliverable: an updated design.md "Open questions"
+        section with answers, plus a table of canonical helper
+        signatures the rest of the plan implements against.
+
+        Steps:
+          1. Re-snapshot live Cluster D duplication
+             (mcp__sonarqube__search_duplicated_files on the latest PR
+             tip). Counts in design.md drift across pushes.
+          2. For each file in the inventory, list every fixture
+             function it defines (setupTempProject, writeFixtureRC,
+             manifest writers, etc.). Group by signature.
+          3. Identify cases where a per-package fixture is
+             materially different (e.g. graphstore tests need a real
+             SQLite/Postgres handle; workflow tests need a populated
+             plan tree). These get bucket-specific helpers.
+          4. Write the signature table — return values, error policy
+             (t.Fatal vs returned error), TempDir ownership.
+
+        Hard test: design.md "Open questions" section is empty;
+        signature table covers every duplicated block in the live
+        SonarCloud inventory.
+
+        Anti-scope: do NOT begin extracting helpers in this task.
+        Audit only. The audit may surface a need to split this plan
+        further (e.g. graphstore fixture work as its own plan); raise
+        via fold-back rather than expanding scope here.
+
+        ISP routing:
+          mode: direct (research + spec edit)
+          verifier: doc review
+          review: design quality (signatures must compose; no
+                  package-cycle hazards)
+          bundle-context (if fanout): findings.md Cluster D table,
+                                       the 21 *_test.go files
+          output contract: design.md updated with concrete signatures
+      app_type: research
+
+    - id: t2-create-internal-testutil
+      title: Land internal/testutil with helpers + unit tests
+      status: pending
+      depends_on:
+        - t1-audit-and-helper-design
+      blocks:
+        - t3-extract-platform-tests
+        - t4-extract-workflow-tests
+        - t5-extract-commands-root-tests
+        - t6-extract-graphstore-tests
+        - t7-extract-skills-and-agents-tests
+      owner: ""
+      write_scope:
+        - internal/testutil/
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — new package + unit tests).
+
+        Implements the helper set converged on in T1. Helpers must:
+          * accept *testing.T as first arg, call t.Helper()
+          * t.Fatal on prerequisite errors (matches existing style)
+          * not call t.TempDir() internally (see design.md decision)
+          * have go-doc on every exported function
+
+        Unit tests cover helper logic with non-trivial branching
+        (e.g. WriteAgentsRC with explicit Sources vs default).
+        Helpers that are pure thin wrappers around os.WriteFile
+        don't need a unit test; they're exercised by every consumer.
+
+        Hard test: go test ./internal/testutil passes; package builds
+        clean; no consumers yet (extraction starts in T3+).
+
+        Anti-scope: do NOT modify any *_test.go in this task. Land
+        the helpers; consumers come next.
+
+        ISP routing:
+          mode: direct (single-package implementation)
+          verifier: smoke (go test ./internal/testutil)
+          review: code review
+          bundle-context (if fanout): T1's signature table
+          output contract: internal/testutil exists with helpers,
+                           docs, tests; importable by any *_test.go
+      app_type: code-fix
+
+    - id: t3-extract-platform-tests
+      title: Refactor internal/platform/*_test.go to use internal/testutil
+      status: pending
+      depends_on:
+        - t2-create-internal-testutil
+      blocks: []
+      owner: ""
+      write_scope:
+        - internal/platform/resource_plan_test.go
+        - internal/platform/mcp_settings_test.go
+        - internal/platform/rules_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — three files; resource_plan_test.go is
+        the largest single Cluster D offender at 239 dup lines).
+
+        Refactor each test file to consume internal/testutil
+        helpers in place of in-file setup/fixture-writer functions.
+        Delete now-unused per-file helpers.
+
+        Per-file commit convention (one commit each):
+          * "test(platform): use internal/testutil in resource_plan_test"
+          * "test(platform): use internal/testutil in mcp_settings_test"
+          * "test(platform): use internal/testutil in rules_test"
+
+        Hard test: go test ./internal/platform/ passes after each
+        commit; commit-by-commit diff shows test bodies reduced
+        by N lines with assertions unchanged.
+
+        Common false positive: refactor accidentally drops an
+        assertion when collapsing a per-file helper. Reviewer must
+        compare assertion lists pre/post.
+
+        Anti-scope: do NOT touch production code in this task.
+
+        ISP routing:
+          mode: fanout-amenable (one subagent per file)
+          verifier: smoke (go test ./internal/platform/)
+          review: code review per file
+          bundle-context (if fanout): T1's signature table, T2's
+                                       internal/testutil API
+          output contract: ~250 dup lines removed; gate-relevant
+                           density falls
+      app_type: code-fix
+
+    - id: t4-extract-workflow-tests
+      title: Refactor commands/workflow/*_test.go to use internal/testutil
+      status: pending
+      depends_on:
+        - t2-create-internal-testutil
+      blocks: []
+      owner: ""
+      write_scope:
+        - commands/workflow/state_plan_test.go
+        - commands/workflow/testutil_test.go
+        - commands/workflow/workflow_integration_test.go
+        - commands/workflow/delegation_fanout_test.go
+        - commands/workflow/iter_log_test.go
+        - commands/workflow/foldback_test.go
+        - commands/workflow/plan_task_test.go
+        - commands/workflow/drift_sweep_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — eight files; second-largest cluster).
+
+        commands/workflow/testutil_test.go itself is a per-package
+        helper file that should be deleted or reduced to a thin
+        re-export shim around internal/testutil. Verify its API is
+        the same as internal/testutil's before deleting.
+
+        One commit per file. Hard test per commit:
+        go test ./commands/workflow/.
+
+        Anti-scope: no plan-engine behavioral changes; this task
+        only moves test scaffolding. If a state_plan_test scenario
+        is genuinely broken under the new helpers, fold-back.
+
+        ISP routing:
+          mode: fanout-amenable (one subagent per file)
+          verifier: smoke (go test ./commands/workflow/)
+          review: code review per file
+          bundle-context (if fanout): T1's signature table, T2's
+                                       internal/testutil API
+          output contract: ~610 dup lines removed
+      app_type: code-fix
+
+    - id: t5-extract-commands-root-tests
+      title: Refactor commands/*_test.go (root) to use internal/testutil
+      status: pending
+      depends_on:
+        - t2-create-internal-testutil
+      blocks: []
+      owner: ""
+      write_scope:
+        - commands/refresh_test.go
+        - commands/import_test.go
+        - commands/mcp_settings_test.go
+        - commands/rules_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — four files).
+
+        commands/refresh_test.go is a high-density single file
+        (32.1%, 114 dup lines) with substantial fixture overlap
+        with refresh.go's setup. commands/mcp_settings_test.go
+        (44.2%, 46 dup lines) is the highest-density per-file
+        offender — its fixture pattern likely mirrors
+        internal/platform/mcp_settings_test.go and may share a
+        helper.
+
+        One commit per file. Hard test per commit: go test ./commands/.
+
+        ISP routing:
+          mode: fanout-amenable (one subagent per file)
+          verifier: smoke (go test ./commands/)
+          review: code review per file
+          bundle-context (if fanout): T1's signature table, T2's
+                                       internal/testutil API
+          output contract: ~230 dup lines removed
+      app_type: code-fix
+
+    - id: t6-extract-graphstore-tests
+      title: Refactor internal/graphstore/*_test.go to use internal/testutil
+      status: pending
+      depends_on:
+        - t2-create-internal-testutil
+      blocks: []
+      owner: ""
+      write_scope:
+        - internal/graphstore/sqlite_test.go
+        - internal/graphstore/postgres_test.go
+        - internal/graphstore/mcp_server_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — three files; may need a graphstore
+        sub-helper per T1 audit's open question).
+
+        Open question carried from spec: do graphstore tests share
+        enough fixture shape with the broader corpus to use the
+        canonical helpers, or do they need a graphstore-specific
+        test util? T1 audit must answer this before T6 starts.
+
+        If a graphstore sub-helper is needed, land it in
+        internal/graphstore/internal/storetest/ (not exported).
+
+        One commit per file. Hard test per commit:
+        go test ./internal/graphstore/.
+
+        Anti-scope: do NOT touch graphstore production code; this
+        task only moves test scaffolding.
+
+        ISP routing:
+          mode: direct (storage tests are subtle; sequential
+                        processing reduces flake risk)
+          verifier: smoke (go test ./internal/graphstore/)
+          review: code review per file
+          bundle-context (if fanout): T1's signature table, T2's
+                                       API, the open-question
+                                       resolution from T1
+          output contract: ~156 dup lines removed
+      app_type: code-fix
+
+    - id: t7-extract-skills-and-agents-tests
+      title: Refactor commands/{agents,skills,kg}/*_test.go to use internal/testutil
+      status: pending
+      depends_on:
+        - t2-create-internal-testutil
+      blocks: []
+      owner: ""
+      write_scope:
+        - commands/agents/agents_test.go
+        - commands/skills/promote_test.go
+        - commands/kg/kg_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — three files).
+
+        commands/agents/agents_test.go and commands/skills/promote_test.go
+        already use setupAgentsEnv/setupSkillsEnv per-file. After
+        projectsync.{ListBucket,PromoteResource} extraction landed
+        in PR#10, the bucket spec is uniform; per-file fixtures
+        should collapse cleanly to internal/testutil's bucket-aware
+        helpers (NewTempProject + WriteManifest variants).
+
+        commands/kg/kg_test.go's 91 dup lines spread across 11
+        blocks — many small repetitions; refactor may need
+        table-driven tests in addition to fixture extraction.
+
+        One commit per file. Hard test per commit:
+        go test ./commands/agents ./commands/skills ./commands/kg.
+
+        ISP routing:
+          mode: fanout-amenable (one subagent per file)
+          verifier: smoke (focused go test)
+          review: code review per file
+          bundle-context (if fanout): T1's signature table, T2's
+                                       API, projectsync.PromoteSpec
+                                       and BucketSpec field shapes
+          output contract: ~318 dup lines removed
+      app_type: code-fix
+
+    - id: t8-archive
+      title: Open follow-up PR; verify gate; archive plan
+      status: pending
+      depends_on:
+        - t3-extract-platform-tests
+        - t4-extract-workflow-tests
+        - t5-extract-commands-root-tests
+        - t6-extract-graphstore-tests
+        - t7-extract-skills-and-agents-tests
+      blocks: []
+      owner: ""
+      write_scope:
+        - .agents/history/go-test-fixture-extraction/
+      verification_required: false
+      notes: |-
+        Tier: T1 (closeout).
+
+        Open the follow-up PR off master with all extraction
+        commits stacked. Verify:
+          * mcp__sonarqube__get_project_quality_gate_status reports
+            new_duplicated_lines_density below 3% OR Cluster D
+            contribution reduced by >= 60%
+          * go test ./... passes
+          * Cross-link to ADR-0008 in the PR description
+
+        On merge: archive plan via dot-agents workflow plan archive
+        --plan go-test-fixture-extraction. Bundles PLAN.yaml,
+        TASKS.yaml, plan.md, and per-task merge-back artifacts.
+
+        Anti-scope: do NOT bundle production-code-helper-extraction
+        commits into the same PR. Cluster D and Cluster E.other are
+        independent plans by design (ADR-0008).
+
+        ISP routing:
+          mode: direct (closeout)
+          verifier: smoke (gate snapshot + go test)
+          review: closeout
+          output contract: history dir populated; ADR-0008 linked
+                           from PR description
+      app_type: workflow

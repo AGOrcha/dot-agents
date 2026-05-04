@@ -1,0 +1,330 @@
+schema_version: 1
+plan_id: production-code-helper-extraction
+tasks:
+    - id: t1-triage-and-classify
+      title: Triage Cluster E.other groups; classify extract-vs-accept per group
+      status: pending
+      depends_on: []
+      blocks:
+        - t2-graphstore-helpers
+        - t3-resource-plan-helper
+        - t4-commands-cli-family
+        - t5-platform-mcp-settings
+        - t6-typescript-port-mirrors
+      owner: ""
+      write_scope:
+        - .agents/workflow/specs/production-code-helper-extraction/design.md
+      verification_required: false
+      notes: |-
+        Tier: T1 (research + decision memo).
+
+        Concrete deliverable: design.md "Open questions" section
+        resolved, with each group classified one of:
+          * EXTRACT — viable shared helper; describe the helper's
+            intended package, signature, and which call sites it
+            replaces.
+          * ACCEPT — duplication is real but extraction is a net
+            negative (e.g. one-off pattern coincidence; helper would
+            need three+ knobs and obscure the call site). Record the
+            reasoning so a future audit doesn't re-litigate.
+
+        Steps:
+          1. Re-snapshot live Cluster E.other duplications via
+             mcp__sonarqube__search_duplicated_files +
+             get_duplications on the latest PR head. Counts in
+             design.md drift across pushes.
+          2. For each group (GS, RP, CMDS, MCP, TS), read the
+             reported duplicated blocks in the actual files. Confirm
+             the duplication is structural (same shape, different
+             nouns) vs accidental (same lines, different intent).
+          3. For EXTRACT groups, propose the helper API. For ACCEPT
+             groups, write the rationale.
+          4. Decide intra-plan ordering. RP is likely smallest single
+             win; GS is likely largest. Check whether any extraction
+             depends on another (e.g. commands/* CLI helper might
+             depend on platform helper).
+
+        Hard test: design.md "Open questions" empty; every group has
+        a classification + rationale; T2-T6 task lists update to
+        reflect the actual extraction set.
+
+        Anti-scope: do NOT begin extracting in this task. Triage only.
+        If the audit reveals additional groups not currently listed
+        (e.g. a fourth subset surfaces post-PR#10 merge), surface via
+        fold-back rather than expanding scope here.
+
+        ISP routing:
+          mode: direct (research + spec edit)
+          verifier: doc review
+          review: design quality
+          bundle-context (if fanout): findings.md Cluster E table,
+                                       the listed files, projectsync
+                                       helpers as a precedent
+          output contract: design.md updated with per-group
+                           classification; T2-T6 task scopes adjusted
+      app_type: research
+
+    - id: t2-graphstore-helpers
+      title: Extract graphstore shared helpers (Group GS)
+      status: pending
+      depends_on:
+        - t1-triage-and-classify
+      blocks: []
+      owner: ""
+      write_scope:
+        - internal/graphstore/sqlite.go
+        - internal/graphstore/postgres.go
+        - internal/graphstore/mcp_server.go
+        - internal/graphstore/
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — three files; the cross-pair sqlite ↔
+        postgres duplication is the largest single cluster in this
+        plan at ~95 dup lines).
+
+        Implements EXTRACT decisions from T1 for Group GS. Likely
+        shapes (subject to T1's resolution):
+          * scanGraphRows(rows, cols) — collapses the ~80-line
+            row-scan duplication between sqlite and postgres.
+          * upsertGraphRow(...) or similar — collapses the ~15-line
+            block at sqlite:459 ↔ postgres:570.
+          * dispatchKGTool(...) — handles mcp_server.go's
+            tool-dispatch repetition.
+
+        Per file: one commit. Hard test per commit:
+          go test ./internal/graphstore/...
+
+        Wire-format watch: if any helper touches SQL parameter
+        emission, reviewer compares the emitted SQL pre/post for
+        each driver. SQL parameter reordering is silent and breaks
+        prepared-statement caching.
+
+        Anti-scope: do NOT touch graphstore consumers in
+        commands/kg/ in this task. Production-code internal only.
+
+        ISP routing:
+          mode: direct (storage code is subtle; sequential
+                        processing reduces flake risk)
+          verifier: smoke (go test ./internal/graphstore/...)
+          review: code review (SQL parity check) + integration
+                   (mcp_server tool dispatch parity)
+          bundle-context (if fanout): T1's classification, the
+                                       three files, existing
+                                       graphstore_test fixtures
+          output contract: ~150-200 dup lines removed from Group GS
+      app_type: code-fix
+
+    - id: t3-resource-plan-helper
+      title: Extract internal/platform/resource_plan.go bucket-listing helper (Group RP)
+      status: pending
+      depends_on:
+        - t1-triage-and-classify
+      blocks: []
+      owner: ""
+      write_scope:
+        - internal/platform/resource_plan.go
+      verification_required: true
+      notes: |-
+        Tier: T1 (single-file refactor; tightest single win).
+
+        resource_plan.go has three near-identical 18-26 line blocks
+        at lines 284, 337, 461 — the listScopedResourceDirs +
+        intent-construction pattern repeated per bucket. Single
+        helper (likely intentsFromBucket(bucket, manifestName,
+        targetRoot)) collapses all three.
+
+        One commit. Hard test:
+          go test ./internal/platform/...
+
+        Wire-format watch: ResourcePlan intent emission order
+        matters for downstream Execute(); helper must preserve
+        per-bucket ordering.
+
+        Anti-scope: do NOT touch BuildSharedAgentMirrorIntents or
+        the public API surface; refactor internals only.
+
+        ISP routing:
+          mode: direct (single-file)
+          verifier: smoke (go test ./internal/platform/...)
+          review: code review (intent ordering preserved)
+          bundle-context (if fanout): T1's classification, the
+                                       file's three offending blocks
+          output contract: ~70 dup lines removed from Group RP
+      app_type: code-fix
+
+    - id: t4-commands-cli-family
+      title: Extract commands/{settings,mcp,rules,...} CLI helpers (Group CMDS)
+      status: pending
+      depends_on:
+        - t1-triage-and-classify
+      blocks: []
+      owner: ""
+      write_scope:
+        - commands/settings.go
+        - commands/mcp.go
+        - commands/rules.go
+        - commands/import_plugins.go
+        - commands/explain.go
+        - commands/status.go
+        - commands/ux.go
+        - commands/skills.go
+        - commands/internal/cmdutil/
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — up to 8 files; T1 may narrow).
+
+        commands/{settings,mcp,rules}.go form a clear three-way
+        cross-duplication of cobra subcommand registration + write
+        boilerplate. Other commands/*.go entries are likely
+        independent self-duplications; T1 audit decides which to
+        extract vs accept.
+
+        Helpers land in commands/internal/cmdutil/ (new package)
+        unless T1 finds the right home is internal/projectsync (for
+        manifest-shaped helpers).
+
+        Per file: one commit. Hard test per commit: go test ./commands/.
+
+        commands/skills.go's residual: PR#10's E.promote work removed
+        most of its duplications; re-snap at T1 to confirm what
+        remains.
+
+        Anti-scope: do NOT change CLI surface (flags, exit codes,
+        UI text). Extraction is structural only.
+
+        ISP routing:
+          mode: fanout-amenable per file pair (settings/mcp/rules
+                 group is one task; others are independent)
+          verifier: smoke (go test ./commands/) + manual CLI
+                     spot-check on one extracted command
+          review: code review (CLI surface preserved)
+          bundle-context (if fanout): T1's classification, the file
+                                       group, ExampleBlock and
+                                       cobra.Command precedents
+          output contract: ~150-200 dup lines removed from Group CMDS
+      app_type: code-fix
+
+    - id: t5-platform-mcp-settings
+      title: Extract internal/platform/mcp_settings + plugins helper (Group MCP)
+      status: pending
+      depends_on:
+        - t1-triage-and-classify
+      blocks: []
+      owner: ""
+      write_scope:
+        - internal/platform/mcp_settings.go
+        - internal/platform/plugins.go
+      verification_required: true
+      notes: |-
+        Tier: T1 (compound — two files; smallest extract group).
+
+        mcp_settings.go and plugins.go share ~26+22 dup lines. T1
+        audit determines whether their shape overlaps with
+        commands/mcp.go (Group CMDS) — if so, extraction may be
+        merged into T4 with a cross-package helper. If not, this
+        task lands a small platform-level helper.
+
+        One or two commits depending on T1's decision. Hard test:
+          go test ./internal/platform/...
+
+        Anti-scope: do NOT touch mcp settings semantics; the
+        on-disk JSON wire format must be byte-identical pre/post.
+
+        ISP routing:
+          mode: direct (small, two-file)
+          verifier: smoke (go test ./internal/platform/...) +
+                     wire-format diff if helper touches JSON emission
+          review: code review (JSON parity)
+          bundle-context (if fanout): T1's classification, the two
+                                       files, group CMDS overlap
+                                       analysis
+          output contract: ~50 dup lines removed from Group MCP
+      app_type: code-fix
+
+    - id: t6-typescript-port-mirrors
+      title: Mirror Go projectsync extraction in TypeScript port (Group TS)
+      status: pending
+      depends_on:
+        - t1-triage-and-classify
+      blocks: []
+      owner: ""
+      write_scope:
+        - ports/typescript/src/lib/projectsync.ts
+        - ports/typescript/src/commands/agents.ts
+        - ports/typescript/src/commands/skills.ts
+      verification_required: true
+      notes: |-
+        Tier: T1 (compound — three files; mirrors the Go work
+        already in PR#10).
+
+        ports/typescript/src/commands/{agents,skills}.ts have a
+        20-line cross-duplication identical in shape to the Go
+        agents/skills list extraction PR#10 already shipped via
+        internal/projectsync. Mirror that work in TS by landing
+        ports/typescript/src/lib/projectsync.ts with the equivalent
+        listBucket helper, then thin out agents.ts and skills.ts.
+
+        Coordinate with the typescript-port plan owner before
+        starting — port plan churn could revert the extraction if
+        landed in the wrong order.
+
+        Hard test:
+          npm --prefix ports/typescript test (per port test
+          conventions; confirm at task start since CI commands drift)
+
+        Anti-scope: do NOT change CLI behavior — runKgHealth /
+        runKgQuery and the public command exports must remain
+        identical.
+
+        ISP routing:
+          mode: direct (port-specific; coordinate before fanning out)
+          verifier: smoke (port test suite)
+          review: code review (port parity with Go)
+          bundle-context (if fanout): T1's classification, the
+                                       PR#10 Go projectsync helpers
+                                       as the precedent, ts-port
+                                       plan owner contact
+          output contract: ~40 dup lines removed from Group TS
+      app_type: code-fix
+
+    - id: t7-archive
+      title: Open follow-up PR; verify gate; archive plan
+      status: pending
+      depends_on:
+        - t2-graphstore-helpers
+        - t3-resource-plan-helper
+        - t4-commands-cli-family
+        - t5-platform-mcp-settings
+        - t6-typescript-port-mirrors
+      blocks: []
+      owner: ""
+      write_scope:
+        - .agents/history/production-code-helper-extraction/
+      verification_required: false
+      notes: |-
+        Tier: T1 (closeout).
+
+        Open the follow-up PR off master with all extraction
+        commits stacked. Verify:
+          * mcp__sonarqube__get_project_quality_gate_status reports
+            Cluster E.other contribution reduced by >= 60%, OR
+            new_duplicated_lines_density below 3% (latter only if
+            go-test-fixture-extraction has also landed).
+          * go test ./... passes
+          * Cross-link to ADR-0008 + the companion plan in the PR
+            description so the dedup story is auditable end-to-end.
+
+        On merge: archive plan via
+          dot-agents workflow plan archive --plan production-code-helper-extraction.
+
+        Anti-scope: do NOT bundle go-test-fixture-extraction commits
+        into the same PR. Cluster D and Cluster E.other are
+        independent plans by design (ADR-0008).
+
+        ISP routing:
+          mode: direct (closeout)
+          verifier: smoke (gate snapshot + go test)
+          review: closeout
+          output contract: history dir populated; ADR-0008 +
+                           companion plan linked from PR description
+      app_type: workflow

@@ -1,0 +1,64 @@
+schema_version: 1
+id: production-code-helper-extraction
+title: Extract shared helpers to clear Cluster E.other production-code duplication
+status: proposed
+summary: |-
+    Cluster E.other from sonarqube-pr10/findings.md: ~400-500 duplicated
+    lines across internal/graphstore/{sqlite,postgres,mcp_server}.go,
+    internal/platform/{resource_plan,mcp_settings,plugins}.go,
+    commands/{import_plugins,settings,mcp,rules,explain,status,ux}.go,
+    and ports/typescript/src/commands/{agents,skills}.ts. Per ADR-0008
+    (option B) this work is deferred from PR#10 to a follow-up plan;
+    this is that plan.
+
+    PR#10 already shipped the in-PR cherries: Cluster F (commands/*/list.go)
+    and E.promote (commands/*/promote.go) both collapsed into
+    internal/projectsync.{ListBucket, PromoteResource, CopyTree,
+    ReadFrontmatterDescription}. This plan extends that pattern to the
+    remaining cross-module pairs.
+
+    Strategy: T1 triage memo classifies each group "extract" vs
+    "do not extract" with reasoning. Per-group tasks land helpers in
+    the smallest enclosing package, refactor consumers, and verify
+    via go test on the affected package only. SonarCloud snapshot once
+    at plan closeout.
+
+    Spec: .agents/workflow/specs/production-code-helper-extraction/design.md
+    Source decision: docs/adr/0008-pr10-duplication-scope.md (option B)
+    Source classification: .agents/workflow/plans/sonarqube-pr10/findings.md (Cluster E)
+    Companion plan: go-test-fixture-extraction (Cluster D)
+created_at: "2026-05-04T00:00:00Z"
+updated_at: "2026-05-04T00:00:00Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: SonarCloud quality gate snapshot for the follow-up PR
+    reports Cluster E.other's contribution to new_duplicated_lines_density
+    reduced by >= 60% (gate may still fail if Cluster D hasn't landed —
+    that is a cross-plan ordering concern, not a local one).
+
+    Local test: go test ./... passes at every commit; production-code
+    refactor commits do not change behavior. The behavioral contract
+    is the existing test suite — if a test fails after extraction, the
+    extraction is wrong.
+
+    Decision-quality test: T1's triage memo classifies every group
+    and every "do not extract" decision carries a rationale. A future
+    audit reading the memo should not need to re-litigate the same
+    classifications.
+
+    False positive watch: an extraction that compiles and passes tests
+    but subtly changes wire format (e.g. SQL parameter ordering, JSON
+    key emission order) is the most likely regression. T2-T6 reviewers
+    must compare emitted output before/after for I/O-shaped helpers.
+verification_strategy: |-
+    Per-task: go test ./<affected-package>/... + go vet on the
+    package. For wire-format-shaped changes (graphstore SQL,
+    mcp_settings JSON), reviewer compares output snapshots pre/post.
+
+    Plan-level: at closeout, single SonarCloud snapshot of the
+    follow-up PR + a cross-link to ADR-0008 in the PR description.
+
+    Plan archives when the follow-up PR merges. Order of merges
+    relative to go-test-fixture-extraction is not constrained — the
+    gate-flip moment is whichever PR is second.
+current_focus_task: T1 triage — re-snapshot live duplications and classify each group extract-vs-accept before any code change
