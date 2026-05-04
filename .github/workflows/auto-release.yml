@@ -67,12 +67,12 @@ jobs:
         run: |
           go build \
             -ldflags "-X github.com/NikashPrakash/dot-agents/commands.Version=${{ steps.version.outputs.version }} -X github.com/NikashPrakash/dot-agents/commands.Commit=${GITHUB_SHA} -X github.com/NikashPrakash/dot-agents/commands.Describe=v${{ steps.version.outputs.version }}" \
-            -o ./bin/dot-agents ./cmd/dot-agents
+            -o ./bin/da ./cmd/dot-agents
 
       - name: Verify CLI version matches
         if: steps.check.outputs.exists == 'false'
         run: |
-          CLI_VERSION=$(./bin/dot-agents --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          CLI_VERSION=$(./bin/da --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
           FILE_VERSION="${{ steps.version.outputs.version }}"
           if [ "$CLI_VERSION" != "$FILE_VERSION" ]; then
             echo "CLI reports version $CLI_VERSION but VERSION file has $FILE_VERSION"
@@ -90,12 +90,12 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents --version
-          ./bin/dot-agents --help
-          ./bin/dot-agents init --yes
+          ./bin/da --version
+          ./bin/da --help
+          ./bin/da init --yes
           test -d "${HOME}/.agents"
-          ./bin/dot-agents status
-          ./bin/dot-agents doctor
+          ./bin/da status
+          ./bin/da doctor
 
       - name: Install GoReleaser
         if: steps.check.outputs.exists == 'false'
@@ -105,6 +105,17 @@ jobs:
           version: latest
           install-only: true
 
+      - name: Import Homebrew tap signing key
+        if: steps.check.outputs.exists == 'false'
+        env:
+          HOMEBREW_TAP_GPG_PRIVATE_KEY: ${{ secrets.HOMEBREW_TAP_GPG_PRIVATE_KEY }}
+        run: |
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg-homebrew-tap"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          echo "GNUPGHOME=${GNUPGHOME}" >> "${GITHUB_ENV}"
+          printf '%s' "${HOMEBREW_TAP_GPG_PRIVATE_KEY}" | gpg --batch --yes --import
+
       - name: Run GoReleaser
         if: steps.check.outputs.exists == 'false'
         env:
@@ -112,6 +123,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOT_AGENTS_PAT: ${{ secrets.DOT_AGENTS_PAT }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
         run: |
           # Ensure an annotated tag for this version exists
           git config user.name "github-actions[bot]"
