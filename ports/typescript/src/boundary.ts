@@ -22,7 +22,7 @@ export const BOUNDARY_HELP_SUBSTRINGS = [
 ] as const;
 
 /**
- * Lines appended to `dot-agents-ts --help` so users see the boundary without opening docs.
+ * Lines appended to `da-ts --help` so users see the boundary without opening docs.
  */
 export function boundaryHelpLines(): string[] {
   return [

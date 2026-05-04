@@ -126,7 +126,7 @@ convention is the markdown format and index below.
 | 0004 | proposed | Execution-telemetry schema seeded by review-decision.yaml | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t4) |
 | 0005 | proposed | Restore KG-context calls in self-review (regression fix) | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t1) |
 | [0006](0006-da-rename-strategy.md) | accepted | Binary rename strategy — `dot-agents` → `da` via hard cutover | dot-agents | 2026-05-03 |
-| 0007 | conditional | TS port binary naming (`da-ts` vs `dot-agents-ts`) | dot-agents | TBD (only produced if `binary-rename-da-sweep` plan t6 surfaces a non-trivial decision) |
+| [0007](0007-ts-port-binary-naming.md) | accepted | TS port binary name — `da-ts` | dot-agents | 2026-05-03 |
 
 ---
 

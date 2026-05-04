@@ -10,7 +10,7 @@
  * docs/TYPESCRIPT_PORT_BOUNDARY.md — TS does not implement kg/* or workflow writes.
  *
  * Usage:
- *   dot-agents-ts <command> [subcommand] [args...] [flags]
+ *   da-ts <command> [subcommand] [args...] [flags]
  */
 
 import { boundaryHelpLines } from "./boundary.js";
@@ -258,7 +258,7 @@ async function cmdHooks(args: string[]): Promise<number> {
 function printHelp(): void {
   printLine("dot-agents TypeScript CLI — Stage 1 variant (not full Go parity)");
   printLine("");
-  printLine("Usage: dot-agents-ts <command> [subcommand] [args...] [flags]");
+  printLine("Usage: da-ts <command> [subcommand] [args...] [flags]");
   printLine("(Run from repo: npm run start -- <command> … after npm run build — see ports/typescript/README.md)");
   printLine("");
   printLine("Commands:");

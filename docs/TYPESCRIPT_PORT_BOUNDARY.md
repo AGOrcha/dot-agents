@@ -47,7 +47,7 @@ The TypeScript variant is **not published** as a standalone npm package from thi
 1. `cd ports/typescript`
 2. `npm ci` (or `npm install`)
 3. `npm run build`
-4. Run `node dist/cli.js …`, `npm run start -- …`, or `npm link` then `dot-agents-ts …` (see **`ports/typescript/README.md`** for Windows notes and PATH).
+4. Run `node dist/cli.js …`, `npm run start -- …`, or `npm link` then `da-ts …` (see **`ports/typescript/README.md`** for Windows notes and PATH).
 
 Parity limits are repeated in **`--help`** so users are not steered toward expecting Go-only commands in TS.
 
@@ -55,7 +55,7 @@ Parity limits are repeated in **`--help`** so users are not steered toward expec
 
 The Go CLI’s **`~/.agents` canonical store** is defined in `internal/platform/buckets.go` (Stage 1 + Stage 2 buckets, ordered). The TypeScript port’s `status` command reports **the same bucket names in the same order** and uses the same **scope/item counting rules** as `commands/status.go` (marker files for `skills` / `agents` / `hooks` / `plugins`; loose files for file-style buckets).
 
-`dot-agents-ts init` creates a `global` scope directory under **each** canonical bucket, matching `commands/init.go` (the shared `resources/` tree remains for non-canonical material).
+`da-ts init` creates a `global` scope directory under **each** canonical bucket, matching `commands/init.go` (the shared `resources/` tree remains for non-canonical material).
 
 **Not implemented in TS:** plugin **spec listing** as a separate `Plugins` section after the canonical table (Go `printPluginsSection` / `ListPluginSpecs`) — deferred until plugin readback parity is required.
 

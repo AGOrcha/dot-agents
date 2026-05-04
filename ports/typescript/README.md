@@ -35,7 +35,7 @@ node dist/cli.js --help
 
 # Optional: expose `dot-agents-ts` on PATH for this clone (still requires build first):
 npm link
-dot-agents-ts --help
+da-ts --help
 ```
 
 On **Windows**, use PowerShell or `cmd.exe` with the same commands; paths are resolved with Node’s `path` APIs. Prefer `npm ci` in CI for reproducible installs.
