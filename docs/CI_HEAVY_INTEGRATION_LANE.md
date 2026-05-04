@@ -19,8 +19,8 @@ parity. Heavier checks live in a separate lane so they stay tracked without dest
 - Builds [tests/Dockerfile.sandbox](../tests/Dockerfile.sandbox).
 - Runs:
   - `docker build -t dot-agents-sandbox:<run-id> -f tests/Dockerfile.sandbox .`
-  - `docker run --rm dot-agents-sandbox:<run-id> dot-agents --version`
-  - `docker run --rm dot-agents-sandbox:<run-id> dot-agents --help`
+  - `docker run --rm dot-agents-sandbox:<run-id> da --version`
+  - `docker run --rm dot-agents-sandbox:<run-id> da --help`
 
 This is intentionally outside the PR gate because container builds are slower, network-sensitive,
 and materially heavier than the isolated built-binary smokes in `test.yml`.
@@ -34,7 +34,7 @@ escalated back into working scope via fold-back rather than parked here as silen
   - Status: escalated into working scope.
   - Fold-back: `graph-warm-build-transaction-defect` on
     `kg-command-surface-readiness / kg-freshness-audit`.
-  - Why escalated: a fresh isolated `dot-agents kg build` failed with
+  - Why escalated: a fresh isolated `da kg build` failed with
     `sqlite3.OperationalError: cannot start a transaction within a transaction`, so this is a live
     product defect, not just heavy-lane backlog.
   - Trigger target: manual or scheduled only after the KG build path is reliable on fresh homes.

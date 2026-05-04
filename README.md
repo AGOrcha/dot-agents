@@ -9,15 +9,15 @@ One CLI to manage configurations — and soon, workflows — across Cursor, Clau
 brew tap dot-agents/tap && brew install dot-agents
 
 # Set up
-dot-agents init
-dot-agents add ~/Github/myproject
+da init
+da add ~/Github/myproject
 
 # Check status
-dot-agents status
-dot-agents doctor
+da status
+da doctor
 
 # Refresh after pulling changes
-dot-agents refresh
+da refresh
 ```
 
 ---
@@ -104,7 +104,7 @@ Agents will manage their own operational infrastructure through three primitives
 | **Persist** | Save files touched, tests run, blockers, and next action at natural breakpoints | Agent (auto) |
 | **Propose** | Queue rule/skill/config changes for human review when patterns emerge | Agent → Human reviews |
 
-The design principle: **agents operate, humans steer.** Zero new commands to learn — the agent handles workflow state and surfaces decisions through `dot-agents review`.
+The design principle: **agents operate, humans steer.** Zero new commands to learn — the agent handles workflow state and surfaces decisions through `da review`.
 
 See [`research/`](research/) for the full analysis behind this direction.
 
@@ -132,7 +132,7 @@ export PATH="$HOME/.dot-agents/src/bin:$PATH"
 
 ### TypeScript port (optional, Windows-friendly subset)
 
-The primary CLI is the **Go** `dot-agents` binary (Homebrew or `scripts/install.sh` above). For machines where **Node.js 20+** is easier than Go, this repo also ships an experimental **TypeScript** implementation under [`ports/typescript/`](ports/typescript/README.md).
+The primary CLI is the **Go** `da` binary (Homebrew or `scripts/install.sh` above). For machines where **Node.js 20+** is easier than Go, this repo also ships an experimental **TypeScript** implementation under [`ports/typescript/`](ports/typescript/README.md).
 
 - **Same goal:** Stage 1 config, links, skills, agents, and hooks — not a silent replacement for Go.
 - **Different limits:** Knowledge graph commands, workflow **writes**, and loop orchestration stay **Go-only**. Read the boundary once in [`docs/TYPESCRIPT_PORT_BOUNDARY.md`](docs/TYPESCRIPT_PORT_BOUNDARY.md), then run `npm run build` and `node dist/cli.js --help` inside `ports/typescript/` before relying on it.
@@ -141,23 +141,23 @@ The primary CLI is the **Go** `dot-agents` binary (Homebrew or `scripts/install.
 
 ```bash
 # 1. Initialize ~/.agents/
-dot-agents init
+da init
 
 # 2. Add a project
-dot-agents add ~/Github/myproject
+da add ~/Github/myproject
 
 # 3. Add your rules to ~/.agents/rules/global/
 #    They'll be linked to all projects automatically
 
 # 4. Check what's applied
-dot-agents status --audit
+da status --audit
 
 # 5. Create reusable skills and subagents
-dot-agents skills new deploy
-dot-agents agents new reviewer
+da skills new deploy
+da agents new reviewer
 
 # Or: set up from a project's manifest (for teams)
-dot-agents install
+da install
 ```
 
 ## Commands
@@ -241,14 +241,14 @@ Your `~/.agents/` directory is designed to be git-tracked:
 
 ```bash
 # First time setup
-dot-agents sync init
+da sync init
 cd ~/.agents
 git remote add origin git@github.com:YOU/agents-config.git
-dot-agents sync push
+da sync push
 
 # On another machine
 git clone git@github.com:YOU/agents-config.git ~/.agents
-dot-agents add ~/Github/myproject  # Re-link your projects
+da add ~/Github/myproject  # Re-link your projects
 ```
 
 ## Supported Agents
@@ -264,7 +264,7 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 ## Requirements
 
 - **macOS** or **Linux** for the **Go** CLI installed via Homebrew or `install.sh` (those paths are what most contributors use day to day).
-- **Windows or other OS:** use the **TypeScript** port under `ports/typescript/` if you only need the Stage 1 subset documented there; use Go `dot-agents` when you need workflow and KG features.
+- **Windows or other OS:** use the **TypeScript** port under `ports/typescript/` if you only need the Stage 1 subset documented there; use Go `da` when you need workflow and KG features.
 - **git** (for sync features)
 
 ## Configuration
@@ -296,13 +296,13 @@ Skills are reusable procedure documents that agents can invoke:
 
 ```bash
 # Create a new skill
-dot-agents skills new deploy
+da skills new deploy
 
 # List all skills
-dot-agents skills
+da skills
 
 # Edit a skill
-dot-agents skills edit deploy
+da skills edit deploy
 ```
 
 Skills live in `~/.agents/skills/global/` with this structure:
@@ -316,13 +316,13 @@ Subagents are directory-based agent definitions:
 
 ```bash
 # Create a new subagent
-dot-agents agents new reviewer
+da agents new reviewer
 
 # List all subagents
-dot-agents agents
+da agents
 
 # Validate an agent's frontmatter
-dot-agents agents validate reviewer
+da agents validate reviewer
 ```
 
 Each subagent is a directory containing:
@@ -336,13 +336,13 @@ Manage Claude Code hooks for automation:
 
 ```bash
 # List all hooks
-dot-agents hooks
+da hooks
 
 # Add a hook
-dot-agents hooks add PreToolUse -m "Bash" -c "echo \\$TOOL_INPUT >> log.txt"
+da hooks add PreToolUse -m "Bash" -c "echo \\$TOOL_INPUT >> log.txt"
 
 # Show hook examples
-dot-agents hooks examples
+da hooks examples
 ```
 
 ### Project Manifests (.agentsrc.json)
@@ -351,10 +351,10 @@ Commit a `.agentsrc.json` to your repo so any contributor can set up agent confi
 
 ```bash
 # Generate manifest from current ~/.agents/ state
-dot-agents install --generate
+da install --generate
 
 # Set up a project from its manifest (after cloning)
-dot-agents install
+da install
 ```
 
 ### Importing Existing Configs
@@ -362,7 +362,7 @@ dot-agents install
 Already have agent configs scattered across your projects? Import them into `~/.agents/`:
 
 ```bash
-dot-agents import myproject
+da import myproject
 ```
 
 This detects existing rules, skills, agents, and hooks in the project and copies them into the central `~/.agents/` directory.
@@ -371,7 +371,7 @@ This detects existing rules, skills, agents, and hooks in the project and copies
 
 ### Agent-as-Operator
 
-The next major evolution: agents run `dot-agents` autonomously instead of humans operating it manually. The agent manages config, skills, rules, and workflow state — surfacing only decisions that require human judgment.
+The next major evolution: agents run `da` autonomously instead of humans operating it manually. The agent manages config, skills, rules, and workflow state — surfacing only decisions that require human judgment.
 
 Changes follow an **approval gradient**:
 - **Auto-apply**: Checkpoints, verification results, plan progress, lessons after corrections
@@ -405,7 +405,7 @@ Cursor's rule system doesn't follow symlinks. Hard links share the actual file c
 
 **Q: Can I use this with existing projects?**
 
-Yes! `dot-agents add` won't overwrite existing files unless you use `--force`.
+Yes! `da add` won't overwrite existing files unless you use `--force`.
 
 **Q: Is my config private?**
 
@@ -415,7 +415,7 @@ Yes. Everything stays in `~/.agents/` on your machine. Git sync is optional and 
 
 That's fine! dot-agents only creates config files for agents it detects or that you have rules for.
 
-**Q: What is `dot-agents refresh` for?**
+**Q: What is `da refresh` for?**
 
 After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config.
 
@@ -426,7 +426,7 @@ After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links 
 
 **Q: Can I sync my config across machines?**
 
-Yes! `dot-agents sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `dot-agents refresh` to set up all your projects.
+Yes! `da sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `da refresh` to set up all your projects.
 
 ## Contributing
 

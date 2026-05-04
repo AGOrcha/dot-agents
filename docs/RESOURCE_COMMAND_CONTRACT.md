@@ -22,7 +22,7 @@ with **shared internals** (planner, platform projection, manifest updates).
 
 Rationale:
 
-- **User mental model:** `dot-agents hooks …` matches how people already talk about hook bundles;
+- **User mental model:** `da hooks …` matches how people already talk about hook bundles;
   burying hooks under a generic `resources` command would add indirection without reducing code
   duplication.
 - **Implementation:** shared code lives in `internal/` packages; command files stay thin
@@ -40,7 +40,7 @@ Rationale:
 | **Settings** | `settings list`, `settings show`, `settings remove` | same as rules |
 
 Canonical hook storage and bundle layout: `~/.agents/hooks/…` with `HOOK.yaml` bundles (see
-`dot-agents hooks --help`).
+`da hooks --help`).
 
 ## Explicitly out of scope here
 

@@ -151,7 +151,7 @@ The shared planner dedupes canonical plugin bundles before any platform-local wr
 
 ## Import Detection and PLUGIN.yaml Scaffolding
 
-`dot-agents import` detects orphaned platform plugin artifacts and imports them into `~/.agents/plugins/{scope}/{name}/`. Import **always scaffolds `PLUGIN.yaml`** from whatever fields can be extracted from the native artifact — the user should not have to write one from scratch.
+`da import` detects orphaned platform plugin artifacts and imports them into `~/.agents/plugins/{scope}/{name}/`. Import **always scaffolds `PLUGIN.yaml`** from whatever fields can be extracted from the native artifact — the user should not have to write one from scratch.
 
 | Orphaned path | Import behavior |
 |--------------|-----------------|
@@ -181,6 +181,6 @@ The native `plugin.json` is preserved verbatim at `platforms/{platformID}/plugin
 
 - All five platforms have first-class plugin support; only OpenCode has an emitter today
 - The canonical bundle contract intentionally stays platform-neutral so the storage model supports all emitters without format lock-in
-- Codex's native marketplace path (`$REPO_ROOT/.agents/plugins/marketplace.json`) aligns naturally with our canonical storage — a future `dot-agents plugins marketplace` command could generate this file from all enabled bundles
+- Codex's native marketplace path (`$REPO_ROOT/.agents/plugins/marketplace.json`) aligns naturally with our canonical storage — a future `da plugins marketplace` command could generate this file from all enabled bundles
 - The donor branch `claude/scalable-skill-syncing-sfxOd` is historical provenance only; the current tree already landed `canonicalPackagePluginManifestOutputs`, `canonicalPluginOutputsFromOpenCodeFile`, `LoadPluginSpec`, `ListPluginSpecs`, and `syncPluginOverlayTree`, so Stage 2 planning should build from that rebuilt baseline
 - Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices are tracked in the `plugin-resource-salvage` plan

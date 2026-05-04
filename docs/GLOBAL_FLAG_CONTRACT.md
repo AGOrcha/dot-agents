@@ -35,7 +35,7 @@ This document uses the same symbols as the plan inventory:
 
 ## Top-level command families
 
-Direct children of `dot-agents`. Unless noted, all five globals are parsed.
+Direct children of `da`. Unless noted, all five globals are parsed.
 
 | Command family | `--json` | `--dry-run` | `--yes` | `--force` | `--verbose` | Notes |
 |----------------|----------|-------------|---------|-----------|-------------|-------|
@@ -108,7 +108,7 @@ Root `--force` and `--verbose` are not shown in the workflow inventory table; tr
 **Issue:** `workflow status` defines a **local** `--json`/`-j` that **shadows** the root persistent `--json`.
 
 - **`commands.Flags.JSON` (root `--json`):** not effective for this subcommand the way operators expect.
-- **Observed behavior:** `dot-agents --json workflow orient` emits JSON; `dot-agents --json workflow status` can still print human UI because the subcommand’s local flag wins the binding for `status`.
+- **Observed behavior:** `da --json workflow orient` emits JSON; `da --json workflow status` can still print human UI because the subcommand’s local flag wins the binding for `status`.
 
 **Contract for automation:** Do not assume root `--json` produces JSON for `workflow status`. Until fixed, use the **subcommand’s** `--json` if exposed, or treat output as human-only.
 
@@ -129,8 +129,8 @@ Root `--force` and `--verbose` are not shown in the workflow inventory table; tr
 
 | Invocation | Drives ingest dry-run? |
 |------------|-------------------------|
-| `dot-agents --dry-run kg ingest …` | **No** (global does not drive ingest dry-run) |
-| `dot-agents kg ingest --dry-run …` | **Yes** (use this for ingest preview) |
+| `da --dry-run kg ingest …` | **No** (global does not drive ingest dry-run) |
+| `da kg ingest --dry-run …` | **Yes** (use this for ingest preview) |
 
 Scripts must pass **`kg ingest --dry-run`** when they need ingest dry-run semantics.
 

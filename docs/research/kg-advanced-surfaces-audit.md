@@ -50,7 +50,7 @@ Execution Flows  [Found 20 execution flow(s)]
 2. **`entry_point: ""` on all flows** — The most useful field for understanding a flow's scope is always empty.
 3. **Flow names are function names** — `error`, `collectNodes`, `TestRemoveFileData` are ordinary function names, not business-domain "flows". This is misleading to agents trying to reason about execution paths.
 4. **Count varies with postprocess** — Before explicit `kg postprocess`: 20 flows. After `kg postprocess`: 64 flows. Flow detection is not stable across postprocess runs on the same graph.
-5. **Advisory already present** — `runKGFlows` already contains `ui.Info("No flows detected. Run 'dot-agents kg postprocess' to detect flows.")` but this fires only when 0 flows are returned, not when step detail is missing.
+5. **Advisory already present** — `runKGFlows` already contains `ui.Info("No flows detected. Run 'da kg postprocess' to detect flows.")` but this fires only when 0 flows are returned, not when step detail is missing.
 
 ### Decision: **expert-only**
 

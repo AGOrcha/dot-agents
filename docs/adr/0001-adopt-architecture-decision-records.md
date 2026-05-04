@@ -64,7 +64,7 @@ ADRs do **not** replace:
 - Specs (`workflow/specs/<id>/design.md`) — multi-page contracts.
 - Plans (`workflow/plans/<id>/`) — how and in what order.
 - Proposals (`~/.agents/proposals/<id>.yaml`) — change requests for
-  shared resources, processed by `dot-agents review approve`.
+  shared resources, processed by `da review approve`.
 - Lessons (`.agents/lessons/<name>/LESSON.md`) — corrections from
   mistakes.
 
@@ -79,7 +79,7 @@ is a candidate for graduation to an ADR.
   decisions without reading every spec.
 - Code citations (`// see ADR-0007`) become navigable.
 - Future KG integration: ADRs are scoped-KG `decision`-typed notes
-  (per ashwingop ontology, research §A.2); a future `dot-agents kg adr
+  (per ashwingop ontology, research §A.2); a future `da kg adr
   index` command can ingest them automatically.
 - Plans can produce ADRs as deliverables, externalizing decisions made
   during execution from the plan narrative.
@@ -110,7 +110,7 @@ is a candidate for graduation to an ADR.
 - The first plan to use ADRs is `self-review-iteration-close-wiring`,
   which will produce ADR-0002 through ADR-0005 as part of its
   execution.
-- A future KG-ADR plan will land `dot-agents kg adr {index, query,
+- A future KG-ADR plan will land `da kg adr {index, query,
   supersede, sightings}` commands so ADRs become first-class citizens
   of the scoped knowledge graph.
 - A retroactive backfill task may write ADRs for prior conversation-level

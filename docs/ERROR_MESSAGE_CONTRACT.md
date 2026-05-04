@@ -49,9 +49,9 @@ If the user can fix the problem with a next step, use `Hints`.
 
 Examples:
 
-- `Run \`dot-agents workflow prefs\` to list valid preference keys and resolved values.`
-- `Run \`dot-agents add .\` first.`
-- `Run \`dot-agents workflow status --help\` to see examples and supported flags.`
+- `Run \`da workflow prefs\` to list valid preference keys and resolved values.`
+- `Run \`da add .\` first.`
+- `Run \`da workflow status --help\` to see examples and supported flags.`
 
 The primary message says what is wrong. Hints say what to do next.
 

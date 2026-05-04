@@ -16,9 +16,9 @@ warm SQLite. `kg warm` only syncs KG notes (markdown), not code graph nodes.
 
 ### Reproduction
 ```
-dot-agents kg bridge query "runWorkflowComplete" --intent symbol_lookup  # no results
+da kg bridge query "runWorkflowComplete" --intent symbol_lookup  # no results
 sqlite3 ~/.knowledge-graph/ops/graphstore.db "SELECT COUNT(*) FROM nodes;"  # 0
-dot-agents kg code-status  # 34281 nodes (CRG)
+da kg code-status  # 34281 nodes (CRG)
 ```
 
 ### Affected intents

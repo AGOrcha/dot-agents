@@ -86,7 +86,7 @@ exist only for hand-authored YAML proposals.
 | Resource | Birth | Use signal | Improvement signal | Graduation path |
 |---|---|---|---|---|
 | **Lesson** | After a correction (manual `LESSON.md` write) | Re-read at session-start | Repeat mistakes despite the lesson; high citation count | Promote to a rule (proposal of `type: rule`, `action: add`) |
-| **Skill** | Repetitive action observed; designed via `/skill-architect` | Skill invocation trace (see §1.6) | Post-skill actions the skill should own; redundant or stale instructions | Tier upgrade (T0→T1→T2) or split into atoms; promote to global via `dot-agents skills promote` |
+| **Skill** | Repetitive action observed; designed via `/skill-architect` | Skill invocation trace (see §1.6) | Post-skill actions the skill should own; redundant or stale instructions | Tier upgrade (T0→T1→T2) or split into atoms; promote to global via `da skills promote` |
 | **Subagent** | Ad-hoc `Agent` invocation pattern stabilizes | Spawn outcome + merge-back quality + retry/replacement count | Follow-up work after merge-back; frequent override-the-default-prompt | Ad-hoc spawn → named role (T0/T1) → registered global subagent type (T2) → bundled into a plugin (T3). **Tier and role compose**: role names what the subagent does; tier sets autonomy at dispatch. |
 | **Hook** | Repeated guard or context-injection pattern | Fire rate, block correctness, **output utility** (does the agent reference what was injected?), **token cost vs benefit**, workaround frequency | False positives; wasted-token injections the agent ignores; agents pathing around the guard | Promote a guard hook to a declarative rule; promote a context-injection hook to a skill; downgrade to advisory; retire if injection cost exceeds utility |
 | **Rule** | Promoted from lesson/proposal | Read count at session-start; violation count | Rule fires but doesn't change behavior; rule contradicts another rule | Refactor, narrow scope, or retire |
@@ -205,7 +205,7 @@ spawned out of nowhere — the contract just makes the wiring explicit.
    below threshold   above threshold
         │           │
         ▼           ▼
-   auto-promote   queue as proposal (existing `dot-agents review` system)
+   auto-promote   queue as proposal (existing `da review` system)
                   ┌─ review packet: update + evidence chain +
                   │  upstream/downstream neighborhoods + why-not list +
                   │  historical contradictions
@@ -233,7 +233,7 @@ just decides whether a reviewer is needed.
 | View evidence chain for a note | `kg evidence <note-id>` | **new** |
 | Generate review packet | `kg review-packet <note-id>` | **new** |
 | Trigger promotion evaluation | `kg promote <note-id>` (manual; auto via hook) | **new** |
-| Async peer review of a promotion | `dot-agents review approve` / `reject` with `type: kg-promotion` | **extend** existing proposal system |
+| Async peer review of a promotion | `da review approve` / `reject` with `type: kg-promotion` | **extend** existing proposal system |
 | Validate plan tier consistency | `workflow plan validate --tier-check` | **extend** `workflow plan create/validate` |
 | Inject tier guidance into worker prompt | orchestrator (`isp`, `loop-worker`) — tier from plan → system instructions | **extend** orchestrator pipeline |
 | Worker escape-hatch routing | `iteration-close` skill → flag escalation to human review | **extend** existing skill |
@@ -251,7 +251,7 @@ just decides whether a reviewer is needed.
 
 ## 5. The proposal-system reuse — load-bearing
 
-`dot-agents review` already implements **async peer review with rollback**.
+`da review` already implements **async peer review with rollback**.
 It has a YAML schema (schema_version, id, status, type, action, target,
 rationale, content, created_at, created_by), a lifecycle (pending → applied
 or rejected), and a routing rule between global (`~/.agents/proposals/`) and
@@ -283,7 +283,7 @@ created_by: kg.update.hook
 
 This means we do **not** build a parallel `kg review` queue. We extend the
 existing review handler to recognize `type: kg-promotion`, render the review
-packet on `dot-agents review show`, and apply the promotion via the existing
+packet on `da review show`, and apply the promotion via the existing
 approval flow.
 
 The architectural payoff: one review pipeline, one mental model, one

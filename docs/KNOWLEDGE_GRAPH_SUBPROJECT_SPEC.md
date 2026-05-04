@@ -227,7 +227,7 @@ kg:
 
 #### Migration Between Backends
 
-`dot-agents kg migrate --to postgres --url <connection_string>` exports the SQLite graph to Postgres. This is a one-time operation for teams scaling up.
+`da kg migrate --to postgres --url <connection_string>` exports the SQLite graph to Postgres. This is a one-time operation for teams scaling up.
 
 ## Core Model
 
@@ -782,8 +782,8 @@ Must deliver:
 
 Must deliver:
 
-- `build-graph` skill updated to use `dot-agents kg build`
-- `review-delta` and `review-pr` skills wired to `dot-agents kg changes` and bridge queries
+- `build-graph` skill updated to use `da kg build`
+- `review-delta` and `review-pr` skills wired to `da kg changes` and bridge queries
 - Graph awareness added to `self-review` and `agent-start` skills
 - Canonical graph hooks in `~/.agents/hooks/global/`
 

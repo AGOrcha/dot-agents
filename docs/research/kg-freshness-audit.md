@@ -9,10 +9,10 @@ Plan task `kg-command-surface-readiness / kg-freshness-audit`.
 
 Commands audited:
 
-- `dot-agents kg build`
-- `dot-agents kg update`
-- `dot-agents kg code-status`
-- supporting contrast: `dot-agents kg health`
+- `da kg build`
+- `da kg update`
+- `da kg code-status`
+- supporting contrast: `da kg health`
 
 Audit target:
 
@@ -66,14 +66,14 @@ So the readiness boundary for code-graph-backed commands is the repo-local CRG g
 
 Observed with both forms:
 
-- `dot-agents --json kg code-status --repo /tmp/kg-freshness-clean`
-- `dot-agents kg code-status --repo /tmp/kg-freshness-clean --json`
+- `da --json kg code-status --repo /tmp/kg-freshness-clean`
+- `da kg code-status --repo /tmp/kg-freshness-clean --json`
 
 Both still rendered the human UI block instead of JSON.
 
 Contrast:
 
-- `dot-agents --json workflow status` emitted valid JSON in the same session
+- `da --json workflow status` emitted valid JSON in the same session
 
 This is a real machine-readability gap for the freshness surface.
 

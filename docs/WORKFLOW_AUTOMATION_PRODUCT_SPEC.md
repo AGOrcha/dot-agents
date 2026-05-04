@@ -70,8 +70,8 @@ These decisions are fixed for the MVP and should not be reopened during implemen
   - Platforms consume rendered native hook outputs from those bundles.
   - Do not build a generic unified hook runner for the MVP.
 - Human interface:
-  - `dot-agents review` is the primary human-facing new command.
-  - `dot-agents workflow ...` commands are escape hatches and debugging tools, not the main human workflow.
+  - `da review` is the primary human-facing new command.
+  - `da workflow ...` commands are escape hatches and debugging tools, not the main human workflow.
 - Proposal queue:
   - One YAML file per proposal.
   - Pending proposals live in `~/.agents/proposals/`.
@@ -144,8 +144,8 @@ Supporting safety hooks are part of the MVP, but they exist to reinforce the sam
 ### Trigger points
 
 - Required: session-start hook
-- Required: `dot-agents workflow orient`
-- Required: `dot-agents workflow status` uses the same underlying data sources
+- Required: `da workflow orient`
+- Required: `da workflow status` uses the same underlying data sources
 
 ### Canonical orient data model
 
@@ -185,8 +185,8 @@ The canonical orient model contains:
   - human-readable Markdown to stdout
   - must include sections for Project, Active Plans, Last Checkpoint, Pending Handoffs, Recent Lessons, Pending Proposals, and Next Action
 - CLI output:
-  - `dot-agents workflow orient` prints the same Markdown view by default
-  - `dot-agents workflow orient --json` emits the same canonical data model in JSON
+  - `da workflow orient` prints the same Markdown view by default
+  - `da workflow orient --json` emits the same canonical data model in JSON
 
 ### Orient behavior rules
 
@@ -199,7 +199,7 @@ The canonical orient model contains:
 ### Trigger points
 
 - Required: session-end hook
-- Required: `dot-agents workflow checkpoint`
+- Required: `da workflow checkpoint`
 - Optional later: additional natural-breakpoint triggers such as post-test hooks
 
 ### Checkpoint schema
@@ -259,7 +259,7 @@ next_action: Implement proposal review command
 
 - Session capture must never block session end.
 - If checkpoint writing fails, the hook prints a warning and exits successfully.
-- `dot-agents workflow checkpoint` may expose flags for `--message` and `--verification`, but the stored schema must remain exactly as defined above.
+- `da workflow checkpoint` may expose flags for `--message` and `--verification`, but the stored schema must remain exactly as defined above.
 
 ## Propose
 
@@ -307,18 +307,18 @@ review_reason: ""
 
 Required commands:
 
-- `dot-agents review`
+- `da review`
   - lists pending proposals only
-- `dot-agents review show <id>`
+- `da review show <id>`
   - shows full proposal content and metadata
-- `dot-agents review approve <id>`
+- `da review approve <id>`
   - validates the target
   - applies the change under `~/.agents/`
-  - runs `dot-agents refresh`
+  - runs `da refresh`
   - updates `status` to `approved`
   - sets `reviewed_at`
   - moves the proposal to `~/.agents/proposals/archived/<id>.yaml`
-- `dot-agents review reject <id> [--reason "..."]`
+- `da review reject <id> [--reason "..."]`
   - updates `status` to `rejected`
   - sets `reviewed_at`
   - sets `review_reason` when provided
@@ -328,7 +328,7 @@ Required commands:
 
 - Approve is transactional: if apply or refresh fails, the proposal remains pending.
 - Review commands are the only MVP path that may apply proposal content to `~/.agents/`.
-- Proposal creation itself is file-based; no separate `dot-agents propose` CLI is required in the MVP.
+- Proposal creation itself is file-based; no separate `da propose` CLI is required in the MVP.
 
 ## Safety And Quality Hook Bundles
 
@@ -410,19 +410,19 @@ The MVP approval gradient is:
 The MVP command surface is:
 
 - Existing:
-  - `dot-agents hooks list`
-  - `dot-agents refresh`
-  - `dot-agents status`
-  - `dot-agents doctor`
+  - `da hooks list`
+  - `da refresh`
+  - `da status`
+  - `da doctor`
 - New:
-  - `dot-agents workflow status`
-  - `dot-agents workflow orient [--json]`
-  - `dot-agents workflow checkpoint [--message ...] [--verification ...]`
-  - `dot-agents workflow log [--all]`
-  - `dot-agents review`
-  - `dot-agents review show <id>`
-  - `dot-agents review approve <id>`
-  - `dot-agents review reject <id> [--reason ...]`
+  - `da workflow status`
+  - `da workflow orient [--json]`
+  - `da workflow checkpoint [--message ...] [--verification ...]`
+  - `da workflow log [--all]`
+  - `da review`
+  - `da review show <id>`
+  - `da review approve <id>`
+  - `da review reject <id> [--reason ...]`
 
 These commands are support and inspection commands. They do not change the core product principle that hooks and file conventions drive the normal agent workflow.
 

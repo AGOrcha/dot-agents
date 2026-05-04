@@ -7,7 +7,7 @@ Related:
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
 - legacy precursor: `.agents/active/crg-kg-integration.plan.md`
 
-New workflow planning work should use `dot-agents workflow` with canonical bundles under `.agents/workflow/plans/` and supporting design docs under `.agents/workflow/specs/`; `.agents/active/` references here are historical lineage only.
+New workflow planning work should use `da workflow` with canonical bundles under `.agents/workflow/plans/` and supporting design docs under `.agents/workflow/specs/`; `.agents/active/` references here are historical lineage only.
 
 ## Purpose
 
@@ -18,12 +18,12 @@ This document maps the bidirectional integration between dot-agents skills (agen
 ```
 Skills (agent-facing)                Commands (CLI)               Graph (data)
 ┌─────────────────┐              ┌──────────────────┐         ┌──────────────┐
-│  /review-delta  │──calls──────>│ dot-agents kg    │──reads──>│ nodes, edges │
+│  /review-delta  │──calls──────>│ da kg            │──reads──>│ nodes, edges │
 │  /review-pr     │              │   changes        │         │ flows, risk  │
-│  /build-graph   │──calls──────>│ dot-agents kg    │──writes─>│ communities  │
+│  /build-graph   │──calls──────>│ da kg            │──writes─>│ communities  │
 │  /agent-start   │              │   build/update   │         │ kg_notes     │
 │  /self-review   │              │                  │         │ note_symbol  │
-│  /agent-handoff │              │ dot-agents       │         │   _links     │
+│  /agent-handoff │              │ da               │         │   _links     │
 │  /split-commits │              │   workflow orient│──reads──>│              │
 │  /gh-fix-ci     │              │   review approve │         └──────────────┘
 └─────────────────┘              └──────────────────┘
@@ -42,9 +42,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Calls CRG MCP tools (`list_graph_stats_tool`, `build_or_update_graph_tool`) directly.
 
 **Integrated state**:
-- Step 1: `dot-agents kg status` — check if graph exists and is current
-- Step 2: `dot-agents kg build` (first time) or `dot-agents kg update` (incremental)
-- Step 3: `dot-agents kg status` — report results
+- Step 1: `da kg status` — check if graph exists and is current
+- Step 2: `da kg build` (first time) or `da kg update` (incremental)
+- Step 3: `da kg status` — report results
 
 **Graph tables touched**: `nodes`, `edges`, `metadata`, `communities`, `flows`, `flow_memberships`
 
@@ -57,11 +57,11 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Calls CRG MCP tools (`build_or_update_graph_tool`, `get_review_context_tool`, `get_impact_radius_tool`, `query_graph_tool`).
 
 **Integrated state**:
-- Step 1: `dot-agents kg update` — ensure graph reflects current state
-- Step 2: `dot-agents kg changes` — get risk-scored change analysis (replaces `get_review_context_tool`)
-- Step 3: `dot-agents kg impact <high-risk-symbol>` — blast radius for flagged symbols
-- Step 4: `dot-agents kg bridge query --intent tests_for <changed-fn>` — check test coverage
-- Step 5: `dot-agents kg bridge query --intent symbol_decisions <changed-fn>` — surface linked decisions (NEW: traceability)
+- Step 1: `da kg update` — ensure graph reflects current state
+- Step 2: `da kg changes` — get risk-scored change analysis (replaces `get_review_context_tool`)
+- Step 3: `da kg impact <high-risk-symbol>` — blast radius for flagged symbols
+- Step 4: `da kg bridge query --intent tests_for <changed-fn>` — check test coverage
+- Step 5: `da kg bridge query --intent symbol_decisions <changed-fn>` — surface linked decisions (NEW: traceability)
 
 **Graph tables touched**: `nodes`, `edges`, `risk_index`, `note_symbol_links`, `kg_notes`
 
@@ -74,10 +74,10 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Same CRG MCP tools as review-delta, plus `semantic_search_nodes_tool`.
 
 **Integrated state**: Same as review-delta, plus:
-- Step 2a: `dot-agents kg changes --base main` — scope to PR diff
-- Step 6: `dot-agents kg search <keyword>` — find related symbols (replaces `semantic_search_nodes_tool`)
+- Step 2a: `da kg changes --base main` — scope to PR diff
+- Step 6: `da kg search <keyword>` — find related symbols (replaces `semantic_search_nodes_tool`)
 
-**Additional graph value**: PR reviews span more code than delta reviews, making community analysis more relevant. `dot-agents kg` communities can identify when a PR crosses module boundaries (higher risk).
+**Additional graph value**: PR reviews span more code than delta reviews, making community analysis more relevant. `da kg` communities can identify when a PR crosses module boundaries (higher risk).
 
 ### self-review
 
@@ -86,8 +86,8 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Runs git diff, applies code quality/security/performance rules. No graph integration.
 
 **Integrated state** (additions only — existing steps unchanged):
-- After step 1 (gather diff): `dot-agents kg changes --brief` — get risk scores and test gaps for changed symbols
-- After step 4 (test coverage): `dot-agents kg bridge query --intent tests_for <changed-fn>` — structural test coverage check
+- After step 1 (gather diff): `da kg changes --brief` — get risk scores and test gaps for changed symbols
+- After step 4 (test coverage): `da kg bridge query --intent tests_for <changed-fn>` — structural test coverage check
 - New step: surface `note_symbol_links` for changed code — alert if a decision-documented function was modified
 
 **Why this matters**: self-review is the most-run review skill. Adding lightweight graph awareness (just `--brief`) keeps it fast while catching impact that git diff alone misses.
@@ -99,9 +99,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Prefers graph/MCP tooling over manual scans when available. References code-review-graph as optional.
 
 **Integrated state**:
-- Context gathering step: `dot-agents workflow orient` (already includes graph health via bridge when available)
-- New: `dot-agents kg status` — show code graph stats (files, nodes, edges, staleness)
-- New: `dot-agents kg bridge query --intent decision_lookup <current-task-topic>` — surface prior decisions relevant to the task
+- Context gathering step: `da workflow orient` (already includes graph health via bridge when available)
+- New: `da kg status` — show code graph stats (files, nodes, edges, staleness)
+- New: `da kg bridge query --intent decision_lookup <current-task-topic>` — surface prior decisions relevant to the task
 
 **Why this matters**: agent-start sets the context window for the entire session. Getting graph context early means fewer grep fallbacks later.
 
@@ -112,9 +112,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Gathers git state, plans, progress, creates handoff document.
 
 **Integrated state** (additions only):
-- New: include `dot-agents kg changes` summary in handoff — what symbols were modified this session
+- New: include `da kg changes` summary in handoff — what symbols were modified this session
 - New: include any `note_symbol_links` created or decisions referenced
-- New: `dot-agents workflow checkpoint` already captures file modifications; extend to include symbol-level changes
+- New: `da workflow checkpoint` already captures file modifications; extend to include symbol-level changes
 
 **Why this matters**: Handoffs lose structural context. Recording which symbols changed (not just files) helps the next agent understand scope faster.
 
@@ -125,7 +125,7 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: No graph integration. Splits are based on file-level heuristics.
 
 **Integrated state**:
-- New: `dot-agents kg` community analysis — suggest commit boundaries aligned with code communities
+- New: `da kg` community analysis — suggest commit boundaries aligned with code communities
 - When two files are in different communities, they are candidates for separate commits
 - When files are in the same community, they should stay in the same commit
 - Fallback: existing file-level heuristics when graph is unavailable
@@ -139,9 +139,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: No graph integration. Inspects check logs, identifies failures, plans fix.
 
 **Integrated state**:
-- New: `dot-agents kg changes --base <failing-commit>` — scope investigation to symbols changed since the last green build
-- New: `dot-agents kg bridge query --intent impact_radius <changed-fn>` — understand what the change might have broken
-- New: `dot-agents kg bridge query --intent tests_for <changed-fn>` — which tests should have caught this
+- New: `da kg changes --base <failing-commit>` — scope investigation to symbols changed since the last green build
+- New: `da kg bridge query --intent impact_radius <changed-fn>` — understand what the change might have broken
+- New: `da kg bridge query --intent tests_for <changed-fn>` — which tests should have caught this
 
 **Why this matters**: CI failures are often caused by impact that crosses module boundaries. The graph shows the blast radius directly instead of requiring the agent to grep through test files.
 
@@ -164,13 +164,13 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Integrated state** (future):
 - New: agent descriptions could reference graph communities for scope — e.g., "this agent owns the `auth` community"
-- New: `dot-agents kg` community list could suggest natural subagent boundaries
+- New: `da kg` community list could suggest natural subagent boundaries
 
 ## Command → Skill: Reverse Direction
 
 Commands can reference, inject, or trigger skills:
 
-### dot-agents init
+### da init
 
 **What it does**: Initialize a project with dot-agents config.
 
@@ -179,15 +179,15 @@ Commands can reference, inject, or trigger skills:
 - Should include graph-aware skills when CRG is available
 - Should register `kg serve` MCP server config for detected platforms
 
-### dot-agents add
+### da add
 
 **What it does**: Add agent configurations to a project.
 
 **Skill integration**:
 - Registers MCP server configs for platforms
-- Should offer to register `dot-agents kg serve` alongside other MCP servers
+- Should offer to register `da kg serve` alongside other MCP servers
 
-### dot-agents refresh
+### da refresh
 
 **What it does**: Update configs from sources.
 
@@ -195,30 +195,30 @@ Commands can reference, inject, or trigger skills:
 - Pulls latest skill definitions from git sources
 - Should update graph skill templates when source skills change
 
-### dot-agents review approve
+### da review approve
 
 **What it does**: Approve and apply a workflow proposal.
 
 **Skill integration**:
 - Could call `self-review` as a pre-check before applying
-- Could call `dot-agents kg changes` to validate proposal impact
+- Could call `da kg changes` to validate proposal impact
 
-### dot-agents workflow orient
+### da workflow orient
 
 **What it does**: Render session context.
 
 **Skill integration**:
 - Already renders plans, checkpoints, handoffs, proposals, git state
 - Should include graph bridge health
-- Should include `dot-agents kg status` (code graph stats)
+- Should include `da kg status` (code graph stats)
 - Feeds context to `agent-start` skill
 
-### dot-agents doctor
+### da doctor
 
 **What it does**: Health check for config state.
 
 **Skill integration**:
-- Should include `dot-agents kg health` in diagnostics
+- Should include `da kg health` in diagnostics
 - Should verify graph hooks are installed if graph DB exists
 
 ## Hooks As The Glue
@@ -229,8 +229,8 @@ Hooks bridge skills and commands by firing on agent events:
 
 | Hook | Event | What it does | Graph connection |
 |------|-------|-------------|-----------------|
-| session-orient | session_start | Calls `dot-agents workflow orient` | Should include graph status |
-| session-capture | stop | Calls `dot-agents workflow checkpoint` | Should capture symbol-level changes |
+| session-orient | session_start | Calls `da workflow orient` | Should include graph status |
+| session-capture | stop | Calls `da workflow checkpoint` | Should capture symbol-level changes |
 | auto-format | post_tool_use (Write/Edit) | Runs formatters | None |
 | guard-commands | pre_tool_use (Bash) | Blocks dangerous commands | None |
 | secret-scan | post_tool_use (Write/Edit) | Warns on credential writes | None |
@@ -239,8 +239,8 @@ Hooks bridge skills and commands by firing on agent events:
 
 | Hook | Event | Command | Purpose |
 |------|-------|---------|---------|
-| graph-update | post_tool_use (Edit/Write/Bash) | `dot-agents kg update --skip-flows` | Keep graph current as code changes |
-| graph-precommit | pre_commit | `dot-agents kg changes --brief` | Surface risk before committing |
+| graph-update | post_tool_use (Edit/Write/Bash) | `da kg update --skip-flows` | Keep graph current as code changes |
+| graph-precommit | pre_commit | `da kg changes --brief` | Surface risk before committing |
 
 These replace the hooks that `code-review-graph install` currently writes to `.claude/settings.json`.
 

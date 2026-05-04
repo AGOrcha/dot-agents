@@ -91,7 +91,7 @@ The MVP deliberately reads existing Markdown plans and handoffs, but the researc
 - Introduce canonical repo-local plan and task artifacts.
 - Preserve human-readable planning while adding deterministic machine state.
 - Support dependencies, blockers, verification expectations, and active-next-task resolution.
-- Keep legacy `.agents/active/*.plan.md` artifacts readable during migration, while making `dot-agents workflow` plus `.agents/workflow/plans/` and `.agents/workflow/specs/` the contributor-facing canonical path.
+- Keep legacy `.agents/active/*.plan.md` artifacts readable during migration, while making `da workflow` plus `.agents/workflow/plans/` and `.agents/workflow/specs/` the contributor-facing canonical path.
 
 ### Resolved Decisions
 
@@ -148,7 +148,7 @@ New repo-local artifacts introduced in this wave:
 
 ### Migration And Compatibility
 
-- Existing `.agents/active/*.plan.md` files may still exist as legacy artifacts, but new contributor guidance should point to `dot-agents workflow` and canonical bundles under `.agents/workflow/plans/`.
+- Existing `.agents/active/*.plan.md` files may still exist as legacy artifacts, but new contributor guidance should point to `da workflow` and canonical bundles under `.agents/workflow/plans/`.
 - When a canonical plan bundle exists, it is the machine-readable and contributor-facing source of truth.
 - Supporting design and decision docs should live under `.agents/workflow/specs/` rather than alongside legacy active-plan Markdown.
 - `plan.md` is optional and exists for human readability, not canonical machine state.
@@ -158,14 +158,14 @@ New repo-local artifacts introduced in this wave:
 
 This wave should add or extend:
 
-- `dot-agents workflow plan`
-- `dot-agents workflow plan create <plan-id>`
-- `dot-agents workflow plan show <plan-id>`
-- `dot-agents workflow task add <plan-id>`
-- `dot-agents workflow tasks <plan-id>`
-- `dot-agents workflow advance <plan-id> --task <task-id> --status <status>`
+- `da workflow plan`
+- `da workflow plan create <plan-id>`
+- `da workflow plan show <plan-id>`
+- `da workflow task add <plan-id>`
+- `da workflow tasks <plan-id>`
+- `da workflow advance <plan-id> --task <task-id> --status <status>`
 
-During migration, prefer `dot-agents workflow plan create` plus `dot-agents workflow task add|update` to seed canonical bundles under `.agents/workflow/plans/`; use `.agents/workflow/specs/` for longer-form design and decision docs that should not masquerade as executable task graphs.
+During migration, prefer `da workflow plan create` plus `da workflow task add|update` to seed canonical bundles under `.agents/workflow/plans/`; use `.agents/workflow/specs/` for longer-form design and decision docs that should not masquerade as executable task graphs.
 
 ### Acceptance Standard
 
@@ -221,7 +221,7 @@ Each line in `verification-log.jsonl` is one JSON object:
   "scope": "repo",
   "summary": "all packages passed",
   "artifacts": [],
-  "recorded_by": "dot-agents workflow verify"
+  "recorded_by": "da workflow verify"
 }
 ```
 
@@ -266,11 +266,11 @@ Rules:
 
 This wave should add or extend:
 
-- `dot-agents workflow status --json`
-- `dot-agents workflow health`
-- `dot-agents workflow health --json`
-- `dot-agents workflow verify record --kind ... --status ... --summary ...`
-- `dot-agents workflow verify log [--all]`
+- `da workflow status --json`
+- `da workflow health`
+- `da workflow health --json`
+- `da workflow verify record --kind ... --status ... --summary ...`
+- `da workflow verify log [--all]`
 
 These are still support commands. Hooks and canonical artifacts remain the primary automation path.
 
@@ -344,11 +344,11 @@ The initial supported categories should be:
 
 This wave should add or extend:
 
-- `dot-agents workflow prefs`
-- `dot-agents workflow prefs show`
-- `dot-agents workflow prefs set-local <key> <value>`
+- `da workflow prefs`
+- `da workflow prefs show`
+- `da workflow prefs set-local <key> <value>`
 
-Shared repo preference changes should still flow through proposal files and `dot-agents review`.
+Shared repo preference changes should still flow through proposal files and `da review`.
 
 ### Acceptance Standard
 
@@ -480,15 +480,15 @@ Skills are the primary consumers of bridge queries. The bridge enables skills to
 
 These are likely escape-hatch commands for the first bridge:
 
-- `dot-agents workflow graph query --intent ...`
-- `dot-agents workflow graph health`
+- `da workflow graph query --intent ...`
+- `da workflow graph health`
 
-These map to `dot-agents kg` commands for direct access:
+These map to `da kg` commands for direct access:
 
-- `dot-agents kg search <query>` — FTS across notes and symbols
-- `dot-agents kg changes [--base <ref>]` — change detection
-- `dot-agents kg impact <symbol>` — impact radius
-- `dot-agents kg bridge query --intent <intent> <query>` — unified bridge query
+- `da kg search <query>` — FTS across notes and symbols
+- `da kg changes [--base <ref>]` — change detection
+- `da kg impact <symbol>` — impact radius
+- `da kg bridge query --intent <intent> <query>` — unified bridge query
 
 ### Acceptance Standard
 
@@ -556,8 +556,8 @@ belong to the transport adapter or runtime protocol, not to canonical repo stora
 
 These are not committed yet, but are the likely escape-hatch commands:
 
-- `dot-agents workflow fanout`
-- `dot-agents workflow merge-back`
+- `da workflow fanout`
+- `da workflow merge-back`
 
 ### Blocking Risks
 
@@ -596,8 +596,8 @@ Users operate multiple repos, and the same workflow drift can recur across them:
 
 ### Candidate CLI Surface
 
-- `dot-agents workflow sweep`
-- `dot-agents workflow drift`
+- `da workflow sweep`
+- `da workflow drift`
 
 ### Candidate Outputs
 

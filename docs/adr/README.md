@@ -101,9 +101,9 @@ ADRs are scoped-KG `decision`-typed notes (per `interaction_label: decision`
 from research evaluation §A.2 ashwingop ontology). Future tooling may
 ingest ADRs into the KG so that:
 
-- `dot-agents kg adr index` — scans `docs/adr/*.md`, ingests as decision-typed
+- `da kg adr index` — scans `docs/adr/*.md`, ingests as decision-typed
   scoped-KG notes with status, supersedes graph, and content hash.
-- `dot-agents kg adr query <id>` — returns the ADR plus its supersedes-graph
+- `da kg adr query <id>` — returns the ADR plus its supersedes-graph
   and **sightings** (every spec/plan/commit/code reference).
 - `kg lint --adr` — finds orphaned ADRs (no sightings), broken supersedes
   chains, missing status, and ADRs without owners.

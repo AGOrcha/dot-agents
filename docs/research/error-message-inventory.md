@@ -32,19 +32,19 @@ That path already produces a consistent envelope:
 Representative current output:
 
 ```text
-$ dot-agents workflow status extra
-Error: dot-agents workflow status does not accept positional arguments (got 1)
+$ da workflow status extra
+Error: da workflow status does not accept positional arguments (got 1)
 Hints:
-  - Usage: dot-agents workflow status [flags]
-  - Run `dot-agents workflow status --help` to see examples and supported flags.
+  - Usage: da workflow status [flags]
+  - Run `da workflow status --help` to see examples and supported flags.
   - Run workflow status from inside the project repository.
 ```
 
 ```text
-$ dot-agents workflow orient --plan x
+$ da workflow orient --plan x
 Error: unknown flag: --plan
 Hint:
-  - Run `dot-agents workflow orient --help` to see examples and supported flags.
+  - Run `da workflow orient --help` to see examples and supported flags.
 ```
 
 ## Strongly compliant families
@@ -77,11 +77,11 @@ These are the cleanest non-workflow examples:
 Observed behavior:
 
 ```text
-$ dot-agents mcp show global does-not-exist
+$ da mcp show global does-not-exist
 Error: MCP file not found: global / does-not-exist
 Hints:
-  - Run `dot-agents mcp list global` to see available files.
-  - Run `dot-agents mcp show --help` to see examples and supported flags.
+  - Run `da mcp list global` to see available files.
+  - Run `da mcp show --help` to see examples and supported flags.
 ```
 
 ## Partially compliant families
@@ -144,17 +144,17 @@ Current state:
 Observed behavior:
 
 ```text
-$ dot-agents kg bridge query --intent nope runWorkflowComplete
+$ da kg bridge query --intent nope runWorkflowComplete
 Error: unknown bridge intent "nope"
 Hint:
-  - Run `dot-agents kg bridge query --help` to see examples and supported flags.
+  - Run `da kg bridge query --help` to see examples and supported flags.
 ```
 
 ```text
-$ dot-agents kg bridge query runWorkflowComplete
+$ da kg bridge query runWorkflowComplete
 Error: --intent is required (valid: ...)
 Hint:
-  - Run `dot-agents kg bridge query --help` to see examples and supported flags.
+  - Run `da kg bridge query --help` to see examples and supported flags.
 ```
 
 Why this still drifts:

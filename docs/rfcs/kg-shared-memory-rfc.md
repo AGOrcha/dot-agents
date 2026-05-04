@@ -86,8 +86,8 @@ These are out of scope for the near term. Any future work in these areas require
 
 **Design:**
 ```bash
-dot-agents kg sync          # git pull + kg lint
-dot-agents kg sync --push   # git push
+da kg sync          # git pull + kg lint
+da kg sync --push   # git push
 ```
 
 **Acceptance criteria:**
