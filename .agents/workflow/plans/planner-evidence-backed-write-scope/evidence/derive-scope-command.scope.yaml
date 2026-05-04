@@ -3,7 +3,7 @@ plan_id: planner-evidence-backed-write-scope
 task_id: derive-scope-command
 status: draft
 mode: code
-goal: dot-agents workflow plan derive-scope <plan_id> <task_id> --seed-symbol/--seed-path. Runs scope-lane and context-lane qu…
+goal: da workflow plan derive-scope <plan_id> <task_id> --seed-symbol/--seed-path. Runs scope-lane and context-lane qu…
 confidence: low
 decision_locks: []
 required_reads: []

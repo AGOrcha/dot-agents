@@ -8,7 +8,7 @@ summary: |-
     (1) Self-review skill writes nothing today (chat-only) — orphaned. (2)
     iter-log v2 review block is dead-coded — schema requires it, no caller
     populates it (22/22 v2 logs have empty review). (3) The earlier
-    crg-kg-integration phase G added `dot-agents kg changes --brief` to
+    crg-kg-integration phase G added `da kg changes --brief` to
     self-review, but the later skill-architect rework lost the call;
     structurally identical regression. Wire self-review to write a structured
     review-decision.yaml; restore the kg-changes/kg-impact context calls;
@@ -26,7 +26,7 @@ success_criteria: |-
     traces back to a `review-decision.yaml` written by self-review (not
     faked). The §3 impact-score formula in
     `agent-context-resolution-architecture.md` becomes computable for the
-    first time on real data. The restored `dot-agents kg changes --brief` +
+    first time on real data. The restored `da kg changes --brief` +
     `kg impact` calls fire as Step 0 of self-review on a real diff.
 
     Common false positive: schema looks correct on inspection but the

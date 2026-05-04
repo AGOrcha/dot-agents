@@ -183,7 +183,7 @@
 - *Second-order:* surfacing open questions as first-class artifacts creates a backlog of things-to-figure-out, which is itself a planning input. Net positive.
 
 **Mapping.**
-- **[GAP-ADOPT — P1]** — add an `open_questions:` structured list to spec frontmatter (YAML). `dot-agents workflow` reads them and exposes via a `workflow open-questions` command that lists every open question across specs.
+- **[GAP-ADOPT — P1]** — add an `open_questions:` structured list to spec frontmatter (YAML). `da workflow` reads them and exposes via a `workflow open-questions` command that lists every open question across specs.
 - **[OVERLAP-SHARPEN]** — our fold-back artifacts already play this role at the observation level. Elevate *spec* open questions to the same surface.
 
 ---
@@ -260,7 +260,7 @@ Commitment-graded. No bundling.
 - **W.2** — Add the correction-loop compensation check to `self-review` or `iteration-close` (sullyai).
 
 **Short-term (one plan each):**
-- **W.3** — `open_questions:` structured list on specs + `dot-agents workflow open-questions` command (the_smart_ape).
+- **W.3** — `open_questions:` structured list on specs + `da workflow open-questions` command (the_smart_ape).
 - **W.4** — Bundle-prompt template audit: add anti-scope + output-contract sections (codex-multi-agent-swarms).
 - **W.5** — `/reweave` skill: at plan close, walk prior plans whose assumptions may be invalidated, propose `status: superseded` or `status: needs-review` (arscontexta).
 

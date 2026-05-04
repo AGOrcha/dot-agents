@@ -108,25 +108,25 @@ This maps directly to the intent marker protocol from Graeme's article:
 ### Before: CLI-First
 
 ```
-dot-agents sync         # human runs
-dot-agents refresh      # human runs
-dot-agents doctor       # human runs
-dot-agents workflow resume  # human runs
+da sync         # human runs
+da refresh      # human runs
+da doctor       # human runs
+da workflow resume  # human runs
 ```
 
 ### After: Agent-First with CLI Escape Hatch
 
 ```
 # Agent runs these automatically via hooks/MCP:
-dot-agents orient       # at session start — load context
-dot-agents persist      # at natural breakpoints — save state
-dot-agents propose      # when changes detected — queue for review
-dot-agents sweep        # periodically — check health across repos
+da orient       # at session start — load context
+da persist      # at natural breakpoints — save state
+da propose      # when changes detected — queue for review
+da sweep        # periodically — check health across repos
 
 # Human can still run:
-dot-agents status       # see what the agent has been doing
-dot-agents review       # approve/reject pending proposals
-dot-agents override     # force a specific state
+da status       # see what the agent has been doing
+da review       # approve/reject pending proposals
+da override     # force a specific state
 ```
 
 ### The Agent Interface
@@ -200,7 +200,7 @@ The previous research identified workflow hygiene practices worth supporting. In
 ### Multi-Member Workflow
 
 When different team members push updates:
-1. Agent detects changes on session start (git pull + dot-agents orient)
+1. Agent detects changes on session start (git pull + da orient)
 2. If changes are compatible → auto-merge, log it
 3. If changes conflict → [ESCALATION_NOTICE] to human with specific conflict
 4. Agent tracks which member last modified each resource for attribution
@@ -208,20 +208,20 @@ When different team members push updates:
 ## What This Means for the dot-agents MVP
 
 ### Previous MVP (from AUTONOMOUS_WORKFLOW_MANAGEMENT_RESEARCH.md):
-1. `dot-agents workflow resume`
-2. `dot-agents workflow checkpoint`
-3. `dot-agents workflow verify`
+1. `da workflow resume`
+2. `da workflow checkpoint`
+3. `da workflow verify`
 
 ### Revised MVP (agent-as-operator):
 1. **Orient hook** — fires at session start, emits context bundle
 2. **Persist hook** — fires at natural breakpoints, saves state
-3. **Propose mechanism** — agent queues changes, human reviews via `dot-agents review`
+3. **Propose mechanism** — agent queues changes, human reviews via `da review`
 
 Why this is better:
 - Zero new commands for humans to learn
 - Agent does the work it's already trying to do, but with canonical persistence
 - The only human-facing command is `review` — approve or reject what the agent proposes
-- Existing `dot-agents sync/refresh/doctor` still work as escape hatches
+- Existing `da sync/refresh/doctor` still work as escape hatches
 
 ## Open Questions
 

@@ -276,7 +276,7 @@ Memory recommendations now need to align with the canonical scoped-KG contract:
 *Added after re-reading `scoped-knowledge-graphs/design.md` (note schema + drivers + provenance), `app-type-profiles/design.md` (verifier chain + behavior preservation), and `skill-tiering-contract/design.md` (tier invariants for non-composition artifacts).*
 
 - **F.1 — One schema, three projections — owned by scoped-KG.** Part E said "trust fields should be one schema, not separate conveniences" but did not assign ownership. The right home is `scoped-knowledge-graphs/design.md` as the canonical `KGNote` schema: `author`, `scope`, `derived_from`, `tier`, `cites`, `corrective_source`, plus the existing `IndexedAt` / staleness drivers / `contradictions` metadata. From that one schema:
-  - **`.agents/lessons/<name>/LESSON.md` is a projection.** Frontmatter mirrors the canonical fields; lessons round-trip into the warm store as `KGNote` rows of `note_type: lesson`. Edits flow either direction; `dot-agents kg sync` handles the round-trip.
+  - **`.agents/lessons/<name>/LESSON.md` is a projection.** Frontmatter mirrors the canonical fields; lessons round-trip into the warm store as `KGNote` rows of `note_type: lesson`. Edits flow either direction; `da kg sync` handles the round-trip.
   - **Auto-memory files are an adapter view.** `~/.claude/projects/<hash>/memory/*.md` is a Claude-Code-platform cache of `user`-scope notes, read at SessionStart and write-mirrored on session end. Cursor / Codex equivalents project from the same `user`-scope rows.
   - **No per-store schema.** The synthesis previously implied three independent conventions; this collapses to one canonical shape with two projections.
 

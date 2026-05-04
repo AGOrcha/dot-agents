@@ -129,12 +129,12 @@ The CI check assumes:
 
 If the parser-fallback approach in `tp3` proves fragile (subcommand
 trees, flag aliases, hidden commands), a small follow-up Go-side task
-adds `dot-agents __dump-tree` (debug-only, JSON output of the cobra
+adds `da __dump-tree` (debug-only, JSON output of the cobra
 tree) — that is NOT this plan's scope but is a known escape hatch.
 
 ## 8. Closeout signals
 
-- `dot-agents workflow plan archive --plan typescript-port` (or the
+- `da workflow plan archive --plan typescript-port` (or the
   equivalent manual archive).
 - `docs/TYPESCRIPT_PORT_GAP.md` exists and is current.
 - `docs/typescript-port-boundary.json` exists and parses.

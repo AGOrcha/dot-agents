@@ -219,7 +219,7 @@ Append every tool invocation to a local log file for audit trail and debugging.
 
 ## Connection to dot-agents
 
-This article demonstrates exactly the kind of hook management that dot-agents already handles via `dot-agents hooks`. The [agent-as-operator research](../AGENT_AS_OPERATOR_RESEARCH.md) identifies hooks as the primary mechanism for the orient/persist cycle — session start hooks for orientation, post-tool hooks for quality enforcement, session end hooks for state persistence.
+This article demonstrates exactly the kind of hook management that dot-agents already handles via `da hooks`. The [agent-as-operator research](../AGENT_AS_OPERATOR_RESEARCH.md) identifies hooks as the primary mechanism for the orient/persist cycle — session start hooks for orientation, post-tool hooks for quality enforcement, session end hooks for state persistence.
 
 The challenge these hooks highlight is portability: configuring 8 hooks per project is tedious. dot-agents solves this by managing hooks centrally in `~/.agents/hooks/` and distributing them to each project's `.claude/settings.json` (or `.codex/hooks.json` for Codex) via the refresh/install commands. Write the hook once, apply it everywhere.
 

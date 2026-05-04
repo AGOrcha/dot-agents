@@ -124,7 +124,7 @@ Tier is **self-declared**, not inferred. Lint *verifies* that the declared tier 
 - Every skill under `.agents/skills/` and `~/.agents/skills/` carries a `tier` value.
 - Lint catches the following in fixture tests: atom-with-calls, molecule-without-verifier, compound-without-review-or-attendance, >10 children warning.
 - At least one in-flight delegation bundle carries `tier: molecule` with a verifier cite and passes lint.
-- The written rule file exists and is loaded globally (verified by `dot-agents refresh` and presence in rule index).
+- The written rule file exists and is loaded globally (verified by `da refresh` and presence in rule index).
 - This spec itself declares `tier: cell` in its frontmatter and lists child compounds in `calls:` once a plan is drafted.
 
 ## 8. Open decisions

@@ -28,7 +28,7 @@ tasks:
           * ADR-0003 — when self-review fires inside iteration-close
             (before verify-record-test? after? in parallel?). Affects whether review
             can reject before tests commit, and how reruns are sequenced.
-          * ADR-0005 — restore `dot-agents kg changes --brief` + `dot-agents kg impact`
+          * ADR-0005 — restore `da kg changes --brief` + `da kg impact`
             as Step 0 of self-review. The crg-kg-integration phase G call was lost in
             the skill-architect rework; this is a regression fix masquerading as a
             new feature. ADR captures *why* the restoration happened so the next
@@ -86,7 +86,7 @@ tasks:
 
         Concrete changes:
           1. New `instructions/kg-context.md` as Step 0 (before code-quality):
-             runs `dot-agents kg changes --brief` and `dot-agents kg impact <files>`
+             runs `da kg changes --brief` and `da kg impact <files>`
              on the staged diff; surfaces blast-radius before per-file review.
              Restores the lost crg-kg-integration phase G integration.
           2. New `instructions/output-format.md` defines the
@@ -103,7 +103,7 @@ tasks:
         Note: the path `.agents/skills/dot-agents/self-review/` is symlinked from
         `.agents/skills/self-review/`; edits land in the canonical location at
         `~/.agents/skills/dot-agents/self-review/`. After editing, run
-        `dot-agents skills promote self-review` (if needed) and `dot-agents refresh`.
+        `da skills promote self-review` (if needed) and `da refresh`.
 
         Hard test:
           Invoking `/self-review` directly (without iteration-close) on a real diff:
@@ -151,7 +151,7 @@ tasks:
              `/self-review` at the ordering chosen in ADR-0003 (before/after/parallel
              with verify-record-test).
           2. After self-review writes review-decision.yaml, iteration-close calls
-             `dot-agents workflow checkpoint --log-to-iter <N> --role review` so
+             `da workflow checkpoint --log-to-iter <N> --role review` so
              mergeReviewIterLog reads the review-decision.yaml and populates the
              iter-log review block. This is the path that has been dead-coded
              since v2 of the schema landed.
@@ -295,7 +295,7 @@ tasks:
         Tier: T1 (molecule — archive + record).
 
         Procedure:
-          1. Run `dot-agents workflow plan archive --plan self-review-iteration-close-wiring`.
+          1. Run `da workflow plan archive --plan self-review-iteration-close-wiring`.
           2. Confirm `.agents/history/self-review-iteration-close-wiring/` contains
              PLAN.yaml, TASKS.yaml, the .plan.md, and the
              delegate-merge-back-archive/ directory if delegated work was used.

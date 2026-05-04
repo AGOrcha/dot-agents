@@ -146,7 +146,7 @@ These are locked decisions to carry into the design-doc fork — NOT re-open dur
 - Mature auth protocol (Docker Registry v2 token auth over OAuth2).
 - Sigstore / cosign ecosystem sits on top natively (for v2 attestation).
 
-**Reference registry server**: **BYO for v1.5** — customer points dot-agents at any OCI-compatible registry they already run. Thin-wrapper `dot-agents serve-registry` (embedding `distribution/distribution`) stays on **v2 roadmap** — ship only if evidence shows small-shop demand without existing OCI infra.
+**Reference registry server**: **BYO for v1.5** — customer points dot-agents at any OCI-compatible registry they already run. Thin-wrapper `da serve-registry` (embedding `distribution/distribution`) stays on **v2 roadmap** — ship only if evidence shows small-shop demand without existing OCI infra.
 
 **Registry content model — separate OCI artifact types, not bundled**:
 
@@ -184,7 +184,7 @@ Rationale (summarized): lifecycle independence, asymmetric consumption (consumer
     "api":  "agents/verifiers/api-sre"      # local-sourced (existing form retained)
   }
   ```
-- Publish CLI is per-artifact: `dot-agents publish agent ./path`, `dot-agents publish verifier ./path`, `dot-agents publish skill ./path`, `dot-agents publish bundle ./manifest.yaml`.
+- Publish CLI is per-artifact: `da publish agent ./path`, `da publish verifier ./path`, `da publish skill ./path`, `da publish bundle ./manifest.yaml`.
 - Media type acts as a client-side schema gate — pulling an agent artifact into a `verifier_profiles` slot is caught before execution.
 
 **FIPS posture for v1.5** (web-verified as of April 2026):
@@ -472,7 +472,7 @@ Each `--role` invocation **merges** into the existing `iter-N.yaml` (first call 
 | `workflow verify record` | **review-agent** (flag-first writer per D1) | Writes both global `verification-log.jsonl` row and per-task `review-decision.yaml` |
 | `workflow fold-back create` / `update` | **post-closeout orchestrator**, grouped by task/slice run (related observations land together; clearly unrelated observations stay separate). `update` enabled per D2 | Needs identity scheme (D2.a) |
 | `workflow fanout --verifier-sequence` | **new flag, workflow fanout** — resolves `app_type` → sequence, writes into bundle | Schema + CLI change; same `write_scope` |
-| `dot-agents refresh` | Deferred to the D6 fork (registry source type not in this plan) | — |
+| `da refresh` | Deferred to the D6 fork (registry source type not in this plan) | — |
 
 **Accept-path flow**:
 impl-agent commits → writes `impl-handoff.yaml` + `focused-unit.result.yaml` → calls `workflow checkpoint --log-to-iter N --role impl` → pre-verifier TDD-fresh gate (D3) → verifiers each write `<type>.result.yaml` + `workflow checkpoint --log-to-iter N --role verifier --verifier-type <type>` → verifier aggregate calls `workflow merge-back` (filling new verification fields) → reviewer reads validation artifacts → calls `workflow verify record` with structured decision flags (CLI writes `review-decision.yaml` + audit row) → calls `workflow checkpoint --log-to-iter N --role review` → orchestrator closeout (archive + cleanup per D13).

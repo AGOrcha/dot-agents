@@ -140,7 +140,7 @@ These constraints are now part of the active plan and should not be re-litigated
 
 ## Native Command Candidates
 
-These are the highest-value sections of the current `ralph-*` shell flow to evaluate for native `dot-agents workflow` commands:
+These are the highest-value sections of the current `ralph-*` shell flow to evaluate for native `da workflow` commands:
 
 - scoped completion driver for one id or a comma-separated plan set
 - replacement-agent / same-stage resume helper for resumable terminal worker failures

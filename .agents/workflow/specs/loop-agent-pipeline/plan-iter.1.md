@@ -173,7 +173,7 @@ The sources array already supports git. Extend to support named package selectio
 "source_priority": ["local", "git:myorg/agent-profiles", "registry"]  // ← new
 }
 
-dot-agents refresh fetches declared packages into ~/.agents/profiles/cache/<source_name>/ and links them. Conflict resolution follows source_priority order. This lets teams
+da refresh fetches declared packages into ~/.agents/profiles/cache/<source_name>/ and links them. Conflict resolution follows source_priority order. This lets teams
 share verifier profiles across repos without copying files.
 
 ---

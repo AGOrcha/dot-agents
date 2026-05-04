@@ -57,6 +57,6 @@ tasks:
           Worker A: Cursor + Claude additions
           Worker B: OpenCode additions
           Worker C: Copilot additions
-        Acceptance: go test ./...; dot-agents status shows new bucket entries; round-trip import/refresh
+        Acceptance: go test ./...; da status shows new bucket entries; round-trip import/refresh
         preserves new bucket files.
         - Fold-back: merge-back integrated — Stage 2 bucket expansion slice landed.

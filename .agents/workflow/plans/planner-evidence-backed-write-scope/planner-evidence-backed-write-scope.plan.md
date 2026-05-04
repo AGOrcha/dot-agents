@@ -144,7 +144,7 @@ The PE-WS spec §10 explicitly excludes ralph from the scope of evidence-backed 
 completes and closeout runs, ralph could call:
 
 ```
-dot-agents workflow plan check-scope <plan_id> <task_id> --from-git-diff
+da workflow plan check-scope <plan_id> <task_id> --from-git-diff
 ```
 
 This compares actual changed files to the task's `final_write_scope` and warns on:

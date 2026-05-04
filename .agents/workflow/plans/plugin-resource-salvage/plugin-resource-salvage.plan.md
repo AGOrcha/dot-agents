@@ -191,11 +191,11 @@ After existing check groups, add a `"plugins"` check group. For each canonical p
 3. **Projection link check**: for `opencode`, check `.opencode/plugins/{name}` — if symlink resolves to non-existent path → `ERROR: {bundle}: broken symlink at {path}`
 
 **Acceptance criteria:**
-- `dot-agents import` on a project with `.opencode/plugins/my-plugin/index.js` creates `~/.agents/plugins/global/my-plugin/PLUGIN.yaml` (with `kind: native`) and `files/index.js`.
-- `dot-agents import` on a project with `.cursor-plugin/plugin.json` creates `~/.agents/plugins/global/{name}/PLUGIN.yaml` (with `kind: package`) and `platforms/cursor/plugin.json`.
-- `dot-agents status` shows a "Plugins" section when `~/.agents/plugins/` has at least one bundle.
-- `dot-agents explain` output includes the `~/.agents/plugins/` layout.
-- `dot-agents doctor` reports broken symlinks and malformed manifests.
+- `da import` on a project with `.opencode/plugins/my-plugin/index.js` creates `~/.agents/plugins/global/my-plugin/PLUGIN.yaml` (with `kind: native`) and `files/index.js`.
+- `da import` on a project with `.cursor-plugin/plugin.json` creates `~/.agents/plugins/global/{name}/PLUGIN.yaml` (with `kind: package`) and `platforms/cursor/plugin.json`.
+- `da status` shows a "Plugins" section when `~/.agents/plugins/` has at least one bundle.
+- `da explain` output includes the `~/.agents/plugins/` layout.
+- `da doctor` reports broken symlinks and malformed manifests.
 - `go test ./commands ./internal/platform` passes.
 
 **Tests:**

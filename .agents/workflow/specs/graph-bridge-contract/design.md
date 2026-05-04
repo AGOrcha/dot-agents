@@ -47,7 +47,7 @@ command must append a structured warning to the response:
 
 ```
 [bridge-sparse] warm store has N nodes / M notes — results may be incomplete.
-Run 'dot-agents kg build' to index code nodes or 'dot-agents kg warm' to sync notes.
+Run 'da kg build' to index code nodes or 'da kg warm' to sync notes.
 ```
 
 This replaces the current silent empty-result output.

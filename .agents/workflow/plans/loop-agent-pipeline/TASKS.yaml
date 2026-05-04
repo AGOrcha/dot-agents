@@ -209,7 +209,7 @@ tasks:
         **what is still missing:** the gate is still too lightweight for the full spec:
         - auto mode in `ralph-review-gate` is artifact-presence based rather than a real orchestrator judgment pass
         - fold-back / proposal routing decisions are still not applied as part of the task-scoped review gate
-        - `ralph-closeout` still owns too much parent-side reconciliation logic instead of delegating more of it to deterministic `dot-agents workflow` helpers
+        - `ralph-closeout` still owns too much parent-side reconciliation logic instead of delegating more of it to deterministic `da workflow` helpers
 
         **pipeline implication:** some logic currently concentrated in `ralph-closeout` should still be split into "per-task review gate" vs "end-of-session / no-more-work cleanup". The task-scoped gate should happen before the next bundle for the same plan is delegated.
 

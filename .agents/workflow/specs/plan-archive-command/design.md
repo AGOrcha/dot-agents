@@ -177,10 +177,10 @@ intent is required.
 ### 4.1 Command surface
 
 ```
-dot-agents workflow plan archive --plan <id>
-dot-agents workflow plan archive --plan <id1>,<id2>,<id3>
-dot-agents workflow plan archive --plan <id> --force
-dot-agents --dry-run workflow plan archive --plan <id1>,<id2>
+da workflow plan archive --plan <id>
+da workflow plan archive --plan <id1>,<id2>,<id3>
+da workflow plan archive --plan <id> --force
+da --dry-run workflow plan archive --plan <id1>,<id2>
 ```
 
 Flags:

@@ -27,7 +27,7 @@ three concrete gaps:
    iter-logs have `overall_decision: ""`.
 3. **A graduated KG-context behavior was lost.** The
    `crg-kg-integration/phase-g-skill-integration` task (2026-04-12)
-   added `dot-agents kg changes --brief` to the older self-review
+   added `da kg changes --brief` to the older self-review
    skill template. The later skill-architect rework lost the call.
    The merge-back artifact even flagged the missing follow-up:
    *"Promote/sync `~/.agents/skills/global` from embedded templates"*
@@ -48,7 +48,7 @@ self-review writes a structured artifact that iteration-close consumes.
 > back to a `review-decision.yaml` written by self-review (not faked).
 > Without further changes, the impact-score formula in
 > `agent-context-resolution-architecture.md` §3 becomes computable for
-> the first time on real data. The restored `dot-agents kg changes
+> the first time on real data. The restored `da kg changes
 > --brief` + `kg impact` calls fire as Step 0 of self-review on a real
 > diff.
 >
@@ -135,7 +135,7 @@ as `proposed` and will be filled in during the corresponding tasks.
 
 **Add:**
 - `instructions/kg-context.md` — Step 0 module that runs
-  `dot-agents kg changes --brief` and `dot-agents kg impact <files>`.
+  `da kg changes --brief` and `da kg impact <files>`.
 - `instructions/output-format.md` — describes the
   `review-decision.yaml` envelope per ADR-0002, with worked example.
 
@@ -162,7 +162,7 @@ as `proposed` and will be filled in during the corresponding tasks.
   - Insert a new step that invokes `/self-review` at the ordering chosen
     in ADR-0003.
   - After self-review writes the file, call
-    `dot-agents workflow checkpoint --log-to-iter <N> --role review` so
+    `da workflow checkpoint --log-to-iter <N> --role review` so
     `mergeReviewIterLog` reads the `review-decision.yaml` and populates
     the iter-log review block.
 
@@ -177,7 +177,7 @@ ship those upgrades — it produces the canonical example.
 
 ## 7. Out of scope for this plan
 
-- Building `dot-agents kg adr {index, query, supersede, sightings}`
+- Building `da kg adr {index, query, supersede, sightings}`
   commands. Deferred to a future plan; ADR-0001's "ADR ↔ Knowledge Graph"
   section names the future shape but does not commit.
 - Backfilling ADRs for prior conversation-level decisions
@@ -210,7 +210,7 @@ for human cross-check.
 
 ## 9. Closeout signals
 
-- `dot-agents workflow plan archive --plan self-review-iteration-close-wiring`
+- `da workflow plan archive --plan self-review-iteration-close-wiring`
 - Architecture note §6.5 gains a one-line addendum recording the new
   baseline conversion-rate measurement starting point.
 - All four ADRs (0002–0005) are flipped from `proposed` to `accepted`

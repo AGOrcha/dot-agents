@@ -289,52 +289,52 @@ These commands are grouped as workflow management, not platform configuration.
 
 ### Resume And Continuity
 
-- `dot-agents workflow resume`
+- `da workflow resume`
   - collect the active plan, last handoff, recent git state, recent verification, and likely next step
-- `dot-agents workflow checkpoint`
+- `da workflow checkpoint`
   - persist files touched, commands run, tests run, blockers, and next action before pause
-- `dot-agents workflow handoff`
+- `da workflow handoff`
   - package state into a continuation bundle for another agent or a future session
 
 ### Planning And Tasking
 
-- `dot-agents workflow plan`
+- `da workflow plan`
   - create or update a canonical plan artifact
-- `dot-agents workflow tasks`
+- `da workflow tasks`
   - manage task graphs, statuses, dependencies, and blockers
-- `dot-agents workflow advance`
+- `da workflow advance`
   - promote future work to active work, split into subplans, or archive completed work
 
 ### Verification And Drift
 
-- `dot-agents workflow verify`
+- `da workflow verify`
   - run repo-appropriate checks and persist results
-- `dot-agents workflow drift`
+- `da workflow drift`
   - compare plan state, repo state, and emitted config state to surface mismatches
-- `dot-agents workflow doctor`
+- `da workflow doctor`
   - validate workflow health, not only config health
 
 ### Tooling And Approval State
 
-- `dot-agents workflow approvals`
+- `da workflow approvals`
   - inspect and normalize MCP/plugin/trust approvals where possible
-- `dot-agents workflow tool-health`
+- `da workflow tool-health`
   - surface auth expiry, rate-limit risk, tool unavailability, and environment prerequisites
-- `dot-agents workflow env capture`
+- `da workflow env capture`
   - save reusable runtime or dev environment assumptions for future sessions
 
 ### Preferences And Reuse
 
-- `dot-agents workflow prefs`
+- `da workflow prefs`
   - persist per-repo habits such as test commands, CI expectations, plan location, and review preferences
-- `dot-agents workflow sweep`
+- `da workflow sweep`
   - apply repeated workflow operations across sibling repos and report drift
 
 ### Fan-out And Delegation
 
-- `dot-agents workflow fanout`
+- `da workflow fanout`
   - spawn bounded workers with ownership constraints and merge summaries
-- `dot-agents workflow merge-back`
+- `da workflow merge-back`
   - collect child summaries, verification results, and unresolved conflicts into one parent continuation artifact
 
 ## Candidate Canonical Resources
@@ -381,9 +381,9 @@ In other words:
 
 The smallest useful workflow-management MVP would likely be:
 
-1. `dot-agents workflow resume`
-2. `dot-agents workflow checkpoint`
-3. `dot-agents workflow verify`
+1. `da workflow resume`
+2. `da workflow checkpoint`
+3. `da workflow verify`
 
 Why these three first:
 

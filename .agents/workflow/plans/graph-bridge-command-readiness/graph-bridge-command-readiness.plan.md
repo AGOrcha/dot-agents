@@ -6,8 +6,8 @@ Status: Active
 
 Turn the reopened graph-bridge usability audit into a canonical workflow plan that makes:
 
-- `dot-agents workflow graph query`
-- `dot-agents kg bridge query`
+- `da workflow graph query`
+- `da kg bridge query`
 
 dependable enough for downstream planning and write-scope derivation.
 

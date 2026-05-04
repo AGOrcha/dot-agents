@@ -1,10 +1,9 @@
-# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
 schema_version: 1
 plan_id: binary-rename-da-sweep
 tasks:
     - id: t1-decide-shim-or-cutover
       title: Decide compat-shim vs hard-cutover; produce ADR-0006
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-ship-shim-or-cutover-binary
@@ -17,7 +16,6 @@ tasks:
         - docs/adr/0006-da-rename-strategy.md
         - docs/adr/README.md
       verification_required: false
-      app_type: research
       notes: |-
         Tier: T2 (compound — load-bearing decision affecting downstream
         sweep mechanics).
@@ -46,10 +44,10 @@ tasks:
           anti-scope: do NOT modify .goreleaser.yaml or any code in this task. ADR is decision-only. t2 owns implementation.
           bundle-context (if fanout): the existing WIP diff (.goreleaser.yaml, .github/workflows/auto-release.yml, .agentsrc.json), ADR-0001 (format), the rename-analysis prose from this session
           output contract: docs/adr/0006-*.md with populated Context/Decision/Consequences; index updated
-
+      app_type: research
     - id: t2-ship-shim-or-cutover-binary
       title: Ship the binary rename per ADR-0006 (shim or cutover)
-      status: pending
+      status: completed
       depends_on:
         - t1-decide-shim-or-cutover
       blocks:
@@ -62,7 +60,6 @@ tasks:
         - Makefile
         - .agentsrc.json
       verification_required: true
-      app_type: build-config
       notes: |-
         Tier: T2 (compound — build config + CI workflow + smoke test).
 
@@ -112,10 +109,10 @@ tasks:
           anti-scope: do NOT touch any of the doc-sweep targets in this task. Build/release only.
           bundle-context (if fanout): user WIP diff, ADR-0006 (decision), goreleaser docs, current commands/root.go
           output contract: passing CI on this branch with `da` as primary binary; if the decision is revised to shim, ADR-0006 must explain why
-
+      app_type: build-config
     - id: t3-sweep-priority-docs
       title: Sweep README, docs/, ADRs, architecture note
-      status: pending
+      status: completed
       depends_on:
         - t1-decide-shim-or-cutover
       blocks: []
@@ -125,7 +122,6 @@ tasks:
         - docs/
         - .agents/proposals/agent-context-resolution-architecture.md
       verification_required: true
-      app_type: docs
       notes: |-
         Tier: T1 (molecule — scoped text substitution per file).
 
@@ -167,10 +163,10 @@ tasks:
           anti-scope: do NOT touch .agents/history/ — that's the historical record. Do NOT change any code in commands/, internal/, ports/typescript/.
           bundle-context (if fanout): ADR-0006 (decision), the substitution rule above, list of project-name-vs-binary-name distinguishing patterns
           output contract: clean grep for dot-agents-as-command outside history dir; commit per area is fine but document the substitution rule in the commit message
-
+      app_type: docs
     - id: t4-sweep-plans-specs-research
       title: Sweep .agents/workflow/{plans,specs}/ + research/ for binary-name references
-      status: pending
+      status: in_progress
       depends_on:
         - t1-decide-shim-or-cutover
       blocks: []
@@ -180,7 +176,6 @@ tasks:
         - .agents/workflow/specs/
         - research/
       verification_required: true
-      app_type: docs
       notes: |-
         Tier: T1 (molecule — text substitution; same rule as t3).
 
@@ -191,7 +186,7 @@ tasks:
           * research/ (13 files reference dot-agents as command examples)
 
         Same substitution rule as t3. Plan task notes reference
-        `dot-agents workflow ...` heavily; these need updating so future
+        `da workflow ...` heavily; these need updating so future
         ISP runs read accurate guidance.
 
         Hard test:
@@ -212,7 +207,7 @@ tasks:
           anti-scope: do NOT touch .agents/history/. Do NOT change schema_version or any non-prose fields. Do NOT modify open-decision content (just the binary references in prose).
           bundle-context (if fanout): ADR-0006, t3 substitution rule, list of files
           output contract: clean grep + valid YAML (no syntax breakage)
-
+      app_type: docs
     - id: t5-sweep-skills-rules-claude-md
       title: Sweep ~/.agents/{skills,rules}/ + ~/.claude/CLAUDE.md for binary-name references
       status: pending
@@ -225,7 +220,6 @@ tasks:
         - ~/.agents/rules/
         - ~/.claude/CLAUDE.md
       verification_required: true
-      app_type: skill
       notes: |-
         Tier: T1 (molecule — text substitution + skills promote/refresh).
 
@@ -261,7 +255,7 @@ tasks:
           anti-scope: do NOT rename `~/.agents/skills/dot-agents/` or `~/.agents/rules/dot-agents/` directories — those use the project name, not the binary name.
           bundle-context (if fanout): ADR-0006, t3 substitution rule, list of skill instruction files
           output contract: clean grep + skills functional + a sanity-check session output captured in merge-back
-
+      app_type: skill
     - id: t6-ts-port-binary-decision
       title: Decide TS port binary naming (dot-agents-ts vs da-ts); produce ADR-0007 if non-trivial
       status: pending
@@ -277,7 +271,6 @@ tasks:
         - ports/typescript/README.md
         - docs/TYPESCRIPT_PORT_BOUNDARY.md
       verification_required: true
-      app_type: typescript
       notes: |-
         Tier: T2 (compound — decision + implementation + cross-doc updates).
 
@@ -315,7 +308,7 @@ tasks:
           anti-scope: do NOT redo the Phase 4 boundary decision. ADR-0007 is naming-only; the boundary stays as-is.
           bundle-context (if fanout): ADR-0006 (decision logic), docs/TYPESCRIPT_PORT_BOUNDARY.md, current package.json bin field
           output contract: ADR-0007 + (if rename chosen) updated package.json + README; CI passes
-
+      app_type: typescript
     - id: t7-drop-dot-agents-shim
       title: Drop dot-agents compat shim after deprecation window expires
       status: pending
@@ -331,7 +324,6 @@ tasks:
         - .github/workflows/auto-release.yml
         - cmd/dot-agents/main.go
       verification_required: true
-      app_type: build-config
       notes: |-
         Tier: T1 (molecule — small reversal of t2's shim).
 
@@ -371,3 +363,4 @@ tasks:
           anti-scope: do NOT skip the calendar check. Even if t2-t5 are technically done, the deprecation window must be respected.
           bundle-context (if fanout): ADR-0006 (timeline), t2 commit (what to revert), release notes template
           output contract: shim removed; release notes published; major version bumped
+      app_type: build-config

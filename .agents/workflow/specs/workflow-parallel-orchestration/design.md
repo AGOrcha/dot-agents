@@ -61,10 +61,10 @@ discover what those tasks are or what the limit is. The instruction exists; the 
 `plan`). It is the machine-facing counterpart to `workflow next`.
 
 ```
-dot-agents workflow eligible
-dot-agents workflow eligible --plan plan-archive-command,workflow-parallel-orchestration
-dot-agents workflow eligible --plan plan-archive-command --limit 3
-dot-agents --json workflow eligible --plan plan-archive-command
+da workflow eligible
+da workflow eligible --plan plan-archive-command,workflow-parallel-orchestration
+da workflow eligible --plan plan-archive-command --limit 3
+da --json workflow eligible --plan plan-archive-command
 ```
 
 **Rationale:** `eligible` is a session-level, cross-plan operation. Nesting it under `plan`

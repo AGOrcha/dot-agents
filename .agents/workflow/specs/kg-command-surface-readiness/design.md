@@ -1,10 +1,10 @@
 # KG Command Surface Readiness
 
-**Status:** design artifact that inventories the broader `dot-agents kg` readiness surface and should feed follow-on canonical plan work after the narrower [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan stabilizes planner-facing queries.
+**Status:** design artifact that inventories the broader `da kg` readiness surface and should feed follow-on canonical plan work after the narrower [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan stabilizes planner-facing queries.
 
 ## Goal
 
-- extend the earlier graph-bridge resurrection work to the rest of the `dot-agents kg` command surface
+- extend the earlier graph-bridge resurrection work to the rest of the `da kg` command surface
 - separate native KG commands from code-graph commands that still depend on the Python `code-review-graph` path directly or indirectly
 - identify which readiness gaps matter for near-term planner and orchestrator work and which are separate product debt
 

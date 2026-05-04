@@ -488,7 +488,7 @@ All package-tier operations live under a new `packages` subcommand.
 | `da packages list` | Show installed packages with resolved version and digest |
 | `da packages publish <type> <path>` | Publish an agent, skill, verifier, or bundle to a declared OCI source |
 
-`publish` replaces the conceptual `dot-agents publish agent|verifier|skill|bundle`
+`publish` replaces the conceptual `da publish agent|verifier|skill|bundle`
 from [external-agent-sources §5](../external-agent-sources/design.md#5-registry-content-model).
 It is scoped under `packages` to make the source-of-truth (OCI registry) explicit and
 to keep the local authoring flow (`da agents add`, `da skills promote`) separate from

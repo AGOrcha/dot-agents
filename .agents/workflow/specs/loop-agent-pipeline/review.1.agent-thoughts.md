@@ -54,8 +54,8 @@ Schema drift:
 
 Without these, the Phase 6 script is a narrative wrapper with no actionable output.
 
-7. dot-agents refresh doesn't support registry source type yet                        
-Phase 7 adds "type": "registry" to sources. The current dot-agents refresh only handles local and git. This is a CLI change. The plan should
+7. da refresh doesn't support registry source type yet                        
+Phase 7 adds "type": "registry" to sources. The current da refresh only handles local and git. This is a CLI change. The plan should
 note commands/ as write_scope for p7.
 
 ---                                       

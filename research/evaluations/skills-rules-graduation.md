@@ -1,7 +1,7 @@
 # Articles Evaluation — Skills, Rules & Graduation
 
 **Written:** 2026-04-21
-**Scope:** How the articles speak to dot-agents' agent-authorship surfaces: skills (`.agents/skills/<name>/` → `dot-agents skills promote` → shared), rules (`.agents/rules/<ns>/` via proposal/review loop), prompts (shared prompt library), and the graduation pipeline that moves experimental artifacts from project-local to globally-shared. Also covers progressive disclosure design for skills/tools.
+**Scope:** How the articles speak to dot-agents' agent-authorship surfaces: skills (`.agents/skills/<name>/` → `da skills promote` → shared), rules (`.agents/rules/<ns>/` via proposal/review loop), prompts (shared prompt library), and the graduation pipeline that moves experimental artifacts from project-local to globally-shared. Also covers progressive disclosure design for skills/tools.
 **Siblings:** `workflow-orchestration.md`, `agent-execution.md`, `hooks-and-platform.md`, `lessons-and-memory.md`, `workflow-spec-plan-inventory.md`, `../articles-evaluation-kg-and-adjacent.md`.
 
 **Rubric:** Core / Pros / Cons / Risk profile (Failure mode / Evidence / Reversibility / Second-order) / Mapping.
@@ -56,7 +56,7 @@
 **Mapping.**
 - **[GAP-ADOPT — P0]** — `author: human | agent` on KGNote, lessons, plans, skills, rules. Write a PreToolUse hook that blocks `Write`/`Edit` on `author: human` files without explicit override. Composes with H.3 in the hooks doc.
 - **[GAP-ADOPT — P1]** — generalize the proposal/review loop beyond global rules: skills, plans, lessons can all graduate from agent-authored drafts. Today only `~/.agents/proposals/` supports this; project-local proposals exist as markdown with no formal graduation.
-- **[OVERLAP-SHARPEN]** — `dot-agents review approve` already does graduation for global rules/skills. Extend its scope to cover the new artifact types.
+- **[OVERLAP-SHARPEN]** — `da review approve` already does graduation for global rules/skills. Extend its scope to cover the new artifact types.
 
 ---
 
@@ -186,7 +186,7 @@
 - Prose-as-title convention extended to skills and lessons (karpathy + KG doc).
 
 **P1:**
-- Generalize proposal/review loop to cover lessons / plans / skills as graduation targets — not just global rules. Today only `dot-agents review approve` exists, and it targets global rules. Extend to project-local artifacts when CLI support lands (noted in `proposal-routing.md` as a future extension).
+- Generalize proposal/review loop to cover lessons / plans / skills as graduation targets — not just global rules. Today only `da review approve` exists, and it targets global rules. Extend to project-local artifacts when CLI support lands (noted in `proposal-routing.md` as a future extension).
 - Cross-reference fields (`skills:`, `lessons:` in frontmatter) between skills and lessons (claude-obsidian-memory-stack).
 - `skill-describe` lint: every skill must have "invoke when:" one-liner (thealexker).
 
@@ -217,7 +217,7 @@
 - **S.6** — Prose-as-title rename pass over `.agents/lessons/` and `.agents/skills/` (karpathy + KG doc).
 
 **Medium-term:**
-- **S.7** — Generalize project-local proposals: `dot-agents review approve` covers project-local artifacts (skills, lessons, plans), not just global rules. Depends on CLI extension referenced in `proposal-routing.md`.
+- **S.7** — Generalize project-local proposals: `da review approve` covers project-local artifacts (skills, lessons, plans), not just global rules. Depends on CLI extension referenced in `proposal-routing.md`.
 - **S.8** — "Rewrite on contradiction" skill/hook: when a new lesson or skill contradicts an older one, flag both for review. Composes with contradiction protocol from the_smart_ape and scoped-KG's same-scope contradiction / cross-scope metadata split.
 
 **Explicitly deferred:**

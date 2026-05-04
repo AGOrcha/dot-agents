@@ -159,7 +159,7 @@
 
 **Mapping.**
 - **[OVERLAP-SHARPEN]** — our lessons and note files should adopt prose-as-title. This is a five-minute convention change.
-- **[GAP-ADOPT]** — an **ingestion pipeline for external content**. Today, transcripts of Slack/meeting/video never reach the KG. A `dot-agents ingest <url|file>` that extracts claims, frameworks, actions and drops them as KG notes (with `derivation: untracked` per scoped-KG §5.8) would close the biggest blind spot in our "what does the agent know?" surface.
+- **[GAP-ADOPT]** — an **ingestion pipeline for external content**. Today, transcripts of Slack/meeting/video never reach the KG. A `da ingest <url|file>` that extracts claims, frameworks, actions and drops them as KG notes (with `derivation: untracked` per scoped-KG §5.8) would close the biggest blind spot in our "what does the agent know?" surface.
 - **[WE-AHEAD]** — our warm store with sqlite + typed queries is strictly better than Obsidian-as-database for machine readers. Humans can still open the `.md` files.
 
 ---
@@ -170,7 +170,7 @@
 
 **Pros.**
 - **Elegantly solves the "agent overwrites my thinking" problem with one frontmatter field.** This is worth adopting verbatim.
-- Maps onto our existing `rules/` vs agent-proposed rules distinction: human-authored rules survive `refresh`, agent-proposed ones go through `dot-agents review`.
+- Maps onto our existing `rules/` vs agent-proposed rules distinction: human-authored rules survive `refresh`, agent-proposed ones go through `da review`.
 - The **graduation mechanism** is the exact pattern our proposal→review loop implements at the rule level. Kevin's innovation is applying it per-file in the KG.
 
 **Cons.**
@@ -190,10 +190,10 @@
 
 **Pros.** The ingest/query/lint triad is the minimal command surface for a durable KG. We have query (kg bridge, MCP tools). We don't have first-class ingest or lint.
 
-**Cons.** Mostly a repackaging of the patterns in arscontexta, Nyk, and kevin. The cross-platform Skills install is interesting but we already solve platform distribution differently (via `dot-agents refresh`).
+**Cons.** Mostly a repackaging of the patterns in arscontexta, Nyk, and kevin. The cross-platform Skills install is interesting but we already solve platform distribution differently (via `da refresh`).
 
 **Mapping.**
-- **[GAP-ADOPT]** — `dot-agents kg lint` as a command surface that runs: broken-wikilink detection, orphan-note detection, stale-citation detection, author-field presence check, contradiction scan. Today we have `kg fresh/warm/build/bridge` but no lint. Lint is the reweave/hygiene primitive.
+- **[GAP-ADOPT]** — `da kg lint` as a command surface that runs: broken-wikilink detection, orphan-note detection, stale-citation detection, author-field presence check, contradiction scan. Today we have `kg fresh/warm/build/bridge` but no lint. Lint is the reweave/hygiene primitive.
 - **[OVERLAP-SHARPEN]** — our MCP surface exposes query; it does not expose ingest. Add `kg_ingest` as an MCP tool so agents can persist discoveries during a session without going through a human-facing command.
 
 ---
@@ -233,7 +233,7 @@
   - confidence decay on stale relations
   
   Pair this with the scoped-KG spec's "review-nudge" axis: the dream cycle is the process that fires review-nudges and gathers candidate cleanups.
-- **[GAP-ADOPT]** — **Context Cores as our distribution primitive.** We already bundle skills/rules/hooks via dot-agents refresh; formalizing it as a versioned, rollback-able "context core" bundle aligns naming and gives rollback guarantees we don't currently promise.
+- **[GAP-ADOPT]** — **Context Cores as our distribution primitive.** We already bundle skills/rules/hooks via `da refresh`; formalizing it as a versioned, rollback-able "context core" bundle aligns naming and gives rollback guarantees we don't currently promise.
 - **[OVERLAP-SHARPEN]** — our scoped-KG spec uses "drivers" for staleness; Zep's `valid_at`/`invalid_at` is a simpler surface for the same idea. Consider adding `valid_at` as an explicit note field alongside `IndexedAt` — it becomes the signal that a driver has fired.
 
 ---
@@ -499,7 +499,7 @@ dot-agents is a Camp 2 (context substrate) system with: a unified `.agents/` tre
 **P1 — meaningful new primitives:**
 5. **Dream cycle / scheduled consolidation job** (Thoth via witcheer). Dedup, relationship inference, description enrichment, and review-nudge firing. Must preserve scoped-KG's contract: time creates `review_due`, not `stale`.
 6. **Contradiction protocol as a skill** (the_smart_ape). Explicit 4-step procedure for agents when they see two notes disagree. For scoped KG, same-scope contradiction can become stale; cross-scope disagreement remains `contradictions` metadata.
-7. **Ingest command for external content** (Nyk). `dot-agents kg ingest <url|file>` that extracts claims and creates untracked-derivation notes.
+7. **Ingest command for external content** (Nyk). `da kg ingest <url|file>` that extracts claims and creates untracked-derivation notes.
 8. **`kg lint` command** (karpathy). Broken wikilinks, orphan notes, missing authors, stale cites, contradictions. Reweave automation.
 
 **P2 — structural:**
@@ -624,7 +624,7 @@ see its Risk profile before deciding.
 
 - **`cross-app-dependency-impact` is a named-but-empty spec slot.** `app-type-profiles/design.md` §"Completeness note" announces a companion spec that "describe[s] how changes to one profile or one repo propagate through the dependency graph to affected repos, sharing the profile vocabulary defined here." This is exactly the architectural slot for: multi-agent-memory-dkg's cross-org coordination, witcheer's TrustGraph "Context Cores" (versioned distribution), and the Camp 2 graph-improves-itself thread. The synthesis should stop discussing those articles in the abstract and instead route their adoptable parts (content-hashing, publisher identity, versioned bundles, behavior-preservation gates) into that empty spec slot. Action: when the spec is drafted, add Part A.5 group "Cross-app / cross-repo propagation" pulling in DKG, TrustGraph, MemSearch, and the §F.2.4 reweave-as-propagation thread below.
 
-- **The `public` scope is already designed; "external ingest" must respect it.** Scoped-KG §4.5 defers the `public` backend but requires today's resolver, provenance, and contract surfaces to *cover* it ("model it from day one so provenance and resolver cover it; first implementation plan does not build a public-scope backend"). The KG doc's P1 #7 (`dot-agents kg ingest <url|file>`) and P2 (Cognee-style "enter through vectors, exit through graph" hybrid bridge) must enter the system as `public`-scope writes — not as untyped notes in `repo`. Otherwise an ingested article becomes a "fact" with repo authority, polluting the precedence chain. Action: the ingest spec must declare `--scope public` as the only legal target for external content unless the user explicitly imports to a different scope, and must enforce the scoped-KG §3.1 legacy-config diagnostic before writing.
+- **The `public` scope is already designed; "external ingest" must respect it.** Scoped-KG §4.5 defers the `public` backend but requires today's resolver, provenance, and contract surfaces to *cover* it ("model it from day one so provenance and resolver cover it; first implementation plan does not build a public-scope backend"). The KG doc's P1 #7 (`da kg ingest <url|file>`) and P2 (Cognee-style "enter through vectors, exit through graph" hybrid bridge) must enter the system as `public`-scope writes — not as untyped notes in `repo`. Otherwise an ingested article becomes a "fact" with repo authority, polluting the precedence chain. Action: the ingest spec must declare `--scope public` as the only legal target for external content unless the user explicitly imports to a different scope, and must enforce the scoped-KG §3.1 legacy-config diagnostic before writing.
 
 - **Verifier evolution is the missing governance layer for "remove a verifier" recommendations.** The agent-execution evaluation's E.4 (per-verifier rejection-rate audit → remove zero-yield verifiers) and the KG doc's C.6 ("would a well-decomposed fanout eliminate the verifier stage?") both describe verifier *retirement*. App-type-profiles §6 already specifies how that is allowed to happen: tightening the accept set is a **major** version bump that **must** pass the §6.2 behavior-preservation gate against a stored corpus of prior task runs. Removal counts as tightening. The synthesis treated verifier audit as a measurement problem; it is also a contract problem.
 
@@ -664,7 +664,7 @@ see its Risk profile before deciding.
 
 - **F.3.2 — Auto-memory recommendations don't apply uniformly across platforms.** Lessons/memory P0 says "add `author: human | agent` to auto-memory files." Claude-Code auto-memory at `~/.claude/projects/<hash>/memory/` is platform-private. Cursor's nearest equivalent is Project Rules; Codex CLI uses a different memory surface; Copilot has no equivalent at all. The recommendation collapses across these. The right framing: define the trust schema (F.2.1) on the canonical scoped-KG `user`-scope note. Each platform's memory adapter projects from the warm store. The auto-memory surface becomes a *cache*, not a source of truth.
 
-- **F.3.3 — MCP tool surfaces (`kg_ingest`, `kg lint`, `get_impact_radius`) are Claude-Code + Cursor-class clients only.** The KG doc treats MCP as a unified runtime, but Codex CLI and Copilot do not currently run MCP. Recommendations to expose ingest/lint as MCP tools must be paired with: a CLI fallback (`dot-agents kg ingest …`) and a rule that declares "MCP-backed surfaces auto-degrade to CLI invocations on platforms without MCP, with platform-specific render guidance in the rule corpus." This is the same pattern config-distribution-model uses for verifier maps.
+- **F.3.3 — MCP tool surfaces (`kg_ingest`, `kg lint`, `get_impact_radius`) are Claude-Code + Cursor-class clients only.** The KG doc treats MCP as a unified runtime, but Codex CLI and Copilot do not currently run MCP. Recommendations to expose ingest/lint as MCP tools must be paired with: a CLI fallback (`da kg ingest …`) and a rule that declares "MCP-backed surfaces auto-degrade to CLI invocations on platforms without MCP, with platform-specific render guidance in the rule corpus." This is the same pattern config-distribution-model uses for verifier maps.
   - Human correction 05/03/2026 - 14:01 (EST)
     Codex CLI and Copilot do indeed run mcp, this is a false or stale claim.
     However, mcp vs cli tool debate is on my mind and do see benefit of cli usage as there's more training data on how to use a cli tool.

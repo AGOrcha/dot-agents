@@ -4,7 +4,7 @@
 
 **Purpose:** define the first upgrade to the planning system so canonical workflow tasks stop treating `write_scope` as an unsupported guess and start treating it as a justified, reviewable contract backed by code-graph evidence.
 
-**Dependency:** live graph-backed planner automation from this spec depends on the canonical [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan, because the current repo state does not yet provide dependable `workflow graph query` and `kg bridge query` behavior for planning use. New follow-on plan/task work should be recorded through `dot-agents workflow` under `.agents/workflow/plans/` and `.agents/workflow/specs/`.
+**Dependency:** live graph-backed planner automation from this spec depends on the canonical [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan, because the current repo state does not yet provide dependable `workflow graph query` and `kg bridge query` behavior for planning use. New follow-on plan/task work should be recorded through `da workflow` under `.agents/workflow/plans/` and `.agents/workflow/specs/`.
 
 ## 1. Audit Summary
 
@@ -107,8 +107,8 @@ The graph surface already exists. The gap is not query capability; it is that pl
 
 Back `write_scope` with a task-local evidence artifact derived from:
 
-- code-structure queries from `dot-agents kg`
-- workflow and repo-memory queries from `dot-agents workflow graph query` and `dot-agents kg query`
+- code-structure queries from `da kg`
+- workflow and repo-memory queries from `da workflow graph query` and `da kg query`
 - planner-authored seeds, assumptions, and exclusions
 
 Treat the evidence as two distinct lanes:
@@ -285,24 +285,24 @@ For code-oriented tasks, the first planning pass should prefer a split query bun
 
 Use these to derive candidate paths and tests:
 
-1. `dot-agents kg build` or `dot-agents kg update`
-2. `dot-agents kg bridge query --intent symbol_lookup <seed>`
-3. `dot-agents kg bridge query --intent callers_of <symbol>`
-4. `dot-agents kg bridge query --intent callees_of <symbol>` when downstream impact matters
-5. `dot-agents kg bridge query --intent tests_for <symbol>`
-6. `dot-agents kg impact <path-or-symbol>` when blast radius is broad or ambiguous
+1. `da kg build` or `da kg update`
+2. `da kg bridge query --intent symbol_lookup <seed>`
+3. `da kg bridge query --intent callers_of <symbol>`
+4. `da kg bridge query --intent callees_of <symbol>` when downstream impact matters
+5. `da kg bridge query --intent tests_for <symbol>`
+6. `da kg impact <path-or-symbol>` when blast radius is broad or ambiguous
 
 ### 5.2 Context lane
 
 Use these to derive the non-code context pack that keeps workers from improvising:
 
-1. `dot-agents workflow graph query --intent plan_context <topic>`
-2. `dot-agents workflow graph query --intent decision_lookup <topic>`
-3. `dot-agents workflow graph query --intent workflow_memory <topic>` when historical task lineage matters
-4. `dot-agents workflow graph query --intent contradictions <topic>` before delegation
-5. `dot-agents kg query --intent repo_context <topic>`
-6. `dot-agents kg query --intent related_notes <topic>`
-7. `dot-agents kg query --intent source_lookup <topic>` when upstream sources or research notes matter
+1. `da workflow graph query --intent plan_context <topic>`
+2. `da workflow graph query --intent decision_lookup <topic>`
+3. `da workflow graph query --intent workflow_memory <topic>` when historical task lineage matters
+4. `da workflow graph query --intent contradictions <topic>` before delegation
+5. `da kg query --intent repo_context <topic>`
+6. `da kg query --intent related_notes <topic>`
+7. `da kg query --intent source_lookup <topic>` when upstream sources or research notes matter
 
 Not every task needs every query, but code-task planning should stop at "manual only" only when the planner records why graph or note evidence was unavailable or unhelpful.
 
@@ -353,7 +353,7 @@ That is the first practical path to making planning quality measurable instead o
 
 Proposed command:
 
-`dot-agents workflow plan derive-scope <plan_id> <task_id> [flags]`
+`da workflow plan derive-scope <plan_id> <task_id> [flags]`
 
 First responsibilities:
 
@@ -372,7 +372,7 @@ Important constraint:
 
 Proposed command:
 
-`dot-agents workflow plan check-scope <plan_id> <task_id> [--changed-file ...]`
+`da workflow plan check-scope <plan_id> <task_id> [--changed-file ...]`
 
 First responsibilities:
 

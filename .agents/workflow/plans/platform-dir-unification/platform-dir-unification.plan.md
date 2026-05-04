@@ -50,7 +50,7 @@ Completed in this session:
 - Updated `commands/import.go` and `commands/refresh.go` normalization to understand `.codex/hooks.json` and `.opencode/agent/*.md`.
 - Updated `commands/add.go` scanning so existing Codex hook files, OpenCode agents, and GitHub hook files are detected before takeover.
 - Updated `commands/explain.go` and `src/share/templates/standard/README.md` so the documented structure better matches current Stage 1 behavior.
-- Updated `commands/status.go` to surface the canonical store at the top of `dot-agents status` and to account for newer Stage 1 outputs such as Codex hooks and OpenCode agents.
+- Updated `commands/status.go` to surface the canonical store at the top of `da status` and to account for newer Stage 1 outputs such as Codex hooks and OpenCode agents.
 - Updated `commands/init.go` so the generated `~/.agents/README.md` and completion guidance describe the Stage 1 canonical buckets more clearly.
 
 Still open in this phase:
