@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: binary-rename-da-sweep
+task_id: t4-sweep-plans-specs-research
+delegation_id: del-t4-sweep-plans-specs-research-1777861641
+decision: accept
+note: doc sweep across plans/specs/research; 34 files; hard test passing (residual matches all project-name prose); anti-scope held
+closed_at: "2026-05-04T02:38:26Z"

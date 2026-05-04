@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t3-sweep-priority-docs
+parent_plan_id: binary-rename-da-sweep
+verifier_type: merge-back
+status: pass
+summary: Parent should run the global cross-scope grep at t6 endgame to confirm coverage across all priority-doc targets. Out-of-scope dirty files at session start (PLAN.yaml, TASKS.yaml, delegation-bundles/, delegation/) were left untouched per loop-worker discipline.
+recorded_at: "2026-05-04T02:24:26Z"
+delegation_id: del-t3-sweep-priority-docs-1777860572
+artifact_paths:
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml

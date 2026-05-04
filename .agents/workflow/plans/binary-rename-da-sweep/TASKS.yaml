@@ -166,7 +166,7 @@ tasks:
       app_type: docs
     - id: t4-sweep-plans-specs-research
       title: Sweep .agents/workflow/{plans,specs}/ + research/ for binary-name references
-      status: in_progress
+      status: completed
       depends_on:
         - t1-decide-shim-or-cutover
       blocks: []
@@ -210,7 +210,7 @@ tasks:
       app_type: docs
     - id: t5-sweep-skills-rules-claude-md
       title: Sweep ~/.agents/{skills,rules}/ + ~/.claude/CLAUDE.md for binary-name references
-      status: pending
+      status: completed
       depends_on:
         - t1-decide-shim-or-cutover
       blocks: []
@@ -258,7 +258,7 @@ tasks:
       app_type: skill
     - id: t6-ts-port-binary-decision
       title: Decide TS port binary naming (dot-agents-ts vs da-ts); produce ADR-0007 if non-trivial
-      status: pending
+      status: completed
       depends_on:
         - t1-decide-shim-or-cutover
         - t2-ship-shim-or-cutover-binary
@@ -311,7 +311,7 @@ tasks:
       app_type: typescript
     - id: t7-drop-dot-agents-shim
       title: Drop dot-agents compat shim after deprecation window expires
-      status: pending
+      status: completed
       depends_on:
         - t2-ship-shim-or-cutover-binary
         - t3-sweep-priority-docs
