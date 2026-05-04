@@ -121,10 +121,10 @@ convention is the markdown format and index below.
 | ADR | Status | Title | Owners | Date |
 |---|---|---|---|---|
 | [0001](0001-adopt-architecture-decision-records.md) | accepted | Adopt Architecture Decision Records | dot-agents | 2026-05-03 |
-| 0002 | proposed | Self-review output destination and schema | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t1) |
-| 0003 | proposed | Self-review fires before verify-record-test | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t1) |
+| [0002](0002-self-review-output-schema.md) | accepted | Self-review output destination and schema | dot-agents | 2026-05-03 |
+| [0003](0003-self-review-fire-ordering.md) | accepted | Self-review fires after verify-record-test, before checkpoint | dot-agents | 2026-05-03 |
 | 0004 | proposed | Execution-telemetry schema seeded by review-decision.yaml | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t4) |
-| 0005 | proposed | Restore KG-context calls in self-review (regression fix) | dot-agents | TBD (produced by `self-review-iteration-close-wiring` plan, t1) |
+| [0005](0005-restore-kg-context-in-self-review.md) | accepted | Restore KG-context calls in self-review (regression fix) | dot-agents | 2026-05-03 |
 | [0006](0006-da-rename-strategy.md) | accepted | Binary rename strategy — `dot-agents` → `da` via hard cutover | dot-agents | 2026-05-03 |
 | [0007](0007-ts-port-binary-naming.md) | accepted | TS port binary name — `da-ts` | dot-agents | 2026-05-03 |
 
