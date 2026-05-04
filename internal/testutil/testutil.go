@@ -16,12 +16,12 @@ package testutil
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"golang.org/x/sys/execabs"
 )
 
 // NewTempProject creates a self-contained agentsHome + repo pair under
@@ -143,9 +143,13 @@ func WriteScopeFile(t *testing.T, agentsHome, bucket, scope, baseName string, co
 func InitGitRepo(t *testing.T, repoPath string, files map[string]string) {
 	t.Helper()
 
+	// execabs.Command resolves "git" via PATH but rejects relative paths
+	// containing "/", matching the project-wide hardening for go:S4036
+	// applied during sonarqube-pr10 sq3. Test code only — runs in
+	// developer-controlled environments, hard-coded tool name.
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repoPath}, args...)...)
+		cmd := execabs.Command("git", append([]string{"-C", repoPath}, args...)...)
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=Test",
 			"GIT_AUTHOR_EMAIL=test@example.com",
