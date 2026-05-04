@@ -4,19 +4,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestListResolveMCP(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "proj"
-	dir := filepath.Join(agentsHome, "mcp", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "mcp.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
+
+	testutil.WriteScopeFile(t, agentsHome, "mcp", scope, "mcp.json", []byte("{}"))
+
 	specs, err := ListCanonicalMCPFiles(agentsHome, scope)
 	if err != nil {
 		t.Fatal(err)
@@ -37,16 +35,10 @@ func TestListResolveSettingsIncludesCursorignore(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "g"
-	dir := filepath.Join(agentsHome, "settings", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "cursorignore"), []byte("*.log\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "cursor.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
+
+	testutil.WriteScopeFile(t, agentsHome, "settings", scope, "cursorignore", []byte("*.log\n"))
+	testutil.WriteScopeFile(t, agentsHome, "settings", scope, "cursor.json", []byte("{}"))
+
 	specs, err := ListCanonicalSettingsFiles(agentsHome, scope)
 	if err != nil || len(specs) != 2 {
 		t.Fatalf("list: %#v err=%v", specs, err)
@@ -61,14 +53,10 @@ func TestEnsureUnderMCPScopeTree(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "p"
-	dir := filepath.Join(agentsHome, "mcp", scope)
-	f := filepath.Join(dir, "x.json")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(f, []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
+
+	testutil.WriteScopeFile(t, agentsHome, "mcp", scope, "x.json", []byte("{}"))
+	f := filepath.Join(agentsHome, "mcp", scope, "x.json")
+
 	if err := EnsureUnderMCPScopeTree(agentsHome, scope, f); err != nil {
 		t.Fatal(err)
 	}

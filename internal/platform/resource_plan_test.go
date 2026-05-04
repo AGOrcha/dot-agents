@@ -146,25 +146,8 @@ func TestBuildResourcePlanRejectsConflictingSharedSkillIntents(t *testing.T) {
 }
 
 func TestResourcePlanExecuteReplacesAllowlistedImportedSkillDir(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills", "review"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "review"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	importedSkill := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
-	canonicalSkillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.WriteFile(importedSkill, []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(canonicalSkillDir, "SKILL.md"), []byte("---\nname: canonical-review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	_, canonicalSkillDir := writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
 
 	plan, err := BuildResourcePlan([]ResourceIntent{validSharedSkillIntent(".agents/skills/review", "claude")})
 	if err != nil {
@@ -256,18 +239,8 @@ func TestDryRunSharedTargetPlanLinesNone(t *testing.T) {
 }
 
 func TestDryRunSharedTargetPlanLinesDedupesCrossPlatform(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	platforms := []Platform{NewCodex(), NewOpenCode(), NewCopilot()}
@@ -367,19 +340,9 @@ func TestCollectAndExecuteSharedTargetPlanDedupesClaudeCursorAgents(t *testing.T
 }
 
 func TestCollectAndExecuteSharedTargetPlanWritesOpenCodeAndCopilotAgentFiles(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	agentDir := filepath.Join(agentsHome, "agents", "proj", "reviewer")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	agentDir := writeFixtureAgent(t, agentsHome, "proj", "reviewer", "# Reviewer\n")
 	agentMD := filepath.Join(agentDir, "AGENT.md")
-	if err := os.WriteFile(agentMD, []byte("# Reviewer\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewOpenCode(), NewCopilot()}); err != nil {
@@ -393,22 +356,8 @@ func TestCollectAndExecuteSharedTargetPlanWritesOpenCodeAndCopilotAgentFiles(t *
 }
 
 func TestCollectAndExecuteSharedTargetPlanWritesOpenCodePluginBundles(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	pluginDir := filepath.Join(agentsHome, "plugins", "proj", "runtime-plugin")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	pluginManifest := filepath.Join(pluginDir, "PLUGIN.yaml")
-	if err := os.WriteFile(pluginManifest, []byte("schema_version: 1\nname: runtime-plugin\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "manifest.json"), []byte(`{"name":"runtime-plugin"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	repo, agentsHome := setupRepoAgentsHome(t)
+	pluginDir := writeFixturePlugin(t, agentsHome, "proj", "runtime-plugin", true)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewOpenCode()}); err != nil {
@@ -419,26 +368,8 @@ func TestCollectAndExecuteSharedTargetPlanWritesOpenCodePluginBundles(t *testing
 }
 
 func TestCollectAndExecuteSharedTargetPlanWritesCodexAgentToml(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	agentDir := filepath.Join(agentsHome, "agents", "proj", "implementer")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	content := `---
-name: implementer
-description: does work
----
-
-# Body
-Ship it.
-`
-	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureCodexAgent(t, agentsHome)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewCodex()}); err != nil {
@@ -456,17 +387,8 @@ Ship it.
 }
 
 func TestExecutePluginBundleIntentReplacesAllowlistedImportedPluginDir(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	pluginDir := filepath.Join(agentsHome, "plugins", "proj", "runtime-plugin")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"), []byte("schema_version: 1\nname: runtime-plugin\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	pluginDir := writeFixturePlugin(t, agentsHome, "proj", "runtime-plugin", false)
 
 	target := filepath.Join(repo, ".opencode", "plugins", "runtime-plugin")
 	if err := os.MkdirAll(target, 0755); err != nil {
@@ -524,26 +446,8 @@ func TestExecutePluginBundleIntentRejectsAllowlistedDirectoryWithoutImportedMark
 }
 
 func TestRemoveSharedTargetPlanRemovesSkillSymlink(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills", "review"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "review"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	importedSkill := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
-	canonicalSkillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.WriteFile(importedSkill, []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(canonicalSkillDir, "SKILL.md"), []byte("---\nname: canonical-review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	platforms := []Platform{NewClaude()}
@@ -562,26 +466,8 @@ func TestRemoveSharedTargetPlanRemovesSkillSymlink(t *testing.T) {
 }
 
 func TestRemoveSharedTargetPlanRemovesCodexAgentToml(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	agentDir := filepath.Join(agentsHome, "agents", "proj", "implementer")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	content := `---
-name: implementer
-description: does work
----
-
-# Body
-Ship it.
-`
-	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureCodexAgent(t, agentsHome)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	platforms := []Platform{NewCodex()}
@@ -647,17 +533,8 @@ func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.
 }
 
 func TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
 
 	// Directory blocks symlink creation; path is not under shared-mirror allowlist prefixes.
 	blocked := filepath.Join(repo, "vendor", "skills", "review")
@@ -702,17 +579,8 @@ func TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory(t *testin
 }
 
 func TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarkers(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
 
 	target := filepath.Join(repo, ".agents", "skills", "review")
 	if err := os.MkdirAll(target, 0755); err != nil {
@@ -738,17 +606,8 @@ func TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarker
 }
 
 func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPresent(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
 
 	target := filepath.Join(repo, ".agents", "skills", "review")
 	if err := os.MkdirAll(target, 0755); err != nil {
@@ -776,22 +635,11 @@ func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPr
 }
 
 func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	agentsHome := filepath.Join(tmp, ".agents")
-
-	// Set up a skill in agentsHome
-	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
 	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	platforms := []Platform{NewCodex(), NewOpenCode(), NewCopilot()}
@@ -808,6 +656,119 @@ func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
 	}
+}
+
+// ── Shared fixture helpers (package-private) ────────────────────────────────
+//
+// These collapse the recurring tmp/repo/agentsHome boilerplate and the
+// canonical bucket-fixture writes that the resource_plan tests use. The
+// generic internal/testutil canonical helpers don't fit here because:
+//   * resource_plan tests assert on specific fixture body contents (e.g.
+//     "Ship it." in the codex toml test) that testutil's defaults don't
+//     match.
+//   * lifting validShared{Skill,Agent,Plugin}Intent into testutil would
+//     create a testutil → platform import cycle.
+
+// setupRepoAgentsHome returns (repo, agentsHome) under t.TempDir().
+// Replaces the 3-line tmp/repo/agentsHome boilerplate at the start of
+// most resource_plan tests.
+func setupRepoAgentsHome(t *testing.T) (repo, agentsHome string) {
+	t.Helper()
+	tmp := t.TempDir()
+	return filepath.Join(tmp, "repo"), filepath.Join(tmp, ".agents")
+}
+
+// writeFixtureSkill creates ~/.agents/skills/<project>/<name>/SKILL.md
+// with frontmatter `name: <name>`. Returns the directory path.
+func writeFixtureSkill(t *testing.T, agentsHome, project, name string) string {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "skills", project, name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: "+name+"\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// writeFixtureImportedSkillPair creates BOTH the repo-imported skill at
+// repo/.agents/skills/<name>/SKILL.md AND the canonical agentsHome skill
+// at <agentsHome>/skills/<project>/<name>/SKILL.md (with a "canonical-"
+// prefix in the canonical name field so tests can distinguish). Returns
+// (importedSkillPath, canonicalSkillDir).
+func writeFixtureImportedSkillPair(t *testing.T, repo, agentsHome, project, name string) (importedSkill, canonicalSkillDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills", name), 0755); err != nil {
+		t.Fatal(err)
+	}
+	canonicalSkillDir = filepath.Join(agentsHome, "skills", project, name)
+	if err := os.MkdirAll(canonicalSkillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	importedSkill = filepath.Join(repo, ".agents", "skills", name, "SKILL.md")
+	if err := os.WriteFile(importedSkill,
+		[]byte("---\nname: "+name+"\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalSkillDir, "SKILL.md"),
+		[]byte("---\nname: canonical-"+name+"\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return importedSkill, canonicalSkillDir
+}
+
+// writeFixtureAgent creates ~/.agents/agents/<project>/<name>/AGENT.md
+// with the supplied body. Returns the directory path.
+func writeFixtureAgent(t *testing.T, agentsHome, project, name, body string) string {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "agents", project, name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// writeFixtureCodexAgent creates the canonical "implementer" agent
+// fixture used by both Codex toml emit + remove tests. Returns the
+// directory path.
+func writeFixtureCodexAgent(t *testing.T, agentsHome string) string {
+	t.Helper()
+	body := `---
+name: implementer
+description: does work
+---
+
+# Body
+Ship it.
+`
+	return writeFixtureAgent(t, agentsHome, "proj", "implementer", body)
+}
+
+// writeFixturePlugin creates ~/.agents/plugins/<project>/<name>/PLUGIN.yaml.
+// When withManifest is true, also writes manifest.json with `{"name":"<name>"}`.
+// Returns the directory path.
+func writeFixturePlugin(t *testing.T, agentsHome, project, name string, withManifest bool) string {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "plugins", project, name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nname: "+name+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if withManifest {
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
+			[]byte(`{"name":"`+name+`"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
 }
 
 func validSharedSkillIntent(targetPath, emitter string) ResourceIntent {

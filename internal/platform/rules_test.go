@@ -4,26 +4,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestListCanonicalRuleFiles(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "g"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "a.mdc"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.md"), []byte("y"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "skipdir"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "binary.bin"), []byte("z"), 0644); err != nil {
+
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "a.mdc", []byte("x"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "b.md", []byte("y"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "binary.bin", []byte("z"))
+	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", scope, "skipdir"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -43,14 +36,10 @@ func TestEnsureUnderRulesScopeTree(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "global"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	f := filepath.Join(dir, "x.mdc")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(f, []byte("1"), 0644); err != nil {
-		t.Fatal(err)
-	}
+
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "x.mdc", []byte("1"))
+	f := filepath.Join(agentsHome, "rules", scope, "x.mdc")
+
 	if err := EnsureUnderRulesScopeTree(agentsHome, scope, f); err != nil {
 		t.Fatalf("expected ok: %v", err)
 	}
@@ -64,14 +53,10 @@ func TestResolveCanonicalRuleFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "p"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "agents.mdc")
-	if err := os.WriteFile(path, []byte("---\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "agents.mdc", []byte("---\n---\n"))
+	path := filepath.Join(agentsHome, "rules", scope, "agents.mdc")
+
 	got, err := ResolveCanonicalRuleFile(agentsHome, scope, "agents")
 	if err != nil {
 		t.Fatalf("resolve stem: %v", err)
