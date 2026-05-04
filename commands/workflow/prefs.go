@@ -54,6 +54,21 @@ type preferenceSource struct {
 	Source string
 }
 
+const (
+	preferenceKeyVerificationTestCommand                    = "verification.test_command"
+	preferenceKeyVerificationLintCommand                    = "verification.lint_command"
+	preferenceKeyVerificationRequireRegressionBeforeHandoff = "verification.require_regression_before_handoff"
+	preferenceKeyPlanningPlanDirectory                      = "planning.plan_directory"
+	preferenceKeyPlanningRequirePlanBeforeCode              = "planning.require_plan_before_code"
+	preferenceKeyReviewReviewOrder                          = "review.review_order"
+	preferenceKeyReviewRequireFindingsFirst                 = "review.require_findings_first"
+	preferenceKeyExecutionPackageManager                    = "execution.package_manager"
+	preferenceKeyExecutionFormatter                         = "execution.formatter"
+	preferenceKeyExecutionMaxParallelWorkers                = "execution.max_parallel_workers"
+
+	errExecutionMaxParallelWorkersRange = "execution.max_parallel_workers must be an integer between 1 and 8"
+)
+
 func defaultWorkflowPreferences() WorkflowPreferences {
 	trueVal := true
 	testCmd := "go test ./..."
@@ -194,16 +209,16 @@ func resolvePreferences(projectPath, project string) (WorkflowPreferences, error
 }
 
 var knownPreferenceKeys = map[string]struct{}{
-	"verification.test_command":                      {},
-	"verification.lint_command":                      {},
-	"verification.require_regression_before_handoff": {},
-	"planning.plan_directory":                        {},
-	"planning.require_plan_before_code":              {},
-	"review.review_order":                            {},
-	"review.require_findings_first":                  {},
-	"execution.package_manager":                      {},
-	"execution.formatter":                            {},
-	"execution.max_parallel_workers":                 {},
+	preferenceKeyVerificationTestCommand:                    {},
+	preferenceKeyVerificationLintCommand:                    {},
+	preferenceKeyVerificationRequireRegressionBeforeHandoff: {},
+	preferenceKeyPlanningPlanDirectory:                      {},
+	preferenceKeyPlanningRequirePlanBeforeCode:              {},
+	preferenceKeyReviewReviewOrder:                          {},
+	preferenceKeyReviewRequireFindingsFirst:                 {},
+	preferenceKeyExecutionPackageManager:                    {},
+	preferenceKeyExecutionFormatter:                         {},
+	preferenceKeyExecutionMaxParallelWorkers:                {},
 }
 
 func isValidPreferenceKey(key string) bool {
@@ -238,31 +253,31 @@ func setLocalPreference(project, key, value string) error {
 
 func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 	switch key {
-	case "verification.test_command":
+	case preferenceKeyVerificationTestCommand:
 		p.Verification.TestCommand = &value
-	case "verification.lint_command":
+	case preferenceKeyVerificationLintCommand:
 		p.Verification.LintCommand = &value
-	case "verification.require_regression_before_handoff":
+	case preferenceKeyVerificationRequireRegressionBeforeHandoff:
 		b := value == "true"
 		p.Verification.RequireRegressionBeforeHandoff = &b
-	case "planning.plan_directory":
+	case preferenceKeyPlanningPlanDirectory:
 		p.Planning.PlanDirectory = &value
-	case "planning.require_plan_before_code":
+	case preferenceKeyPlanningRequirePlanBeforeCode:
 		b := value == "true"
 		p.Planning.RequirePlanBeforeCode = &b
-	case "review.review_order":
+	case preferenceKeyReviewReviewOrder:
 		p.Review.ReviewOrder = &value
-	case "review.require_findings_first":
+	case preferenceKeyReviewRequireFindingsFirst:
 		b := value == "true"
 		p.Review.RequireFindingsFirst = &b
-	case "execution.package_manager":
+	case preferenceKeyExecutionPackageManager:
 		p.Execution.PackageManager = &value
-	case "execution.formatter":
+	case preferenceKeyExecutionFormatter:
 		p.Execution.Formatter = &value
-	case "execution.max_parallel_workers":
+	case preferenceKeyExecutionMaxParallelWorkers:
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 1 || n > 8 {
-			return fmt.Errorf("execution.max_parallel_workers must be an integer between 1 and 8")
+			return fmt.Errorf(errExecutionMaxParallelWorkersRange)
 		}
 		p.Execution.MaxParallelWorkers = &n
 	default:
@@ -324,16 +339,16 @@ func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSou
 	}
 
 	return []preferenceSource{
-		{"verification.test_command", strPtrVal(resolved.Verification.TestCommand), strSrc(defaults.Verification.TestCommand, repo.Verification.TestCommand, local.Verification.TestCommand)},
-		{"verification.lint_command", strPtrVal(resolved.Verification.LintCommand), strSrc(defaults.Verification.LintCommand, repo.Verification.LintCommand, local.Verification.LintCommand)},
-		{"verification.require_regression_before_handoff", boolPtrStr(resolved.Verification.RequireRegressionBeforeHandoff), boolSrc(defaults.Verification.RequireRegressionBeforeHandoff, repo.Verification.RequireRegressionBeforeHandoff, local.Verification.RequireRegressionBeforeHandoff)},
-		{"planning.plan_directory", strPtrVal(resolved.Planning.PlanDirectory), strSrc(defaults.Planning.PlanDirectory, repo.Planning.PlanDirectory, local.Planning.PlanDirectory)},
-		{"planning.require_plan_before_code", boolPtrStr(resolved.Planning.RequirePlanBeforeCode), boolSrc(defaults.Planning.RequirePlanBeforeCode, repo.Planning.RequirePlanBeforeCode, local.Planning.RequirePlanBeforeCode)},
-		{"review.review_order", strPtrVal(resolved.Review.ReviewOrder), strSrc(defaults.Review.ReviewOrder, repo.Review.ReviewOrder, local.Review.ReviewOrder)},
-		{"review.require_findings_first", boolPtrStr(resolved.Review.RequireFindingsFirst), boolSrc(defaults.Review.RequireFindingsFirst, repo.Review.RequireFindingsFirst, local.Review.RequireFindingsFirst)},
-		{"execution.package_manager", strPtrVal(resolved.Execution.PackageManager), strSrc(defaults.Execution.PackageManager, repo.Execution.PackageManager, local.Execution.PackageManager)},
-		{"execution.formatter", strPtrVal(resolved.Execution.Formatter), strSrc(defaults.Execution.Formatter, repo.Execution.Formatter, local.Execution.Formatter)},
-		{"execution.max_parallel_workers", intPtrStr(resolved.Execution.MaxParallelWorkers), intSrc(defaults.Execution.MaxParallelWorkers, repo.Execution.MaxParallelWorkers, local.Execution.MaxParallelWorkers)},
+		{preferenceKeyVerificationTestCommand, strPtrVal(resolved.Verification.TestCommand), strSrc(defaults.Verification.TestCommand, repo.Verification.TestCommand, local.Verification.TestCommand)},
+		{preferenceKeyVerificationLintCommand, strPtrVal(resolved.Verification.LintCommand), strSrc(defaults.Verification.LintCommand, repo.Verification.LintCommand, local.Verification.LintCommand)},
+		{preferenceKeyVerificationRequireRegressionBeforeHandoff, boolPtrStr(resolved.Verification.RequireRegressionBeforeHandoff), boolSrc(defaults.Verification.RequireRegressionBeforeHandoff, repo.Verification.RequireRegressionBeforeHandoff, local.Verification.RequireRegressionBeforeHandoff)},
+		{preferenceKeyPlanningPlanDirectory, strPtrVal(resolved.Planning.PlanDirectory), strSrc(defaults.Planning.PlanDirectory, repo.Planning.PlanDirectory, local.Planning.PlanDirectory)},
+		{preferenceKeyPlanningRequirePlanBeforeCode, boolPtrStr(resolved.Planning.RequirePlanBeforeCode), boolSrc(defaults.Planning.RequirePlanBeforeCode, repo.Planning.RequirePlanBeforeCode, local.Planning.RequirePlanBeforeCode)},
+		{preferenceKeyReviewReviewOrder, strPtrVal(resolved.Review.ReviewOrder), strSrc(defaults.Review.ReviewOrder, repo.Review.ReviewOrder, local.Review.ReviewOrder)},
+		{preferenceKeyReviewRequireFindingsFirst, boolPtrStr(resolved.Review.RequireFindingsFirst), boolSrc(defaults.Review.RequireFindingsFirst, repo.Review.RequireFindingsFirst, local.Review.RequireFindingsFirst)},
+		{preferenceKeyExecutionPackageManager, strPtrVal(resolved.Execution.PackageManager), strSrc(defaults.Execution.PackageManager, repo.Execution.PackageManager, local.Execution.PackageManager)},
+		{preferenceKeyExecutionFormatter, strPtrVal(resolved.Execution.Formatter), strSrc(defaults.Execution.Formatter, repo.Execution.Formatter, local.Execution.Formatter)},
+		{preferenceKeyExecutionMaxParallelWorkers, intPtrStr(resolved.Execution.MaxParallelWorkers), intSrc(defaults.Execution.MaxParallelWorkers, repo.Execution.MaxParallelWorkers, local.Execution.MaxParallelWorkers)},
 	}, nil
 }
 

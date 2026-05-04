@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const workflowFlagVerifierType = "verifier-type"
+
 // Command wiring for `dot-agents workflow`: cobra subtree and exported NewCmd(deps).
 // Behavioral implementations live in sibling sources (state.go, plan_task.go, verification.go, …).
 
@@ -69,7 +71,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: deps.NoArgsWithHints("Use flags such as `--message` instead of positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("role") || cmd.Flags().Changed("verifier-type") {
+			if cmd.Flags().Changed("role") || cmd.Flags().Changed(workflowFlagVerifierType) {
 				if !cmd.Flags().Changed("log-to-iter") {
 					return fmt.Errorf("--role and --verifier-type require --log-to-iter")
 				}
@@ -90,7 +92,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	checkpointCmd.Flags().StringVar(&checkpointVerificationText, "verification-summary", "", "Verification summary text")
 	checkpointCmd.Flags().IntVar(&checkpointLogToIter, "log-to-iter", 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterRole, "role", "", "With --log-to-iter: merge only the impl, verifier, or review block")
-	checkpointCmd.Flags().StringVar(&checkpointLogToIterVerifierType, "verifier-type", "", "Verifier slug when --role verifier (for example unit)")
+	checkpointCmd.Flags().StringVar(&checkpointLogToIterVerifierType, workflowFlagVerifierType, "", "Verifier slug when --role verifier (for example unit)")
 
 	logCmd := &cobra.Command{
 		Use:   "log",
@@ -488,7 +490,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	verifyRecordCmd.Flags().StringVar(&reviewEscalation, "escalation-reason", "", "When --kind review: required when overall decision is escalate")
 	verifyRecordCmd.Flags().StringVar(&reviewNotes, "reviewer-notes", "", "When --kind review: optional reviewer notes")
 	verifyRecordCmd.Flags().StringVar(&reviewTask, "task", "", "Task id for delegation contract lookup (required for --kind review; optional for other kinds to write a typed result artifact)")
-	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, "verifier-type", "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
+	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, workflowFlagVerifierType, "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")
 

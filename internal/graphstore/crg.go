@@ -24,6 +24,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const crgReadOnlyPragma = "?_pragma=query_only(true)"
+
 // CRGBridge shells out to the code-review-graph Python CLI.
 type CRGBridge struct {
 	// RepoRoot is the directory that code-review-graph treats as the project root.
@@ -333,7 +335,7 @@ func (b *CRGBridge) Status() (*CRGStatus, error) {
 		return status, nil
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	db, err := sql.Open("sqlite", dbPath+crgReadOnlyPragma)
 	if err != nil {
 		status.State = string(CRGReadinessError)
 		status.Message = fmt.Sprintf("open CRG db: %v", err)
@@ -899,7 +901,7 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil, nil // no CRG db — not an error
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	db, err := sql.Open("sqlite", dbPath+crgReadOnlyPragma)
 	if err != nil {
 		return nil, fmt.Errorf("open CRG db: %w", err)
 	}
@@ -946,7 +948,7 @@ func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil, nil
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=query_only(true)")
+	db, err := sql.Open("sqlite", dbPath+crgReadOnlyPragma)
 	if err != nil {
 		return nil, fmt.Errorf("open CRG db: %w", err)
 	}

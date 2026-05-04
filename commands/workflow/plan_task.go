@@ -15,6 +15,14 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const (
+	workflowTasksFileName      = "TASKS.yaml"
+	errPlanNotFoundFmt         = "plan %q not found"
+	errPlanNotFoundWithCause   = "plan %q not found: %w"
+	errTaskNotFoundInPlanFmt   = "task %q not found in plan %q"
+	errTasksForPlanNotFoundFmt = "tasks for plan %q not found: %w"
+)
+
 // ScopeEvidence is the Go representation of a .scope.yaml sidecar file located at
 // .agents/workflow/plans/<plan_id>/evidence/<task_id>.scope.yaml.
 // All slice fields use []string{} (not nil) so JSON marshals to [] not null.
@@ -125,7 +133,7 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 	// Load the task to derive mode and goal from notes.
 	tf, err := loadCanonicalTasks(projectPath, planID)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	var task *CanonicalTask
 	for i := range tf.Tasks {
@@ -135,7 +143,7 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 		}
 	}
 	if task == nil {
-		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 	}
 
 	// Determine mode from task notes or app_type heuristic.
@@ -460,7 +468,7 @@ func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 }
 
 func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) {
-	path := filepath.Join(plansBaseDir(projectPath), planID, "TASKS.yaml")
+	path := filepath.Join(plansBaseDir(projectPath), planID, workflowTasksFileName)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -494,7 +502,7 @@ func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "TASKS.yaml"), content, 0644)
+	return os.WriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
 }
 
 func collectCanonicalPlans(projectPath string) ([]workflowCanonicalPlanSummary, []string) {
@@ -599,7 +607,7 @@ func runWorkflowPlanShow(planID string) error {
 	}
 	plan, err := loadCanonicalPlan(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("plan %q not found: %w", planID, err)
+		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
 	tf, tasksErr := loadCanonicalTasks(project.Path, planID)
 	sf, slicesErr := loadCanonicalSlices(project.Path, planID)
@@ -638,7 +646,7 @@ func runWorkflowPlanShow(planID string) error {
 	fmt.Fprintln(os.Stdout)
 
 	if tasksErr != nil {
-		fmt.Fprintln(os.Stdout, "  (no TASKS.yaml found)")
+		fmt.Fprintf(os.Stdout, "  (no %s found)\n", workflowTasksFileName)
 		return nil
 	}
 
@@ -802,7 +810,7 @@ func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, err
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("plan %q not found", planID)
+			return nil, fmt.Errorf(errPlanNotFoundFmt, planID)
 		}
 		ids = []string{planID}
 	}
@@ -936,11 +944,11 @@ func runWorkflowTasks(planID string) error {
 		return err
 	}
 	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
-		return fmt.Errorf("plan %q not found: %w", planID, err)
+		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
 	tf, err := loadCanonicalTasks(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
@@ -968,7 +976,7 @@ func runWorkflowSlices(planID string) error {
 		return err
 	}
 	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
-		return fmt.Errorf("plan %q not found: %w", planID, err)
+		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
 	sf, err := loadCanonicalSlices(project.Path, planID)
 	if err != nil {
@@ -1423,7 +1431,7 @@ func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (
 		filtered := make([]string, 0, len(scopeIDs))
 		for _, id := range scopeIDs {
 			if !available[id] {
-				return nil, fmt.Errorf("plan %q not found", id)
+				return nil, fmt.Errorf(errPlanNotFoundFmt, id)
 			}
 			filtered = append(filtered, id)
 		}
@@ -1499,7 +1507,7 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 		}
 		for _, id := range planFilter {
 			if !available[id] {
-				return nil, fmt.Errorf("plan %q not found", id)
+				return nil, fmt.Errorf(errPlanNotFoundFmt, id)
 			}
 		}
 	}
@@ -1629,7 +1637,7 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 			if loadErr != nil {
 				// Plan not found in workflow/plans/ — check history/ as fallback.
 				// Archived plans are completed; their tasks may satisfy cross-plan deps.
-				histPath := filepath.Join(historyBaseDir(projectPath), refPlanID, "TASKS.yaml")
+				histPath := filepath.Join(historyBaseDir(projectPath), refPlanID, workflowTasksFileName)
 				if histContent, histErr := os.ReadFile(histPath); histErr == nil {
 					var histTF CanonicalTaskFile
 					if yaml.Unmarshal(histContent, &histTF) == nil {
@@ -1665,7 +1673,7 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 		}
 		if !found {
 			if warnings != nil {
-				*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: task %q not found in plan %q", dep, refTaskID, refPlanID))
+				*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: "+errTaskNotFoundInPlanFmt, dep, refTaskID, refPlanID))
 			}
 			incomplete = append(incomplete, dep)
 			continue
@@ -1720,7 +1728,7 @@ func selectAllEligibleTasks(projectPath string, planFilter []string) ([]workflow
 				}
 			}
 			if !found {
-				return nil, fmt.Errorf("plan %q not found", wantID)
+				return nil, fmt.Errorf(errPlanNotFoundFmt, wantID)
 			}
 		}
 	}
@@ -1828,7 +1836,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	}
 	tf, err := loadCanonicalTasks(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	found := false
 	var taskTitle string
@@ -1841,7 +1849,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 	}
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err
@@ -1923,7 +1931,7 @@ func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun 
 func archiveSinglePlan(projectPath, planID string, force, dryRun bool) error {
 	plan, err := loadCanonicalPlan(projectPath, planID)
 	if err != nil {
-		return fmt.Errorf("plan %q not found: %w", planID, err)
+		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
 
 	// Guard: status must be completed (or --force).
@@ -1979,7 +1987,7 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteri
 	}
 	plan, err := loadCanonicalPlan(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("plan %q not found: %w", planID, err)
+		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
 	if status != "" {
 		plan.Status = status
@@ -2014,7 +2022,7 @@ func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, 
 	}
 	tf, err := loadCanonicalTasks(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	for _, t := range tf.Tasks {
 		if t.ID == taskID {
@@ -2072,7 +2080,7 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 	}
 	tf, err := loadCanonicalTasks(project.Path, planID)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %q not found: %w", planID, err)
+		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	found := false
 	for i, t := range tf.Tasks {
@@ -2098,7 +2106,7 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 		break
 	}
 	if !found {
-		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 	}
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err

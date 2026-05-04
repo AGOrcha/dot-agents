@@ -48,8 +48,8 @@ func PromoteAgentIn(name, projectPath string, force bool) error {
 			return fmt.Errorf("agent %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", name, existing, canonicalPath)
 		}
 	} else {
-		if _, err := os.Stat(filepath.Join(sourcePath, "AGENT.md")); err != nil {
-			return fmt.Errorf("agent %q not found in .agents/agents/ (expected AGENT.md at %s/AGENT.md)", name, sourcePath)
+		if _, err := os.Stat(filepath.Join(sourcePath, agentManifestName)); err != nil {
+			return fmt.Errorf("agent %q not found in .agents/agents/ (expected %s at %s/%s)", name, agentManifestName, sourcePath, agentManifestName)
 		}
 		if fi, err := os.Lstat(canonicalPath); err == nil {
 			if fi.Mode()&os.ModeSymlink != 0 {

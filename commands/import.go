@@ -168,6 +168,7 @@ const (
 	relGitHubHooksDir        = ".github/hooks/"
 	relAgentMarkdownSuffix   = ".agent.md"
 	relJSONSuffix            = ".json"
+	relHookManifestYAML      = "HOOK.yaml"
 	agentsHooksPrefix        = "hooks/"
 )
 
@@ -803,15 +804,15 @@ func importConflictFirstFreeAlternateDestRel(agentsHome, primaryDestRel, origin 
 	}
 	trim := strings.TrimPrefix(primaryDestRel, agentsHooksPrefix)
 	parts := strings.Split(trim, "/")
-	if len(parts) == 3 && parts[2] == "HOOK.yaml" {
+	if len(parts) == 3 && parts[2] == relHookManifestYAML {
 		scope, logical := parts[0], parts[1]
 		taken := func(bundle string) bool {
-			p := filepath.Join(agentsHome, "hooks", scope, bundle, "HOOK.yaml")
+			p := filepath.Join(agentsHome, "hooks", scope, bundle, relHookManifestYAML)
 			_, err := os.Stat(p)
 			return err == nil
 		}
 		name := importConflictStableBundleName(logical, origin, taken)
-		return agentsHooksPrefix + scope + "/" + name + "/HOOK.yaml", true
+		return agentsHooksPrefix + scope + "/" + name + "/" + relHookManifestYAML, true
 	}
 	if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
 		scope := parts[0]
@@ -831,7 +832,7 @@ func logicalNameFromHooksDest(destRel string) string {
 	destRel = filepath.ToSlash(destRel)
 	trim := strings.TrimPrefix(destRel, agentsHooksPrefix)
 	parts := strings.Split(trim, "/")
-	if len(parts) == 3 && parts[2] == "HOOK.yaml" {
+	if len(parts) == 3 && parts[2] == relHookManifestYAML {
 		return parts[1]
 	}
 	if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
@@ -1141,7 +1142,7 @@ func buildCanonicalHookOutputs(scope string, specs []importedHookSpec) []importO
 			continue
 		}
 		outputs = append(outputs, importOutput{
-			destRel: agentsHooksPrefix + scope + "/" + name + "/HOOK.yaml",
+			destRel: agentsHooksPrefix + scope + "/" + name + "/" + relHookManifestYAML,
 			content: append(content, '\n'),
 			Origin:  spec.platform,
 		})

@@ -28,7 +28,7 @@ func listAgents(scope string) error {
 			continue
 		}
 		agentPath := filepath.Join(agentsDir, e.Name())
-		agentMD := filepath.Join(agentPath, "AGENT.md")
+		agentMD := filepath.Join(agentPath, agentManifestName)
 		if _, err := os.Stat(agentMD); err == nil {
 			desc := readDescriptionFromMarkdown(agentMD)
 			if desc != "" {
@@ -37,7 +37,7 @@ func listAgents(scope string) error {
 				ui.Bullet("ok", e.Name())
 			}
 		} else {
-			ui.Bullet("warn", e.Name()+" (no AGENT.md)")
+			ui.Bullet("warn", e.Name()+" (no "+agentManifestName+")")
 		}
 		count++
 	}

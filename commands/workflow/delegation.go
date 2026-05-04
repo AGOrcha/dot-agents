@@ -1484,7 +1484,7 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		break
 	}
 	if !found {
-		return fmt.Errorf("task %q not found in plan %q", taskID, planID)
+		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 	}
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return fmt.Errorf("save tasks: %w", err)

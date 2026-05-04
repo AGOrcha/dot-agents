@@ -18,7 +18,7 @@ func CreateAgent(name, scope string) error {
 		return fmt.Errorf("creating agent directory: %w", err)
 	}
 
-	agentMD := filepath.Join(agentDir, "AGENT.md")
+	agentMD := filepath.Join(agentDir, agentManifestName)
 	if err := writeAgentMDIfAbsent(agentMD, name); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func writeAgentMDIfAbsent(agentMD, name string) error {
 	}
 	content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\nAgent instructions here.\n", name, name)
 	if err := os.WriteFile(agentMD, []byte(content), 0644); err != nil {
-		return fmt.Errorf("creating AGENT.md: %w", err)
+		return fmt.Errorf("creating %s: %w", agentManifestName, err)
 	}
 	return nil
 }

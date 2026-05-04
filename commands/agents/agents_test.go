@@ -58,7 +58,7 @@ func writeAgentMD(t *testing.T, projectPath, agentName string) {
 		t.Fatal(err)
 	}
 	content := "---\nname: " + agentName + "\ndescription: test agent\n---\n\n# " + agentName + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentManifestName), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -70,7 +70,7 @@ func writeCanonicalAgent(t *testing.T, agentsHome, projectName, agentName string
 		t.Fatal(err)
 	}
 	content := "---\nname: " + agentName + "\ndescription: test agent\n---\n\n# " + agentName + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, agentManifestName), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -229,8 +229,8 @@ func TestImportAgentIn_ErrorRepoLocalMispointedSymlink(t *testing.T) {
 	if !strings.Contains(err.Error(), "not the canonical path") {
 		t.Errorf("error = %q", err.Error())
 	}
-	if _, err := os.Stat(filepath.Join(canonical, "AGENT.md")); err != nil {
-		t.Errorf("canonical AGENT.md: %v", err)
+	if _, err := os.Stat(filepath.Join(canonical, agentManifestName)); err != nil {
+		t.Errorf("canonical %s: %v", agentManifestName, err)
 	}
 }
 
@@ -255,8 +255,8 @@ func TestPromoteAgentIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 	if !cfi.IsDir() {
 		t.Errorf("canonical path %s should be a directory, got %v", canonicalPath, cfi.Mode())
 	}
-	if _, err := os.Stat(filepath.Join(canonicalPath, "AGENT.md")); err != nil {
-		t.Errorf("canonical AGENT.md missing: %v", err)
+	if _, err := os.Stat(filepath.Join(canonicalPath, agentManifestName)); err != nil {
+		t.Errorf("canonical %s missing: %v", agentManifestName, err)
 	}
 
 	rfi, err := os.Lstat(repoLocalPath)
@@ -414,22 +414,22 @@ func TestPromoteAgentIn_ForceOverwritesCanonicalDir(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(destPath, "stale"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(destPath, "AGENT.md"), []byte("stale"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(destPath, agentManifestName), []byte("stale"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := PromoteAgentIn("force-agent", projectPath, true); err != nil {
 		t.Fatalf("PromoteAgentIn with --force: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(destPath, "AGENT.md"))
+	data, err := os.ReadFile(filepath.Join(destPath, agentManifestName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) == "stale" {
-		t.Errorf("expected repo AGENT.md to replace stale canonical file")
+		t.Errorf("expected repo %s to replace stale canonical file", agentManifestName)
 	}
 	if !strings.Contains(string(data), "test agent") {
-		t.Errorf("expected promoted AGENT.md from repo fixture, got %q", string(data))
+		t.Errorf("expected promoted %s from repo fixture, got %q", agentManifestName, string(data))
 	}
 }
 
@@ -501,7 +501,7 @@ func TestPromoteAgentIn_ErrorExistingCanonicalWithoutForce(t *testing.T) {
 	if err := os.MkdirAll(destPath, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(destPath, "AGENT.md"), []byte("---\nname: x\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(destPath, agentManifestName), []byte("---\nname: x\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -523,10 +523,10 @@ func TestPromoteAgentIn_ErrorMissingAGENTmd(t *testing.T) {
 
 	err := PromoteAgentIn("empty-dir", projectPath, false)
 	if err == nil {
-		t.Fatal("expected error without AGENT.md, got nil")
+		t.Fatalf("expected error without %s, got nil", agentManifestName)
 	}
-	if !strings.Contains(err.Error(), "AGENT.md") {
-		t.Errorf("error message = %q; want 'AGENT.md' substring", err.Error())
+	if !strings.Contains(err.Error(), agentManifestName) {
+		t.Errorf("error message = %q; want %q substring", err.Error(), agentManifestName)
 	}
 }
 
@@ -557,8 +557,8 @@ func TestRemoveAgentIn_UnlinksSymlinksAndManifest(t *testing.T) {
 			t.Errorf("agents list should not include gone-agent: %v", rc.Agents)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(agentsHome, "agents", "rmproj", "gone-agent", "AGENT.md")); err != nil {
-		t.Errorf("canonical AGENT.md should remain without --purge: %v", err)
+	if _, err := os.Stat(filepath.Join(agentsHome, "agents", "rmproj", "gone-agent", agentManifestName)); err != nil {
+		t.Errorf("canonical %s should remain without --purge: %v", agentManifestName, err)
 	}
 }
 
@@ -634,7 +634,7 @@ func TestRemoveAgentIn_PurgeDeletesCanonical(t *testing.T) {
 		t.Fatalf("RemoveAgentIn: %v", err)
 	}
 	canonical := filepath.Join(agentsHome, "agents", "purgeproj", "purge-me")
-	if _, err := os.Stat(filepath.Join(canonical, "AGENT.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(canonical, agentManifestName)); !os.IsNotExist(err) {
 		t.Errorf("expected canonical tree removed: %v", err)
 	}
 }

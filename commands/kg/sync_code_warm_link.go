@@ -24,6 +24,8 @@ func commandJSON(cmd *cobra.Command) bool {
 	return err == nil && v
 }
 
+const warmStoreOpenErrFmt = "open warm store: %w"
+
 // ── Phase 6C: kg sync ─────────────────────────────────────────────────────────
 
 // runKGSync is a thin wrapper: git pull (or push) followed by kg lint.
@@ -568,7 +570,7 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 
 	store, err := openKGStore(home)
 	if err != nil {
-		return fmt.Errorf("open warm store: %w", err)
+		return fmt.Errorf(warmStoreOpenErrFmt, err)
 	}
 	defer store.Close()
 
@@ -693,7 +695,7 @@ func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 
 	store, err := openKGStore(kgHome())
 	if err != nil {
-		return fmt.Errorf("open warm store: %w", err)
+		return fmt.Errorf(warmStoreOpenErrFmt, err)
 	}
 	defer store.Close()
 
@@ -717,7 +719,7 @@ func runKGLinkList(_ *cobra.Command, args []string) error {
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {
-		return fmt.Errorf("open warm store: %w", err)
+		return fmt.Errorf(warmStoreOpenErrFmt, err)
 	}
 	defer store.Close()
 
@@ -746,7 +748,7 @@ func runKGLinkRemove(_ *cobra.Command, args []string) error {
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {
-		return fmt.Errorf("open warm store: %w", err)
+		return fmt.Errorf(warmStoreOpenErrFmt, err)
 	}
 	defer store.Close()
 
@@ -761,7 +763,7 @@ func runKGLinkRemove(_ *cobra.Command, args []string) error {
 func runKGWarmStats(_ *cobra.Command, _ []string) error {
 	store, err := openKGStore(kgHome())
 	if err != nil {
-		return fmt.Errorf("open warm store: %w", err)
+		return fmt.Errorf(warmStoreOpenErrFmt, err)
 	}
 	defer store.Close()
 

@@ -15,12 +15,12 @@ HOST_GOCACHE="$(go env GOCACHE)"
 
 # Skip if real CRG is not available in the repo .venv or on PATH.
 CRG_BIN=""
-if [ -x "$REPO_ROOT/.venv/bin/code-review-graph" ]; then
+if [[ -x "$REPO_ROOT/.venv/bin/code-review-graph" ]]; then
     CRG_BIN="$REPO_ROOT/.venv/bin/code-review-graph"
 elif command -v code-review-graph &>/dev/null; then
     CRG_BIN="$(command -v code-review-graph)"
 fi
-if [ -z "$CRG_BIN" ]; then
+if [[ -z "$CRG_BIN" ]]; then
     echo "SKIP: real code-review-graph not available (set up .venv or install on PATH)"
     exit 0
 fi

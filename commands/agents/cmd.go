@@ -78,7 +78,7 @@ ensures repo symlinks under .claude/agents/.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, err := os.Getwd()
 			if err != nil {
-				return fmt.Errorf("resolving project path: %w", err)
+				return fmt.Errorf(resolveProjectPathFmt, err)
 			}
 			return PromoteAgentIn(args[0], projectPath, force)
 		},
@@ -103,7 +103,7 @@ and removes the name from .agentsrc.json agents[]. The canonical directory under
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, err := os.Getwd()
 			if err != nil {
-				return fmt.Errorf("resolving project path: %w", err)
+				return fmt.Errorf(resolveProjectPathFmt, err)
 			}
 			return RemoveAgentIn(deps, args[0], projectPath, purge)
 		},
@@ -128,7 +128,7 @@ This is the reverse of promote: the canonical directory remains the source of tr
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectPath, err := os.Getwd()
 			if err != nil {
-				return fmt.Errorf("resolving project path: %w", err)
+				return fmt.Errorf(resolveProjectPathFmt, err)
 			}
 			return ImportAgentIn(args[0], projectPath)
 		},

@@ -26,10 +26,10 @@ func ImportAgentIn(name, projectPath string) error {
 
 	agentsHome := config.AgentsHome()
 	canonicalPath := filepath.Join(agentsHome, "agents", projectName, name)
-	agentMD := filepath.Join(canonicalPath, "AGENT.md")
+	agentMD := filepath.Join(canonicalPath, agentManifestName)
 	if _, err := os.Stat(agentMD); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("agent %q not found at canonical path %s (expected AGENT.md): create the canonical agent first or run `dot-agents agents list` to confirm the name", name, config.DisplayPath(canonicalPath))
+			return fmt.Errorf("agent %q not found at canonical path %s (expected %s): create the canonical agent first or run `dot-agents agents list` to confirm the name", name, config.DisplayPath(canonicalPath), agentManifestName)
 		}
 		return fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -81,7 +81,7 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 		return fmt.Errorf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s; remove the stale link and retry", name, name, existing, canonicalPath)
 	}
 	if fi.IsDir() {
-		if _, err := os.Stat(filepath.Join(repoLocal, "AGENT.md")); err == nil {
+		if _, err := os.Stat(filepath.Join(repoLocal, agentManifestName)); err == nil {
 			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use `dot-agents agents promote` first", name, repoLocal)
 		}
 	}
@@ -109,6 +109,6 @@ func buildSingleAgentMirrorIntent(project, name, targetRoot string) platform.Res
 		Materializer:  "shared-agent-dir-symlink",
 		ReplacePolicy: platform.ResourceReplaceAllowlistedImportedDirOnly,
 		PrunePolicy:   platform.ResourcePruneTarget,
-		MarkerFiles:   []string{"AGENT.md"},
+		MarkerFiles:   []string{agentManifestName},
 	}
 }

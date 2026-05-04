@@ -103,6 +103,11 @@ var validConfidenceLevels = map[string]bool{
 	"low": true, "medium": true, "high": true,
 }
 
+const (
+	kgIndexFileName = "index.md"
+	kgLogFileName   = "log.md"
+)
+
 func isValidNoteType(t string) bool   { return validNoteTypes[t] }
 func isValidNoteStatus(s string) bool { return validNoteStatuses[s] }
 func isValidConfidence(c string) bool { return c == "" || validConfidenceLevels[c] }
@@ -159,7 +164,7 @@ type IndexEntry struct {
 }
 
 func appendLogEntry(kgHomeDir string, entry string) error {
-	logPath := filepath.Join(kgHomeDir, "notes", "log.md")
+	logPath := filepath.Join(kgHomeDir, "notes", kgLogFileName)
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
@@ -170,7 +175,7 @@ func appendLogEntry(kgHomeDir string, entry string) error {
 }
 
 func readLogEntries(kgHomeDir string, limit int) ([]string, error) {
-	logPath := filepath.Join(kgHomeDir, "notes", "log.md")
+	logPath := filepath.Join(kgHomeDir, "notes", kgLogFileName)
 	data, err := os.ReadFile(logPath)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -205,7 +210,7 @@ func readLogEntries(kgHomeDir string, limit int) ([]string, error) {
 
 // updateIndex adds or replaces a note entry in notes/index.md.
 func updateIndex(kgHomeDir string, note *GraphNote) error {
-	indexPath := filepath.Join(kgHomeDir, "notes", "index.md")
+	indexPath := filepath.Join(kgHomeDir, "notes", kgIndexFileName)
 	data, err := os.ReadFile(indexPath)
 	if os.IsNotExist(err) {
 		data = []byte("# Knowledge Graph Index\n")
@@ -265,7 +270,7 @@ func updateIndex(kgHomeDir string, note *GraphNote) error {
 
 // readIndex parses entries from notes/index.md.
 func readIndex(kgHomeDir string) ([]IndexEntry, error) {
-	indexPath := filepath.Join(kgHomeDir, "notes", "index.md")
+	indexPath := filepath.Join(kgHomeDir, "notes", kgIndexFileName)
 	data, err := os.ReadFile(indexPath)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -508,14 +513,14 @@ func runKGSetup() error {
 	}
 
 	// Write initial index
-	indexPath := filepath.Join(home, "notes", "index.md")
+	indexPath := filepath.Join(home, "notes", kgIndexFileName)
 	indexContent := "# Knowledge Graph Index\n\nThis file is maintained automatically by dot-agents kg.\n"
 	if err := os.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
 		return fmt.Errorf("write index: %w", err)
 	}
 
 	// Write initial log
-	logPath := filepath.Join(home, "notes", "log.md")
+	logPath := filepath.Join(home, "notes", kgLogFileName)
 	logContent := "# Knowledge Graph Operation Log\n\nAppend-only log of graph operations.\n"
 	if err := os.WriteFile(logPath, []byte(logContent), 0644); err != nil {
 		return fmt.Errorf("write log: %w", err)

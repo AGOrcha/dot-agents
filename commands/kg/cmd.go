@@ -8,6 +8,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	repoRootHelpText = "Repository root (auto-detected from git)"
+	gitDiffBaseHelp  = "Git diff base (default: HEAD~1)"
+)
+
 func NewKGCmd(deps Deps) *cobra.Command {
 	kgCmd := &cobra.Command{
 		Use:   "kg",
@@ -201,7 +206,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Short: "Full code graph build (re-parse all files via code-review-graph)",
 		RunE:  runKGBuild,
 	}
-	kgBuildCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgBuildCmd.Flags().String("repo", "", repoRootHelpText)
 	kgBuildCmd.Flags().Bool("skip-flows", false, "Skip flow/community detection (faster)")
 	kgBuildCmd.Flags().Bool("skip-postprocess", false, "Skip all post-processing (raw parse only)")
 
@@ -210,8 +215,8 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Short: "Incremental code graph update (changed files only)",
 		RunE:  runKGUpdate,
 	}
-	kgUpdateCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
-	kgUpdateCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgUpdateCmd.Flags().String("repo", "", repoRootHelpText)
+	kgUpdateCmd.Flags().String("base", "", gitDiffBaseHelp)
 	kgUpdateCmd.Flags().Bool("skip-flows", false, "Skip flow/community detection")
 	kgUpdateCmd.Flags().Bool("skip-postprocess", false, "Skip all post-processing")
 
@@ -222,7 +227,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 			return runKGCodeStatus(deps, cmd, args)
 		},
 	}
-	kgCodeStatusCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgCodeStatusCmd.Flags().String("repo", "", repoRootHelpText)
 
 	kgChangesCmd := &cobra.Command{
 		Use:   "changes",
@@ -231,8 +236,8 @@ for structured project memory, bridge queries, and code-to-note context.`,
 			return runKGChanges(deps, cmd, args)
 		},
 	}
-	kgChangesCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
-	kgChangesCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgChangesCmd.Flags().String("repo", "", repoRootHelpText)
+	kgChangesCmd.Flags().String("base", "", gitDiffBaseHelp)
 	kgChangesCmd.Flags().Bool("brief", false, "Show brief summary only")
 	kgChangesCmd.Flags().Bool("require-graph", false, "Return non-zero exit if graph is not ready (unbuilt or locked)")
 
@@ -244,8 +249,8 @@ for structured project memory, bridge queries, and code-to-note context.`,
 			return runKGImpact(deps, cmd, args)
 		},
 	}
-	kgImpactCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
-	kgImpactCmd.Flags().String("base", "", "Git diff base (default: HEAD~1)")
+	kgImpactCmd.Flags().String("repo", "", repoRootHelpText)
+	kgImpactCmd.Flags().String("base", "", gitDiffBaseHelp)
 	kgImpactCmd.Flags().Int("depth", 2, "Max hop depth for impact traversal")
 	kgImpactCmd.Flags().Int("limit", 50, "Max impacted nodes to return")
 	kgImpactCmd.Flags().Bool("require-graph", false, "Return non-zero exit if graph is not ready (unbuilt or locked)")
@@ -263,7 +268,7 @@ analysis instead.`,
 			return runKGFlows(deps, cmd, args)
 		},
 	}
-	kgFlowsCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgFlowsCmd.Flags().String("repo", "", repoRootHelpText)
 	kgFlowsCmd.Flags().Int("limit", 20, "Max flows to show")
 	kgFlowsCmd.Flags().String("sort", "criticality", "Sort by: criticality|size")
 
@@ -281,7 +286,7 @@ when sorting by size.`,
 			return runKGCommunities(deps, cmd, args)
 		},
 	}
-	kgCommunitiesCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgCommunitiesCmd.Flags().String("repo", "", repoRootHelpText)
 	kgCommunitiesCmd.Flags().Int("min-size", 0, "Only show communities with at least this many members")
 	kgCommunitiesCmd.Flags().String("sort", "size", "Sort by: size|cohesion")
 
@@ -295,7 +300,7 @@ This command runs automatically as part of 'kg build' and 'kg update'. Run it
 manually only to repair stale derived data without rebuilding the full graph.`,
 		RunE: runKGPostprocess,
 	}
-	kgPostprocessCmd.Flags().String("repo", "", "Repository root (auto-detected from git)")
+	kgPostprocessCmd.Flags().String("repo", "", repoRootHelpText)
 	kgPostprocessCmd.Flags().Bool("no-flows", false, "Skip flow detection")
 	kgPostprocessCmd.Flags().Bool("no-communities", false, "Skip community detection")
 	kgPostprocessCmd.Flags().Bool("no-fts", false, "Skip FTS rebuild")

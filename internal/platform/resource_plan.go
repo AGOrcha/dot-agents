@@ -20,6 +20,13 @@ type ResourcePlan struct {
 	Resources []plannedResource
 }
 
+const (
+	agentManifestName          = "AGENT.md"
+	codexAgentTomlMaterializer = "codex-agent-toml"
+	emptySourcePathErr         = "empty source path"
+	skillManifestName          = "SKILL.md"
+)
+
 func BuildResourcePlan(intents []ResourceIntent) (ResourcePlan, error) {
 	byConflict := map[string][]ResourceIntent{}
 	for _, intent := range intents {
@@ -115,16 +122,16 @@ func (p ResourcePlan) Execute(repoPath, agentsHome string) error {
 func executeResourceIntent(intent ResourceIntent, repoPath, agentsHome string) error {
 	switch {
 	case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
-		src := intent.SourceRef.CanonicalPath(agentsHome)
-		if src == "" {
-			return fmt.Errorf("empty source path")
+		src, err := canonicalIntentSourcePath(intent, agentsHome)
+		if err != nil {
+			return err
 		}
 		target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 		return ensureDirSymlinkIntent(src, target, intent)
 	case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
-		src := intent.SourceRef.CanonicalPath(agentsHome)
-		if src == "" {
-			return fmt.Errorf("empty source path")
+		src, err := canonicalIntentSourcePath(intent, agentsHome)
+		if err != nil {
+			return err
 		}
 		target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 		return ensureFileSymlinkIntent(src, target, intent)
@@ -133,6 +140,14 @@ func executeResourceIntent(intent ResourceIntent, repoPath, agentsHome string) e
 	default:
 		return fmt.Errorf("unsupported intent shape/transport %s/%s", intent.Shape, intent.Transport)
 	}
+}
+
+func canonicalIntentSourcePath(intent ResourceIntent, agentsHome string) (string, error) {
+	src := intent.SourceRef.CanonicalPath(agentsHome)
+	if src == "" {
+		return "", fmt.Errorf(emptySourcePathErr)
+	}
+	return src, nil
 }
 
 func resolveIntentTargetPath(targetPath, repoPath string) string {
@@ -178,10 +193,10 @@ func ensureFileSymlinkIntent(src, target string, intent ResourceIntent) error {
 
 func executeRenderSingleWrite(intent ResourceIntent, repoPath, agentsHome string) error {
 	switch intent.Materializer {
-	case "codex-agent-toml":
-		src := intent.SourceRef.CanonicalPath(agentsHome)
-		if src == "" {
-			return fmt.Errorf("empty source path")
+	case codexAgentTomlMaterializer:
+		src, err := canonicalIntentSourcePath(intent, agentsHome)
+		if err != nil {
+			return err
 		}
 		dst := resolveIntentTargetPath(intent.TargetPath, repoPath)
 		return writeCodexAgentTomlFile(dst, src)
@@ -265,7 +280,7 @@ func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]Res
 
 func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "skills", project, "SKILL.md")
+	entries, err := listScopedResourceDirs(agentsHome, "skills", project, skillManifestName)
 	if err != nil {
 		return nil
 	}
@@ -292,13 +307,11 @@ func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []Resource
 			Materializer:  "shared-skill-dir-symlink",
 			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{"SKILL.md"},
+			MarkerFiles:   []string{skillManifestName},
 		})
 	}
 	return intents
 }
-
-const pluginManifestName = "PLUGIN.yaml"
 
 // BuildSharedPluginBundleIntents returns ResourceIntents for each canonical plugin bundle
 // under ~/.agents/plugins/{scope}/ pointing at the given target roots. Each platform's
@@ -320,7 +333,7 @@ func BuildSharedPluginBundleIntents(project string, targetRoots ...string) ([]Re
 
 func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []ResourceIntent {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "plugins", project, pluginManifestName)
+	entries, err := listScopedResourceDirs(agentsHome, "plugins", project, PluginManifestName)
 	if err != nil {
 		return nil
 	}
@@ -347,7 +360,7 @@ func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []Resourc
 			Materializer:  "shared-plugin-dir-symlink",
 			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{pluginManifestName},
+			MarkerFiles:   []string{PluginManifestName},
 		})
 	}
 	return intents
@@ -376,7 +389,7 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 // AGENT.md file to a repo-local file path (OpenCode `.md`, Copilot `.agent.md`).
 func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
 		return nil, nil
 	}
@@ -393,7 +406,7 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 			SourceRef: ResourceSourceRef{
 				Scope:        project,
 				Bucket:       "agents",
-				RelativePath: filepath.Join(entry.Name, "AGENT.md"),
+				RelativePath: filepath.Join(entry.Name, agentManifestName),
 				Kind:         ResourceSourceCanonicalFile,
 				Origin:       "shared-agent-file-symlink",
 			},
@@ -411,7 +424,7 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 // from canonical project agent directories.
 func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
 		return nil, nil
 	}
@@ -428,13 +441,13 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 			SourceRef: ResourceSourceRef{
 				Scope:        project,
 				Bucket:       "agents",
-				RelativePath: filepath.Join(entry.Name, "AGENT.md"),
+				RelativePath: filepath.Join(entry.Name, agentManifestName),
 				Kind:         ResourceSourceCanonicalFile,
 				Origin:       "shared-codex-agent-toml",
 			},
 			Shape:         ResourceShapeRenderSingle,
 			Transport:     ResourceTransportWrite,
-			Materializer:  "codex-agent-toml",
+			Materializer:  codexAgentTomlMaterializer,
 			ReplacePolicy: ResourceReplaceIfManaged,
 			PrunePolicy:   ResourcePruneNone,
 		})
@@ -444,7 +457,7 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 
 func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
 		return nil
 	}
@@ -471,7 +484,7 @@ func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []Resource
 			Materializer:  "shared-agent-dir-symlink",
 			ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{"AGENT.md"},
+			MarkerFiles:   []string{agentManifestName},
 		})
 	}
 	return intents
@@ -561,7 +574,7 @@ func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome strin
 		return nil
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
 		switch intent.Materializer {
-		case "codex-agent-toml":
+		case codexAgentTomlMaterializer:
 			_ = os.Remove(target)
 			return nil
 		default:
