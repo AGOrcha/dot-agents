@@ -1,11 +1,9 @@
 package commands
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/NikashPrakash/dot-agents/commands/skills"
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -49,47 +47,6 @@ func newSkillsListCmd() *cobra.Command {
 			return skills.List(scope)
 		},
 	}
-}
-
-// readFrontmatterDescription parses the YAML frontmatter of a markdown file
-// and returns the value of the "description:" field.
-//
-// Shared with agents list (same package); skills list uses commands/skills.List
-// which duplicates parsing to keep the skills subpackage free of import cycles.
-func readFrontmatterDescription(mdPath string) string {
-	f, err := os.Open(mdPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	lineNum := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineNum++
-		if lineNum == 1 {
-			if strings.TrimSpace(line) == "---" {
-				inFrontmatter = true
-			} else {
-				return ""
-			}
-			continue
-		}
-		if inFrontmatter {
-			if strings.TrimSpace(line) == "---" {
-				break
-			}
-			if strings.HasPrefix(line, "description:") {
-				val := strings.TrimPrefix(line, "description:")
-				val = strings.TrimSpace(val)
-				val = strings.Trim(val, `"'`)
-				return val
-			}
-		}
-	}
-	return ""
 }
 
 func newSkillsNewCmd() *cobra.Command {
