@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: sq2-reliability-rating-fixes
+parent_plan_id: sonarqube-pr10
+verifier_type: code-fix
+status: pass
+summary: 'Cluster A (shell [[ vs [) applied to add.sh/json.sh/verify.sh — ~44 sites converted. Cluster B (TS replace -> replaceAll) applied to workflow.ts/agents.ts/skills.ts/codex.ts — 11 sites; literal globals switched to string-form replaceAll, anchored regexes kept regex-form via .replaceAll(regex). Cluster C (TS sort compare) applied to core/{config,hooks,mcp}.ts and tests/{agentsrc,commands}.test.ts — 6 sites use (a,b)=>a.localeCompare(b). Two commits: ca15ef3 (A) and b941530 (B+C). No suppressions. Local bash -n / npm run build / npm test were blocked by sandbox; relied on grep audits and self-review of diffs. Parent must verify new_reliability_rating == 1 on PR#10 SonarCloud after push.'
+recorded_at: "2026-05-04T04:09:45Z"
+delegation_id: del-sq2-reliability-rating-fixes-1777867210
+recorded_by: dot-agents workflow verify record

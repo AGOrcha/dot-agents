@@ -1,0 +1,47 @@
+schema_version: 1
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+plan_id: sonarqube-pr10
+task_id: sq3-security-hotspots-sweep
+owner: loop-worker
+worker:
+    profile: loop-worker
+    project_overlay_files:
+        - .agents/active/active.loop.md
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-04T04:19:14Z"
+    reason: All 35 hotspots classified by sq1 as needing-review-in-this-PR; mostly REVIEWED-SAFE status changes via MCP
+scope:
+    write_scope:
+        - commands/
+        - internal/
+        - scripts/
+        - tests/
+        - .github/workflows/
+prompt:
+    inline:
+        - Sweep all 35 PR#10 security hotspots per sq1 findings.md §3
+        - 'three clusters: (G) 27 Go exec.LookPath hotspots (go:S4036) across commands/sync'
+        - commands/workflow
+        - commands/kg
+        - internal/graphstore
+        - internal/platform — disposition REVIEWED-SAFE (hard-coded tool name; user-shell context; no escalation surface); use mcp__sonarqube__change_security_hotspot_status. (I) 4 TS test publicly-writable-dir hotspots (typescript:S5443) in ports/typescript/tests/{commands
+        - kg}.test.ts — disposition REVIEWED-SAFE (test isolation via os.tmpdir/random subdirs). (H) 3 TS regex DoS hotspots (typescript:S5852) in ports/typescript/src/commands/{workflow
+        - agents
+        - 'skills}.ts — per-regex inspection: if bounded by repo patterns mark SAFE; if user-controllable refactor to non-backtracking form. Use mcp__sonarqube__search_security_hotspots and mcp__sonarqube__show_security_hotspot to triage; mcp__sonarqube__change_security_hotspot_status to mark each. Per-hotspot ''comment'' field on status change is the audit trail. Anti-scope: NO mass-marking without per-hotspot review; every status change has its own justification visible in SonarCloud''s status-change comment. Hard test: new_security_hotspots_reviewed >= 100% on PR#10 analysis after sweep. When done: verify record + merge-back. Do NOT advance.'
+context:
+    required_files:
+        - .agents/workflow/plans/sonarqube-pr10/findings.md
+verification:
+    feedback_goal: All 35 PR#10 security hotspots transitioned from TO_REVIEW to REVIEWED with per-hotspot rationale; new_security_hotspots_reviewed -> 100%
+    scenario_tags:
+        - sonarqube-pr10-security-hotspots
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

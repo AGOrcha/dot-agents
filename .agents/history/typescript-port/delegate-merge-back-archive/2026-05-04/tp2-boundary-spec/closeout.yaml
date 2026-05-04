@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: typescript-port
+task_id: tp2-boundary-spec
+delegation_id: del-tp2-boundary-spec-1777866067
+decision: accept
+note: boundary spec JSON at docs/typescript-port-boundary.json; cross-ref added; commit cece76e
+closed_at: "2026-05-04T03:56:50Z"

@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: typescript-port
+task_id: tp1-current-gap-audit
+delegation_id: del-tp1-current-gap-audit-1777864446
+decision: accept
+note: gap memo at docs/TYPESCRIPT_PORT_GAP.md classifies all surfaces; commit fbc0ddc
+closed_at: "2026-05-04T03:39:12Z"

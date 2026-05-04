@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t3-extend-iteration-close
+parent_plan_id: self-review-iteration-close-wiring
+verifier_type: skill-extension
+status: pass
+summary: 'iteration-close skill extended per ADRs 0002+0003: SKILL.md frontmatter gained tier:T2 + contract block (5 reads / 4 writes / 4 escape_hatches); instructions/workflow.md inserted Invoke Self-Review section after Record Verification (test) and before Write Checkpoint, with three sub-steps (invoke /self-review, verify record --kind review, checkpoint --log-to-iter --role review), failure-mode table (accept/reject/escalate), and explicit false-positive guard against omitting --role review. Anti-scope held: no changes to mergeReviewIterLog, verify record, or checkpoint flag surface. Frontmatter validated as YAML (tier:T2 + 13 contract entries); go build ./... clean.'
+recorded_at: "2026-05-04T03:55:36Z"
+delegation_id: del-t3-extend-iteration-close-1777866086
+recorded_by: dot-agents workflow verify record

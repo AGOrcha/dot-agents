@@ -1,0 +1,62 @@
+schema_version: 1
+id: del-sq2-reliability-rating-fixes-1777867210
+parent_plan_id: sonarqube-pr10
+parent_task_id: sq2-reliability-rating-fixes
+title: Address new_reliability_rating findings classified as fixable
+summary: Delegated from plan SonarQube — PR#10 Quality Gate Clearance
+write_scope:
+    - src/lib/commands/add.sh
+    - src/lib/utils/json.sh
+    - scripts/verify.sh
+    - ports/typescript/src/commands/workflow.ts
+    - ports/typescript/src/commands/agents.ts
+    - ports/typescript/src/commands/skills.ts
+    - ports/typescript/src/platforms/codex.ts
+    - ports/typescript/src/core/config.ts
+    - ports/typescript/src/core/hooks.ts
+    - ports/typescript/src/core/mcp.ts
+    - ports/typescript/tests/agentsrc.test.ts
+    - ports/typescript/tests/commands.test.ts
+success_criteria: |-
+    Tier: T2 (compound — touches multiple files; size depends on sq1
+    findings).
+
+    Per the source plan: the actionable cluster includes
+    scripts/setup_homebrew_cask_release_secrets.sh,
+    tests/test-kg-real-crg-build.sh, .github/workflows/test.yml.
+    Recent commits (cb3c197 print ci test command output, f3ff375
+    sonarqube fixes pt.1) addressed parts of this; sq1 audit will
+    clarify what's left.
+
+    For each finding marked "fixable in this PR" by sq1:
+      * Apply fix
+      * Run local verification per task
+      * Confirm SonarCloud picks it up after push
+
+    If finding scope balloons beyond ~3 commits, escalate to a
+    follow-up plan via fold-back rather than continuing to drag
+    this task open.
+
+    Hard test:
+      new_reliability_rating moves below the failing threshold OR
+      remaining issues are explicitly tagged as won't-fix with
+      justification.
+
+    Common false positive:
+      Local lint passes but SonarCloud's incremental diff still
+      flags because of base-branch divergence. Verify against the
+      live PR analysis after each push, not just local replay.
+
+    ISP routing:
+      mode: fanout-amenable per finding cluster (each cluster has its own files; subagent can implement one cluster at a time)
+      verifier: smoke (relevant local tests pass) + integration (push + check SonarCloud)
+      review: code review per cluster (does the fix address the underlying smell, or just suppress the rule?)
+      anti-scope: do NOT add suppression comments without justification. Do NOT touch unrelated code in the same cluster.
+      bundle-context (if fanout): sq1's findings.md, the specific cluster's file list, SonarCloud rule docs (mcp__sonarqube__show_rule)
+      output contract: lower new_reliability_rating; merge-back captures per-cluster fix rationale
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T04:00:10Z"
+updated_at: "2026-05-04T04:10:00Z"

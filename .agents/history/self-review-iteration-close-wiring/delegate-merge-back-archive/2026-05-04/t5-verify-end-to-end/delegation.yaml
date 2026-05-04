@@ -1,0 +1,47 @@
+schema_version: 1
+id: del-t5-verify-end-to-end-1777868634
+parent_plan_id: self-review-iteration-close-wiring
+parent_task_id: t5-verify-end-to-end
+title: Run a real iteration through the new chain; capture before/after iter-log diff
+summary: Delegated from plan Self-Review ↔ Iteration-Close Wiring
+write_scope:
+    - .agents/active/iteration-log/
+success_criteria: |-
+    Tier: T1 (molecule — verification, not a new compound).
+
+    Procedure:
+      1. Make a small dummy edit on this branch that produces a measurable
+         diff (e.g. update a comment in commands/kg/cmd.go).
+      2. Run iteration-close per the new chain (verify → self-review →
+         checkpoint --role review → advance|merge-back).
+      3. Capture the produced iter-N.yaml. Side-by-side against the most
+         recent v2 iter-log with empty review (e.g. iter-61.yaml).
+      4. Confirm the diff shows: empty review fields → populated review
+         fields, with content traceable to the produced
+         review-decision.yaml.
+
+    Hard test:
+      Real iter-log produced by a real iteration shows non-stub review block
+      content. Side-by-side diff captured as evidence in
+      .agents/active/merge-back/<task>.md.
+
+    Common false positive:
+      Only synthetic test data was used (no real diff was reviewed); or the
+      verifier reads only field presence, not content quality. The verifier
+      must paste the produced review-decision.yaml content INTO the merge-back
+      for human cross-check.
+
+    ISP routing:
+      mode: direct (verification task; orchestrator runs the iteration; no fanout)
+      verifier: integration (the iteration itself IS the test; produces a real iter-log file as evidence)
+      review: verification review — was the test actually run on a real diff? Is the produced review-decision.yaml content quoted in the merge-back?
+      anti-scope: do NOT make this a synthetic/mocked test. Use a real (small) edit on this branch.
+      rollback: if verification fails, t5 escalates back to t2 or t3 via fold-back rather than papering over the failure
+      bundle-context (if fanout): not applicable — this is the orchestrator's verification turn
+      output contract: a fresh iter-N.yaml on disk with populated review block + a captured before/after diff in the merge-back
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T04:23:54Z"
+updated_at: "2026-05-04T05:01:18Z"

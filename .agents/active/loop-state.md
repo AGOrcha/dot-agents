@@ -43,6 +43,7 @@ Architecture note §4 mapping (auto-archive observation when referenced plan/tas
 ## Loop Health
 
 - **Audit baseline (2026-05-03):** 1/12 conversion rate from auto-emissions → action; 24/42 history dirs have `impl-results.md`. The new plan is the first to be measured against these baselines.
+- Self-review chain verification iteration: 2026-05-04 (t5 of self-review-iteration-close-wiring).
 - **Methodology:** plan + tasks adopt hard-test + common-false-positive (annimaniac), four-question lens, resource graduation matrix view (architecture note §1.5), and execution-telemetry seed framing (§1.6).
 - **ISP routing hints:** every task in TASKS.yaml notes declares `mode` (direct | fanout-amenable), `verifier` kind, `review` kind, anti-scope, bundle-context (for fanout), and output contract.
 - **CLAUDE.md:** updated 2026-05-03 — Task Management section now matches actual toolchain (`workflow plan create / advance / merge-back / plan archive`), drops obsolete impl-results condensation rule, fixes broken `.agents/lessons.md` reference to `.agents/lessons/index.md`.

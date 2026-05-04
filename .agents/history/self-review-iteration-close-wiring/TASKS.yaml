@@ -65,7 +65,7 @@ tasks:
       app_type: research
     - id: t2-extend-self-review-skill
       title: Extend self-review skill to write review-decision.yaml; restore kg-context calls; add tier+contract frontmatter
-      status: in_progress
+      status: completed
       depends_on:
         - t1-audit-decide-output-schema
       blocks:
@@ -128,7 +128,7 @@ tasks:
       app_type: skill
     - id: t3-extend-iteration-close
       title: Wire iteration-close to invoke self-review and call workflow checkpoint --role review
-      status: pending
+      status: completed
       depends_on:
         - t1-audit-decide-output-schema
         - t2-extend-self-review-skill
@@ -180,7 +180,7 @@ tasks:
       app_type: skill
     - id: t4-trace-schema-seed-doc
       title: Document review-decision.yaml as the first execution-telemetry trace; produce ADR-0004
-      status: pending
+      status: completed
       depends_on:
         - t1-audit-decide-output-schema
       blocks: []
@@ -228,7 +228,7 @@ tasks:
       app_type: research
     - id: t5-verify-end-to-end
       title: Run a real iteration through the new chain; capture before/after iter-log diff
-      status: pending
+      status: completed
       depends_on:
         - t2-extend-self-review-skill
         - t3-extend-iteration-close
@@ -274,7 +274,7 @@ tasks:
       app_type: verifier
     - id: t6-archive-and-baseline
       title: workflow plan archive; record updated baseline in architecture note §6.5
-      status: pending
+      status: completed
       depends_on:
         - t5-verify-end-to-end
       blocks: []

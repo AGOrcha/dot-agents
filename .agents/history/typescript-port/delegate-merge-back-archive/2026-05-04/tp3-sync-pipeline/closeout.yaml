@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: typescript-port
+task_id: tp3-sync-pipeline
+delegation_id: del-tp3-sync-pipeline-1777867045
+decision: accept
+note: CI sync check; fake-cmd validation experiment passed; 99 tests; commit 0b34307
+closed_at: "2026-05-04T04:17:54Z"

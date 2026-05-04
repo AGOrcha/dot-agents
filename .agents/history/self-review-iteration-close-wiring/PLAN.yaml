@@ -1,7 +1,7 @@
 schema_version: 1
 id: self-review-iteration-close-wiring
 title: Self-Review ↔ Iteration-Close Wiring
-status: active
+status: archived
 summary: |-
     Close three audit-identified pipeline gaps with one well-scoped change.
     (1) Self-review skill writes nothing today (chat-only) — orphaned. (2)
@@ -16,7 +16,7 @@ summary: |-
     ADR-0003, ADR-0004, ADR-0005. First concrete instance of the §1.6
     execution-telemetry pillar in `agent-context-resolution-architecture.md`.
 created_at: "2026-05-03T20:00:00Z"
-updated_at: "2026-05-04T03:13:37Z"
+updated_at: "2026-05-04T05:06:26Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: After plan archive, a fresh iteration through `iteration-close`
@@ -42,4 +42,4 @@ verification_strategy: |-
     as a before/after diff in t5; (b) ADR-0002 through ADR-0005 are
     written to docs/adr/, indexed, and reference each other where
     relationships exist.
-current_focus_task: Extend self-review skill to write review-decision.yaml; restore kg-context calls; add tier+contract frontmatter
+current_focus_task: ""

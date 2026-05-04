@@ -1,0 +1,36 @@
+schema_version: 1
+id: del-tp4-close-mirror-gaps-1777868356
+parent_plan_id: typescript-port
+parent_task_id: tp4-close-mirror-gaps
+title: Close any must-mirror gaps surfaced by tp1 audit
+summary: Delegated from plan TypeScript Port — Sync Pipeline & Boundary Maintenance
+write_scope:
+    - ports/typescript/src/commands/
+    - ports/typescript/src/cli.ts
+    - ports/typescript/tests/
+success_criteria: |-
+    Tier: T2 (compound — implementation work; size depends on tp1 findings).
+
+    If tp1 finds zero "Stage 1 + missing" rows (i.e. the TS port
+    already covers the documented Stage 1 surface), this task
+    completes with a "no gaps to close" merge-back and is archived.
+
+    If tp1 finds material gaps, those are scoped here. Each missing
+    Stage 1 command or flag becomes a sub-deliverable; if the total
+    scope exceeds 3 commands or 5 flag-level changes, this task
+    SHOULD spawn a follow-up plan rather than ballooning. Use
+    fold-back to escalate.
+
+    ISP routing:
+      mode: fanout-amenable (per-command independent work; clean isolation)
+      verifier: smoke (each new command exercised with --help and at least one real input on a fresh repo)
+      review: code review per command (does it match the Go behavior at the documented boundary level? does it write to ~/.agents/ correctly?)
+      anti-scope: do NOT exceed the Phase 4 boundary. Read-only workflow surfaces are allowed; mutating workflow / KG / orchestration are NOT.
+      bundle-context (if fanout): docs/TYPESCRIPT_PORT_GAP.md (from tp1), the Go source for the command being mirrored, existing TS commands as style reference, ports/typescript/tests/ for the testing pattern
+      output contract: TS files for each newly-mirrored command; passing CI including the tp3 sync check; ports/typescript/README.md updated if user-facing surface changed
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T04:19:16Z"
+updated_at: "2026-05-04T04:21:08Z"

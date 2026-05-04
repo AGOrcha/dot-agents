@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: self-review-iteration-close-wiring
+task_id: t3-extend-iteration-close
+delegation_id: del-t3-extend-iteration-close-1777866086
+decision: accept
+note: iteration-close extended; self-review invocation at ADR-0003 ordering; tier+contract added
+closed_at: "2026-05-04T03:56:49Z"

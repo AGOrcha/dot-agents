@@ -1,0 +1,56 @@
+schema_version: 1
+id: del-sq4-duplication-debt-decision-1777866067
+parent_plan_id: sonarqube-pr10
+parent_task_id: sq4-duplication-debt-decision
+title: Decide scope on new_duplicated_lines_density (this PR vs follow-up plan)
+summary: Delegated from plan SonarQube — PR#10 Quality Gate Clearance
+write_scope:
+    - docs/adr/0008-pr10-duplication-scope.md
+    - docs/adr/README.md
+    - .agents/workflow/plans/sonarqube-pr10/findings.md
+success_criteria: |-
+    Tier: T2 (compound — load-bearing decision affecting PR#10
+    merge readiness).
+
+    Per the source plan: duplication is branch-wide debt across
+    324 commits / 893 changed files vs base. Mass-fixing in this
+    PR would balloon scope; deferring may block merge if reviewer
+    rejects. ADR-0008 documents the decision either way.
+
+    Options:
+      (A) Fix duplication in this PR — opens scope significantly;
+          risks PR being held open longer than is healthy
+      (B) Accept duplication failure as a known waiver for this PR
+          with a follow-up plan tracking the cleanup; merge anyway
+          if reviewer agrees
+      (C) Block PR#10 merge until a follow-up duplication-cleanup
+          plan ships; keep this plan active
+
+    Whichever path is chosen, ADR-0008 records:
+      * Context (the 324-commit / 893-file scope; what mass-fix would entail)
+      * Decision (chosen option)
+      * Consequences
+      * If (B) or (C): the follow-up plan id and a rough scope estimate
+
+    Hard test:
+      ADR-0008 written, indexed, accepted. PR#10 has a clear merge
+      path forward (either duplication addressed, or waived with
+      maintainer agreement, or blocked-with-tracker).
+
+    Common false positive:
+      ADR captures "decide later" without actually deciding.
+      Sub-merit-able. Each option's tradeoffs must be explicit.
+
+    ISP routing:
+      mode: direct (ADR + index update)
+      verifier: manual (decision-quality)
+      review: decision-quality
+      anti-scope: do NOT start mass-deduping in this task — that's option (A)'s implementation, which would spawn its own plan
+      bundle-context (if fanout): sq1's findings.md (duplication numbers), SonarCloud project URL, PR#10 description for scope context
+      output contract: docs/adr/0008-*.md + index updated + a concrete answer in findings.md "duplication path forward"
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:41:07Z"
+updated_at: "2026-05-04T03:45:02Z"

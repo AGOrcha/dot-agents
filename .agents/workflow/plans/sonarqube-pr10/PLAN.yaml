@@ -18,7 +18,7 @@ summary: |-
     note) to canonical plan so eligible/orient surface it correctly while
     PR #10 is open. Closes when PR merges.
 created_at: "2026-05-03T22:30:00Z"
-updated_at: "2026-05-04T03:13:37Z"
+updated_at: "2026-05-04T04:19:13Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate on PR #10 passes (or, if not
@@ -36,6 +36,10 @@ verification_strategy: |-
     Iterative: each task addresses a specific failing condition or
     finding cluster, runs the relevant local verifications named in
     the source plan markdown, then pushes and re-checks SonarCloud.
+    For SQ3 security hotspots, after each CI run poll/check SonarCloud
+    PR #10 for updated hotspot and quality-gate metrics until manual
+    scan triggers are enabled; once manual triggers are enabled, use
+    the explicit manual scan result as the verification source of truth.
     Plan archives when PR #10 merges; if PR is closed without merge,
     plan archives with a note about scope deferral.
-current_focus_task: Audit current SonarCloud state on PR#10; classify remaining findings
+current_focus_task: Review and resolve security hotspots flagged on PR#10

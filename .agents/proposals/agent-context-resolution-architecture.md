@@ -372,6 +372,13 @@ them) lack the field entirely; partial backfill is possible but
 fabricates an explicit-accept gate that never ran — recommend leaving
 v1 out of scope.
 
+**2026-05-04 update:** `self-review-iteration-close-wiring` archived
+the first live end-to-end trace: `iter-62.yaml` has
+`review.overall_decision: accept` and `review.verify_record_appended:
+true`, populated from `.agents/active/verification/t5-verify-end-to-end/review-decision.yaml`.
+The v2 review-block path is live; baseline measurement of the next
+conversion-rate sample starts from this point.
+
 **Skill rework lineage: 5/5 spec-driven, 0/5 observation-driven** in
 the sample (orchestrator-session-start, iteration-close, loop-worker,
 agent-start). All reworks landed inside scoped plan tasks. The
