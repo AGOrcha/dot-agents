@@ -108,56 +108,56 @@ func ListCanonicalSettingsFiles(agentsHome, scope string) ([]SettingsFileSpec, e
 	return out, nil
 }
 
-// ResolveCanonicalMCPFile finds an MCP file by scope and name (basename or stem).
-func ResolveCanonicalMCPFile(agentsHome, scope, name string) (*MCPFileSpec, error) {
+// resolveCanonicalFileByExt walks the candidate set (name plus
+// name+ext for each known ext when name has no dot) under
+// agentsHome/<bucket>/<scope>/, returns (foundPath, baseName) for the
+// first file that satisfies isValid(). Powers the public Resolve…File
+// helpers below.
+func resolveCanonicalFileByExt(
+	agentsHome, bucket, scope, name string,
+	validExts []string,
+	isValid func(filename string) bool,
+) (foundPath, baseName string, err error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, fmt.Errorf("mcp file name is empty")
+		return "", "", fmt.Errorf("%s file name is empty", bucket)
 	}
-	root := filepath.Join(agentsHome, "mcp", scope)
+	root := filepath.Join(agentsHome, bucket, scope)
 	candidates := []string{name}
 	if !strings.Contains(name, ".") {
-		for _, ext := range []string{".json", ".toml", ".yaml", ".yml"} {
+		for _, ext := range validExts {
 			candidates = append(candidates, name+ext)
 		}
 	}
 	for _, cand := range candidates {
 		p := filepath.Join(root, cand)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && isMCPFileName(cand) {
-			return &MCPFileSpec{
-				Scope:      scope,
-				BaseName:   cand,
-				SourcePath: p,
-			}, nil
+		if fi, statErr := os.Stat(p); statErr == nil && !fi.IsDir() && isValid(cand) {
+			return p, cand, nil
 		}
 	}
-	return nil, fmt.Errorf("mcp file not found: %s / %s", scope, name)
+	return "", "", fmt.Errorf("%s file not found: %s / %s", bucket, scope, name)
+}
+
+// canonicalFileExts is the shared candidate-extension set for both MCP
+// and settings file resolution.
+var canonicalFileExts = []string{".json", ".toml", ".yaml", ".yml"}
+
+// ResolveCanonicalMCPFile finds an MCP file by scope and name (basename or stem).
+func ResolveCanonicalMCPFile(agentsHome, scope, name string) (*MCPFileSpec, error) {
+	p, base, err := resolveCanonicalFileByExt(agentsHome, "mcp", scope, name, canonicalFileExts, isMCPFileName)
+	if err != nil {
+		return nil, err
+	}
+	return &MCPFileSpec{Scope: scope, BaseName: base, SourcePath: p}, nil
 }
 
 // ResolveCanonicalSettingsFile finds a settings file by scope and name (basename or stem).
 func ResolveCanonicalSettingsFile(agentsHome, scope, name string) (*SettingsFileSpec, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, fmt.Errorf("settings file name is empty")
+	p, base, err := resolveCanonicalFileByExt(agentsHome, "settings", scope, name, canonicalFileExts, isSettingsFileName)
+	if err != nil {
+		return nil, err
 	}
-	root := filepath.Join(agentsHome, "settings", scope)
-	candidates := []string{name}
-	if !strings.Contains(name, ".") {
-		for _, ext := range []string{".json", ".toml", ".yaml", ".yml"} {
-			candidates = append(candidates, name+ext)
-		}
-	}
-	for _, cand := range candidates {
-		p := filepath.Join(root, cand)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && isSettingsFileName(cand) {
-			return &SettingsFileSpec{
-				Scope:      scope,
-				BaseName:   cand,
-				SourcePath: p,
-			}, nil
-		}
-	}
-	return nil, fmt.Errorf("settings file not found: %s / %s", scope, name)
+	return &SettingsFileSpec{Scope: scope, BaseName: base, SourcePath: p}, nil
 }
 
 // EnsureUnderMCPScopeTree checks that target is under agentsHome/mcp/scope.
