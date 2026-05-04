@@ -10,6 +10,30 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// loadOnlyFoldBackArtifact globs the repo's fold-back staging dir,
+// asserts exactly one fold-*.yaml file exists, reads + unmarshals it,
+// and returns the parsed artifact. Replaces the recurring 16-17 line
+// glob+read+unmarshal block in TestFoldBackCreate* tests.
+func loadOnlyFoldBackArtifact(t *testing.T, repo string) foldBackArtifact {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one fold-back artifact, got %d", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a foldBackArtifact
+	if err := yaml.Unmarshal(data, &a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
 func TestFoldBackCreateSmall(t *testing.T) {
 	repo := setupFoldBackProject(t)
 	if err := executeWorkflowCommand(t, repo, "fold-back", "create", "--plan", "p1", "--task", "t1", "--observation", "new obs"); err != nil {
@@ -22,21 +46,7 @@ func TestFoldBackCreateSmall(t *testing.T) {
 	if !strings.Contains(tf.Tasks[0].Notes, "existing") || !strings.Contains(tf.Tasks[0].Notes, "new obs") {
 		t.Fatalf("task notes = %q", tf.Tasks[0].Notes)
 	}
-	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("glob fold-back artifacts: got %d files", len(matches))
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var a foldBackArtifact
-	if err := yaml.Unmarshal(data, &a); err != nil {
-		t.Fatal(err)
-	}
+	a := loadOnlyFoldBackArtifact(t, repo)
 	if a.Classification != "small" || a.RoutedTo != "task_note:p1/t1" {
 		t.Fatalf("artifact: %+v", a)
 	}
@@ -54,21 +64,7 @@ func TestFoldBackCreateNoTask(t *testing.T) {
 	if !strings.Contains(plan.Summary, "start") || !strings.Contains(plan.Summary, "plan-level obs") {
 		t.Fatalf("plan summary = %q", plan.Summary)
 	}
-	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected one fold-back file, got %d", len(matches))
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var a foldBackArtifact
-	if err := yaml.Unmarshal(data, &a); err != nil {
-		t.Fatal(err)
-	}
+	a := loadOnlyFoldBackArtifact(t, repo)
 	if a.Classification != "small" || a.RoutedTo != "plan_summary:p1" || a.TaskID != "" {
 		t.Fatalf("artifact: %+v", a)
 	}
@@ -105,21 +101,7 @@ func TestFoldBackCreatePropose(t *testing.T) {
 		t.Fatalf("expected one proposal, got %d", len(propMatches))
 	}
 
-	matches, err := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "fold-*.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 1 {
-		t.Fatalf("expected one fold-back artifact, got %d", len(matches))
-	}
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var a foldBackArtifact
-	if err := yaml.Unmarshal(data, &a); err != nil {
-		t.Fatal(err)
-	}
+	a := loadOnlyFoldBackArtifact(t, repo)
 	if a.Classification != "proposal" || !strings.HasPrefix(a.RoutedTo, "proposal:obs-") {
 		t.Fatalf("artifact: %+v", a)
 	}

@@ -195,17 +195,24 @@ func TestDetectRepoDrift_SliceFieldsNeverNil(t *testing.T) {
 	}
 }
 
-// TestDetectRepoDrift_CompletedPlanIDs asserts completed plans are detected.
-func TestDetectRepoDrift_CompletedPlanIDs(t *testing.T) {
-	dir := t.TempDir()
-	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "my-plan")
+// writeMinimalPlanYAML mkdirs <dir>/.agents/workflow/plans/<planID>/
+// and writes PLAN.yaml with the supplied status.
+func writeMinimalPlanYAML(t *testing.T, dir, planID, status string) {
+	t.Helper()
+	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", planID)
 	if err := os.MkdirAll(plansDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	planYAML := []byte("schema_version: 1\nid: my-plan\nstatus: completed\n")
+	planYAML := []byte("schema_version: 1\nid: " + planID + "\nstatus: " + status + "\n")
 	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planYAML, 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestDetectRepoDrift_CompletedPlanIDs asserts completed plans are detected.
+func TestDetectRepoDrift_CompletedPlanIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeMinimalPlanYAML(t, dir, "my-plan", "completed")
 	project := ManagedProject{Name: "test-proj", Path: dir}
 	report := detectRepoDrift(project, 7, 30)
 	if len(report.CompletedPlanIDs) != 1 || report.CompletedPlanIDs[0] != "my-plan" {
@@ -219,14 +226,7 @@ func TestDetectRepoDrift_CompletedPlanIDs(t *testing.T) {
 // TestDetectRepoDrift_InconsistentArchivedPlanIDs asserts archived-but-present plans are detected.
 func TestDetectRepoDrift_InconsistentArchivedPlanIDs(t *testing.T) {
 	dir := t.TempDir()
-	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "old-plan")
-	if err := os.MkdirAll(plansDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	planYAML := []byte("schema_version: 1\nid: old-plan\nstatus: archived\n")
-	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planYAML, 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeMinimalPlanYAML(t, dir, "old-plan", "archived")
 	project := ManagedProject{Name: "test-proj2", Path: dir}
 	report := detectRepoDrift(project, 7, 30)
 	if len(report.InconsistentArchivedPlanIDs) != 1 || report.InconsistentArchivedPlanIDs[0] != "old-plan" {

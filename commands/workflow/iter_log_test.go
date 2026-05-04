@@ -152,26 +152,54 @@ func TestWorkflowIterLogEmbeddedSchemaMatchesCanonical(t *testing.T) {
 	}
 }
 
-func TestCheckpointLogToIterFirstCommit(t *testing.T) {
-	// Repo with only one commit: HEAD~1 does not exist → first_commit: true, counts 0
-	repo := initWorkflowTestRepo(t)
+// setupDelegationFlowEnv combines initWorkflowTestRepoWithCommit + a
+// fresh AGENTS_HOME + delegation/delegation-bundles dirs. Returns
+// (repo, delegDir, bundleDir).
+func setupDelegationFlowEnv(t *testing.T) (repo, delegDir, bundleDir string) {
+	t.Helper()
+	repo = initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	delegDir = filepath.Join(repo, ".agents", "active", "delegation")
+	bundleDir = filepath.Join(repo, ".agents", "active", "delegation-bundles")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// runCheckpointLogToIter sets AGENTS_HOME, runs `workflow checkpoint
+// --log-to-iter <iter>`, reads the resulting iter-<iter>.yaml, and
+// unmarshals it. Returns the entry. Used by TestCheckpointLogToIter*
+// tests that all share this run-and-read shape.
+func runCheckpointLogToIter(t *testing.T, repo string, iter int) iterLogEntry {
+	t.Helper()
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "1"); err != nil {
-		t.Fatalf("checkpoint --log-to-iter 1: %v", err)
+	iterStr := fmt.Sprintf("%d", iter)
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", iterStr); err != nil {
+		t.Fatalf("checkpoint --log-to-iter %d: %v", iter, err)
 	}
-
-	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-1.yaml")
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-"+iterStr+".yaml")
 	raw, err := os.ReadFile(iterPath)
 	if err != nil {
-		t.Fatalf("iter-1.yaml not created: %v", err)
+		t.Fatalf("iter-%d.yaml not created: %v", iter, err)
 	}
-
 	var entry iterLogEntry
 	if err := yaml.Unmarshal(raw, &entry); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
+	return entry
+}
+
+func TestCheckpointLogToIterFirstCommit(t *testing.T) {
+	// Repo with only one commit: HEAD~1 does not exist → first_commit: true, counts 0
+	repo := initWorkflowTestRepo(t)
+	entry := runCheckpointLogToIter(t, repo, 1)
 
 	if !entry.FirstCommit {
 		t.Errorf("first_commit = false, want true when HEAD~1 absent")
@@ -185,22 +213,7 @@ func TestCheckpointLogToIterFirstCommit(t *testing.T) {
 func TestCheckpointLogToIterNoDelegation(t *testing.T) {
 	// No delegation contracts → wave and task_id are empty strings
 	repo := initWorkflowTestRepoWithCommit(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "5"); err != nil {
-		t.Fatalf("checkpoint --log-to-iter 5: %v", err)
-	}
-
-	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-5.yaml")
-	raw, err := os.ReadFile(iterPath)
-	if err != nil {
-		t.Fatalf("iter-5.yaml not created: %v", err)
-	}
-	var entry iterLogEntry
-	if err := yaml.Unmarshal(raw, &entry); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	entry := runCheckpointLogToIter(t, repo, 5)
 	if entry.Wave != "" {
 		t.Errorf("wave = %q, want empty when no delegation contract", entry.Wave)
 	}
@@ -350,18 +363,7 @@ func TestCheckpointLogToIterVerifierTypeWithoutLogToIterRejected(t *testing.T) {
 }
 
 func TestCheckpointLogToIterVerifierMergePreservesImpl(t *testing.T) {
-	repo := initWorkflowTestRepoWithCommit(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
-	bundleDir := filepath.Join(repo, ".agents", "active", "delegation-bundles")
-	if err := os.MkdirAll(delegDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	repo, delegDir, bundleDir := setupDelegationFlowEnv(t)
 	const taskID = "slice-task"
 	const bundleID = "del-slice-task-999001"
 	contract := fmt.Sprintf(`schema_version: 1
@@ -457,18 +459,7 @@ recorded_at: "2026-04-18T12:00:00Z"
 }
 
 func TestCheckpointLogToIterBundleFeedbackGoalOnStub(t *testing.T) {
-	repo := initWorkflowTestRepoWithCommit(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
-	bundleDir := filepath.Join(repo, ".agents", "active", "delegation-bundles")
-	if err := os.MkdirAll(delegDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	repo, delegDir, bundleDir := setupDelegationFlowEnv(t)
 	const taskID = "fg-task"
 	const bundleID = "del-fg-task-999002"
 	contract := fmt.Sprintf(`schema_version: 1

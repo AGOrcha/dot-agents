@@ -814,26 +814,33 @@ func TestFanoutEvidenceWarning_NoSidecarGraphDegraded(t *testing.T) {
 	}
 }
 
-// TestFanoutEvidenceWarning_SidecarLowConfidence asserts a warning is emitted when a
-// sidecar exists but its confidence is "low".
-func TestFanoutEvidenceWarning_SidecarLowConfidence(t *testing.T) {
-	repo := setupTestProject(t)
-
-	// Write a low-confidence sidecar.
-	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "evidence")
+// writeScopeEvidenceSidecar mkdirs the evidence directory under
+// .agents/workflow/plans/<planID>/evidence/ and writes a sidecar with
+// the supplied confidence. Used by TestFanoutEvidenceWarning_Sidecar*
+// pair tests that differ only in confidence value.
+func writeScopeEvidenceSidecar(t *testing.T, repo, planID, taskID, confidence string) {
+	t.Helper()
+	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", planID, "evidence")
 	if err := os.MkdirAll(evidenceDir, 0755); err != nil {
 		t.Fatalf("mkdir evidence: %v", err)
 	}
-	ev := NewScopeEvidence("plan-001", "task-001")
-	ev.Confidence = "low"
+	ev := NewScopeEvidence(planID, taskID)
+	ev.Confidence = confidence
 	data, err := yaml.Marshal(ev)
 	if err != nil {
 		t.Fatalf("marshal sidecar: %v", err)
 	}
-	sidecarPath := deriveScopeEvidencePath(repo, "plan-001", "task-001")
+	sidecarPath := deriveScopeEvidencePath(repo, planID, taskID)
 	if err := os.WriteFile(sidecarPath, data, 0644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
+}
+
+// TestFanoutEvidenceWarning_SidecarLowConfidence asserts a warning is emitted when a
+// sidecar exists but its confidence is "low".
+func TestFanoutEvidenceWarning_SidecarLowConfidence(t *testing.T) {
+	repo := setupTestProject(t)
+	writeScopeEvidenceSidecar(t, repo, "plan-001", "task-001", "low")
 
 	got := captureStderr(t, func() {
 		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
@@ -850,21 +857,7 @@ func TestFanoutEvidenceWarning_SidecarLowConfidence(t *testing.T) {
 // confidence != "low" (negative path for the low-confidence warning).
 func TestFanoutEvidenceWarning_SidecarHighConfidence(t *testing.T) {
 	repo := setupTestProject(t)
-
-	evidenceDir := filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "evidence")
-	if err := os.MkdirAll(evidenceDir, 0755); err != nil {
-		t.Fatalf("mkdir evidence: %v", err)
-	}
-	ev := NewScopeEvidence("plan-001", "task-001")
-	ev.Confidence = "high"
-	data, err := yaml.Marshal(ev)
-	if err != nil {
-		t.Fatalf("marshal sidecar: %v", err)
-	}
-	sidecarPath := deriveScopeEvidencePath(repo, "plan-001", "task-001")
-	if err := os.WriteFile(sidecarPath, data, 0644); err != nil {
-		t.Fatalf("write sidecar: %v", err)
-	}
+	writeScopeEvidenceSidecar(t, repo, "plan-001", "task-001", "high")
 
 	got := captureStderr(t, func() {
 		checkFanoutScopeEvidenceWarnings(repo, "plan-001", "task-001", false)
