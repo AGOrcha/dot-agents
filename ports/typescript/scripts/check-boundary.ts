@@ -341,18 +341,76 @@ function extractUseLiterals(src: string): string[] {
  * Captures both Var and VarP variants.
  */
 function extractLocalFlags(src: string): string[] {
-  const re =
-    /Flags\(\)\.[A-Za-z0-9]+VarP?\(\s*[^,]+,\s*(?:[^,]+,\s*)?"([^"]+)"/g;
   const out = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) {
+  let pos = 0;
+  while (pos < src.length) {
+    const flagsAt = src.indexOf("Flags().", pos);
+    if (flagsAt === -1) break;
+    const open = src.indexOf("(", flagsAt + "Flags().".length);
+    if (open === -1) break;
+    const close = findCallEnd(src, open);
+    if (close === -1) {
+      pos = open + 1;
+      continue;
+    }
+
     // Skip non-flag-looking captures (defensive; should always be a flag name).
-    const name = m[1];
+    const name = firstStringLiteral(src.slice(open + 1, close));
     if (name && /^[a-zA-Z][a-zA-Z0-9-]*$/.test(name)) {
       out.add("--" + name);
     }
+    pos = close + 1;
   }
-  return [...out].sort();
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+function findCallEnd(src: string, open: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === "\\" && i+1 < src.length) {
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function firstStringLiteral(src: string): string | null {
+  let quote: string | null = null;
+  let start = -1;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (!quote) {
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        start = i + 1;
+      }
+      continue;
+    }
+    if (ch === "\\" && i + 1 < src.length) {
+      i++;
+      continue;
+    }
+    if (ch === quote) {
+      return src.slice(start, i);
+    }
+  }
+  return null;
 }
 
 /**
@@ -470,13 +528,13 @@ export function parseTSCommandTree(repoRoot: string = REPO_ROOT): TSCommandTree 
         `The dispatcher may have switched to a different shape — update the parser.`,
     );
   }
-  return { topLevel: [...seen].sort() };
+  return { topLevel: [...seen].sort((a, b) => a.localeCompare(b)) };
 }
 
 // --- Diff core ---------------------------------------------------------------
 
 function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return s.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function classifyTopLevel(
@@ -522,7 +580,7 @@ function diffStage1Surface(
         category: "stage1-locked-item-missing",
         message:
           `Stage 1 command "${go.name}" lost locked surface item "${item}". ` +
-          `Either restore it in commands/${go.constructor.replace(/^New|Cmd$/g, "").toLowerCase()}* ` +
+          `Either restore it in commands/${go.constructor.replaceAll(/^New|Cmd$/g, "").toLowerCase()}* ` +
           `or update docs/typescript-port-boundary.json (remove from stage1_flag_lock["${go.name}"] ` +
           `and decide if it is now phase5_deferred or stage2_deferred_subitems).`,
       });

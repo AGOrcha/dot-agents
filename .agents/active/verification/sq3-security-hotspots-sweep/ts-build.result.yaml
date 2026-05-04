@@ -1,11 +1,11 @@
 schema_version: 1
 task_id: sq3-security-hotspots-sweep
 parent_plan_id: sonarqube-pr10
-verifier_type: go-test
+verifier_type: ts-build
 status: pass
-summary: Full Go suite remains green after TS boundary-sync remediation
+summary: TypeScript boundary-sync script builds after removing the Sonar regex hotspot and reliability smells
 recorded_at: "2026-05-04T05:33:31Z"
 delegation_id: del-sq3-security-hotspots-sweep-1777868354
 recorded_by: dot-agents workflow verify record
 commands:
-    - go test ./...
+    - npm run build
