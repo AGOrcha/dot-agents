@@ -95,7 +95,7 @@ describe("runAdd", () => {
 
   it("returns path_not_found for non-existent paths", async () => {
     const home = await makeTmp();
-    const result = await runAdd("/tmp/__does_not_exist_999__", { agentsHomeOverride: home });
+    const result = await runAdd(join(home, "__does_not_exist_999__"), { agentsHomeOverride: home });
     expect(result.status).toBe("path_not_found");
   });
 
@@ -160,7 +160,7 @@ describe("runRefresh", () => {
       join(home, "config.json"),
       JSON.stringify({
         version: 1,
-        projects: { ghost: { path: "/tmp/__ghost_project_9999__", added: new Date().toISOString() } },
+        projects: { ghost: { path: join(home, "__ghost_project_9999__"), added: new Date().toISOString() } },
       }) + "\n",
       "utf8",
     );
@@ -290,7 +290,7 @@ describe("runDoctor", () => {
       join(home, "config.json"),
       JSON.stringify({
         version: 1,
-        projects: { stale: { path: "/tmp/__stale_project__", added: new Date().toISOString() } },
+        projects: { stale: { path: join(home, "__stale_project__"), added: new Date().toISOString() } },
       }) + "\n",
       "utf8",
     );

@@ -31,14 +31,25 @@ async function readSkillDescription(skillMd: string): Promise<string | undefined
     const { readFile } = await import("node:fs/promises");
     const content = await readFile(skillMd, "utf8");
     // Simple frontmatter parse: look for description: value
-    const match = content.match(/^description:\s*(.+)$/m);
-    if (match) {
-      return match[1].trim().replaceAll(/^['"]|['"]$/g, "");
+    for (const rawLine of content.split("\n")) {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (!line.startsWith("description:")) continue;
+      return stripOuterQuotes(line.slice("description:".length).trim());
     }
   } catch {
     // ignore
   }
   return undefined;
+}
+
+function stripOuterQuotes(value: string): string {
+  if (value.length < 2) return value;
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 /**

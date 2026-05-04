@@ -89,7 +89,7 @@ describe("runKgQuery", () => {
   });
 
   it("ignores kgHomeOverride (stub does not invoke Go)", async () => {
-    const r = await runKgQuery("x", { kgHomeOverride: "/tmp/fake-kg" });
+    const r = await runKgQuery("x", { kgHomeOverride: join(await makeTmp(), "fake-kg") });
     expect(r.result).toBe(STUB);
   });
 });

@@ -76,16 +76,11 @@ export async function runWorkflowOrient(
     return { branch: null, plan: null, task: null, found: false, warnings };
   }
 
-  // Extract the ## Current Position section (up to the next ## heading)
-  const sectionMatch = content.match(
-    /^## Current Position\s*\n([\s\S]*?)(?=^## |\z)/m,
-  );
-  if (!sectionMatch) {
+  const section = currentPositionSection(content);
+  if (!section) {
     warnings.push("## Current Position section not found in loop-state.md");
     return { branch: null, plan: null, task: null, found: false, warnings };
   }
-
-  const section = sectionMatch[1];
 
   // Extract plan: - **Plan:** `<plan-id>`
   const planMatch = section.match(/\*\*Plan:\*\*\s*`([^`]+)`/);
@@ -107,6 +102,19 @@ export async function runWorkflowOrient(
   const branch = branchMatch ? (branchMatch[1] ?? null) : null;
 
   return { branch, plan, task, found: true, warnings };
+}
+
+function currentPositionSection(content: string): string | null {
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => line.trimEnd() === "## Current Position");
+  if (start === -1) return null;
+
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("## ")) break;
+    body.push(line);
+  }
+  return body.join("\n");
 }
 
 // ---------------------------------------------------------------------------
