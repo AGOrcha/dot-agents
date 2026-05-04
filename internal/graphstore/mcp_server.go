@@ -373,21 +373,8 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	}
 	// Freshness guard: return a structured error when the graph is not ready
 	// so callers can distinguish "no impact" from "graph not built".
-	if status, stErr := bridge.Status(); stErr == nil && status != nil {
-		switch status.State {
-		case string(CRGReadinessUnbuilt):
-			return json.Marshal(map[string]any{
-				"error": "code graph not built",
-				"state": status.State,
-				"hint":  "run build_or_update_graph_tool first",
-			})
-		case string(CRGReadinessBusyOrLocked):
-			return json.Marshal(map[string]any{
-				"error": "code graph is busy or locked",
-				"state": status.State,
-				"hint":  "wait for concurrent operation to complete",
-			})
-		}
+	if guard, gerr := graphReadinessGuardJSON(bridge); gerr != nil || guard != nil {
+		return guard, gerr
 	}
 	result, err := bridge.GetImpactRadius(ImpactOptions{
 		ChangedFiles: files,
@@ -510,21 +497,8 @@ func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMess
 	}
 	// Freshness guard: return a structured error when the graph is not ready
 	// rather than silently returning empty changed symbols.
-	if status, stErr := bridge.Status(); stErr == nil && status != nil {
-		switch status.State {
-		case string(CRGReadinessUnbuilt):
-			return json.Marshal(map[string]any{
-				"error": "code graph not built",
-				"state": status.State,
-				"hint":  "run build_or_update_graph_tool first",
-			})
-		case string(CRGReadinessBusyOrLocked):
-			return json.Marshal(map[string]any{
-				"error": "code graph is busy or locked",
-				"state": status.State,
-				"hint":  "wait for concurrent operation to complete",
-			})
-		}
+	if guard, gerr := graphReadinessGuardJSON(bridge); gerr != nil || guard != nil {
+		return guard, gerr
 	}
 	// Pass req.Files so callers can see the scope, even though the CRG CLI
 	// detect-changes subcommand does not yet accept a --files filter (v1.x
@@ -599,6 +573,33 @@ func (s *MCPServer) requireBridge() (mcpBridge, error) {
 		return nil, s.bridgeErr
 	}
 	return nil, fmt.Errorf("CRG bridge unavailable")
+}
+
+// graphReadinessGuardJSON returns a JSON envelope when the graph is in
+// an unbuilt or busy-or-locked state, or (nil, nil) when the graph is
+// ready (or status cannot be determined — callers proceed in that
+// case). Tool handlers should call this immediately after
+// requireBridge and short-circuit when the returned bytes are non-nil.
+func graphReadinessGuardJSON(bridge mcpBridge) ([]byte, error) {
+	status, stErr := bridge.Status()
+	if stErr != nil || status == nil {
+		return nil, nil
+	}
+	switch status.State {
+	case string(CRGReadinessUnbuilt):
+		return json.Marshal(map[string]any{
+			"error": "code graph not built",
+			"state": status.State,
+			"hint":  "run build_or_update_graph_tool first",
+		})
+	case string(CRGReadinessBusyOrLocked):
+		return json.Marshal(map[string]any{
+			"error": "code graph is busy or locked",
+			"state": status.State,
+			"hint":  "wait for concurrent operation to complete",
+		})
+	}
+	return nil, nil
 }
 
 func (s *MCPServer) loadStats() (GraphStats, error) {

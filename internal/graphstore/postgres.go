@@ -551,8 +551,8 @@ func (s *PostgresStore) GetStats() (GraphStats, error) {
 
 // GetImpactRadius performs a pure-Go BFS from the nodes in changedFiles,
 // traversing both outbound and inbound edges up to maxDepth hops.
-// The implementation is identical to the SQLite version — the BFS logic is
-// backend-agnostic; only the underlying queries differ.
+// Postgres-specific: uses pgx for the seed/edge queries; the BFS body
+// is shared with the SQLite backend via computeImpactRadius (impact.go).
 func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes int) (ImpactResult, error) {
 	seeds := map[string]bool{}
 	for _, f := range changedFiles {
@@ -586,84 +586,7 @@ func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNode
 		return ImpactResult{}, err
 	}
 
-	visited := map[string]bool{}
-	frontier := make([]string, 0, len(seeds))
-	for q := range seeds {
-		frontier = append(frontier, q)
-	}
-
-	impacted := map[string]bool{}
-	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
-		var next []string
-		for _, qn := range frontier {
-			visited[qn] = true
-			for _, neighbor := range fwd[qn] {
-				if !visited[neighbor] {
-					next = append(next, neighbor)
-					impacted[neighbor] = true
-				}
-			}
-			for _, pred := range rev[qn] {
-				if !visited[pred] {
-					next = append(next, pred)
-					impacted[pred] = true
-				}
-			}
-		}
-		if len(visited)+len(next) > maxNodes {
-			break
-		}
-		frontier = next
-	}
-
-	var changedNodes []GraphNode
-	for qn := range seeds {
-		n, err := s.GetNode(qn)
-		if err != nil || n == nil {
-			continue
-		}
-		changedNodes = append(changedNodes, *n)
-	}
-
-	var impactedNodes []GraphNode
-	for qn := range impacted {
-		if seeds[qn] {
-			continue
-		}
-		n, err := s.GetNode(qn)
-		if err != nil || n == nil {
-			continue
-		}
-		impactedNodes = append(impactedNodes, *n)
-	}
-
-	impactedFiles := map[string]bool{}
-	for _, n := range impactedNodes {
-		impactedFiles[n.FilePath] = true
-	}
-	var files []string
-	for f := range impactedFiles {
-		files = append(files, f)
-	}
-
-	all := make([]string, 0, len(seeds)+len(impacted))
-	for q := range seeds {
-		all = append(all, q)
-	}
-	for q := range impacted {
-		all = append(all, q)
-	}
-	edges, err := s.GetEdgesAmong(all)
-	if err != nil {
-		return ImpactResult{}, err
-	}
-
-	return ImpactResult{
-		ChangedNodes:  changedNodes,
-		ImpactedNodes: impactedNodes,
-		ImpactedFiles: files,
-		Edges:         edges,
-	}, nil
+	return computeImpactRadius(seeds, fwd, rev, maxDepth, maxNodes, s)
 }
 
 // ---------------------------------------------------------------------------
