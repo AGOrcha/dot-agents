@@ -631,4 +631,3 @@ func importedPackageAuthors(manifest importedPackagePluginManifest) []string {
 	}
 	return nil
 }
-
