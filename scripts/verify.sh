@@ -12,9 +12,9 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Find dot-agents binary
-if [ -x "./bin/dot-agents" ]; then
+if [[ -x "./bin/dot-agents" ]]; then
   DOT_AGENTS="./bin/dot-agents"
-elif [ -f "./src/bin/dot-agents" ]; then
+elif [[ -f "./src/bin/dot-agents" ]]; then
   DOT_AGENTS="./src/bin/dot-agents"
 elif command -v dot-agents >/dev/null 2>&1; then
   DOT_AGENTS="dot-agents"
@@ -37,7 +37,7 @@ test_command() {
 
   echo -n "  Testing $name... "
   if eval "$cmd" >/dev/null 2>&1; then
-    if [ "$expect_success" = "true" ]; then
+    if [[ "$expect_success" = "true" ]]; then
       echo -e "${GREEN}✓${NC}"
       passed=$((passed + 1))
     else
@@ -45,7 +45,7 @@ test_command() {
       failed=$((failed + 1))
     fi
   else
-    if [ "$expect_success" = "false" ]; then
+    if [[ "$expect_success" = "false" ]]; then
       echo -e "${GREEN}✓ (expected failure)${NC}"
       passed=$((passed + 1))
     else
@@ -102,7 +102,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BOLD}Results:${NC} ${GREEN}$passed passed${NC}, ${RED}$failed failed${NC}"
 echo ""
 
-if [ $failed -gt 0 ]; then
+if [[ $failed -gt 0 ]]; then
   echo -e "${RED}Some tests failed!${NC}"
   exit 1
 else

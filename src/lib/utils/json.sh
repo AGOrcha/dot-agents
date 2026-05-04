@@ -11,7 +11,7 @@ _json_has_jq() {
 # Usage: json_read "/path/to/file.json"
 json_read() {
   local file="$1"
-  if [ -f "$file" ]; then
+  if [[ -f "$file" ]]; then
     cat "$file"
   else
     echo "{}"
@@ -149,7 +149,7 @@ json_valid() {
     local open_braces close_braces
     open_braces=$(echo "$json" | tr -cd '{' | wc -c)
     close_braces=$(echo "$json" | tr -cd '}' | wc -c)
-    [ "$open_braces" -eq "$close_braces" ] && [ "$open_braces" -gt 0 ]
+    [[ "$open_braces" -eq "$close_braces" ]] && [[ "$open_braces" -gt 0 ]]
   fi
 }
 
@@ -199,7 +199,7 @@ config_add_project() {
   # Add to projects
   json=$(echo "$json" | jq --arg name "$name" --argjson proj "$project_json" '.projects[$name] = $proj')
 
-  if [ "$DRY_RUN" = true ]; then
+  if [[ "$DRY_RUN" = true ]]; then
     log_dry "add project '$name' to config.json"
   else
     json_write_file "$config_file" "$json"
@@ -221,7 +221,7 @@ config_remove_project() {
   json=$(json_read "$config_file")
   json=$(echo "$json" | jq --arg name "$name" 'del(.projects[$name])')
 
-  if [ "$DRY_RUN" = true ]; then
+  if [[ "$DRY_RUN" = true ]]; then
     log_dry "remove project '$name' from config.json"
   else
     json_write_file "$config_file" "$json"
@@ -242,7 +242,7 @@ config_get_project_path() {
   local config_file="$AGENTS_HOME/config.json"
   local path
   path=$(json_get_file "$config_file" ".projects.\"$name\".path")
-  if [ -n "$path" ]; then
+  if [[ -n "$path" ]]; then
     expand_path "$path"
   fi
   return 0
@@ -309,7 +309,7 @@ config_set_platform_state() {
     '.agents = (.agents // {})
      | .agents[$p] = ((.agents[$p] // {}) + {enabled: $enabled, version: (if $version == "" then null else $version end)})')
 
-  if [ "$DRY_RUN" = true ]; then
+  if [[ "$DRY_RUN" = true ]]; then
     log_dry "update platform '$platform' in config.json (enabled=$enabled, version=${version:-null})"
   else
     json_write_file "$config_file" "$json"

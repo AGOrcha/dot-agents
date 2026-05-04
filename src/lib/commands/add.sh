@@ -79,23 +79,23 @@ dot_agents_platform_has_active_backup() {
   local platform="$2"
   local root="$AGENTS_HOME/resources/$project_slug"
 
-  [ -d "$root" ] || return 1
+  [[ -d "$root" ]] || return 1
 
   case "$platform" in
     cursor)
-      [ -e "$root/.cursor/rules" ] || [ -e "$root/.cursor/agents" ] || [ -e "$root/.cursor/settings.json" ] || [ -e "$root/.cursor/mcp.json" ] || [ -e "$root/.cursorignore" ]
+      [[ -e "$root/.cursor/rules" ]] || [[ -e "$root/.cursor/agents" ]] || [[ -e "$root/.cursor/settings.json" ]] || [[ -e "$root/.cursor/mcp.json" ]] || [[ -e "$root/.cursorignore" ]]
       ;;
     claude)
-      [ -e "$root/.claude/rules" ] || [ -e "$root/.claude/skills" ] || [ -e "$root/.claude/agents" ] || [ -e "$root/.claude/settings.local.json" ] || [ -e "$root/.mcp.json" ]
+      [[ -e "$root/.claude/rules" ]] || [[ -e "$root/.claude/skills" ]] || [[ -e "$root/.claude/agents" ]] || [[ -e "$root/.claude/settings.local.json" ]] || [[ -e "$root/.mcp.json" ]]
       ;;
     codex)
-      [ -e "$root/AGENTS.md" ] || [ -e "$root/AGENTS.md.dot-agents-backup" ] || [ -e "$root/.codex/agents" ] || [ -e "$root/.codex/config.toml" ] || [ -e "$root/.codex/config.toml.dot-agents-backup" ] || [ -e "$root/.codex/instructions.md" ] || [ -e "$root/.codex/instructions.md.dot-agents-backup" ] || [ -e "$root/.agents/skills" ]
+      [[ -e "$root/AGENTS.md" ]] || [[ -e "$root/AGENTS.md.dot-agents-backup" ]] || [[ -e "$root/.codex/agents" ]] || [[ -e "$root/.codex/config.toml" ]] || [[ -e "$root/.codex/config.toml.dot-agents-backup" ]] || [[ -e "$root/.codex/instructions.md" ]] || [[ -e "$root/.codex/instructions.md.dot-agents-backup" ]] || [[ -e "$root/.agents/skills" ]]
       ;;
     opencode)
-      [ -e "$root/opencode.json" ] || [ -e "$root/.opencode/agent" ] || [ -e "$root/.opencode/config.json" ] || [ -e "$root/.opencode/instructions.md" ]
+      [[ -e "$root/opencode.json" ]] || [[ -e "$root/.opencode/agent" ]] || [[ -e "$root/.opencode/config.json" ]] || [[ -e "$root/.opencode/instructions.md" ]]
       ;;
     copilot)
-      [ -e "$root/.github/copilot-instructions.md" ] || [ -e "$root/.github/agents" ] || [ -e "$root/.vscode/mcp.json" ] || [ -e "$root/.claude/settings.local.json" ] || [ -e "$root/.agents/skills" ]
+      [[ -e "$root/.github/copilot-instructions.md" ]] || [[ -e "$root/.github/agents" ]] || [[ -e "$root/.vscode/mcp.json" ]] || [[ -e "$root/.claude/settings.local.json" ]] || [[ -e "$root/.agents/skills" ]]
       ;;
     *)
       return 1
@@ -214,7 +214,7 @@ cmd_add() {
   done
 
   # Get project path from remaining args
-  if [ ${#REMAINING_ARGS[@]} -eq 0 ]; then
+  if [[ ${#REMAINING_ARGS[@]} -eq 0 ]]; then
     log_error "Project path required"
     echo ""
     echo "Usage: dot-agents add <path>"
@@ -232,7 +232,7 @@ cmd_add() {
   fi
 
   # Derive project name from directory if not specified
-  if [ -z "$project_name" ]; then
+  if [[ -z "$project_name" ]]; then
     project_name=$(basename "$project_path")
   fi
 
@@ -259,7 +259,7 @@ cmd_add() {
   step "Scanning project..."
 
   # Check if it's a git repository
-  if [ -d "$project_path/.git" ]; then
+  if [[ -d "$project_path/.git" ]]; then
     bullet "ok" "Valid git repository"
   else
     bullet "none" "Not a git repository (optional)"
@@ -268,8 +268,8 @@ cmd_add() {
   # Check if already registered
   local existing_path
   existing_path=$(config_get_project_path "$project_name")
-  if [ -n "$existing_path" ]; then
-    if [ "$FORCE" != true ]; then
+  if [[ -n "$existing_path" ]]; then
+    if [[ "$FORCE" != true ]]; then
       bullet "warn" "Already registered at: $existing_path"
       echo ""
       log_info "Use --force to update, or --name to use a different name"
@@ -334,64 +334,64 @@ cmd_add() {
   # Check for existing files that would be replaced (root-level only)
   check_existing_config_files "$project_name" "$project_path"
   local existing_files=()
-  [ ${#_CHECK_EXISTING_FILES[@]} -gt 0 ] && existing_files=("${_CHECK_EXISTING_FILES[@]}")
+  [[ ${#_CHECK_EXISTING_FILES[@]} -gt 0 ]] && existing_files=("${_CHECK_EXISTING_FILES[@]}")
 
   # Exhaustively scan for all AI config files in the repo
   scan_existing_ai_configs "$project_path"
   local all_ai_configs=()
-  [ ${#_SCAN_AI_CONFIGS[@]} -gt 0 ] && all_ai_configs=("${_SCAN_AI_CONFIGS[@]}")
+  [[ ${#_SCAN_AI_CONFIGS[@]} -gt 0 ]] && all_ai_configs=("${_SCAN_AI_CONFIGS[@]}")
 
   # Separate files that will be replaced vs. discovered elsewhere
   local discovered_elsewhere=()
-  if [ ${#all_ai_configs[@]} -gt 0 ]; then
+  if [[ ${#all_ai_configs[@]} -gt 0 ]]; then
     for config in "${all_ai_configs[@]}"; do
       local is_root_file=false
-      if [ ${#existing_files[@]} -gt 0 ]; then
+      if [[ ${#existing_files[@]} -gt 0 ]]; then
         for root_file in "${existing_files[@]}"; do
-          if [ "$config" = "$root_file" ]; then
+          if [[ "$config" = "$root_file" ]]; then
             is_root_file=true
             break
           fi
         done
       fi
-      if [ "$is_root_file" = false ]; then
+      if [[ "$is_root_file" = false ]]; then
         discovered_elsewhere+=("$config")
       fi
     done
   fi
 
   # Show files that will be replaced
-  if [ ${#existing_files[@]} -gt 0 ]; then
+  if [[ ${#existing_files[@]} -gt 0 ]]; then
     echo ""
     log_section "Files to Replace"
     echo -e "  ${YELLOW}These root-level files will be backed up and replaced with links:${NC}"
     for file in "${existing_files[@]}"; do
       local display_file="${file#$project_path/}"
       local file_type="file"
-      [ -L "$file" ] && file_type="symlink"
+      [[ -L "$file" ]] && file_type="symlink"
       echo -e "  ${YELLOW}!${NC} $display_file ${DIM}($file_type)${NC}"
     done
 
-    if [ "$FORCE" != true ]; then
+    if [[ "$FORCE" != true ]]; then
       echo ""
       echo -e "  ${DIM}Backups stored in ~/.agents/resources/$project_name/backups/<timestamp>/${NC}"
     fi
   fi
 
   # Show discovered configs elsewhere in the repo (informational)
-  if [ ${#discovered_elsewhere[@]} -gt 0 ]; then
+  if [[ ${#discovered_elsewhere[@]} -gt 0 ]]; then
     echo ""
     log_section "Other AI Configs Discovered"
     echo -e "  ${CYAN}Found AI agent configs elsewhere in the repo (not replaced):${NC}"
     local shown=0
     for file in "${discovered_elsewhere[@]}"; do
-      if [ $shown -lt 10 ]; then
+      if [[ $shown -lt 10 ]]; then
         local display_file="${file#$project_path/}"
         echo -e "  ${CYAN}○${NC} $display_file"
         ((shown++))
       fi
     done
-    if [ ${#discovered_elsewhere[@]} -gt 10 ]; then
+    if [[ ${#discovered_elsewhere[@]} -gt 10 ]]; then
       echo -e "  ${DIM}... and $((${#discovered_elsewhere[@]} - 10)) more${NC}"
     fi
     echo ""
@@ -399,7 +399,7 @@ cmd_add() {
   fi
 
   # Handle dry-run mode
-  if [ "$DRY_RUN" = true ]; then
+  if [[ "$DRY_RUN" = true ]]; then
     echo ""
     log_info "DRY RUN - no changes made"
     return 0
@@ -407,7 +407,7 @@ cmd_add() {
 
   # Confirm before proceeding
   local confirm_msg="Proceed?"
-  if [ ${#existing_files[@]} -gt 0 ]; then
+  if [[ ${#existing_files[@]} -gt 0 ]]; then
     confirm_msg="Proceed? (${#existing_files[@]} file(s) will be backed up and replaced)"
   fi
 
@@ -418,16 +418,16 @@ cmd_add() {
 
   # Backup existing files before replacing
   local backup_timestamp=""
-  if [ ${#existing_files[@]} -gt 0 ]; then
+  if [[ ${#existing_files[@]} -gt 0 ]]; then
     backup_timestamp=$(date +%Y%m%d-%H%M%S)
     for file in "${existing_files[@]}"; do
       # Skip backup artifacts (never back up a backup)
       [[ "$(basename "$file")" == *.dot-agents-backup ]] && continue
-      if [ -e "$file" ] && [ ! -L "$file" ]; then
+      if [[ -e "$file" ]] && [[ ! -L "$file" ]]; then
         # Copy into ~/.agents/resources then delete original — no *.dot-agents-backup in project
         mirror_project_backup_to_resources "$project_name" "$project_path" "$file" "$backup_timestamp"
         rm "$file"
-      elif [ -L "$file" ]; then
+      elif [[ -L "$file" ]]; then
         rm "$file"  # Remove existing symlinks without backup
       fi
     done
@@ -443,14 +443,14 @@ cmd_add() {
   # Restore from active (non-timestamped) resources first, when available
   local restored_count
   restored_count=$(restore_project_from_active_resources "$project_name")
-  if [ "$restored_count" -gt 0 ]; then
+  if [[ "$restored_count" -gt 0 ]]; then
     bullet "ok" "Restored $restored_count item(s) from ~/.agents/resources/$project_name/"
   fi
 
   # Copy project settings template if it doesn't exist
   local templates_dir="$SHARE_DIR/templates/standard"
   local project_settings="$AGENTS_HOME/settings/$project_name/claude-code.json"
-  if [ ! -f "$project_settings" ]; then
+  if [[ ! -f "$project_settings" ]]; then
     cp "$templates_dir/settings/project/claude-code.json" "$project_settings" 2>/dev/null || true
     bullet "ok" "Created project settings template"
   fi
@@ -463,14 +463,14 @@ cmd_add() {
 
   local platform
   while IFS= read -r platform; do
-    if dot_agents_platform_has_active_backup "$project_name" "$platform" && [ "$VERBOSE" = true ]; then
+    if dot_agents_platform_has_active_backup "$project_name" "$platform" && [[ "$VERBOSE" = true ]]; then
       bullet "found" "Found active $(platform_display_name "$platform") backup in ~/.agents/resources/$project_name/"
     fi
 
     if platform_is_installed "$platform"; then
       platform_create_links "$platform" "$project_name" "$project_path"
       bullet "ok" "$(platform_success_message "$platform")"
-    elif [ "$VERBOSE" = true ]; then
+    elif [[ "$VERBOSE" = true ]]; then
       bullet "skip" "$(platform_display_name "$platform") not installed"
     fi
   done < <(platform_ids)
@@ -482,7 +482,7 @@ cmd_add() {
   # Build next steps based on context
   local next_steps=()
   next_steps+=("Add project rules: edit ~/.agents/rules/$project_name/rules.md")
-  if [ "$has_deprecated" = true ]; then
+  if [[ "$has_deprecated" = true ]]; then
     next_steps+=("Migrate deprecated formats: dot-agents migrate detect")
   fi
   next_steps+=("Check applied configs: dot-agents status --audit")
@@ -506,11 +506,11 @@ mirror_project_backup_to_resources() {
   local source_file="$3"
   local backup_timestamp="$4"
 
-  [ -f "$source_file" ] || return 0
+  [[ -f "$source_file" ]] || return 0
 
   local rel_path
   rel_path="${source_file#$project_path/}"
-  if [ "$rel_path" = "$source_file" ]; then
+  if [[ "$rel_path" = "$source_file" ]]; then
     # Fallback to basename if source file is not under project path
     rel_path=$(basename "$source_file")
   fi
@@ -523,7 +523,7 @@ mirror_project_backup_to_resources() {
   fi
 
   # Timestamped immutable copy
-  if [ -n "$backup_timestamp" ]; then
+  if [[ -n "$backup_timestamp" ]]; then
     local ts_target="$AGENTS_HOME/resources/$project_slug/backups/$backup_timestamp/$rel_path"
     mkdir -p "$(dirname "$ts_target")"
     if ! cp -a "$source_file" "$ts_target" 2>/dev/null; then
@@ -539,7 +539,7 @@ restore_project_from_active_resources() {
   local root="$AGENTS_HOME/resources/$project"
   local restored=0
 
-  [ -d "$root" ] || { echo 0; return 0; }
+  [[ -d "$root" ]] || { echo 0; return 0; }
 
   local file
   while IFS= read -r -d '' file; do
@@ -552,14 +552,14 @@ restore_project_from_active_resources() {
     # skip the suffixed one (canonical takes priority). New backups won't have the suffix.
     if [[ "$rel" == *.dot-agents-backup ]]; then
       local canonical_rel="${rel%.dot-agents-backup}"
-      [ -f "$root/$canonical_rel" ] && continue
+      [[ -f "$root/$canonical_rel" ]] && continue
       # No canonical copy present — use the legacy backup as the source, mapped without suffix
       rel="$canonical_rel"
     fi
 
     local dest_rel
     dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel")
-    [ -n "$dest_rel" ] || continue
+    [[ -n "$dest_rel" ]] || continue
 
     local dest="$AGENTS_HOME/$dest_rel"
     mkdir -p "$(dirname "$dest")"
@@ -596,9 +596,9 @@ create_project_dirs() {
 
   for dir in "${dirs[@]}"; do
     local display_dir="${dir/#$HOME/~}"
-    if [ -d "$dir" ]; then
-      [ "$VERBOSE" = true ] && log_skip "$display_dir/ (exists)"
-    elif [ "$DRY_RUN" = true ]; then
+    if [[ -d "$dir" ]]; then
+      [[ "$VERBOSE" = true ]] && log_skip "$display_dir/ (exists)"
+    elif [[ "$DRY_RUN" = true ]]; then
       log_dry "mkdir $display_dir/"
     else
       mkdir -p "$dir"
@@ -625,7 +625,7 @@ setup_project_links() {
       continue
     fi
 
-    if [ "$DRY_RUN" = true ]; then
+    if [[ "$DRY_RUN" = true ]]; then
       log_dry "$(platform_dry_run_message "$platform")"
     else
       platform_create_links "$platform" "$project" "$repo"
@@ -645,12 +645,12 @@ check_deprecated_formats() {
       log_warn "Found deprecated $(platform_display_name "$platform") config"
       local details
       details=$(platform_deprecated_details "$platform" "$repo")
-      [ -n "$details" ] && log_info "  → $details"
+      [[ -n "$details" ]] && log_info "  → $details"
       found_deprecated=true
     fi
   done < <(platform_ids)
 
-  if [ "$found_deprecated" = true ]; then
+  if [[ "$found_deprecated" = true ]]; then
     echo ""
   fi
 }
@@ -677,7 +677,7 @@ is_managed_project_output() {
   local file_path="$3"
 
   local rel_path="${file_path#$project_path/}"
-  if [ "$rel_path" = "$file_path" ]; then
+  if [[ "$rel_path" = "$file_path" ]]; then
     return 1
   fi
 
@@ -687,7 +687,7 @@ is_managed_project_output() {
 
   local dest_rel
   dest_rel=$(dot_agents_map_resource_rel_to_agents_dest "$project" "$rel_path")
-  [ -n "$dest_rel" ] || return 1
+  [[ -n "$dest_rel" ]] || return 1
 
   are_hardlinked "$file_path" "$AGENTS_HOME/$dest_rel"
 }
@@ -723,13 +723,13 @@ check_existing_config_files() {
   )
 
   for file in "${root_files[@]}"; do
-    if [ -e "$file" ] || [ -L "$file" ]; then
-      if [ -d "$file" ]; then
+    if [[ -e "$file" ]] || [[ -L "$file" ]]; then
+      if [[ -d "$file" ]]; then
         # Check for files inside directories
         for subfile in "$file"/*; do
           # Skip files that are already backups to prevent cascading backups
           [[ "$subfile" == *.dot-agents-backup ]] && continue
-          [ -e "$subfile" ] || continue
+          [[ -e "$subfile" ]] || continue
           is_managed_project_output "$project" "$project_path" "$subfile" && continue
           _CHECK_EXISTING_FILES+=("$subfile")
         done
