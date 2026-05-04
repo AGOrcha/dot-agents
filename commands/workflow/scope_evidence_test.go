@@ -73,6 +73,30 @@ func TestScopeEvidenceUnmarshalRoundTrip(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 
+	t.Run("parsed-fields", func(t *testing.T) {
+		assertScopeEvidenceFields(t, ev)
+	})
+
+	t.Run("json-roundtrip", func(t *testing.T) {
+		data, err := json.Marshal(&ev)
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		var ev2 ScopeEvidence
+		if err := json.Unmarshal(data, &ev2); err != nil {
+			t.Fatalf("json.Unmarshal: %v", err)
+		}
+		if ev2.PlanID != ev.PlanID {
+			t.Errorf("round-trip PlanID = %q, want %q", ev2.PlanID, ev.PlanID)
+		}
+		if ev2.Confidence != ev.Confidence {
+			t.Errorf("round-trip Confidence = %q, want %q", ev2.Confidence, ev.Confidence)
+		}
+	})
+}
+
+func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
+	t.Helper()
 	if ev.SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1", ev.SchemaVersion)
 	}
@@ -130,80 +154,48 @@ func TestScopeEvidenceUnmarshalRoundTrip(t *testing.T) {
 	if len(ev.OpenGaps) != 1 {
 		t.Errorf("OpenGaps len = %d, want 1", len(ev.OpenGaps))
 	}
-
-	// Round-trip through JSON.
-	data, err := json.Marshal(&ev)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	var ev2 ScopeEvidence
-	if err := json.Unmarshal(data, &ev2); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-	if ev2.PlanID != ev.PlanID {
-		t.Errorf("round-trip PlanID = %q, want %q", ev2.PlanID, ev.PlanID)
-	}
-	if ev2.Confidence != ev.Confidence {
-		t.Errorf("round-trip Confidence = %q, want %q", ev2.Confidence, ev.Confidence)
-	}
 }
 
 func TestNewScopeEvidenceSlicesNotNil(t *testing.T) {
 	// Positive: NewScopeEvidence returns an instance with no nil slices.
 	ev := NewScopeEvidence("my-plan", "my-task")
-	if ev.DecisionLocks == nil {
-		t.Error("DecisionLocks is nil, want []string{}")
-	}
-	if ev.RequiredReads == nil {
-		t.Error("RequiredReads is nil")
-	}
-	if ev.Queries == nil {
-		t.Error("Queries is nil")
-	}
-	if ev.RequiredPaths == nil {
-		t.Error("RequiredPaths is nil")
-	}
-	if ev.OptionalPaths == nil {
-		t.Error("OptionalPaths is nil")
-	}
-	if ev.ExcludedPaths == nil {
-		t.Error("ExcludedPaths is nil")
-	}
-	if ev.Provides == nil {
-		t.Error("Provides is nil")
-	}
-	if ev.Consumes == nil {
-		t.Error("Consumes is nil")
-	}
-	if ev.FinalWriteScope == nil {
-		t.Error("FinalWriteScope is nil")
-	}
-	if ev.VerificationFocus == nil {
-		t.Error("VerificationFocus is nil")
-	}
-	if ev.AllowedLocalChoices == nil {
-		t.Error("AllowedLocalChoices is nil")
-	}
-	if ev.StopConditions == nil {
-		t.Error("StopConditions is nil")
-	}
-	if ev.OpenGaps == nil {
-		t.Error("OpenGaps is nil")
-	}
 
-	// Negative: JSON marshaling of empty slices should produce [] not null.
-	data, err := json.Marshal(ev)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	js := string(data)
-	// Spot-check two fields that must not appear as null.
-	if containsNullSlice(js, "decision_locks") {
-		t.Error("decision_locks marshaled as null, want []")
-	}
-	if containsNullSlice(js, "provides") {
-		t.Error("provides marshaled as null, want []")
-	}
+	t.Run("slice-fields-not-nil", func(t *testing.T) {
+		sliceFields := map[string][]interface{}{
+			"DecisionLocks":      {ev.DecisionLocks},
+			"RequiredReads":      {ev.RequiredReads},
+			"Queries":            {ev.Queries},
+			"RequiredPaths":      {ev.RequiredPaths},
+			"OptionalPaths":      {ev.OptionalPaths},
+			"ExcludedPaths":      {ev.ExcludedPaths},
+			"Provides":           {ev.Provides},
+			"Consumes":           {ev.Consumes},
+			"FinalWriteScope":    {ev.FinalWriteScope},
+			"VerificationFocus":  {ev.VerificationFocus},
+			"AllowedLocalChoices": {ev.AllowedLocalChoices},
+			"StopConditions":     {ev.StopConditions},
+			"OpenGaps":           {ev.OpenGaps},
+		}
+		for name, vals := range sliceFields {
+			if vals[0] == nil {
+				t.Errorf("%s is nil, want non-nil", name)
+			}
+		}
+	})
+
+	t.Run("json-marshals-empty-slices-not-null", func(t *testing.T) {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		js := string(data)
+		if containsNullSlice(js, "decision_locks") {
+			t.Error("decision_locks marshaled as null, want []")
+		}
+		if containsNullSlice(js, "provides") {
+			t.Error("provides marshaled as null, want []")
+		}
+	})
 }
 
 // containsNullSlice checks that a JSON string does NOT contain `"<field>":null`.
@@ -315,45 +307,49 @@ tasks:
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	// Positive: command must succeed and write a sidecar with confidence:low (no graph available).
-	if err := runWorkflowPlanDeriveScope("test-derive-plan", "my-task", []string{"MySymbol"}, nil); err != nil {
-		t.Fatalf("runWorkflowPlanDeriveScope: %v", err)
-	}
+	t.Run("success-degraded-gracefully", func(t *testing.T) {
+		// Positive: command must succeed and write a sidecar with confidence:low (no graph available).
+		if err := runWorkflowPlanDeriveScope("test-derive-plan", "my-task", []string{"MySymbol"}, nil); err != nil {
+			t.Fatalf("runWorkflowPlanDeriveScope: %v", err)
+		}
 
-	sidecarPath := planDir + "/evidence/my-task.scope.yaml"
-	data, err := os.ReadFile(sidecarPath)
-	if err != nil {
-		t.Fatalf("sidecar not written: %v", err)
-	}
-	var ev ScopeEvidence
-	if err := yaml.Unmarshal(data, &ev); err != nil {
-		t.Fatalf("unmarshal sidecar: %v", err)
-	}
-	if ev.PlanID != "test-derive-plan" {
-		t.Errorf("PlanID = %q, want test-derive-plan", ev.PlanID)
-	}
-	if ev.TaskID != "my-task" {
-		t.Errorf("TaskID = %q, want my-task", ev.TaskID)
-	}
-	if ev.Confidence != "low" {
-		t.Errorf("Confidence = %q, want low (no graph)", ev.Confidence)
-	}
-	if ev.Mode != "code" {
-		t.Errorf("Mode = %q, want code", ev.Mode)
-	}
-	if ev.Seeds == nil || len(ev.Seeds.Symbols) == 0 {
-		t.Error("Seeds.Symbols not populated from --seed-symbol")
-	}
-	if len(ev.RequiredPaths) == 0 {
-		t.Error("RequiredPaths empty, expected at least write_scope paths")
-	}
-	// Verify warnings captured in open_gaps.
-	if len(ev.OpenGaps) == 0 {
-		t.Error("OpenGaps should contain graph-not-ready warnings")
-	}
+		sidecarPath := planDir + "/evidence/my-task.scope.yaml"
+		data, err := os.ReadFile(sidecarPath)
+		if err != nil {
+			t.Fatalf("sidecar not written: %v", err)
+		}
+		var ev ScopeEvidence
+		if err := yaml.Unmarshal(data, &ev); err != nil {
+			t.Fatalf("unmarshal sidecar: %v", err)
+		}
+		if ev.PlanID != "test-derive-plan" {
+			t.Errorf("PlanID = %q, want test-derive-plan", ev.PlanID)
+		}
+		if ev.TaskID != "my-task" {
+			t.Errorf("TaskID = %q, want my-task", ev.TaskID)
+		}
+		if ev.Confidence != "low" {
+			t.Errorf("Confidence = %q, want low (no graph)", ev.Confidence)
+		}
+		if ev.Mode != "code" {
+			t.Errorf("Mode = %q, want code", ev.Mode)
+		}
+		if ev.Seeds == nil || len(ev.Seeds.Symbols) == 0 {
+			t.Error("Seeds.Symbols not populated from --seed-symbol")
+		}
+		if len(ev.RequiredPaths) == 0 {
+			t.Error("RequiredPaths empty, expected at least write_scope paths")
+		}
+		// Verify warnings captured in open_gaps.
+		if len(ev.OpenGaps) == 0 {
+			t.Error("OpenGaps should contain graph-not-ready warnings")
+		}
+	})
 
-	// Negative: nonexistent task must return an error, not write a sidecar.
-	if err := runWorkflowPlanDeriveScope("test-derive-plan", "nonexistent", nil, nil); err == nil {
-		t.Error("expected error for nonexistent task, got nil")
-	}
+	t.Run("error-nonexistent-task", func(t *testing.T) {
+		// Negative: nonexistent task must return an error, not write a sidecar.
+		if err := runWorkflowPlanDeriveScope("test-derive-plan", "nonexistent", nil, nil); err == nil {
+			t.Error("expected error for nonexistent task, got nil")
+		}
+	})
 }

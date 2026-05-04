@@ -31,10 +31,12 @@ func TestMapGlobalRelToDest(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := mapGlobalRelToDest(c.rel)
-		if got != c.want {
-			t.Fatalf("mapGlobalRelToDest(%q)=%q, want %q", c.rel, got, c.want)
-		}
+		t.Run(c.rel, func(t *testing.T) {
+			got := mapGlobalRelToDest(c.rel)
+			if got != c.want {
+				t.Fatalf("mapGlobalRelToDest(%q)=%q, want %q", c.rel, got, c.want)
+			}
+		})
 	}
 }
 

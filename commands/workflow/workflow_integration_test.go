@@ -94,68 +94,71 @@ func TestWorkflow_PlanLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// List: wave-2 should appear
-	ids, err := listCanonicalPlanIDs(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) != 1 || ids[0] != "wave-2" {
-		t.Fatalf("expected [wave-2], got %v", ids)
-	}
-
-	// Show: plan loads cleanly with expected fields
-	plan, err := loadCanonicalPlan(repo, "wave-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Status != "active" {
-		t.Fatalf("plan status = %q, want active", plan.Status)
-	}
-
-	// Advance t1 to completed
-	if err := runWorkflowAdvance("wave-2", "t1", "completed"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify task status
-	tf, err := loadCanonicalTasks(repo, "wave-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var t1Status string
-	for _, task := range tf.Tasks {
-		if task.ID == "t1" {
-			t1Status = task.Status
+	t.Run("list-plan", func(t *testing.T) {
+		ids, err := listCanonicalPlanIDs(repo)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if t1Status != "completed" {
-		t.Fatalf("t1 status = %q, want completed", t1Status)
-	}
+		if len(ids) != 1 || ids[0] != "wave-2" {
+			t.Fatalf("expected [wave-2], got %v", ids)
+		}
+	})
 
-	// Advance t2 to in_progress — this should update plan focus task
-	if err := runWorkflowAdvance("wave-2", "t2", "in_progress"); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := loadCanonicalPlan(repo, "wave-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.CurrentFocusTask != "add subcommands" {
-		t.Fatalf("current_focus_task = %q, want 'add subcommands'", reloaded.CurrentFocusTask)
-	}
+	t.Run("show-plan", func(t *testing.T) {
+		plan, err := loadCanonicalPlan(repo, "wave-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Status != "active" {
+			t.Fatalf("plan status = %q, want active", plan.Status)
+		}
+	})
 
-	// collectWorkflowState should report updated task counts
-	state, err := collectWorkflowState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(state.CanonicalPlans) != 1 {
-		t.Fatalf("expected 1 canonical plan, got %d", len(state.CanonicalPlans))
-	}
-	// t1=completed(1), t2=in_progress(pending), t3=completed(1) → completed=2, pending=1
-	if state.CanonicalPlans[0].CompletedCount != 2 {
-		t.Fatalf("completed count = %d, want 2", state.CanonicalPlans[0].CompletedCount)
-	}
+	t.Run("advance-t1-completed", func(t *testing.T) {
+		if err := runWorkflowAdvance("wave-2", "t1", "completed"); err != nil {
+			t.Fatal(err)
+		}
+		tf, err := loadCanonicalTasks(repo, "wave-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var t1Status string
+		for _, task := range tf.Tasks {
+			if task.ID == "t1" {
+				t1Status = task.Status
+			}
+		}
+		if t1Status != "completed" {
+			t.Fatalf("t1 status = %q, want completed", t1Status)
+		}
+	})
+
+	t.Run("advance-t2-updates-focus", func(t *testing.T) {
+		if err := runWorkflowAdvance("wave-2", "t2", "in_progress"); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := loadCanonicalPlan(repo, "wave-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reloaded.CurrentFocusTask != "add subcommands" {
+			t.Fatalf("current_focus_task = %q, want 'add subcommands'", reloaded.CurrentFocusTask)
+		}
+	})
+
+	t.Run("state-counts", func(t *testing.T) {
+		state, err := collectWorkflowState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(state.CanonicalPlans) != 1 {
+			t.Fatalf("expected 1 canonical plan, got %d", len(state.CanonicalPlans))
+		}
+		// t1=completed(1), t2=in_progress(pending), t3=completed(1) → completed=2, pending=1
+		if state.CanonicalPlans[0].CompletedCount != 2 {
+			t.Fatalf("completed count = %d, want 2", state.CanonicalPlans[0].CompletedCount)
+		}
+	})
 }
 
 // TestWorkflow_VerifyThenHealth records a passing verification run, then calls computeWorkflowHealth

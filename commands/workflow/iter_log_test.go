@@ -28,102 +28,109 @@ func TestCheckpointLogToIter(t *testing.T) {
 	}
 	content := string(raw)
 
-	// Header comment must be present
-	if !strings.HasPrefix(content, "# yaml-language-server:") {
-		t.Errorf("missing yaml-language-server header; got: %q", content[:min(len(content), 80)])
-	}
-	if !strings.Contains(content, "workflow-iter-log.schema.json") {
-		t.Errorf("header does not reference schema: %s", content[:min(len(content), 120)])
-	}
+	t.Run("header-schema", func(t *testing.T) {
+		if !strings.HasPrefix(content, "# yaml-language-server:") {
+			t.Errorf("missing yaml-language-server header; got: %q", content[:min(len(content), 80)])
+		}
+		if !strings.Contains(content, "workflow-iter-log.schema.json") {
+			t.Errorf("header does not reference schema: %s", content[:min(len(content), 120)])
+		}
+	})
 
 	var entry iterLogEntry
 	if err := yaml.Unmarshal(raw, &entry); err != nil {
 		t.Fatalf("unmarshal iter-38.yaml: %v", err)
 	}
 
-	// CLI-deterministic fields
-	if entry.SchemaVersion != 2 {
-		t.Errorf("schema_version = %d, want 2", entry.SchemaVersion)
-	}
-	if entry.Iteration != iterN {
-		t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
-	}
-	today := time.Now().UTC().Format("2006-01-02")
-	if entry.Date != today {
-		t.Errorf("date = %q, want %q", entry.Date, today)
-	}
-	// commit sha should be non-empty (repo has commits)
-	if entry.Commit == "" {
-		t.Errorf("commit sha is empty; expected a git SHA")
-	}
-	// files_changed, lines_added, lines_removed are >= 0 (parsed from diff --stat)
-	if entry.FilesChanged < 0 {
-		t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
-	}
+	t.Run("cli-deterministic", func(t *testing.T) {
+		if entry.SchemaVersion != 2 {
+			t.Errorf("schema_version = %d, want 2", entry.SchemaVersion)
+		}
+		if entry.Iteration != iterN {
+			t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
+		}
+		today := time.Now().UTC().Format("2006-01-02")
+		if entry.Date != today {
+			t.Errorf("date = %q, want %q", entry.Date, today)
+		}
+		if entry.Commit == "" {
+			t.Errorf("commit sha is empty; expected a git SHA")
+		}
+		if entry.FilesChanged < 0 {
+			t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
+		}
+	})
 
-	// impl block: empty stubs (schema v2)
-	impl := entry.Impl
-	if impl.Item != "" {
-		t.Errorf("impl.item = %q, want empty string", impl.Item)
-	}
-	if impl.Summary != "" {
-		t.Errorf("impl.summary = %q, want empty", impl.Summary)
-	}
-	if impl.ScopeNote != "" {
-		t.Errorf("impl.scope_note = %q, want empty", impl.ScopeNote)
-	}
-	if impl.FeedbackGoal != "" {
-		t.Errorf("impl.feedback_goal = %q, want empty", impl.FeedbackGoal)
-	}
-	if impl.Retries != 0 {
-		t.Errorf("impl.retries = %d, want 0", impl.Retries)
-	}
-	if impl.FocusedTestsAdded != 0 {
-		t.Errorf("impl.focused_tests_added = %d, want 0", impl.FocusedTestsAdded)
-	}
-	if impl.FocusedTestsPass != nil {
-		t.Errorf("impl.focused_tests_pass = %v, want nil", impl.FocusedTestsPass)
-	}
-	isa := impl.SelfAssessment
-	if isa.ReadLoopState {
-		t.Error("impl.self_assessment.read_loop_state should be false")
-	}
-	if isa.OneItemOnly {
-		t.Error("impl.self_assessment.one_item_only should be false")
-	}
-	if isa.CommittedAfterTests {
-		t.Error("impl.self_assessment.committed_after_tests should be false")
-	}
-	if isa.AlignedWithCanonicalTasks {
-		t.Error("impl.self_assessment.aligned_with_canonical_tasks should be false")
-	}
-	if isa.PersistedViaWorkflowCommands != "" {
-		t.Errorf("impl.self_assessment.persisted_via_workflow_commands = %q, want empty", isa.PersistedViaWorkflowCommands)
-	}
-	if isa.StayedUnder10Files {
-		t.Error("impl.self_assessment.stayed_under_10_files should be false")
-	}
-	if isa.NoDestructiveCommands {
-		t.Error("impl.self_assessment.no_destructive_commands should be false")
-	}
-	if isa.ScopedTestsToWriteScope {
-		t.Error("impl.self_assessment.scoped_tests_to_write_scope should be false")
-	}
-	if isa.TddRefreshPerformed {
-		t.Error("impl.self_assessment.tdd_refresh_performed should be false")
-	}
+	t.Run("impl-stubs", func(t *testing.T) {
+		impl := entry.Impl
+		if impl.Item != "" {
+			t.Errorf("impl.item = %q, want empty string", impl.Item)
+		}
+		if impl.Summary != "" {
+			t.Errorf("impl.summary = %q, want empty", impl.Summary)
+		}
+		if impl.ScopeNote != "" {
+			t.Errorf("impl.scope_note = %q, want empty", impl.ScopeNote)
+		}
+		if impl.FeedbackGoal != "" {
+			t.Errorf("impl.feedback_goal = %q, want empty", impl.FeedbackGoal)
+		}
+		if impl.Retries != 0 {
+			t.Errorf("impl.retries = %d, want 0", impl.Retries)
+		}
+		if impl.FocusedTestsAdded != 0 {
+			t.Errorf("impl.focused_tests_added = %d, want 0", impl.FocusedTestsAdded)
+		}
+		if impl.FocusedTestsPass != nil {
+			t.Errorf("impl.focused_tests_pass = %v, want nil", impl.FocusedTestsPass)
+		}
+	})
 
-	if len(entry.Verifiers) != 0 {
-		t.Errorf("verifiers = %v, want empty", entry.Verifiers)
-	}
-	// review block: empty defaults
-	if entry.Review.Phase1Decision != "" || entry.Review.Phase2Decision != "" || entry.Review.OverallDecision != "" {
-		t.Errorf("review decisions should be empty stubs, got %#v", entry.Review)
-	}
+	t.Run("self-assessment-defaults", func(t *testing.T) {
+		isa := entry.Impl.SelfAssessment
+		if isa.ReadLoopState {
+			t.Error("impl.self_assessment.read_loop_state should be false")
+		}
+		if isa.OneItemOnly {
+			t.Error("impl.self_assessment.one_item_only should be false")
+		}
+		if isa.CommittedAfterTests {
+			t.Error("impl.self_assessment.committed_after_tests should be false")
+		}
+		if isa.AlignedWithCanonicalTasks {
+			t.Error("impl.self_assessment.aligned_with_canonical_tasks should be false")
+		}
+		if isa.PersistedViaWorkflowCommands != "" {
+			t.Errorf("impl.self_assessment.persisted_via_workflow_commands = %q, want empty", isa.PersistedViaWorkflowCommands)
+		}
+		if isa.StayedUnder10Files {
+			t.Error("impl.self_assessment.stayed_under_10_files should be false")
+		}
+		if isa.NoDestructiveCommands {
+			t.Error("impl.self_assessment.no_destructive_commands should be false")
+		}
+		if isa.ScopedTestsToWriteScope {
+			t.Error("impl.self_assessment.scoped_tests_to_write_scope should be false")
+		}
+		if isa.TddRefreshPerformed {
+			t.Error("impl.self_assessment.tdd_refresh_performed should be false")
+		}
+	})
 
-	if err := validateWorkflowIterLogEntry(&entry); err != nil {
-		t.Fatalf("schema validation failed for valid stub: %v", err)
-	}
+	t.Run("verifiers-and-review", func(t *testing.T) {
+		if len(entry.Verifiers) != 0 {
+			t.Errorf("verifiers = %v, want empty", entry.Verifiers)
+		}
+		if entry.Review.Phase1Decision != "" || entry.Review.Phase2Decision != "" || entry.Review.OverallDecision != "" {
+			t.Errorf("review decisions should be empty stubs, got %#v", entry.Review)
+		}
+	})
+
+	t.Run("schema-validation", func(t *testing.T) {
+		if err := validateWorkflowIterLogEntry(&entry); err != nil {
+			t.Fatalf("schema validation failed for valid stub: %v", err)
+		}
+	})
 }
 
 func TestCheckpointLogToIterRequiresPositiveIteration(t *testing.T) {
@@ -398,27 +405,29 @@ closeout: {}
 		t.Fatal(err)
 	}
 
-	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77"); err != nil {
-		t.Fatalf("stub: %v", err)
-	}
-	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
-	raw, err := os.ReadFile(iterPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var entry iterLogEntry
-	if err := yaml.Unmarshal(raw, &entry); err != nil {
-		t.Fatal(err)
-	}
-	entry.Impl.Item = "keep-me"
-	body, err := yaml.Marshal(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
-	if err := os.WriteFile(iterPath, append([]byte(header), body...), 0644); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("stub-and-patch", func(t *testing.T) {
+		if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77"); err != nil {
+			t.Fatalf("stub: %v", err)
+		}
+		iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
+		raw, err := os.ReadFile(iterPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var entry iterLogEntry
+		if err := yaml.Unmarshal(raw, &entry); err != nil {
+			t.Fatal(err)
+		}
+		entry.Impl.Item = "keep-me"
+		body, err := yaml.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
+		if err := os.WriteFile(iterPath, append([]byte(header), body...), 0644); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	verDir := filepath.Join(repo, ".agents", "active", "verification", taskID)
 	if err := os.MkdirAll(verDir, 0755); err != nil {
@@ -436,26 +445,29 @@ recorded_at: "2026-04-18T12:00:00Z"
 		t.Fatal(err)
 	}
 
-	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77", "--role", "verifier", "--verifier-type", "unit"); err != nil {
-		t.Fatalf("verifier merge: %v", err)
-	}
-	raw2, err := os.ReadFile(iterPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out iterLogEntry
-	if err := yaml.Unmarshal(raw2, &out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Impl.Item != "keep-me" {
-		t.Errorf("impl.item = %q, want keep-me (verifier merge must not wipe impl)", out.Impl.Item)
-	}
-	if len(out.Verifiers) != 1 {
-		t.Fatalf("verifiers len = %d, want 1", len(out.Verifiers))
-	}
-	if out.Verifiers[0].Type != "unit" || out.Verifiers[0].Status != "pass" || !out.Verifiers[0].GatePassed {
-		t.Fatalf("unexpected verifier row: %#v", out.Verifiers[0])
-	}
+	t.Run("verifier-merge-preserves", func(t *testing.T) {
+		if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77", "--role", "verifier", "--verifier-type", "unit"); err != nil {
+			t.Fatalf("verifier merge: %v", err)
+		}
+		iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
+		raw2, err := os.ReadFile(iterPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out iterLogEntry
+		if err := yaml.Unmarshal(raw2, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Impl.Item != "keep-me" {
+			t.Errorf("impl.item = %q, want keep-me (verifier merge must not wipe impl)", out.Impl.Item)
+		}
+		if len(out.Verifiers) != 1 {
+			t.Fatalf("verifiers len = %d, want 1", len(out.Verifiers))
+		}
+		if out.Verifiers[0].Type != "unit" || out.Verifiers[0].Status != "pass" || !out.Verifiers[0].GatePassed {
+			t.Fatalf("unexpected verifier row: %#v", out.Verifiers[0])
+		}
+	})
 }
 
 func TestCheckpointLogToIterBundleFeedbackGoalOnStub(t *testing.T) {

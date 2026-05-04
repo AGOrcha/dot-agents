@@ -649,61 +649,67 @@ func TestObs1776215397478320000_AgentResourceLifecycleCompleted(t *testing.T) {
 		t.Skipf("history agent-resource-lifecycle TASKS not in this checkout: %v", err)
 	}
 
-	var doc struct {
-		PlanID string `yaml:"plan_id"`
-		Tasks  []struct {
-			ID     string `yaml:"id"`
-			Status string `yaml:"status"`
-		} `yaml:"tasks"`
-	}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("parse history TASKS: %v", err)
-	}
-	if doc.PlanID != "agent-resource-lifecycle" {
-		t.Fatalf("plan_id = %q", doc.PlanID)
-	}
-	if len(doc.Tasks) == 0 {
-		t.Fatal("expected tasks in history TASKS.yaml")
-	}
-	for _, task := range doc.Tasks {
-		if task.Status != "completed" {
-			t.Fatalf("task %q status = %q, want completed (proposal 539 closure)", task.ID, task.Status)
+	t.Run("verify-tasks-completed", func(t *testing.T) {
+		var doc struct {
+			PlanID string `yaml:"plan_id"`
+			Tasks  []struct {
+				ID     string `yaml:"id"`
+				Status string `yaml:"status"`
+			} `yaml:"tasks"`
 		}
-	}
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("parse history TASKS: %v", err)
+		}
+		if doc.PlanID != "agent-resource-lifecycle" {
+			t.Fatalf("plan_id = %q", doc.PlanID)
+		}
+		if len(doc.Tasks) == 0 {
+			t.Fatal("expected tasks in history TASKS.yaml")
+		}
+		for _, task := range doc.Tasks {
+			if task.Status != "completed" {
+				t.Fatalf("task %q status = %q, want completed (proposal 539 closure)", task.ID, task.Status)
+			}
+		}
+	})
 
-	agentsBridge := filepath.Join(root, "commands", "agents.go")
-	bridge, err := os.ReadFile(agentsBridge)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(bridge), "NewAgentsCmd") {
-		t.Fatal("commands/agents.go missing NewAgentsCmd bridge")
-	}
-	cmdTree := filepath.Join(root, "commands", "agents", "cmd.go")
-	cmdSrc, err := os.ReadFile(cmdTree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs := string(cmdSrc)
-	for _, needle := range []string{"promote <name>", "import <name>", "remove <name>", "list [project]"} {
-		if !strings.Contains(cs, needle) {
-			t.Fatalf("commands/agents/cmd.go missing %q — agents lifecycle CLI incomplete", needle)
+	t.Run("verify-command-surface", func(t *testing.T) {
+		agentsBridge := filepath.Join(root, "commands", "agents.go")
+		bridge, err := os.ReadFile(agentsBridge)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	for _, leaf := range []string{"promote.go", "import.go", "remove.go"} {
-		p := filepath.Join(root, "commands", "agents", leaf)
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("expected agents subcommand file %s: %v", leaf, err)
+		if !strings.Contains(string(bridge), "NewAgentsCmd") {
+			t.Fatal("commands/agents.go missing NewAgentsCmd bridge")
 		}
-	}
+		cmdTree := filepath.Join(root, "commands", "agents", "cmd.go")
+		cmdSrc, err := os.ReadFile(cmdTree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cs := string(cmdSrc)
+		for _, needle := range []string{"promote <name>", "import <name>", "remove <name>", "list [project]"} {
+			if !strings.Contains(cs, needle) {
+				t.Fatalf("commands/agents/cmd.go missing %q — agents lifecycle CLI incomplete", needle)
+			}
+		}
+		for _, leaf := range []string{"promote.go", "import.go", "remove.go"} {
+			p := filepath.Join(root, "commands", "agents", leaf)
+			if _, err := os.Stat(p); err != nil {
+				t.Fatalf("expected agents subcommand file %s: %v", leaf, err)
+			}
+		}
+	})
 
-	claudeGo := filepath.Join(root, "internal", "platform", "claude.go")
-	cg, err := os.ReadFile(claudeGo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(cg), "syncScopedDirSymlinksTargets") ||
-		!strings.Contains(string(cg), "createAgentsLinks") {
-		t.Fatal("internal/platform/claude.go expected createAgentsLinks wiring for agents refresh parity")
-	}
+	t.Run("verify-platform-wiring", func(t *testing.T) {
+		claudeGo := filepath.Join(root, "internal", "platform", "claude.go")
+		cg, err := os.ReadFile(claudeGo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(cg), "syncScopedDirSymlinksTargets") ||
+			!strings.Contains(string(cg), "createAgentsLinks") {
+			t.Fatal("internal/platform/claude.go expected createAgentsLinks wiring for agents refresh parity")
+		}
+	})
 }

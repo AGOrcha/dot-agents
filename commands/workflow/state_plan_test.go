@@ -89,33 +89,42 @@ blockers: []
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Project.Name != "workflow-proj" {
-		t.Fatalf("project name = %q", state.Project.Name)
-	}
-	if len(state.ActivePlans) != 1 || state.ActivePlans[0].Title != "Sample Plan" {
-		t.Fatalf("unexpected plans: %+v", state.ActivePlans)
-	}
-	if len(state.ActivePlans[0].PendingItems) == 0 || state.ActivePlans[0].PendingItems[0] != "First pending task" {
-		t.Fatalf("unexpected pending items: %+v", state.ActivePlans[0].PendingItems)
-	}
-	if state.Checkpoint == nil || state.Checkpoint.NextAction != "Resume implementation" {
-		t.Fatalf("unexpected checkpoint: %+v", state.Checkpoint)
-	}
-	if state.NextAction != "First pending task" {
-		t.Fatalf("next action = %q, want First pending task", state.NextAction)
-	}
-	if state.NextActionSource != "active_plan" {
-		t.Fatalf("next action source = %q, want active_plan", state.NextActionSource)
-	}
-	if len(state.Handoffs) != 1 || state.Handoffs[0].Title != "Next Handoff" {
-		t.Fatalf("unexpected handoffs: %+v", state.Handoffs)
-	}
-	if len(state.Lessons) != 2 {
-		t.Fatalf("unexpected lessons: %+v", state.Lessons)
-	}
-	if state.Proposals.PendingCount != 1 {
-		t.Fatalf("pending proposals = %d, want 1", state.Proposals.PendingCount)
-	}
+
+	t.Run("project-and-plans", func(t *testing.T) {
+		if state.Project.Name != "workflow-proj" {
+			t.Fatalf("project name = %q", state.Project.Name)
+		}
+		if len(state.ActivePlans) != 1 || state.ActivePlans[0].Title != "Sample Plan" {
+			t.Fatalf("unexpected plans: %+v", state.ActivePlans)
+		}
+		if len(state.ActivePlans[0].PendingItems) == 0 || state.ActivePlans[0].PendingItems[0] != "First pending task" {
+			t.Fatalf("unexpected pending items: %+v", state.ActivePlans[0].PendingItems)
+		}
+	})
+
+	t.Run("checkpoint-and-actions", func(t *testing.T) {
+		if state.Checkpoint == nil || state.Checkpoint.NextAction != "Resume implementation" {
+			t.Fatalf("unexpected checkpoint: %+v", state.Checkpoint)
+		}
+		if state.NextAction != "First pending task" {
+			t.Fatalf("next action = %q, want First pending task", state.NextAction)
+		}
+		if state.NextActionSource != "active_plan" {
+			t.Fatalf("next action source = %q, want active_plan", state.NextActionSource)
+		}
+	})
+
+	t.Run("ancillary-artifacts", func(t *testing.T) {
+		if len(state.Handoffs) != 1 || state.Handoffs[0].Title != "Next Handoff" {
+			t.Fatalf("unexpected handoffs: %+v", state.Handoffs)
+		}
+		if len(state.Lessons) != 2 {
+			t.Fatalf("unexpected lessons: %+v", state.Lessons)
+		}
+		if state.Proposals.PendingCount != 1 {
+			t.Fatalf("pending proposals = %d, want 1", state.Proposals.PendingCount)
+		}
+	})
 }
 
 func TestAppendWorkflowSessionLogAndSplitEntries(t *testing.T) {
@@ -505,6 +514,7 @@ func TestBuildWorkflowPlanGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(graph.Nodes) != 6 {
 		t.Fatalf("node count = %d, want 6", len(graph.Nodes))
 	}
@@ -822,6 +832,7 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 		}
 	})
 }
+
 
 func TestRunWorkflowCompleteRejectsBlankPlanFilter(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
