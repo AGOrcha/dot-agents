@@ -8,53 +8,14 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
-
-// setupSkillsEnv creates a minimal repo+agentsHome fixture for skills tests.
-// Returns (agentsHome, projectPath).
-func setupSkillsEnv(t *testing.T, projectName string) (agentsHome, projectPath string) {
-	t.Helper()
-	tmp := t.TempDir()
-	agentsHome = filepath.Join(tmp, "agents")
-	projectPath = filepath.Join(tmp, "repo")
-
-	if err := os.MkdirAll(agentsHome, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(projectPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: projectName,
-		Sources: []config.Source{{Type: "local"}},
-	}
-	if err := rc.Save(projectPath); err != nil {
-		t.Fatalf("rc.Save: %v", err)
-	}
-	return agentsHome, projectPath
-}
-
-func writeSkillMD(t *testing.T, projectPath, skillName string) {
-	t.Helper()
-	dir := filepath.Join(projectPath, ".agents", "skills", skillName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	content := "---\nname: " + skillName + "\ndescription: test skill\n---\n\n# " + skillName + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 // ── PromoteSkillIn success ────────────────────────────────────────────────────
 
 func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
-	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest")
-	writeSkillMD(t, projectPath, "my-skill")
+	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest")
+	testutil.WriteSkillManifest(t, projectPath, "my-skill")
 
 	if err := PromoteSkillIn("my-skill", projectPath); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -139,7 +100,7 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeSkillMD(t, projectPath, "extra-skill")
+	testutil.WriteSkillManifest(t, projectPath, "extra-skill")
 
 	if err := PromoteSkillIn("extra-skill", projectPath); err != nil {
 		t.Fatalf("PromoteSkillIn: %v", err)
@@ -180,8 +141,8 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 }
 
 func TestPromoteSkillIn_IdempotentOnExistingSymlink(t *testing.T) {
-	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest2")
-	writeSkillMD(t, projectPath, "idem-skill")
+	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest2")
+	testutil.WriteSkillManifest(t, projectPath, "idem-skill")
 
 	// First promote: copies content, repo-local becomes managed symlink.
 	if err := PromoteSkillIn("idem-skill", projectPath); err != nil {
@@ -221,7 +182,7 @@ func TestPromoteSkillIn_IdempotentOnExistingSymlink(t *testing.T) {
 // ── PromoteSkillIn error paths ────────────────────────────────────────────────
 
 func TestPromoteSkillIn_ErrorSkillNotFound(t *testing.T) {
-	_, projectPath := setupSkillsEnv(t, "myprojtest3")
+	_, projectPath := testutil.NewTempProject(t, "myprojtest3")
 	// Do NOT write skill files — skill directory does not exist.
 
 	err := PromoteSkillIn("nonexistent", projectPath)
@@ -250,7 +211,7 @@ func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
 	if err := rc.Save(projectPath); err != nil {
 		t.Fatalf("rc.Save: %v", err)
 	}
-	writeSkillMD(t, projectPath, "some-skill")
+	testutil.WriteSkillManifest(t, projectPath, "some-skill")
 
 	err := PromoteSkillIn("some-skill", projectPath)
 	if err == nil {
@@ -262,8 +223,8 @@ func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
 }
 
 func TestPromoteSkillIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
-	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest5")
-	writeSkillMD(t, projectPath, "mis-skill")
+	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest5")
+	testutil.WriteSkillManifest(t, projectPath, "mis-skill")
 
 	// Manually create repo-local as a symlink pointing somewhere else.
 	repoLocalPath := filepath.Join(projectPath, ".agents", "skills", "mis-skill")
@@ -285,8 +246,8 @@ func TestPromoteSkillIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
 }
 
 func TestPromoteSkillIn_ErrorExistingNonSymlink(t *testing.T) {
-	agentsHome, projectPath := setupSkillsEnv(t, "myprojtest4")
-	writeSkillMD(t, projectPath, "clash-skill")
+	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest4")
+	testutil.WriteSkillManifest(t, projectPath, "clash-skill")
 
 	// Pre-create a real directory at the destination (not a symlink).
 	destPath := filepath.Join(agentsHome, "skills", "myprojtest4", "clash-skill")
@@ -338,7 +299,7 @@ func TestPromoteSkillIn_MirrorSucceedsWhenClaudeSkillsDirAlreadyExists(t *testin
 	if err := rc.Save(projectPath); err != nil {
 		t.Fatalf("rc.Save: %v", err)
 	}
-	writeSkillMD(t, projectPath, skillName)
+	testutil.WriteSkillManifest(t, projectPath, skillName)
 
 	// Pre-create a real directory at the Claude skills target — this is the
 	// scenario that triggered the bug: skill was placed directly in ~/.claude/skills/

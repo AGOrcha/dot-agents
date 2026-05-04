@@ -1227,19 +1227,14 @@ func TestIsValidQueryIntent(t *testing.T) {
 
 // ── Phase 3: Search engine ────────────────────────────────────────────────────
 
-func setupKGWithNotes(t *testing.T) string {
+// setupKGWithCustomNotes initializes a KG home, runs setup, and seeds
+// the supplied notes via createGraphNote. Returns the home dir.
+// Used by tests that need fixture notes other than the defaults.
+func setupKGWithCustomNotes(t *testing.T, notes []*GraphNote) string {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
 		t.Fatalf("setup: %v", err)
-	}
-	now := "2026-01-01T00:00:00Z"
-	notes := []*GraphNote{
-		{SchemaVersion: 1, ID: "ent-cobra", Type: "entity", Title: "cobra", Summary: "CLI framework for Go.", Status: "active", CreatedAt: now, UpdatedAt: now},
-		{SchemaVersion: 1, ID: "ent-yaml", Type: "entity", Title: "YAML", Summary: "Configuration format.", Status: "active", CreatedAt: now, UpdatedAt: now},
-		{SchemaVersion: 1, ID: "dec-use-cobra", Type: "decision", Title: "Use cobra for CLI", Summary: "We decided to use cobra.", Status: "active", CreatedAt: now, UpdatedAt: now},
-		{SchemaVersion: 1, ID: "dec-use-yaml", Type: "decision", Title: "Use YAML config", Summary: "Team chose YAML for all configuration.", Status: "active", CreatedAt: now, UpdatedAt: now},
-		{SchemaVersion: 1, ID: "rep-dot-agents", Type: "repo", Title: "dot-agents", Summary: "CLI for managing agent configs.", Status: "active", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, n := range notes {
 		if err := createGraphNote(home, n, "note body for "+n.ID); err != nil {
@@ -1247,6 +1242,18 @@ func setupKGWithNotes(t *testing.T) string {
 		}
 	}
 	return home
+}
+
+func setupKGWithNotes(t *testing.T) string {
+	t.Helper()
+	now := "2026-01-01T00:00:00Z"
+	return setupKGWithCustomNotes(t, []*GraphNote{
+		{SchemaVersion: 1, ID: "ent-cobra", Type: "entity", Title: "cobra", Summary: "CLI framework for Go.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "ent-yaml", Type: "entity", Title: "YAML", Summary: "Configuration format.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-use-cobra", Type: "decision", Title: "Use cobra for CLI", Summary: "We decided to use cobra.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "dec-use-yaml", Type: "decision", Title: "Use YAML config", Summary: "Team chose YAML for all configuration.", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "rep-dot-agents", Type: "repo", Title: "dot-agents", Summary: "CLI for managing agent configs.", Status: "active", CreatedAt: now, UpdatedAt: now},
+	})
 }
 
 func TestSearchNotes_ByType(t *testing.T) {
@@ -1636,18 +1643,11 @@ func TestLintIndexDrift(t *testing.T) {
 }
 
 func TestLintContradictions(t *testing.T) {
-	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
 	now := "2026-01-01T00:00:00Z"
-	notes := []*GraphNote{
+	home := setupKGWithCustomNotes(t, []*GraphNote{
 		{SchemaVersion: 1, ID: "dec-use-yaml", Type: "decision", Title: "Use YAML config format", Summary: "Use YAML.", Status: "active", CreatedAt: now, UpdatedAt: now},
 		{SchemaVersion: 1, ID: "dec-use-json", Type: "decision", Title: "Use JSON config format", Summary: "Use JSON.", Status: "active", CreatedAt: now, UpdatedAt: now},
-	}
-	for _, n := range notes {
-		_ = createGraphNote(home, n, "")
-	}
+	})
 	_, noteMap, _ := buildLinkGraph(home)
 	results := lintContradictions(noteMap)
 	if len(results) == 0 {
@@ -1656,18 +1656,11 @@ func TestLintContradictions(t *testing.T) {
 }
 
 func TestLintContradictions_NonConflicting(t *testing.T) {
-	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
 	now := "2026-01-01T00:00:00Z"
-	notes := []*GraphNote{
+	home := setupKGWithCustomNotes(t, []*GraphNote{
 		{SchemaVersion: 1, ID: "dec-a", Type: "decision", Title: "Use cobra for CLI parsing", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
 		{SchemaVersion: 1, ID: "dec-b", Type: "decision", Title: "Deploy to production weekly", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
-	}
-	for _, n := range notes {
-		_ = createGraphNote(home, n, "")
-	}
+	})
 	_, noteMap, _ := buildLinkGraph(home)
 	results := lintContradictions(noteMap)
 	if len(results) != 0 {
@@ -1700,18 +1693,11 @@ func TestRunGraphLint_FullRun(t *testing.T) {
 // ── Phase 4: Contradictions query (Phase 3 upgrade) ──────────────────────────
 
 func TestExecuteQuery_Contradictions_Live(t *testing.T) {
-	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
 	now := "2026-01-01T00:00:00Z"
-	notes := []*GraphNote{
+	home := setupKGWithCustomNotes(t, []*GraphNote{
 		{SchemaVersion: 1, ID: "dec-yaml", Type: "decision", Title: "Use YAML config format", Summary: "YAML.", Status: "active", CreatedAt: now, UpdatedAt: now},
 		{SchemaVersion: 1, ID: "dec-toml", Type: "decision", Title: "Use TOML config format", Summary: "TOML.", Status: "active", CreatedAt: now, UpdatedAt: now},
-	}
-	for _, n := range notes {
-		_ = createGraphNote(home, n, "")
-	}
+	})
 
 	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: ""})
 	if err != nil {
