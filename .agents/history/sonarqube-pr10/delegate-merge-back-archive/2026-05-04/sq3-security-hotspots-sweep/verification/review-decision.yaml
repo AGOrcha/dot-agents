@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: sq3-security-hotspots-sweep
+parent_plan_id: sonarqube-pr10
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: 'Phase 1: Behavior preserved; execabs hardens command execution while retaining command arguments and CI verifies Sonar hotspot clearance. Phase 2: Architecture acceptable; no direct Sonar hotspot writes used, workflow artifacts now reflect CI/manual-scan source of truth. KG context: kg changes risk 0.40 with test gaps on command wrappers; covered by go test ./..., npm run build, npm test, GitHub CI, and read-only SonarCloud readback. Residual risk: duplication gate remains failed by ADR-0008 waiver, outside SQ3.'
+recorded_at: "2026-05-04T06:00:33Z"
+recorded_by: dot-agents workflow verify record

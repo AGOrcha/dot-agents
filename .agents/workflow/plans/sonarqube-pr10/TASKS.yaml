@@ -104,7 +104,7 @@ tasks:
       app_type: code-fix
     - id: sq3-security-hotspots-sweep
       title: Review and resolve security hotspots flagged on PR#10
-      status: in_progress
+      status: completed
       depends_on:
         - sq1-current-state-audit
       blocks: []
@@ -157,7 +157,7 @@ tasks:
           anti-scope: do NOT mass-mark without review. Do NOT change rule severity or threshold to paper over the failure.
           bundle-context (if fanout): sq1's hotspot list, SonarCloud project URL
           output contract: new_security_hotspots_reviewed above threshold; per-hotspot rationale visible in SonarCloud
-        - (fb:sq3-ci-driven-hotspot-verification) 2026-05-04 ISP continuation rechecked live SonarCloud after CI on 1104186: new_security_hotspots_reviewed=5.6%, 2 REVIEWED-SAFE, 34 TO_REVIEW. Direct hotspot writes are not the intended path now. Keep SQ3 in read-only verification mode: after each CI run, check the live quality gate and hotspot inventory; once manual scan triggers are enabled, use the explicit manual scan as source of truth. Cached per-hotspot inspection evidence remains in the merge-back, but agents should not apply those status changes directly. Code remediation is allowed when CI can remove the finding; the new check-boundary.ts regex hotspot and four same-file reliability issues are being handled by parser/sort/replaceAll changes.
+        - (fb:sq3-ci-driven-hotspot-verification) 2026-05-04 final read-only SonarCloud check after CI on 85266c0: new_security_hotspots_reviewed=100.0%, 0 TO_REVIEW hotspots. Direct hotspot writes were not used for the successful closeout path. Code remediation removed the TS hotspots through parser/test changes and the Go PATH hotspots through execabs-backed command invocation hardening. Quality gate still fails only on new_duplicated_lines_density, which sq4/ADR-0008 waives as branch-wide debt.
       app_type: code-fix
     - id: sq4-duplication-debt-decision
       title: Decide scope on new_duplicated_lines_density (this PR vs follow-up plan)
@@ -214,7 +214,7 @@ tasks:
       app_type: research
     - id: sq5-archive-on-pr-merge
       title: Archive plan when PR#10 merges (or closes without merge)
-      status: pending
+      status: blocked
       depends_on:
         - sq2-reliability-rating-fixes
         - sq3-security-hotspots-sweep
@@ -242,6 +242,9 @@ tasks:
         Common false positive:
           Plan archived prematurely while PR is still open and reviewing.
           Verify PR state via `gh pr view 10` before archiving.
+        - (gate:pr-open-2026-05-04) PR#10 is still OPEN at head 85266c0, so
+          sq5 is blocked. Do not archive sonarqube-pr10 until `gh pr view 10`
+          reports MERGED or CLOSED.
 
         ISP routing:
           mode: direct (CLI commands + small note; not implementation)
