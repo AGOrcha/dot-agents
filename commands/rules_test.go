@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -43,13 +44,7 @@ func TestRunRulesList(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	scope := "g"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "rules.mdc"), []byte("# x"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "rules.mdc", []byte("# x"))
 	if err := runRulesList(scope); err != nil {
 		t.Fatalf("runRulesList: %v", err)
 	}
@@ -60,14 +55,8 @@ func TestRunRulesRemove(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	scope := "g"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(dir, "drop.md")
-	if err := os.WriteFile(p, []byte("z"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "drop.md", []byte("z"))
+	p := filepath.Join(agentsHome, "rules", scope, "drop.md")
 	deps := testRulesDeps()
 	deps.Flags.Yes = true
 	if err := runRulesRemove(deps, scope, "drop"); err != nil {
@@ -82,13 +71,7 @@ func TestFindRuleSpec(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "proj"
-	dir := filepath.Join(agentsHome, "rules", scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "lint.mdc"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "lint.mdc", []byte("x"))
 	deps := testRulesDeps()
 	got, err := findRuleSpec(deps, agentsHome, scope, "lint")
 	if err != nil {

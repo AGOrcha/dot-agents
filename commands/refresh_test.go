@@ -10,6 +10,71 @@ import (
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
 
+// setupRefreshTestEnv provisions the home/.agents/repo/bin directories,
+// sets HOME/AGENTS_HOME/PATH env, and drops a fake codex binary in
+// binDir so refresh's platform installation checks succeed. Returns
+// the four paths.
+func setupRefreshTestEnv(t *testing.T) (home, agentsHome, repo, binDir string) {
+	t.Helper()
+	tmp := t.TempDir()
+	home = filepath.Join(tmp, "home")
+	agentsHome = filepath.Join(tmp, ".agents")
+	repo = filepath.Join(tmp, "repo")
+	binDir = filepath.Join(tmp, "bin")
+	for _, dir := range []string{home, agentsHome, repo, binDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(binDir, "codex"), []byte("#!/bin/sh\necho codex test\n"), 0755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return
+}
+
+// codexOnlyRefreshConfig returns a config with only the codex platform
+// enabled and `proj` pointing at repo. Used by refresh tests that
+// verify codex-flavor refresh behavior without involving other platforms.
+func codexOnlyRefreshConfig(repo string) *config.Config {
+	return &config.Config{
+		Version: 1,
+		Projects: map[string]config.Project{
+			"proj": {Path: repo},
+		},
+		Agents: map[string]config.Agent{
+			"cursor":   {Enabled: false},
+			"claude":   {Enabled: false},
+			"codex":    {Enabled: true},
+			"opencode": {Enabled: false},
+			"copilot":  {Enabled: false},
+		},
+	}
+}
+
+// saveConfigAndRunRefresh saves cfg, snapshots Flags + refreshImport,
+// runs refresh for project, and registers a t.Cleanup to restore
+// globals at test end. t.Fatal on any error.
+func saveConfigAndRunRefresh(t *testing.T, cfg *config.Config, project string) {
+	t.Helper()
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	oldFlags := Flags
+	oldRefreshImport := refreshImport
+	Flags = GlobalFlags{}
+	refreshImport = false
+	t.Cleanup(func() {
+		Flags = oldFlags
+		refreshImport = oldRefreshImport
+	})
+	if err := runRefresh(project); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+}
+
 // ---------- mapResourceRelToDest ----------
 
 func TestMapResourceRelToDest_MCPCanonicalization(t *testing.T) {
@@ -104,26 +169,7 @@ func TestMapResourceRelToDest_UnknownReturnsEmpty(t *testing.T) {
 }
 
 func TestRefreshImportsUnmanagedAgentsMarkdownBeforeRelinking(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	agentsHome := filepath.Join(tmp, ".agents")
-	repo := filepath.Join(tmp, "repo")
-	binDir := filepath.Join(tmp, "bin")
-
-	for _, dir := range []string{home, agentsHome, repo, binDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-
-	t.Setenv("HOME", home)
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	codexBin := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codexBin, []byte("#!/bin/sh\necho codex test\n"), 0755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	_, agentsHome, repo, _ := setupRefreshTestEnv(t)
 
 	globalRules := filepath.Join(agentsHome, "rules", "global", "rules.md")
 	if err := os.MkdirAll(filepath.Dir(globalRules), 0755); err != nil {
@@ -138,35 +184,7 @@ func TestRefreshImportsUnmanagedAgentsMarkdownBeforeRelinking(t *testing.T) {
 		t.Fatalf("write repo AGENTS.md: %v", err)
 	}
 
-	cfg := &config.Config{
-		Version: 1,
-		Projects: map[string]config.Project{
-			"proj": {Path: repo},
-		},
-		Agents: map[string]config.Agent{
-			"cursor":   {Enabled: false},
-			"claude":   {Enabled: false},
-			"codex":    {Enabled: true},
-			"opencode": {Enabled: false},
-			"copilot":  {Enabled: false},
-		},
-	}
-	if err := cfg.Save(); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	oldFlags := Flags
-	oldRefreshImport := refreshImport
-	Flags = GlobalFlags{}
-	refreshImport = false
-	defer func() {
-		Flags = oldFlags
-		refreshImport = oldRefreshImport
-	}()
-
-	if err := runRefresh("proj"); err != nil {
-		t.Fatalf("runRefresh: %v", err)
-	}
+	saveConfigAndRunRefresh(t, codexOnlyRefreshConfig(repo), "proj")
 
 	projectCanonical := filepath.Join(agentsHome, "rules", "proj", "agents.md")
 	if got, err := os.ReadFile(projectCanonical); err != nil {
@@ -196,26 +214,7 @@ func TestRefreshImportsUnmanagedAgentsMarkdownBeforeRelinking(t *testing.T) {
 }
 
 func TestRefreshReplacesExistingCanonicalAgentsMarkdownFromUnmanagedRepoFile(t *testing.T) {
-	tmp := t.TempDir()
-	home := filepath.Join(tmp, "home")
-	agentsHome := filepath.Join(tmp, ".agents")
-	repo := filepath.Join(tmp, "repo")
-	binDir := filepath.Join(tmp, "bin")
-
-	for _, dir := range []string{home, agentsHome, repo, binDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-
-	t.Setenv("HOME", home)
-	t.Setenv("AGENTS_HOME", agentsHome)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	codexBin := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codexBin, []byte("#!/bin/sh\necho codex test\n"), 0755); err != nil {
-		t.Fatalf("write fake codex: %v", err)
-	}
+	_, agentsHome, repo, _ := setupRefreshTestEnv(t)
 
 	projectCanonical := filepath.Join(agentsHome, "rules", "proj", "agents.md")
 	if err := os.MkdirAll(filepath.Dir(projectCanonical), 0755); err != nil {
@@ -230,35 +229,7 @@ func TestRefreshReplacesExistingCanonicalAgentsMarkdownFromUnmanagedRepoFile(t *
 		t.Fatalf("write repo AGENTS.md: %v", err)
 	}
 
-	cfg := &config.Config{
-		Version: 1,
-		Projects: map[string]config.Project{
-			"proj": {Path: repo},
-		},
-		Agents: map[string]config.Agent{
-			"cursor":   {Enabled: false},
-			"claude":   {Enabled: false},
-			"codex":    {Enabled: true},
-			"opencode": {Enabled: false},
-			"copilot":  {Enabled: false},
-		},
-	}
-	if err := cfg.Save(); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	oldFlags := Flags
-	oldRefreshImport := refreshImport
-	Flags = GlobalFlags{}
-	refreshImport = false
-	defer func() {
-		Flags = oldFlags
-		refreshImport = oldRefreshImport
-	}()
-
-	if err := runRefresh("proj"); err != nil {
-		t.Fatalf("runRefresh: %v", err)
-	}
+	saveConfigAndRunRefresh(t, codexOnlyRefreshConfig(repo), "proj")
 
 	if got, err := os.ReadFile(projectCanonical); err != nil {
 		t.Fatalf("read canonical project agents: %v", err)

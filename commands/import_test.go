@@ -858,19 +858,29 @@ func TestProcessImportOutput_hookConflictDryRun(t *testing.T) {
 	}
 }
 
-func TestImportFromOpencodePluginDir(t *testing.T) {
+// setupImportPluginEnv allocates an isolated agentsHome+sourceRoot pair
+// and writes a fixture file at sourceRoot/<relSubpath> with the
+// supplied content. Returns (agentsHome, sourceRoot, sourcePath).
+func setupImportPluginEnv(t *testing.T, relSubpath, content string) (agentsHome, sourceRoot, sourcePath string) {
+	t.Helper()
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
+	agentsHome = filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
-
-	sourceRoot := filepath.Join(tmp, "repo")
-	sourcePath := filepath.Join(sourceRoot, relOpenCodePluginsDir, "my-plugin", "index.js")
+	sourceRoot = filepath.Join(tmp, "repo")
+	sourcePath = filepath.Join(sourceRoot, relSubpath)
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(sourcePath, []byte("console.log('hello')\n"), 0644); err != nil {
+	if err := os.WriteFile(sourcePath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+	return agentsHome, sourceRoot, sourcePath
+}
+
+func TestImportFromOpencodePluginDir(t *testing.T) {
+	agentsHome, sourceRoot, sourcePath := setupImportPluginEnv(t,
+		filepath.Join(relOpenCodePluginsDir, "my-plugin", "index.js"),
+		"console.log('hello')\n")
 
 	result := processImportCandidate(importCandidate{
 		project:    "proj",
@@ -907,18 +917,9 @@ func TestImportFromOpencodePluginDir(t *testing.T) {
 }
 
 func TestImportFromCursorPluginManifest(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	sourceRoot := filepath.Join(tmp, "repo")
-	sourcePath := filepath.Join(sourceRoot, relCursorPluginDir, "plugin.json")
-	if err := os.MkdirAll(filepath.Dir(sourcePath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(sourcePath, []byte(`{"name":"my-plugin","version":"1.0.0"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	agentsHome, sourceRoot, sourcePath := setupImportPluginEnv(t,
+		filepath.Join(relCursorPluginDir, "plugin.json"),
+		`{"name":"my-plugin","version":"1.0.0"}`)
 
 	result := processImportCandidate(importCandidate{
 		project:    "proj",
