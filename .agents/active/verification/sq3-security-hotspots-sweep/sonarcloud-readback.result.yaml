@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: sq3-security-hotspots-sweep
+parent_plan_id: sonarqube-pr10
+verifier_type: sonarcloud-readback
+status: partial
+summary: 'CI-driven SQ3 readback: SonarCloud PR#10 reports new_security_hotspots_reviewed=5.7%, 2 REVIEWED-SAFE, 33 TO_REVIEW; no agent-side hotspot writes permitted'
+recorded_at: "2026-05-04T05:22:54Z"
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+recorded_by: dot-agents workflow verify record
+commands:
+    - get_project_quality_gate_status + search_security_hotspots read-only

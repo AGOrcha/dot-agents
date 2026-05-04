@@ -1,0 +1,8 @@
+schema_version: 1
+id: sq3-ci-driven-hotspot-verification
+plan_id: sonarqube-pr10
+task_id: sq3-security-hotspots-sweep
+observation: 'SQ3 is now CI/manual-scan driven, not agent-side hotspot-write driven. A 2026-05-04 ISP continuation rechecked live SonarCloud after CI and saw new_security_hotspots_reviewed=5.7% with 2 REVIEWED-SAFE hotspots and 33 TO_REVIEW. Read-only MCP tools (search_security_hotspots, show_security_hotspot, get_project_quality_gate_status) work fine and are the allowed verification path. Direct mcp__sonarqube__change_security_hotspot_status calls should not be used by agents for this task unless the plan note is explicitly changed. Per-call inspection evidence for clusters G/H/I is preserved in the merge-back for human review and CI/manual-scan interpretation. Next action: after each CI run, re-check live quality gate + hotspot inventory; once manual scan triggers are enabled, use the explicit manual scan result as source of truth.'
+classification: small
+routed_to: task_note:sonarqube-pr10/sq3-security-hotspots-sweep
+created_at: "2026-05-04T04:21:05Z"

@@ -124,24 +124,26 @@ tasks:
         hotspots remain to reach an acceptable threshold (depends on
         SonarCloud's threshold for the failing gate condition).
 
-        Use mcp__sonarqube__search_security_hotspots and
-        mcp__sonarqube__show_security_hotspot to triage.
-        Use mcp__sonarqube__change_security_hotspot_status to mark each
-        as REVIEWED with appropriate disposition (SAFE / FIXED /
-        ACKNOWLEDGED) once examined.
+        Use read-only SonarCloud checks (quality gate + hotspot search/show)
+        to triage and verify. Do NOT use agent-side
+        mcp__sonarqube__change_security_hotspot_status writes for SQ3 while
+        this plan is in CI-driven mode; hotspot status changes should come
+        from the CI/manual-scan process or explicit human UI action.
 
         Hard test:
           new_security_hotspots_reviewed moves above the failing
           threshold AND every changed status carries a one-line
           justification visible in SonarCloud.
 
-        CI/manual-scan transition note:
+        CI/manual-scan operating mode:
           After each CI run, re-check SonarCloud PR #10 for updated
-          security-hotspot and quality-gate metrics before making more
-          status changes. Continue polling/checking CI-produced analysis
-          until the project switches to manual scan triggers; once manual
-          scan triggers are enabled, treat explicit manual scans as the
-          source of truth for SQ3 verification.
+          security-hotspot and quality-gate metrics. Continue
+          polling/checking CI-produced analysis until the project switches
+          to manual scan triggers; once manual scan triggers are enabled,
+          treat explicit manual scans as the source of truth for SQ3
+          verification. Agents may read SonarCloud state but must not
+          directly update hotspot statuses unless this note is explicitly
+          changed.
 
         Common false positive:
           Mass-marking hotspots as SAFE without genuine review. Defeats
@@ -155,7 +157,7 @@ tasks:
           anti-scope: do NOT mass-mark without review. Do NOT change rule severity or threshold to paper over the failure.
           bundle-context (if fanout): sq1's hotspot list, SonarCloud project URL
           output contract: new_security_hotspots_reviewed above threshold; per-hotspot rationale visible in SonarCloud
-        - (fb:sq3-mcp-write-denied) Cannot complete sweep: mcp__sonarqube__change_security_hotspot_status is denied by sandbox permissions (5 attempted calls all returned 'Permission to use ... has been denied'). Read-only MCP tools (search_security_hotspots, show_security_hotspot, get_project_quality_gate_status) work fine. All 35 hotspots are confirmed TO_REVIEW; per-call inspection of all clusters G/H/I is complete (every Go LookPath site is hard-coded, e.g. exec.Command("git", ...); the 3 TS regexes are bounded to file front-matter or single in-repo loop-state.md content; the 4 TS test publicly-writable-dir hotspots use deterministic /tmp paths inside test process). Inspection evidence is preserved in this merge-back. To unblock: grant mcp__sonarqube__change_security_hotspot_status permission to the worker session, then re-run sq3 (the inspection work is cached in the merge-back so the sweep is just per-hotspot status changes). Hotspot keys + dispositions are listed in the merge-back so the operator can flip them by hand if needed.
+        - (fb:sq3-ci-driven-hotspot-verification) 2026-05-04 ISP continuation rechecked live SonarCloud after CI: new_security_hotspots_reviewed=5.7%, 2 REVIEWED-SAFE, 33 TO_REVIEW. Direct hotspot writes are not the intended path now. Keep SQ3 in read-only verification mode: after each CI run, check the live quality gate and hotspot inventory; once manual scan triggers are enabled, use the explicit manual scan as source of truth. Cached per-hotspot inspection evidence remains in the merge-back, but agents should not apply those status changes directly.
       app_type: code-fix
     - id: sq4-duplication-debt-decision
       title: Decide scope on new_duplicated_lines_density (this PR vs follow-up plan)
