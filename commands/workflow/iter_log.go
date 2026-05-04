@@ -189,6 +189,9 @@ func firstReadableDelegationContract(projectPath string) *DelegationContract {
 		if err != nil {
 			continue
 		}
+		if contract.Status != "pending" && contract.Status != "active" {
+			continue
+		}
 		return contract
 	}
 	return nil
@@ -422,6 +425,7 @@ func mergeReviewIterLog(dst *iterLogEntry, projectPath, taskID string) error {
 	}
 	dst.Review.EscalationReason = doc.EscalationReason
 	dst.Review.ReviewerNotes = doc.ReviewerNotes
+	dst.Review.VerifyRecordAppended = true
 	return nil
 }
 

@@ -220,6 +220,124 @@ func TestCheckpointLogToIterVerifierRequiresVerifierType(t *testing.T) {
 	}
 }
 
+func TestCheckpointLogToIterIgnoresCompletedDelegationContracts(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	completed := `schema_version: 1
+id: del-a-completed
+parent_plan_id: plan-a
+parent_task_id: a-completed
+title: completed
+write_scope: []
+status: completed
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`
+	if err := os.WriteFile(filepath.Join(delegDir, "a-completed.yaml"), []byte(completed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	active := `schema_version: 1
+id: del-z-active
+parent_plan_id: plan-z
+parent_task_id: z-active
+title: active
+write_scope: []
+status: active
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`
+	if err := os.WriteFile(filepath.Join(delegDir, "z-active.yaml"), []byte(active), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "6"); err != nil {
+		t.Fatalf("checkpoint --log-to-iter 6: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "iteration-log", "iter-6.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Wave != "plan-z" {
+		t.Errorf("wave = %q, want active delegation plan-z", entry.Wave)
+	}
+	if entry.TaskID != "z-active" {
+		t.Errorf("task_id = %q, want active delegation z-active", entry.TaskID)
+	}
+}
+
+func TestCheckpointLogToIterReviewMergeMarksVerifyRecordAppended(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "review-task"
+	contract := `schema_version: 1
+id: del-review-task
+parent_plan_id: plan-review
+parent_task_id: review-task
+title: review
+write_scope: []
+status: active
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`
+	if err := os.WriteFile(filepath.Join(delegDir, taskID+".yaml"), []byte(contract), 0644); err != nil {
+		t.Fatal(err)
+	}
+	verDir := filepath.Join(repo, ".agents", "active", "verification", taskID)
+	if err := os.MkdirAll(verDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	decision := `schema_version: 1
+task_id: review-task
+parent_plan_id: plan-review
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: ok
+recorded_at: "2026-04-18T12:00:00Z"
+recorded_by: test
+`
+	if err := os.WriteFile(filepath.Join(verDir, "review-decision.yaml"), []byte(decision), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "7", "--role", "review"); err != nil {
+		t.Fatalf("checkpoint --role review: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "iteration-log", "iter-7.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Review.OverallDecision != "accept" {
+		t.Errorf("overall_decision = %q, want accept", entry.Review.OverallDecision)
+	}
+	if !entry.Review.VerifyRecordAppended {
+		t.Error("verify_record_appended = false, want true when review-decision.yaml was merged")
+	}
+}
+
 func TestCheckpointLogToIterVerifierTypeWithoutLogToIterRejected(t *testing.T) {
 	repo := initWorkflowTestRepoWithCommit(t)
 	agentsHome := t.TempDir()
