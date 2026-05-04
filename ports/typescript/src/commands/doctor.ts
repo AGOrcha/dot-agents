@@ -36,81 +36,78 @@ export interface DoctorResult {
   ok: boolean;
 }
 
+async function checkAgentsHome(home: string): Promise<DoctorCheck> {
+  try {
+    const s = await stat(home);
+    if (s.isDirectory()) {
+      return { name: "agents_home", status: "ok", message: "~/.agents/ exists" };
+    }
+    return { name: "agents_home", status: "error", message: "~/.agents/ exists but is not a directory" };
+  } catch {
+    return {
+      name: "agents_home",
+      status: "error",
+      message: "~/.agents/ not found — run: dot-agents init",
+    };
+  }
+}
+
+async function checkConfigJson(home: string): Promise<DoctorCheck> {
+  const cfgPath = join(home, "config.json");
+  try {
+    await stat(cfgPath);
+    return { name: "config_json", status: "ok", message: "config.json exists" };
+  } catch {
+    return { name: "config_json", status: "warn", message: "config.json not found" };
+  }
+}
+
+async function checkProjectAgentsRc(
+  name: string,
+  path: string,
+): Promise<{ pathExists: boolean; agentsRcFound: boolean }> {
+  try {
+    await stat(path);
+    try {
+      await stat(join(path, ".agentsrc.json"));
+      return { pathExists: true, agentsRcFound: true };
+    } catch {
+      return { pathExists: true, agentsRcFound: false };
+    }
+  } catch {
+    return { pathExists: false, agentsRcFound: false };
+  }
+}
+
+function createProjectCheck(name: string, path: string, pathExists: boolean, agentsRcFound: boolean, verbose: boolean): DoctorCheck | null {
+  if (pathExists && agentsRcFound && !verbose) return null;
+  if (pathExists && agentsRcFound && verbose) {
+    return { name: `project:${name}`, status: "ok", message: `Project "${name}" healthy` };
+  }
+  if (pathExists && !agentsRcFound) {
+    return { name: `project:${name}`, status: "warn", message: `Project "${name}" has no .agentsrc.json` };
+  }
+  return { name: `project:${name}`, status: "warn", message: `Project "${name}" path not found: ${path}` };
+}
+
 export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorResult> {
   const home = opts.agentsHomeOverride ?? agentsHome();
   const checks: DoctorCheck[] = [];
 
-  // Check ~/.agents/
-  try {
-    const s = await stat(home);
-    if (s.isDirectory()) {
-      checks.push({ name: "agents_home", status: "ok", message: "~/.agents/ exists" });
-    } else {
-      checks.push({ name: "agents_home", status: "error", message: "~/.agents/ exists but is not a directory" });
-    }
-  } catch {
-    checks.push({
-      name: "agents_home",
-      status: "error",
-      message: "~/.agents/ not found — run: dot-agents init",
-    });
-  }
+  checks.push(await checkAgentsHome(home));
+  checks.push(await checkConfigJson(home));
 
-  // Check config.json
-  const cfgPath = join(home, "config.json");
-  try {
-    await stat(cfgPath);
-    checks.push({ name: "config_json", status: "ok", message: "config.json exists" });
-  } catch {
-    checks.push({ name: "config_json", status: "warn", message: "config.json not found" });
-  }
-
-  // Check managed project paths
   const cfg = await loadConfig(home);
   const names = listProjects(cfg);
   const projects: ProjectDoctorEntry[] = [];
 
   for (const name of names) {
     const path = getProjectPath(cfg, name) ?? "";
-    let pathExists = false;
-    let agentsRcFound = false;
-    try {
-      await stat(path);
-      pathExists = true;
-      try {
-        await stat(join(path, ".agentsrc.json"));
-        agentsRcFound = true;
-      } catch {
-        agentsRcFound = false;
-      }
-    } catch {
-      pathExists = false;
+    const { pathExists, agentsRcFound } = await checkProjectAgentsRc(name, path);
+    const projectCheck = createProjectCheck(name, path, pathExists, agentsRcFound, opts.verbose ?? false);
+    if (projectCheck) {
+      checks.push(projectCheck);
     }
-
-    if (pathExists) {
-      if (agentsRcFound) {
-        if (opts.verbose) {
-          checks.push({
-            name: `project:${name}`,
-            status: "ok",
-            message: `Project "${name}" healthy`,
-          });
-        }
-      } else {
-        checks.push({
-          name: `project:${name}`,
-          status: "warn",
-          message: `Project "${name}" has no .agentsrc.json`,
-        });
-      }
-    } else {
-      checks.push({
-        name: `project:${name}`,
-        status: "warn",
-        message: `Project "${name}" path not found: ${path}`,
-      });
-    }
-
     projects.push({ name, path, pathExists, agentsRcFound });
   }
 

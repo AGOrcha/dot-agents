@@ -146,38 +146,47 @@ async function cmdDoctor(args: string[]): Promise<number> {
   }
 }
 
+async function cmdSkillsList(args: string[]): Promise<number> {
+  const pos = positionals(args);
+  const scope = pos[0] ?? "global";
+  const result = await runSkillsList(scope);
+  printLine(`Skills (${result.scope}):`);
+  if (result.skills.length === 0) {
+    printLine("  (none)");
+  } else {
+    for (const s of result.skills) {
+      const desc = s.description ? `  — ${s.description}` : "";
+      printLine(`  ${s.name}${desc}`);
+    }
+  }
+  return 0;
+}
+
+async function cmdSkillsNew(args: string[]): Promise<number> {
+  const pos = positionals(args);
+  if (pos.length === 0) {
+    printError("skills new requires a skill name");
+    return 1;
+  }
+  const [skillName, scope = "global"] = pos;
+  const result = await runSkillsNew(skillName, scope);
+  if (result.alreadyExists) {
+    printLine(`Skill "${skillName}" already exists at ${result.path}`);
+  } else {
+    printLine(`Created skill "${skillName}" at ${result.path}`);
+  }
+  return 0;
+}
+
 async function cmdSkills(args: string[]): Promise<number> {
   const [sub, ...rest] = args;
-  const pos = positionals(rest);
 
   if (!sub || sub === "list") {
-    const scope = pos[0] ?? "global";
-    const result = await runSkillsList(scope);
-    printLine(`Skills (${result.scope}):`);
-    if (result.skills.length === 0) {
-      printLine("  (none)");
-    } else {
-      for (const s of result.skills) {
-        const desc = s.description ? `  — ${s.description}` : "";
-        printLine(`  ${s.name}${desc}`);
-      }
-    }
-    return 0;
+    return cmdSkillsList(rest);
   }
 
   if (sub === "new") {
-    if (pos.length === 0) {
-      printError("skills new requires a skill name");
-      return 1;
-    }
-    const [skillName, scope = "global"] = pos;
-    const result = await runSkillsNew(skillName, scope);
-    if (result.alreadyExists) {
-      printLine(`Skill "${skillName}" already exists at ${result.path}`);
-    } else {
-      printLine(`Created skill "${skillName}" at ${result.path}`);
-    }
-    return 0;
+    return cmdSkillsNew(rest);
   }
 
   printError(`Unknown skills subcommand: ${sub}`);
@@ -185,38 +194,47 @@ async function cmdSkills(args: string[]): Promise<number> {
   return 1;
 }
 
+async function cmdAgentsList(args: string[]): Promise<number> {
+  const pos = positionals(args);
+  const scope = pos[0] ?? "global";
+  const result = await runAgentsList(scope);
+  printLine(`Agents (${result.scope}):`);
+  if (result.agents.length === 0) {
+    printLine("  (none)");
+  } else {
+    for (const a of result.agents) {
+      const desc = a.description ? `  — ${a.description}` : "";
+      printLine(`  ${a.name}${desc}`);
+    }
+  }
+  return 0;
+}
+
+async function cmdAgentsNew(args: string[]): Promise<number> {
+  const pos = positionals(args);
+  if (pos.length === 0) {
+    printError("agents new requires an agent name");
+    return 1;
+  }
+  const [agentName, scope = "global"] = pos;
+  const result = await runAgentsNew(agentName, scope);
+  if (result.alreadyExists) {
+    printLine(`Agent "${agentName}" already exists at ${result.path}`);
+  } else {
+    printLine(`Created agent "${agentName}" at ${result.path}`);
+  }
+  return 0;
+}
+
 async function cmdAgents(args: string[]): Promise<number> {
   const [sub, ...rest] = args;
-  const pos = positionals(rest);
 
   if (!sub || sub === "list") {
-    const scope = pos[0] ?? "global";
-    const result = await runAgentsList(scope);
-    printLine(`Agents (${result.scope}):`);
-    if (result.agents.length === 0) {
-      printLine("  (none)");
-    } else {
-      for (const a of result.agents) {
-        const desc = a.description ? `  — ${a.description}` : "";
-        printLine(`  ${a.name}${desc}`);
-      }
-    }
-    return 0;
+    return cmdAgentsList(rest);
   }
 
   if (sub === "new") {
-    if (pos.length === 0) {
-      printError("agents new requires an agent name");
-      return 1;
-    }
-    const [agentName, scope = "global"] = pos;
-    const result = await runAgentsNew(agentName, scope);
-    if (result.alreadyExists) {
-      printLine(`Agent "${agentName}" already exists at ${result.path}`);
-    } else {
-      printLine(`Created agent "${agentName}" at ${result.path}`);
-    }
-    return 0;
+    return cmdAgentsNew(rest);
   }
 
   printError(`Unknown agents subcommand: ${sub}`);

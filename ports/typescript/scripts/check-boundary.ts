@@ -414,6 +414,32 @@ function firstStringLiteral(src: string): string | null {
 }
 
 /**
+ * Detects and redirects a wrapper constructor to its delegate package.
+ * Returns packageDir unchanged if the constructor is not a wrapper.
+ */
+function resolveDelegatePackage(
+  packageDir: string,
+  ctorSrc: string,
+  filePath: string,
+): { packageDir: string; restrictToFile: string | undefined } {
+  // Check if this is a wrapper file (no cobra.Command literal in body).
+  if (/&cobra\.Command\s*\{/.test(ctorSrc)) {
+    return { packageDir, restrictToFile: filePath };
+  }
+  // Look for delegate call: e.g. `agents.NewAgentsCmd(...)` or `wf.NewCmd(...)`.
+  const delegate = /\b(\w+)\.New\w*\s*\(/.exec(ctorSrc);
+  if (!delegate) {
+    return { packageDir, restrictToFile: filePath };
+  }
+  const alias = delegate[1];
+  const subDir = resolvePackageDir(packageDir, ctorSrc, alias);
+  if (!subDir || !existsSync(subDir) || !statSync(subDir).isDirectory()) {
+    return { packageDir, restrictToFile: filePath };
+  }
+  return { packageDir: subDir, restrictToFile: undefined };
+}
+
+/**
  * For a Stage 1 top-level command, returns its surface:
  *   - The first `Use:` literal in the constructor file is the top-level name.
  *   - Subsequent `Use:` literals in the package are subcommands.
@@ -424,27 +450,12 @@ export function parseGoCommandSurface(
   ctor: string,
 ): GoCommandSurface {
   const { filePath, packageDir } = locateConstructor(repoRoot, ctor);
-  // Special case: wrapper file like commands/agents.go that just calls into
-  // a sub-package. Detect by checking whether the constructor body contains
-  // a cobra.Command literal at all. If not, redirect to commands/<dir>/.
   const ctorSrc = readFileSync(filePath, "utf8");
-  let packageDirToScan = packageDir;
-  let restrictToFile: string | undefined = filePath;
-  if (!/&cobra\.Command\s*\{/.test(ctorSrc)) {
-    // Look for a delegate call: e.g. `agents.NewAgentsCmd(...)` or
-    // `wf.NewCmd(...)`. The package alias hints at the subdir name, but
-    // import aliases may rename the package (`wf "..../workflow"`). Resolve
-    // the alias via a quick import-block scan so we land on the real subdir.
-    const delegate = /\b(\w+)\.New\w*\s*\(/.exec(ctorSrc);
-    if (delegate) {
-      const alias = delegate[1];
-      const subDir = resolvePackageDir(packageDir, ctorSrc, alias);
-      if (subDir && existsSync(subDir) && statSync(subDir).isDirectory()) {
-        packageDirToScan = subDir;
-        restrictToFile = undefined;
-      }
-    }
-  }
+  const { packageDir: packageDirToScan, restrictToFile } = resolveDelegatePackage(
+    packageDir,
+    ctorSrc,
+    filePath,
+  );
 
   const src = readPackageSource(packageDirToScan, restrictToFile);
   const uses = extractUseLiterals(src);

@@ -46,45 +46,56 @@ export function standardDirs(home: string): string[] {
   return dirs;
 }
 
+/** Check if home directory exists and is a directory. */
+async function checkHomeExists(home: string): Promise<boolean> {
+  try {
+    const s = await stat(home);
+    return s.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Handle the case where home already exists and force is not set. */
+function handleExistingHome(home: string, result: InitResult): InitResult {
+  for (const dir of standardDirs(home)) {
+    result.skipped.push(dir);
+  }
+  return result;
+}
+
+/** Create a single directory, handling EEXIST gracefully. */
+async function createDir(dir: string, result: InitResult, dryRun: boolean): Promise<void> {
+  if (dryRun) {
+    result.created.push(dir);
+  } else {
+    try {
+      await mkdir(dir, { recursive: true });
+      result.created.push(dir);
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== "EEXIST") throw e;
+      result.skipped.push(dir);
+    }
+  }
+}
+
 /** Run the init command. Returns a result summary. */
 export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   const home = opts.agentsHomeOverride ?? agentsHome();
   const result: InitResult = { alreadyExists: false, created: [], skipped: [] };
 
-  let homeExists = false;
-  try {
-    const s = await stat(home);
-    homeExists = s.isDirectory();
-  } catch {
-    homeExists = false;
-  }
-
+  const homeExists = await checkHomeExists(home);
   if (homeExists) {
     result.alreadyExists = true;
     if (!opts.force) {
-      // Dry-run still reports dirs as skipped
-      for (const dir of standardDirs(home)) {
-        result.skipped.push(dir);
-      }
-      return result;
+      return handleExistingHome(home, result);
     }
   }
 
   const dirs = standardDirs(home);
   for (const dir of dirs) {
-    if (opts.dryRun) {
-      result.created.push(dir);
-    } else {
-      try {
-        await mkdir(dir, { recursive: true });
-        result.created.push(dir);
-      } catch (e) {
-        // If directory already exists that's fine; anything else is unexpected
-        const err = e as NodeJS.ErrnoException;
-        if (err.code !== "EEXIST") throw e;
-        result.skipped.push(dir);
-      }
-    }
+    await createDir(dir, result, opts.dryRun ?? false);
   }
   return result;
 }
