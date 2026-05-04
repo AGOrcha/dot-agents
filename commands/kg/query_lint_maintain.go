@@ -198,7 +198,6 @@ func sortScoredNotesDesc(scored []scoredNoteResult) {
 	}
 }
 
-
 // searchByLinks returns notes linked from a given note's links field.
 func searchByLinks(kgHomeDir, noteID string) ([]GraphQueryResult, error) {
 	exists, path := noteExists(kgHomeDir, noteID)
