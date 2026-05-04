@@ -59,14 +59,23 @@ var validDelegationStatuses = map[string]bool{
 	"pending": true, "active": true, "completed": true, "failed": true, "cancelled": true,
 }
 
+const (
+	delegationAgentsDir         = ".agents"
+	delegationProposalRoutePfx  = "proposal:"
+	errLoadTasksForPlanFmt      = "load tasks for plan %s: %w"
+	errTaskNotFoundInPlanShort  = "task %s not found in plan %s"
+	delegationTaskNoteRouteFmt  = "task_note:%s/%s"
+	delegationPlanSummaryRteFmt = "plan_summary:%s"
+)
+
 func isValidDelegationStatus(s string) bool { return validDelegationStatuses[s] }
 
 func delegationDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "active", "delegation")
+	return filepath.Join(projectPath, delegationAgentsDir, "active", "delegation")
 }
 
 func mergeBackDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "active", "merge-back")
+	return filepath.Join(projectPath, delegationAgentsDir, "active", "merge-back")
 }
 
 func loadDelegationContract(projectPath, taskID string) (*DelegationContract, error) {
@@ -209,7 +218,7 @@ func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
 }
 
 func foldBackDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "active", "fold-back")
+	return filepath.Join(projectPath, delegationAgentsDir, "active", "fold-back")
 }
 
 func appendFoldBackBullet(notes, observation string) string {
@@ -286,10 +295,10 @@ func loadFoldBackArtifactByID(projectPath, id string) (foldBackArtifact, error) 
 }
 
 func proposalAbsPathFromRoutedTo(routed string) (string, error) {
-	if !strings.HasPrefix(routed, "proposal:") {
+	if !strings.HasPrefix(routed, delegationProposalRoutePfx) {
 		return "", fmt.Errorf("not a proposal route: %q", routed)
 	}
-	name := strings.TrimPrefix(routed, "proposal:")
+	name := strings.TrimPrefix(routed, delegationProposalRoutePfx)
 	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 		return "", fmt.Errorf("invalid proposal name in route %q", routed)
 	}
@@ -468,7 +477,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		if prior.TaskID != "" {
 			tf, err := loadCanonicalTasks(project.Path, planID)
 			if err != nil {
-				return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+				return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
 			}
 			var found bool
 			for i := range tf.Tasks {
@@ -479,12 +488,12 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 				}
 			}
 			if !found {
-				return fmt.Errorf("task %s not found in plan %s", prior.TaskID, planID)
+				return fmt.Errorf(errTaskNotFoundInPlanShort, prior.TaskID, planID)
 			}
 			if err := saveCanonicalTasks(project.Path, tf); err != nil {
 				return err
 			}
-			artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, prior.TaskID)
+			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, prior.TaskID)
 		} else {
 			plan, err := loadCanonicalPlan(project.Path, planID)
 			if err != nil {
@@ -496,7 +505,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 				return err
 			}
 			artifact.TaskID = ""
-			artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+			artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
 		}
 
 	case !priorExists && propose:
@@ -523,14 +532,14 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		if err := writeFoldBackProposalFile(proposalPath, fm, observation); err != nil {
 			return err
 		}
-		artifact.RoutedTo = "proposal:" + proposalName
+		artifact.RoutedTo = delegationProposalRoutePfx + proposalName
 
 	case !priorExists && slug != "" && strings.TrimSpace(taskID) != "":
 		artifact.Classification = "small"
 		artifact.TaskID = taskID
 		tf, err := loadCanonicalTasks(project.Path, planID)
 		if err != nil {
-			return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+			return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
 		}
 		var found bool
 		for i := range tf.Tasks {
@@ -541,12 +550,12 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+			return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
 		}
 		if err := saveCanonicalTasks(project.Path, tf); err != nil {
 			return err
 		}
-		artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
+		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, taskID)
 
 	case !priorExists && slug != "" && strings.TrimSpace(taskID) == "":
 		artifact.Classification = "small"
@@ -560,14 +569,14 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		if err := saveCanonicalPlan(project.Path, plan); err != nil {
 			return err
 		}
-		artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
 
 	case !priorExists && !propose && strings.TrimSpace(taskID) != "":
 		artifact.Classification = "small"
 		artifact.TaskID = taskID
 		tf, err := loadCanonicalTasks(project.Path, planID)
 		if err != nil {
-			return fmt.Errorf("load tasks for plan %s: %w", planID, err)
+			return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
 		}
 		var found bool
 		for i := range tf.Tasks {
@@ -578,12 +587,12 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("task %s not found in plan %s", taskID, planID)
+			return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
 		}
 		if err := saveCanonicalTasks(project.Path, tf); err != nil {
 			return err
 		}
-		artifact.RoutedTo = fmt.Sprintf("task_note:%s/%s", planID, taskID)
+		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, taskID)
 
 	case !priorExists && !propose && strings.TrimSpace(taskID) == "":
 		artifact.Classification = "small"
@@ -597,7 +606,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		if err := saveCanonicalPlan(project.Path, plan); err != nil {
 			return err
 		}
-		artifact.RoutedTo = fmt.Sprintf("plan_summary:%s", planID)
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
 
 	default:
 		return fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", slug, propose, priorExists)
@@ -696,7 +705,7 @@ func runWorkflowFoldBackList(cmd *cobra.Command, _ []string) error {
 }
 
 func ensureTaskVerificationDir(projectPath, taskID string) error {
-	dir := filepath.Join(projectPath, ".agents", "active", "verification", taskID)
+	dir := filepath.Join(projectPath, delegationAgentsDir, "active", "verification", taskID)
 	return os.MkdirAll(dir, 0755)
 }
 
@@ -1029,7 +1038,7 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 }
 
 func delegationBundlesDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "active", "delegation-bundles")
+	return filepath.Join(projectPath, delegationAgentsDir, "active", "delegation-bundles")
 }
 
 func trimStringSlice(in []string) []string {
@@ -1415,10 +1424,10 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	}
 
 	dateStr := time.Now().UTC().Format("2006-01-02")
-	archiveDir := filepath.Join(project.Path, ".agents", "history", planID, "delegate-merge-back-archive", dateStr, taskID)
+	archiveDir := filepath.Join(project.Path, delegationAgentsDir, "history", planID, "delegate-merge-back-archive", dateStr, taskID)
 	mergeBackSrc := filepath.Join(mergeBackDir(project.Path), taskID+".md")
 	delegationSrc := filepath.Join(delegationDir(project.Path), taskID+".yaml")
-	verificationSrcDir := filepath.Join(project.Path, ".agents", "active", "verification", taskID)
+	verificationSrcDir := filepath.Join(project.Path, delegationAgentsDir, "active", "verification", taskID)
 
 	if err := copyWorkflowArtifact(mergeBackSrc, filepath.Join(archiveDir, "merge-back.md")); err != nil {
 		return fmt.Errorf("archive merge-back: %w", err)

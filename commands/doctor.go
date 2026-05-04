@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const doctorOpenCodeDir = ".opencode"
+
 func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -252,7 +254,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 					if projectPath == "" {
 						continue
 					}
-					linkPath := filepath.Join(projectPath, ".opencode", "plugins", spec.Name)
+					linkPath := filepath.Join(projectPath, doctorOpenCodeDir, "plugins", spec.Name)
 					info, err := os.Lstat(linkPath)
 					if err != nil || info.Mode()&os.ModeSymlink == 0 {
 						continue
@@ -545,7 +547,7 @@ func collectBrokenUserLinks(agentsHome string) []brokenLink {
 	}
 
 	// OpenCode: ~/.opencode/agent/*
-	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
 	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(opencodeAgentDir, e.Name())
@@ -722,7 +724,7 @@ func printUserConfigStatus(agentsHome string) {
 	}
 
 	// OpenCode
-	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
 	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(opencodeAgentDir, e.Name())

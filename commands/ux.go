@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const uxUsageHintFmt = "Usage: %s"
+
 // CLIError carries actionable hints for user-facing command failures.
 type CLIError struct {
 	Message   string
@@ -88,7 +90,7 @@ func ExactArgsWithHints(n int, hints ...string) cobra.PositionalArgs {
 		return UsageError(
 			fmt.Sprintf("%s expects %d %s, got %d", cmd.CommandPath(), n, noun, len(args)),
 			append([]string{
-				fmt.Sprintf("Usage: %s", cmd.UseLine()),
+				fmt.Sprintf(uxUsageHintFmt, cmd.UseLine()),
 				helpHintForCommand(cmd),
 			}, hints...)...,
 		)
@@ -103,7 +105,7 @@ func NoArgsWithHints(hints ...string) cobra.PositionalArgs {
 		return UsageError(
 			fmt.Sprintf("%s does not accept positional arguments (got %d)", cmd.CommandPath(), len(args)),
 			append([]string{
-				fmt.Sprintf("Usage: %s", cmd.UseLine()),
+				fmt.Sprintf(uxUsageHintFmt, cmd.UseLine()),
 				helpHintForCommand(cmd),
 			}, hints...)...,
 		)
@@ -118,7 +120,7 @@ func MaximumNArgsWithHints(n int, hints ...string) cobra.PositionalArgs {
 		return UsageError(
 			fmt.Sprintf("%s accepts at most %d argument(s), got %d", cmd.CommandPath(), n, len(args)),
 			append([]string{
-				fmt.Sprintf("Usage: %s", cmd.UseLine()),
+				fmt.Sprintf(uxUsageHintFmt, cmd.UseLine()),
 				helpHintForCommand(cmd),
 			}, hints...)...,
 		)
@@ -133,7 +135,7 @@ func RangeArgsWithHints(min, max int, hints ...string) cobra.PositionalArgs {
 		return UsageError(
 			fmt.Sprintf("%s expects between %d and %d arguments, got %d", cmd.CommandPath(), min, max, len(args)),
 			append([]string{
-				fmt.Sprintf("Usage: %s", cmd.UseLine()),
+				fmt.Sprintf(uxUsageHintFmt, cmd.UseLine()),
 				helpHintForCommand(cmd),
 			}, hints...)...,
 		)

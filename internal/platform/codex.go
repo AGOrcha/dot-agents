@@ -19,6 +19,7 @@ const (
 	codexDir            = ".codex"
 	codexHooksJSON      = "hooks.json"
 	codexAgentsMarkdown = "AGENTS.md"
+	codexAgentMDFile    = "AGENT.md"
 )
 
 func NewCodex() Platform { return &codex{} }
@@ -202,7 +203,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 }
 
 func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, codexAgentMDFile)
 	if err != nil {
 		return nil
 	}
@@ -225,7 +226,7 @@ func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
 }
 
 func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
-	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
 		return nil
 	}
@@ -249,7 +250,7 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 }
 
 func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
-	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
 		return nil
 	}

@@ -17,6 +17,7 @@ const (
 	claudeSettingsJSON      = "settings.json"
 	claudeSettingsLocalJSON = "settings.local.json"
 	claudeDir               = ".claude"
+	claudeAgentsBucketDir   = ".agents"
 )
 
 func NewClaude() Platform { return &claude{} }
@@ -290,7 +291,7 @@ func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
 	// syncScopedDirSymlinks). Shared-target projection may already create `.claude/agents/*`;
 	// this pass also ensures `.agents/agents/*` and heals incorrect symlinks idempotently.
 	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md",
-		filepath.Join(repoPath, ".agents", "agents"),
+		filepath.Join(repoPath, claudeAgentsBucketDir, "agents"),
 		filepath.Join(repoPath, claudeDir, "agents"),
 	)
 }
@@ -311,7 +312,7 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
 	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome)
 	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome)
-	c.removeScopedDirLinks(filepath.Join(repoPath, ".agents", "skills"), agentsHome)
+	c.removeScopedDirLinks(filepath.Join(repoPath, claudeAgentsBucketDir, "skills"), agentsHome)
 	return nil
 }
 
@@ -365,7 +366,7 @@ func isSymlink(path string) bool {
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project,
 		filepath.Join(claudeDir, "skills"),
-		filepath.Join(".agents", "skills"),
+		filepath.Join(claudeAgentsBucketDir, "skills"),
 	)
 	if err != nil {
 		return nil, err

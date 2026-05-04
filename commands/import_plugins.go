@@ -74,6 +74,15 @@ const (
 	packagePluginMarketplaceFile = "marketplace"
 	packagePluginComponentFile   = "component"
 	packagePluginOverlayFile     = "overlay"
+
+	importHooksJSON       = "hooks.json"
+	importPluginJSON      = "plugin.json"
+	importMarketplaceJSON = "marketplace.json"
+	importAgentsPrefix    = "agents/"
+	importSkillsPrefix    = "skills/"
+	importCommandsPrefix  = "commands/"
+	importHooksPrefix     = "hooks/"
+	importRulesPrefix     = "rules/"
 )
 
 func gatherDirectPackagePluginCandidates(project, projectPath string) []importCandidate {
@@ -153,7 +162,7 @@ func directPackagePluginRefs(sourceRoot string) ([]directPackagePluginRef, error
 			directPackagePluginDirRef("copilot", name, "agents", manifest.Agents),
 			directPackagePluginDirRef("copilot", name, "skills", manifest.Skills),
 			directPackagePluginDirRef("copilot", name, "commands", manifest.Commands),
-			directPackagePluginFileRef("copilot", name, manifest.Hooks, "hooks.json"),
+			directPackagePluginFileRef("copilot", name, manifest.Hooks, importHooksJSON),
 			directPackagePluginFileRef("copilot", name, manifest.MCPServers, relMCPJSON),
 		}
 	})
@@ -167,7 +176,7 @@ func directPackagePluginRefs(sourceRoot string) ([]directPackagePluginRef, error
 			directPackagePluginDirRef("copilot", name, "agents", manifest.Agents),
 			directPackagePluginDirRef("copilot", name, "skills", manifest.Skills),
 			directPackagePluginDirRef("copilot", name, "commands", manifest.Commands),
-			directPackagePluginFileRef("copilot", name, manifest.Hooks, "hooks.json"),
+			directPackagePluginFileRef("copilot", name, manifest.Hooks, importHooksJSON),
 			directPackagePluginFileRef("copilot", name, manifest.MCPServers, relMCPJSON),
 		}
 	})
@@ -179,7 +188,7 @@ func directPackagePluginRefs(sourceRoot string) ([]directPackagePluginRef, error
 	refs, err = directPackagePluginRefsForManifest(sourceRoot, "codex", filepath.Join(sourceRoot, relCodexPluginDir[:len(relCodexPluginDir)-1], relCopilotPluginManifest), func(manifest importedPackagePluginManifest, name string) []directPackagePluginRef {
 		return []directPackagePluginRef{
 			directPackagePluginDirRef("codex", name, "skills", manifest.Skills),
-			directPackagePluginFileRef("codex", name, manifest.Hooks, "hooks.json"),
+			directPackagePluginFileRef("codex", name, manifest.Hooks, importHooksJSON),
 			directPackagePluginFileRef("codex", name, manifest.MCPServers, relMCPJSON),
 			directPackagePluginFileRef("codex", name, manifest.Apps, ".app.json"),
 		}
@@ -346,7 +355,7 @@ func packagePluginLayout(rel string) (platformID, rootRel, kind string) {
 		return "codex", strings.TrimSuffix(relCodexPluginDir, "/"), packagePluginMarketplaceFile
 	case strings.HasPrefix(rel, relGitHubPluginDir):
 		return "copilot", strings.TrimSuffix(relGitHubPluginDir, "/"), packagePluginLayoutKind(rel, relGitHubPluginDir)
-	case strings.HasPrefix(rel, "agents/"), strings.HasPrefix(rel, "skills/"), strings.HasPrefix(rel, "commands/"):
+	case strings.HasPrefix(rel, importAgentsPrefix), strings.HasPrefix(rel, importSkillsPrefix), strings.HasPrefix(rel, importCommandsPrefix):
 		return "copilot", "", packagePluginComponentFile
 	case strings.HasPrefix(rel, relClaudePluginDir):
 		return "claude", strings.TrimSuffix(relClaudePluginDir, "/"), packagePluginLayoutKind(rel, relClaudePluginDir)
@@ -362,9 +371,9 @@ func packagePluginLayout(rel string) (platformID, rootRel, kind string) {
 func packagePluginLayoutKind(rel, rootPrefix string) string {
 	trimmed := strings.TrimPrefix(rel, rootPrefix)
 	switch {
-	case trimmed == "plugin.json":
+	case trimmed == importPluginJSON:
 		return packagePluginManifestFile
-	case trimmed == "marketplace.json":
+	case trimmed == importMarketplaceJSON:
 		return packagePluginMarketplaceFile
 	case trimmed == "commands/plugin.json":
 		return packagePluginComponentFile
@@ -379,7 +388,7 @@ func packagePluginLayoutKind(rel, rootPrefix string) string {
 	case trimmed == "mcp.json", trimmed == ".mcp.json":
 		return packagePluginComponentFile
 	default:
-		if strings.HasPrefix(trimmed, "commands/") || strings.HasPrefix(trimmed, "agents/") || strings.HasPrefix(trimmed, "skills/") || strings.HasPrefix(trimmed, "hooks/") || strings.HasPrefix(trimmed, "rules/") {
+		if strings.HasPrefix(trimmed, importCommandsPrefix) || strings.HasPrefix(trimmed, importAgentsPrefix) || strings.HasPrefix(trimmed, importSkillsPrefix) || strings.HasPrefix(trimmed, importHooksPrefix) || strings.HasPrefix(trimmed, importRulesPrefix) {
 			return packagePluginComponentFile
 		}
 		if strings.HasPrefix(trimmed, "mcp/") {
@@ -398,7 +407,7 @@ func packagePluginManifestPath(sourceRoot, rootRel, platformID string) string {
 		if rootRel == "" {
 			return filepath.Join(sourceRoot, relCopilotPluginManifest)
 		}
-		return filepath.Join(sourceRoot, rootRel, "plugin.json")
+		return filepath.Join(sourceRoot, rootRel, importPluginJSON)
 	case "codex":
 		if rootRel == "" {
 			return filepath.Join(sourceRoot, relCodexPluginDir[:len(relCodexPluginDir)-1], relCopilotPluginManifest)
@@ -428,7 +437,7 @@ func packagePluginNameFromMarketplace(sourcePath, platformID, manifestPath strin
 	paths := []string{sourcePath}
 	switch platformID {
 	case "copilot", "codex", "claude", "cursor":
-		paths = append(paths, filepath.Join(filepath.Dir(manifestPath), "marketplace.json"))
+		paths = append(paths, filepath.Join(filepath.Dir(manifestPath), importMarketplaceJSON))
 	}
 
 	for _, path := range paths {
@@ -501,7 +510,7 @@ func canonicalPackagePluginManifestOutputs(c importCandidate, platformID, name s
 		return nil, true, err
 	}
 	outputs = append(outputs, importOutput{
-		destRel: filepath.ToSlash(filepath.Join(base, "platforms", platformID, "plugin.json")),
+		destRel: filepath.ToSlash(filepath.Join(base, "platforms", platformID, importPluginJSON)),
 		content: raw,
 	})
 	return outputs, true, nil
@@ -514,7 +523,7 @@ func canonicalPackagePluginMarketplaceOutputs(c importCandidate, platformID, nam
 	}
 	base := filepath.ToSlash(filepath.Join("plugins", c.project, name))
 	return []importOutput{{
-		destRel: filepath.ToSlash(filepath.Join(base, "platforms", platformID, "marketplace.json")),
+		destRel: filepath.ToSlash(filepath.Join(base, "platforms", platformID, importMarketplaceJSON)),
 		content: raw,
 	}}, true, nil
 }
@@ -563,60 +572,60 @@ func packagePluginComponentPath(trimmed, platformID string) (component, rest str
 	switch platformID {
 	case "claude":
 		switch {
-		case strings.HasPrefix(trimmed, "commands/"):
-			return "commands", strings.TrimPrefix(trimmed, "commands/"), true
-		case strings.HasPrefix(trimmed, "agents/"):
-			return "agents", strings.TrimPrefix(trimmed, "agents/"), true
-		case strings.HasPrefix(trimmed, "skills/"):
-			return "skills", strings.TrimPrefix(trimmed, "skills/"), true
-		case strings.HasPrefix(trimmed, "hooks/"):
-			return "hooks", strings.TrimPrefix(trimmed, "hooks/"), true
+		case strings.HasPrefix(trimmed, importCommandsPrefix):
+			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
+		case strings.HasPrefix(trimmed, importAgentsPrefix):
+			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
+		case strings.HasPrefix(trimmed, importSkillsPrefix):
+			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
+		case strings.HasPrefix(trimmed, importHooksPrefix):
+			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
 		case strings.HasPrefix(trimmed, "mcp/"):
 			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
-		case strings.HasPrefix(trimmed, "rules/"):
-			return "rules", strings.TrimPrefix(trimmed, "rules/"), true
+		case strings.HasPrefix(trimmed, importRulesPrefix):
+			return "rules", strings.TrimPrefix(trimmed, importRulesPrefix), true
 		}
 	case "cursor":
 		switch {
-		case strings.HasPrefix(trimmed, "rules/"):
-			return "rules", strings.TrimPrefix(trimmed, "rules/"), true
-		case strings.HasPrefix(trimmed, "commands/"):
-			return "commands", strings.TrimPrefix(trimmed, "commands/"), true
-		case strings.HasPrefix(trimmed, "agents/"):
-			return "agents", strings.TrimPrefix(trimmed, "agents/"), true
-		case strings.HasPrefix(trimmed, "skills/"):
-			return "skills", strings.TrimPrefix(trimmed, "skills/"), true
-		case strings.HasPrefix(trimmed, "hooks/"):
-			return "hooks", strings.TrimPrefix(trimmed, "hooks/"), true
+		case strings.HasPrefix(trimmed, importRulesPrefix):
+			return "rules", strings.TrimPrefix(trimmed, importRulesPrefix), true
+		case strings.HasPrefix(trimmed, importCommandsPrefix):
+			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
+		case strings.HasPrefix(trimmed, importAgentsPrefix):
+			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
+		case strings.HasPrefix(trimmed, importSkillsPrefix):
+			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
+		case strings.HasPrefix(trimmed, importHooksPrefix):
+			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
 		case strings.HasPrefix(trimmed, "mcp/"):
 			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
 		case trimmed == "mcp.json", trimmed == ".mcp.json":
 			return "mcp", trimmed, true
 		}
 	case "codex":
-		if strings.HasPrefix(trimmed, "skills/") {
-			return "skills", strings.TrimPrefix(trimmed, "skills/"), true
+		if strings.HasPrefix(trimmed, importSkillsPrefix) {
+			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
 		}
-		if strings.HasPrefix(trimmed, "agents/") {
-			return "agents", strings.TrimPrefix(trimmed, "agents/"), true
+		if strings.HasPrefix(trimmed, importAgentsPrefix) {
+			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
 		}
-		if strings.HasPrefix(trimmed, "hooks/") {
-			return "hooks", strings.TrimPrefix(trimmed, "hooks/"), true
+		if strings.HasPrefix(trimmed, importHooksPrefix) {
+			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
 		}
 		if strings.HasPrefix(trimmed, "mcp/") {
 			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
 		}
-		if strings.HasPrefix(trimmed, "commands/") {
-			return "commands", strings.TrimPrefix(trimmed, "commands/"), true
+		if strings.HasPrefix(trimmed, importCommandsPrefix) {
+			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
 		}
 	case "copilot":
 		switch {
-		case strings.HasPrefix(trimmed, "agents/"):
-			return "agents", strings.TrimPrefix(trimmed, "agents/"), true
-		case strings.HasPrefix(trimmed, "skills/"):
-			return "skills", strings.TrimPrefix(trimmed, "skills/"), true
-		case strings.HasPrefix(trimmed, "commands/"):
-			return "commands", strings.TrimPrefix(trimmed, "commands/"), true
+		case strings.HasPrefix(trimmed, importAgentsPrefix):
+			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
+		case strings.HasPrefix(trimmed, importSkillsPrefix):
+			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
+		case strings.HasPrefix(trimmed, importCommandsPrefix):
+			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
 		}
 	}
 	return "", "", false

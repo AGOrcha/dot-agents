@@ -14,6 +14,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const errUnknownPreferenceKeyFmt = "unknown preference key %q"
+
 type WorkflowPreferences struct {
 	Verification WorkflowVerificationPrefs `json:"verification" yaml:"verification"`
 	Planning     WorkflowPlanningPrefs     `json:"planning" yaml:"planning"`
@@ -282,7 +284,7 @@ func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 		p.Execution.MaxParallelWorkers = &n
 	default:
 		return deps.ErrorWithHints(
-			fmt.Sprintf("unknown preference key %q", key),
+			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
 			"Run `dot-agents workflow prefs` to list valid preference keys.",
 		)
 	}
@@ -411,7 +413,7 @@ func runWorkflowPrefs() error {
 func runWorkflowPrefsSetLocal(key, value string) error {
 	if !isValidPreferenceKey(key) {
 		return deps.ErrorWithHints(
-			fmt.Sprintf("unknown preference key %q", key),
+			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
 			"Run `dot-agents workflow prefs` to see valid preference keys.",
 		)
 	}
@@ -429,7 +431,7 @@ func runWorkflowPrefsSetLocal(key, value string) error {
 func runWorkflowPrefsSetShared(key, value string) error {
 	if !isValidPreferenceKey(key) {
 		return deps.ErrorWithHints(
-			fmt.Sprintf("unknown preference key %q", key),
+			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
 			"Run `dot-agents workflow prefs` to see valid preference keys.",
 		)
 	}

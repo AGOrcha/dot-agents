@@ -32,6 +32,10 @@ const (
 	statusClaudeSettingsLocalJSON = "settings.local.json"
 	statusClaudeSettingsJSON      = "settings.json"
 	globalRulesPrefix             = "global--"
+	statusClaudeMCPJSON           = ".mcp.json"
+	statusCodexConfigToml         = "config.toml"
+	statusOpenCodeJSON            = "opencode.json"
+	statusVSCodeDir               = ".vscode"
 )
 
 type platformBadge struct {
@@ -197,7 +201,7 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 		}
 	}
 	addManagedCounts(&claudeOK, &claudeWarn, []string{
-		filepath.Join(path, ".mcp.json"),
+		filepath.Join(path, statusClaudeMCPJSON),
 		filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
 	}, []string{
 		filepath.Join(path, statusClaudeDir, "agents"),
@@ -210,7 +214,7 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 	codexOK, codexWarn := 0, 0
 	addManagedCounts(&codexOK, &codexWarn, []string{
 		agentsMD,
-		filepath.Join(path, statusCodexDir, "config.toml"),
+		filepath.Join(path, statusCodexDir, statusCodexConfigToml),
 		filepath.Join(path, statusCodexDir, statusHooksJSON),
 	}, []string{
 		filepath.Join(path, statusCodexDir, "agents"),
@@ -221,7 +225,7 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 	// OpenCode
 	opencodeOK, opencodeWarn := 0, 0
 	addManagedCounts(&opencodeOK, &opencodeWarn, []string{
-		filepath.Join(path, "opencode.json"),
+		filepath.Join(path, statusOpenCodeJSON),
 	}, []string{
 		filepath.Join(path, statusOpenCodeDir, "agent"),
 		filepath.Join(path, statusAgentsDir, "skills"),
@@ -232,7 +236,7 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 	copilotOK, copilotWarn := 0, 0
 	addManagedCounts(&copilotOK, &copilotWarn, []string{
 		filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
-		filepath.Join(path, ".vscode", statusCopilotMCPJSON),
+		filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON),
 		filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
 	}, []string{
 		filepath.Join(path, statusGitHubDir, "agents"),
@@ -466,7 +470,7 @@ func collectProjectPlatforms(path string) []statusJSONPlatform {
 		)),
 		platformStatus("Claude", countPlatformHealth(
 			[]string{
-				filepath.Join(path, ".mcp.json"),
+				filepath.Join(path, statusClaudeMCPJSON),
 				filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
 			},
 			[]string{
@@ -478,7 +482,7 @@ func collectProjectPlatforms(path string) []statusJSONPlatform {
 		platformStatus("Codex", countPlatformHealth(
 			[]string{
 				filepath.Join(path, statusAgentsMarkdown),
-				filepath.Join(path, statusCodexDir, "config.toml"),
+				filepath.Join(path, statusCodexDir, statusCodexConfigToml),
 				filepath.Join(path, statusCodexDir, statusHooksJSON),
 			},
 			[]string{
@@ -488,7 +492,7 @@ func collectProjectPlatforms(path string) []statusJSONPlatform {
 		)),
 		platformStatus("OpenCode", countPlatformHealth(
 			[]string{
-				filepath.Join(path, "opencode.json"),
+				filepath.Join(path, statusOpenCodeJSON),
 			},
 			[]string{
 				filepath.Join(path, statusOpenCodeDir, "agent"),
@@ -498,7 +502,7 @@ func collectProjectPlatforms(path string) []statusJSONPlatform {
 		platformStatus("Copilot", countPlatformHealth(
 			[]string{
 				filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
-				filepath.Join(path, ".vscode", statusCopilotMCPJSON),
+				filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON),
 				filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
 			},
 			[]string{
@@ -1000,7 +1004,7 @@ func printClaudeAudit(name, path, agentsHome string) {
 		fmt.Fprintf(os.Stdout, "      %s○%s %s/rules/ %s(empty)%s\n", ui.Dim, ui.Reset, statusClaudeDir, ui.Dim, ui.Reset)
 	}
 	// Claude MCP link (.mcp.json)
-	claudeMCPPath := filepath.Join(path, ".mcp.json")
+	claudeMCPPath := filepath.Join(path, statusClaudeMCPJSON)
 	if dest, err := os.Readlink(claudeMCPPath); err == nil {
 		displayDest := config.DisplayPath(dest)
 		if _, err := os.Stat(dest); err == nil {
@@ -1017,7 +1021,7 @@ func printClaudeAudit(name, path, agentsHome string) {
 func printCodexAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sCodex%s\n", ui.Cyan, ui.Reset)
 	printCodexAgentsMD(filepath.Join(path, statusAgentsMarkdown))
-	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, "config.toml"), ".codex/config.toml")
+	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusCodexConfigToml), ".codex/config.toml")
 	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusHooksJSON), ".codex/hooks.json")
 	printCodexSkillsAudit(filepath.Join(path, statusAgentsDir, "skills"))
 	printCodexAgentsAudit(filepath.Join(path, statusCodexDir, "agents"))
@@ -1102,7 +1106,7 @@ func printOpenCodeAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
 
 	// opencode.json symlink
-	opencodeJSON := filepath.Join(path, "opencode.json")
+	opencodeJSON := filepath.Join(path, statusOpenCodeJSON)
 	if info, err := os.Lstat(opencodeJSON); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			dest, _ := os.Readlink(opencodeJSON)
@@ -1162,7 +1166,7 @@ func printCopilotAudit(name, path string) {
 		fmt.Fprintf(os.Stdout, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
 	}
 	// Copilot MCP link (.vscode/mcp.json)
-	vscodeMCPPath := filepath.Join(path, ".vscode", statusCopilotMCPJSON)
+	vscodeMCPPath := filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON)
 	if dest, err := os.Readlink(vscodeMCPPath); err == nil {
 		displayDest := config.DisplayPath(dest)
 		if _, err := os.Stat(dest); err == nil {

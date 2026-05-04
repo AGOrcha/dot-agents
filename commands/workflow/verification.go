@@ -12,6 +12,8 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
+const verifyRecordedByLabel = "dot-agents workflow verify record"
+
 // ── Verification log ──────────────────────────────────────────────────────────
 
 func isValidVerificationKind(k string) bool {
@@ -151,7 +153,7 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 		EscalationReason: strings.TrimSpace(escalation),
 		ReviewerNotes:    strings.TrimSpace(reviewerNotes),
 		RecordedAt:       now,
-		RecordedBy:       "dot-agents workflow verify record",
+		RecordedBy:       verifyRecordedByLabel,
 	}
 	if err := writeReviewDecisionYAML(project.Path, doc); err != nil {
 		return err
@@ -167,7 +169,7 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 		Scope:         scope,
 		Summary:       strings.TrimSpace(summary),
 		Artifacts:     []string{artifactRel},
-		RecordedBy:    "dot-agents workflow verify record",
+		RecordedBy:    verifyRecordedByLabel,
 	}
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err
@@ -231,7 +233,7 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, veri
 			Summary:       strings.TrimSpace(summary),
 			RecordedAt:    now,
 			DelegationID:  contract.ID,
-			RecordedBy:    "dot-agents workflow verify record",
+			RecordedBy:    verifyRecordedByLabel,
 		}
 		if strings.TrimSpace(command) != "" {
 			doc.Commands = []string{command}
@@ -255,7 +257,7 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, veri
 		Scope:         scope,
 		Summary:       summary,
 		Artifacts:     artifacts,
-		RecordedBy:    "dot-agents workflow verify record",
+		RecordedBy:    verifyRecordedByLabel,
 	}
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err

@@ -12,6 +12,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const reviewProposalIDHint = "Pass the proposal ID from `dot-agents review`."
+
 func NewReviewCmd() *cobra.Command {
 	var rejectReason string
 
@@ -38,7 +40,7 @@ not be applied silently.`,
 		Example: ExampleBlock(
 			"  dot-agents review show pref-default-model",
 		),
-		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
+		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewShow(args[0])
 		},
@@ -50,7 +52,7 @@ not be applied silently.`,
 		Example: ExampleBlock(
 			"  dot-agents review approve pref-default-model",
 		),
-		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
+		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewApprove(args[0])
 		},
@@ -62,7 +64,7 @@ not be applied silently.`,
 		Example: ExampleBlock(
 			"  dot-agents review reject pref-default-model --reason \"not ready\"",
 		),
-		Args: ExactArgsWithHints(1, "Pass the proposal ID from `dot-agents review`."),
+		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewReject(args[0], rejectReason)
 		},

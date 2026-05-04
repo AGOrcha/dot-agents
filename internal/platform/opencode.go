@@ -12,7 +12,10 @@ import (
 
 type opencode struct{}
 
-const opencodeJSON = "opencode.json"
+const (
+	opencodeJSON = "opencode.json"
+	opencodeDir  = ".opencode"
+)
 
 func NewOpenCode() Platform { return &opencode{} }
 
@@ -55,7 +58,7 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 
 func (o *opencode) ensureUserAgents(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".opencode", "agent")
+		userAgentsDir := filepath.Join(homeRoot, opencodeDir, "agent")
 		if err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", userAgentsDir, ".md"); err != nil {
 			return err
 		}
@@ -68,7 +71,7 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, opencodeJSON), agentsHome)
 
-	agentDir := filepath.Join(repoPath, ".opencode", "agent")
+	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
 			links.RemoveIfSymlinkUnder(filepath.Join(agentDir, e.Name()), agentsHome)
@@ -90,11 +93,11 @@ func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error)
 	if err != nil {
 		return nil, err
 	}
-	plugins, err := BuildSharedPluginBundleIntents(project, filepath.Join(".opencode", "plugins"))
+	plugins, err := BuildSharedPluginBundleIntents(project, filepath.Join(opencodeDir, "plugins"))
 	if err != nil {
 		return nil, err
 	}
-	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(".opencode", "agent"), ".md")
+	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(opencodeDir, "agent"), ".md")
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const mcpInvalidParamsMessage = "invalid params"
+
 type mcpBridge interface {
 	Build(opts BuildOptions) error
 	Update(opts UpdateOptions) error
@@ -150,7 +152,7 @@ func (s *MCPServer) dispatch(method string, id json.RawMessage, params json.RawM
 		var call mcpToolCall
 		if len(params) > 0 {
 			if err := json.Unmarshal(params, &call); err != nil {
-				return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+				return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 			}
 		}
 		switch call.Name {
@@ -341,10 +343,10 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 		Depth  int    `json:"depth"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 	}
 	if strings.TrimSpace(req.Symbol) == "" {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: "symbol is required"}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: "symbol is required"}
 	}
 	depth := req.Depth
 	if depth <= 0 {
@@ -416,10 +418,10 @@ func (s *MCPServer) handleSemanticSearchNodes(params json.RawMessage) (json.RawM
 		Limit int    `json:"limit"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 	}
 	if strings.TrimSpace(req.Query) == "" {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: "query is required"}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: "query is required"}
 	}
 	limit := req.Limit
 	if limit <= 0 {
@@ -449,7 +451,7 @@ func (s *MCPServer) handleQueryGraph(params json.RawMessage) (json.RawMessage, e
 		Scope  string `json:"scope"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 	}
 	switch strings.ToLower(strings.TrimSpace(req.Intent)) {
 	case "symbol_lookup", "semantic_search", "search":
@@ -486,10 +488,10 @@ func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMess
 		Files []string `json:"files"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 	}
 	if len(req.Files) == 0 {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: "files are required"}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: "files are required"}
 	}
 	bridge, err := s.requireBridge()
 	if err != nil {
@@ -546,11 +548,11 @@ func (s *MCPServer) handleGetDocsSection(params json.RawMessage) (json.RawMessag
 		Section string `json:"section"`
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: err.Error()}
 	}
 	section := strings.TrimSpace(req.Section)
 	if section == "" {
-		return nil, &rpcError{Code: -32602, Message: "invalid params", Data: "section is required"}
+		return nil, &rpcError{Code: -32602, Message: mcpInvalidParamsMessage, Data: "section is required"}
 	}
 	candidates := []string{
 		filepath.Join(s.workDir, "docs", "KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md"),

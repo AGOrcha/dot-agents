@@ -18,10 +18,13 @@ import (
 
 const (
 	workflowTasksFileName      = "TASKS.yaml"
+	workflowPlanFileName       = "PLAN.yaml"
 	errPlanNotFoundFmt         = "plan %q not found"
 	errPlanNotFoundWithCause   = "plan %q not found: %w"
 	errTaskNotFoundInPlanFmt   = "task %q not found in plan %q"
 	errTasksForPlanNotFoundFmt = "tasks for plan %q not found: %w"
+	errParseFileFmt            = "parse %s: %w"
+	planTaskSliceIDPrefix      = "slice:"
 )
 
 // ScopeEvidence is the Go representation of a .scope.yaml sidecar file located at
@@ -444,14 +447,14 @@ func deriveScopeRunContextLane(planID, taskID string, adapter *LocalGraphAdapter
 }
 
 func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
-	path := filepath.Join(plansBaseDir(projectPath), planID, "PLAN.yaml")
+	path := filepath.Join(plansBaseDir(projectPath), planID, workflowPlanFileName)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	var plan CanonicalPlan
 	if err := yaml.Unmarshal(content, &plan); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf(errParseFileFmt, path, err)
 	}
 	return &plan, nil
 }
@@ -465,7 +468,7 @@ func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "PLAN.yaml"), content, 0644)
+	return os.WriteFile(filepath.Join(dir, workflowPlanFileName), content, 0644)
 }
 
 func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) {
@@ -476,7 +479,7 @@ func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) 
 	}
 	var tf CanonicalTaskFile
 	if err := yaml.Unmarshal(content, &tf); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf(errParseFileFmt, path, err)
 	}
 	return &tf, nil
 }
@@ -489,7 +492,7 @@ func loadCanonicalSlices(projectPath, planID string) (*CanonicalSliceFile, error
 	}
 	var sf CanonicalSliceFile
 	if err := yaml.Unmarshal(content, &sf); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf(errParseFileFmt, path, err)
 	}
 	return &sf, nil
 }
@@ -575,7 +578,7 @@ func runWorkflowPlanList() error {
 	}
 	if len(ids) == 0 {
 		fmt.Fprintln(os.Stdout, "No canonical plans found.")
-		fmt.Fprintf(os.Stdout, "  Create one at: %s\n", config.DisplayPath(filepath.Join(plansBaseDir(project.Path), "<plan-id>", "PLAN.yaml")))
+		fmt.Fprintf(os.Stdout, "  Create one at: %s\n", config.DisplayPath(filepath.Join(plansBaseDir(project.Path), "<plan-id>", workflowPlanFileName)))
 		return nil
 	}
 	if deps.Flags.JSON() {
@@ -765,7 +768,7 @@ func runWorkflowPlanGraph(planID string) error {
 				if taskEdge.From == taskNode.ID && taskEdge.Type == "contains" {
 					sliceNode, ok := nodeByID[taskEdge.To]
 					if ok && sliceNode.Kind == "slice" {
-						fmt.Fprintf(os.Stdout, "         => [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(sliceNode.ID, "slice:"+sliceNode.PlanID+"/"), "slice:"), sliceNode.Label, sliceNode.Status)
+						fmt.Fprintf(os.Stdout, "         => [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(sliceNode.ID, planTaskSliceIDPrefix+sliceNode.PlanID+"/"), planTaskSliceIDPrefix), sliceNode.Label, sliceNode.Status)
 						for _, sliceEdge := range graph.Edges {
 							if sliceEdge.From != sliceNode.ID || sliceEdge.Type != "depends_on" {
 								continue
@@ -871,7 +874,7 @@ func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, err
 					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s references unknown parent task %s", plan.ID, slice.ID, slice.ParentTaskID))
 					continue
 				}
-				sliceNodeID := "slice:" + plan.ID + "/" + slice.ID
+				sliceNodeID := planTaskSliceIDPrefix + plan.ID + "/" + slice.ID
 				sliceIDs[slice.ID] = sliceNodeID
 				graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
 					ID:     sliceNodeID,

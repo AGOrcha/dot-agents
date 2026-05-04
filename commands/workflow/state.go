@@ -17,6 +17,14 @@ import (
 	"golang.org/x/sys/execabs"
 )
 
+const (
+	stateGitRevParse  = "rev-parse"
+	stateGitShortFlag = "--short"
+	stateAgentsDir    = ".agents"
+	stateNoneBullet   = "- none"
+	stateBulletFmt    = "- %s\n"
+)
+
 func runWorkflowStatus() error {
 	state, err := collectWorkflowState()
 	if err != nil {
@@ -297,15 +305,15 @@ func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string
 		return summary, warnings
 	}
 
-	summary.Branch = strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--abbrev-ref", "HEAD"))
+	summary.Branch = strings.TrimSpace(gitOutput(projectPath, stateGitRevParse, "--abbrev-ref", "HEAD"))
 	if summary.Branch == "" {
 		summary.Branch = "unknown"
 	}
-	summary.SHA = strings.TrimSpace(gitOutput(projectPath, "rev-parse", "--short", "HEAD"))
+	summary.SHA = strings.TrimSpace(gitOutput(projectPath, stateGitRevParse, stateGitShortFlag, "HEAD"))
 	if summary.SHA == "" {
 		summary.SHA = "unknown"
 	}
-	statusLines := strings.TrimSpace(gitOutput(projectPath, "status", "--short"))
+	statusLines := strings.TrimSpace(gitOutput(projectPath, "status", stateGitShortFlag))
 	if statusLines != "" {
 		summary.DirtyFileCount = len(strings.Split(statusLines, "\n"))
 	}
@@ -317,7 +325,7 @@ func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string
 }
 
 func collectWorkflowPlans(projectPath string) ([]workflowPlanSummary, error) {
-	paths, err := filepath.Glob(filepath.Join(projectPath, ".agents", "active", "*.plan.md"))
+	paths, err := filepath.Glob(filepath.Join(projectPath, stateAgentsDir, "active", "*.plan.md"))
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +342,7 @@ func collectWorkflowPlans(projectPath string) ([]workflowPlanSummary, error) {
 }
 
 func collectWorkflowHandoffs(projectPath string) ([]workflowHandoffSummary, error) {
-	paths, err := filepath.Glob(filepath.Join(projectPath, ".agents", "active", "handoffs", "*.md"))
+	paths, err := filepath.Glob(filepath.Join(projectPath, stateAgentsDir, "active", "handoffs", "*.md"))
 	if err != nil {
 		return nil, err
 	}
@@ -352,8 +360,8 @@ func collectWorkflowHandoffs(projectPath string) ([]workflowHandoffSummary, erro
 
 func collectWorkflowLessons(projectPath string) ([]string, []string) {
 	candidates := []string{
-		filepath.Join(projectPath, ".agents", "lessons", "index.md"),
-		filepath.Join(projectPath, ".agents", "lessons.md"),
+		filepath.Join(projectPath, stateAgentsDir, "lessons", "index.md"),
+		filepath.Join(projectPath, stateAgentsDir, "lessons.md"),
 	}
 	for _, candidate := range candidates {
 		content, err := os.ReadFile(candidate)
@@ -522,7 +530,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Canonical Plans")
 	fmt.Fprintln(out)
 	if len(state.CanonicalPlans) == 0 {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 		fmt.Fprintln(out)
 	} else {
 		for _, cp := range state.CanonicalPlans {
@@ -539,7 +547,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Active Plans")
 	fmt.Fprintln(out)
 	if len(state.ActivePlans) == 0 {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 		fmt.Fprintln(out)
 	} else {
 		for _, plan := range state.ActivePlans {
@@ -549,7 +557,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 				fmt.Fprintln(out, "- no pending items found")
 			} else {
 				for _, item := range plan.PendingItems {
-					fmt.Fprintf(out, "- %s\n", item)
+					fmt.Fprintf(out, stateBulletFmt, item)
 				}
 			}
 			fmt.Fprintln(out)
@@ -559,7 +567,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Last Checkpoint")
 	fmt.Fprintln(out)
 	if state.Checkpoint == nil {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 		fmt.Fprintln(out)
 	} else {
 		fmt.Fprintf(out, "- timestamp: %s\n", state.Checkpoint.Timestamp)
@@ -576,7 +584,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Pending Handoffs")
 	fmt.Fprintln(out)
 	if len(state.Handoffs) == 0 {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 	} else {
 		for _, handoff := range state.Handoffs {
 			fmt.Fprintf(out, "- %s (%s)\n", handoff.Title, handoff.Path)
@@ -587,7 +595,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Delegations")
 	fmt.Fprintln(out)
 	if state.ActiveDelegations.ActiveCount == 0 && state.PendingMergeBacks == 0 {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 	} else {
 		fmt.Fprintf(out, "- active delegations: %d\n", state.ActiveDelegations.ActiveCount)
 		if state.ActiveDelegations.PendingIntents > 0 {
@@ -600,10 +608,10 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	fmt.Fprintln(out, "# Recent Lessons")
 	fmt.Fprintln(out)
 	if len(state.Lessons) == 0 {
-		fmt.Fprintln(out, "- none")
+		fmt.Fprintln(out, stateNoneBullet)
 	} else {
 		for _, lesson := range state.Lessons {
-			fmt.Fprintf(out, "- %s\n", lesson)
+			fmt.Fprintf(out, stateBulletFmt, lesson)
 		}
 	}
 	fmt.Fprintln(out)
@@ -615,7 +623,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 
 	fmt.Fprintln(out, "# Next Action")
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "- %s\n", state.NextAction)
+	fmt.Fprintf(out, stateBulletFmt, state.NextAction)
 	fmt.Fprintf(out, "- source: %s\n", state.NextActionSource)
 
 	if len(state.Git.RecentCommits) > 0 {
@@ -664,7 +672,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 		fmt.Fprintln(out, "# Warnings")
 		fmt.Fprintln(out)
 		for _, warning := range state.Warnings {
-			fmt.Fprintf(out, "- %s\n", warning)
+			fmt.Fprintf(out, stateBulletFmt, warning)
 		}
 	}
 }
@@ -767,11 +775,11 @@ func isValidVerificationStatus(status string) bool {
 }
 
 func plansBaseDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "workflow", "plans")
+	return filepath.Join(projectPath, stateAgentsDir, "workflow", "plans")
 }
 
 func historyBaseDir(projectPath string) string {
-	return filepath.Join(projectPath, ".agents", "history")
+	return filepath.Join(projectPath, stateAgentsDir, "history")
 }
 
 func listCanonicalPlanIDs(projectPath string) ([]string, error) {

@@ -7,7 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const workflowFlagVerifierType = "verifier-type"
+const (
+	workflowFlagVerifierType    = "verifier-type"
+	workflowFlagLogToIter       = "log-to-iter"
+	workflowFlagWriteScope      = "write-scope"
+	cmdHintCanonicalPlanID      = "Pass a canonical plan ID from `dot-agents workflow plan`."
+	cmdFlagCanonicalPlanIDDescr = "Canonical plan ID (required)"
+)
 
 // Command wiring for `dot-agents workflow`: cobra subtree and exported NewCmd(deps).
 // Behavioral implementations live in sibling sources (state.go, plan_task.go, verification.go, …).
@@ -72,11 +78,11 @@ preferences, fanout artifacts, and bridge queries.`,
 		Args: deps.NoArgsWithHints("Use flags such as `--message` instead of positional arguments."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("role") || cmd.Flags().Changed(workflowFlagVerifierType) {
-				if !cmd.Flags().Changed("log-to-iter") {
+				if !cmd.Flags().Changed(workflowFlagLogToIter) {
 					return fmt.Errorf("--role and --verifier-type require --log-to-iter")
 				}
 			}
-			if cmd.Flags().Changed("log-to-iter") {
+			if cmd.Flags().Changed(workflowFlagLogToIter) {
 				if checkpointLogToIter < 1 {
 					return fmt.Errorf("checkpoint --log-to-iter requires N >= 1 (schema workflow-iter-log enforces iteration.minimum: 1)")
 				}
@@ -90,7 +96,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	checkpointCmd.Flags().StringVar(&checkpointMessage, "message", "", "Checkpoint message")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationState, "verification-status", workflowDefaultVerificationState, "Verification status: pass, fail, partial, or unknown")
 	checkpointCmd.Flags().StringVar(&checkpointVerificationText, "verification-summary", "", "Verification summary text")
-	checkpointCmd.Flags().IntVar(&checkpointLogToIter, "log-to-iter", 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
+	checkpointCmd.Flags().IntVar(&checkpointLogToIter, workflowFlagLogToIter, 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterRole, "role", "", "With --log-to-iter: merge only the impl, verifier, or review block")
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterVerifierType, workflowFlagVerifierType, "", "Verifier slug when --role verifier (for example unit)")
 
@@ -126,7 +132,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Example: deps.ExampleBlock(
 			"  dot-agents workflow plan show loop-orchestrator-layer",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
+		Args: deps.ExactArgsWithHints(1, cmdHintCanonicalPlanID),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanShow(args[0])
 		},
@@ -225,7 +231,7 @@ preferences, fanout artifacts, and bridge queries.`,
 			"  dot-agents workflow plan schedule plan-archive-command",
 			"  dot-agents --json workflow plan schedule plan-archive-command",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
+		Args: deps.ExactArgsWithHints(1, cmdHintCanonicalPlanID),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowPlanSchedule(args[0])
 		},
@@ -295,7 +301,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	taskAddCmd.Flags().StringVar(&taskAddOwner, "owner", "dot-agents", "Task owner")
 	taskAddCmd.Flags().StringVar(&taskAddDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on")
 	taskAddCmd.Flags().StringVar(&taskAddBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks")
-	taskAddCmd.Flags().StringVar(&taskAddWriteScope, "write-scope", "", "Comma-separated file/dir patterns this task may touch")
+	taskAddCmd.Flags().StringVar(&taskAddWriteScope, workflowFlagWriteScope, "", "Comma-separated file/dir patterns this task may touch")
 	taskAddCmd.Flags().StringVar(&taskAddAppType, "app-type", "", "App type for verifier dispatch (e.g. go-cli, go-http-service)")
 	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
 	_ = taskAddCmd.MarkFlagRequired("id")
@@ -316,7 +322,7 @@ preferences, fanout artifacts, and bridge queries.`,
 	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateTitle, "title", "", "New task title")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateNotes, "notes", "", "New implementation notes (replaces existing)")
-	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, "write-scope", "", "New comma-separated write-scope patterns (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 
 	taskCmd.AddCommand(taskAddCmd, taskUpdateCmd)
@@ -327,7 +333,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Example: deps.ExampleBlock(
 			"  dot-agents workflow tasks loop-orchestrator-layer",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
+		Args: deps.ExactArgsWithHints(1, cmdHintCanonicalPlanID),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowTasks(args[0])
 		},
@@ -339,7 +345,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Example: deps.ExampleBlock(
 			"  dot-agents workflow slices loop-orchestrator-layer",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass a canonical plan ID from `dot-agents workflow plan`."),
+		Args: deps.ExactArgsWithHints(1, cmdHintCanonicalPlanID),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowSlices(args[0])
 		},
@@ -604,11 +610,11 @@ preferences, fanout artifacts, and bridge queries.`,
 		Args: deps.NoArgsWithHints("Use `--plan`, `--task`, and related flags instead of positional arguments."),
 		RunE: runWorkflowFanout,
 	}
-	fanoutCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	fanoutCmd.Flags().String("plan", "", cmdFlagCanonicalPlanIDDescr)
 	fanoutCmd.Flags().String("task", "", "Task ID to delegate (required)")
 	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
-	fanoutCmd.Flags().String("write-scope", "", "Comma-separated file/dir patterns this delegate may touch")
+	fanoutCmd.Flags().String(workflowFlagWriteScope, "", "Comma-separated file/dir patterns this delegate may touch")
 	fanoutCmd.Flags().String("delegate-profile", defaultDelegateProfile, "Worker profile label stored in the delegation bundle")
 	fanoutCmd.Flags().StringSlice("project-overlay", nil, "Repeatable repo-relative project overlay guidance files")
 	fanoutCmd.Flags().StringSlice("prompt", nil, "Repeatable inline prompt lines for the delegate")
@@ -659,7 +665,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Args: deps.NoArgsWithHints("Use `--plan` and `--observation` flags instead of positional arguments."),
 		RunE: runWorkflowFoldBackCreate,
 	}
-	foldBackCreateCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	foldBackCreateCmd.Flags().String("plan", "", cmdFlagCanonicalPlanIDDescr)
 	foldBackCreateCmd.Flags().String("task", "", "Task ID to append note to (optional)")
 	foldBackCreateCmd.Flags().String("observation", "", "Observation text (required)")
 	foldBackCreateCmd.Flags().String("slug", "", "Stable id for create-or-update (D2.a); one tagged line per slug in TASKS/plan notes")
@@ -676,7 +682,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Args: deps.NoArgsWithHints("Requires --plan, --slug, and --observation."),
 		RunE: runWorkflowFoldBackUpdate,
 	}
-	foldBackUpdateCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	foldBackUpdateCmd.Flags().String("plan", "", cmdFlagCanonicalPlanIDDescr)
 	foldBackUpdateCmd.Flags().String("slug", "", "Stable fold-back id (required; must match an existing artifact)")
 	foldBackUpdateCmd.Flags().String("task", "", "Task ID (required when the existing fold-back is task-scoped)")
 	foldBackUpdateCmd.Flags().String("observation", "", "Replacement observation text (required)")
@@ -710,7 +716,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		Args: deps.NoArgsWithHints("Use `--plan`, `--task`, and `--decision` flags instead of positional arguments."),
 		RunE: runWorkflowDelegationCloseout,
 	}
-	delegationCloseoutCmd.Flags().String("plan", "", "Canonical plan ID (required)")
+	delegationCloseoutCmd.Flags().String("plan", "", cmdFlagCanonicalPlanIDDescr)
 	delegationCloseoutCmd.Flags().String("task", "", "Delegated task ID (required)")
 	delegationCloseoutCmd.Flags().String("decision", "", "accept|reject — parent integration decision (required)")
 	delegationCloseoutCmd.Flags().String("note", "", "Optional note (typically used with --decision reject)")
