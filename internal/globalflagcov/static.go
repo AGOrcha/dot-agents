@@ -36,6 +36,7 @@ func loadStatic(moduleRoot string) (*staticAnalysis, error) {
 	// yet wired into the root CLI build graph.
 	pkgs, err := packages.Load(cfg,
 		"./commands",
+		"./commands/agents",
 		"./commands/sync",
 		"./commands/hooks",
 		"./commands/skills",
