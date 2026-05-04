@@ -88,6 +88,80 @@ func sha256File(path string) ([32]byte, error) {
 	return sha256.Sum256(data), nil
 }
 
+func mergePlanDirFastRename(srcDir, dstDir string, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("  [dry-run] rename %s → %s\n", srcDir, dstDir)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dstDir), 0755); err != nil {
+		return fmt.Errorf("create history parent: %w", err)
+	}
+	return os.Rename(srcDir, dstDir)
+}
+
+// mergePlanDirCompareAndCopy applies the sha256 + mtime compare rule for one
+// file and either overwrites the destination or skips with a warning. Returns
+// nil when the file is intentionally skipped.
+func mergePlanDirCompareAndCopy(srcPath, dstPath, rel string, dryRun bool) error {
+	srcHash, err := sha256File(srcPath)
+	if err != nil {
+		return fmt.Errorf("hash %s: %w", rel, err)
+	}
+
+	dstStat, dstStatErr := os.Stat(dstPath)
+	if dstStatErr != nil && !os.IsNotExist(dstStatErr) {
+		return fmt.Errorf("stat dst %s: %w", rel, dstStatErr)
+	}
+
+	if dstStatErr == nil {
+		dstHash, err := sha256File(dstPath)
+		if err != nil {
+			return fmt.Errorf("hash dst %s: %w", rel, err)
+		}
+		if srcHash == dstHash {
+			if dryRun {
+				fmt.Printf("  [dry-run] skip (identical) %s\n", rel)
+			}
+			return nil
+		}
+		srcStat, err := os.Stat(srcPath)
+		if err != nil {
+			return fmt.Errorf("stat src %s: %w", rel, err)
+		}
+		if dstStat.ModTime().After(srcStat.ModTime()) {
+			fmt.Printf("  warn: history file is newer than source, skipping %s\n", rel)
+			if dryRun {
+				fmt.Printf("  [dry-run] skip (history newer) %s\n", rel)
+			}
+			return nil
+		}
+	}
+
+	if dryRun {
+		fmt.Printf("  [dry-run] overwrite %s\n", rel)
+		return nil
+	}
+	return copyWorkflowArtifact(srcPath, dstPath)
+}
+
+// mergePlanDirFile applies all merge rules to one file from the walk.
+func mergePlanDirFile(planID, srcPath, dstPath, rel string, dryRun bool) error {
+	if isDMAFile(rel) {
+		if dryRun {
+			fmt.Printf("  [dry-run] skip (dma)      %s\n", rel)
+		}
+		return nil
+	}
+	if isCanonicalPlanFile(rel, planID) {
+		if dryRun {
+			fmt.Printf("  [dry-run] overwrite (canonical) %s\n", rel)
+			return nil
+		}
+		return copyWorkflowArtifact(srcPath, dstPath)
+	}
+	return mergePlanDirCompareAndCopy(srcPath, dstPath, rel, dryRun)
+}
+
 // mergeWorkflowPlanDir merges a plan source directory into a history destination directory.
 //
 // Rules (applied per file):
@@ -103,20 +177,11 @@ func sha256File(path string) ([32]byte, error) {
 // On RemoveAll failure after a successful merge, retries once automatically.
 // In dry-run mode no filesystem changes are made; per-file decisions are printed.
 func mergeWorkflowPlanDir(planID, srcDir, dstDir string, dryRun bool) error {
-	// Fast path: destination does not exist — rename is atomic and cheap.
 	if _, err := os.Stat(dstDir); os.IsNotExist(err) {
-		if dryRun {
-			fmt.Printf("  [dry-run] rename %s → %s\n", srcDir, dstDir)
-			return nil
-		}
-		if err := os.MkdirAll(filepath.Dir(dstDir), 0755); err != nil {
-			return fmt.Errorf("create history parent: %w", err)
-		}
-		return os.Rename(srcDir, dstDir)
+		return mergePlanDirFastRename(srcDir, dstDir, dryRun)
 	}
 
-	// Walk the source and apply merge rules.
-	if err := filepath.WalkDir(srcDir, func(srcPath string, d fs.DirEntry, walkErr error) error {
+	return filepath.WalkDir(srcDir, func(srcPath string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -130,75 +195,8 @@ func mergeWorkflowPlanDir(planID, srcDir, dstDir string, dryRun bool) error {
 			}
 			return os.MkdirAll(filepath.Join(dstDir, rel), 0755)
 		}
-
-		dstPath := filepath.Join(dstDir, rel)
-
-		// Rule 1: DMA artifacts — always skip.
-		if isDMAFile(rel) {
-			if dryRun {
-				fmt.Printf("  [dry-run] skip (dma)      %s\n", rel)
-			}
-			return nil
-		}
-
-		// Rule 2: Canonical plan files — always overwrite.
-		if isCanonicalPlanFile(rel, planID) {
-			if dryRun {
-				fmt.Printf("  [dry-run] overwrite (canonical) %s\n", rel)
-				return nil
-			}
-			return copyWorkflowArtifact(srcPath, dstPath)
-		}
-
-		// Rule 3: All other files — sha256 + mtime compare.
-		srcHash, err := sha256File(srcPath)
-		if err != nil {
-			return fmt.Errorf("hash %s: %w", rel, err)
-		}
-
-		dstStat, dstStatErr := os.Stat(dstPath)
-		if dstStatErr != nil && !os.IsNotExist(dstStatErr) {
-			return fmt.Errorf("stat dst %s: %w", rel, dstStatErr)
-		}
-
-		if dstStatErr == nil {
-			dstHash, err := sha256File(dstPath)
-			if err != nil {
-				return fmt.Errorf("hash dst %s: %w", rel, err)
-			}
-			if srcHash == dstHash {
-				// Identical — skip.
-				if dryRun {
-					fmt.Printf("  [dry-run] skip (identical) %s\n", rel)
-				}
-				return nil
-			}
-			// Check mtime.
-			srcStat, err := os.Stat(srcPath)
-			if err != nil {
-				return fmt.Errorf("stat src %s: %w", rel, err)
-			}
-			if dstStat.ModTime().After(srcStat.ModTime()) {
-				// History is newer — warn and skip.
-				fmt.Printf("  warn: history file is newer than source, skipping %s\n", rel)
-				if dryRun {
-					fmt.Printf("  [dry-run] skip (history newer) %s\n", rel)
-				}
-				return nil
-			}
-		}
-
-		// Overwrite (source is newer or different, or dst absent).
-		if dryRun {
-			fmt.Printf("  [dry-run] overwrite %s\n", rel)
-			return nil
-		}
-		return copyWorkflowArtifact(srcPath, dstPath)
-	}); err != nil {
-		return err
-	}
-
-	return nil
+		return mergePlanDirFile(planID, srcPath, filepath.Join(dstDir, rel), rel, dryRun)
+	})
 }
 
 // removeAllWithRetry calls os.RemoveAll and retries once on failure.

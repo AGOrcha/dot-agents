@@ -429,6 +429,59 @@ func mergeReviewIterLog(dst *iterLogEntry, projectPath, taskID string) error {
 	return nil
 }
 
+func loadOrInitIterLogEntry(iterPath, feedbackGoal, taskID string) (*iterLogEntry, error) {
+	data, err := os.ReadFile(iterPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &iterLogEntry{
+				SchemaVersion: 2,
+				Impl:          emptyIterLogImplBlock(feedbackGoal),
+				Verifiers:     []iterLogVerifierEntry{},
+				Review:        zeroIterLogReviewBlock(taskID),
+			}, nil
+		}
+		return nil, fmt.Errorf("read existing iteration log: %w", err)
+	}
+	entry, err := loadIterLogDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	if entry.SchemaVersion != 2 {
+		return nil, fmt.Errorf("iteration log %s has unsupported schema_version %d (expected 2 after migration)", config.DisplayPath(iterPath), entry.SchemaVersion)
+	}
+	return entry, nil
+}
+
+func applyIterLogRole(entry *iterLogEntry, role, verifierType, feedbackGoal, projectPath, taskID string, contract *DelegationContract) error {
+	switch role {
+	case "":
+		entry.Impl.FeedbackGoal = feedbackGoal
+	case "impl":
+		mergeImplIterLog(entry, contract, projectPath)
+	case "verifier":
+		return upsertVerifierIterLog(entry, projectPath, taskID, verifierType)
+	case "review":
+		return mergeReviewIterLog(entry, projectPath, taskID)
+	}
+	return nil
+}
+
+func writeIterLogEntry(iterPath string, entry *iterLogEntry) error {
+	if err := validateWorkflowIterLogEntry(entry); err != nil {
+		return err
+	}
+	body, err := yaml.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshal iter log: %w", err)
+	}
+	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
+	content := []byte(header + string(body))
+	if err := os.WriteFile(iterPath, content, 0644); err != nil {
+		return fmt.Errorf("write iter log: %w", err)
+	}
+	return nil
+}
+
 func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	if err := validateIterLogRoleFlags(role, verifierType); err != nil {
 		return err
@@ -457,58 +510,19 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	}
 	iterPath := filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n))
 
-	var entry *iterLogEntry
-	if data, err := os.ReadFile(iterPath); err == nil {
-		entry, err = loadIterLogDocument(data)
-		if err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("read existing iteration log: %w", err)
-	}
-
-	if entry == nil {
-		entry = &iterLogEntry{
-			SchemaVersion: 2,
-			Impl:          emptyIterLogImplBlock(feedbackGoal),
-			Verifiers:     []iterLogVerifierEntry{},
-			Review:        zeroIterLogReviewBlock(taskID),
-		}
-	} else if entry.SchemaVersion != 2 {
-		return fmt.Errorf("iteration log %s has unsupported schema_version %d (expected 2 after migration)", config.DisplayPath(iterPath), entry.SchemaVersion)
+	entry, err := loadOrInitIterLogEntry(iterPath, feedbackGoal, taskID)
+	if err != nil {
+		return err
 	}
 
 	mergeIterLogTopLevelGit(entry, n, wave, taskID, commit, diff)
 
-	switch role {
-	case "":
-		entry.Impl.FeedbackGoal = feedbackGoal
-	case "impl":
-		mergeImplIterLog(entry, contract, project.Path)
-	case "verifier":
-		if err := upsertVerifierIterLog(entry, project.Path, taskID, verifierType); err != nil {
-			return err
-		}
-	case "review":
-		if err := mergeReviewIterLog(entry, project.Path, taskID); err != nil {
-			return err
-		}
-	}
-
-	if err := validateWorkflowIterLogEntry(entry); err != nil {
+	if err := applyIterLogRole(entry, role, verifierType, feedbackGoal, project.Path, taskID, contract); err != nil {
 		return err
 	}
 
-	body, err := yaml.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("marshal iter log: %w", err)
-	}
-
-	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
-	content := []byte(header + string(body))
-
-	if err := os.WriteFile(iterPath, content, 0644); err != nil {
-		return fmt.Errorf("write iter log: %w", err)
+	if err := writeIterLogEntry(iterPath, entry); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", config.DisplayPath(iterPath))

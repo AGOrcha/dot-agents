@@ -357,259 +357,264 @@ func runWorkflowFoldBackUpdate(cmd *cobra.Command, _ []string) error {
 	return runWorkflowFoldBackUpsert(cmd, true)
 }
 
+type foldBackUpsertInputs struct {
+	planID      string
+	taskID      string
+	observation string
+	propose     bool
+	slug        string
+}
+
+func parseFoldBackUpsertInputs(cmd *cobra.Command, updateOnly bool) (*foldBackUpsertInputs, error) {
+	in := &foldBackUpsertInputs{}
+	in.planID, _ = cmd.Flags().GetString("plan")
+	in.taskID, _ = cmd.Flags().GetString("task")
+	in.observation, _ = cmd.Flags().GetString("observation")
+	in.propose, _ = cmd.Flags().GetBool("propose")
+	in.slug, _ = cmd.Flags().GetString("slug")
+	in.slug = strings.TrimSpace(in.slug)
+
+	if strings.TrimSpace(in.observation) == "" {
+		return nil, fmt.Errorf("observation text is required")
+	}
+	if updateOnly && in.slug == "" {
+		return nil, fmt.Errorf("--slug is required for fold-back update")
+	}
+	if in.slug != "" {
+		if err := validateFoldBackSlug(in.slug); err != nil {
+			return nil, err
+		}
+	}
+	return in, nil
+}
+
+func loadPriorFoldBackArtifact(projectPath, slug string) (*foldBackArtifact, bool, error) {
+	if slug == "" {
+		return nil, false, nil
+	}
+	st, statErr := os.Stat(foldBackArtifactFile(projectPath, slug))
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, false, nil
+		}
+		return nil, false, statErr
+	}
+	if st.IsDir() {
+		return nil, false, nil
+	}
+	a, loadErr := loadFoldBackArtifactByID(projectPath, slug)
+	if loadErr != nil {
+		return nil, false, fmt.Errorf("load fold-back %q: %w", slug, loadErr)
+	}
+	return &a, true, nil
+}
+
+func validateFoldBackPriorAgreement(prior *foldBackArtifact, in *foldBackUpsertInputs) error {
+	if prior.PlanID != in.planID {
+		return fmt.Errorf("fold-back %q belongs to plan %q, not %q", in.slug, prior.PlanID, in.planID)
+	}
+	if in.propose {
+		return fmt.Errorf("--propose is not valid when updating an existing slug-scoped fold-back")
+	}
+	if prior.Classification != "small" {
+		return nil
+	}
+	if prior.TaskID != "" {
+		if strings.TrimSpace(in.taskID) == "" {
+			return fmt.Errorf("fold-back %q is task-scoped (%s); pass --task %s", in.slug, prior.TaskID, prior.TaskID)
+		}
+		if in.taskID != prior.TaskID {
+			return fmt.Errorf("--task %q does not match fold-back scope (expected %q)", in.taskID, prior.TaskID)
+		}
+		return nil
+	}
+	if strings.TrimSpace(in.taskID) != "" {
+		return fmt.Errorf("fold-back %q is plan-scoped; omit --task", in.slug)
+	}
+	return nil
+}
+
+func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(notes string) string) error {
+	tf, err := loadCanonicalTasks(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
+	}
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == taskID {
+			tf.Tasks[i].Notes = mutate(tf.Tasks[i].Notes)
+			return saveCanonicalTasks(projectPath, tf)
+		}
+	}
+	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+}
+
+func updatePlanFoldBackSummary(projectPath, planID, createdAt string, mutate func(summary string) string) error {
+	plan, err := loadCanonicalPlan(projectPath, planID)
+	if err != nil {
+		return err
+	}
+	plan.Summary = mutate(plan.Summary)
+	plan.UpdatedAt = createdAt
+	return saveCanonicalPlan(projectPath, plan)
+}
+
+func updateExistingProposalFoldBack(prior *foldBackArtifact, observation string, artifact *foldBackArtifact) error {
+	artifact.Classification = "proposal"
+	artifact.TaskID = prior.TaskID
+	artifact.RoutedTo = prior.RoutedTo
+	propPath, err := proposalAbsPathFromRoutedTo(prior.RoutedTo)
+	if err != nil {
+		return err
+	}
+	fm, _, err := readFoldBackProposalFile(propPath)
+	if err != nil {
+		return fmt.Errorf("read proposal %s: %w", propPath, err)
+	}
+	fm.Observation = observation
+	return writeFoldBackProposalFile(propPath, fm, observation)
+}
+
+func updateExistingSmallFoldBack(projectPath string, in *foldBackUpsertInputs, prior *foldBackArtifact, createdAt string, artifact *foldBackArtifact) error {
+	artifact.Classification = "small"
+	artifact.TaskID = prior.TaskID
+	mutate := func(notes string) string {
+		return setFoldBackTaggedNote(notes, in.slug, in.observation)
+	}
+	if prior.TaskID != "" {
+		if err := updateTaskFoldBackNote(projectPath, in.planID, prior.TaskID, mutate); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, prior.TaskID)
+		return nil
+	}
+	if err := updatePlanFoldBackSummary(projectPath, in.planID, createdAt, mutate); err != nil {
+		return err
+	}
+	artifact.TaskID = ""
+	artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+	return nil
+}
+
+func createProposalFoldBack(in *foldBackUpsertInputs, ts int64, createdAt string, artifact *foldBackArtifact) error {
+	artifact.Classification = "proposal"
+	artifact.TaskID = strings.TrimSpace(in.taskID)
+	proposalName := fmt.Sprintf("obs-%d.md", ts)
+	if in.slug != "" {
+		proposalName = fmt.Sprintf("obs-%s.md", in.slug)
+	}
+	proposalsDir := filepath.Join(config.AgentsHome(), "proposals")
+	if err := os.MkdirAll(proposalsDir, 0755); err != nil {
+		return err
+	}
+	proposalPath := filepath.Join(proposalsDir, proposalName)
+	fm := foldBackProposalFrontmatter{
+		Title:       fmt.Sprintf("Fold-back: %s", in.planID),
+		Observation: in.observation,
+		PlanID:      in.planID,
+		CreatedAt:   createdAt,
+	}
+	if artifact.TaskID != "" {
+		fm.TaskID = artifact.TaskID
+	}
+	if err := writeFoldBackProposalFile(proposalPath, fm, in.observation); err != nil {
+		return err
+	}
+	artifact.RoutedTo = delegationProposalRoutePfx + proposalName
+	return nil
+}
+
+func createSmallFoldBack(projectPath string, in *foldBackUpsertInputs, createdAt string, artifact *foldBackArtifact) error {
+	artifact.Classification = "small"
+	taskID := strings.TrimSpace(in.taskID)
+	artifact.TaskID = taskID
+	useTagged := in.slug != ""
+	mutate := func(text string) string {
+		if useTagged {
+			return setFoldBackTaggedNote(text, in.slug, in.observation)
+		}
+		return appendFoldBackBullet(text, in.observation)
+	}
+	if taskID != "" {
+		if err := updateTaskFoldBackNote(projectPath, in.planID, taskID, mutate); err != nil {
+			return err
+		}
+		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, taskID)
+		return nil
+	}
+	if err := updatePlanFoldBackSummary(projectPath, in.planID, createdAt, mutate); err != nil {
+		return err
+	}
+	artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+	return nil
+}
+
+func dispatchFoldBackUpsert(projectPath string, in *foldBackUpsertInputs, prior *foldBackArtifact, priorExists bool, ts int64, createdAt string, artifact *foldBackArtifact) error {
+	switch {
+	case priorExists && prior.Classification == "proposal":
+		return updateExistingProposalFoldBack(prior, in.observation, artifact)
+	case priorExists && prior.Classification == "small":
+		return updateExistingSmallFoldBack(projectPath, in, prior, createdAt, artifact)
+	case !priorExists && in.propose:
+		return createProposalFoldBack(in, ts, createdAt, artifact)
+	case !priorExists:
+		return createSmallFoldBack(projectPath, in, createdAt, artifact)
+	default:
+		return fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", in.slug, in.propose, priorExists)
+	}
+}
+
 func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
-
-	planID, _ := cmd.Flags().GetString("plan")
-	taskID, _ := cmd.Flags().GetString("task")
-	observation, _ := cmd.Flags().GetString("observation")
-	propose, _ := cmd.Flags().GetBool("propose")
-	slug, _ := cmd.Flags().GetString("slug")
-	slug = strings.TrimSpace(slug)
-
-	if strings.TrimSpace(observation) == "" {
-		return fmt.Errorf("observation text is required")
-	}
-	if updateOnly && slug == "" {
-		return fmt.Errorf("--slug is required for fold-back update")
-	}
-	if slug != "" {
-		if err := validateFoldBackSlug(slug); err != nil {
-			return err
-		}
+	in, err := parseFoldBackUpsertInputs(cmd, updateOnly)
+	if err != nil {
+		return err
 	}
 
-	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
-		return fmt.Errorf("plan %s not found: %w", planID, err)
+	if _, err := loadCanonicalPlan(project.Path, in.planID); err != nil {
+		return fmt.Errorf("plan %s not found: %w", in.planID, err)
 	}
 
 	now := time.Now().UTC()
 	createdAt := now.Format(time.RFC3339)
 	ts := now.UnixNano()
-	foldID := fmt.Sprintf("fold-%d", ts)
 
-	var prior *foldBackArtifact
-	priorExists := false
-	if slug != "" {
-		st, statErr := os.Stat(foldBackArtifactFile(project.Path, slug))
-		if statErr == nil && !st.IsDir() {
-			a, loadErr := loadFoldBackArtifactByID(project.Path, slug)
-			if loadErr != nil {
-				return fmt.Errorf("load fold-back %q: %w", slug, loadErr)
-			}
-			prior = &a
-			priorExists = true
-		} else if statErr != nil && !os.IsNotExist(statErr) {
-			return statErr
-		}
+	prior, priorExists, err := loadPriorFoldBackArtifact(project.Path, in.slug)
+	if err != nil {
+		return err
 	}
-
 	if updateOnly && !priorExists {
-		return fmt.Errorf("no fold-back artifact with slug %q", slug)
+		return fmt.Errorf("no fold-back artifact with slug %q", in.slug)
 	}
-
 	if priorExists {
-		if prior.PlanID != planID {
-			return fmt.Errorf("fold-back %q belongs to plan %q, not %q", slug, prior.PlanID, planID)
+		if err := validateFoldBackPriorAgreement(prior, in); err != nil {
+			return err
 		}
-		if propose {
-			return fmt.Errorf("--propose is not valid when updating an existing slug-scoped fold-back")
+		if prior.Classification == "small" && in.propose {
+			return fmt.Errorf("cannot use --propose for slug %q: existing artifact is inline (small)", in.slug)
 		}
-		if prior.Classification == "small" {
-			if prior.TaskID != "" {
-				if strings.TrimSpace(taskID) == "" {
-					return fmt.Errorf("fold-back %q is task-scoped (%s); pass --task %s", slug, prior.TaskID, prior.TaskID)
-				}
-				if taskID != prior.TaskID {
-					return fmt.Errorf("--task %q does not match fold-back scope (expected %q)", taskID, prior.TaskID)
-				}
-			} else if strings.TrimSpace(taskID) != "" {
-				return fmt.Errorf("fold-back %q is plan-scoped; omit --task", slug)
-			}
-		}
-	}
-
-	if priorExists && prior.Classification == "small" && propose {
-		return fmt.Errorf("cannot use --propose for slug %q: existing artifact is inline (small)", slug)
 	}
 
 	artifact := foldBackArtifact{
 		SchemaVersion: 1,
-		PlanID:        planID,
-		Observation:   observation,
+		PlanID:        in.planID,
+		Observation:   in.observation,
 		CreatedAt:     createdAt,
 	}
-	if priorExists {
+	switch {
+	case priorExists:
 		artifact.ID = prior.ID
 		artifact.CreatedAt = prior.CreatedAt
-	} else if slug != "" {
-		artifact.ID = slug
-	} else {
-		artifact.ID = foldID
+	case in.slug != "":
+		artifact.ID = in.slug
+	default:
+		artifact.ID = fmt.Sprintf("fold-%d", ts)
 	}
 
-	updated := priorExists
-
-	switch {
-	case priorExists && prior.Classification == "proposal":
-		artifact.Classification = "proposal"
-		artifact.TaskID = prior.TaskID
-		artifact.RoutedTo = prior.RoutedTo
-		propPath, err := proposalAbsPathFromRoutedTo(prior.RoutedTo)
-		if err != nil {
-			return err
-		}
-		fm, _, err := readFoldBackProposalFile(propPath)
-		if err != nil {
-			return fmt.Errorf("read proposal %s: %w", propPath, err)
-		}
-		fm.Observation = observation
-		if err := writeFoldBackProposalFile(propPath, fm, observation); err != nil {
-			return err
-		}
-
-	case priorExists && prior.Classification == "small":
-		artifact.Classification = "small"
-		artifact.TaskID = prior.TaskID
-		if prior.TaskID != "" {
-			tf, err := loadCanonicalTasks(project.Path, planID)
-			if err != nil {
-				return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
-			}
-			var found bool
-			for i := range tf.Tasks {
-				if tf.Tasks[i].ID == prior.TaskID {
-					tf.Tasks[i].Notes = setFoldBackTaggedNote(tf.Tasks[i].Notes, slug, observation)
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf(errTaskNotFoundInPlanShort, prior.TaskID, planID)
-			}
-			if err := saveCanonicalTasks(project.Path, tf); err != nil {
-				return err
-			}
-			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, prior.TaskID)
-		} else {
-			plan, err := loadCanonicalPlan(project.Path, planID)
-			if err != nil {
-				return err
-			}
-			plan.Summary = setFoldBackTaggedNote(plan.Summary, slug, observation)
-			plan.UpdatedAt = createdAt
-			if err := saveCanonicalPlan(project.Path, plan); err != nil {
-				return err
-			}
-			artifact.TaskID = ""
-			artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
-		}
-
-	case !priorExists && propose:
-		artifact.Classification = "proposal"
-		artifact.TaskID = strings.TrimSpace(taskID)
-		proposalName := fmt.Sprintf("obs-%d.md", ts)
-		if slug != "" {
-			proposalName = fmt.Sprintf("obs-%s.md", slug)
-		}
-		proposalsDir := filepath.Join(config.AgentsHome(), "proposals")
-		if err := os.MkdirAll(proposalsDir, 0755); err != nil {
-			return err
-		}
-		proposalPath := filepath.Join(proposalsDir, proposalName)
-		fm := foldBackProposalFrontmatter{
-			Title:       fmt.Sprintf("Fold-back: %s", planID),
-			Observation: observation,
-			PlanID:      planID,
-			CreatedAt:   createdAt,
-		}
-		if artifact.TaskID != "" {
-			fm.TaskID = artifact.TaskID
-		}
-		if err := writeFoldBackProposalFile(proposalPath, fm, observation); err != nil {
-			return err
-		}
-		artifact.RoutedTo = delegationProposalRoutePfx + proposalName
-
-	case !priorExists && slug != "" && strings.TrimSpace(taskID) != "":
-		artifact.Classification = "small"
-		artifact.TaskID = taskID
-		tf, err := loadCanonicalTasks(project.Path, planID)
-		if err != nil {
-			return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
-		}
-		var found bool
-		for i := range tf.Tasks {
-			if tf.Tasks[i].ID == taskID {
-				tf.Tasks[i].Notes = setFoldBackTaggedNote(tf.Tasks[i].Notes, slug, observation)
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
-		}
-		if err := saveCanonicalTasks(project.Path, tf); err != nil {
-			return err
-		}
-		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, taskID)
-
-	case !priorExists && slug != "" && strings.TrimSpace(taskID) == "":
-		artifact.Classification = "small"
-		artifact.TaskID = ""
-		plan, err := loadCanonicalPlan(project.Path, planID)
-		if err != nil {
-			return err
-		}
-		plan.Summary = setFoldBackTaggedNote(plan.Summary, slug, observation)
-		plan.UpdatedAt = createdAt
-		if err := saveCanonicalPlan(project.Path, plan); err != nil {
-			return err
-		}
-		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
-
-	case !priorExists && !propose && strings.TrimSpace(taskID) != "":
-		artifact.Classification = "small"
-		artifact.TaskID = taskID
-		tf, err := loadCanonicalTasks(project.Path, planID)
-		if err != nil {
-			return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
-		}
-		var found bool
-		for i := range tf.Tasks {
-			if tf.Tasks[i].ID == taskID {
-				tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, observation)
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
-		}
-		if err := saveCanonicalTasks(project.Path, tf); err != nil {
-			return err
-		}
-		artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, planID, taskID)
-
-	case !priorExists && !propose && strings.TrimSpace(taskID) == "":
-		artifact.Classification = "small"
-		artifact.TaskID = ""
-		plan, err := loadCanonicalPlan(project.Path, planID)
-		if err != nil {
-			return err
-		}
-		plan.Summary = appendFoldBackBullet(plan.Summary, observation)
-		plan.UpdatedAt = createdAt
-		if err := saveCanonicalPlan(project.Path, plan); err != nil {
-			return err
-		}
-		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, planID)
-
-	default:
-		return fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", slug, propose, priorExists)
+	if err := dispatchFoldBackUpsert(project.Path, in, prior, priorExists, ts, createdAt, &artifact); err != nil {
+		return err
 	}
 
 	if err := writeFoldBackArtifact(project.Path, artifact); err != nil {
@@ -624,7 +629,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	}
 
 	verb := "Recorded"
-	if updated {
+	if priorExists {
 		verb = "Updated"
 	}
 	fmt.Fprintf(out, "  %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
@@ -801,6 +806,98 @@ func checkFanoutScopeEvidenceWarnings(projectPath, planID, taskID string, skipCh
 	}
 }
 
+// resolveFanoutSliceTask resolves taskID and seed write scope from an optional
+// slice ID. Returns the (possibly mutated) taskID and the seed write scope.
+func resolveFanoutSliceTask(projectPath, planID, sliceID, taskID string, writeScopeExplicit bool) (string, []string, error) {
+	if sliceID == "" {
+		return taskID, nil, nil
+	}
+	sf, err := loadCanonicalSlices(projectPath, planID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load slices for plan %s: %w", planID, err)
+	}
+	var found *CanonicalSlice
+	for i := range sf.Slices {
+		if sf.Slices[i].ID == sliceID {
+			found = &sf.Slices[i]
+			break
+		}
+	}
+	if found == nil {
+		return "", nil, fmt.Errorf("slice %q not found in plan %s", sliceID, planID)
+	}
+	if found.Status == "completed" {
+		return "", nil, fmt.Errorf("slice %q is already completed", sliceID)
+	}
+	taskID = found.ParentTaskID
+	var ws []string
+	if !writeScopeExplicit {
+		ws = append(ws, found.WriteScope...)
+	}
+	return taskID, ws, nil
+}
+
+func resolveFanoutTargetTask(tasks *CanonicalTaskFile, taskID, planID string) (*CanonicalTask, error) {
+	var targetTask *CanonicalTask
+	for i := range tasks.Tasks {
+		if tasks.Tasks[i].ID == taskID {
+			targetTask = &tasks.Tasks[i]
+			break
+		}
+	}
+	if targetTask == nil {
+		return nil, fmt.Errorf("task %s not found in plan %s", taskID, planID)
+	}
+	if targetTask.Status != "pending" && targetTask.Status != "in_progress" {
+		return nil, fmt.Errorf("task %s has status %q — only pending or in_progress tasks can be delegated", taskID, targetTask.Status)
+	}
+	return targetTask, nil
+}
+
+func resolveFanoutWriteScope(seed []string, csv string, explicit bool, fallback []string) []string {
+	if explicit {
+		ws := seed[:0]
+		for _, p := range strings.Split(csv, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				ws = append(ws, p)
+			}
+		}
+		return ws
+	}
+	if len(seed) == 0 && len(fallback) > 0 {
+		return append([]string(nil), fallback...)
+	}
+	return seed
+}
+
+func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, taskID string) error {
+	existing, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return fmt.Errorf("list delegations: %w", err)
+	}
+	conflicts := writeScopeOverlaps(existing, writeScope, taskID)
+	if len(conflicts) == 0 {
+		return nil
+	}
+	for _, c := range conflicts {
+		ui.Warn(c)
+	}
+	return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
+}
+
+func persistFanoutArtifacts(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, taskID string) error {
+	contractPath := filepath.Join(delegationDir(projectPath), taskID+".yaml")
+	if err := saveDelegationContract(projectPath, contract); err != nil {
+		return fmt.Errorf("save delegation contract: %w", err)
+	}
+	if err := saveDelegationBundle(projectPath, bundle); err != nil {
+		_ = os.Remove(contractPath)
+		return fmt.Errorf("save delegation bundle: %w", err)
+	}
+	return nil
+}
+
 func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -823,29 +920,9 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("provide --slice or --task, not both")
 	}
 
-	var writeScope []string
-	if sliceID != "" {
-		sf, err := loadCanonicalSlices(project.Path, planID)
-		if err != nil {
-			return fmt.Errorf("load slices for plan %s: %w", planID, err)
-		}
-		var found *CanonicalSlice
-		for i := range sf.Slices {
-			if sf.Slices[i].ID == sliceID {
-				found = &sf.Slices[i]
-				break
-			}
-		}
-		if found == nil {
-			return fmt.Errorf("slice %q not found in plan %s", sliceID, planID)
-		}
-		if found.Status == "completed" {
-			return fmt.Errorf("slice %q is already completed", sliceID)
-		}
-		taskID = found.ParentTaskID
-		if !writeScopeExplicit {
-			writeScope = append(writeScope, found.WriteScope...)
-		}
+	taskID, writeScope, err := resolveFanoutSliceTask(project.Path, planID, sliceID, taskID, writeScopeExplicit)
+	if err != nil {
+		return err
 	}
 	if taskID == "" {
 		return fmt.Errorf("provide --slice <slice-id> or --task <task-id>")
@@ -855,36 +932,16 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("tasks for plan %s not found: %w", planID, err)
 	}
-	var targetTask *CanonicalTask
-	for i := range tf.Tasks {
-		if tf.Tasks[i].ID == taskID {
-			targetTask = &tf.Tasks[i]
-			break
-		}
-	}
-	if targetTask == nil {
-		return fmt.Errorf("task %s not found in plan %s", taskID, planID)
-	}
-	if targetTask.Status != "pending" && targetTask.Status != "in_progress" {
-		return fmt.Errorf("task %s has status %q — only pending or in_progress tasks can be delegated", taskID, targetTask.Status)
+	targetTask, err := resolveFanoutTargetTask(tf, taskID, planID)
+	if err != nil {
+		return err
 	}
 
 	if _, err := loadDelegationContract(project.Path, taskID); err == nil {
 		return fmt.Errorf("task %s already has an active delegation contract", taskID)
 	}
 
-	if writeScopeExplicit {
-		writeScope = writeScope[:0]
-		for _, p := range strings.Split(writeScopeCSV, ",") {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				writeScope = append(writeScope, p)
-			}
-		}
-	}
-	if len(writeScope) == 0 && len(targetTask.WriteScope) > 0 {
-		writeScope = append([]string(nil), targetTask.WriteScope...)
-	}
+	writeScope = resolveFanoutWriteScope(writeScope, writeScopeCSV, writeScopeExplicit, targetTask.WriteScope)
 
 	if err := ensureTaskVerificationDir(project.Path, taskID); err != nil {
 		return fmt.Errorf("prepare verification directory: %w", err)
@@ -897,15 +954,8 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	skipEvidenceCheck, _ := cmd.Flags().GetBool("skip-evidence-check")
 	checkFanoutScopeEvidenceWarnings(project.Path, planID, taskID, skipEvidenceCheck)
 
-	existing, err := listDelegationContracts(project.Path)
-	if err != nil {
-		return fmt.Errorf("list delegations: %w", err)
-	}
-	if conflicts := writeScopeOverlaps(existing, writeScope, taskID); len(conflicts) > 0 {
-		for _, c := range conflicts {
-			ui.Warn(c)
-		}
-		return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
+	if err := checkFanoutWriteScopeConflicts(project.Path, writeScope, taskID); err != nil {
+		return err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -927,13 +977,8 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
-	if err := saveDelegationContract(project.Path, contract); err != nil {
-		return fmt.Errorf("save delegation contract: %w", err)
-	}
-	if err := saveDelegationBundle(project.Path, bundle); err != nil {
-		_ = os.Remove(contractPath)
-		return fmt.Errorf("save delegation bundle: %w", err)
+	if err := persistFanoutArtifacts(project.Path, contract, bundle, taskID); err != nil {
+		return err
 	}
 
 	if targetTask.Status == "pending" {
@@ -950,6 +995,20 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Write scope: %s", strings.Join(writeScope, ", ")),
 	)
 	return nil
+}
+
+func gitDiffChangedFiles(projectPath string) []string {
+	gitOut, err := execabs.Command("git", "-C", projectPath, "diff", "--name-only", "HEAD").Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimSpace(string(gitOut)), "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
@@ -975,15 +1034,7 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("delegation for task %s is already %s", taskID, contract.Status)
 	}
 
-	var filesChanged []string
-	gitOut, err := execabs.Command("git", "-C", project.Path, "diff", "--name-only", "HEAD").Output()
-	if err == nil {
-		for _, f := range strings.Split(strings.TrimSpace(string(gitOut)), "\n") {
-			if f != "" {
-				filesChanged = append(filesChanged, f)
-			}
-		}
-	}
+	filesChanged := gitDiffChangedFiles(project.Path)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	mergeBack := &MergeBackSummary{
@@ -1193,6 +1244,115 @@ func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan 
 	return appType, sequence, nil
 }
 
+type fanoutBundleFlags struct {
+	profile         string
+	feedbackGoal    string
+	validationQueue string
+	selReason       string
+	overlays        []string
+	promptLines     []string
+	promptFiles     []string
+	contextFiles    []string
+	scenarioTags    []string
+	regressionArts  []string
+	reqNeg          bool
+	sandbox         bool
+	retryMax        int
+}
+
+func collectFanoutBundleFlags(cmd *cobra.Command) *fanoutBundleFlags {
+	f := &fanoutBundleFlags{}
+	f.profile, _ = cmd.Flags().GetString("delegate-profile")
+	f.profile = strings.TrimSpace(f.profile)
+	if f.profile == "" {
+		f.profile = defaultDelegateProfile
+	}
+	f.feedbackGoal, _ = cmd.Flags().GetString("feedback-goal")
+	f.feedbackGoal = strings.TrimSpace(f.feedbackGoal)
+	if f.feedbackGoal == "" {
+		f.feedbackGoal = defaultDelegationFeedbackGoal
+	}
+	f.validationQueue, _ = cmd.Flags().GetString("validation-queue")
+	f.validationQueue = strings.TrimSpace(f.validationQueue)
+	f.selReason, _ = cmd.Flags().GetString("selection-reason")
+
+	f.overlays = trimStringSlice(mustGetStringSlice(cmd, "project-overlay"))
+	f.promptLines = trimStringSlice(mustGetStringSlice(cmd, "prompt"))
+	f.promptFiles = trimStringSlice(mustGetStringSlice(cmd, "prompt-file"))
+	f.contextFiles = trimStringSlice(mustGetStringSlice(cmd, "context-file"))
+	f.scenarioTags = trimStringSlice(mustGetStringSlice(cmd, "scenario-tag"))
+	f.regressionArts = trimStringSlice(mustGetStringSlice(cmd, "regression-artifact"))
+
+	f.reqNeg, _ = cmd.Flags().GetBool("require-negative-coverage")
+	f.sandbox, _ = cmd.Flags().GetBool("sandbox-mutations")
+	f.retryMax, _ = cmd.Flags().GetInt("verifier-retry-max")
+	return f
+}
+
+func validateFanoutBundleFlagPaths(projectPath string, f *fanoutBundleFlags) error {
+	checks := []struct {
+		paths []string
+		flag  string
+	}{
+		{f.overlays, "--project-overlay"},
+		{f.promptFiles, "--prompt-file"},
+		{f.contextFiles, "--context-file"},
+	}
+	for _, c := range checks {
+		for _, p := range c.paths {
+			if _, err := validateProjectFileRef(projectPath, p); err != nil {
+				return fmt.Errorf("%s %w", c.flag, err)
+			}
+		}
+	}
+	if f.validationQueue != "" {
+		if _, err := validateProjectFileRef(projectPath, f.validationQueue); err != nil {
+			return fmt.Errorf("--validation-queue %w", err)
+		}
+	}
+	for _, p := range f.regressionArts {
+		if _, err := validateInsideProjectPath(projectPath, p); err != nil {
+			return fmt.Errorf("--regression-artifact %w", err)
+		}
+	}
+	return nil
+}
+
+func newDelegationEvidencePolicy() *struct {
+	RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+	ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+	SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+	PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+} {
+	return &struct {
+		RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+		ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
+		SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+		PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+	}{}
+}
+
+func applyFanoutEvidencePolicy(b *delegationBundleYAML, f *fanoutBundleFlags) {
+	if f.reqNeg || f.sandbox {
+		b.Verification.EvidencePolicy = newDelegationEvidencePolicy()
+		if f.reqNeg {
+			v := true
+			b.Verification.EvidencePolicy.RequireNegativeCoverage = &v
+		}
+		if f.sandbox {
+			v := true
+			b.Verification.EvidencePolicy.SandboxMutations = &v
+		}
+	}
+	if f.retryMax > 0 {
+		if b.Verification.EvidencePolicy == nil {
+			b.Verification.EvidencePolicy = newDelegationEvidencePolicy()
+		}
+		rm := f.retryMax
+		b.Verification.EvidencePolicy.PrimaryChainMax = &rm
+	}
+}
+
 func buildDelegationBundleForFanout(
 	projectPath string,
 	cmd *cobra.Command,
@@ -1203,51 +1363,9 @@ func buildDelegationBundleForFanout(
 	writeScope []string,
 	createdAtRFC3339 string,
 ) (*delegationBundleYAML, error) {
-	profile, _ := cmd.Flags().GetString("delegate-profile")
-	profile = strings.TrimSpace(profile)
-	if profile == "" {
-		profile = defaultDelegateProfile
-	}
-	feedbackGoal, _ := cmd.Flags().GetString("feedback-goal")
-	feedbackGoal = strings.TrimSpace(feedbackGoal)
-	if feedbackGoal == "" {
-		feedbackGoal = defaultDelegationFeedbackGoal
-	}
-	validationQueue, _ := cmd.Flags().GetString("validation-queue")
-	validationQueue = strings.TrimSpace(validationQueue)
-	selReason, _ := cmd.Flags().GetString("selection-reason")
-
-	overlays := trimStringSlice(mustGetStringSlice(cmd, "project-overlay"))
-	promptLines := trimStringSlice(mustGetStringSlice(cmd, "prompt"))
-	promptFiles := trimStringSlice(mustGetStringSlice(cmd, "prompt-file"))
-	contextFiles := trimStringSlice(mustGetStringSlice(cmd, "context-file"))
-	scenarioTags := trimStringSlice(mustGetStringSlice(cmd, "scenario-tag"))
-	regressionArts := trimStringSlice(mustGetStringSlice(cmd, "regression-artifact"))
-
-	for _, p := range overlays {
-		if _, err := validateProjectFileRef(projectPath, p); err != nil {
-			return nil, fmt.Errorf("--project-overlay %w", err)
-		}
-	}
-	for _, p := range promptFiles {
-		if _, err := validateProjectFileRef(projectPath, p); err != nil {
-			return nil, fmt.Errorf("--prompt-file %w", err)
-		}
-	}
-	for _, p := range contextFiles {
-		if _, err := validateProjectFileRef(projectPath, p); err != nil {
-			return nil, fmt.Errorf("--context-file %w", err)
-		}
-	}
-	if validationQueue != "" {
-		if _, err := validateProjectFileRef(projectPath, validationQueue); err != nil {
-			return nil, fmt.Errorf("--validation-queue %w", err)
-		}
-	}
-	for _, p := range regressionArts {
-		if _, err := validateInsideProjectPath(projectPath, p); err != nil {
-			return nil, fmt.Errorf("--regression-artifact %w", err)
-		}
+	f := collectFanoutBundleFlags(cmd)
+	if err := validateFanoutBundleFlagPaths(projectPath, f); err != nil {
+		return nil, err
 	}
 
 	owner := strings.TrimSpace(contract.Owner)
@@ -1265,9 +1383,9 @@ func buildDelegationBundleForFanout(
 	}
 	b.Owner = owner
 
-	b.Worker.Profile = profile
-	if len(overlays) > 0 {
-		b.Worker.ProjectOverlayFiles = overlays
+	b.Worker.Profile = f.profile
+	if len(f.overlays) > 0 {
+		b.Worker.ProjectOverlayFiles = f.overlays
 	}
 
 	b.Selection = &struct {
@@ -1277,30 +1395,30 @@ func buildDelegationBundleForFanout(
 	}{
 		SelectedBy: "workflow fanout",
 		SelectedAt: createdAtRFC3339,
-		Reason:     strings.TrimSpace(selReason),
+		Reason:     strings.TrimSpace(f.selReason),
 	}
 
 	b.Scope.WriteScope = append([]string(nil), writeScope...)
 
-	if len(promptLines) > 0 {
-		b.Prompt.Inline = promptLines
+	if len(f.promptLines) > 0 {
+		b.Prompt.Inline = f.promptLines
 	}
-	if len(promptFiles) > 0 {
-		b.Prompt.PromptFiles = promptFiles
+	if len(f.promptFiles) > 0 {
+		b.Prompt.PromptFiles = f.promptFiles
 	}
-	if len(contextFiles) > 0 {
-		b.Context.RequiredFiles = contextFiles
+	if len(f.contextFiles) > 0 {
+		b.Context.RequiredFiles = f.contextFiles
 	}
 
-	b.Verification.FeedbackGoal = feedbackGoal
-	if len(scenarioTags) > 0 {
-		b.Verification.ScenarioTags = scenarioTags
+	b.Verification.FeedbackGoal = f.feedbackGoal
+	if len(f.scenarioTags) > 0 {
+		b.Verification.ScenarioTags = f.scenarioTags
 	}
-	if len(regressionArts) > 0 {
-		b.Verification.RegressionArtifacts = regressionArts
+	if len(f.regressionArts) > 0 {
+		b.Verification.RegressionArtifacts = f.regressionArts
 	}
-	if validationQueue != "" {
-		b.Verification.HigherLayerValidationQueue = validationQueue
+	if f.validationQueue != "" {
+		b.Verification.HigherLayerValidationQueue = f.validationQueue
 	}
 
 	appType, verifierSeq, err := resolveFanoutVerifierDispatch(projectPath, cmd, plan, targetTask)
@@ -1314,38 +1432,7 @@ func buildDelegationBundleForFanout(
 		b.Verification.VerifierSequence = verifierSeq
 	}
 
-	reqNeg, _ := cmd.Flags().GetBool("require-negative-coverage")
-	sandbox, _ := cmd.Flags().GetBool("sandbox-mutations")
-	if reqNeg || sandbox {
-		b.Verification.EvidencePolicy = &struct {
-			RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-			ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
-			SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-			PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
-		}{}
-		if reqNeg {
-			v := true
-			b.Verification.EvidencePolicy.RequireNegativeCoverage = &v
-		}
-		if sandbox {
-			v := true
-			b.Verification.EvidencePolicy.SandboxMutations = &v
-		}
-	}
-
-	retryMax, _ := cmd.Flags().GetInt("verifier-retry-max")
-	if retryMax > 0 {
-		if b.Verification.EvidencePolicy == nil {
-			b.Verification.EvidencePolicy = &struct {
-				RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-				ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
-				SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-				PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
-			}{}
-		}
-		rm := retryMax
-		b.Verification.EvidencePolicy.PrimaryChainMax = &rm
-	}
+	applyFanoutEvidencePolicy(&b, f)
 
 	b.Closeout.WorkerMust = []string{"workflow_verify_record", "workflow_checkpoint", "workflow_merge_back"}
 	b.Closeout.ParentMust = []string{"workflow_advance", "workflow_delegation_closeout"}
@@ -1379,6 +1466,116 @@ func allCanonicalTasksTerminal(tasks []CanonicalTask) bool {
 	return true
 }
 
+func reconcileDelegationContractForCloseout(projectPath, taskID, planID string) (*DelegationContract, error) {
+	contract, err := loadDelegationContract(projectPath, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("delegation contract for task %s not found: %w", taskID, err)
+	}
+	if contract.ParentPlanID != planID {
+		return nil, fmt.Errorf("delegation plan_id %q does not match --plan %q", contract.ParentPlanID, planID)
+	}
+	if contract.Status != "completed" && contract.Status != "cancelled" {
+		contract.Status = "completed"
+		if err := saveDelegationContract(projectPath, contract); err != nil {
+			return nil, fmt.Errorf("reconcile delegation status before closeout: %w", err)
+		}
+		contract, err = loadDelegationContract(projectPath, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("reload delegation contract: %w", err)
+		}
+	}
+	if contract.Status != "completed" {
+		return nil, fmt.Errorf("delegation for task %s must be completed (run merge-back first); status is %q", taskID, contract.Status)
+	}
+	return contract, nil
+}
+
+func archiveCloseoutArtifacts(projectPath, taskID, planID, decision string, contract *DelegationContract, closeout workflowDelegationCloseoutRecord) (archiveDir, dateStr string, err error) {
+	dateStr = time.Now().UTC().Format("2006-01-02")
+	archiveDir = filepath.Join(projectPath, delegationAgentsDir, "history", planID, "delegate-merge-back-archive", dateStr, taskID)
+	mergeBackSrc := filepath.Join(mergeBackDir(projectPath), taskID+".md")
+	delegationSrc := filepath.Join(delegationDir(projectPath), taskID+".yaml")
+	verificationSrcDir := filepath.Join(projectPath, delegationAgentsDir, "active", "verification", taskID)
+
+	if err = copyWorkflowArtifact(mergeBackSrc, filepath.Join(archiveDir, "merge-back.md")); err != nil {
+		return "", "", fmt.Errorf("archive merge-back: %w", err)
+	}
+	if err = copyWorkflowArtifact(delegationSrc, filepath.Join(archiveDir, "delegation.yaml")); err != nil {
+		return "", "", fmt.Errorf("archive delegation contract: %w", err)
+	}
+
+	closeoutData, err := yaml.Marshal(closeout)
+	if err != nil {
+		return "", "", err
+	}
+	if err = os.WriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
+		return "", "", fmt.Errorf("write closeout record: %w", err)
+	}
+
+	if decision == "accept" {
+		if st, err := os.Stat(verificationSrcDir); err == nil && st.IsDir() {
+			if err := copyWorkflowDir(verificationSrcDir, filepath.Join(archiveDir, "verification")); err != nil {
+				return "", "", fmt.Errorf("archive verification dir: %w", err)
+			}
+			if err := os.RemoveAll(verificationSrcDir); err != nil {
+				return "", "", fmt.Errorf("remove active verification dir: %w", err)
+			}
+		}
+	}
+
+	_ = os.Remove(mergeBackSrc)
+	_ = os.Remove(delegationSrc)
+	bundlePath := filepath.Join(delegationBundlesDir(projectPath), contract.ID+".yaml")
+	if _, err := os.Stat(bundlePath); err == nil {
+		_ = os.Remove(bundlePath)
+	}
+	return archiveDir, dateStr, nil
+}
+
+func applyCloseoutDecisionToTasks(projectPath, planID, taskID string, closeout workflowDelegationCloseoutRecord) error {
+	tf, err := loadCanonicalTasks(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf("load canonical tasks: %w", err)
+	}
+	found := false
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID != taskID {
+			continue
+		}
+		found = true
+		switch closeout.Decision {
+		case "accept":
+			tf.Tasks[i].Status = "completed"
+		case "reject":
+			tf.Tasks[i].Status = "blocked"
+			if closeout.Note != "" {
+				tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, fmt.Sprintf("delegation closeout reject: %s", closeout.Note))
+			}
+		}
+		break
+	}
+	if !found {
+		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
+	}
+	if err := saveCanonicalTasks(projectPath, tf); err != nil {
+		return fmt.Errorf("save tasks: %w", err)
+	}
+
+	plan, err := loadCanonicalPlan(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf("load plan: %w", err)
+	}
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
+	if allCanonicalTasksTerminal(tf.Tasks) {
+		plan.Status = "completed"
+	}
+	if err := saveCanonicalPlan(projectPath, plan); err != nil {
+		return fmt.Errorf("save plan: %w", err)
+	}
+	return nil
+}
+
 func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -1398,42 +1595,9 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("merge-back for task %s is required before closeout: %w", taskID, err)
 	}
 
-	contract, err := loadDelegationContract(project.Path, taskID)
+	contract, err := reconcileDelegationContractForCloseout(project.Path, taskID, planID)
 	if err != nil {
-		return fmt.Errorf("delegation contract for task %s not found: %w", taskID, err)
-	}
-	if contract.ParentPlanID != planID {
-		return fmt.Errorf("delegation plan_id %q does not match --plan %q", contract.ParentPlanID, planID)
-	}
-
-	// workflow merge-back marks the delegation completed when merge-back is written; workers that drop
-	// merge-back/*.md without invoking that command can leave status as active/pending/failed.
-	if contract.Status != "completed" && contract.Status != "cancelled" {
-		contract.Status = "completed"
-		if err := saveDelegationContract(project.Path, contract); err != nil {
-			return fmt.Errorf("reconcile delegation status before closeout: %w", err)
-		}
-		contract, err = loadDelegationContract(project.Path, taskID)
-		if err != nil {
-			return fmt.Errorf("reload delegation contract: %w", err)
-		}
-	}
-
-	if contract.Status != "completed" {
-		return fmt.Errorf("delegation for task %s must be completed (run merge-back first); status is %q", taskID, contract.Status)
-	}
-
-	dateStr := time.Now().UTC().Format("2006-01-02")
-	archiveDir := filepath.Join(project.Path, delegationAgentsDir, "history", planID, "delegate-merge-back-archive", dateStr, taskID)
-	mergeBackSrc := filepath.Join(mergeBackDir(project.Path), taskID+".md")
-	delegationSrc := filepath.Join(delegationDir(project.Path), taskID+".yaml")
-	verificationSrcDir := filepath.Join(project.Path, delegationAgentsDir, "active", "verification", taskID)
-
-	if err := copyWorkflowArtifact(mergeBackSrc, filepath.Join(archiveDir, "merge-back.md")); err != nil {
-		return fmt.Errorf("archive merge-back: %w", err)
-	}
-	if err := copyWorkflowArtifact(delegationSrc, filepath.Join(archiveDir, "delegation.yaml")); err != nil {
-		return fmt.Errorf("archive delegation contract: %w", err)
+		return err
 	}
 
 	closeout := workflowDelegationCloseoutRecord{
@@ -1445,71 +1609,14 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		Note:          strings.TrimSpace(note),
 		ClosedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
-	closeoutData, err := yaml.Marshal(closeout)
+
+	_, dateStr, err := archiveCloseoutArtifacts(project.Path, taskID, planID, decision, contract, closeout)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
-		return fmt.Errorf("write closeout record: %w", err)
-	}
 
-	if decision == "accept" {
-		if st, err := os.Stat(verificationSrcDir); err == nil && st.IsDir() {
-			if err := copyWorkflowDir(verificationSrcDir, filepath.Join(archiveDir, "verification")); err != nil {
-				return fmt.Errorf("archive verification dir: %w", err)
-			}
-			if err := os.RemoveAll(verificationSrcDir); err != nil {
-				return fmt.Errorf("remove active verification dir: %w", err)
-			}
-		}
-	}
-
-	_ = os.Remove(mergeBackSrc)
-	_ = os.Remove(delegationSrc)
-	bundlePath := filepath.Join(delegationBundlesDir(project.Path), contract.ID+".yaml")
-	if _, err := os.Stat(bundlePath); err == nil {
-		_ = os.Remove(bundlePath)
-	}
-
-	tf, err := loadCanonicalTasks(project.Path, planID)
-	if err != nil {
-		return fmt.Errorf("load canonical tasks: %w", err)
-	}
-	found := false
-	for i := range tf.Tasks {
-		if tf.Tasks[i].ID != taskID {
-			continue
-		}
-		found = true
-		switch decision {
-		case "accept":
-			tf.Tasks[i].Status = "completed"
-		case "reject":
-			tf.Tasks[i].Status = "blocked"
-			if closeout.Note != "" {
-				tf.Tasks[i].Notes = appendFoldBackBullet(tf.Tasks[i].Notes, fmt.Sprintf("delegation closeout reject: %s", closeout.Note))
-			}
-		}
-		break
-	}
-	if !found {
-		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
-	}
-	if err := saveCanonicalTasks(project.Path, tf); err != nil {
-		return fmt.Errorf("save tasks: %w", err)
-	}
-
-	plan, err := loadCanonicalPlan(project.Path, planID)
-	if err != nil {
-		return fmt.Errorf("load plan: %w", err)
-	}
-	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	plan.CurrentFocusTask = effectivePlanFocusTask(tf.Tasks)
-	if allCanonicalTasksTerminal(tf.Tasks) {
-		plan.Status = "completed"
-	}
-	if err := saveCanonicalPlan(project.Path, plan); err != nil {
-		return fmt.Errorf("save plan: %w", err)
+	if err := applyCloseoutDecisionToTasks(project.Path, planID, taskID, closeout); err != nil {
+		return err
 	}
 
 	if deps.Flags.JSON() {

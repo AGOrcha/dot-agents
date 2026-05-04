@@ -19,16 +19,6 @@ const (
 // Behavioral implementations live in sibling sources (state.go, plan_task.go, verification.go, …).
 
 func newWorkflowCmd() *cobra.Command {
-	var (
-		checkpointMessage               string
-		checkpointVerificationState     string
-		checkpointVerificationText      string
-		checkpointLogToIter             int
-		checkpointLogToIterRole         string
-		checkpointLogToIterVerifierType string
-		logAll                          bool
-	)
-
 	cmd := &cobra.Command{
 		Use:   "workflow",
 		Short: "Inspect and persist workflow state",
@@ -43,7 +33,36 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 	}
 
-	statusCmd := &cobra.Command{
+	cmd.AddCommand(
+		newWorkflowStatusCmd(),
+		newWorkflowOrientCmd(),
+		newWorkflowCheckpointCmd(),
+		newWorkflowLogCmd(),
+		newWorkflowPlanCmd(),
+		newWorkflowTaskCmd(),
+		newWorkflowTasksCmd(),
+		newWorkflowSlicesCmd(),
+		newWorkflowEligibleCmd(),
+		newWorkflowNextCmd(),
+		newWorkflowCompleteCmd(),
+		newWorkflowAdvanceCmd(),
+		newWorkflowHealthCmd(),
+		newWorkflowVerifyCmd(),
+		newWorkflowPrefsCmd(),
+		newWorkflowGraphCmd(),
+		newWorkflowFanoutCmd(),
+		newWorkflowMergeBackCmd(),
+		newWorkflowFoldBackCmd(),
+		newWorkflowDelegationCmd(),
+		newWorkflowDriftCmd(),
+		newWorkflowSweepCmd(),
+		newWorkflowBundleCmd(),
+	)
+	return cmd
+}
+
+func newWorkflowStatusCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "status",
 		Short: "Show workflow state for the current project",
 		Example: deps.ExampleBlock(
@@ -55,8 +74,10 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowStatus()
 		},
 	}
+}
 
-	orientCmd := &cobra.Command{
+func newWorkflowOrientCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "orient",
 		Short: "Render session orient context for the current project",
 		Example: deps.ExampleBlock(
@@ -67,7 +88,17 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowOrient()
 		},
 	}
+}
 
+func newWorkflowCheckpointCmd() *cobra.Command {
+	var (
+		checkpointMessage               string
+		checkpointVerificationState     string
+		checkpointVerificationText      string
+		checkpointLogToIter             int
+		checkpointLogToIterRole         string
+		checkpointLogToIterVerifierType string
+	)
 	checkpointCmd := &cobra.Command{
 		Use:   "checkpoint",
 		Short: "Write a checkpoint for the current project",
@@ -99,7 +130,11 @@ preferences, fanout artifacts, and bridge queries.`,
 	checkpointCmd.Flags().IntVar(&checkpointLogToIter, workflowFlagLogToIter, 0, "Write a schema-validated iteration log stub for N (>=1) to .agents/active/iteration-log/iter-N.yaml")
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterRole, "role", "", "With --log-to-iter: merge only the impl, verifier, or review block")
 	checkpointCmd.Flags().StringVar(&checkpointLogToIterVerifierType, workflowFlagVerifierType, "", "Verifier slug when --role verifier (for example unit)")
+	return checkpointCmd
+}
 
+func newWorkflowLogCmd() *cobra.Command {
+	var logAll bool
 	logCmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show recent checkpoint log entries",
@@ -113,7 +148,10 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 	logCmd.Flags().BoolVar(&logAll, "all", false, "Show all log entries")
+	return logCmd
+}
 
+func newWorkflowPlanCmd() *cobra.Command {
 	planCmd := &cobra.Command{
 		Use:   "plan",
 		Short: "List canonical plans",
@@ -126,7 +164,21 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPlanList()
 		},
 	}
-	planShowCmd := &cobra.Command{
+	planCmd.AddCommand(
+		newWorkflowPlanShowCmd(),
+		newWorkflowPlanGraphCmd(),
+		newWorkflowPlanCreateCmd(),
+		newWorkflowPlanUpdateCmd(),
+		newWorkflowPlanArchiveCmd(),
+		newWorkflowPlanScheduleCmd(),
+		newWorkflowPlanDeriveScopeCmd(),
+		newWorkflowPlanCheckScopeCmd(),
+	)
+	return planCmd
+}
+
+func newWorkflowPlanShowCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "show <plan-id>",
 		Short: "Show details of a canonical plan",
 		Example: deps.ExampleBlock(
@@ -137,7 +189,10 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPlanShow(args[0])
 		},
 	}
-	planGraphCmd := &cobra.Command{
+}
+
+func newWorkflowPlanGraphCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "graph [plan-id]",
 		Short: "Render a derived graph of canonical plans and tasks",
 		Example: deps.ExampleBlock(
@@ -153,6 +208,9 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPlanGraph(planID)
 		},
 	}
+}
+
+func newWorkflowPlanCreateCmd() *cobra.Command {
 	var planCreateTitle, planCreateSummary, planCreateOwner, planCreateSuccessCriteria, planCreateVerificationStrategy string
 	planCreateCmd := &cobra.Command{
 		Use:   "create <plan-id>",
@@ -171,7 +229,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	planCreateCmd.Flags().StringVar(&planCreateSuccessCriteria, "success-criteria", "", "Observable conditions that prove the plan is done")
 	planCreateCmd.Flags().StringVar(&planCreateVerificationStrategy, "verification-strategy", "", "How completion will be verified (tests, smokes, manual checks)")
 	_ = planCreateCmd.MarkFlagRequired("title")
+	return planCreateCmd
+}
 
+func newWorkflowPlanUpdateCmd() *cobra.Command {
 	var planUpdateStatus, planUpdateTitle, planUpdateSummary, planUpdateFocus, planUpdateSuccessCriteria, planUpdateVerificationStrategy string
 	planUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
@@ -190,7 +251,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	planUpdateCmd.Flags().StringVar(&planUpdateFocus, "focus", "", "New current_focus_task value")
 	planUpdateCmd.Flags().StringVar(&planUpdateSuccessCriteria, "success-criteria", "", "New success criteria (replaces existing)")
 	planUpdateCmd.Flags().StringVar(&planUpdateVerificationStrategy, "verification-strategy", "", "New verification strategy (replaces existing)")
+	return planUpdateCmd
+}
 
+func newWorkflowPlanArchiveCmd() *cobra.Command {
 	var planArchivePlanIDs string
 	var planArchiveForce bool
 	planArchiveCmd := &cobra.Command{
@@ -223,8 +287,11 @@ preferences, fanout artifacts, and bridge queries.`,
 	planArchiveCmd.Flags().StringVar(&planArchivePlanIDs, "plan", "", "Comma-separated plan IDs to archive (required)")
 	planArchiveCmd.Flags().BoolVar(&planArchiveForce, "force", false, "Skip completed-status guard and archive regardless of plan status")
 	_ = planArchiveCmd.MarkFlagRequired("plan")
+	return planArchiveCmd
+}
 
-	planScheduleCmd := &cobra.Command{
+func newWorkflowPlanScheduleCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "schedule <plan-id>",
 		Short: "Show wave schedule (Kahn BFS topological sort) for a plan's tasks",
 		Example: deps.ExampleBlock(
@@ -236,7 +303,9 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowPlanSchedule(args[0])
 		},
 	}
+}
 
+func newWorkflowPlanDeriveScopeCmd() *cobra.Command {
 	var deriveScopeSymbols, deriveScopePaths []string
 	planDeriveScopeCmd := &cobra.Command{
 		Use:   "derive-scope <plan-id> <task-id>",
@@ -253,7 +322,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopeSymbols, "seed-symbol", nil, "Seed symbol for scope-lane queries (repeatable)")
 	planDeriveScopeCmd.Flags().StringArrayVar(&deriveScopePaths, "seed-path", nil, "Seed file path for scope-lane queries (repeatable)")
+	return planDeriveScopeCmd
+}
 
+func newWorkflowPlanCheckScopeCmd() *cobra.Command {
 	var checkScopeFiles []string
 	var checkScopeFromGitDiff bool
 	planCheckScopeCmd := &cobra.Command{
@@ -271,9 +343,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	planCheckScopeCmd.Flags().StringArrayVar(&checkScopeFiles, "changed-file", nil, "Changed file path (repeatable)")
 	planCheckScopeCmd.Flags().BoolVar(&checkScopeFromGitDiff, "from-git-diff", false, "Read changed files from git diff HEAD")
+	return planCheckScopeCmd
+}
 
-	planCmd.AddCommand(planShowCmd, planGraphCmd, planCreateCmd, planUpdateCmd, planArchiveCmd, planScheduleCmd, planDeriveScopeCmd, planCheckScopeCmd)
-
+func newWorkflowTaskCmd() *cobra.Command {
 	taskCmd := &cobra.Command{
 		Use:   "task",
 		Short: "Add or update tasks within a canonical plan",
@@ -282,6 +355,11 @@ preferences, fanout artifacts, and bridge queries.`,
 			"  dot-agents workflow task update loop-orchestrator-layer --task phase-5 --write-scope internal/platform",
 		),
 	}
+	taskCmd.AddCommand(newWorkflowTaskAddCmd(), newWorkflowTaskUpdateCmd())
+	return taskCmd
+}
+
+func newWorkflowTaskAddCmd() *cobra.Command {
 	var taskAddID, taskAddTitle, taskAddNotes, taskAddOwner, taskAddDependsOn, taskAddBlocks, taskAddWriteScope, taskAddAppType string
 	var taskAddVerification bool
 	taskAddCmd := &cobra.Command{
@@ -306,7 +384,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
 	_ = taskAddCmd.MarkFlagRequired("id")
 	_ = taskAddCmd.MarkFlagRequired("title")
+	return taskAddCmd
+}
 
+func newWorkflowTaskUpdateCmd() *cobra.Command {
 	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
@@ -324,10 +405,11 @@ preferences, fanout artifacts, and bridge queries.`,
 	taskUpdateCmd.Flags().StringVar(&taskUpdateNotes, "notes", "", "New implementation notes (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
+	return taskUpdateCmd
+}
 
-	taskCmd.AddCommand(taskAddCmd, taskUpdateCmd)
-
-	tasksCmd := &cobra.Command{
+func newWorkflowTasksCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "tasks <plan-id>",
 		Short: "Show tasks for a canonical plan",
 		Example: deps.ExampleBlock(
@@ -338,8 +420,10 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowTasks(args[0])
 		},
 	}
+}
 
-	slicesCmd := &cobra.Command{
+func newWorkflowSlicesCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "slices <plan-id>",
 		Short: "Show slices for a canonical plan",
 		Example: deps.ExampleBlock(
@@ -350,7 +434,9 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowSlices(args[0])
 		},
 	}
+}
 
+func newWorkflowEligibleCmd() *cobra.Command {
 	var eligiblePlanFilter string
 	var eligibleLimit int
 	eligibleCmd := &cobra.Command{
@@ -370,7 +456,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	eligibleCmd.Flags().StringVar(&eligiblePlanFilter, "plan", "", "Only consider tasks from these canonical plan ids (comma-separated)")
 	eligibleCmd.Flags().IntVar(&eligibleLimit, "limit", 0, "Override max_parallel_workers pref (0 = use pref, >0 = explicit limit)")
+	return eligibleCmd
+}
 
+func newWorkflowNextCmd() *cobra.Command {
 	var workflowNextPlanID string
 	nextCmd := &cobra.Command{
 		Use:   "next",
@@ -387,7 +476,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	nextCmd.Flags().StringVar(&workflowNextPlanID, "plan", "", "Only consider tasks from this canonical plan id")
 	nextCmd.Flags().Lookup("plan").Usage = "Only consider tasks from these canonical plan ids (comma-separated)"
+	return nextCmd
+}
 
+func newWorkflowCompleteCmd() *cobra.Command {
 	var workflowCompletePlanID string
 	completeCmd := &cobra.Command{
 		Use:   "complete",
@@ -406,7 +498,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	completeCmd.Flags().StringVar(&workflowCompletePlanID, "plan", "", "Only consider these canonical plan ids (comma-separated)")
 	_ = completeCmd.MarkFlagRequired("plan")
+	return completeCmd
+}
 
+func newWorkflowAdvanceCmd() *cobra.Command {
 	var advanceTask, advanceStatus string
 	advanceCmd := &cobra.Command{
 		Use:   "advance <plan-id>",
@@ -423,8 +518,11 @@ preferences, fanout artifacts, and bridge queries.`,
 	advanceCmd.Flags().StringVar(&advanceStatus, "status", "", "New task status (required)")
 	_ = advanceCmd.MarkFlagRequired("task")
 	_ = advanceCmd.MarkFlagRequired("status")
+	return advanceCmd
+}
 
-	healthCmd := &cobra.Command{
+func newWorkflowHealthCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "health",
 		Short: "Show workflow health snapshot",
 		Example: deps.ExampleBlock(
@@ -435,7 +533,9 @@ preferences, fanout artifacts, and bridge queries.`,
 			return runWorkflowHealth()
 		},
 	}
+}
 
+func newWorkflowVerifyCmd() *cobra.Command {
 	verifyCmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Manage verification log",
@@ -445,6 +545,11 @@ preferences, fanout artifacts, and bridge queries.`,
 			"  dot-agents workflow verify log",
 		),
 	}
+	verifyCmd.AddCommand(newWorkflowVerifyRecordCmd(), newWorkflowVerifyLogCmd())
+	return verifyCmd
+}
+
+func newWorkflowVerifyRecordCmd() *cobra.Command {
 	var verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary string
 	var reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask string
 	var reviewFailedGates []string
@@ -459,29 +564,8 @@ preferences, fanout artifacts, and bridge queries.`,
 		),
 		Args: deps.NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			k := strings.TrimSpace(strings.ToLower(verifyKind))
-			if k == "" {
-				return fmt.Errorf("--kind is required")
-			}
-			if strings.TrimSpace(verifySummary) == "" {
-				return fmt.Errorf("--summary is required")
-			}
-			if k == "review" {
-				if strings.TrimSpace(verifyStatus) != "" {
-					return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
-				}
-				if strings.TrimSpace(reviewPhase1) == "" || strings.TrimSpace(reviewPhase2) == "" {
-					return deps.ErrorWithHints(
-						"--phase1-decision and --phase2-decision are required when --kind review",
-						"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
-					)
-				}
-				return runWorkflowVerifyRecordReview(verifyCommand, verifyScope, verifySummary, reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, reviewFailedGates)
-			}
-			if strings.TrimSpace(verifyStatus) == "" {
-				return fmt.Errorf("--status is required when --kind is not review")
-			}
-			return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary, reviewTask, verifyVerifierType)
+			return runWorkflowVerifyRecordDispatch(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary,
+				reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, verifyVerifierType, reviewFailedGates)
 		},
 	}
 	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom|review (required)")
@@ -499,7 +583,40 @@ preferences, fanout artifacts, and bridge queries.`,
 	verifyRecordCmd.Flags().StringVar(&verifyVerifierType, workflowFlagVerifierType, "", "Verifier profile id for typed result artifact stem (e.g. unit, api, batch); defaults to --kind when --task is set")
 	_ = verifyRecordCmd.MarkFlagRequired("kind")
 	_ = verifyRecordCmd.MarkFlagRequired("summary")
+	return verifyRecordCmd
+}
 
+// runWorkflowVerifyRecordDispatch validates flag combinations and dispatches to the
+// appropriate runWorkflowVerifyRecord{Review,} runner.
+func runWorkflowVerifyRecordDispatch(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary,
+	reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, verifyVerifierType string,
+	reviewFailedGates []string) error {
+	k := strings.TrimSpace(strings.ToLower(verifyKind))
+	if k == "" {
+		return fmt.Errorf("--kind is required")
+	}
+	if strings.TrimSpace(verifySummary) == "" {
+		return fmt.Errorf("--summary is required")
+	}
+	if k == "review" {
+		if strings.TrimSpace(verifyStatus) != "" {
+			return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
+		}
+		if strings.TrimSpace(reviewPhase1) == "" || strings.TrimSpace(reviewPhase2) == "" {
+			return deps.ErrorWithHints(
+				"--phase1-decision and --phase2-decision are required when --kind review",
+				"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
+			)
+		}
+		return runWorkflowVerifyRecordReview(verifyCommand, verifyScope, verifySummary, reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, reviewFailedGates)
+	}
+	if strings.TrimSpace(verifyStatus) == "" {
+		return fmt.Errorf("--status is required when --kind is not review")
+	}
+	return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary, reviewTask, verifyVerifierType)
+}
+
+func newWorkflowVerifyLogCmd() *cobra.Command {
 	var verifyLogAll bool
 	verifyLogCmd := &cobra.Command{
 		Use:   "log",
@@ -514,9 +631,10 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 	verifyLogCmd.Flags().BoolVar(&verifyLogAll, "all", false, "Show all log entries")
+	return verifyLogCmd
+}
 
-	verifyCmd.AddCommand(verifyRecordCmd, verifyLogCmd)
-
+func newWorkflowPrefsCmd() *cobra.Command {
 	prefsCmd := &cobra.Command{
 		Use:   "prefs",
 		Short: "Show resolved workflow preferences",
@@ -568,7 +686,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 
 	prefsCmd.AddCommand(prefsShowCmd, prefsSetLocalCmd, prefsSetSharedCmd)
+	return prefsCmd
+}
 
+func newWorkflowGraphCmd() *cobra.Command {
 	graphCmd := &cobra.Command{
 		Use:   "graph",
 		Short: "Query knowledge graph context",
@@ -599,7 +720,10 @@ preferences, fanout artifacts, and bridge queries.`,
 		RunE: runWorkflowGraphHealth,
 	}
 	graphCmd.AddCommand(graphQueryCmd, graphHealthCmd)
+	return graphCmd
+}
 
+func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd := &cobra.Command{
 		Use:   "fanout",
 		Short: "Delegate a task to a sub-agent with a bounded write scope",
@@ -632,7 +756,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	fanoutCmd.Flags().Bool("skip-tdd-gate", false, "Skip pre-verifier check that Go write_scope has *_test.go coverage")
 	fanoutCmd.Flags().Bool("skip-evidence-check", false, "Suppress scope-evidence sidecar warnings (missing sidecar or low confidence)")
 	_ = fanoutCmd.MarkFlagRequired("plan")
+	return fanoutCmd
+}
 
+func newWorkflowMergeBackCmd() *cobra.Command {
 	mergeBackCmd := &cobra.Command{
 		Use:   "merge-back",
 		Short: "Record a sub-agent's completed work as a merge-back artifact",
@@ -648,7 +775,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	mergeBackCmd.Flags().String("integration-notes", "", "Guidance for the parent agent")
 	_ = mergeBackCmd.MarkFlagRequired("task")
 	_ = mergeBackCmd.MarkFlagRequired("summary")
+	return mergeBackCmd
+}
 
+func newWorkflowFoldBackCmd() *cobra.Command {
 	foldBackCmd := &cobra.Command{
 		Use:   "fold-back",
 		Short: "Route loop observations into durable plan artifacts or proposals",
@@ -701,7 +831,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	}
 	foldBackListCmd.Flags().String("plan", "", "Filter by canonical plan ID")
 	foldBackCmd.AddCommand(foldBackCreateCmd, foldBackUpdateCmd, foldBackListCmd)
+	return foldBackCmd
+}
 
+func newWorkflowDelegationCmd() *cobra.Command {
 	delegationCmd := &cobra.Command{
 		Use:   "delegation",
 		Short: "Parent-driven delegation lifecycle helpers",
@@ -737,7 +870,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	delegationGateCmd.Flags().String("task", "", "Delegated task ID (required)")
 	_ = delegationGateCmd.MarkFlagRequired("task")
 	delegationCmd.AddCommand(delegationCloseoutCmd, delegationGateCmd)
+	return delegationCmd
+}
 
+func newWorkflowDriftCmd() *cobra.Command {
 	driftCmd := &cobra.Command{
 		Use:   "drift",
 		Short: "Detect workflow drift across managed repos (read-only)",
@@ -751,7 +887,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	driftCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
 	driftCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	driftCmd.Flags().String("project", "", "Check only this project (by name)")
+	return driftCmd
+}
 
+func newWorkflowSweepCmd() *cobra.Command {
 	sweepCmd := &cobra.Command{
 		Use:   "sweep",
 		Short: "Plan and optionally apply fixes for workflow drift across managed repos",
@@ -765,7 +904,10 @@ preferences, fanout artifacts, and bridge queries.`,
 	sweepCmd.Flags().Int("stale-days", defaultCheckpointStaleDays, "Checkpoint staleness threshold in days")
 	sweepCmd.Flags().Int("proposal-days", defaultProposalStaleDays, "Proposal staleness threshold in days")
 	sweepCmd.Flags().Bool("apply", false, "Execute sweep actions (default is dry-run)")
+	return sweepCmd
+}
 
+func newWorkflowBundleCmd() *cobra.Command {
 	bundleCmd := &cobra.Command{
 		Use:   "bundle",
 		Short: "Inspect delegation bundle artifacts",
@@ -786,9 +928,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		},
 	}
 	bundleCmd.AddCommand(bundleStagesCmd)
-
-	cmd.AddCommand(statusCmd, orientCmd, checkpointCmd, logCmd, planCmd, taskCmd, tasksCmd, slicesCmd, eligibleCmd, nextCmd, completeCmd, advanceCmd, healthCmd, verifyCmd, prefsCmd, graphCmd, fanoutCmd, mergeBackCmd, foldBackCmd, delegationCmd, driftCmd, sweepCmd, bundleCmd)
-	return cmd
+	return bundleCmd
 }
 
 // NewCmd builds the `dot-agents workflow` command tree. Callers must supply Deps from package commands to avoid an import cycle.

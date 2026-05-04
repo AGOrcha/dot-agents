@@ -73,6 +73,95 @@ func extractPlanStatus(data []byte) string {
 	return plan.Status
 }
 
+func driftCheckpointPhase(report *RepoDriftReport, project ManagedProject, checkpointStaleDays int) {
+	checkpointPath := filepath.Join(config.ProjectContextDir(project.Name), "checkpoint.yaml")
+	checkpointData, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		report.MissingCheckpoint = true
+		report.Warnings = append(report.Warnings, "no checkpoint found")
+		return
+	}
+	var cp workflowCheckpoint
+	if err := yaml.Unmarshal(checkpointData, &cp); err != nil || cp.Timestamp == "" {
+		return
+	}
+	t, err := time.Parse(time.RFC3339, cp.Timestamp)
+	if err != nil {
+		return
+	}
+	ageDays := int(time.Since(t).Hours() / 24)
+	report.CheckpointAgeDays = ageDays
+	if ageDays > checkpointStaleDays {
+		report.StaleCheckpoint = true
+		report.Warnings = append(report.Warnings, fmt.Sprintf("checkpoint is %d days old (threshold: %d)", ageDays, checkpointStaleDays))
+	}
+}
+
+func driftStaleProposalPhase(report *RepoDriftReport, proposalStaleDays int) {
+	proposals, err := config.ListPendingProposals()
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -proposalStaleDays)
+	for _, p := range proposals {
+		t, err := time.Parse(time.RFC3339, p.CreatedAt)
+		if err == nil && t.Before(cutoff) {
+			report.StaleProposalCount++
+		}
+	}
+	if report.StaleProposalCount > 0 {
+		report.Warnings = append(report.Warnings, fmt.Sprintf("%d stale proposals (older than %d days)", report.StaleProposalCount, proposalStaleDays))
+	}
+}
+
+func driftWorkflowDirPhase(report *RepoDriftReport, project ManagedProject) {
+	workflowDir := filepath.Join(project.Path, ".agents", "workflow")
+	if _, err := os.Stat(workflowDir); os.IsNotExist(err) {
+		report.MissingWorkflowDir = true
+		report.Warnings = append(report.Warnings, "no .agents/workflow/ directory — workflow not initialized")
+	}
+	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
+	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
+		report.MissingPlanStructure = true
+		if !report.MissingWorkflowDir {
+			report.Warnings = append(report.Warnings, "no .agents/workflow/plans/ directory — no canonical plans")
+		}
+	}
+}
+
+func recordPlanStatusDrift(report *RepoDriftReport, planID, status string) {
+	switch status {
+	case "completed":
+		report.CompletedPlanIDs = append(report.CompletedPlanIDs, planID)
+		report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q is completed but not archived", planID))
+	case "archived":
+		report.InconsistentArchivedPlanIDs = append(report.InconsistentArchivedPlanIDs, planID)
+		report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q has status=archived but still exists in workflow/plans/ — archive may be incomplete", planID))
+	}
+}
+
+func driftPlanScanPhase(report *RepoDriftReport, project ManagedProject) {
+	if report.MissingPlanStructure {
+		return
+	}
+	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
+	entries, err := os.ReadDir(plansDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		planFile := filepath.Join(plansDir, e.Name(), "PLAN.yaml")
+		data, err := os.ReadFile(planFile)
+		if err != nil {
+			continue
+		}
+		recordPlanStatusDrift(report, e.Name(), extractPlanStatus(data))
+	}
+}
+
 // detectRepoDrift inspects one managed project for workflow drift.
 // All checks are read-only.
 func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleDays int) RepoDriftReport {
@@ -83,7 +172,6 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 		InconsistentArchivedPlanIDs: []string{},
 	}
 
-	// 1. Reachability
 	if _, err := os.Stat(project.Path); err != nil {
 		report.Reachable = false
 		report.Status = "unreachable"
@@ -92,83 +180,10 @@ func detectRepoDrift(project ManagedProject, checkpointStaleDays, proposalStaleD
 	}
 	report.Reachable = true
 
-	// 2. Checkpoint existence and age
-	checkpointPath := filepath.Join(config.ProjectContextDir(project.Name), "checkpoint.yaml")
-	checkpointData, err := os.ReadFile(checkpointPath)
-	if err != nil {
-		report.MissingCheckpoint = true
-		report.Warnings = append(report.Warnings, "no checkpoint found")
-	} else {
-		var cp workflowCheckpoint
-		if err := yaml.Unmarshal(checkpointData, &cp); err == nil && cp.Timestamp != "" {
-			t, err := time.Parse(time.RFC3339, cp.Timestamp)
-			if err == nil {
-				ageDays := int(time.Since(t).Hours() / 24)
-				report.CheckpointAgeDays = ageDays
-				if ageDays > checkpointStaleDays {
-					report.StaleCheckpoint = true
-					report.Warnings = append(report.Warnings, fmt.Sprintf("checkpoint is %d days old (threshold: %d)", ageDays, checkpointStaleDays))
-				}
-			}
-		}
-	}
-
-	// 3. Stale proposals
-	proposals, err := config.ListPendingProposals()
-	if err == nil {
-		cutoff := time.Now().UTC().AddDate(0, 0, -proposalStaleDays)
-		for _, p := range proposals {
-			t, err := time.Parse(time.RFC3339, p.CreatedAt)
-			if err == nil && t.Before(cutoff) {
-				report.StaleProposalCount++
-			}
-		}
-		if report.StaleProposalCount > 0 {
-			report.Warnings = append(report.Warnings, fmt.Sprintf("%d stale proposals (older than %d days)", report.StaleProposalCount, proposalStaleDays))
-		}
-	}
-
-	// 4. Workflow directory presence
-	workflowDir := filepath.Join(project.Path, ".agents", "workflow")
-	if _, err := os.Stat(workflowDir); os.IsNotExist(err) {
-		report.MissingWorkflowDir = true
-		report.Warnings = append(report.Warnings, "no .agents/workflow/ directory — workflow not initialized")
-	}
-
-	// 5. Canonical plan structure
-	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
-	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
-		report.MissingPlanStructure = true
-		// Only warn if workflow dir exists (otherwise workflow dir warning is enough)
-		if !report.MissingWorkflowDir {
-			report.Warnings = append(report.Warnings, "no .agents/workflow/plans/ directory — no canonical plans")
-		}
-	}
-
-	// 6. Completed and inconsistently-archived plans
-	if !report.MissingPlanStructure {
-		if entries, err := os.ReadDir(plansDir); err == nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				planFile := filepath.Join(plansDir, e.Name(), "PLAN.yaml")
-				data, err := os.ReadFile(planFile)
-				if err != nil {
-					continue
-				}
-				status := extractPlanStatus(data)
-				switch status {
-				case "completed":
-					report.CompletedPlanIDs = append(report.CompletedPlanIDs, e.Name())
-					report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q is completed but not archived", e.Name()))
-				case "archived":
-					report.InconsistentArchivedPlanIDs = append(report.InconsistentArchivedPlanIDs, e.Name())
-					report.Warnings = append(report.Warnings, fmt.Sprintf("plan %q has status=archived but still exists in workflow/plans/ — archive may be incomplete", e.Name()))
-				}
-			}
-		}
-	}
+	driftCheckpointPhase(&report, project, checkpointStaleDays)
+	driftStaleProposalPhase(&report, proposalStaleDays)
+	driftWorkflowDirPhase(&report, project)
+	driftPlanScanPhase(&report, project)
 
 	if len(report.Warnings) == 0 {
 		report.Status = "healthy"
@@ -235,63 +250,39 @@ func saveDriftReport(agg AggregateDriftReport) error {
 	return os.WriteFile(driftReportPath(), data, 0644)
 }
 
-// runWorkflowDrift is the read-only cross-repo drift detection command.
-func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
-	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
-	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
-	projectFilter, _ := cmd.Flags().GetString("project")
-
-	projects, err := loadManagedProjects()
-	if err != nil {
-		return fmt.Errorf("load managed projects: %w", err)
+func filterDriftProjects(projects []ManagedProject, projectFilter string) ([]ManagedProject, error) {
+	if projectFilter == "" {
+		return projects, nil
 	}
-	if len(projects) == 0 {
-		ui.Info("No managed projects registered. Add one with: dot-agents add <path>")
-		return nil
-	}
-
-	// Filter to single project if requested
-	if projectFilter != "" {
-		var filtered []ManagedProject
-		for _, p := range projects {
-			if p.Name == projectFilter {
-				filtered = append(filtered, p)
-			}
-		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("project %q not found in managed projects", projectFilter)
-		}
-		projects = filtered
-	}
-
-	// Run drift detection
-	reports := make([]RepoDriftReport, 0, len(projects))
+	var filtered []ManagedProject
 	for _, p := range projects {
-		reports = append(reports, detectRepoDrift(p, checkpointDays, proposalDays))
+		if p.Name == projectFilter {
+			filtered = append(filtered, p)
+		}
 	}
-	agg := aggregateDrift(reports)
-
-	// Save to disk
-	_ = saveDriftReport(agg)
-
-	if deps.Flags.JSON() {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(agg)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("project %q not found in managed projects", projectFilter)
 	}
+	return filtered, nil
+}
 
-	// Human-readable output
+func driftStatusBadge(status string) string {
+	switch status {
+	case "warn":
+		return ui.ColorText(ui.Yellow, "warn")
+	case "unreachable":
+		return ui.ColorText(ui.Red, "unreachable")
+	default:
+		return ui.ColorText(ui.Green, "healthy")
+	}
+}
+
+func renderDriftReport(reports []RepoDriftReport, agg AggregateDriftReport) {
 	ui.Header("Workflow Drift Report")
 	fmt.Fprintf(os.Stdout, "  %s projects checked%s\n\n", ui.Bold, ui.Reset)
 
 	for _, r := range reports {
-		statusBadge := ui.ColorText(ui.Green, "healthy")
-		if r.Status == "warn" {
-			statusBadge = ui.ColorText(ui.Yellow, "warn")
-		} else if r.Status == "unreachable" {
-			statusBadge = ui.ColorText(ui.Red, "unreachable")
-		}
-		fmt.Fprintf(os.Stdout, "  %-20s [%s]\n", r.Project.Name, statusBadge)
+		fmt.Fprintf(os.Stdout, "  %-20s [%s]\n", r.Project.Name, driftStatusBadge(r.Status))
 		for _, w := range r.Warnings {
 			fmt.Fprintf(os.Stdout, "    %s↳ %s%s\n", ui.Dim, ui.Reset, w)
 		}
@@ -308,6 +299,43 @@ func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "  healthy: %d  warnings: %d  unreachable: %d\n",
 		agg.HealthyCount, agg.WarnCount, agg.UnreachableCount)
 	fmt.Fprintf(os.Stdout, "  report saved: %s\n", config.DisplayPath(driftReportPath()))
+}
+
+// runWorkflowDrift is the read-only cross-repo drift detection command.
+func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
+	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
+	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
+	projectFilter, _ := cmd.Flags().GetString("project")
+
+	projects, err := loadManagedProjects()
+	if err != nil {
+		return fmt.Errorf("load managed projects: %w", err)
+	}
+	if len(projects) == 0 {
+		ui.Info("No managed projects registered. Add one with: dot-agents add <path>")
+		return nil
+	}
+
+	projects, err = filterDriftProjects(projects, projectFilter)
+	if err != nil {
+		return err
+	}
+
+	reports := make([]RepoDriftReport, 0, len(projects))
+	for _, p := range projects {
+		reports = append(reports, detectRepoDrift(p, checkpointDays, proposalDays))
+	}
+	agg := aggregateDrift(reports)
+
+	_ = saveDriftReport(agg)
+
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(agg)
+	}
+
+	renderDriftReport(reports, agg)
 	return nil
 }
 

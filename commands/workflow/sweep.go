@@ -135,6 +135,77 @@ func applySweepAction(item SweepActionItem) error {
 	}
 }
 
+func sweepLogEntry(action SweepActionItem, applied, dryRun bool) SweepLogEntry {
+	return SweepLogEntry{
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Project:     action.Project.Name,
+		Action:      action.Action,
+		Description: action.Description,
+		Applied:     applied,
+		DryRun:      dryRun,
+	}
+}
+
+func renderSweepPlanHeader(plan SweepPlan, dryRun bool) {
+	modeLabel := "dry-run"
+	if !dryRun {
+		modeLabel = "apply"
+	}
+	ui.Header(fmt.Sprintf("Sweep Plan [%s]", modeLabel))
+	fmt.Fprintln(os.Stdout)
+
+	for i, action := range plan.Actions {
+		marker := "○"
+		if action.RequiresConfirmation && !dryRun {
+			marker = "⚡"
+		}
+		fmt.Fprintf(os.Stdout, "  %s %d. [%s] %s\n", marker, i+1, action.Project.Name, action.Description)
+	}
+	fmt.Fprintln(os.Stdout)
+}
+
+func runSweepDryRun(plan SweepPlan) {
+	ui.Info("Run with --apply to execute these actions.")
+	for _, action := range plan.Actions {
+		appendSweepLog(sweepLogEntry(action, false, true))
+	}
+}
+
+// confirmSweepAction returns true if the action should be applied. It also
+// records a skip log entry when the user declines.
+func confirmSweepAction(action SweepActionItem) bool {
+	if !action.RequiresConfirmation || deps.Flags.Yes() {
+		return true
+	}
+	fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
+	var resp string
+	fmt.Scanln(&resp)
+	if strings.ToLower(strings.TrimSpace(resp)) == "y" {
+		return true
+	}
+	ui.Info(fmt.Sprintf("  Skipped: %s", action.Description))
+	appendSweepLog(sweepLogEntry(action, false, false))
+	return false
+}
+
+func runSweepApply(plan SweepPlan) {
+	applied := 0
+	for _, action := range plan.Actions {
+		if !confirmSweepAction(action) {
+			continue
+		}
+		if err := applySweepAction(action); err != nil {
+			ui.Warn(fmt.Sprintf("Failed: %s — %v", action.Description, err))
+		} else {
+			applied++
+			ui.Success(fmt.Sprintf("Applied: %s", action.Description))
+		}
+		appendSweepLog(sweepLogEntry(action, true, false))
+	}
+	fmt.Fprintln(os.Stdout)
+	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", applied, len(plan.Actions)))
+}
+
 // runWorkflowSweep runs drift detection and optionally applies fixes.
 func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
 	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
@@ -163,73 +234,13 @@ func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	modeLabel := "dry-run"
-	if !dryRun {
-		modeLabel = "apply"
-	}
-	ui.Header(fmt.Sprintf("Sweep Plan [%s]", modeLabel))
-	fmt.Fprintln(os.Stdout)
-
-	for i, action := range plan.Actions {
-		marker := "○"
-		if action.RequiresConfirmation && !dryRun {
-			marker = "⚡"
-		}
-		fmt.Fprintf(os.Stdout, "  %s %d. [%s] %s\n", marker, i+1, action.Project.Name, action.Description)
-	}
-	fmt.Fprintln(os.Stdout)
+	renderSweepPlanHeader(plan, dryRun)
 
 	if dryRun {
-		ui.Info("Run with --apply to execute these actions.")
-		for _, action := range plan.Actions {
-			appendSweepLog(SweepLogEntry{
-				Timestamp:   time.Now().UTC().Format(time.RFC3339),
-				Project:     action.Project.Name,
-				Action:      action.Action,
-				Description: action.Description,
-				Applied:     false,
-				DryRun:      true,
-			})
-		}
+		runSweepDryRun(plan)
 		return nil
 	}
 
-	// Apply with per-action confirmation for destructive actions
-	applied := 0
-	for _, action := range plan.Actions {
-		if action.RequiresConfirmation && !deps.Flags.Yes() {
-			fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
-			var resp string
-			fmt.Scanln(&resp)
-			if strings.ToLower(strings.TrimSpace(resp)) != "y" {
-				ui.Info(fmt.Sprintf("  Skipped: %s", action.Description))
-				appendSweepLog(SweepLogEntry{
-					Timestamp:   time.Now().UTC().Format(time.RFC3339),
-					Project:     action.Project.Name,
-					Action:      action.Action,
-					Description: action.Description,
-					Applied:     false,
-					DryRun:      false,
-				})
-				continue
-			}
-		}
-		if err := applySweepAction(action); err != nil {
-			ui.Warn(fmt.Sprintf("Failed: %s — %v", action.Description, err))
-		} else {
-			applied++
-			ui.Success(fmt.Sprintf("Applied: %s", action.Description))
-		}
-		appendSweepLog(SweepLogEntry{
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
-			Project:     action.Project.Name,
-			Action:      action.Action,
-			Description: action.Description,
-			Applied:     true,
-			DryRun:      false,
-		})
-	}
-	fmt.Fprintln(os.Stdout)
-	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", applied, len(plan.Actions)))
+	runSweepApply(plan)
 	return nil
 }

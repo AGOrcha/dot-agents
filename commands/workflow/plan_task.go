@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,33 +128,20 @@ func deriveScopeEvidencePath(projectPath, planID, taskID string) string {
 // It runs scope-lane and context-lane query bundles against the KG/CRG graph and
 // writes a candidate .scope.yaml sidecar. Degrades gracefully to confidence:low
 // when the graph is not ready. Does NOT auto-edit TASKS.yaml.
-func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []string) error {
-	project, err := currentWorkflowProject()
-	if err != nil {
-		return err
-	}
-	projectPath := project.Path
-
-	// Load the task to derive mode and goal from notes.
+func loadCanonicalTaskByID(projectPath, planID, taskID string) (*CanonicalTask, error) {
 	tf, err := loadCanonicalTasks(projectPath, planID)
 	if err != nil {
-		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
+		return nil, fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
-	var task *CanonicalTask
 	for i := range tf.Tasks {
 		if tf.Tasks[i].ID == taskID {
-			task = &tf.Tasks[i]
-			break
+			return &tf.Tasks[i], nil
 		}
 	}
-	if task == nil {
-		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
-	}
+	return nil, fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
+}
 
-	// Determine mode from task notes or app_type heuristic.
-	mode := deriveScopeMode(task)
-
-	// Check graph health to decide confidence and whether to run scope-lane queries.
+func graphAdapterForProject(projectPath string) *LocalGraphAdapter {
 	cfg, _ := loadGraphBridgeConfig(projectPath)
 	if cfg == nil {
 		cfg = &GraphBridgeConfig{Enabled: false}
@@ -162,7 +150,54 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 	if graphHome == "" {
 		graphHome = defaultGraphHome(projectPath)
 	}
-	adapter := NewLocalGraphAdapter(graphHome)
+	return NewLocalGraphAdapter(graphHome)
+}
+
+// deriveScopeWarningsForMode returns the scope-lane skip reason (if any) for
+// the given mode/readiness/seeds combination. Empty string means scope-lane
+// queries should run.
+func deriveScopeWarningsForMode(mode string, codeReady, hasScopeInputs bool) string {
+	if mode == "code" && codeReady && hasScopeInputs {
+		return ""
+	}
+	if mode != "code" {
+		return "scope-lane graph queries skipped (mode: " + mode + ")"
+	}
+	if !codeReady {
+		return "scope-lane graph queries skipped (code-lane not ready; run 'kg build' then 'kg warm --include-code')"
+	}
+	return "scope-lane graph queries skipped (no --seed-symbol or --seed-path provided)"
+}
+
+func persistScopeEvidenceSidecar(projectPath, planID, taskID string, ev *ScopeEvidence) (string, error) {
+	outPath := deriveScopeEvidencePath(projectPath, planID, taskID)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+		return "", fmt.Errorf("create evidence dir: %w", err)
+	}
+	data, err := yaml.Marshal(ev)
+	if err != nil {
+		return "", fmt.Errorf("marshal sidecar: %w", err)
+	}
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		return "", fmt.Errorf("write sidecar: %w", err)
+	}
+	return outPath, nil
+}
+
+func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []string) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	projectPath := project.Path
+
+	task, err := loadCanonicalTaskByID(projectPath, planID, taskID)
+	if err != nil {
+		return err
+	}
+	mode := deriveScopeMode(task)
+
+	adapter := graphAdapterForProject(projectPath)
 	health, _ := adapter.Health()
 
 	ev := NewScopeEvidence(planID, taskID)
@@ -172,15 +207,14 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 		ev.Goal = ev.Goal[:120] + "…"
 	}
 
-	// Populate seeds from flags.
-	if len(seedSymbols) > 0 || len(seedPaths) > 0 {
+	hasScopeInputs := len(seedSymbols) > 0 || len(seedPaths) > 0
+	if hasScopeInputs {
 		ev.Seeds = &ScopeSeeds{
 			Symbols: append([]string{}, seedSymbols...),
 			Paths:   append([]string{}, seedPaths...),
 		}
 	}
 
-	// Populate write_scope from TASKS.yaml as a baseline for required_paths.
 	for _, p := range task.WriteScope {
 		ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{
 			Path:    p,
@@ -188,48 +222,30 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 		})
 	}
 
-	// Determine confidence based on graph health and seeds.
-	hasScopeInputs := len(seedSymbols) > 0 || len(seedPaths) > 0
 	codeReady := health.CodeLaneReady
 	contextReady := health.ContextLaneReady
 
-	// Run scope-lane queries only for code mode when graph is ready and seeds exist.
 	var scopeWarnings []string
-	if mode == "code" && codeReady && hasScopeInputs {
-		queryFiles := deriveScopeRunScopeLane(projectPath, seedSymbols, seedPaths, ev)
-		_ = queryFiles
-	} else if mode != "code" {
-		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (mode: "+mode+")")
-	} else if !codeReady {
-		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (code-lane not ready; run 'kg build' then 'kg warm --include-code')")
-	} else if !hasScopeInputs {
-		scopeWarnings = append(scopeWarnings, "scope-lane graph queries skipped (no --seed-symbol or --seed-path provided)")
+	if w := deriveScopeWarningsForMode(mode, codeReady, hasScopeInputs); w != "" {
+		scopeWarnings = append(scopeWarnings, w)
+	} else {
+		_ = deriveScopeRunScopeLane(projectPath, seedSymbols, seedPaths, ev)
 	}
 
-	// Run context-lane queries for plan_context and decision_lookup.
 	if contextReady {
 		deriveScopeRunContextLane(planID, taskID, adapter, ev)
 	} else {
 		scopeWarnings = append(scopeWarnings, "context-lane queries skipped (context-lane not ready; run 'kg warm' after authoring notes)")
 	}
 
-	// Set confidence.
 	ev.Confidence = deriveScopeConfidence(mode, codeReady, contextReady, hasScopeInputs, len(ev.Queries))
 	if len(scopeWarnings) > 0 {
 		ev.OpenGaps = append(ev.OpenGaps, scopeWarnings...)
 	}
 
-	// Write sidecar.
-	outPath := deriveScopeEvidencePath(projectPath, planID, taskID)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return fmt.Errorf("create evidence dir: %w", err)
-	}
-	data, err := yaml.Marshal(ev)
+	outPath, err := persistScopeEvidenceSidecar(projectPath, planID, taskID, ev)
 	if err != nil {
-		return fmt.Errorf("marshal sidecar: %w", err)
-	}
-	if err := os.WriteFile(outPath, data, 0644); err != nil {
-		return fmt.Errorf("write sidecar: %w", err)
+		return err
 	}
 
 	if deps.Flags.JSON() {
@@ -240,10 +256,8 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 	ui.Success(fmt.Sprintf("Wrote scope evidence sidecar: %s", config.DisplayPath(outPath)))
 	fmt.Fprintf(os.Stdout, "  confidence: %s\n", ev.Confidence)
 	fmt.Fprintf(os.Stdout, "  required_paths: %d  queries: %d\n", len(ev.RequiredPaths), len(ev.Queries))
-	if len(scopeWarnings) > 0 {
-		for _, w := range scopeWarnings {
-			ui.Warn(w)
-		}
+	for _, w := range scopeWarnings {
+		ui.Warn(w)
 	}
 	fmt.Fprintln(os.Stdout)
 	return nil
@@ -629,6 +643,17 @@ func runWorkflowPlanShow(planID string) error {
 		return enc.Encode(out)
 	}
 
+	renderPlanShowHeader(plan)
+	if tasksErr != nil {
+		fmt.Fprintf(os.Stdout, "  (no %s found)\n", workflowTasksFileName)
+		return nil
+	}
+	renderPlanShowTasks(tf)
+	renderPlanShowSlices(sf, slicesErr)
+	return nil
+}
+
+func renderPlanShowHeader(plan *CanonicalPlan) {
 	ui.Header(plan.Title)
 	ui.Section("Plan")
 	fmt.Fprintf(os.Stdout, "  id: %s\n", plan.ID)
@@ -648,14 +673,23 @@ func runWorkflowPlanShow(planID string) error {
 		fmt.Fprintf(os.Stdout, "  focus task: %s\n", plan.CurrentFocusTask)
 	}
 	fmt.Fprintln(os.Stdout)
+}
 
-	if tasksErr != nil {
-		fmt.Fprintf(os.Stdout, "  (no %s found)\n", workflowTasksFileName)
-		return nil
+func planShowTaskMarker(status string) string {
+	switch status {
+	case "completed":
+		return "✓"
+	case "in_progress":
+		return "▶"
+	case "blocked":
+		return "✗"
+	default:
+		return " "
 	}
+}
 
-	var pending, blocked, completed, total int
-	for _, t := range tf.Tasks {
+func summarizeTaskCounts(tasks []CanonicalTask) (pending, blocked, completed, total int) {
+	for _, t := range tasks {
 		total++
 		switch t.Status {
 		case "pending", "in_progress":
@@ -666,21 +700,20 @@ func runWorkflowPlanShow(planID string) error {
 			completed++
 		}
 	}
+	return
+}
+
+func renderPlanShowTasks(tf *CanonicalTaskFile) {
+	pending, blocked, completed, total := summarizeTaskCounts(tf.Tasks)
 	ui.Section("Tasks")
 	fmt.Fprintf(os.Stdout, "  total: %d   pending: %d   blocked: %d   completed: %d\n\n", total, pending, blocked, completed)
 	for _, t := range tf.Tasks {
-		marker := " "
-		switch t.Status {
-		case "completed":
-			marker = "✓"
-		case "in_progress":
-			marker = "▶"
-		case "blocked":
-			marker = "✗"
-		}
-		fmt.Fprintf(os.Stdout, "  [%s] %s  %s\n", marker, t.ID, t.Title)
+		fmt.Fprintf(os.Stdout, "  [%s] %s  %s\n", planShowTaskMarker(t.Status), t.ID, t.Title)
 	}
 	fmt.Fprintln(os.Stdout)
+}
+
+func renderPlanShowSlices(sf *CanonicalSliceFile, slicesErr error) {
 	if slicesErr == nil {
 		ui.Section("Slices")
 		fmt.Fprintf(os.Stdout, "  total: %d\n\n", len(sf.Slices))
@@ -689,7 +722,6 @@ func runWorkflowPlanShow(planID string) error {
 		}
 	}
 	fmt.Fprintln(os.Stdout)
-	return nil
 }
 
 type workflowPlanGraphNode struct {
@@ -712,6 +744,54 @@ type workflowPlanGraph struct {
 	Nodes      []workflowPlanGraphNode `json:"nodes"`
 	Edges      []workflowPlanGraphEdge `json:"edges"`
 	Warnings   []string                `json:"warnings,omitempty"`
+}
+
+func renderPlanGraphSliceDeps(graph *workflowPlanGraph, nodeByID map[string]workflowPlanGraphNode, sliceNode workflowPlanGraphNode) {
+	for _, sliceEdge := range graph.Edges {
+		if sliceEdge.From != sliceNode.ID || sliceEdge.Type != "depends_on" {
+			continue
+		}
+		targetLabel := sliceEdge.To
+		if targetNode, ok := nodeByID[sliceEdge.To]; ok {
+			targetLabel = targetNode.Label
+		}
+		fmt.Fprintf(os.Stdout, "            depends_on: %s\n", targetLabel)
+	}
+}
+
+func renderPlanGraphTaskChildren(graph *workflowPlanGraph, nodeByID map[string]workflowPlanGraphNode, taskNode workflowPlanGraphNode) {
+	for _, taskEdge := range graph.Edges {
+		if taskEdge.From == taskNode.ID && taskEdge.Type == "contains" {
+			sliceNode, ok := nodeByID[taskEdge.To]
+			if ok && sliceNode.Kind == "slice" {
+				fmt.Fprintf(os.Stdout, "         => [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(sliceNode.ID, planTaskSliceIDPrefix+sliceNode.PlanID+"/"), planTaskSliceIDPrefix), sliceNode.Label, sliceNode.Status)
+				renderPlanGraphSliceDeps(graph, nodeByID, sliceNode)
+			}
+		}
+		if taskEdge.From != taskNode.ID || (taskEdge.Type != "depends_on" && taskEdge.Type != "blocks") {
+			continue
+		}
+		targetLabel := taskEdge.To
+		if targetNode, ok := nodeByID[taskEdge.To]; ok {
+			targetLabel = targetNode.Label
+		}
+		fmt.Fprintf(os.Stdout, "         %s: %s\n", taskEdge.Type, targetLabel)
+	}
+}
+
+func renderPlanGraphPlanNode(graph *workflowPlanGraph, nodeByID map[string]workflowPlanGraphNode, node workflowPlanGraphNode) {
+	fmt.Fprintf(os.Stdout, "  [%s] %s (%s)\n", strings.TrimPrefix(node.ID, "plan:"), node.Label, node.Status)
+	for _, edge := range graph.Edges {
+		if edge.Type != "contains" || edge.From != node.ID {
+			continue
+		}
+		taskNode, ok := nodeByID[edge.To]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "      -> [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(taskNode.ID, "task:"+taskNode.PlanID+"/"), "task:"), taskNode.Label, taskNode.Status)
+		renderPlanGraphTaskChildren(graph, nodeByID, taskNode)
+	}
 }
 
 func runWorkflowPlanGraph(planID string) error {
@@ -746,51 +826,7 @@ func runWorkflowPlanGraph(planID string) error {
 		if node.Kind != "plan" {
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "  [%s] %s (%s)\n", strings.TrimPrefix(node.ID, "plan:"), node.Label, node.Status)
-		for _, edge := range graph.Edges {
-			if edge.Type != "contains" || edge.From != node.ID {
-				continue
-			}
-			taskNode := workflowPlanGraphNode{}
-			found := false
-			for _, candidate := range graph.Nodes {
-				if candidate.ID == edge.To {
-					taskNode = candidate
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
-			fmt.Fprintf(os.Stdout, "      -> [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(taskNode.ID, "task:"+taskNode.PlanID+"/"), "task:"), taskNode.Label, taskNode.Status)
-			for _, taskEdge := range graph.Edges {
-				if taskEdge.From == taskNode.ID && taskEdge.Type == "contains" {
-					sliceNode, ok := nodeByID[taskEdge.To]
-					if ok && sliceNode.Kind == "slice" {
-						fmt.Fprintf(os.Stdout, "         => [%s] %s (%s)\n", strings.TrimPrefix(strings.TrimPrefix(sliceNode.ID, planTaskSliceIDPrefix+sliceNode.PlanID+"/"), planTaskSliceIDPrefix), sliceNode.Label, sliceNode.Status)
-						for _, sliceEdge := range graph.Edges {
-							if sliceEdge.From != sliceNode.ID || sliceEdge.Type != "depends_on" {
-								continue
-							}
-							targetLabel := sliceEdge.To
-							if targetNode, ok := nodeByID[sliceEdge.To]; ok {
-								targetLabel = targetNode.Label
-							}
-							fmt.Fprintf(os.Stdout, "            depends_on: %s\n", targetLabel)
-						}
-					}
-				}
-				if taskEdge.From != taskNode.ID || (taskEdge.Type != "depends_on" && taskEdge.Type != "blocks") {
-					continue
-				}
-				targetLabel := taskEdge.To
-				if targetNode, ok := nodeByID[taskEdge.To]; ok {
-					targetLabel = targetNode.Label
-				}
-				fmt.Fprintf(os.Stdout, "         %s: %s\n", taskEdge.Type, targetLabel)
-			}
-		}
+		renderPlanGraphPlanNode(graph, nodeByID, node)
 	}
 
 	for _, warning := range graph.Warnings {
@@ -800,23 +836,148 @@ func runWorkflowPlanGraph(planID string) error {
 	return nil
 }
 
-func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, error) {
+func resolvePlanGraphPlanIDs(projectPath, planID string) ([]string, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	if planID != "" {
-		found := false
-		for _, id := range ids {
-			if id == planID {
-				found = true
-				break
+	if planID == "" {
+		return ids, nil
+	}
+	for _, id := range ids {
+		if id == planID {
+			return []string{planID}, nil
+		}
+	}
+	return nil, fmt.Errorf(errPlanNotFoundFmt, planID)
+}
+
+func appendPlanGraphTaskNodes(graph *workflowPlanGraph, plan *CanonicalPlan, tasks []CanonicalTask, planNodeID string) map[string]string {
+	taskIDs := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		taskNodeID := "task:" + plan.ID + "/" + task.ID
+		taskIDs[task.ID] = taskNodeID
+		graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+			ID:     taskNodeID,
+			Kind:   "task",
+			PlanID: plan.ID,
+			Label:  task.Title,
+			Status: task.Status,
+		})
+		graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+			From: planNodeID,
+			To:   taskNodeID,
+			Type: "contains",
+		})
+	}
+	return taskIDs
+}
+
+func appendPlanGraphSliceNodes(graph *workflowPlanGraph, plan *CanonicalPlan, slices []CanonicalSlice, taskIDs map[string]string) map[string]string {
+	sliceIDs := make(map[string]string, len(slices))
+	for _, slice := range slices {
+		parentTaskNodeID, ok := taskIDs[slice.ParentTaskID]
+		if !ok {
+			graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s references unknown parent task %s", plan.ID, slice.ID, slice.ParentTaskID))
+			continue
+		}
+		sliceNodeID := planTaskSliceIDPrefix + plan.ID + "/" + slice.ID
+		sliceIDs[slice.ID] = sliceNodeID
+		graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+			ID:     sliceNodeID,
+			Kind:   "slice",
+			PlanID: plan.ID,
+			TaskID: slice.ParentTaskID,
+			Label:  slice.Title,
+			Status: slice.Status,
+		})
+		graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+			From: parentTaskNodeID,
+			To:   sliceNodeID,
+			Type: "contains",
+		})
+	}
+	return sliceIDs
+}
+
+func appendPlanGraphSliceDeps(graph *workflowPlanGraph, plan *CanonicalPlan, slices []CanonicalSlice, sliceIDs map[string]string) {
+	for _, slice := range slices {
+		fromID, ok := sliceIDs[slice.ID]
+		if !ok {
+			continue
+		}
+		for _, dep := range slice.DependsOn {
+			toID, ok := sliceIDs[dep]
+			if !ok {
+				graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s depends on unknown slice %s", plan.ID, slice.ID, dep))
+				continue
 			}
+			graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
+				From: fromID,
+				To:   toID,
+				Type: "depends_on",
+			})
 		}
-		if !found {
-			return nil, fmt.Errorf(errPlanNotFoundFmt, planID)
+	}
+}
+
+func appendPlanGraphTaskRelationEdges(graph *workflowPlanGraph, plan *CanonicalPlan, tasks []CanonicalTask, taskIDs map[string]string) {
+	for _, task := range tasks {
+		fromID := taskIDs[task.ID]
+		for _, dep := range task.DependsOn {
+			toID, ok := taskIDs[dep]
+			if !ok {
+				graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s depends on unknown task %s", plan.ID, task.ID, dep))
+				continue
+			}
+			graph.Edges = append(graph.Edges, workflowPlanGraphEdge{From: fromID, To: toID, Type: "depends_on"})
 		}
-		ids = []string{planID}
+		for _, blocked := range task.Blocks {
+			toID, ok := taskIDs[blocked]
+			if !ok {
+				graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s blocks unknown task %s", plan.ID, task.ID, blocked))
+				continue
+			}
+			graph.Edges = append(graph.Edges, workflowPlanGraphEdge{From: fromID, To: toID, Type: "blocks"})
+		}
+	}
+}
+
+func appendPlanToWorkflowGraph(graph *workflowPlanGraph, projectPath, id string) error {
+	plan, err := loadCanonicalPlan(projectPath, id)
+	if err != nil {
+		return fmt.Errorf("load plan %q: %w", id, err)
+	}
+	tf, err := loadCanonicalTasks(projectPath, id)
+	if err != nil {
+		return fmt.Errorf("load tasks for plan %q: %w", id, err)
+	}
+	sf, slicesErr := loadCanonicalSlices(projectPath, id)
+	if slicesErr != nil && !os.IsNotExist(slicesErr) {
+		return fmt.Errorf("load slices for plan %q: %w", id, slicesErr)
+	}
+
+	planNodeID := "plan:" + plan.ID
+	graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
+		ID:     planNodeID,
+		Kind:   "plan",
+		Label:  plan.Title,
+		Status: plan.Status,
+	})
+
+	taskIDs := appendPlanGraphTaskNodes(graph, plan, tf.Tasks, planNodeID)
+	if slicesErr == nil {
+		sliceIDs := appendPlanGraphSliceNodes(graph, plan, sf.Slices, taskIDs)
+		appendPlanGraphSliceDeps(graph, plan, sf.Slices, sliceIDs)
+	}
+	appendPlanGraphTaskRelationEdges(graph, plan, tf.Tasks, taskIDs)
+	return nil
+}
+
+func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, error) {
+	ids, err := resolvePlanGraphPlanIDs(projectPath, planID)
+	if err != nil {
+		return nil, err
 	}
 
 	graph := &workflowPlanGraph{
@@ -827,118 +988,10 @@ func buildWorkflowPlanGraph(projectPath, planID string) (*workflowPlanGraph, err
 	}
 
 	for _, id := range ids {
-		plan, err := loadCanonicalPlan(projectPath, id)
-		if err != nil {
-			return nil, fmt.Errorf("load plan %q: %w", id, err)
-		}
-		tf, err := loadCanonicalTasks(projectPath, id)
-		if err != nil {
-			return nil, fmt.Errorf("load tasks for plan %q: %w", id, err)
-		}
-		sf, slicesErr := loadCanonicalSlices(projectPath, id)
-		if slicesErr != nil && !os.IsNotExist(slicesErr) {
-			return nil, fmt.Errorf("load slices for plan %q: %w", id, slicesErr)
-		}
-
-		planNodeID := "plan:" + plan.ID
-		graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
-			ID:     planNodeID,
-			Kind:   "plan",
-			Label:  plan.Title,
-			Status: plan.Status,
-		})
-
-		taskIDs := make(map[string]string, len(tf.Tasks))
-		for _, task := range tf.Tasks {
-			taskNodeID := "task:" + plan.ID + "/" + task.ID
-			taskIDs[task.ID] = taskNodeID
-			graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
-				ID:     taskNodeID,
-				Kind:   "task",
-				PlanID: plan.ID,
-				Label:  task.Title,
-				Status: task.Status,
-			})
-			graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
-				From: planNodeID,
-				To:   taskNodeID,
-				Type: "contains",
-			})
-		}
-
-		if slicesErr == nil {
-			sliceIDs := make(map[string]string, len(sf.Slices))
-			for _, slice := range sf.Slices {
-				parentTaskNodeID, ok := taskIDs[slice.ParentTaskID]
-				if !ok {
-					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s references unknown parent task %s", plan.ID, slice.ID, slice.ParentTaskID))
-					continue
-				}
-				sliceNodeID := planTaskSliceIDPrefix + plan.ID + "/" + slice.ID
-				sliceIDs[slice.ID] = sliceNodeID
-				graph.Nodes = append(graph.Nodes, workflowPlanGraphNode{
-					ID:     sliceNodeID,
-					Kind:   "slice",
-					PlanID: plan.ID,
-					TaskID: slice.ParentTaskID,
-					Label:  slice.Title,
-					Status: slice.Status,
-				})
-				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
-					From: parentTaskNodeID,
-					To:   sliceNodeID,
-					Type: "contains",
-				})
-			}
-			for _, slice := range sf.Slices {
-				fromID, ok := sliceIDs[slice.ID]
-				if !ok {
-					continue
-				}
-				for _, dep := range slice.DependsOn {
-					toID, ok := sliceIDs[dep]
-					if !ok {
-						graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s slice %s depends on unknown slice %s", plan.ID, slice.ID, dep))
-						continue
-					}
-					graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
-						From: fromID,
-						To:   toID,
-						Type: "depends_on",
-					})
-				}
-			}
-		}
-
-		for _, task := range tf.Tasks {
-			fromID := taskIDs[task.ID]
-			for _, dep := range task.DependsOn {
-				toID, ok := taskIDs[dep]
-				if !ok {
-					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s depends on unknown task %s", plan.ID, task.ID, dep))
-					continue
-				}
-				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
-					From: fromID,
-					To:   toID,
-					Type: "depends_on",
-				})
-			}
-			for _, blocked := range task.Blocks {
-				toID, ok := taskIDs[blocked]
-				if !ok {
-					graph.Warnings = append(graph.Warnings, fmt.Sprintf("plan %s task %s blocks unknown task %s", plan.ID, task.ID, blocked))
-					continue
-				}
-				graph.Edges = append(graph.Edges, workflowPlanGraphEdge{
-					From: fromID,
-					To:   toID,
-					Type: "blocks",
-				})
-			}
+		if err := appendPlanToWorkflowGraph(graph, projectPath, id); err != nil {
+			return nil, err
 		}
 	}
-
 	return graph, nil
 }
 
@@ -1221,6 +1274,65 @@ func annotateEligibleTasks(projectPath string, tasks []workflowNextTaskSuggestio
 
 // runWorkflowEligible implements `workflow eligible`: lists all unblocked tasks
 // across active plans, annotated with conflict detection and evidence data.
+func resolveEligibleEffectiveLimit(prefs WorkflowPreferences, limit int) (effective, maxWorkers int) {
+	maxWorkers = 1
+	if prefs.Execution.MaxParallelWorkers != nil {
+		maxWorkers = *prefs.Execution.MaxParallelWorkers
+	}
+	effective = maxWorkers
+	if limit > 0 {
+		effective = limit
+	}
+	return effective, maxWorkers
+}
+
+func eligibleAnnotatedWithConflicts(projectPath string, tasks []workflowNextTaskSuggestion) ([]AnnotatedTask, writeScopeConflictResult) {
+	annotated := annotateEligibleTasks(projectPath, tasks)
+	taskSuggestions := make([]workflowNextTaskSuggestion, len(annotated))
+	for i, at := range annotated {
+		taskSuggestions[i] = at.workflowNextTaskSuggestion
+	}
+	conflictResult := computeWriteScopeConflicts(taskSuggestions)
+	for i := range annotated {
+		if i < len(conflictResult.EligibleTasks) {
+			annotated[i].ConflictsWith = conflictResult.EligibleTasks[i].ConflictsWith
+		}
+	}
+	return annotated, conflictResult
+}
+
+func renderEligibleTask(at AnnotatedTask) {
+	scopeStr := strings.Join(at.WriteScope, ", ")
+	if !at.WriteScopeDeclared {
+		scopeStr = "(none) [no write_scope declared]"
+	}
+	evidenceStr := fmt.Sprintf("  evidence: %s (confidence: %s)", fmt.Sprintf("%v", at.HasEvidence), at.EvidenceConfidence)
+	fmt.Fprintf(os.Stdout, "  [%s/%s] %s  (%s)\n", at.PlanID, at.TaskID, at.TaskTitle, at.Status)
+	fmt.Fprintf(os.Stdout, "      scope: %s\n", scopeStr)
+	fmt.Fprintf(os.Stdout, "     %s\n", evidenceStr)
+	if len(at.ConflictsWith) > 0 {
+		fmt.Fprintf(os.Stdout, "     %s\n", "  conflicts: "+strings.Join(at.ConflictsWith, ", "))
+	}
+}
+
+func renderEligibleOutput(out eligibleOutput, maxWorkers, limit int) {
+	ui.Header("Eligible Tasks")
+	for _, at := range out.EligibleTasks {
+		renderEligibleTask(at)
+	}
+	fmt.Fprintln(os.Stdout)
+	limitLabel := fmt.Sprintf("max_parallel_workers=%d", maxWorkers)
+	if limit > 0 {
+		limitLabel = fmt.Sprintf("--limit=%d", limit)
+	}
+	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by %s)\n",
+		out.TotalEligible, out.MaxParallel, limitLabel)
+	if len(out.MaxBatch) > 0 {
+		fmt.Fprintf(os.Stdout, "  max batch: %s\n", strings.Join(out.MaxBatch, ", "))
+	}
+	fmt.Fprintln(os.Stdout)
+}
+
 func runWorkflowEligible(planFilter string, limit int) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -1231,15 +1343,7 @@ func runWorkflowEligible(planFilter string, limit int) error {
 	if err != nil {
 		return err
 	}
-	maxWorkers := 1
-	if prefs.Execution.MaxParallelWorkers != nil {
-		maxWorkers = *prefs.Execution.MaxParallelWorkers
-	}
-	// --limit 0 (unset) means use max_parallel_workers pref; >0 is an explicit override.
-	effectiveLimit := maxWorkers
-	if limit > 0 {
-		effectiveLimit = limit
-	}
+	effectiveLimit, maxWorkers := resolveEligibleEffectiveLimit(prefs, limit)
 
 	planIDs := parsePlanIDFilter(planFilter)
 	tasks, err := selectAllEligibleTasks(project.Path, planIDs)
@@ -1247,27 +1351,11 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		return err
 	}
 
-	// Apply effective limit (pref or explicit --limit).
 	if effectiveLimit > 0 && len(tasks) > effectiveLimit {
 		tasks = tasks[:effectiveLimit]
 	}
 
-	annotated := annotateEligibleTasks(project.Path, tasks)
-
-	// Re-derive conflict graph and max batch from the annotated slice.
-	// We need to re-run conflict detection on the (possibly truncated) set.
-	taskSuggestions := make([]workflowNextTaskSuggestion, len(annotated))
-	for i, at := range annotated {
-		taskSuggestions[i] = at.workflowNextTaskSuggestion
-	}
-	conflictResult := computeWriteScopeConflicts(taskSuggestions)
-
-	// Sync ConflictsWith back to annotated (truncated slice may differ).
-	for i := range annotated {
-		if i < len(conflictResult.EligibleTasks) {
-			annotated[i].ConflictsWith = conflictResult.EligibleTasks[i].ConflictsWith
-		}
-	}
+	annotated, conflictResult := eligibleAnnotatedWithConflicts(project.Path, tasks)
 
 	out := eligibleOutput{
 		EligibleTasks: annotated,
@@ -1286,36 +1374,7 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		return enc.Encode(out)
 	}
 
-	// Human-readable output.
-	ui.Header("Eligible Tasks")
-	for _, at := range out.EligibleTasks {
-		scopeStr := strings.Join(at.WriteScope, ", ")
-		if !at.WriteScopeDeclared {
-			scopeStr = "(none) [no write_scope declared]"
-		}
-		conflictsStr := ""
-		if len(at.ConflictsWith) > 0 {
-			conflictsStr = "  conflicts: " + strings.Join(at.ConflictsWith, ", ")
-		}
-		evidenceStr := fmt.Sprintf("  evidence: %s (confidence: %s)", fmt.Sprintf("%v", at.HasEvidence), at.EvidenceConfidence)
-		fmt.Fprintf(os.Stdout, "  [%s/%s] %s  (%s)\n", at.PlanID, at.TaskID, at.TaskTitle, at.Status)
-		fmt.Fprintf(os.Stdout, "      scope: %s\n", scopeStr)
-		fmt.Fprintf(os.Stdout, "     %s\n", evidenceStr)
-		if conflictsStr != "" {
-			fmt.Fprintf(os.Stdout, "     %s\n", conflictsStr)
-		}
-	}
-	fmt.Fprintln(os.Stdout)
-	limitLabel := fmt.Sprintf("max_parallel_workers=%d", maxWorkers)
-	if limit > 0 {
-		limitLabel = fmt.Sprintf("--limit=%d", limit)
-	}
-	fmt.Fprintf(os.Stdout, "%d tasks eligible, %d can run in parallel (limited by %s)\n",
-		out.TotalEligible, out.MaxParallel, limitLabel)
-	if len(out.MaxBatch) > 0 {
-		fmt.Fprintf(os.Stdout, "  max batch: %s\n", strings.Join(out.MaxBatch, ", "))
-	}
-	fmt.Fprintln(os.Stdout)
+	renderEligibleOutput(out, maxWorkers, limit)
 	return nil
 }
 
@@ -1414,6 +1473,59 @@ func filterPlanIDsLocked(ids []string, locked map[string]bool) []string {
 	return out
 }
 
+func validateScopeIDsAgainstAvailable(scopeIDs, ids []string) ([]string, error) {
+	if len(scopeIDs) == 0 {
+		return scopeIDs, nil
+	}
+	available := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		available[id] = true
+	}
+	filtered := make([]string, 0, len(scopeIDs))
+	for _, id := range scopeIDs {
+		if !available[id] {
+			return nil, fmt.Errorf(errPlanNotFoundFmt, id)
+		}
+		filtered = append(filtered, id)
+	}
+	return filtered, nil
+}
+
+func partitionScopePlansByStatus(projectPath string, scopeIDs []string, lockedPlans map[string]bool) (paused, locked []string, err error) {
+	paused = make([]string, 0, len(scopeIDs))
+	locked = make([]string, 0, len(scopeIDs))
+	for _, id := range scopeIDs {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load plan %q: %w", id, err)
+		}
+		switch plan.Status {
+		case "paused":
+			paused = append(paused, id)
+		case "active":
+			if lockedPlans[id] {
+				locked = append(locked, id)
+			}
+		}
+	}
+	sort.Strings(paused)
+	sort.Strings(locked)
+	return paused, locked, nil
+}
+
+func deriveCompletionState(suggestion *workflowNextTaskSuggestion, paused, locked []string) string {
+	switch {
+	case suggestion != nil:
+		return "actionable"
+	case len(paused) > 0:
+		return "paused"
+	case len(locked) > 0:
+		return "locked"
+	default:
+		return "drained"
+	}
+}
+
 func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (*workflowCompletionScopeState, error) {
 	ids, err := listCanonicalPlanIDs(projectPath)
 	if err != nil {
@@ -1426,20 +1538,9 @@ func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (
 		}, nil
 	}
 
-	scopeIDs := parsePlanIDFilter(explicitPlanID)
-	if len(scopeIDs) > 0 {
-		available := make(map[string]bool, len(ids))
-		for _, id := range ids {
-			available[id] = true
-		}
-		filtered := make([]string, 0, len(scopeIDs))
-		for _, id := range scopeIDs {
-			if !available[id] {
-				return nil, fmt.Errorf(errPlanNotFoundFmt, id)
-			}
-			filtered = append(filtered, id)
-		}
-		scopeIDs = filtered
+	scopeIDs, err := validateScopeIDsAgainstAvailable(parsePlanIDFilter(explicitPlanID), ids)
+	if err != nil {
+		return nil, err
 	}
 
 	delegations, err := listDelegationContracts(projectPath)
@@ -1447,39 +1548,17 @@ func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (
 		return nil, err
 	}
 	lockedPlans := activeDelegationPlanIDs(delegations)
-	pausedPlans := make([]string, 0, len(scopeIDs))
-	lockedScopePlans := make([]string, 0, len(scopeIDs))
-	for _, id := range scopeIDs {
-		plan, err := loadCanonicalPlan(projectPath, id)
-		if err != nil {
-			return nil, fmt.Errorf("load plan %q: %w", id, err)
-		}
-		switch plan.Status {
-		case "paused":
-			pausedPlans = append(pausedPlans, id)
-		case "active":
-			if lockedPlans[id] {
-				lockedScopePlans = append(lockedScopePlans, id)
-			}
-		}
+	pausedPlans, lockedScopePlans, err := partitionScopePlansByStatus(projectPath, scopeIDs, lockedPlans)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(pausedPlans)
-	sort.Strings(lockedScopePlans)
 
 	suggestion, err := selectNextCanonicalTask(projectPath, explicitPlanID)
 	if err != nil {
 		return nil, err
 	}
 
-	state := "drained"
-	switch {
-	case suggestion != nil:
-		state = "actionable"
-	case len(pausedPlans) > 0:
-		state = "paused"
-	case len(lockedScopePlans) > 0:
-		state = "locked"
-	}
+	state := deriveCompletionState(suggestion, pausedPlans, lockedScopePlans)
 
 	return &workflowCompletionScopeState{
 		Scope:       scopeIDs,
@@ -1490,16 +1569,7 @@ func collectWorkflowCompletionState(projectPath string, explicitPlanID string) (
 	}, nil
 }
 
-func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
-	ids, err := listCanonicalPlanIDs(projectPath)
-	if err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-
-	explicitPlanID = strings.TrimSpace(explicitPlanID)
+func resolveNextEffectivePlanIDs(projectPath, explicitPlanID string, ids []string) ([]string, error) {
 	planFilter := parsePlanIDFilter(explicitPlanID)
 	if explicitPlanID != "" && len(planFilter) == 0 {
 		return nil, nil
@@ -1516,27 +1586,56 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 		}
 	}
 
-	// Apply delegation-based plan locking: when no explicit plan is given, only
-	// consider plans that are locked (have active delegations). When explicit, only
-	// consider plans that are NOT locked.
 	delegations, err := listDelegationContracts(projectPath)
 	if err != nil {
 		return nil, err
 	}
 	lockedPlans := activeDelegationPlanIDs(delegations)
-
-	effectiveIDs := ids
 	if len(planFilter) > 0 {
-		effectiveIDs = planFilter
-		effectiveIDs = filterPlanIDsUnlocked(effectiveIDs, lockedPlans)
-	} else {
-		effectiveIDs = filterPlanIDsLocked(effectiveIDs, lockedPlans)
+		return filterPlanIDsUnlocked(planFilter, lockedPlans), nil
+	}
+	return filterPlanIDsLocked(ids, lockedPlans), nil
+}
+
+func rankNextTaskCandidate(projectPath string, sug workflowNextTaskSuggestion) (workflowNextTaskSuggestion, int) {
+	plan, loadErr := loadCanonicalPlan(projectPath, sug.PlanID)
+	priority := 3
+	reason := "first pending unblocked task in an active canonical plan"
+	if loadErr == nil {
+		switch {
+		case sug.Status == "in_progress" && plan.CurrentFocusTask == sug.TaskTitle:
+			priority = 0
+			reason = "current focus task is already in progress"
+		case sug.Status == "in_progress":
+			priority = 1
+			reason = "task is already in progress and unblocked"
+		case plan.CurrentFocusTask == sug.TaskTitle:
+			priority = 2
+			reason = "current focus task is pending and all dependencies are complete"
+		}
+	}
+	sug.Reason = reason
+	return sug, priority
+}
+
+func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workflowNextTaskSuggestion, error) {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	explicitPlanID = strings.TrimSpace(explicitPlanID)
+	effectiveIDs, err := resolveNextEffectivePlanIDs(projectPath, explicitPlanID, ids)
+	if err != nil {
+		return nil, err
 	}
 	if len(effectiveIDs) == 0 {
 		return nil, nil
 	}
 
-	// Use selectAllEligibleTasks scoped to effectiveIDs to get the candidate pool.
 	candidates, err := selectAllEligibleTasks(projectPath, effectiveIDs)
 	if err != nil {
 		return nil, err
@@ -1545,41 +1644,17 @@ func selectNextCanonicalTask(projectPath string, explicitPlanID string) (*workfl
 		return nil, nil
 	}
 
-	// Re-rank candidates by priority using focus-task information.
-	type ranked struct {
-		s        workflowNextTaskSuggestion
-		priority int
-	}
-	var best *ranked
+	var best *workflowNextTaskSuggestion
+	bestPriority := math.MaxInt
 	for _, sug := range candidates {
-		plan, loadErr := loadCanonicalPlan(projectPath, sug.PlanID)
-		r := ranked{s: sug, priority: 3}
-		if loadErr == nil {
-			switch {
-			case sug.Status == "in_progress" && plan.CurrentFocusTask == sug.TaskTitle:
-				r.priority = 0
-				r.s.Reason = "current focus task is already in progress"
-			case sug.Status == "in_progress":
-				r.priority = 1
-				r.s.Reason = "task is already in progress and unblocked"
-			case plan.CurrentFocusTask == sug.TaskTitle:
-				r.priority = 2
-				r.s.Reason = "current focus task is pending and all dependencies are complete"
-			default:
-				r.priority = 3
-				r.s.Reason = "first pending unblocked task in an active canonical plan"
-			}
-		}
-		if best == nil || r.priority < best.priority {
-			tmp := r
+		ranked, priority := rankNextTaskCandidate(projectPath, sug)
+		if best == nil || priority < bestPriority {
+			tmp := ranked
 			best = &tmp
+			bestPriority = priority
 		}
 	}
-
-	if best == nil {
-		return nil, nil
-	}
-	return &best.s, nil
+	return best, nil
 }
 
 func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []string {
@@ -1606,6 +1681,56 @@ func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []str
 // plan's TASKS.yaml. Intra-plan deps are checked against localTasks.
 // If a cross-plan reference cannot be loaded, it is treated as unsatisfied and a
 // warning is appended to warnings.
+// loadCrossPlanTasksCached returns the canonical tasks for refPlanID, loading
+// from workflow/plans/ first and falling back to history/. Caches misses as nil.
+func loadCrossPlanTasksCached(projectPath, refPlanID string, cache map[string]*CanonicalTaskFile) (*CanonicalTaskFile, error) {
+	if tf, ok := cache[refPlanID]; ok {
+		return tf, nil
+	}
+	tf, err := loadCanonicalTasks(projectPath, refPlanID)
+	if err == nil {
+		cache[refPlanID] = tf
+		return tf, nil
+	}
+	histPath := filepath.Join(historyBaseDir(projectPath), refPlanID, workflowTasksFileName)
+	if histContent, histErr := os.ReadFile(histPath); histErr == nil {
+		var histTF CanonicalTaskFile
+		if yaml.Unmarshal(histContent, &histTF) == nil {
+			cache[refPlanID] = &histTF
+			return &histTF, nil
+		}
+	}
+	cache[refPlanID] = nil
+	return nil, err
+}
+
+// crossPlanDepIncomplete returns true when the cross-plan dependency dep is
+// not satisfied (plan missing, task missing, or task not completed). Warnings
+// are appended when the plan or task cannot be located.
+func crossPlanDepIncomplete(projectPath, dep string, cache map[string]*CanonicalTaskFile, warnings *[]string) bool {
+	slashIdx := strings.Index(dep, "/")
+	refPlanID := dep[:slashIdx]
+	refTaskID := dep[slashIdx+1:]
+
+	tf, loadErr := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+	if tf == nil {
+		if loadErr != nil && warnings != nil {
+			*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: cannot load plan %q tasks: %v", dep, refPlanID, loadErr))
+		}
+		return true
+	}
+
+	for _, t := range tf.Tasks {
+		if t.ID == refTaskID {
+			return t.Status != "completed"
+		}
+	}
+	if warnings != nil {
+		*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: "+errTaskNotFoundInPlanFmt, dep, refTaskID, refPlanID))
+	}
+	return true
+}
+
 func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []CanonicalTask, deps []string, warnings *[]string) []string {
 	if len(deps) == 0 {
 		return nil
@@ -1616,73 +1741,16 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 		statusByID[task.ID] = task.Status
 	}
 
-	// Cache loaded cross-plan task files to avoid redundant IO.
-	crossPlanCache := make(map[string]*CanonicalTaskFile)
-
+	cache := make(map[string]*CanonicalTaskFile)
 	var incomplete []string
 	for _, dep := range deps {
 		if !strings.Contains(dep, "/") {
-			// Intra-plan dependency.
 			if statusByID[dep] != "completed" {
 				incomplete = append(incomplete, dep)
 			}
 			continue
 		}
-
-		// Cross-plan dependency: format is "<planID>/<taskID>".
-		slashIdx := strings.Index(dep, "/")
-		refPlanID := dep[:slashIdx]
-		refTaskID := dep[slashIdx+1:]
-
-		tf, ok := crossPlanCache[refPlanID]
-		if !ok {
-			var loadErr error
-			tf, loadErr = loadCanonicalTasks(projectPath, refPlanID)
-			if loadErr != nil {
-				// Plan not found in workflow/plans/ — check history/ as fallback.
-				// Archived plans are completed; their tasks may satisfy cross-plan deps.
-				histPath := filepath.Join(historyBaseDir(projectPath), refPlanID, workflowTasksFileName)
-				if histContent, histErr := os.ReadFile(histPath); histErr == nil {
-					var histTF CanonicalTaskFile
-					if yaml.Unmarshal(histContent, &histTF) == nil {
-						tf = &histTF
-						loadErr = nil
-					}
-				}
-				if loadErr != nil {
-					if warnings != nil {
-						*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: cannot load plan %q tasks: %v", dep, refPlanID, loadErr))
-					}
-					incomplete = append(incomplete, dep)
-					crossPlanCache[refPlanID] = nil // cache miss marker
-					continue
-				}
-			}
-			crossPlanCache[refPlanID] = tf
-		}
-		if tf == nil {
-			// Already failed to load; treat as unsatisfied.
-			incomplete = append(incomplete, dep)
-			continue
-		}
-
-		found := false
-		satisfied := false
-		for _, t := range tf.Tasks {
-			if t.ID == refTaskID {
-				found = true
-				satisfied = t.Status == "completed"
-				break
-			}
-		}
-		if !found {
-			if warnings != nil {
-				*warnings = append(*warnings, fmt.Sprintf("cross-plan dep %q: "+errTaskNotFoundInPlanFmt, dep, refTaskID, refPlanID))
-			}
-			incomplete = append(incomplete, dep)
-			continue
-		}
-		if !satisfied {
+		if crossPlanDepIncomplete(projectPath, dep, cache, warnings) {
 			incomplete = append(incomplete, dep)
 		}
 	}
@@ -1709,87 +1777,21 @@ func selectAllEligibleTasks(projectPath string, planFilter []string) ([]workflow
 		return []workflowNextTaskSuggestion{}, nil
 	}
 
-	// Apply plan filter if provided.
-	if len(planFilter) > 0 {
-		filterSet := make(map[string]bool, len(planFilter))
-		for _, id := range planFilter {
-			filterSet[id] = true
-		}
-		filtered := ids[:0]
-		for _, id := range ids {
-			if filterSet[id] {
-				filtered = append(filtered, id)
-			}
-		}
-		ids = filtered
-		// Validate that every requested plan exists.
-		for _, wantID := range planFilter {
-			found := false
-			for _, id := range ids {
-				if id == wantID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil, fmt.Errorf(errPlanNotFoundFmt, wantID)
-			}
-		}
+	ids, err = applyEligiblePlanFilter(ids, planFilter)
+	if err != nil {
+		return nil, err
 	}
 
-	// Build active-delegation lookup keyed by task ID.
-	delegations, err := listDelegationContracts(projectPath)
+	activeDelegations, err := loadActiveDelegationTaskSet(projectPath)
 	if err != nil {
 		return []workflowNextTaskSuggestion{}, err
-	}
-	activeDelegations := make(map[string]bool, len(delegations))
-	for _, c := range delegations {
-		if c.Status == "pending" || c.Status == "active" {
-			activeDelegations[c.ParentTaskID] = true
-		}
 	}
 
 	var eligible []workflowNextTaskSuggestion
 	for _, id := range ids {
-		plan, err := loadCanonicalPlan(projectPath, id)
-		if err != nil || plan.Status != "active" {
-			continue
-		}
-		tf, err := loadCanonicalTasks(projectPath, id)
-		if err != nil {
-			continue
-		}
-		for _, task := range tf.Tasks {
-			if task.Status != "pending" && task.Status != "in_progress" {
-				continue
-			}
-			if activeDelegations[task.ID] {
-				continue
-			}
-			var depWarnings []string
-			if len(incompleteCanonicalDependenciesCrossplan(projectPath, tf.Tasks, task.DependsOn, &depWarnings)) > 0 {
-				continue
-			}
-			ws := task.WriteScope
-			if ws == nil {
-				ws = []string{}
-			}
-			eligible = append(eligible, workflowNextTaskSuggestion{
-				PlanID:               plan.ID,
-				PlanTitle:            plan.Title,
-				TaskID:               task.ID,
-				TaskTitle:            task.Title,
-				Status:               task.Status,
-				Reason:               "eligible: active plan, unblocked, no active delegation",
-				WriteScope:           append([]string(nil), ws...),
-				VerificationRequired: task.VerificationRequired,
-				DependsOn:            append([]string(nil), task.DependsOn...),
-				AppType:              task.AppType,
-			})
-		}
+		eligible = append(eligible, collectEligibleTasksForPlan(projectPath, id, activeDelegations)...)
 	}
 
-	// Stable sort: in_progress before pending, preserve declaration order otherwise.
 	sort.SliceStable(eligible, func(i, j int) bool {
 		si, sj := eligible[i].Status, eligible[j].Status
 		if si == sj {
@@ -1802,6 +1804,87 @@ func selectAllEligibleTasks(projectPath string, planFilter []string) ([]workflow
 		eligible = []workflowNextTaskSuggestion{}
 	}
 	return eligible, nil
+}
+
+func applyEligiblePlanFilter(ids, planFilter []string) ([]string, error) {
+	if len(planFilter) == 0 {
+		return ids, nil
+	}
+	available := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		available[id] = true
+	}
+	for _, want := range planFilter {
+		if !available[want] {
+			return nil, fmt.Errorf(errPlanNotFoundFmt, want)
+		}
+	}
+	filterSet := make(map[string]bool, len(planFilter))
+	for _, id := range planFilter {
+		filterSet[id] = true
+	}
+	filtered := ids[:0]
+	for _, id := range ids {
+		if filterSet[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered, nil
+}
+
+func loadActiveDelegationTaskSet(projectPath string) (map[string]bool, error) {
+	delegations, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[string]bool, len(delegations))
+	for _, c := range delegations {
+		if c.Status == "pending" || c.Status == "active" {
+			active[c.ParentTaskID] = true
+		}
+	}
+	return active, nil
+}
+
+func collectEligibleTasksForPlan(projectPath, id string, activeDelegations map[string]bool) []workflowNextTaskSuggestion {
+	plan, err := loadCanonicalPlan(projectPath, id)
+	if err != nil || plan.Status != "active" {
+		return nil
+	}
+	tf, err := loadCanonicalTasks(projectPath, id)
+	if err != nil {
+		return nil
+	}
+	var out []workflowNextTaskSuggestion
+	for _, task := range tf.Tasks {
+		if task.Status != "pending" && task.Status != "in_progress" {
+			continue
+		}
+		if activeDelegations[task.ID] {
+			continue
+		}
+		var depWarnings []string
+		if len(incompleteCanonicalDependenciesCrossplan(projectPath, tf.Tasks, task.DependsOn, &depWarnings)) > 0 {
+			continue
+		}
+		ws := task.WriteScope
+		if ws == nil {
+			ws = []string{}
+		}
+		out = append(out, workflowNextTaskSuggestion{
+			PlanID:               plan.ID,
+			PlanTitle:            plan.Title,
+			TaskID:               task.ID,
+			TaskTitle:            task.Title,
+			Status:               task.Status,
+			Reason:               "eligible: active plan, unblocked, no active delegation",
+			WriteScope:           append([]string(nil), ws...),
+			VerificationRequired: task.VerificationRequired,
+			DependsOn:            append([]string(nil), task.DependsOn...),
+			AppType:              task.AppType,
+		})
+	}
+	return out
 }
 
 // effectivePlanFocusTask returns the title that should represent plan focus for orient/status.
@@ -2019,6 +2102,19 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteri
 	return nil
 }
 
+func splitTrimmedCSV(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(csv, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, writeScope, appType string, verificationRequired bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2041,27 +2137,9 @@ func runWorkflowTaskAdd(planID, taskID, title, notes, owner, dependsOn, blocks, 
 		Notes:                notes,
 		AppType:              appType,
 		VerificationRequired: verificationRequired,
-	}
-	if dependsOn != "" {
-		for _, id := range strings.Split(dependsOn, ",") {
-			if id = strings.TrimSpace(id); id != "" {
-				task.DependsOn = append(task.DependsOn, id)
-			}
-		}
-	}
-	if blocks != "" {
-		for _, id := range strings.Split(blocks, ",") {
-			if id = strings.TrimSpace(id); id != "" {
-				task.Blocks = append(task.Blocks, id)
-			}
-		}
-	}
-	if writeScope != "" {
-		for _, p := range strings.Split(writeScope, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				task.WriteScope = append(task.WriteScope, p)
-			}
-		}
+		DependsOn:            splitTrimmedCSV(dependsOn),
+		Blocks:               splitTrimmedCSV(blocks),
+		WriteScope:           splitTrimmedCSV(writeScope),
 	}
 	tf.Tasks = append(tf.Tasks, task)
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
@@ -2098,13 +2176,7 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 			tf.Tasks[i].Notes = notes
 		}
 		if writeScope != "" {
-			var scope []string
-			for _, p := range strings.Split(writeScope, ",") {
-				if p = strings.TrimSpace(p); p != "" {
-					scope = append(scope, p)
-				}
-			}
-			tf.Tasks[i].WriteScope = scope
+			tf.Tasks[i].WriteScope = splitTrimmedCSV(writeScope)
 		}
 		found = true
 		break
@@ -2147,23 +2219,17 @@ type PlanScheduleResult struct {
 	MaxIntraParallelism int                `json:"max_intra_plan_parallelism"`
 }
 
-// computePlanSchedule runs Kahn's BFS topological sort on the tasks in tf,
-// assigning each task a wave number. Cross-plan dep entries (containing "/")
-// are ignored for intra-plan scheduling. Returns a PlanScheduleResult.
-func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
-	// Build id → task index map.
+// buildPlanScheduleGraph builds the in-degree array and adjacency list used
+// by Kahn's BFS topological sort. Cross-plan deps (containing "/") are ignored.
+func buildPlanScheduleGraph(tf *CanonicalTaskFile) (inDegree []int, adj [][]int) {
 	idxByID := make(map[string]int, len(tf.Tasks))
 	for i, t := range tf.Tasks {
 		idxByID[t.ID] = i
 	}
-
-	// Build in-degree and adjacency list: adj[i] = list of task indices that depend on task i.
-	inDegree := make([]int, len(tf.Tasks))
-	adj := make([][]int, len(tf.Tasks))
-
+	inDegree = make([]int, len(tf.Tasks))
+	adj = make([][]int, len(tf.Tasks))
 	for i, t := range tf.Tasks {
 		for _, dep := range t.DependsOn {
-			// Skip cross-plan dependencies.
 			if strings.Contains(dep, "/") {
 				continue
 			}
@@ -2175,22 +2241,20 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 			inDegree[i]++
 		}
 	}
+	return inDegree, adj
+}
 
-	// wave[i] holds the 0-based wave index for task i (wave 1 = index 0).
-	waveIdx := make([]int, len(tf.Tasks))
-	processed := 0
-
-	// Seed with all zero in-degree tasks.
+// runKahnBFSWaves assigns each task a wave index by Kahn's BFS topological sort.
+// Returns the wave-grouped task indices and the total number of processed tasks.
+func runKahnBFSWaves(inDegree []int, adj [][]int) (waveSlots map[int][]int, processed int) {
+	waveIdx := make([]int, len(inDegree))
 	queue := []int{}
 	for i, deg := range inDegree {
 		if deg == 0 {
 			queue = append(queue, i)
 		}
 	}
-
-	// waveSlots groups task indices by their wave index.
-	waveSlots := map[int][]int{}
-
+	waveSlots = map[int][]int{}
 	for len(queue) > 0 {
 		var nextQueue []int
 		for _, idx := range queue {
@@ -2209,12 +2273,10 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 		}
 		queue = nextQueue
 	}
+	return waveSlots, processed
+}
 
-	if processed != len(tf.Tasks) {
-		return nil, fmt.Errorf("plan %q has a dependency cycle (processed %d of %d tasks)", tf.PlanID, processed, len(tf.Tasks))
-	}
-
-	// Build sorted wave list.
+func buildPlanScheduleWaves(tf *CanonicalTaskFile, waveSlots map[int][]int) ([]PlanScheduleWave, int) {
 	waveNums := make([]int, 0, len(waveSlots))
 	for w := range waveSlots {
 		waveNums = append(waveNums, w)
@@ -2245,7 +2307,19 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 			maxPar = len(waveTasks)
 		}
 	}
+	return waves, maxPar
+}
 
+// computePlanSchedule runs Kahn's BFS topological sort on the tasks in tf,
+// assigning each task a wave number. Cross-plan dep entries (containing "/")
+// are ignored for intra-plan scheduling. Returns a PlanScheduleResult.
+func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
+	inDegree, adj := buildPlanScheduleGraph(tf)
+	waveSlots, processed := runKahnBFSWaves(inDegree, adj)
+	if processed != len(tf.Tasks) {
+		return nil, fmt.Errorf("plan %q has a dependency cycle (processed %d of %d tasks)", tf.PlanID, processed, len(tf.Tasks))
+	}
+	waves, maxPar := buildPlanScheduleWaves(tf, waveSlots)
 	return &PlanScheduleResult{
 		PlanID:              tf.PlanID,
 		Waves:               waves,
@@ -2272,13 +2346,7 @@ type checkScopeResult struct {
 // reports which files are inside/outside final_write_scope, which required_paths were
 // untouched, and which excluded_paths were touched.
 // Exit code: 0=clean, 1=warning (outside-scope or excluded touched), 2=no-sidecar.
-func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fromGitDiff bool) error {
-	project, err := currentWorkflowProject()
-	if err != nil {
-		return err
-	}
-	projectPath := project.Path
-
+func loadCheckScopeSidecar(projectPath, planID, taskID string) (string, *ScopeEvidence, error) {
 	sidecarPath := deriveScopeEvidencePath(projectPath, planID, taskID)
 	data, err := os.ReadFile(sidecarPath)
 	if err != nil {
@@ -2287,23 +2355,23 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 			fmt.Fprintln(os.Stderr, "Run 'dot-agents workflow plan derive-scope' to generate one.")
 			os.Exit(2)
 		}
-		return fmt.Errorf("read sidecar: %w", err)
+		return "", nil, fmt.Errorf("read sidecar: %w", err)
 	}
 	var ev ScopeEvidence
 	if err := yaml.Unmarshal(data, &ev); err != nil {
-		return fmt.Errorf("parse sidecar: %w", err)
+		return "", nil, fmt.Errorf("parse sidecar: %w", err)
 	}
+	return sidecarPath, &ev, nil
+}
 
-	// Collect changed files.
+func collectCheckScopeChangedFiles(projectPath string, changedFiles []string, fromGitDiff bool) []string {
 	if fromGitDiff {
-		gitFiles, err := checkScopeGitDiffFiles(projectPath)
-		if err != nil {
+		if gitFiles, err := checkScopeGitDiffFiles(projectPath); err != nil {
 			ui.Warn("--from-git-diff: " + err.Error())
 		} else {
 			changedFiles = append(changedFiles, gitFiles...)
 		}
 	}
-	// Dedup changed files.
 	seen := make(map[string]bool, len(changedFiles))
 	deduped := make([]string, 0, len(changedFiles))
 	for _, f := range changedFiles {
@@ -2312,9 +2380,10 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 			deduped = append(deduped, f)
 		}
 	}
-	changedFiles = deduped
+	return deduped
+}
 
-	// Build lookup sets.
+func classifyCheckScopeFiles(ev *ScopeEvidence, changedFiles []string) (inside, outside, touchedExcluded, untouchedRequired []string) {
 	finalScopeSet := make(map[string]bool, len(ev.FinalWriteScope))
 	for _, p := range ev.FinalWriteScope {
 		finalScopeSet[p] = true
@@ -2328,31 +2397,74 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 		excludedSet[ep.Path] = true
 	}
 
-	var insideScope, outsideScope, touchedExcluded []string
 	touchedFiles := make(map[string]bool, len(changedFiles))
 	for _, f := range changedFiles {
 		touchedFiles[f] = true
-		if finalScopeSet[f] || requiredSet[f] {
-			insideScope = append(insideScope, f)
-		} else if excludedSet[f] {
+		switch {
+		case finalScopeSet[f] || requiredSet[f]:
+			inside = append(inside, f)
+		case excludedSet[f]:
 			touchedExcluded = append(touchedExcluded, f)
-		} else {
-			outsideScope = append(outsideScope, f)
+		default:
+			outside = append(outside, f)
 		}
 	}
-
-	var untouchedRequired []string
 	for _, rp := range ev.RequiredPaths {
 		if !touchedFiles[rp.Path] {
 			untouchedRequired = append(untouchedRequired, rp.Path)
 		}
 	}
-
-	sort.Strings(insideScope)
-	sort.Strings(outsideScope)
+	sort.Strings(inside)
+	sort.Strings(outside)
 	sort.Strings(untouchedRequired)
 	sort.Strings(touchedExcluded)
+	return
+}
 
+func renderCheckScopeSection(out *os.File, title, prefix string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	ui.Section(title)
+	for _, f := range items {
+		fmt.Fprintf(out, "  %s %s\n", prefix, f)
+	}
+	fmt.Fprintln(out)
+}
+
+func renderCheckScopeResult(planID, taskID, sidecarPath string, result checkScopeResult) {
+	ui.Header(fmt.Sprintf("Scope Check: %s / %s", planID, taskID))
+	fmt.Fprintf(os.Stdout, "  sidecar: %s\n", sidecarPath)
+	fmt.Fprintf(os.Stdout, "  changed files: %d\n\n", len(result.ChangedFiles))
+
+	renderCheckScopeSection(os.Stdout, "Inside Scope", "+", result.InsideScope)
+	renderCheckScopeSection(os.Stdout, "Outside Scope (warning)", "!", result.OutsideScope)
+	renderCheckScopeSection(os.Stdout, "Untouched Required Paths", "-", result.UntouchedRequired)
+	renderCheckScopeSection(os.Stdout, "Touched Excluded Paths (warning)", "x", result.TouchedExcluded)
+
+	if result.Clean {
+		ui.Success("clean — all changes are within scope, no excluded paths touched")
+	} else {
+		ui.Warn("scope warnings present (outside-scope or excluded paths touched)")
+		fmt.Fprintln(os.Stdout)
+		os.Exit(1)
+	}
+}
+
+func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fromGitDiff bool) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	projectPath := project.Path
+
+	sidecarPath, ev, err := loadCheckScopeSidecar(projectPath, planID, taskID)
+	if err != nil {
+		return err
+	}
+
+	changedFiles = collectCheckScopeChangedFiles(projectPath, changedFiles, fromGitDiff)
+	insideScope, outsideScope, touchedExcluded, untouchedRequired := classifyCheckScopeFiles(ev, changedFiles)
 	clean := len(outsideScope) == 0 && len(touchedExcluded) == 0
 
 	result := checkScopeResult{
@@ -2377,49 +2489,7 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 		return nil
 	}
 
-	ui.Header(fmt.Sprintf("Scope Check: %s / %s", planID, taskID))
-	fmt.Fprintf(os.Stdout, "  sidecar: %s\n", config.DisplayPath(sidecarPath))
-	fmt.Fprintf(os.Stdout, "  changed files: %d\n\n", len(changedFiles))
-
-	if len(insideScope) > 0 {
-		ui.Section("Inside Scope")
-		for _, f := range insideScope {
-			fmt.Fprintf(os.Stdout, "  + %s\n", f)
-		}
-		fmt.Fprintln(os.Stdout)
-	}
-
-	if len(outsideScope) > 0 {
-		ui.Section("Outside Scope (warning)")
-		for _, f := range outsideScope {
-			fmt.Fprintf(os.Stdout, "  ! %s\n", f)
-		}
-		fmt.Fprintln(os.Stdout)
-	}
-
-	if len(untouchedRequired) > 0 {
-		ui.Section("Untouched Required Paths")
-		for _, f := range untouchedRequired {
-			fmt.Fprintf(os.Stdout, "  - %s\n", f)
-		}
-		fmt.Fprintln(os.Stdout)
-	}
-
-	if len(touchedExcluded) > 0 {
-		ui.Section("Touched Excluded Paths (warning)")
-		for _, f := range touchedExcluded {
-			fmt.Fprintf(os.Stdout, "  x %s\n", f)
-		}
-		fmt.Fprintln(os.Stdout)
-	}
-
-	if clean {
-		ui.Success("clean — all changes are within scope, no excluded paths touched")
-	} else {
-		ui.Warn("scope warnings present (outside-scope or excluded paths touched)")
-		fmt.Fprintln(os.Stdout)
-		os.Exit(1)
-	}
+	renderCheckScopeResult(planID, taskID, config.DisplayPath(sidecarPath), result)
 	return nil
 }
 

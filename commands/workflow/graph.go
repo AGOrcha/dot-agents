@@ -221,6 +221,39 @@ func NewLocalGraphAdapter(graphHome string) *LocalGraphAdapter {
 	return &LocalGraphAdapter{graphHome: graphHome}
 }
 
+func countMarkdownNotes(graphHome string) int {
+	noteDirs := []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"}
+	count := 0
+	for _, sub := range noteDirs {
+		entries, err := os.ReadDir(filepath.Join(graphHome, "notes", sub))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func setLaneReadyStatus(h *GraphBridgeHealth) {
+	switch {
+	case h.CodeLaneReady && h.ContextLaneReady:
+		h.Status = "healthy"
+	case h.CodeLaneReady:
+		h.Status = "partial"
+		h.Note = "code-lane ready; context-lane needs KG notes (run 'kg warm' after authoring notes)"
+	case h.ContextLaneReady:
+		h.Status = "partial"
+		h.Note = "context-lane ready; code-lane needs ETL (run 'kg warm --include-code' after 'kg build')"
+	default:
+		h.Status = "degraded"
+		h.Note = "neither lane has data — run 'kg build' then 'kg warm --include-code' to populate code-lane"
+	}
+}
+
 func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 	h := GraphBridgeHealth{
 		SchemaVersion: 1,
@@ -238,18 +271,7 @@ func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 		h.Warnings = append(h.Warnings, fmt.Sprintf("graph not initialized at %s", a.graphHome))
 		return h, nil
 	}
-	noteDirs := []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"}
-	for _, sub := range noteDirs {
-		entries, err := os.ReadDir(filepath.Join(a.graphHome, "notes", sub))
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				h.NoteCount++
-			}
-		}
-	}
+	h.NoteCount = countMarkdownNotes(a.graphHome)
 
 	// Query warm store for node/note counts to report code-lane and context-lane readiness.
 	warmDBPath := filepath.Join(a.graphHome, "ops", "graphstore.db")
@@ -263,20 +285,66 @@ func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 
 	h.LastQueryTime = a.lastQuery
 	h.LastQueryStatus = a.lastStatus
-	switch {
-	case h.CodeLaneReady && h.ContextLaneReady:
-		h.Status = "healthy"
-	case h.CodeLaneReady:
-		h.Status = "partial"
-		h.Note = "code-lane ready; context-lane needs KG notes (run 'kg warm' after authoring notes)"
-	case h.ContextLaneReady:
-		h.Status = "partial"
-		h.Note = "context-lane ready; code-lane needs ETL (run 'kg warm --include-code' after 'kg build')"
-	default:
-		h.Status = "degraded"
-		h.Note = "neither lane has data — run 'kg build' then 'kg warm --include-code' to populate code-lane"
-	}
+	setLaneReadyStatus(&h)
 	return h, nil
+}
+
+var graphBridgeIntentSubdirs = map[string][]string{
+	"plan_context":    {"decisions", "synthesis"},
+	"decision_lookup": {"decisions"},
+	"entity_context":  {"entities"},
+	"workflow_memory": {"sources", "sessions"},
+	"contradictions":  {"decisions"},
+}
+
+// graphSearchNoteEntry matches one note file against a query and returns the
+// composed result if it matches. ok=false means the entry should be skipped.
+func graphSearchNoteEntry(graphHome, sub, name, q string) (GraphBridgeResult, string, bool) {
+	dir := filepath.Join(graphHome, "notes", sub)
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return GraphBridgeResult{}, "", false
+	}
+	content := strings.ToLower(string(data))
+	if q != "" && !strings.Contains(content, q) {
+		return GraphBridgeResult{}, "", false
+	}
+	id, title, summary, srcRefs := parseNoteMetadata(string(data))
+	if id == "" {
+		id = strings.TrimSuffix(name, ".md")
+	}
+	return GraphBridgeResult{
+		ID:         id,
+		Type:       strings.TrimSuffix(sub, "s"),
+		Title:      title,
+		Summary:    summary,
+		Path:       filepath.Join("notes", sub, name),
+		SourceRefs: srcRefs,
+	}, id, true
+}
+
+// graphSearchSubdir appends matching results from one notes/<sub> directory.
+// Stops once results reaches the cap.
+func graphSearchSubdir(graphHome, sub, q string, seen map[string]bool, results *[]GraphBridgeResult, cap int) {
+	dir := filepath.Join(graphHome, "notes", sub)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		result, id, ok := graphSearchNoteEntry(graphHome, sub, e.Name(), q)
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		*results = append(*results, result)
+		if len(*results) >= cap {
+			return
+		}
+	}
 }
 
 func (a *LocalGraphAdapter) Query(query GraphBridgeQuery) (GraphBridgeResponse, error) {
@@ -289,14 +357,7 @@ func (a *LocalGraphAdapter) Query(query GraphBridgeQuery) (GraphBridgeResponse, 
 		Results:       []GraphBridgeResult{},
 	}
 
-	noteTypes := map[string][]string{
-		"plan_context":    {"decisions", "synthesis"},
-		"decision_lookup": {"decisions"},
-		"entity_context":  {"entities"},
-		"workflow_memory": {"sources", "sessions"},
-		"contradictions":  {"decisions"},
-	}
-	subdirs, ok := noteTypes[query.Intent]
+	subdirs, ok := graphBridgeIntentSubdirs[query.Intent]
 	if !ok {
 		return resp, fmt.Errorf("unsupported bridge intent: %s", query.Intent)
 	}
@@ -304,41 +365,9 @@ func (a *LocalGraphAdapter) Query(query GraphBridgeQuery) (GraphBridgeResponse, 
 	seen := make(map[string]bool)
 	q := strings.ToLower(query.Query)
 	for _, sub := range subdirs {
-		dir := filepath.Join(a.graphHome, "notes", sub)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-			if err != nil {
-				continue
-			}
-			content := strings.ToLower(string(data))
-			if q == "" || strings.Contains(content, q) {
-				id, title, summary, srcRefs := parseNoteMetadata(string(data))
-				if id == "" {
-					id = strings.TrimSuffix(e.Name(), ".md")
-				}
-				if seen[id] {
-					continue
-				}
-				seen[id] = true
-				resp.Results = append(resp.Results, GraphBridgeResult{
-					ID:         id,
-					Type:       strings.TrimSuffix(sub, "s"),
-					Title:      title,
-					Summary:    summary,
-					Path:       filepath.Join("notes", sub, e.Name()),
-					SourceRefs: srcRefs,
-				})
-				if len(resp.Results) >= 10 {
-					break
-				}
-			}
+		graphSearchSubdir(a.graphHome, sub, q, seen, &resp.Results, 10)
+		if len(resp.Results) >= 10 {
+			break
 		}
 	}
 
@@ -372,6 +401,62 @@ func parseNoteMetadata(content string) (id, title, summary string, sourceRefs []
 	return
 }
 
+func resolveGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
+	cfg, err := loadGraphBridgeConfig(projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("load bridge config: %w", err)
+	}
+	if cfg.Enabled {
+		return cfg, nil
+	}
+	scaffolded, serr := scaffoldGraphBridgeConfig(projectPath)
+	if serr != nil {
+		return nil, deps.ErrorWithHints(
+			"graph bridge not configured",
+			"Create `.agents/workflow/graph-bridge.yaml` with `enabled: true` to enable workflow graph queries.",
+		)
+	}
+	fmt.Fprintln(os.Stderr, "graph-bridge.yaml created with defaults — results may be sparse until the KG is populated")
+	return scaffolded, nil
+}
+
+func validateGraphBridgeIntent(intent string, allowed []string) error {
+	if !isValidWorkflowBridgeIntent(intent) {
+		return deps.ErrorWithHints(
+			fmt.Sprintf("unknown intent %q", intent),
+			"Valid workflow bridge intents: `plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions`.",
+		)
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	for _, a := range allowed {
+		if a == intent {
+			return nil
+		}
+	}
+	return fmt.Errorf("intent %q not in allowed_intents for this repo", intent)
+}
+
+func renderGraphQueryResults(intent, query string, resp GraphBridgeResponse) {
+	if deps.Flags.JSON() {
+		data, _ := json.MarshalIndent(resp, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+	ui.Header(fmt.Sprintf("Graph Query: %s  [%s]", intent, query))
+	if len(resp.Results) == 0 {
+		ui.Info("No results found.")
+	} else {
+		for _, r := range resp.Results {
+			ui.Bullet("found", fmt.Sprintf("[%s] %s — %s", r.Type, r.Title, r.Summary))
+		}
+	}
+	for _, w := range resp.Warnings {
+		ui.Warn(w)
+	}
+}
+
 func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	projectPath, err := os.Getwd()
 	if err != nil {
@@ -388,41 +473,12 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	if isWorkflowGraphCodeBridgeIntent(intent) {
 		return runWorkflowGraphQueryViaKGBridge(projectPath, intent, args)
 	}
-	cfg, err := loadGraphBridgeConfig(projectPath)
+	cfg, err := resolveGraphBridgeConfig(projectPath)
 	if err != nil {
-		return fmt.Errorf("load bridge config: %w", err)
+		return err
 	}
-	if !cfg.Enabled {
-		// Auto-scaffold a default config and continue rather than hard-failing.
-		scaffolded, serr := scaffoldGraphBridgeConfig(projectPath)
-		if serr != nil {
-			return deps.ErrorWithHints(
-				"graph bridge not configured",
-				"Create `.agents/workflow/graph-bridge.yaml` with `enabled: true` to enable workflow graph queries.",
-			)
-		}
-		cfg = scaffolded
-		fmt.Fprintln(os.Stderr, "graph-bridge.yaml created with defaults — results may be sparse until the KG is populated")
-	}
-
-	if !isValidWorkflowBridgeIntent(intent) {
-		return deps.ErrorWithHints(
-			fmt.Sprintf("unknown intent %q", intent),
-			"Valid workflow bridge intents: `plan_context`, `decision_lookup`, `entity_context`, `workflow_memory`, `contradictions`.",
-		)
-	}
-	allowed := cfg.AllowedIntents
-	if len(allowed) > 0 {
-		ok := false
-		for _, a := range allowed {
-			if a == intent {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return fmt.Errorf("intent %q not in allowed_intents for this repo", intent)
-		}
+	if err := validateGraphBridgeIntent(intent, cfg.AllowedIntents); err != nil {
+		return err
 	}
 
 	query := strings.Join(args, " ")
@@ -447,22 +503,7 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	health.LastQueryStatus = "ok"
 	_ = writeGraphBridgeHealth(filepath.Base(projectPath), health)
 
-	if deps.Flags.JSON() {
-		data, _ := json.MarshalIndent(resp, "", "  ")
-		fmt.Println(string(data))
-		return nil
-	}
-	ui.Header(fmt.Sprintf("Graph Query: %s  [%s]", intent, query))
-	if len(resp.Results) == 0 {
-		ui.Info("No results found.")
-	} else {
-		for _, r := range resp.Results {
-			ui.Bullet("found", fmt.Sprintf("[%s] %s — %s", r.Type, r.Title, r.Summary))
-		}
-	}
-	for _, w := range resp.Warnings {
-		ui.Warn(w)
-	}
+	renderGraphQueryResults(intent, query, resp)
 	return nil
 }
 

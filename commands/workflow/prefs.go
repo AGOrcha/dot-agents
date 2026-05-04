@@ -253,42 +253,54 @@ func setLocalPreference(project, key, value string) error {
 	return os.WriteFile(path, out, 0644)
 }
 
+type preferenceApplier func(p *WorkflowPreferences, value string) error
+
+func applyStringPref(get func(p *WorkflowPreferences) **string) preferenceApplier {
+	return func(p *WorkflowPreferences, value string) error {
+		*get(p) = &value
+		return nil
+	}
+}
+
+func applyBoolPref(get func(p *WorkflowPreferences) **bool) preferenceApplier {
+	return func(p *WorkflowPreferences, value string) error {
+		b := value == "true"
+		*get(p) = &b
+		return nil
+	}
+}
+
+func applyMaxParallelWorkers(p *WorkflowPreferences, value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 || n > 8 {
+		return fmt.Errorf(errExecutionMaxParallelWorkersRange)
+	}
+	p.Execution.MaxParallelWorkers = &n
+	return nil
+}
+
+var preferenceAppliers = map[string]preferenceApplier{
+	preferenceKeyVerificationTestCommand:                    applyStringPref(func(p *WorkflowPreferences) **string { return &p.Verification.TestCommand }),
+	preferenceKeyVerificationLintCommand:                    applyStringPref(func(p *WorkflowPreferences) **string { return &p.Verification.LintCommand }),
+	preferenceKeyVerificationRequireRegressionBeforeHandoff: applyBoolPref(func(p *WorkflowPreferences) **bool { return &p.Verification.RequireRegressionBeforeHandoff }),
+	preferenceKeyPlanningPlanDirectory:                      applyStringPref(func(p *WorkflowPreferences) **string { return &p.Planning.PlanDirectory }),
+	preferenceKeyPlanningRequirePlanBeforeCode:              applyBoolPref(func(p *WorkflowPreferences) **bool { return &p.Planning.RequirePlanBeforeCode }),
+	preferenceKeyReviewReviewOrder:                          applyStringPref(func(p *WorkflowPreferences) **string { return &p.Review.ReviewOrder }),
+	preferenceKeyReviewRequireFindingsFirst:                 applyBoolPref(func(p *WorkflowPreferences) **bool { return &p.Review.RequireFindingsFirst }),
+	preferenceKeyExecutionPackageManager:                    applyStringPref(func(p *WorkflowPreferences) **string { return &p.Execution.PackageManager }),
+	preferenceKeyExecutionFormatter:                         applyStringPref(func(p *WorkflowPreferences) **string { return &p.Execution.Formatter }),
+	preferenceKeyExecutionMaxParallelWorkers:                applyMaxParallelWorkers,
+}
+
 func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
-	switch key {
-	case preferenceKeyVerificationTestCommand:
-		p.Verification.TestCommand = &value
-	case preferenceKeyVerificationLintCommand:
-		p.Verification.LintCommand = &value
-	case preferenceKeyVerificationRequireRegressionBeforeHandoff:
-		b := value == "true"
-		p.Verification.RequireRegressionBeforeHandoff = &b
-	case preferenceKeyPlanningPlanDirectory:
-		p.Planning.PlanDirectory = &value
-	case preferenceKeyPlanningRequirePlanBeforeCode:
-		b := value == "true"
-		p.Planning.RequirePlanBeforeCode = &b
-	case preferenceKeyReviewReviewOrder:
-		p.Review.ReviewOrder = &value
-	case preferenceKeyReviewRequireFindingsFirst:
-		b := value == "true"
-		p.Review.RequireFindingsFirst = &b
-	case preferenceKeyExecutionPackageManager:
-		p.Execution.PackageManager = &value
-	case preferenceKeyExecutionFormatter:
-		p.Execution.Formatter = &value
-	case preferenceKeyExecutionMaxParallelWorkers:
-		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || n > 8 {
-			return fmt.Errorf(errExecutionMaxParallelWorkersRange)
-		}
-		p.Execution.MaxParallelWorkers = &n
-	default:
+	applier, ok := preferenceAppliers[key]
+	if !ok {
 		return deps.ErrorWithHints(
 			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
 			"Run `dot-agents workflow prefs` to list valid preference keys.",
 		)
 	}
-	return nil
+	return applier(p, value)
 }
 
 func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSource, error) {

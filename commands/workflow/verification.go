@@ -81,6 +81,45 @@ func readVerificationLog(project string, limit int) ([]VerificationRecord, error
 	return records, nil
 }
 
+func resolveReviewOverallDecision(phase1, phase2, overallIn, escalation string) (string, error) {
+	derived := deriveOverallReviewDecision(phase1, phase2)
+	overall := strings.TrimSpace(strings.ToLower(overallIn))
+	if overall == "" {
+		overall = derived
+	} else if overall != derived {
+		return "", deps.ErrorWithHints(
+			fmt.Sprintf("overall decision %q disagrees with phases (derived %q from phase_1=%s phase_2=%s)", overall, derived, phase1, phase2),
+			"Omit --overall-decision to use derived consolidation, or adjust phase flags so the derived value matches.",
+		)
+	}
+	if overall == "escalate" && strings.TrimSpace(escalation) == "" {
+		return "", deps.ErrorWithHints(
+			"overall decision is escalate but --escalation-reason is empty",
+			"Provide a non-empty --escalation-reason whenever the consolidated decision is escalate.",
+		)
+	}
+	return overall, nil
+}
+
+func resolveReviewDelegationContract(projectPath, taskFlag string) (string, *DelegationContract, error) {
+	taskID := strings.TrimSpace(taskFlag)
+	if taskID == "" {
+		contract := firstReadableDelegationContract(projectPath)
+		if contract == nil {
+			return "", nil, deps.ErrorWithHints(
+				"review verify record needs a delegation task id",
+				"Pass --task <task_id> matching `.agents/active/delegation/<task_id>.yaml`, or keep a single readable active delegation contract.",
+			)
+		}
+		return contract.ParentTaskID, contract, nil
+	}
+	contract, err := loadDelegationContract(projectPath, taskID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load delegation contract for task %q: %w", taskID, err)
+	}
+	return taskID, contract, nil
+}
+
 func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, overallIn, escalation, reviewerNotes, taskFlag string, failedGatesInput []string) error {
 	if !isValidVerificationScope(scope) {
 		return deps.ErrorWithHints(
@@ -100,39 +139,14 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 	if err != nil {
 		return err
 	}
-	derived := deriveOverallReviewDecision(phase1, phase2)
-	overall := strings.TrimSpace(strings.ToLower(overallIn))
-	if overall == "" {
-		overall = derived
-	} else if overall != derived {
-		return deps.ErrorWithHints(
-			fmt.Sprintf("overall decision %q disagrees with phases (derived %q from phase_1=%s phase_2=%s)", overall, derived, phase1, phase2),
-			"Omit --overall-decision to use derived consolidation, or adjust phase flags so the derived value matches.",
-		)
-	}
-	if overall == "escalate" && strings.TrimSpace(escalation) == "" {
-		return deps.ErrorWithHints(
-			"overall decision is escalate but --escalation-reason is empty",
-			"Provide a non-empty --escalation-reason whenever the consolidated decision is escalate.",
-		)
+	overall, err := resolveReviewOverallDecision(phase1, phase2, overallIn, escalation)
+	if err != nil {
+		return err
 	}
 
-	taskID := strings.TrimSpace(taskFlag)
-	var contract *DelegationContract
-	if taskID == "" {
-		contract = firstReadableDelegationContract(project.Path)
-		if contract == nil {
-			return deps.ErrorWithHints(
-				"review verify record needs a delegation task id",
-				"Pass --task <task_id> matching `.agents/active/delegation/<task_id>.yaml`, or keep a single readable active delegation contract.",
-			)
-		}
-		taskID = contract.ParentTaskID
-	} else {
-		contract, err = loadDelegationContract(project.Path, taskID)
-		if err != nil {
-			return fmt.Errorf("load delegation contract for task %q: %w", taskID, err)
-		}
+	taskID, contract, err := resolveReviewDelegationContract(project.Path, taskFlag)
+	if err != nil {
+		return err
 	}
 
 	failedGates := trimStringSlice(failedGatesInput)
@@ -178,7 +192,7 @@ func runWorkflowVerifyRecordReview(command, scope, summary, phase1In, phase2In, 
 	return nil
 }
 
-func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, verifierType string) error {
+func validateVerifyRecordInputs(kind, status, scope string) error {
 	if strings.TrimSpace(strings.ToLower(kind)) == "review" {
 		return fmt.Errorf("internal error: use runWorkflowVerifyRecordReview for kind review")
 	}
@@ -200,48 +214,63 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, veri
 			"Valid verification scopes: `file`, `package`, `repo`, `custom`.",
 		)
 	}
+	return nil
+}
+
+// writeVerifyResultArtifact writes the typed <verifier_type>.result.yaml when
+// taskID is non-empty and returns the slash-joined relative artifact path.
+func writeVerifyResultArtifact(projectPath, taskID, kind, status, command, summary, verifierType, now string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	vt := strings.TrimSpace(verifierType)
+	if vt == "" {
+		vt = strings.TrimSpace(strings.ToLower(kind))
+	}
+	if !validVerificationVerifierTypeStem(vt) {
+		return "", deps.ErrorWithHints(
+			fmt.Sprintf("verifier-type %q is not a valid artifact stem (must match ^[a-z][a-z0-9_-]*$)", vt),
+			"Use a profile id like `unit`, `api`, `batch`, or omit --verifier-type to derive it from --kind.",
+		)
+	}
+	contract, cerr := loadDelegationContract(projectPath, taskID)
+	if cerr != nil {
+		return "", fmt.Errorf("load delegation contract for task %q: %w", taskID, cerr)
+	}
+	doc := &VerificationResultDoc{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		ParentPlanID:  contract.ParentPlanID,
+		VerifierType:  vt,
+		Status:        status,
+		Summary:       strings.TrimSpace(summary),
+		RecordedAt:    now,
+		DelegationID:  contract.ID,
+		RecordedBy:    verifyRecordedByLabel,
+	}
+	if strings.TrimSpace(command) != "" {
+		doc.Commands = []string{command}
+	}
+	if err := writeVerificationResultYAML(projectPath, doc); err != nil {
+		return "", fmt.Errorf("write verification result artifact: %w", err)
+	}
+	return filepath.ToSlash(filepath.Join(".agents", "active", "verification", taskID, vt+".result.yaml")), nil
+}
+
+func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, verifierType string) error {
+	if err := validateVerifyRecordInputs(kind, status, scope); err != nil {
+		return err
+	}
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Write typed <verifier_type>.result.yaml when --task is provided.
 	taskID = strings.TrimSpace(taskID)
-	var artifactRel string
-	if taskID != "" {
-		vt := strings.TrimSpace(verifierType)
-		if vt == "" {
-			vt = strings.TrimSpace(strings.ToLower(kind))
-		}
-		if !validVerificationVerifierTypeStem(vt) {
-			return deps.ErrorWithHints(
-				fmt.Sprintf("verifier-type %q is not a valid artifact stem (must match ^[a-z][a-z0-9_-]*$)", vt),
-				"Use a profile id like `unit`, `api`, `batch`, or omit --verifier-type to derive it from --kind.",
-			)
-		}
-		contract, cerr := loadDelegationContract(project.Path, taskID)
-		if cerr != nil {
-			return fmt.Errorf("load delegation contract for task %q: %w", taskID, cerr)
-		}
-		doc := &VerificationResultDoc{
-			SchemaVersion: 1,
-			TaskID:        taskID,
-			ParentPlanID:  contract.ParentPlanID,
-			VerifierType:  vt,
-			Status:        status,
-			Summary:       strings.TrimSpace(summary),
-			RecordedAt:    now,
-			DelegationID:  contract.ID,
-			RecordedBy:    verifyRecordedByLabel,
-		}
-		if strings.TrimSpace(command) != "" {
-			doc.Commands = []string{command}
-		}
-		if err := writeVerificationResultYAML(project.Path, doc); err != nil {
-			return fmt.Errorf("write verification result artifact: %w", err)
-		}
-		artifactRel = filepath.ToSlash(filepath.Join(".agents", "active", "verification", taskID, vt+".result.yaml"))
+
+	artifactRel, err := writeVerifyResultArtifact(project.Path, taskID, kind, status, command, summary, verifierType, now)
+	if err != nil {
+		return err
 	}
 
 	artifacts := []string{}
