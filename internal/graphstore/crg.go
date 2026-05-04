@@ -348,48 +348,18 @@ func (b *CRGBridge) Status() (*CRGStatus, error) {
 	var lastUpdated sql.NullString
 	if err := db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT file_path), COALESCE(MAX(updated_at), '')
 		FROM nodes`).Scan(&nodes, &files, &lastUpdated); err != nil {
-		if isCRGBusyLockedError(err) {
-			status.State = string(CRGReadinessBusyOrLocked)
-			status.Message = err.Error()
-			return status, nil
-		}
-		if isCRGUnbuiltError(err) {
-			status.Message = err.Error()
-			return status, nil
-		}
-		status.State = string(CRGReadinessError)
-		status.Message = err.Error()
+		applyCRGStatusError(status, err)
 		return status, nil
 	}
 
 	if err := db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&edges); err != nil {
-		if isCRGBusyLockedError(err) {
-			status.State = string(CRGReadinessBusyOrLocked)
-			status.Message = err.Error()
-			return status, nil
-		}
-		if isCRGUnbuiltError(err) {
-			status.Message = err.Error()
-			return status, nil
-		}
-		status.State = string(CRGReadinessError)
-		status.Message = err.Error()
+		applyCRGStatusError(status, err)
 		return status, nil
 	}
 
 	languages, langErr := readCRGLanguages(db)
 	if langErr != nil {
-		if isCRGBusyLockedError(langErr) {
-			status.State = string(CRGReadinessBusyOrLocked)
-			status.Message = langErr.Error()
-			return status, nil
-		}
-		if isCRGUnbuiltError(langErr) {
-			status.Message = langErr.Error()
-			return status, nil
-		}
-		status.State = string(CRGReadinessError)
-		status.Message = langErr.Error()
+		applyCRGStatusError(status, langErr)
 		return status, nil
 	}
 
@@ -411,6 +381,21 @@ func (b *CRGBridge) Status() (*CRGStatus, error) {
 		status.Message = "code graph has not been built yet"
 	}
 	return status, nil
+}
+
+// applyCRGStatusError classifies a SQLite error against the busy/locked,
+// unbuilt, and generic-error tiers and records the matching state and
+// message on status. Behavior mirrors the previous inlined branches.
+func applyCRGStatusError(status *CRGStatus, err error) {
+	switch {
+	case isCRGBusyLockedError(err):
+		status.State = string(CRGReadinessBusyOrLocked)
+	case isCRGUnbuiltError(err):
+		// Leave status.State at its prior value (unbuilt by default).
+	default:
+		status.State = string(CRGReadinessError)
+	}
+	status.Message = err.Error()
 }
 
 const (

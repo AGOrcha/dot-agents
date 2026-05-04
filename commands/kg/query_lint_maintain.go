@@ -98,63 +98,97 @@ func scoreMatch(note *GraphNote, body, query string) int {
 }
 
 // searchNotes searches notes in the given type subdirectory (or all subdirs if noteType=="").
+type scoredNoteResult struct {
+	score  int
+	result GraphQueryResult
+}
+
 func searchNotes(kgHomeDir, noteType, query string, limit int) ([]GraphQueryResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	type scoredResult struct {
-		score  int
-		result GraphQueryResult
-	}
-	var scored []scoredResult
-
+	var scored []scoredNoteResult
 	walkFn := func(path string, _ fs.DirEntry) error {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil // skip unreadable files
-		}
-		note, body, err := parseGraphNote(data)
-		if err != nil {
-			return nil // skip unparseable files
-		}
-		s := scoreMatch(note, body, query)
-		if s < 0 {
-			return nil
-		}
-		relPath, _ := filepath.Rel(kgHomeDir, path)
-		scored = append(scored, scoredResult{
-			score: s,
-			result: GraphQueryResult{
-				ID:         note.ID,
-				Type:       note.Type,
-				Title:      note.Title,
-				Summary:    note.Summary,
-				Path:       relPath,
-				SourceRefs: note.SourceRefs,
-			},
-		})
+		appendScoredNoteResult(&scored, kgHomeDir, path, query)
 		return nil
 	}
 
-	if noteType != "" {
-		subDir := filepath.Join(kgHomeDir, "notes", noteSubdir(noteType))
-		entries, err := os.ReadDir(subDir)
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				_ = walkFn(filepath.Join(subDir, e.Name()), e)
-			}
-		}
-	} else {
-		_ = walkNoteFiles(kgHomeDir, walkFn)
+	if err := visitNoteFiles(kgHomeDir, noteType, walkFn); err != nil {
+		return nil, err
 	}
 
-	// Sort by score descending (simple selection — limit is small)
+	sortScoredNotesDesc(scored)
+	results := make([]GraphQueryResult, 0, min(limit, len(scored)))
+	for i, r := range scored {
+		if i >= limit {
+			break
+		}
+		results = append(results, r.result)
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return results, nil
+}
+
+// appendScoredNoteResult parses the note at path, scores it against query,
+// and appends a matching GraphQueryResult to scored on a non-negative score.
+func appendScoredNoteResult(scored *[]scoredNoteResult, kgHomeDir, path, query string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	note, body, err := parseGraphNote(data)
+	if err != nil {
+		return
+	}
+	s := scoreMatch(note, body, query)
+	if s < 0 {
+		return
+	}
+	relPath, _ := filepath.Rel(kgHomeDir, path)
+	*scored = append(*scored, scoredNoteResult{
+		score: s,
+		result: GraphQueryResult{
+			ID:         note.ID,
+			Type:       note.Type,
+			Title:      note.Title,
+			Summary:    note.Summary,
+			Path:       relPath,
+			SourceRefs: note.SourceRefs,
+		},
+	})
+}
+
+// visitNoteFiles invokes walkFn for every .md note file. When noteType is
+// non-empty the walk is restricted to the matching subdirectory; otherwise
+// it spans the whole notes/ tree via walkNoteFiles.
+func visitNoteFiles(kgHomeDir, noteType string, walkFn func(string, fs.DirEntry) error) error {
+	if noteType == "" {
+		_ = walkNoteFiles(kgHomeDir, walkFn)
+		return nil
+	}
+	subDir := filepath.Join(kgHomeDir, "notes", noteSubdir(noteType))
+	entries, err := os.ReadDir(subDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		_ = walkFn(filepath.Join(subDir, e.Name()), e)
+	}
+	return nil
+}
+
+// sortScoredNotesDesc sorts scored in descending order of score using a
+// simple O(n^2) selection sort — adequate since limit (and therefore the
+// candidate set) is small.
+func sortScoredNotesDesc(scored []scoredNoteResult) {
 	for i := 0; i < len(scored)-1; i++ {
 		for j := i + 1; j < len(scored); j++ {
 			if scored[j].score > scored[i].score {
@@ -162,16 +196,8 @@ func searchNotes(kgHomeDir, noteType, query string, limit int) ([]GraphQueryResu
 			}
 		}
 	}
-
-	var results []GraphQueryResult
-	for i, r := range scored {
-		if i >= limit {
-			break
-		}
-		results = append(results, r.result)
-	}
-	return results, nil
 }
+
 
 // searchByLinks returns notes linked from a given note's links field.
 func searchByLinks(kgHomeDir, noteID string) ([]GraphQueryResult, error) {
@@ -596,13 +622,43 @@ func lintOversizePages(kgHomeDir string, notes map[string]*GraphNote, maxBytes i
 }
 
 // lintContradictions groups decision notes by shared title keywords and flags pairs.
+type decisionLintNote struct {
+	id    string
+	title string
+	words map[string]bool
+}
+
 func lintContradictions(notes map[string]*GraphNote) []LintResult {
-	type decisionNote struct {
-		id    string
-		title string
-		words map[string]bool
+	decisions := collectActiveDecisions(notes)
+
+	var results []LintResult
+	seen := make(map[string]bool)
+	for i := 0; i < len(decisions); i++ {
+		for j := i + 1; j < len(decisions); j++ {
+			a, b := decisions[i], decisions[j]
+			if countSharedKeywords(a.words, b.words) < 2 {
+				continue
+			}
+			key := a.id + "|" + b.id
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			results = append(results, LintResult{
+				Check:    "contradictions",
+				Severity: "warn",
+				Message:  fmt.Sprintf("decisions %q and %q share keywords — potential conflict", a.title, b.title),
+				NoteID:   a.id,
+			})
+		}
 	}
-	var decisions []decisionNote
+	return results
+}
+
+// collectActiveDecisions returns the keyword-bag projection of every active
+// decision note in notes, used as input to the contradictions lint.
+func collectActiveDecisions(notes map[string]*GraphNote) []decisionLintNote {
+	var out []decisionLintNote
 	for id, note := range notes {
 		if note.Type != "decision" || note.Status != "active" {
 			continue
@@ -614,36 +670,20 @@ func lintContradictions(notes map[string]*GraphNote) []LintResult {
 				words[w] = true
 			}
 		}
-		decisions = append(decisions, decisionNote{id: id, title: note.Title, words: words})
+		out = append(out, decisionLintNote{id: id, title: note.Title, words: words})
 	}
+	return out
+}
 
-	var results []LintResult
-	seen := make(map[string]bool)
-	for i := 0; i < len(decisions); i++ {
-		for j := i + 1; j < len(decisions); j++ {
-			a, b := decisions[i], decisions[j]
-			// Count shared keywords
-			shared := 0
-			for w := range a.words {
-				if b.words[w] {
-					shared++
-				}
-			}
-			if shared >= 2 {
-				key := a.id + "|" + b.id
-				if !seen[key] {
-					seen[key] = true
-					results = append(results, LintResult{
-						Check:    "contradictions",
-						Severity: "warn",
-						Message:  fmt.Sprintf("decisions %q and %q share keywords — potential conflict", a.title, b.title),
-						NoteID:   a.id,
-					})
-				}
-			}
+// countSharedKeywords counts how many keys appear in both a and b.
+func countSharedKeywords(a, b map[string]bool) int {
+	shared := 0
+	for w := range a {
+		if b[w] {
+			shared++
 		}
 	}
-	return results
+	return shared
 }
 
 // lintIntegrityViolations checks each note's body hash against ops/integrity/manifest.json.
@@ -719,10 +759,20 @@ func runGraphLint(kgHomeDir string) (*LintReport, error) {
 		lintIntegrityViolations(kgHomeDir, notes), // Phase 6A
 	}
 	report.ChecksRun = len(checks)
-
 	for _, batch := range checks {
 		report.Results = append(report.Results, batch...)
 	}
+	tallyLintSeverities(report)
+
+	writeLintReport(kgHomeDir, report)
+	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("lint | %d errors, %d warnings", report.ErrorCount, report.WarnCount))
+	updateHealthFromLint(kgHomeDir, report)
+
+	return report, nil
+}
+
+// tallyLintSeverities updates the per-severity counters on report.
+func tallyLintSeverities(report *LintReport) {
 	for _, r := range report.Results {
 		switch r.Severity {
 		case "error":
@@ -733,42 +783,48 @@ func runGraphLint(kgHomeDir string) (*LintReport, error) {
 			report.InfoCount++
 		}
 	}
+}
 
-	// Write report
+// writeLintReport persists report to ops/lint/lint-report.json. Errors are
+// best-effort: write failures are silently swallowed to match the previous
+// behavior.
+func writeLintReport(kgHomeDir string, report *LintReport) {
 	reportPath := filepath.Join(kgHomeDir, "ops", "lint", "lint-report.json")
-	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err == nil {
-		if data, err := json.MarshalIndent(report, "", "  "); err == nil {
-			_ = os.WriteFile(reportPath, data, 0644)
-		}
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+		return
 	}
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(reportPath, data, 0644)
+}
 
-	// Append log entry
-	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("lint | %d errors, %d warnings", report.ErrorCount, report.WarnCount))
-
-	// Update health with lint-derived metrics
+// updateHealthFromLint folds lint metrics back into graph-health.json,
+// promoting the status to "error" on broken links and to "warn" on any
+// other warnings.
+func updateHealthFromLint(kgHomeDir string, report *LintReport) {
 	health, err := computeGraphHealth(kgHomeDir)
-	if err == nil {
-		// Count broken links and orphans from lint
-		for _, r := range report.Results {
-			switch r.Check {
-			case "broken_links":
-				health.BrokenLinkCount++
-			case "orphan_pages":
-				health.OrphanCount++
-			case "contradictions":
-				health.ContradictionCount++
-			}
-		}
-		if health.BrokenLinkCount > 0 {
-			health.Status = "error"
-			health.Warnings = append(health.Warnings, fmt.Sprintf("%d broken links detected", health.BrokenLinkCount))
-		} else if report.WarnCount > 0 && health.Status == "healthy" {
-			health.Status = "warn"
-		}
-		_ = writeGraphHealth(kgHomeDir, health)
+	if err != nil {
+		return
 	}
-
-	return report, nil
+	for _, r := range report.Results {
+		switch r.Check {
+		case "broken_links":
+			health.BrokenLinkCount++
+		case "orphan_pages":
+			health.OrphanCount++
+		case "contradictions":
+			health.ContradictionCount++
+		}
+	}
+	if health.BrokenLinkCount > 0 {
+		health.Status = "error"
+		health.Warnings = append(health.Warnings, fmt.Sprintf("%d broken links detected", health.BrokenLinkCount))
+	} else if report.WarnCount > 0 && health.Status == "healthy" {
+		health.Status = "warn"
+	}
+	_ = writeGraphHealth(kgHomeDir, health)
 }
 
 // findContradictions returns LintResults for contradiction detection (used by query intent).
@@ -799,21 +855,12 @@ func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
 	}
 
 	checkFilter, _ := cmd.Flags().GetString("check")
-
 	report, err := runGraphLint(home)
 	if err != nil {
 		return err
 	}
-
-	// Apply single-check filter
 	if checkFilter != "" {
-		var filtered []LintResult
-		for _, r := range report.Results {
-			if r.Check == checkFilter {
-				filtered = append(filtered, r)
-			}
-		}
-		report.Results = filtered
+		report.Results = filterLintResultsByCheck(report.Results, checkFilter)
 	}
 
 	if deps.Flags.JSON {
@@ -825,6 +872,28 @@ func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	renderLintReportText(report)
+	if report.ErrorCount > 0 {
+		return fmt.Errorf("lint found %d errors", report.ErrorCount)
+	}
+	return nil
+}
+
+// filterLintResultsByCheck returns only those results whose Check matches
+// the given filter.
+func filterLintResultsByCheck(results []LintResult, check string) []LintResult {
+	var filtered []LintResult
+	for _, r := range results {
+		if r.Check == check {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// renderLintReportText prints the lint report in human-readable form,
+// including the colored status badge and per-severity bullet groups.
+func renderLintReportText(report *LintReport) {
 	badge := ui.ColorText(ui.Green, "ok")
 	if report.ErrorCount > 0 {
 		badge = ui.ColorText(ui.Red, "errors")
@@ -837,25 +906,19 @@ func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
 
 	if len(report.Results) == 0 {
 		ui.Success("No issues found.")
-		return nil
+		return
 	}
 
-	// Group by severity
+	icons := map[string]string{"error": "error", "warn": "warn", "info": "found"}
 	for _, sev := range []string{"error", "warn", "info"} {
 		for _, r := range report.Results {
 			if r.Severity != sev {
 				continue
 			}
-			icon := map[string]string{"error": "error", "warn": "warn", "info": "found"}[sev]
-			ui.Bullet(icon, fmt.Sprintf("[%s] %s", r.Check, r.Message))
+			ui.Bullet(icons[sev], fmt.Sprintf("[%s] %s", r.Check, r.Message))
 		}
 	}
 	fmt.Println()
-
-	if report.ErrorCount > 0 {
-		return fmt.Errorf("lint found %d errors", report.ErrorCount)
-	}
-	return nil
 }
 
 // ── Phase 4: Maintenance operations ──────────────────────────────────────────
@@ -865,61 +928,75 @@ func runKGReweave(kgHomeDir string) error {
 	if err != nil {
 		return err
 	}
-
 	removed, added := 0, 0
-
 	for id, note := range notes {
-		changed := false
-		var validLinks []string
-
-		// Remove broken links
-		for _, linkedID := range adj[id] {
-			if _, exists := notes[linkedID]; exists {
-				validLinks = append(validLinks, linkedID)
-			} else {
-				removed++
-				changed = true
-			}
+		validLinks, removedHere, addedHere, changed := repairNoteLinks(adj[id], note, notes)
+		removed += removedHere
+		added += addedHere
+		if !changed {
+			continue
 		}
-
-		// Add links for IDs mentioned in source_refs that aren't already linked
-		for _, refID := range note.SourceRefs {
-			if _, exists := notes[refID]; !exists {
-				continue
-			}
-			alreadyLinked := false
-			for _, l := range validLinks {
-				if l == refID {
-					alreadyLinked = true
-					break
-				}
-			}
-			if !alreadyLinked {
-				validLinks = append(validLinks, refID)
-				added++
-				changed = true
-			}
-		}
-
-		if changed {
-			note.Links = validLinks
-			note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-			if err := updateGraphNote(kgHomeDir, note, ""); err != nil {
-				// Read existing body and re-write with repaired links
-				path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
-				existing, readErr := os.ReadFile(path)
-				if readErr == nil {
-					_, body, parseErr := parseGraphNote(existing)
-					if parseErr == nil {
-						_ = updateGraphNote(kgHomeDir, note, body)
-					}
-				}
-			}
-		}
+		note.Links = validLinks
+		note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		persistReweavedNote(kgHomeDir, id, note)
 	}
-
 	ui.Success(fmt.Sprintf("Reweave complete: %d broken links removed, %d source_ref links added", removed, added))
 	return nil
+}
+
+// repairNoteLinks computes the repaired link slice for a single note: it
+// keeps every existing link that still resolves, then adds any source_ref
+// IDs that resolve and aren't yet linked. The returned counters report how
+// many links were dropped and added.
+func repairNoteLinks(currentLinks []string, note *GraphNote, notes map[string]*GraphNote) (validLinks []string, removed int, added int, changed bool) {
+	for _, linkedID := range currentLinks {
+		if _, exists := notes[linkedID]; exists {
+			validLinks = append(validLinks, linkedID)
+		} else {
+			removed++
+			changed = true
+		}
+	}
+	for _, refID := range note.SourceRefs {
+		if _, exists := notes[refID]; !exists {
+			continue
+		}
+		if containsLinkID(validLinks, refID) {
+			continue
+		}
+		validLinks = append(validLinks, refID)
+		added++
+		changed = true
+	}
+	return validLinks, removed, added, changed
+}
+
+// containsLinkID reports whether refID appears in links.
+func containsLinkID(links []string, refID string) bool {
+	for _, l := range links {
+		if l == refID {
+			return true
+		}
+	}
+	return false
+}
+
+// persistReweavedNote writes the repaired note back to disk, falling back
+// to a body-preserving rewrite when the empty-body update is rejected.
+func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
+	if err := updateGraphNote(kgHomeDir, note, ""); err == nil {
+		return
+	}
+	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
+	existing, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return
+	}
+	_, body, parseErr := parseGraphNote(existing)
+	if parseErr != nil {
+		return
+	}
+	_ = updateGraphNote(kgHomeDir, note, body)
 }
 
 func runKGMarkStale(kgHomeDir string, threshold time.Duration) error {
@@ -931,32 +1008,37 @@ func runKGMarkStale(kgHomeDir string, threshold time.Duration) error {
 	cutoff := time.Now().UTC().Add(-threshold)
 	count := 0
 	for id, note := range notes {
-		if note.Status == "archived" || note.Status == "superseded" || note.Status == "stale" {
-			continue
-		}
-		t, parseErr := time.Parse(time.RFC3339, note.UpdatedAt)
-		if parseErr != nil {
-			continue
-		}
-		if t.Before(cutoff) {
-			note.Status = "stale"
-			note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-			path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
-			existing, readErr := os.ReadFile(path)
-			if readErr != nil {
-				continue
-			}
-			_, body, parseErr := parseGraphNote(existing)
-			if parseErr != nil {
-				continue
-			}
-			if err := updateGraphNote(kgHomeDir, note, body); err == nil {
-				count++
-			}
+		if markNoteStale(kgHomeDir, id, note, cutoff) {
+			count++
 		}
 	}
 	ui.Success(fmt.Sprintf("Marked %d notes as stale", count))
 	return nil
+}
+
+// markNoteStale promotes a single note to "stale" status when it is still
+// active and its UpdatedAt timestamp is before cutoff. Returns true on a
+// successful update.
+func markNoteStale(kgHomeDir, id string, note *GraphNote, cutoff time.Time) bool {
+	if note.Status == "archived" || note.Status == "superseded" || note.Status == "stale" {
+		return false
+	}
+	t, parseErr := time.Parse(time.RFC3339, note.UpdatedAt)
+	if parseErr != nil || !t.Before(cutoff) {
+		return false
+	}
+	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
+	existing, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return false
+	}
+	_, body, parseErr := parseGraphNote(existing)
+	if parseErr != nil {
+		return false
+	}
+	note.Status = "stale"
+	note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	return updateGraphNote(kgHomeDir, note, body) == nil
 }
 
 func runKGCompact(kgHomeDir string) error {
@@ -972,31 +1054,45 @@ func runKGCompact(kgHomeDir string) error {
 
 	count := 0
 	for id, note := range notes {
-		if note.Status != "archived" && note.Status != "superseded" {
-			continue
-		}
-		src := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
-		dst := filepath.Join(archiveDir, id+".md")
-		if err := os.Rename(src, dst); err != nil {
-			continue
-		}
-		count++
-		// Remove from index
-		indexPath := filepath.Join(kgHomeDir, "notes", "index.md")
-		data, readErr := os.ReadFile(indexPath)
-		if readErr == nil {
-			lines := strings.Split(string(data), "\n")
-			idPrefix := fmt.Sprintf("- [%s]", id)
-			var kept []string
-			for _, l := range lines {
-				if !strings.HasPrefix(l, idPrefix) {
-					kept = append(kept, l)
-				}
-			}
-			_ = os.WriteFile(indexPath, []byte(strings.Join(kept, "\n")), 0644)
+		if archiveCompactedNote(kgHomeDir, archiveDir, id, note) {
+			count++
 		}
 	}
 	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("compact | archived %d notes", count))
 	ui.Success(fmt.Sprintf("Compacted %d notes to %s", count, archiveDir))
 	return nil
+}
+
+// archiveCompactedNote moves a single archived/superseded note into the
+// _archived directory and trims it from notes/index.md. Returns true when
+// the move succeeded.
+func archiveCompactedNote(kgHomeDir, archiveDir, id string, note *GraphNote) bool {
+	if note.Status != "archived" && note.Status != "superseded" {
+		return false
+	}
+	src := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
+	dst := filepath.Join(archiveDir, id+".md")
+	if err := os.Rename(src, dst); err != nil {
+		return false
+	}
+	removeIndexEntry(filepath.Join(kgHomeDir, "notes", "index.md"), id)
+	return true
+}
+
+// removeIndexEntry rewrites notes/index.md without any line whose body
+// begins with `- [<id>]`. Read or write errors are silent.
+func removeIndexEntry(indexPath, id string) {
+	data, readErr := os.ReadFile(indexPath)
+	if readErr != nil {
+		return
+	}
+	idPrefix := fmt.Sprintf("- [%s]", id)
+	lines := strings.Split(string(data), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if !strings.HasPrefix(l, idPrefix) {
+			kept = append(kept, l)
+		}
+	}
+	_ = os.WriteFile(indexPath, []byte(strings.Join(kept, "\n")), 0644)
 }

@@ -42,14 +42,7 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 	repoAgents := filepath.Join(projectPath, ".agents", "agents", name)
 	repoClaude := filepath.Join(projectPath, ".claude", "agents", name)
 
-	inList := false
-	for _, a := range rc.Agents {
-		if a == name {
-			inList = true
-			break
-		}
-	}
-
+	inList := containsString(rc.Agents, name)
 	if !inList && !pathExists(repoAgents) && !pathExists(repoClaude) {
 		return agentUserError(deps, fmt.Sprintf("agent %q is not linked in this project", name), "Run `dot-agents agents list` to inspect the managed agents in this repository.")
 	}
@@ -68,15 +61,40 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 		}
 	}
 
-	canonicalPurged := false
-	if purge {
-		var err error
-		canonicalPurged, err = purgeCanonicalAgent(deps, canonicalPath, name)
-		if err != nil {
-			return err
-		}
+	canonicalPurged, err := maybePurgeCanonicalAgent(deps, canonicalPath, name, purge)
+	if err != nil {
+		return err
 	}
 
+	ui.SuccessBox(
+		fmt.Sprintf("Removed agent '%s' from project '%s'", name, projectName),
+		removeAgentSummaryLines(rc, canonicalPath, inList, purge, canonicalPurged)...,
+	)
+	return nil
+}
+
+// containsString reports whether list contains the exact value v.
+func containsString(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// maybePurgeCanonicalAgent runs purgeCanonicalAgent only when purge is true,
+// returning a no-op (false, nil) otherwise.
+func maybePurgeCanonicalAgent(deps Deps, canonicalPath, name string, purge bool) (bool, error) {
+	if !purge {
+		return false, nil
+	}
+	return purgeCanonicalAgent(deps, canonicalPath, name)
+}
+
+// removeAgentSummaryLines builds the SuccessBox body lines describing the
+// effect of RemoveAgentIn on the manifest and canonical directory.
+func removeAgentSummaryLines(rc *config.AgentsRC, canonicalPath string, inList, purge, canonicalPurged bool) []string {
 	lines := []string{
 		"Repo symlinks under .agents/agents/ and .claude/agents/ were removed when present",
 	}
@@ -92,8 +110,7 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 	} else {
 		lines = append(lines, fmt.Sprintf("Canonical left at %s (use --purge to delete)", config.DisplayPath(canonicalPath)))
 	}
-	ui.SuccessBox(fmt.Sprintf("Removed agent '%s' from project '%s'", name, projectName), lines...)
-	return nil
+	return lines
 }
 
 func removeAgentNameFromSlice(list []string, name string) []string {

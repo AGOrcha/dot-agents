@@ -124,63 +124,97 @@ func (i ResourceIntent) EffectiveConflictKey() string {
 }
 
 func (i ResourceIntent) Validate() error {
-	if i.IntentID == "" {
-		return fmt.Errorf("intent_id is required")
+	if err := i.validateRequiredStrings(); err != nil {
+		return err
 	}
-	if i.Project == "" {
-		return fmt.Errorf("project is required")
-	}
-	if i.Bucket == "" {
-		return fmt.Errorf("bucket is required")
-	}
-	if i.LogicalName == "" {
-		return fmt.Errorf("logical_name is required")
-	}
-	if i.TargetPath == "" {
-		return fmt.Errorf("target_path is required")
-	}
-	switch i.Ownership {
-	case ResourceOwnershipSharedRepo, ResourceOwnershipPlatformRepo, ResourceOwnershipUserHome:
-	case "":
-		return fmt.Errorf("ownership is required")
-	default:
-		return fmt.Errorf("ownership %q is unsupported", i.Ownership)
+	if err := i.validateEnums(); err != nil {
+		return err
 	}
 	if err := i.SourceRef.Validate(); err != nil {
 		return err
 	}
-	switch i.Shape {
-	case ResourceShapeDirectDir, ResourceShapeDirectFile, ResourceShapeRenderSingle, ResourceShapeRenderFanout:
-	case "":
-		return fmt.Errorf("shape is required")
-	default:
-		return fmt.Errorf("shape %q is unsupported", i.Shape)
-	}
-	switch i.Transport {
-	case ResourceTransportSymlink, ResourceTransportHardlink, ResourceTransportWrite:
-	case "":
-		return fmt.Errorf("transport is required")
-	default:
-		return fmt.Errorf("transport %q is unsupported", i.Transport)
-	}
-	switch i.ReplacePolicy {
-	case ResourceReplaceNever, ResourceReplaceIfManaged, ResourceReplaceAllowlistedImportedDirOnly:
-	case "":
-		return fmt.Errorf("replace_policy is required")
-	default:
-		return fmt.Errorf("replace_policy %q is unsupported", i.ReplacePolicy)
-	}
-	switch i.PrunePolicy {
-	case ResourcePruneNone, ResourcePruneTarget, ResourcePruneGeneratedChildren:
-	case "":
-		return fmt.Errorf("prune_policy is required")
-	default:
-		return fmt.Errorf("prune_policy %q is unsupported", i.PrunePolicy)
-	}
 	if i.Materializer == "" {
 		return fmt.Errorf("materializer is required")
 	}
+	return i.validateShapeTransport()
+}
 
+// validateRequiredStrings asserts that the always-required identity fields
+// are non-empty and returns the matching error otherwise.
+func (i ResourceIntent) validateRequiredStrings() error {
+	required := []struct {
+		field, name string
+	}{
+		{i.IntentID, "intent_id"},
+		{i.Project, "project"},
+		{i.Bucket, "bucket"},
+		{i.LogicalName, "logical_name"},
+		{i.TargetPath, "target_path"},
+	}
+	for _, r := range required {
+		if r.field == "" {
+			return fmt.Errorf("%s is required", r.name)
+		}
+	}
+	return nil
+}
+
+// validateEnums verifies each policy/enum field is one of the allowed values
+// and returns a typed error for the first invalid or empty entry.
+func (i ResourceIntent) validateEnums() error {
+	if err := validateEnum("ownership", string(i.Ownership), []string{
+		string(ResourceOwnershipSharedRepo),
+		string(ResourceOwnershipPlatformRepo),
+		string(ResourceOwnershipUserHome),
+	}); err != nil {
+		return err
+	}
+	if err := validateEnum("shape", string(i.Shape), []string{
+		string(ResourceShapeDirectDir),
+		string(ResourceShapeDirectFile),
+		string(ResourceShapeRenderSingle),
+		string(ResourceShapeRenderFanout),
+	}); err != nil {
+		return err
+	}
+	if err := validateEnum("transport", string(i.Transport), []string{
+		string(ResourceTransportSymlink),
+		string(ResourceTransportHardlink),
+		string(ResourceTransportWrite),
+	}); err != nil {
+		return err
+	}
+	if err := validateEnum("replace_policy", string(i.ReplacePolicy), []string{
+		string(ResourceReplaceNever),
+		string(ResourceReplaceIfManaged),
+		string(ResourceReplaceAllowlistedImportedDirOnly),
+	}); err != nil {
+		return err
+	}
+	return validateEnum("prune_policy", string(i.PrunePolicy), []string{
+		string(ResourcePruneNone),
+		string(ResourcePruneTarget),
+		string(ResourcePruneGeneratedChildren),
+	})
+}
+
+// validateEnum returns an error when value is empty (required) or not one of
+// allowed.
+func validateEnum(name, value string, allowed []string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s %q is unsupported", name, value)
+}
+
+// validateShapeTransport enforces the shape↔transport compatibility matrix:
+// direct shapes must not use Write; render shapes must use Write.
+func (i ResourceIntent) validateShapeTransport() error {
 	switch i.Shape {
 	case ResourceShapeDirectDir, ResourceShapeDirectFile:
 		if i.Transport == ResourceTransportWrite {
@@ -191,6 +225,5 @@ func (i ResourceIntent) Validate() error {
 			return fmt.Errorf("shape %q requires transport %q", i.Shape, ResourceTransportWrite)
 		}
 	}
-
 	return nil
 }

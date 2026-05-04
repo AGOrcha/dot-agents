@@ -3,6 +3,7 @@ package globalflagcov
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"path/filepath"
 	"runtime"
@@ -27,9 +28,29 @@ func loadStatic(moduleRoot string) (*staticAnalysis, error) {
 	if err != nil {
 		return nil, err
 	}
+	okPkgs, err := loadCommandPackages(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	s := &staticAnalysis{
+		pkgs:   okPkgs,
+		direct: make(map[string]FlagSet),
+		calls:  make(map[string][]string),
+	}
+	for _, pkg := range okPkgs {
+		s.indexPackage(pkg)
+	}
+	return s, nil
+}
+
+// loadCommandPackages type-checks the explicit command packages used by the
+// CLI and returns only those without errors and with the syntax/types data
+// the analyzer needs.
+func loadCommandPackages(absDir string) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule,
-		Dir:  abs,
+		Dir:  absDir,
 	}
 	// Load explicit command packages only. A glob like ./commands/... would also
 	// type-check experimental subpackages (e.g. commands/workflow) that are not
@@ -59,43 +80,44 @@ func loadStatic(moduleRoot string) (*staticAnalysis, error) {
 	if len(okPkgs) == 0 {
 		return nil, fmt.Errorf("packages.Load: no packages without errors")
 	}
+	return okPkgs, nil
+}
 
-	s := &staticAnalysis{
-		pkgs:   okPkgs,
-		direct: make(map[string]FlagSet),
-		calls:  make(map[string][]string),
+// indexPackage walks every top-level FuncDecl in pkg and records its direct
+// flag references and same-package callees in the analysis maps.
+func (s *staticAnalysis) indexPackage(pkg *packages.Package) {
+	info := pkg.TypesInfo
+	if info == nil {
+		return
 	}
-
-	for _, pkg := range okPkgs {
-		info := pkg.TypesInfo
-		if info == nil {
-			continue
-		}
-		for _, file := range pkg.Syntax {
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil {
-					continue
-				}
-				obj := info.Defs[fn.Name]
-				if obj == nil {
-					continue
-				}
-				f, ok := obj.(*types.Func)
-				if !ok {
-					continue
-				}
-				key := symbolKey(f)
-				if key == "" {
-					continue
-				}
-				s.direct[key] = directFlagsInBody(fn.Body)
-				s.calls[key] = collectCallees(info, fn.Body, f.Pkg())
-			}
+	for _, file := range pkg.Syntax {
+		for _, decl := range file.Decls {
+			s.indexFuncDecl(info, decl)
 		}
 	}
+}
 
-	return s, nil
+// indexFuncDecl records flag-set/callee info for a single ast.FuncDecl when
+// the declaration has a body, a resolved type, and a non-empty symbol key.
+func (s *staticAnalysis) indexFuncDecl(info *types.Info, decl ast.Decl) {
+	fn, ok := decl.(*ast.FuncDecl)
+	if !ok || fn.Body == nil {
+		return
+	}
+	obj := info.Defs[fn.Name]
+	if obj == nil {
+		return
+	}
+	f, ok := obj.(*types.Func)
+	if !ok {
+		return
+	}
+	key := symbolKey(f)
+	if key == "" {
+		return
+	}
+	s.direct[key] = directFlagsInBody(fn.Body)
+	s.calls[key] = collectCallees(info, fn.Body, f.Pkg())
 }
 
 func symbolKey(f *types.Func) string {
@@ -150,43 +172,41 @@ func directFlagsInBody(body ast.Node) FlagSet {
 		if !ok || sel.Sel == nil {
 			return true
 		}
-		// <ident>.Flags.<GlobalFlags field> (e.g. deps.Flags.DryRun in commands/sync)
-		if inner, ok := sel.X.(*ast.SelectorExpr); ok && inner.Sel != nil && inner.Sel.Name == "Flags" {
-			if _, ok := inner.X.(*ast.Ident); ok {
-				switch sel.Sel.Name {
-				case "JSON":
-					fs.JSON = true
-				case "DryRun":
-					fs.DryRun = true
-				case "Yes":
-					fs.Yes = true
-				case "Force":
-					fs.Force = true
-				case "Verbose":
-					fs.Verbose = true
-				}
-			}
-			return true
-		}
-		id, ok := sel.X.(*ast.Ident)
-		if !ok || id.Name != "Flags" {
-			return true
-		}
-		switch sel.Sel.Name {
-		case "JSON":
-			fs.JSON = true
-		case "DryRun":
-			fs.DryRun = true
-		case "Yes":
-			fs.Yes = true
-		case "Force":
-			fs.Force = true
-		case "Verbose":
-			fs.Verbose = true
+		if isFlagAccess(sel) {
+			markFlag(&fs, sel.Sel.Name)
 		}
 		return true
 	})
 	return fs
+}
+
+// isFlagAccess reports whether sel reads a field on a Flags object: either
+// the bare `Flags.<Name>` form or the `<ident>.Flags.<Name>` form (used in
+// commands/sync style structs that embed a deps.Flags handle).
+func isFlagAccess(sel *ast.SelectorExpr) bool {
+	if inner, ok := sel.X.(*ast.SelectorExpr); ok && inner.Sel != nil && inner.Sel.Name == "Flags" {
+		_, ok := inner.X.(*ast.Ident)
+		return ok
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == "Flags"
+}
+
+// markFlag sets the matching boolean on fs for a known global flag field
+// name (JSON / DryRun / Yes / Force / Verbose). Unknown names are ignored.
+func markFlag(fs *FlagSet, name string) {
+	switch name {
+	case "JSON":
+		fs.JSON = true
+	case "DryRun":
+		fs.DryRun = true
+	case "Yes":
+		fs.Yes = true
+	case "Force":
+		fs.Force = true
+	case "Verbose":
+		fs.Verbose = true
+	}
 }
 
 func collectCallees(info *types.Info, body ast.Node, callerPkg *types.Package) []string {
@@ -210,23 +230,26 @@ func collectCallees(info *types.Info, body ast.Node, callerPkg *types.Package) [
 func calleeKey(info *types.Info, call *ast.CallExpr, callerPkg *types.Package) string {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
-		if obj, ok := info.Uses[fun]; ok {
-			if fn, ok := obj.(*types.Func); ok {
-				if samePkg(fn, callerPkg) {
-					return symbolKey(fn)
-				}
-			}
-		}
+		return resolveCalleeIdent(info, fun, callerPkg)
 	case *ast.SelectorExpr:
-		if obj, ok := info.Uses[fun.Sel]; ok {
-			if fn, ok := obj.(*types.Func); ok {
-				if samePkg(fn, callerPkg) {
-					return symbolKey(fn)
-				}
-			}
-		}
+		return resolveCalleeIdent(info, fun.Sel, callerPkg)
 	}
 	return ""
+}
+
+// resolveCalleeIdent returns the symbol key of the function denoted by ident
+// when the resolved object is a *types.Func declared in callerPkg. Anything
+// else (cross-package call, non-func, unresolved use) returns "".
+func resolveCalleeIdent(info *types.Info, ident *ast.Ident, callerPkg *types.Package) string {
+	obj, ok := info.Uses[ident]
+	if !ok {
+		return ""
+	}
+	fn, ok := obj.(*types.Func)
+	if !ok || !samePkg(fn, callerPkg) {
+		return ""
+	}
+	return symbolKey(fn)
 }
 
 func samePkg(fn *types.Func, callerPkg *types.Package) bool {
@@ -262,45 +285,58 @@ func (s *staticAnalysis) flagsForRuntimeHandler(runtimeName string, pc uintptr) 
 func (s *staticAnalysis) findFuncLitContainingLine(absFile string, line int) (*ast.FuncLit, *types.Info, *types.Package) {
 	want := filepath.Clean(absFile)
 	for _, pkg := range s.pkgs {
-		fset := pkg.Fset
-		info := pkg.TypesInfo
-		if info == nil || pkg.Types == nil {
+		if pkg.TypesInfo == nil || pkg.Types == nil {
 			continue
 		}
-		var candidates []*ast.FuncLit
-		for _, af := range pkg.Syntax {
-			path := filepath.Clean(fset.Position(af.Pos()).Filename)
-			if path != want && filepath.Base(path) != filepath.Base(want) {
-				continue
-			}
-			ast.Inspect(af, func(n ast.Node) bool {
-				fl, ok := n.(*ast.FuncLit)
-				if !ok {
-					return true
-				}
-				start := fset.Position(fl.Pos()).Line
-				end := fset.Position(fl.End()).Line
-				if line >= start && line <= end {
-					candidates = append(candidates, fl)
-				}
-				return true
-			})
-		}
+		candidates := collectFuncLitCandidates(pkg, want, line)
 		if len(candidates) == 0 {
 			continue
 		}
-		best := candidates[0]
-		bestSpan := fset.Position(best.End()).Line - fset.Position(best.Pos()).Line
-		for _, fl := range candidates[1:] {
-			span := fset.Position(fl.End()).Line - fset.Position(fl.Pos()).Line
-			if span < bestSpan {
-				best = fl
-				bestSpan = span
-			}
-		}
-		return best, info, pkg.Types
+		return tightestFuncLit(pkg.Fset, candidates), pkg.TypesInfo, pkg.Types
 	}
 	return nil, nil, nil
+}
+
+// collectFuncLitCandidates returns every ast.FuncLit in pkg whose source
+// file matches want (by full path or basename) and whose line range covers
+// line.
+func collectFuncLitCandidates(pkg *packages.Package, want string, line int) []*ast.FuncLit {
+	fset := pkg.Fset
+	var candidates []*ast.FuncLit
+	for _, af := range pkg.Syntax {
+		path := filepath.Clean(fset.Position(af.Pos()).Filename)
+		if path != want && filepath.Base(path) != filepath.Base(want) {
+			continue
+		}
+		ast.Inspect(af, func(n ast.Node) bool {
+			fl, ok := n.(*ast.FuncLit)
+			if !ok {
+				return true
+			}
+			start := fset.Position(fl.Pos()).Line
+			end := fset.Position(fl.End()).Line
+			if line >= start && line <= end {
+				candidates = append(candidates, fl)
+			}
+			return true
+		})
+	}
+	return candidates
+}
+
+// tightestFuncLit returns the candidate ast.FuncLit with the smallest line
+// span. The first element acts as the seed; ties keep the earlier entry.
+func tightestFuncLit(fset *token.FileSet, candidates []*ast.FuncLit) *ast.FuncLit {
+	best := candidates[0]
+	bestSpan := fset.Position(best.End()).Line - fset.Position(best.Pos()).Line
+	for _, fl := range candidates[1:] {
+		span := fset.Position(fl.End()).Line - fset.Position(fl.Pos()).Line
+		if span < bestSpan {
+			best = fl
+			bestSpan = span
+		}
+	}
+	return best
 }
 
 func (s *staticAnalysis) flagsForFuncLit(fl *ast.FuncLit, info *types.Info, litPkg *types.Package) FlagSet {

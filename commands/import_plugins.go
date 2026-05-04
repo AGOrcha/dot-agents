@@ -107,36 +107,50 @@ func gatherDirectPackagePluginCandidates(project, projectPath string) []importCa
 
 	for _, ref := range refs {
 		if ref.dir {
-			root := filepath.Join(projectPath, filepath.FromSlash(ref.relPath))
-			_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-				if walkErr != nil || d.IsDir() || isBackupArtifact(d.Name()) {
-					return nil
-				}
-				rel, relErr := filepath.Rel(projectPath, path)
-				if relErr != nil {
-					return nil
-				}
-				if isProjectImportRelCovered(filepath.ToSlash(rel)) {
-					return nil
-				}
-				appendCandidate(path)
-				return nil
-			})
+			collectDirectPluginDirCandidates(projectPath, ref.relPath, appendCandidate)
 			continue
 		}
-
-		if isProjectImportRelCovered(ref.relPath) {
-			continue
+		if path, ok := directPluginFileCandidate(projectPath, ref.relPath); ok {
+			appendCandidate(path)
 		}
-		src := filepath.Join(projectPath, filepath.FromSlash(ref.relPath))
-		info, statErr := os.Lstat(src)
-		if statErr != nil || info.IsDir() || isBackupArtifact(filepath.Base(src)) {
-			continue
-		}
-		appendCandidate(src)
 	}
 
 	return out
+}
+
+// collectDirectPluginDirCandidates walks a referenced plugin directory and
+// emits each non-backup, non-covered file as an import candidate.
+func collectDirectPluginDirCandidates(projectPath, relPath string, appendCandidate func(string)) {
+	root := filepath.Join(projectPath, filepath.FromSlash(relPath))
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || isBackupArtifact(d.Name()) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(projectPath, path)
+		if relErr != nil {
+			return nil
+		}
+		if isProjectImportRelCovered(filepath.ToSlash(rel)) {
+			return nil
+		}
+		appendCandidate(path)
+		return nil
+	})
+}
+
+// directPluginFileCandidate resolves a single non-directory plugin reference
+// to its absolute path, returning ok=false when the reference is covered by
+// the standard project import scan or points at an unusable target.
+func directPluginFileCandidate(projectPath, relPath string) (string, bool) {
+	if isProjectImportRelCovered(relPath) {
+		return "", false
+	}
+	src := filepath.Join(projectPath, filepath.FromSlash(relPath))
+	info, statErr := os.Lstat(src)
+	if statErr != nil || info.IsDir() || isBackupArtifact(filepath.Base(src)) {
+		return "", false
+	}
+	return src, true
 }
 
 func isProjectImportRelCovered(rel string) bool {
@@ -568,65 +582,60 @@ func canonicalPackagePluginOverlayOutput(c importCandidate, platformID, name, ro
 	}}, true, nil
 }
 
+// packagePluginPrefixRule maps a path prefix to its target component name.
+// The order in each per-platform table matters: it preserves the original
+// switch arm precedence.
+type packagePluginPrefixRule struct {
+	prefix    string
+	component string
+}
+
+// packagePluginPrefixTables enumerates, per platform, which path prefixes
+// project to which component bucket. The previous implementation expressed
+// these as nested switch statements; the table preserves the same order.
+var packagePluginPrefixTables = map[string][]packagePluginPrefixRule{
+	"claude": {
+		{importCommandsPrefix, "commands"},
+		{importAgentsPrefix, "agents"},
+		{importSkillsPrefix, "skills"},
+		{importHooksPrefix, "hooks"},
+		{"mcp/", "mcp"},
+		{importRulesPrefix, "rules"},
+	},
+	"cursor": {
+		{importRulesPrefix, "rules"},
+		{importCommandsPrefix, "commands"},
+		{importAgentsPrefix, "agents"},
+		{importSkillsPrefix, "skills"},
+		{importHooksPrefix, "hooks"},
+		{"mcp/", "mcp"},
+	},
+	"codex": {
+		{importSkillsPrefix, "skills"},
+		{importAgentsPrefix, "agents"},
+		{importHooksPrefix, "hooks"},
+		{"mcp/", "mcp"},
+		{importCommandsPrefix, "commands"},
+	},
+	"copilot": {
+		{importAgentsPrefix, "agents"},
+		{importSkillsPrefix, "skills"},
+		{importCommandsPrefix, "commands"},
+	},
+}
+
 func packagePluginComponentPath(trimmed, platformID string) (component, rest string, ok bool) {
-	switch platformID {
-	case "claude":
-		switch {
-		case strings.HasPrefix(trimmed, importCommandsPrefix):
-			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
-		case strings.HasPrefix(trimmed, importAgentsPrefix):
-			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
-		case strings.HasPrefix(trimmed, importSkillsPrefix):
-			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
-		case strings.HasPrefix(trimmed, importHooksPrefix):
-			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
-		case strings.HasPrefix(trimmed, "mcp/"):
-			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
-		case strings.HasPrefix(trimmed, importRulesPrefix):
-			return "rules", strings.TrimPrefix(trimmed, importRulesPrefix), true
+	rules, known := packagePluginPrefixTables[platformID]
+	if !known {
+		return "", "", false
+	}
+	for _, r := range rules {
+		if strings.HasPrefix(trimmed, r.prefix) {
+			return r.component, strings.TrimPrefix(trimmed, r.prefix), true
 		}
-	case "cursor":
-		switch {
-		case strings.HasPrefix(trimmed, importRulesPrefix):
-			return "rules", strings.TrimPrefix(trimmed, importRulesPrefix), true
-		case strings.HasPrefix(trimmed, importCommandsPrefix):
-			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
-		case strings.HasPrefix(trimmed, importAgentsPrefix):
-			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
-		case strings.HasPrefix(trimmed, importSkillsPrefix):
-			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
-		case strings.HasPrefix(trimmed, importHooksPrefix):
-			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
-		case strings.HasPrefix(trimmed, "mcp/"):
-			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
-		case trimmed == "mcp.json", trimmed == ".mcp.json":
-			return "mcp", trimmed, true
-		}
-	case "codex":
-		if strings.HasPrefix(trimmed, importSkillsPrefix) {
-			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
-		}
-		if strings.HasPrefix(trimmed, importAgentsPrefix) {
-			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
-		}
-		if strings.HasPrefix(trimmed, importHooksPrefix) {
-			return "hooks", strings.TrimPrefix(trimmed, importHooksPrefix), true
-		}
-		if strings.HasPrefix(trimmed, "mcp/") {
-			return "mcp", strings.TrimPrefix(trimmed, "mcp/"), true
-		}
-		if strings.HasPrefix(trimmed, importCommandsPrefix) {
-			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
-		}
-	case "copilot":
-		switch {
-		case strings.HasPrefix(trimmed, importAgentsPrefix):
-			return "agents", strings.TrimPrefix(trimmed, importAgentsPrefix), true
-		case strings.HasPrefix(trimmed, importSkillsPrefix):
-			return "skills", strings.TrimPrefix(trimmed, importSkillsPrefix), true
-		case strings.HasPrefix(trimmed, importCommandsPrefix):
-			return "commands", strings.TrimPrefix(trimmed, importCommandsPrefix), true
-		}
+	}
+	if platformID == "cursor" && (trimmed == "mcp.json" || trimmed == ".mcp.json") {
+		return "mcp", trimmed, true
 	}
 	return "", "", false
 }

@@ -218,54 +218,67 @@ func updateIndex(kgHomeDir string, note *GraphNote) error {
 		return err
 	}
 	lines := strings.Split(string(data), "\n")
+	entryLine := buildIndexEntryLine(note)
 
-	// Build the entry line
+	idPrefix := fmt.Sprintf("- [%s]", note.ID)
+	if replaced := replaceIndexEntry(lines, idPrefix, entryLine); !replaced {
+		lines = insertIndexEntry(lines, note.Type, entryLine)
+	}
+	return os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// buildIndexEntryLine renders the markdown bullet entry for a note in
+// notes/index.md, truncating overly long summaries.
+func buildIndexEntryLine(note *GraphNote) string {
 	notePath := filepath.Join("notes", noteSubdir(note.Type), note.ID+".md")
 	summary := note.Summary
 	if len(summary) > 80 {
 		summary = summary[:77] + "..."
 	}
-	entryLine := fmt.Sprintf("- [%s](%s): %s — %s", note.ID, notePath, note.Title, summary)
+	return fmt.Sprintf("- [%s](%s): %s — %s", note.ID, notePath, note.Title, summary)
+}
 
-	// Check if entry already exists and replace it; otherwise add under type section
-	idPrefix := fmt.Sprintf("- [%s]", note.ID)
-	found := false
+// replaceIndexEntry mutates lines to replace any existing entry with the
+// same id prefix; returns true when a replacement happened.
+func replaceIndexEntry(lines []string, idPrefix, entryLine string) bool {
 	for i, l := range lines {
 		if strings.HasPrefix(l, idPrefix) {
 			lines[i] = entryLine
-			found = true
-			break
+			return true
 		}
 	}
+	return false
+}
 
-	if !found {
-		// Find or create section header for the type
-		sectionHeader := fmt.Sprintf("## %ss", note.Type)
-		sectionIdx := -1
-		for i, l := range lines {
-			if strings.TrimSpace(l) == sectionHeader {
-				sectionIdx = i
-				break
-			}
-		}
-		if sectionIdx < 0 {
-			// Append new section
-			lines = append(lines, "", sectionHeader, entryLine)
-		} else {
-			// Insert after header (and any existing entries before next blank/section)
-			insertAt := sectionIdx + 1
-			for insertAt < len(lines) && lines[insertAt] != "" && !strings.HasPrefix(lines[insertAt], "## ") {
-				insertAt++
-			}
-			newLines := make([]string, 0, len(lines)+1)
-			newLines = append(newLines, lines[:insertAt]...)
-			newLines = append(newLines, entryLine)
-			newLines = append(newLines, lines[insertAt:]...)
-			lines = newLines
+// insertIndexEntry returns lines with entryLine inserted under the matching
+// `## <type>s` section, creating the section at the end of the document
+// when it does not exist.
+func insertIndexEntry(lines []string, noteType, entryLine string) []string {
+	sectionHeader := fmt.Sprintf("## %ss", noteType)
+	sectionIdx := indexOfTrimmed(lines, sectionHeader)
+	if sectionIdx < 0 {
+		return append(lines, "", sectionHeader, entryLine)
+	}
+	insertAt := sectionIdx + 1
+	for insertAt < len(lines) && lines[insertAt] != "" && !strings.HasPrefix(lines[insertAt], "## ") {
+		insertAt++
+	}
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:insertAt]...)
+	out = append(out, entryLine)
+	out = append(out, lines[insertAt:]...)
+	return out
+}
+
+// indexOfTrimmed returns the index of the first line whose trimmed text
+// equals target, or -1 when no match exists.
+func indexOfTrimmed(lines []string, target string) int {
+	for i, l := range lines {
+		if strings.TrimSpace(l) == target {
+			return i
 		}
 	}
-
-	return os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")), 0644)
+	return -1
 }
 
 // readIndex parses entries from notes/index.md.
@@ -368,47 +381,65 @@ func computeGraphHealth(kgHomeDir string) (GraphHealth, error) {
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Count notes by walking notes/ subdirectories
-	noteDirs := []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"}
-	for _, sub := range noteDirs {
-		dir := filepath.Join(kgHomeDir, "notes", sub)
-		entries, err := os.ReadDir(dir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
+	for _, sub := range []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"} {
+		if err := tallyGraphNoteDir(filepath.Join(kgHomeDir, "notes", sub), sub, &h); err != nil {
 			return h, err
 		}
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				h.NoteCount++
-				if sub == "sources" {
-					h.SourceCount++
-				}
-				// Check for stale status
-				data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-				if err == nil {
-					note, _, parseErr := parseGraphNote(data)
-					if parseErr == nil && note.Status == "stale" {
-						h.StaleCount++
-					}
-				}
-			}
+	}
+	h.QueueDepth = countQueueEntries(filepath.Join(kgHomeDir, "raw", "inbox"))
+	deriveGraphHealthStatus(&h)
+	return h, nil
+}
+
+// tallyGraphNoteDir counts notes (and stale notes) under a single notes/<sub>/
+// directory, updating h in place. Missing directories are not an error.
+func tallyGraphNoteDir(dir, sub string, h *GraphHealth) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		h.NoteCount++
+		if sub == "sources" {
+			h.SourceCount++
+		}
+		data, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		if rerr != nil {
+			continue
+		}
+		note, _, parseErr := parseGraphNote(data)
+		if parseErr == nil && note.Status == "stale" {
+			h.StaleCount++
 		}
 	}
+	return nil
+}
 
-	// Count queue depth
-	queueDir := filepath.Join(kgHomeDir, "raw", "inbox")
-	queueEntries, err := os.ReadDir(queueDir)
-	if err == nil {
-		for _, e := range queueEntries {
-			if !e.IsDir() {
-				h.QueueDepth++
-			}
+// countQueueEntries returns the number of non-directory entries in the raw
+// inbox queue. Errors (including missing directory) are treated as zero.
+func countQueueEntries(queueDir string) int {
+	entries, err := os.ReadDir(queueDir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			n++
 		}
 	}
+	return n
+}
 
-	// Derive status
+// deriveGraphHealthStatus sets h.Status to "healthy"/"warn" and appends the
+// matching warnings based on the populated counts.
+func deriveGraphHealthStatus(h *GraphHealth) {
 	h.Status = "healthy"
 	if h.OrphanCount > 0 {
 		h.Warnings = append(h.Warnings, fmt.Sprintf("%d orphan notes detected", h.OrphanCount))
@@ -420,8 +451,6 @@ func computeGraphHealth(kgHomeDir string) (GraphHealth, error) {
 			h.Status = "warn"
 		}
 	}
-
-	return h, nil
 }
 
 func writeGraphHealth(kgHomeDir string, health GraphHealth) error {
@@ -593,17 +622,28 @@ func runKGHealth(deps Deps, cmd *cobra.Command) error {
 		return nil
 	}
 
-	statusBadge := map[string]string{
+	renderGraphHealthText(home, health)
+	return nil
+}
+
+// graphHealthStatusBadge returns the colored status badge string for the
+// current graph health, falling back to the raw status when unrecognized.
+func graphHealthStatusBadge(status string) string {
+	badges := map[string]string{
 		"healthy": ui.ColorText(ui.Green, "healthy"),
 		"warn":    ui.ColorText(ui.Yellow, "warn"),
 		"error":   ui.ColorText(ui.Red, "error"),
 	}
-	badge := statusBadge[health.Status]
-	if badge == "" {
-		badge = health.Status
+	if b, ok := badges[status]; ok {
+		return b
 	}
+	return status
+}
 
-	ui.Header(fmt.Sprintf("Knowledge Graph Health  [%s]", badge))
+// renderGraphHealthText writes the human-readable graph health report
+// (Notes/Queue/Warnings sections) to stdout.
+func renderGraphHealthText(home string, health GraphHealth) {
+	ui.Header(fmt.Sprintf("Knowledge Graph Health  [%s]", graphHealthStatusBadge(health.Status)))
 	ui.Info(fmt.Sprintf("Graph home: %s", home))
 	ui.Info(fmt.Sprintf("Timestamp:  %s", health.Timestamp))
 	fmt.Println()
@@ -634,7 +674,6 @@ func runKGHealth(deps Deps, cmd *cobra.Command) error {
 		}
 	}
 	fmt.Println()
-	return nil
 }
 
 func runKGServe(_ *cobra.Command, _ []string) error {
@@ -657,17 +696,27 @@ func walkNoteFiles(kgHomeDir string, fn func(path string, info fs.DirEntry) erro
 		if !sub.IsDir() {
 			continue
 		}
-		subDir := filepath.Join(notesDir, sub.Name())
-		files, err := os.ReadDir(subDir)
-		if err != nil {
+		if err := walkNoteFilesIn(filepath.Join(notesDir, sub.Name()), fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkNoteFilesIn invokes fn for each top-level .md note file under subDir,
+// returning early on the first error returned by fn. Read errors on subDir
+// itself are treated as "no notes" rather than fatal.
+func walkNoteFilesIn(subDir string, fn func(path string, info fs.DirEntry) error) error {
+	files, err := os.ReadDir(subDir)
+	if err != nil {
+		return nil
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") {
 			continue
 		}
-		for _, f := range files {
-			if !f.IsDir() && strings.HasSuffix(f.Name(), ".md") {
-				if err := fn(filepath.Join(subDir, f.Name()), f); err != nil {
-					return err
-				}
-			}
+		if err := fn(filepath.Join(subDir, f.Name()), f); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -766,25 +815,33 @@ func extractClaims(content string) []string {
 	var claims []string
 	seen := map[string]bool{}
 	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		var claim string
-		switch {
-		case strings.HasPrefix(line, "#"):
-			claim = strings.TrimSpace(strings.TrimLeft(line, "#"))
-		case strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**") && len(line) > 4:
-			claim = line[2 : len(line)-2]
-		case (strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")) && len(line) > 8:
-			item := line[2:]
-			if isAssertive(item) {
-				claim = item
-			}
+		claim := extractClaim(strings.TrimSpace(line))
+		if claim == "" || seen[claim] {
+			continue
 		}
-		if claim != "" && !seen[claim] {
-			seen[claim] = true
-			claims = append(claims, claim)
-		}
+		seen[claim] = true
+		claims = append(claims, claim)
 	}
 	return claims
+}
+
+// extractClaim returns the claim text for a single trimmed line, or "" when
+// the line does not match any of the heading / bold / assertive-bullet
+// patterns recognized by extractClaims.
+func extractClaim(line string) string {
+	if strings.HasPrefix(line, "#") {
+		return strings.TrimSpace(strings.TrimLeft(line, "#"))
+	}
+	if strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**") && len(line) > 4 {
+		return line[2 : len(line)-2]
+	}
+	if (strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")) && len(line) > 8 {
+		item := line[2:]
+		if isAssertive(item) {
+			return item
+		}
+	}
+	return ""
 }
 
 func isAssertive(s string) bool {
@@ -806,27 +863,44 @@ func extractEntities(content string) []string {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		// Backtick code identifiers
-		parts := strings.Split(line, "`")
-		for i := 1; i < len(parts); i += 2 {
-			if e := strings.TrimSpace(parts[i]); e != "" && !seen[e] {
-				seen[e] = true
-				entities = append(entities, e)
-			}
+		entities = appendBacktickEntities(entities, line, seen)
+		entities = appendCapitalizedPhrases(entities, line, seen)
+	}
+	return entities
+}
+
+// appendBacktickEntities appends every code-fenced identifier on line to
+// entities, skipping duplicates already in seen.
+func appendBacktickEntities(entities []string, line string, seen map[string]bool) []string {
+	parts := strings.Split(line, "`")
+	for i := 1; i < len(parts); i += 2 {
+		e := strings.TrimSpace(parts[i])
+		if e == "" || seen[e] {
+			continue
 		}
-		// Capitalized multi-word phrases (2+ words, each capitalized)
-		words := strings.Fields(line)
-		for i := 0; i+1 < len(words); i++ {
-			w1 := cleanWord(words[i])
-			w2 := cleanWord(words[i+1])
-			if isCapitalized(w1) && isCapitalized(w2) && len(w1) > 1 && len(w2) > 1 {
-				phrase := w1 + " " + w2
-				if !seen[phrase] {
-					seen[phrase] = true
-					entities = append(entities, phrase)
-				}
-			}
+		seen[e] = true
+		entities = append(entities, e)
+	}
+	return entities
+}
+
+// appendCapitalizedPhrases appends every adjacent pair of capitalized words
+// (each at least 2 characters) found in line to entities, skipping
+// duplicates already in seen.
+func appendCapitalizedPhrases(entities []string, line string, seen map[string]bool) []string {
+	words := strings.Fields(line)
+	for i := 0; i+1 < len(words); i++ {
+		w1 := cleanWord(words[i])
+		w2 := cleanWord(words[i+1])
+		if !isCapitalized(w1) || !isCapitalized(w2) || len(w1) <= 1 || len(w2) <= 1 {
+			continue
 		}
+		phrase := w1 + " " + w2
+		if seen[phrase] {
+			continue
+		}
+		seen[phrase] = true
+		entities = append(entities, phrase)
 	}
 	return entities
 }
@@ -949,20 +1023,40 @@ type IngestResult struct {
 func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 	result := &IngestResult{SourceID: sourceID}
 
-	inboxPath := filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md")
-	data, err := os.ReadFile(inboxPath)
+	data, err := os.ReadFile(filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md"))
 	if err != nil {
 		return nil, fmt.Errorf("read inbox source: %w", err)
 	}
+	src, rawBody := parseRawSourceFrontmatter(string(data), sourceID)
 
-	// Parse source metadata from frontmatter
-	s := string(data)
+	now := time.Now().UTC().Format(time.RFC3339)
+	srcNote := buildSourceNote(src, rawBody, now)
+	if err := createGraphNote(kgHomeDir, srcNote, rawBody); err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("source note: %v", err))
+	} else {
+		result.NotesCreated = append(result.NotesCreated, srcNote.ID)
+	}
+
+	ingestEntityNotes(kgHomeDir, src, srcNote, rawBody, now, result)
+	ingestDecisionNotes(kgHomeDir, src, srcNote, rawBody, now, result)
+
+	if err := moveToImported(kgHomeDir, sourceID); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("move to imported: %v", err))
+	}
+	if health, err := computeGraphHealth(kgHomeDir); err == nil {
+		_ = writeGraphHealth(kgHomeDir, health)
+	}
+	return result, nil
+}
+
+// parseRawSourceFrontmatter extracts the YAML frontmatter and remaining body
+// from a raw inbox source, applying default values when fields are absent.
+func parseRawSourceFrontmatter(s, sourceID string) (RawSource, string) {
 	var src RawSource
 	var rawBody string
 	if strings.HasPrefix(s, "---") {
 		rest := s[3:]
-		idx := strings.Index(rest, "\n---")
-		if idx >= 0 {
+		if idx := strings.Index(rest, "\n---"); idx >= 0 {
 			_ = yaml.Unmarshal([]byte(rest[:idx]), &src)
 			rawBody = strings.TrimPrefix(strings.TrimPrefix(rest[idx+4:], "\n"), "\n")
 		}
@@ -976,10 +1070,13 @@ func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 	if src.SourceType == "" {
 		src.SourceType = "markdown"
 	}
+	return src, rawBody
+}
 
-	// Create source summary note
-	now := time.Now().UTC().Format(time.RFC3339)
-	srcNote := &GraphNote{
+// buildSourceNote constructs the source-summary GraphNote for an ingested
+// raw source.
+func buildSourceNote(src RawSource, rawBody, now string) *GraphNote {
+	return &GraphNote{
 		SchemaVersion: 1,
 		ID:            "src-" + src.ID,
 		Type:          "source",
@@ -989,19 +1086,20 @@ func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := createGraphNote(kgHomeDir, srcNote, rawBody); err != nil {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("source note: %v", err))
-	} else {
-		result.NotesCreated = append(result.NotesCreated, srcNote.ID)
-	}
+}
 
-	// Extract and create entity notes
-	entities := extractEntities(rawBody)
-	for i, entity := range entities {
+// ingestEntityNotes extracts up to five entity references from rawBody and
+// creates a draft entity note for each new symbol.
+func ingestEntityNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
+	for i, entity := range extractEntities(rawBody) {
 		if i >= 5 { // cap to 5 entities per source to avoid noise
 			break
 		}
 		entID := slugify("ent-" + entity)
+		if exists, _ := noteExists(kgHomeDir, entID); exists {
+			result.NotesUpdated = append(result.NotesUpdated, entID)
+			continue
+		}
 		entNote := &GraphNote{
 			SchemaVersion: 1,
 			ID:            entID,
@@ -1013,20 +1111,18 @@ func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if exists, _ := noteExists(kgHomeDir, entID); exists {
-			result.NotesUpdated = append(result.NotesUpdated, entID)
-		} else {
-			if err := createGraphNote(kgHomeDir, entNote, ""); err != nil {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("entity %s: %v", entity, err))
-			} else {
-				result.NotesCreated = append(result.NotesCreated, entID)
-			}
+		if err := createGraphNote(kgHomeDir, entNote, ""); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("entity %s: %v", entity, err))
+			continue
 		}
+		result.NotesCreated = append(result.NotesCreated, entID)
 	}
+}
 
-	// Extract and create decision notes
-	decisions := extractDecisions(rawBody)
-	for i, dec := range decisions {
+// ingestDecisionNotes extracts up to three decision-shaped sentences from
+// rawBody and creates a draft decision note for each.
+func ingestDecisionNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
+	for i, dec := range extractDecisions(rawBody) {
 		if i >= 3 {
 			break
 		}
@@ -1044,23 +1140,10 @@ func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 		}
 		if err := createGraphNote(kgHomeDir, decNote, ""); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("decision: %v", err))
-		} else {
-			result.NotesCreated = append(result.NotesCreated, decID)
+			continue
 		}
+		result.NotesCreated = append(result.NotesCreated, decID)
 	}
-
-	// Move to imported
-	if err := moveToImported(kgHomeDir, sourceID); err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("move to imported: %v", err))
-	}
-
-	// Update health snapshot
-	health, err := computeGraphHealth(kgHomeDir)
-	if err == nil {
-		_ = writeGraphHealth(kgHomeDir, health)
-	}
-
-	return result, nil
 }
 
 // slugify converts a string to a lowercase, hyphen-separated identifier.
@@ -1105,97 +1188,157 @@ func runKGIngest(deps Deps, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
 	}
 
-	ingestAll, _ := cmd.Flags().GetBool("all")
-	localDryRun, _ := cmd.Flags().GetBool("dry-run")
-	dryRun := deps.Flags.DryRun || localDryRun
-	sourceTitle, _ := cmd.Flags().GetString("title")
-	sourceType, _ := cmd.Flags().GetString("type")
-	if sourceType == "" {
-		sourceType = "markdown"
+	opts := readIngestFlags(deps, cmd)
+
+	sourceIDs, done, err := resolveIngestSources(home, args, opts)
+	if err != nil || done {
+		return err
 	}
 
-	var sourceIDs []string
-
-	if ingestAll {
-		pending, err := listPendingRawSources(home)
-		if err != nil {
-			return fmt.Errorf("list inbox: %w", err)
-		}
-		for _, s := range pending {
-			sourceIDs = append(sourceIDs, s.ID)
-		}
-		if len(sourceIDs) == 0 {
-			ui.Info("Inbox is empty — nothing to ingest.")
-			return nil
-		}
-	} else {
-		if len(args) == 0 {
-			return fmt.Errorf("provide a file path to ingest or use --all")
-		}
-		srcPath := args[0]
-		srcData, err := os.ReadFile(srcPath)
-		if err != nil {
-			return fmt.Errorf("read source file: %w", err)
-		}
-		srcID := slugify(filepath.Base(strings.TrimSuffix(srcPath, filepath.Ext(srcPath))))
-		if srcID == "" {
-			srcID = fmt.Sprintf("src-%d", time.Now().Unix())
-		}
-		title := sourceTitle
-		if title == "" {
-			title = filepath.Base(srcPath)
-		}
-		raw := RawSource{
-			SchemaVersion: 1,
-			ID:            srcID,
-			Title:         title,
-			SourceType:    sourceType,
-			OriginalPath:  srcPath,
-			CapturedAt:    time.Now().UTC().Format(time.RFC3339),
-			Status:        "pending",
-		}
-		if dryRun {
-			ui.InfoBox("Dry run — would ingest", fmt.Sprintf("Source ID: %s", srcID), fmt.Sprintf("Title: %s", title), fmt.Sprintf("Type: %s", sourceType))
-			entities := extractEntities(string(srcData))
-			decisions := extractDecisions(string(srcData))
-			ui.Info(fmt.Sprintf("  Entities found: %d", len(entities)))
-			ui.Info(fmt.Sprintf("  Decisions found: %d", len(decisions)))
-			return nil
-		}
-		if err := recordRawSource(home, raw, srcData); err != nil {
-			return fmt.Errorf("record source: %w", err)
-		}
-		sourceIDs = []string{srcID}
-	}
-
-	if dryRun {
+	if opts.dryRun {
 		ui.InfoBox("Dry run — would ingest", fmt.Sprintf("%d sources from inbox", len(sourceIDs)))
 		return nil
 	}
 
 	for _, sid := range sourceIDs {
-		result, err := ingestSource(home, sid)
-		if err != nil {
-			ui.Error(fmt.Sprintf("ingest %s: %v", sid, err))
-			continue
-		}
-		if deps.Flags.JSON {
-			data, _ := json.MarshalIndent(result, "", "  ")
-			fmt.Println(string(data))
-			continue
-		}
-		ui.Success(fmt.Sprintf("Ingested %s", sid))
-		if len(result.NotesCreated) > 0 {
-			ui.Info(fmt.Sprintf("  Notes created: %s", strings.Join(result.NotesCreated, ", ")))
-		}
-		if len(result.NotesUpdated) > 0 {
-			ui.Info(fmt.Sprintf("  Notes updated: %s", strings.Join(result.NotesUpdated, ", ")))
-		}
-		for _, w := range result.Warnings {
-			ui.Warn(w)
-		}
+		runSingleIngest(deps, home, sid)
 	}
 	return nil
+}
+
+// kgIngestOptions captures the parsed flags for the kg ingest subcommand.
+type kgIngestOptions struct {
+	ingestAll   bool
+	dryRun      bool
+	sourceTitle string
+	sourceType  string
+}
+
+// readIngestFlags pulls the ingest-related flags off cmd, applying defaults
+// and merging the global dry-run flag with the local one.
+func readIngestFlags(deps Deps, cmd *cobra.Command) kgIngestOptions {
+	ingestAll, _ := cmd.Flags().GetBool("all")
+	localDryRun, _ := cmd.Flags().GetBool("dry-run")
+	sourceTitle, _ := cmd.Flags().GetString("title")
+	sourceType, _ := cmd.Flags().GetString("type")
+	if sourceType == "" {
+		sourceType = "markdown"
+	}
+	return kgIngestOptions{
+		ingestAll:   ingestAll,
+		dryRun:      deps.Flags.DryRun || localDryRun,
+		sourceTitle: sourceTitle,
+		sourceType:  sourceType,
+	}
+}
+
+// resolveIngestSources expands the user request into a slice of source IDs.
+// It returns done=true when the command has already produced its output
+// (inbox empty, or a single-file dry-run preview) and no further work
+// should run.
+func resolveIngestSources(home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
+	if opts.ingestAll {
+		ids, done, err := resolveIngestAll(home)
+		return ids, done, err
+	}
+	return resolveIngestSingle(home, args, opts)
+}
+
+// resolveIngestAll resolves the --all flow: gather every pending inbox source,
+// returning done=true when the inbox is empty so the caller short-circuits.
+func resolveIngestAll(home string) ([]string, bool, error) {
+	pending, err := listPendingRawSources(home)
+	if err != nil {
+		return nil, false, fmt.Errorf("list inbox: %w", err)
+	}
+	ids := make([]string, 0, len(pending))
+	for _, s := range pending {
+		ids = append(ids, s.ID)
+	}
+	if len(ids) == 0 {
+		ui.Info("Inbox is empty — nothing to ingest.")
+		return nil, true, nil
+	}
+	return ids, false, nil
+}
+
+// resolveIngestSingle handles the single-file ingest flow: validate args,
+// read the source, build the RawSource record, and either preview (dry-run)
+// or record it for the downstream loop.
+func resolveIngestSingle(home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
+	if len(args) == 0 {
+		return nil, false, fmt.Errorf("provide a file path to ingest or use --all")
+	}
+	srcPath := args[0]
+	srcData, err := os.ReadFile(srcPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("read source file: %w", err)
+	}
+	srcID := slugify(filepath.Base(strings.TrimSuffix(srcPath, filepath.Ext(srcPath))))
+	if srcID == "" {
+		srcID = fmt.Sprintf("src-%d", time.Now().Unix())
+	}
+	title := opts.sourceTitle
+	if title == "" {
+		title = filepath.Base(srcPath)
+	}
+	raw := RawSource{
+		SchemaVersion: 1,
+		ID:            srcID,
+		Title:         title,
+		SourceType:    opts.sourceType,
+		OriginalPath:  srcPath,
+		CapturedAt:    time.Now().UTC().Format(time.RFC3339),
+		Status:        "pending",
+	}
+	if opts.dryRun {
+		previewSingleIngest(srcID, title, opts.sourceType, srcData)
+		return nil, true, nil
+	}
+	if err := recordRawSource(home, raw, srcData); err != nil {
+		return nil, false, fmt.Errorf("record source: %w", err)
+	}
+	return []string{srcID}, false, nil
+}
+
+// previewSingleIngest prints the dry-run summary for a single-file ingest:
+// the source identifiers plus extracted entity/decision counts.
+func previewSingleIngest(srcID, title, sourceType string, srcData []byte) {
+	ui.InfoBox("Dry run — would ingest",
+		fmt.Sprintf("Source ID: %s", srcID),
+		fmt.Sprintf("Title: %s", title),
+		fmt.Sprintf("Type: %s", sourceType),
+	)
+	entities := extractEntities(string(srcData))
+	decisions := extractDecisions(string(srcData))
+	ui.Info(fmt.Sprintf("  Entities found: %d", len(entities)))
+	ui.Info(fmt.Sprintf("  Decisions found: %d", len(decisions)))
+}
+
+// runSingleIngest ingests one source and renders the human-readable summary
+// (or JSON, when requested) without short-circuiting the caller's loop on
+// per-source errors.
+func runSingleIngest(deps Deps, home, sid string) {
+	result, err := ingestSource(home, sid)
+	if err != nil {
+		ui.Error(fmt.Sprintf("ingest %s: %v", sid, err))
+		return
+	}
+	if deps.Flags.JSON {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+		return
+	}
+	ui.Success(fmt.Sprintf("Ingested %s", sid))
+	if len(result.NotesCreated) > 0 {
+		ui.Info(fmt.Sprintf("  Notes created: %s", strings.Join(result.NotesCreated, ", ")))
+	}
+	if len(result.NotesUpdated) > 0 {
+		ui.Info(fmt.Sprintf("  Notes updated: %s", strings.Join(result.NotesUpdated, ", ")))
+	}
+	for _, w := range result.Warnings {
+		ui.Warn(w)
+	}
 }
 
 // ── kg queue subcommand ───────────────────────────────────────────────────────

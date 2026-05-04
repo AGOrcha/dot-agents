@@ -203,6 +203,16 @@ func createInstallPlatformLinks(projectName, projectPath string) {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
+	runInstallSharedTargets(projectName, projectPath)
+
+	for _, p := range platform.All() {
+		createInstallPlatformLink(p, projectName, projectPath)
+	}
+}
+
+// runInstallSharedTargets runs the shared-target projection across all
+// installed platforms and surfaces the resulting plan or warning lines.
+func runInstallSharedTargets(projectName, projectPath string) {
 	var installed []platform.Platform
 	for _, p := range platform.All() {
 		if p.IsInstalled() {
@@ -216,29 +226,31 @@ func createInstallPlatformLinks(projectName, projectPath string) {
 		} else {
 			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 		}
-	} else if lines != nil {
-		for _, line := range lines {
-			ui.DryRun(line)
-		}
+		return
 	}
+	for _, line := range lines {
+		ui.DryRun(line)
+	}
+}
 
-	for _, p := range platform.All() {
-		if !p.IsInstalled() {
-			if Flags.Verbose {
-				ui.Skip(p.DisplayName() + " (not installed)")
-			}
-			continue
+// createInstallPlatformLink refreshes (or skips) the link bundle for a
+// single platform during install, honoring verbose / dry-run flags.
+func createInstallPlatformLink(p platform.Platform, projectName, projectPath string) {
+	if !p.IsInstalled() {
+		if Flags.Verbose {
+			ui.Skip(p.DisplayName() + " (not installed)")
 		}
-		if Flags.DryRun {
-			ui.DryRun("refresh " + p.DisplayName() + " links")
-			continue
-		}
-		if err := p.CreateLinks(projectName, projectPath); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
-		} else {
-			ui.Bullet("ok", p.DisplayName()+" links created")
-		}
+		return
 	}
+	if Flags.DryRun {
+		ui.DryRun("refresh " + p.DisplayName() + " links")
+		return
+	}
+	if err := p.CreateLinks(projectName, projectPath); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+		return
+	}
+	ui.Bullet("ok", p.DisplayName()+" links created")
 }
 
 func finalizeInstall(projectName, projectPath string) {

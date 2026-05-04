@@ -149,57 +149,64 @@ func printAgentsHomeGitStatusLine(agentsHome string) {
 
 // collectProjectTextBadges builds the same per-platform row shown in text-mode status.
 func collectProjectTextBadges(path, agentsHome string) []platformBadge {
-	badges := []platformBadge{}
-
-	// Cursor
-	cursorOK, cursorWarn := 0, 0
-	cursorRulesDir := filepath.Join(path, statusCursorDir, "rules")
-	if entries, err := os.ReadDir(cursorRulesDir); err == nil {
-		for _, e := range entries {
-			if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
-				continue
-			}
-			f := filepath.Join(cursorRulesDir, e.Name())
-			if strings.HasPrefix(e.Name(), globalRulesPrefix) {
-				srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
-				src := filepath.Join(agentsHome, "rules", "global", srcName)
-				if linked, _ := links.AreHardlinked(f, src); linked {
-					cursorOK++
-				} else {
-					srcMD := strings.TrimSuffix(srcName, ".mdc") + ".md"
-					src2 := filepath.Join(agentsHome, "rules", "global", srcMD)
-					if linked, _ := links.AreHardlinked(f, src2); linked {
-						cursorOK++
-					} else {
-						cursorWarn++
-					}
-				}
-			}
-		}
+	return []platformBadge{
+		cursorTextBadge(path, agentsHome),
+		claudeTextBadge(path),
+		codexTextBadge(path),
+		opencodeTextBadge(path),
+		copilotTextBadge(path),
 	}
+}
+
+// cursorTextBadge counts cursor rules/managed files for the badge row.
+func cursorTextBadge(path, agentsHome string) platformBadge {
+	cursorOK, cursorWarn := countCursorRules(path, agentsHome)
 	addManagedCounts(&cursorOK, &cursorWarn, []string{
 		filepath.Join(path, statusCursorDir, statusCopilotMCPJSON),
 		filepath.Join(path, statusCursorDir, statusClaudeSettingsJSON),
 		filepath.Join(path, statusCursorDir, statusHooksJSON),
 		filepath.Join(path, ".cursorignore"),
 	}, nil)
-	badges = append(badges, platformBadge{"Cursor", cursorOK > 0, cursorWarn > 0})
+	return platformBadge{"Cursor", cursorOK > 0, cursorWarn > 0}
+}
 
-	// Claude
-	claudeOK, claudeWarn := 0, 0
-	claudeRulesDir := filepath.Join(path, statusClaudeDir, "rules")
-	if entries, err := os.ReadDir(claudeRulesDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(claudeRulesDir, e.Name())
-			if dest, err := os.Readlink(linkPath); err == nil {
-				if _, err := os.Stat(dest); err == nil {
-					claudeOK++
-				} else {
-					claudeWarn++
-				}
-			}
-		}
+// countCursorRules walks .cursor/rules/ and counts hardlinks to the global
+// rules store as ok, mismatches as warnings.
+func countCursorRules(path, agentsHome string) (int, int) {
+	ok, warn := 0, 0
+	cursorRulesDir := filepath.Join(path, statusCursorDir, "rules")
+	entries, err := os.ReadDir(cursorRulesDir)
+	if err != nil {
+		return ok, warn
 	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
+			continue
+		}
+		if !strings.HasPrefix(e.Name(), globalRulesPrefix) {
+			continue
+		}
+		f := filepath.Join(cursorRulesDir, e.Name())
+		srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
+		src := filepath.Join(agentsHome, "rules", "global", srcName)
+		if linked, _ := links.AreHardlinked(f, src); linked {
+			ok++
+			continue
+		}
+		srcMD := strings.TrimSuffix(srcName, ".mdc") + ".md"
+		src2 := filepath.Join(agentsHome, "rules", "global", srcMD)
+		if linked, _ := links.AreHardlinked(f, src2); linked {
+			ok++
+			continue
+		}
+		warn++
+	}
+	return ok, warn
+}
+
+// claudeTextBadge counts the .claude/rules symlinks plus managed files.
+func claudeTextBadge(path string) platformBadge {
+	claudeOK, claudeWarn := countClaudeRules(path)
 	addManagedCounts(&claudeOK, &claudeWarn, []string{
 		filepath.Join(path, statusClaudeMCPJSON),
 		filepath.Join(path, statusClaudeDir, statusClaudeSettingsLocalJSON),
@@ -207,22 +214,48 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 		filepath.Join(path, statusClaudeDir, "agents"),
 		filepath.Join(path, statusClaudeDir, "skills"),
 	})
-	badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
+	return platformBadge{"Claude", claudeOK > 0, claudeWarn > 0}
+}
 
-	// Codex (AGENTS.md)
-	agentsMD := filepath.Join(path, statusAgentsMarkdown)
+// countClaudeRules walks .claude/rules/ symlinks and reports ok/warn counts.
+func countClaudeRules(path string) (int, int) {
+	ok, warn := 0, 0
+	claudeRulesDir := filepath.Join(path, statusClaudeDir, "rules")
+	entries, err := os.ReadDir(claudeRulesDir)
+	if err != nil {
+		return ok, warn
+	}
+	for _, e := range entries {
+		linkPath := filepath.Join(claudeRulesDir, e.Name())
+		dest, err := os.Readlink(linkPath)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(dest); err == nil {
+			ok++
+		} else {
+			warn++
+		}
+	}
+	return ok, warn
+}
+
+// codexTextBadge counts AGENTS.md / codex-config / hooks managed files.
+func codexTextBadge(path string) platformBadge {
 	codexOK, codexWarn := 0, 0
 	addManagedCounts(&codexOK, &codexWarn, []string{
-		agentsMD,
+		filepath.Join(path, statusAgentsMarkdown),
 		filepath.Join(path, statusCodexDir, statusCodexConfigToml),
 		filepath.Join(path, statusCodexDir, statusHooksJSON),
 	}, []string{
 		filepath.Join(path, statusCodexDir, "agents"),
 		filepath.Join(path, statusAgentsDir, "skills"),
 	})
-	badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
+	return platformBadge{"Codex", codexOK > 0, codexWarn > 0}
+}
 
-	// OpenCode
+// opencodeTextBadge counts opencode.json plus its sibling agent/skill dirs.
+func opencodeTextBadge(path string) platformBadge {
 	opencodeOK, opencodeWarn := 0, 0
 	addManagedCounts(&opencodeOK, &opencodeWarn, []string{
 		filepath.Join(path, statusOpenCodeJSON),
@@ -230,9 +263,11 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 		filepath.Join(path, statusOpenCodeDir, "agent"),
 		filepath.Join(path, statusAgentsDir, "skills"),
 	})
-	badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
+	return platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0}
+}
 
-	// Copilot
+// copilotTextBadge counts copilot-instructions / mcp / settings files.
+func copilotTextBadge(path string) platformBadge {
 	copilotOK, copilotWarn := 0, 0
 	addManagedCounts(&copilotOK, &copilotWarn, []string{
 		filepath.Join(path, statusGitHubDir, statusCopilotInstructions),
@@ -243,9 +278,7 @@ func collectProjectTextBadges(path, agentsHome string) []platformBadge {
 		filepath.Join(path, statusGitHubDir, "hooks"),
 		filepath.Join(path, statusAgentsDir, "skills"),
 	})
-	badges = append(badges, platformBadge{"Copilot", copilotOK > 0, copilotWarn > 0})
-
-	return badges
+	return platformBadge{"Copilot", copilotOK > 0, copilotWarn > 0}
 }
 
 func printStatusProjectManifestSummary(path string) {

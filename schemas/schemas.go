@@ -46,50 +46,94 @@ func Validate(schema Schema, jsonBytes []byte) error {
 	}
 }
 
+// pluginAllowedTopLevel lists the top-level fields permitted in PLUGIN.yaml.
+var pluginAllowedTopLevel = map[string]struct{}{
+	"schema_version":     {},
+	"kind":               {},
+	"name":               {},
+	"version":            {},
+	"display_name":       {},
+	"description":        {},
+	"authors":            {},
+	"homepage":           {},
+	"license":            {},
+	"platforms":          {},
+	"resources":          {},
+	"marketplace":        {},
+	"dependencies":       {},
+	"platform_overrides": {},
+}
+
+// pluginAllowedResources lists the resource buckets supported under
+// `resources` in PLUGIN.yaml.
+var pluginAllowedResources = map[string]struct{}{
+	"agents":   {},
+	"skills":   {},
+	"commands": {},
+	"hooks":    {},
+	"mcp":      {},
+}
+
+// pluginAllowedPlatforms lists every platform id accepted by `platforms` and
+// `platform_overrides`.
+var pluginAllowedPlatforms = map[string]struct{}{
+	"claude":   {},
+	"cursor":   {},
+	"codex":    {},
+	"copilot":  {},
+	"opencode": {},
+}
+
 func validatePluginManifest(jsonBytes []byte) error {
 	var payload map[string]any
 	if err := json.Unmarshal(jsonBytes, &payload); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
-
-	allowed := map[string]struct{}{
-		"schema_version":     {},
-		"kind":               {},
-		"name":               {},
-		"version":            {},
-		"display_name":       {},
-		"description":        {},
-		"authors":            {},
-		"homepage":           {},
-		"license":            {},
-		"platforms":          {},
-		"resources":          {},
-		"marketplace":        {},
-		"dependencies":       {},
-		"platform_overrides": {},
-	}
 	for key := range payload {
-		if _, ok := allowed[key]; !ok {
+		if _, ok := pluginAllowedTopLevel[key]; !ok {
 			return fmt.Errorf("unknown top-level field %q", key)
 		}
 	}
+	if err := validatePluginCoreFields(payload); err != nil {
+		return err
+	}
+	if err := validatePluginPlatforms(payload); err != nil {
+		return err
+	}
+	if err := validatePluginAuthors(payload); err != nil {
+		return err
+	}
+	if err := validatePluginResources(payload); err != nil {
+		return err
+	}
+	if err := validatePluginMarketplace(payload); err != nil {
+		return err
+	}
+	return validatePluginOverrides(payload)
+}
 
+// validatePluginCoreFields enforces the schema_version, kind, and name
+// constraints for a plugin manifest.
+func validatePluginCoreFields(payload map[string]any) error {
 	if v, ok := payload["schema_version"]; !ok || !matchesSchemaVersionOne(v) {
 		return fmt.Errorf("schema_version must be 1")
 	}
-
 	kind, _ := payload["kind"].(string)
 	switch strings.TrimSpace(kind) {
 	case "native", "package":
 	default:
 		return fmt.Errorf("kind must be native or package")
 	}
-
 	name, _ := payload["name"].(string)
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("name is required")
 	}
+	return nil
+}
 
+// validatePluginPlatforms ensures `platforms` is a non-empty slice of known,
+// unique platform ids.
+func validatePluginPlatforms(payload map[string]any) error {
 	platforms, ok := payload["platforms"].([]any)
 	if !ok || len(platforms) == 0 {
 		return fmt.Errorf("platforms must contain at least one platform id")
@@ -101,9 +145,7 @@ func validatePluginManifest(jsonBytes []byte) error {
 		if id == "" {
 			return fmt.Errorf("platforms contains an empty platform id")
 		}
-		switch id {
-		case "claude", "cursor", "codex", "copilot", "opencode":
-		default:
+		if _, ok := pluginAllowedPlatforms[id]; !ok {
 			return fmt.Errorf("unknown platform %q", id)
 		}
 		if _, exists := seen[id]; exists {
@@ -111,64 +153,80 @@ func validatePluginManifest(jsonBytes []byte) error {
 		}
 		seen[id] = struct{}{}
 	}
+	return nil
+}
 
-	if authors, ok := payload["authors"].([]any); ok {
-		for _, raw := range authors {
-			if strings.TrimSpace(asString(raw)) == "" {
-				return fmt.Errorf("authors contains an empty value")
-			}
+// validatePluginAuthors checks the optional authors slice.
+func validatePluginAuthors(payload map[string]any) error {
+	authors, ok := payload["authors"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, raw := range authors {
+		if strings.TrimSpace(asString(raw)) == "" {
+			return fmt.Errorf("authors contains an empty value")
 		}
 	}
+	return nil
+}
 
-	if resources, ok := payload["resources"].(map[string]any); ok {
-		allowedResources := map[string]struct{}{
-			"agents":   {},
-			"skills":   {},
-			"commands": {},
-			"hooks":    {},
-			"mcp":      {},
+// validatePluginResources checks the optional resources block, including the
+// allowed bucket keys and string-array shape of each value.
+func validatePluginResources(payload map[string]any) error {
+	resources, ok := payload["resources"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for key, value := range resources {
+		if _, ok := pluginAllowedResources[key]; !ok {
+			return fmt.Errorf("resources contains unknown field %q", key)
 		}
-		for key, value := range resources {
-			if _, ok := allowedResources[key]; !ok {
-				return fmt.Errorf("resources contains unknown field %q", key)
-			}
-			if err := validateStringArray(value, "resources."+key); err != nil {
-				return err
-			}
+		if err := validateStringArray(value, "resources."+key); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	if marketplace, ok := payload["marketplace"].(map[string]any); ok {
-		for key := range marketplace {
-			if key != "repo" && key != "tags" {
-				return fmt.Errorf("marketplace contains unknown field %q", key)
-			}
-		}
-		if tags, ok := marketplace["tags"]; ok {
-			if err := validateStringArray(tags, "marketplace.tags"); err != nil {
-				return err
-			}
+// validatePluginMarketplace checks the optional marketplace block (repo/tags).
+func validatePluginMarketplace(payload map[string]any) error {
+	marketplace, ok := payload["marketplace"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for key := range marketplace {
+		if key != "repo" && key != "tags" {
+			return fmt.Errorf("marketplace contains unknown field %q", key)
 		}
 	}
-
-	if overrides, ok := payload["platform_overrides"].(map[string]any); ok {
-		keys := make([]string, 0, len(overrides))
-		for key := range overrides {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			switch key {
-			case "claude", "cursor", "codex", "copilot", "opencode":
-			default:
-				return fmt.Errorf("unknown platform override %q", key)
-			}
-			if _, ok := overrides[key].(map[string]any); !ok {
-				return fmt.Errorf("platform_overrides.%s must be an object", key)
-			}
+	if tags, ok := marketplace["tags"]; ok {
+		if err := validateStringArray(tags, "marketplace.tags"); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+// validatePluginOverrides checks the optional platform_overrides block;
+// keys are sorted before iteration to keep error messages deterministic.
+func validatePluginOverrides(payload map[string]any) error {
+	overrides, ok := payload["platform_overrides"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(overrides))
+	for key := range overrides {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if _, ok := pluginAllowedPlatforms[key]; !ok {
+			return fmt.Errorf("unknown platform override %q", key)
+		}
+		if _, ok := overrides[key].(map[string]any); !ok {
+			return fmt.Errorf("platform_overrides.%s must be an object", key)
+		}
+	}
 	return nil
 }
 

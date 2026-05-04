@@ -302,26 +302,16 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 		fmt.Println(string(data))
 		return nil
 	}
+	renderImpactResultText(result)
+	return nil
+}
+
+// renderImpactResultText prints the human-readable impact-radius report.
+func renderImpactResultText(result *graphstore.CRGImpactResult) {
 	ui.Header("Impact Radius")
 	ui.Info(result.Summary)
-	if len(result.ChangedNodes) > 0 {
-		ui.Section("Changed nodes")
-		for _, n := range result.ChangedNodes {
-			if n.Kind == "File" {
-				continue // file-level nodes are noisy
-			}
-			ui.Bullet("warn", fmt.Sprintf("[%s] %s", n.Kind, n.Name))
-		}
-	}
-	if len(result.ImpactedNodes) > 0 {
-		ui.Section("Impacted nodes")
-		for _, n := range result.ImpactedNodes {
-			if n.Kind == "File" {
-				continue
-			}
-			ui.Bullet("found", fmt.Sprintf("[%s] %s", n.Kind, n.Name))
-		}
-	}
+	renderImpactNodeSection("Changed nodes", "warn", result.ChangedNodes)
+	renderImpactNodeSection("Impacted nodes", "found", result.ImpactedNodes)
 	if len(result.ImpactedFiles) > 0 {
 		ui.Section("Impacted files")
 		for _, f := range result.ImpactedFiles {
@@ -334,7 +324,22 @@ func runKGImpact(deps Deps, cmd *cobra.Command, args []string) error {
 	if len(result.ChangedNodes) == 0 && len(result.ImpactedNodes) == 0 {
 		ui.Info("Note: run 'kg code-status' to verify the code graph is current.")
 	}
-	return nil
+}
+
+// renderImpactNodeSection prints a section header followed by one bullet
+// per non-file node, using the supplied bullet glyph. The section is
+// suppressed entirely when nodes is empty.
+func renderImpactNodeSection(header, glyph string, nodes []graphstore.ImpactNode) {
+	if len(nodes) == 0 {
+		return
+	}
+	ui.Section(header)
+	for _, n := range nodes {
+		if n.Kind == "File" {
+			continue // file-level nodes are noisy
+		}
+		ui.Bullet(glyph, fmt.Sprintf("[%s] %s", n.Kind, n.Name))
+	}
 }
 
 func runKGFlows(deps Deps, cmd *cobra.Command, _ []string) error {
@@ -574,94 +579,21 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	}
 	defer store.Close()
 
-	allTypes := []string{"source", "entity", "concept", "synthesis", "decision", "repo", "session"}
-	var typeList []string
-	if noteTypeFilter != "" {
-		if !isValidNoteType(noteTypeFilter) {
-			return fmt.Errorf("invalid note type %q: valid values are %s", noteTypeFilter, strings.Join(allTypes, ", "))
-		}
-		typeList = []string{noteTypeFilter}
-	} else {
-		typeList = allTypes
-	}
-	subdirs := make([]string, len(typeList))
-	for i, t := range typeList {
-		subdirs[i] = noteSubdir(t)
+	subdirs, err := warmNoteSubdirs(noteTypeFilter)
+	if err != nil {
+		return err
 	}
 
-	var indexed, skipped int
-	for _, sub := range subdirs {
-		dir := filepath.Join(home, "notes", sub)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // directory may not exist yet
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			fpath := filepath.Join(dir, e.Name())
-			data, err := os.ReadFile(fpath)
-			if err != nil {
-				skipped++
-				continue
-			}
-			note, _, err := parseGraphNote(data)
-			if err != nil || note.ID == "" {
-				skipped++
-				continue
-			}
-			kn := noteToKGNote(note, fpath)
-			if err := store.UpsertKGNote(kn); err != nil {
-				skipped++
-				continue
-			}
-			indexed++
-		}
-	}
-
-	// Also walk _archived directory
-	archivedDir := filepath.Join(home, "notes", "_archived")
-	if entries, err := os.ReadDir(archivedDir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			fpath := filepath.Join(archivedDir, e.Name())
-			data, err := os.ReadFile(fpath)
-			if err != nil {
-				skipped++
-				continue
-			}
-			note, _, err := parseGraphNote(data)
-			if err != nil || note.ID == "" {
-				skipped++
-				continue
-			}
-			kn := noteToKGNote(note, fpath)
-			if kn.ArchivedAt == "" {
-				kn.ArchivedAt = note.UpdatedAt // treat physical archive dir as archived
-			}
-			if err := store.UpsertKGNote(kn); err != nil {
-				skipped++
-				continue
-			}
-			indexed++
-		}
-	}
+	indexed, skipped := warmActiveNotes(store, home, subdirs)
+	archIndexed, archSkipped := warmArchivedNotes(store, home)
+	indexed += archIndexed
+	skipped += archSkipped
 
 	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
 
-	var codeMsg string
+	codeMsg := ""
 	if includeCode {
-		repoRoot, _ := os.Getwd()
-		nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
-		if cerr != nil {
-			ui.Warn(fmt.Sprintf("code-lane import skipped: %v", cerr))
-		} else {
-			codeMsg = fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
-			_ = store.SetMetadata("last_code_import", time.Now().UTC().Format(time.RFC3339))
-		}
+		codeMsg = warmCodeLane(store)
 	}
 
 	lines := []string{
@@ -674,6 +606,97 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	}
 	ui.SuccessBox(summary, lines...)
 	return nil
+}
+
+// warmNoteSubdirs translates a note-type filter (or empty for all types)
+// into the matching notes/<sub> subdirectory list. Returns an error when
+// the explicit type filter is unrecognized.
+func warmNoteSubdirs(noteTypeFilter string) ([]string, error) {
+	allTypes := []string{"source", "entity", "concept", "synthesis", "decision", "repo", "session"}
+	typeList := allTypes
+	if noteTypeFilter != "" {
+		if !isValidNoteType(noteTypeFilter) {
+			return nil, fmt.Errorf("invalid note type %q: valid values are %s", noteTypeFilter, strings.Join(allTypes, ", "))
+		}
+		typeList = []string{noteTypeFilter}
+	}
+	subdirs := make([]string, len(typeList))
+	for i, t := range typeList {
+		subdirs[i] = noteSubdir(t)
+	}
+	return subdirs, nil
+}
+
+// warmActiveNotes upserts each note found under the given notes/ subdirs
+// into store and returns the indexed/skipped counters.
+func warmActiveNotes(store *graphstore.SQLiteStore, home string, subdirs []string) (indexed, skipped int) {
+	for _, sub := range subdirs {
+		i, s := warmNotesInDir(store, filepath.Join(home, "notes", sub), nil)
+		indexed += i
+		skipped += s
+	}
+	return indexed, skipped
+}
+
+// warmArchivedNotes upserts the contents of notes/_archived, marking each
+// resulting KGNote as archived when the source frontmatter omits the
+// archive timestamp.
+func warmArchivedNotes(store *graphstore.SQLiteStore, home string) (indexed, skipped int) {
+	return warmNotesInDir(store, filepath.Join(home, "notes", "_archived"), func(kn *graphstore.KGNote, note *GraphNote) {
+		if kn.ArchivedAt == "" {
+			kn.ArchivedAt = note.UpdatedAt
+		}
+	})
+}
+
+// warmNotesInDir reads every top-level .md file under dir, parses it as a
+// GraphNote, applies the optional adjust callback, and upserts the
+// resulting KGNote into store. Returns the indexed/skipped counters.
+// Missing directories are not counted as skips.
+func warmNotesInDir(store *graphstore.SQLiteStore, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		fpath := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(fpath)
+		if err != nil {
+			skipped++
+			continue
+		}
+		note, _, err := parseGraphNote(data)
+		if err != nil || note.ID == "" {
+			skipped++
+			continue
+		}
+		kn := noteToKGNote(note, fpath)
+		if adjust != nil {
+			adjust(&kn, note)
+		}
+		if err := store.UpsertKGNote(kn); err != nil {
+			skipped++
+			continue
+		}
+		indexed++
+	}
+	return indexed, skipped
+}
+
+// warmCodeLane runs the optional code-lane import from CRG and returns a
+// summary line for inclusion in the SuccessBox body, or "" on failure.
+func warmCodeLane(store *graphstore.SQLiteStore) string {
+	repoRoot, _ := os.Getwd()
+	nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
+	if cerr != nil {
+		ui.Warn(fmt.Sprintf("code-lane import skipped: %v", cerr))
+		return ""
+	}
+	_ = store.SetMetadata("last_code_import", time.Now().UTC().Format(time.RFC3339))
+	return fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
 }
 
 // runKGLinkAdd creates a note→symbol link.

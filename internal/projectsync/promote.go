@@ -42,66 +42,23 @@ type PromoteSpec struct {
 // repo-local path is already a managed symlink to the canonical path.
 func PromoteResource(name, projectPath string, spec PromoteSpec) error {
 	sourcePath := filepath.Join(projectPath, ".agents", spec.Bucket, name)
-
 	sourceInfo, err := os.Lstat(sourcePath)
 	if err != nil {
 		return fmt.Errorf("%s %q not found in .agents/%s/: %w", spec.Singular, name, spec.Bucket, err)
 	}
 
-	rc, err := config.LoadAgentsRC(projectPath)
+	rc, projectName, err := loadPromoteRC(projectPath, name, spec)
 	if err != nil {
-		return fmt.Errorf("loading .agentsrc.json for %s %q: %w", spec.Singular, name, err)
-	}
-	projectName := rc.Project
-	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
+		return err
 	}
 
-	agentsHome := config.AgentsHome()
-	destDir := filepath.Join(agentsHome, spec.Bucket, projectName)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("creating %s directory for %q: %w", spec.Bucket, name, err)
+	canonicalPath, err := preparePromoteDest(name, projectName, spec)
+	if err != nil {
+		return err
 	}
-	canonicalPath := filepath.Join(destDir, name)
 
-	if sourceInfo.Mode()&os.ModeSymlink != 0 {
-		existing, err := os.Readlink(sourcePath)
-		if err != nil {
-			return fmt.Errorf("reading existing symlink for %s %q: %w", spec.Singular, name, err)
-		}
-		if existing != canonicalPath {
-			return fmt.Errorf("%s %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, existing, canonicalPath)
-		}
-	} else {
-		if _, err := os.Stat(filepath.Join(sourcePath, spec.ManifestName)); err != nil {
-			return fmt.Errorf("%s %q not found in .agents/%s/ (expected %s at %s/%s)", spec.Singular, name, spec.Bucket, spec.ManifestName, sourcePath, spec.ManifestName)
-		}
-		if fi, err := os.Lstat(canonicalPath); err == nil {
-			switch {
-			case fi.Mode()&os.ModeSymlink != 0:
-				if err := os.Remove(canonicalPath); err != nil {
-					return fmt.Errorf("removing stale canonical symlink for %s %q: %w", spec.Singular, name, err)
-				}
-			case fi.IsDir():
-				if !spec.Force {
-					return fmt.Errorf("%s %q already exists at canonical path %s as a real directory%s", spec.Singular, name, canonicalPath, spec.ExistingRealDirHint)
-				}
-				if err := os.RemoveAll(canonicalPath); err != nil {
-					return fmt.Errorf("removing existing canonical directory for %s %q: %w", spec.Singular, name, err)
-				}
-			default:
-				return fmt.Errorf("%s %q already exists at canonical path %s; remove the file and retry", spec.Singular, name, canonicalPath)
-			}
-		}
-		if err := CopyTree(sourcePath, canonicalPath); err != nil {
-			return fmt.Errorf("copying %s %q to canonical path: %w", spec.Singular, name, err)
-		}
-		if err := os.RemoveAll(sourcePath); err != nil {
-			return fmt.Errorf("removing repo-local %s directory for %q: %w", spec.Singular, name, err)
-		}
-		if err := os.Symlink(canonicalPath, sourcePath); err != nil {
-			return fmt.Errorf("creating repo-local managed symlink for %s %q: %w", spec.Singular, name, err)
-		}
+	if err := materializePromoteSource(sourcePath, canonicalPath, sourceInfo, name, spec); err != nil {
+		return err
 	}
 
 	count := spec.RegisterInRC(rc, name)
@@ -119,6 +76,94 @@ func PromoteResource(name, projectPath string, spec PromoteSpec) error {
 		"Run 'dot-agents refresh' to sync across all platforms",
 	)
 	return nil
+}
+
+// loadPromoteRC loads the project AgentsRC and validates that a project name
+// is set, returning a typed error for the common "missing project" case.
+func loadPromoteRC(projectPath, name string, spec PromoteSpec) (*config.AgentsRC, string, error) {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("loading .agentsrc.json for %s %q: %w", spec.Singular, name, err)
+	}
+	if rc.Project == "" {
+		return nil, "", fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
+	}
+	return rc, rc.Project, nil
+}
+
+// preparePromoteDest ensures the bucket directory under ~/.agents/<bucket>/<project>/
+// exists and returns the canonical path for the named resource.
+func preparePromoteDest(name, projectName string, spec PromoteSpec) (string, error) {
+	destDir := filepath.Join(config.AgentsHome(), spec.Bucket, projectName)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", fmt.Errorf("creating %s directory for %q: %w", spec.Bucket, name, err)
+	}
+	return filepath.Join(destDir, name), nil
+}
+
+// materializePromoteSource handles the symlink-vs-real-dir branching for the
+// repo-local source path: an existing managed symlink is validated, while a
+// real directory is copied to canonical and replaced with a symlink.
+func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec) error {
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return validatePromoteSymlink(sourcePath, canonicalPath, name, spec)
+	}
+	if _, err := os.Stat(filepath.Join(sourcePath, spec.ManifestName)); err != nil {
+		return fmt.Errorf("%s %q not found in .agents/%s/ (expected %s at %s/%s)", spec.Singular, name, spec.Bucket, spec.ManifestName, sourcePath, spec.ManifestName)
+	}
+	if err := clearExistingCanonical(canonicalPath, name, spec); err != nil {
+		return err
+	}
+	if err := CopyTree(sourcePath, canonicalPath); err != nil {
+		return fmt.Errorf("copying %s %q to canonical path: %w", spec.Singular, name, err)
+	}
+	if err := os.RemoveAll(sourcePath); err != nil {
+		return fmt.Errorf("removing repo-local %s directory for %q: %w", spec.Singular, name, err)
+	}
+	if err := os.Symlink(canonicalPath, sourcePath); err != nil {
+		return fmt.Errorf("creating repo-local managed symlink for %s %q: %w", spec.Singular, name, err)
+	}
+	return nil
+}
+
+// validatePromoteSymlink confirms that an existing repo-local symlink points
+// at the canonical path; mismatches and read errors surface as fatal errors.
+func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
+	existing, err := os.Readlink(sourcePath)
+	if err != nil {
+		return fmt.Errorf("reading existing symlink for %s %q: %w", spec.Singular, name, err)
+	}
+	if existing != canonicalPath {
+		return fmt.Errorf("%s %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, existing, canonicalPath)
+	}
+	return nil
+}
+
+// clearExistingCanonical removes a stale symlink or, when Force is set, a real
+// directory at the canonical path. A real file or a real directory without
+// Force is fatal.
+func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error {
+	fi, err := os.Lstat(canonicalPath)
+	if err != nil {
+		return nil
+	}
+	switch {
+	case fi.Mode()&os.ModeSymlink != 0:
+		if err := os.Remove(canonicalPath); err != nil {
+			return fmt.Errorf("removing stale canonical symlink for %s %q: %w", spec.Singular, name, err)
+		}
+		return nil
+	case fi.IsDir():
+		if !spec.Force {
+			return fmt.Errorf("%s %q already exists at canonical path %s as a real directory%s", spec.Singular, name, canonicalPath, spec.ExistingRealDirHint)
+		}
+		if err := os.RemoveAll(canonicalPath); err != nil {
+			return fmt.Errorf("removing existing canonical directory for %s %q: %w", spec.Singular, name, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s %q already exists at canonical path %s; remove the file and retry", spec.Singular, name, canonicalPath)
+	}
 }
 
 // CopyTree recursively copies the directory tree at src to dst, preserving

@@ -121,16 +121,7 @@ func (s *MCPServer) Serve(r io.Reader, w io.Writer) error {
 		}
 
 		result, rpcErr := s.dispatch(req.Method, req.ID, req.Params)
-		resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
-		if rpcErr != nil {
-			if re, ok := rpcErr.(*rpcError); ok {
-				resp.Error = re
-			} else {
-				resp.Error = &rpcError{Code: -32603, Message: rpcErr.Error()}
-			}
-		} else {
-			resp.Result = json.RawMessage(result)
-		}
+		resp := buildRPCResponse(req.ID, result, rpcErr)
 		if len(req.ID) == 0 {
 			continue
 		}
@@ -138,6 +129,23 @@ func (s *MCPServer) Serve(r io.Reader, w io.Writer) error {
 			return err
 		}
 	}
+}
+
+// buildRPCResponse assembles a JSON-RPC response from a dispatch result and
+// error, normalizing typed *rpcError values and falling back to an internal
+// error code for anything else.
+func buildRPCResponse(id json.RawMessage, result json.RawMessage, rpcErr error) rpcResponse {
+	resp := rpcResponse{JSONRPC: "2.0", ID: id}
+	if rpcErr == nil {
+		resp.Result = result
+		return resp
+	}
+	if re, ok := rpcErr.(*rpcError); ok {
+		resp.Error = re
+	} else {
+		resp.Error = &rpcError{Code: -32603, Message: rpcErr.Error()}
+	}
+	return resp
 }
 
 func (s *MCPServer) dispatch(method string, id json.RawMessage, params json.RawMessage) (json.RawMessage, error) {
@@ -304,37 +312,52 @@ func (s *MCPServer) handleListGraphStats(_ json.RawMessage) (json.RawMessage, er
 	if err != nil {
 		return nil, err
 	}
-	communities := 0
-	if s.bridge != nil {
-		if result, err := s.bridge.ListCommunities(0, "size"); err == nil && result != nil {
-			communities = len(result.Communities)
-		}
+	payload := map[string]any{
+		"nodes":       stats.TotalNodes,
+		"edges":       stats.TotalEdges,
+		"languages":   s.collectStatsLanguages(stats),
+		"communities": s.countStatsCommunities(),
 	}
+	return json.Marshal(payload)
+}
+
+// countStatsCommunities returns the number of communities reported by the
+// bridge, or 0 when the bridge is absent or returns an error.
+func (s *MCPServer) countStatsCommunities() int {
+	if s.bridge == nil {
+		return 0
+	}
+	result, err := s.bridge.ListCommunities(0, "size")
+	if err != nil || result == nil {
+		return 0
+	}
+	return len(result.Communities)
+}
+
+// collectStatsLanguages returns a {language: count} map preferring the warm
+// store's Languages slice and falling back to the bridge status string.
+func (s *MCPServer) collectStatsLanguages(stats GraphStats) map[string]int {
 	languages := map[string]int{}
 	if len(stats.Languages) > 0 {
 		for _, lang := range stats.Languages {
 			languages[lang]++
 		}
-	} else if s.bridge != nil {
-		if status, err := s.bridge.Status(); err == nil && status != nil {
-			for _, lang := range strings.Split(status.Languages, ",") {
-				lang = strings.TrimSpace(lang)
-				if lang != "" {
-					languages[lang]++
-				}
-			}
+		return languages
+	}
+	if s.bridge == nil {
+		return languages
+	}
+	status, err := s.bridge.Status()
+	if err != nil || status == nil {
+		return languages
+	}
+	for _, lang := range strings.Split(status.Languages, ",") {
+		lang = strings.TrimSpace(lang)
+		if lang != "" {
+			languages[lang]++
 		}
 	}
-	if len(languages) == 0 {
-		languages = map[string]int{}
-	}
-	payload := map[string]any{
-		"nodes":       stats.TotalNodes,
-		"edges":       stats.TotalEdges,
-		"languages":   languages,
-		"communities": communities,
-	}
-	return json.Marshal(payload)
+	return languages
 }
 
 func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessage, error) {
@@ -352,23 +375,7 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	if depth <= 0 {
 		depth = 2
 	}
-	files := []string{req.Symbol}
-	if s.store != nil {
-		if nodes, err := s.store.SearchNodes(req.Symbol, 20); err == nil {
-			var dedup []string
-			seen := map[string]bool{}
-			for _, node := range nodes {
-				if node.FilePath == "" || seen[node.FilePath] {
-					continue
-				}
-				seen[node.FilePath] = true
-				dedup = append(dedup, node.FilePath)
-			}
-			if len(dedup) > 0 {
-				files = dedup
-			}
-		}
-	}
+	files := s.resolveImpactFiles(req.Symbol)
 	bridge, err := s.requireBridge()
 	if err != nil {
 		return nil, err
@@ -385,31 +392,60 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	nodes := make([]map[string]any, 0, len(result.ChangedNodes)+len(result.ImpactedNodes))
-	seen := map[string]bool{}
-	for _, node := range result.ChangedNodes {
-		key := node.QualifiedName
-		if key == "" {
-			key = node.Name
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		nodes = append(nodes, impactNodeToMCP(node))
-	}
-	for _, node := range result.ImpactedNodes {
-		key := node.QualifiedName
-		if key == "" {
-			key = node.Name
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		nodes = append(nodes, impactNodeToMCP(node))
-	}
+	nodes := dedupImpactNodes(result.ChangedNodes, result.ImpactedNodes)
 	return json.Marshal(map[string]any{"nodes": nodes})
+}
+
+// resolveImpactFiles expands a symbol query into the set of file paths used
+// as the impact-radius seed. Falls back to a single-element slice containing
+// the raw symbol when the warm store is unavailable or returns nothing.
+func (s *MCPServer) resolveImpactFiles(symbol string) []string {
+	files := []string{symbol}
+	if s.store == nil {
+		return files
+	}
+	nodes, err := s.store.SearchNodes(symbol, 20)
+	if err != nil {
+		return files
+	}
+	seen := map[string]bool{}
+	var dedup []string
+	for _, node := range nodes {
+		if node.FilePath == "" || seen[node.FilePath] {
+			continue
+		}
+		seen[node.FilePath] = true
+		dedup = append(dedup, node.FilePath)
+	}
+	if len(dedup) > 0 {
+		return dedup
+	}
+	return files
+}
+
+// dedupImpactNodes returns the changed-then-impacted node sequence with
+// duplicates by qualified name (or fallback name) removed, in original order.
+func dedupImpactNodes(changed, impacted []ImpactNode) []map[string]any {
+	nodes := make([]map[string]any, 0, len(changed)+len(impacted))
+	seen := map[string]bool{}
+	appendIfNew := func(node ImpactNode) {
+		key := node.QualifiedName
+		if key == "" {
+			key = node.Name
+		}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		nodes = append(nodes, impactNodeToMCP(node))
+	}
+	for _, node := range changed {
+		appendIfNew(node)
+	}
+	for _, node := range impacted {
+		appendIfNew(node)
+	}
+	return nodes
 }
 
 func (s *MCPServer) handleSemanticSearchNodes(params json.RawMessage) (json.RawMessage, error) {
@@ -514,20 +550,18 @@ func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMess
 	if strings.TrimSpace(riskSummary) == "" {
 		riskSummary = fmt.Sprintf("%d changed functions, %d test gaps, %d review priorities", len(report.ChangedFunctions), len(report.TestGaps), len(report.ReviewPriorities))
 	}
-	impactNodes := []map[string]any{}
-	if s.store != nil {
-		impact, err := s.store.GetImpactRadius(req.Files, 2, 50)
-		if err == nil {
-			for _, node := range impact.ChangedNodes {
-				impactNodes = append(impactNodes, graphNodeToMCP(node))
-			}
-			for _, node := range impact.ImpactedNodes {
-				impactNodes = append(impactNodes, graphNodeToMCP(node))
-			}
-		}
-	}
-	changed := make([]map[string]any, 0, len(report.ChangedFunctions))
-	for _, fn := range report.ChangedFunctions {
+	return json.Marshal(map[string]any{
+		"changed_symbols": reviewChangedSymbols(report.ChangedFunctions),
+		"impact_radius":   s.reviewImpactNodes(req.Files),
+		"risk_summary":    riskSummary,
+	})
+}
+
+// reviewChangedSymbols projects each changed function from a CRG report into
+// the MCP review-context payload shape.
+func reviewChangedSymbols(fns []CRGChangedNode) []map[string]any {
+	changed := make([]map[string]any, 0, len(fns))
+	for _, fn := range fns {
 		changed = append(changed, map[string]any{
 			"name":       fn.QualifiedName,
 			"type":       "changed_function",
@@ -536,11 +570,28 @@ func (s *MCPServer) handleGetReviewContext(params json.RawMessage) (json.RawMess
 			"summary":    fn.FilePath,
 		})
 	}
-	return json.Marshal(map[string]any{
-		"changed_symbols": changed,
-		"impact_radius":   impactNodes,
-		"risk_summary":    riskSummary,
-	})
+	return changed
+}
+
+// reviewImpactNodes returns the impact-radius node payload for a review
+// context request, defaulting to an empty slice when the warm store is
+// unavailable or the query fails.
+func (s *MCPServer) reviewImpactNodes(files []string) []map[string]any {
+	out := []map[string]any{}
+	if s.store == nil {
+		return out
+	}
+	impact, err := s.store.GetImpactRadius(files, 2, 50)
+	if err != nil {
+		return out
+	}
+	for _, node := range impact.ChangedNodes {
+		out = append(out, graphNodeToMCP(node))
+	}
+	for _, node := range impact.ImpactedNodes {
+		out = append(out, graphNodeToMCP(node))
+	}
+	return out
 }
 
 func (s *MCPServer) handleGetDocsSection(params json.RawMessage) (json.RawMessage, error) {

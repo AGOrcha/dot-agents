@@ -206,42 +206,66 @@ func collectNeighborResults(store *graphstore.SQLiteStore, nodes []graphstore.Gr
 	seen := make(map[string]bool)
 	var results []GraphQueryResult
 	for _, node := range nodes {
-		var edges []graphstore.GraphEdge
-		var err error
-		if inbound {
-			edges, err = store.GetEdgesByTarget(node.QualifiedName)
-		} else {
-			edges, err = store.GetEdgesBySource(node.QualifiedName)
-		}
+		edges, err := neighborEdges(store, node.QualifiedName, inbound)
 		if err != nil {
 			return nil, err
 		}
-		for _, edge := range edges {
-			if edgeKind != "" && edge.Kind != edgeKind {
-				continue
-			}
-			neighborQN := edge.SourceQualified
-			if !inbound {
-				neighborQN = edge.TargetQualified
-			}
-			if seen[neighborQN] {
-				continue
-			}
-			neighbor, err := store.GetNode(neighborQN)
-			if err != nil || neighbor == nil {
-				continue
-			}
-			if edgeKind == graphstore.EdgeKindTestedBy && !neighbor.IsTest && neighbor.Kind != graphstore.NodeKindTest {
-				continue
-			}
-			seen[neighborQN] = true
-			results = append(results, graphNodeToQueryResult(*neighbor, graphNodeTypeLabel(*neighbor)))
-			if limit > 0 && len(results) >= limit {
-				return results, nil
-			}
+		done, err := appendNeighborMatches(store, edges, edgeKind, inbound, seen, &results, limit)
+		if err != nil {
+			return nil, err
+		}
+		if done {
+			return results, nil
 		}
 	}
 	return results, nil
+}
+
+// neighborEdges returns the inbound or outbound edges for qn.
+func neighborEdges(store *graphstore.SQLiteStore, qn string, inbound bool) ([]graphstore.GraphEdge, error) {
+	if inbound {
+		return store.GetEdgesByTarget(qn)
+	}
+	return store.GetEdgesBySource(qn)
+}
+
+// appendNeighborMatches walks edges, resolves the neighbor on the opposite
+// end, and appends a result row when the edge/neighbor pass the kind filter.
+// Returns done=true once limit has been reached.
+func appendNeighborMatches(
+	store *graphstore.SQLiteStore,
+	edges []graphstore.GraphEdge,
+	edgeKind string,
+	inbound bool,
+	seen map[string]bool,
+	results *[]GraphQueryResult,
+	limit int,
+) (bool, error) {
+	for _, edge := range edges {
+		if edgeKind != "" && edge.Kind != edgeKind {
+			continue
+		}
+		neighborQN := edge.SourceQualified
+		if !inbound {
+			neighborQN = edge.TargetQualified
+		}
+		if seen[neighborQN] {
+			continue
+		}
+		neighbor, err := store.GetNode(neighborQN)
+		if err != nil || neighbor == nil {
+			continue
+		}
+		if edgeKind == graphstore.EdgeKindTestedBy && !neighbor.IsTest && neighbor.Kind != graphstore.NodeKindTest {
+			continue
+		}
+		seen[neighborQN] = true
+		*results = append(*results, graphNodeToQueryResult(*neighbor, graphNodeTypeLabel(*neighbor)))
+		if limit > 0 && len(*results) >= limit {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func collectSymbolDecisionResults(store *graphstore.SQLiteStore, nodes []graphstore.GraphNode, limit int) ([]GraphQueryResult, error) {
@@ -252,51 +276,65 @@ func collectSymbolDecisionResults(store *graphstore.SQLiteStore, nodes []graphst
 		if err != nil {
 			return nil, err
 		}
-		for _, link := range links {
-			if seen[link.NoteID] {
-				continue
-			}
-			note, err := store.GetKGNote(link.NoteID)
-			if err != nil || note == nil {
-				continue
-			}
-			if note.NoteType != "decision" && note.NoteType != "synthesis" && note.NoteType != "concept" {
-				continue
-			}
-			seen[link.NoteID] = true
-			results = append(results, GraphQueryResult{
-				ID:         note.ID,
-				Type:       note.NoteType,
-				Title:      note.Title,
-				Summary:    note.Summary,
-				Path:       note.FilePath,
-				SourceRefs: []string{node.QualifiedName},
-			})
-			if limit > 0 && len(results) >= limit {
-				return results, nil
-			}
+		if appendDecisionLinkMatches(store, node.QualifiedName, links, seen, &results, limit) {
+			return results, nil
 		}
 	}
 	return results, nil
 }
 
-func collectDecisionSymbolResults(store *graphstore.SQLiteStore, query string, limit int) ([]GraphQueryResult, error) {
-	var candidates []graphstore.KGNote
-	if note, err := store.GetKGNote(strings.TrimSpace(query)); err == nil && note != nil {
-		if note.NoteType == "decision" || note.NoteType == "synthesis" || note.NoteType == "concept" {
-			candidates = append(candidates, *note)
+// appendDecisionLinkMatches walks the note links for a symbol, materializes
+// the matching decision/synthesis/concept notes, and appends them to results.
+// Returns true once limit has been reached.
+func appendDecisionLinkMatches(
+	store *graphstore.SQLiteStore,
+	symbolQN string,
+	links []graphstore.NoteSymbolLink,
+	seen map[string]bool,
+	results *[]GraphQueryResult,
+	limit int,
+) bool {
+	for _, link := range links {
+		if seen[link.NoteID] {
+			continue
+		}
+		note, err := store.GetKGNote(link.NoteID)
+		if err != nil || note == nil {
+			continue
+		}
+		if !isDecisionNoteType(note.NoteType) {
+			continue
+		}
+		seen[link.NoteID] = true
+		*results = append(*results, GraphQueryResult{
+			ID:         note.ID,
+			Type:       note.NoteType,
+			Title:      note.Title,
+			Summary:    note.Summary,
+			Path:       note.FilePath,
+			SourceRefs: []string{symbolQN},
+		})
+		if limit > 0 && len(*results) >= limit {
+			return true
 		}
 	}
-	if len(candidates) == 0 {
-		notes, err := store.SearchKGNotes(query, limit)
-		if err != nil {
-			return nil, err
-		}
-		for _, note := range notes {
-			if note.NoteType == "decision" || note.NoteType == "synthesis" || note.NoteType == "concept" {
-				candidates = append(candidates, note)
-			}
-		}
+	return false
+}
+
+// isDecisionNoteType reports whether note belongs to one of the high-signal
+// note categories used by the decision lookup intents.
+func isDecisionNoteType(noteType string) bool {
+	switch noteType {
+	case "decision", "synthesis", "concept":
+		return true
+	}
+	return false
+}
+
+func collectDecisionSymbolResults(store *graphstore.SQLiteStore, query string, limit int) ([]GraphQueryResult, error) {
+	candidates, err := decisionNoteCandidates(store, query, limit)
+	if err != nil {
+		return nil, err
 	}
 	seen := make(map[string]bool)
 	var results []GraphQueryResult
@@ -305,29 +343,70 @@ func collectDecisionSymbolResults(store *graphstore.SQLiteStore, query string, l
 		if err != nil {
 			return nil, err
 		}
-		for _, link := range links {
-			if seen[link.QualifiedName] {
-				continue
-			}
-			node, err := store.GetNode(link.QualifiedName)
-			if err != nil || node == nil {
-				results = append(results, GraphQueryResult{
-					ID:      link.QualifiedName,
-					Type:    "symbol",
-					Title:   link.QualifiedName,
-					Summary: fmt.Sprintf("%s via %s", note.Title, link.LinkKind),
-				})
-			} else {
-				results = append(results, graphNodeToQueryResult(*node, graphNodeTypeLabel(*node)))
-				results[len(results)-1].Summary = fmt.Sprintf("%s via %s", note.Title, link.LinkKind)
-			}
-			seen[link.QualifiedName] = true
-			if limit > 0 && len(results) >= limit {
-				return results, nil
-			}
+		if appendDecisionSymbolMatches(store, note, links, seen, &results, limit) {
+			return results, nil
 		}
 	}
 	return results, nil
+}
+
+// decisionNoteCandidates resolves the candidate set of decision/synthesis/
+// concept notes for collectDecisionSymbolResults, preferring an exact ID
+// match over a fuzzy search.
+func decisionNoteCandidates(store *graphstore.SQLiteStore, query string, limit int) ([]graphstore.KGNote, error) {
+	var candidates []graphstore.KGNote
+	if note, err := store.GetKGNote(strings.TrimSpace(query)); err == nil && note != nil && isDecisionNoteType(note.NoteType) {
+		candidates = append(candidates, *note)
+	}
+	if len(candidates) > 0 {
+		return candidates, nil
+	}
+	notes, err := store.SearchKGNotes(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, note := range notes {
+		if isDecisionNoteType(note.NoteType) {
+			candidates = append(candidates, note)
+		}
+	}
+	return candidates, nil
+}
+
+// appendDecisionSymbolMatches walks the symbol links for a decision note and
+// appends a result row per linked symbol (resolving warm-store metadata when
+// available). Returns true once limit has been reached.
+func appendDecisionSymbolMatches(
+	store *graphstore.SQLiteStore,
+	note graphstore.KGNote,
+	links []graphstore.NoteSymbolLink,
+	seen map[string]bool,
+	results *[]GraphQueryResult,
+	limit int,
+) bool {
+	for _, link := range links {
+		if seen[link.QualifiedName] {
+			continue
+		}
+		seen[link.QualifiedName] = true
+		summary := fmt.Sprintf("%s via %s", note.Title, link.LinkKind)
+		node, err := store.GetNode(link.QualifiedName)
+		if err != nil || node == nil {
+			*results = append(*results, GraphQueryResult{
+				ID:      link.QualifiedName,
+				Type:    "symbol",
+				Title:   link.QualifiedName,
+				Summary: summary,
+			})
+		} else {
+			*results = append(*results, graphNodeToQueryResult(*node, graphNodeTypeLabel(*node)))
+			(*results)[len(*results)-1].Summary = summary
+		}
+		if limit > 0 && len(*results) >= limit {
+			return true
+		}
+	}
+	return false
 }
 
 func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, error) {
@@ -338,8 +417,7 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 		Provider:      "crg",
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
-	root := crgRepoRoot()
-	bridge, err := graphstore.NewCRGBridge(root)
+	bridge, err := graphstore.NewCRGBridge(crgRepoRoot())
 	if err != nil {
 		resp.Provider = "crg-unavailable"
 		resp.Warnings = append(resp.Warnings, err.Error())
@@ -349,8 +427,27 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 	if err != nil {
 		return resp, err
 	}
+	matches := caseInsensitiveMatcher(query)
+	if appendChangedFunctionMatches(&resp, report.ChangedFunctions, matches, limit) {
+		return resp, nil
+	}
+	if appendTestGapMatches(&resp, report.TestGaps, matches, limit) {
+		return resp, nil
+	}
+	if appendReviewPriorityMatches(&resp, report.ReviewPriorities, matches, limit) {
+		return resp, nil
+	}
+	if resp.Results == nil {
+		resp.Results = []GraphQueryResult{}
+	}
+	return resp, nil
+}
+
+// caseInsensitiveMatcher returns a predicate that matches when query is
+// empty or a case-insensitive substring of any provided text.
+func caseInsensitiveMatcher(query string) func(...string) bool {
 	q := strings.ToLower(strings.TrimSpace(query))
-	matches := func(texts ...string) bool {
+	return func(texts ...string) bool {
 		if q == "" {
 			return true
 		}
@@ -361,7 +458,12 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 		}
 		return false
 	}
-	for _, fn := range report.ChangedFunctions {
+}
+
+// appendChangedFunctionMatches projects matching changed-function entries
+// onto resp.Results and reports whether the limit has been reached.
+func appendChangedFunctionMatches(resp *GraphQueryResponse, fns []graphstore.CRGChangedNode, matches func(...string) bool, limit int) bool {
+	for _, fn := range fns {
 		if !matches(fn.Name, fn.QualifiedName, fn.FilePath) {
 			continue
 		}
@@ -376,10 +478,15 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 			RiskScore:     fn.RiskScore,
 		})
 		if limit > 0 && len(resp.Results) >= limit {
-			return resp, nil
+			return true
 		}
 	}
-	for _, gap := range report.TestGaps {
+	return false
+}
+
+// appendTestGapMatches projects matching test-gap entries onto resp.Results.
+func appendTestGapMatches(resp *GraphQueryResponse, gaps []graphstore.CRGTestGap, matches func(...string) bool, limit int) bool {
+	for _, gap := range gaps {
 		if !matches(gap.QualifiedName, gap.FilePath) {
 			continue
 		}
@@ -394,10 +501,16 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 			TestCoverage:  "missing",
 		})
 		if limit > 0 && len(resp.Results) >= limit {
-			return resp, nil
+			return true
 		}
 	}
-	for _, priority := range report.ReviewPriorities {
+	return false
+}
+
+// appendReviewPriorityMatches projects matching review-priority entries
+// onto resp.Results.
+func appendReviewPriorityMatches(resp *GraphQueryResponse, priorities []graphstore.CRGPriority, matches func(...string) bool, limit int) bool {
+	for _, priority := range priorities {
 		if !matches(priority.QualifiedName, priority.Reason) {
 			continue
 		}
@@ -410,13 +523,10 @@ func collectChangeAnalysisResults(query string, limit int) (GraphQueryResponse, 
 			RiskScore:     priority.RiskScore,
 		})
 		if limit > 0 && len(resp.Results) >= limit {
-			return resp, nil
+			return true
 		}
 	}
-	if resp.Results == nil {
-		resp.Results = []GraphQueryResult{}
-	}
-	return resp, nil
+	return false
 }
 
 func collectCommunityContextResults(query string, limit int) (GraphQueryResponse, error) {
@@ -427,8 +537,7 @@ func collectCommunityContextResults(query string, limit int) (GraphQueryResponse
 		Provider:      "crg",
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
-	root := crgRepoRoot()
-	bridge, err := graphstore.NewCRGBridge(root)
+	bridge, err := graphstore.NewCRGBridge(crgRepoRoot())
 	if err != nil {
 		resp.Provider = "crg-unavailable"
 		resp.Warnings = append(resp.Warnings, err.Error())
@@ -438,18 +547,7 @@ func collectCommunityContextResults(query string, limit int) (GraphQueryResponse
 	if err != nil {
 		return resp, err
 	}
-	q := strings.ToLower(strings.TrimSpace(query))
-	matches := func(texts ...string) bool {
-		if q == "" {
-			return true
-		}
-		for _, text := range texts {
-			if strings.Contains(strings.ToLower(text), q) {
-				return true
-			}
-		}
-		return false
-	}
+	matches := caseInsensitiveMatcher(query)
 	for _, community := range communities.Communities {
 		if !matches(community.Name, community.Description, strings.Join(community.Members, " ")) {
 			continue
@@ -491,96 +589,148 @@ func collectCodeBridgeResults(kgHomeDir, bridgeIntent, query string, limit int) 
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 		Provider:      "warm-graphstore",
 	}
-	switch bridgeIntent {
-	case "symbol_lookup":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results = collectGraphResults(nodes, "", limit)
-	case "impact_radius":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		if len(nodes) == 0 {
-			resp.Warnings = append(resp.Warnings, "no matching code symbols found")
-			break
-		}
-		files := make([]string, 0, len(nodes))
-		seen := make(map[string]bool)
-		for _, node := range nodes {
-			if node.FilePath == "" || seen[node.FilePath] {
-				continue
-			}
-			seen[node.FilePath] = true
-			files = append(files, node.FilePath)
-		}
-		impact, err := store.GetImpactRadius(files, 2, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results = collectGraphResults(impact.ChangedNodes, "changed_symbol", limit)
-		if limit <= 0 || len(resp.Results) < limit {
-			resp.Results = append(resp.Results, collectGraphResults(impact.ImpactedNodes, "impacted_symbol", limit-len(resp.Results))...)
-		}
-		if len(impact.ImpactedFiles) > 0 {
-			resp.Warnings = append(resp.Warnings, fmt.Sprintf("impact radius spans %d files", len(impact.ImpactedFiles)))
-		}
-	case "tests_for":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results, err = collectNeighborResults(store, nodes, graphstore.EdgeKindTestedBy, true, limit)
-		if err != nil {
-			return resp, err
-		}
-		if len(resp.Results) == 0 {
-			resp.Results, err = collectNeighborResults(store, nodes, graphstore.EdgeKindTestedBy, false, limit)
-			if err != nil {
-				return resp, err
-			}
-		}
-	case "callers_of":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results, err = collectNeighborResults(store, nodes, graphstore.EdgeKindCalls, true, limit)
-		if err != nil {
-			return resp, err
-		}
-	case "callees_of":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results, err = collectNeighborResults(store, nodes, graphstore.EdgeKindCalls, false, limit)
-		if err != nil {
-			return resp, err
-		}
-	case "symbol_decisions":
-		nodes, err := findCodeNodes(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-		resp.Results, err = collectSymbolDecisionResults(store, nodes, limit)
-		if err != nil {
-			return resp, err
-		}
-	case "decision_symbols":
-		resp.Results, err = collectDecisionSymbolResults(store, query, limit)
-		if err != nil {
-			return resp, err
-		}
-	default:
-		return resp, fmt.Errorf("unknown code bridge intent %q: valid values are %s", bridgeIntent, strings.Join(sortedKeys(codeBridgeIntents), ", "))
+	if err := dispatchWarmStoreBridgeIntent(store, &resp, bridgeIntent, query, limit); err != nil {
+		return resp, err
 	}
 	if resp.Results == nil {
 		resp.Results = []GraphQueryResult{}
 	}
-	// Attach sparsity score: 0 = good evidence, 100 = no evidence.
+	annotateBridgeSparsity(store, &resp)
+	return resp, nil
+}
+
+// dispatchWarmStoreBridgeIntent routes a warm-store bridge query to the
+// matching collector, populating resp.Results / resp.Warnings on success.
+func dispatchWarmStoreBridgeIntent(store *graphstore.SQLiteStore, resp *GraphQueryResponse, bridgeIntent, query string, limit int) error {
+	switch bridgeIntent {
+	case "symbol_lookup":
+		return runSymbolLookup(store, resp, query, limit)
+	case "impact_radius":
+		return runImpactRadius(store, resp, query, limit)
+	case "tests_for":
+		return runTestsFor(store, resp, query, limit)
+	case "callers_of":
+		return runNeighbors(store, resp, query, graphstore.EdgeKindCalls, true, limit)
+	case "callees_of":
+		return runNeighbors(store, resp, query, graphstore.EdgeKindCalls, false, limit)
+	case "symbol_decisions":
+		return runSymbolDecisions(store, resp, query, limit)
+	case "decision_symbols":
+		results, err := collectDecisionSymbolResults(store, query, limit)
+		if err != nil {
+			return err
+		}
+		resp.Results = results
+		return nil
+	default:
+		return fmt.Errorf("unknown code bridge intent %q: valid values are %s", bridgeIntent, strings.Join(sortedKeys(codeBridgeIntents), ", "))
+	}
+}
+
+// runSymbolLookup populates resp with raw symbol matches for query.
+func runSymbolLookup(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+	nodes, err := findCodeNodes(store, query, limit)
+	if err != nil {
+		return err
+	}
+	resp.Results = collectGraphResults(nodes, "", limit)
+	return nil
+}
+
+// runImpactRadius runs the impact-radius lookup and projects both changed
+// and impacted nodes onto resp, attaching warning metadata when relevant.
+func runImpactRadius(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+	nodes, err := findCodeNodes(store, query, limit)
+	if err != nil {
+		return err
+	}
+	if len(nodes) == 0 {
+		resp.Warnings = append(resp.Warnings, "no matching code symbols found")
+		return nil
+	}
+	files := uniqueFilePaths(nodes)
+	impact, err := store.GetImpactRadius(files, 2, limit)
+	if err != nil {
+		return err
+	}
+	resp.Results = collectGraphResults(impact.ChangedNodes, "changed_symbol", limit)
+	if limit <= 0 || len(resp.Results) < limit {
+		resp.Results = append(resp.Results, collectGraphResults(impact.ImpactedNodes, "impacted_symbol", limit-len(resp.Results))...)
+	}
+	if len(impact.ImpactedFiles) > 0 {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("impact radius spans %d files", len(impact.ImpactedFiles)))
+	}
+	return nil
+}
+
+// uniqueFilePaths returns the deduplicated, non-empty FilePath values of
+// the given nodes.
+func uniqueFilePaths(nodes []graphstore.GraphNode) []string {
+	files := make([]string, 0, len(nodes))
+	seen := make(map[string]bool)
+	for _, node := range nodes {
+		if node.FilePath == "" || seen[node.FilePath] {
+			continue
+		}
+		seen[node.FilePath] = true
+		files = append(files, node.FilePath)
+	}
+	return files
+}
+
+// runTestsFor runs the tests_for intent: prefers inbound tested-by edges,
+// then falls back to outbound when no results were found.
+func runTestsFor(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+	nodes, err := findCodeNodes(store, query, limit)
+	if err != nil {
+		return err
+	}
+	results, err := collectNeighborResults(store, nodes, graphstore.EdgeKindTestedBy, true, limit)
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		results, err = collectNeighborResults(store, nodes, graphstore.EdgeKindTestedBy, false, limit)
+		if err != nil {
+			return err
+		}
+	}
+	resp.Results = results
+	return nil
+}
+
+// runNeighbors handles callers_of / callees_of by walking call edges in the
+// requested direction.
+func runNeighbors(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query, edgeKind string, inbound bool, limit int) error {
+	nodes, err := findCodeNodes(store, query, limit)
+	if err != nil {
+		return err
+	}
+	results, err := collectNeighborResults(store, nodes, edgeKind, inbound, limit)
+	if err != nil {
+		return err
+	}
+	resp.Results = results
+	return nil
+}
+
+// runSymbolDecisions handles the symbol_decisions intent.
+func runSymbolDecisions(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+	nodes, err := findCodeNodes(store, query, limit)
+	if err != nil {
+		return err
+	}
+	results, err := collectSymbolDecisionResults(store, nodes, limit)
+	if err != nil {
+		return err
+	}
+	resp.Results = results
+	return nil
+}
+
+// annotateBridgeSparsity attaches the 0–100 sparsity score and the
+// bridge-sparse warning when both the result set and warm store are empty.
+func annotateBridgeSparsity(store *graphstore.SQLiteStore, resp *GraphQueryResponse) {
 	nodeCount := store.CountNodes()
 	score := computeSparsityScore(len(resp.Results), nodeCount)
 	resp.SparsityScore = &score
@@ -588,7 +738,6 @@ func collectCodeBridgeResults(kgHomeDir, bridgeIntent, query string, limit int) 
 		resp.Warnings = append(resp.Warnings,
 			fmt.Sprintf("[bridge-sparse] warm store has %d nodes — run 'dot-agents kg build' then 'dot-agents kg warm --include-code' to populate code-lane", nodeCount))
 	}
-	return resp, nil
 }
 
 // computeSparsityScore returns a 0–100 sparsity score for bridge results.

@@ -474,79 +474,87 @@ func (s *PostgresStore) GetStats() (GraphStats, error) {
 	ctx := context.Background()
 	var stats GraphStats
 
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM nodes").Scan(&stats.TotalNodes); err != nil {
-		return stats, err
-	}
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM edges").Scan(&stats.TotalEdges); err != nil {
-		return stats, err
-	}
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM nodes WHERE kind='File'").Scan(&stats.FilesCount); err != nil {
-		return stats, err
-	}
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM kg_notes").Scan(&stats.NotesCount); err != nil {
-		return stats, err
-	}
-	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM note_symbol_links").Scan(&stats.LinksCount); err != nil {
+	if err := s.scanStatsCounts(ctx, &stats); err != nil {
 		return stats, err
 	}
 
 	stats.NodesByKind = map[string]int{}
-	rows, err := s.pool.Query(ctx, "SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
-	if err != nil {
-		return stats, err
-	}
-	for rows.Next() {
-		var k string
-		var c int
-		if err := rows.Scan(&k, &c); err != nil {
-			rows.Close()
-			return stats, err
-		}
-		stats.NodesByKind[k] = c
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := s.collectKindCounts(ctx, "SELECT kind, COUNT(*) FROM nodes GROUP BY kind", stats.NodesByKind); err != nil {
 		return stats, err
 	}
 
 	stats.EdgesByKind = map[string]int{}
-	rows, err = s.pool.Query(ctx, "SELECT kind, COUNT(*) FROM edges GROUP BY kind")
+	if err := s.collectKindCounts(ctx, "SELECT kind, COUNT(*) FROM edges GROUP BY kind", stats.EdgesByKind); err != nil {
+		return stats, err
+	}
+
+	languages, err := s.collectLanguages(ctx)
 	if err != nil {
 		return stats, err
 	}
+	stats.Languages = languages
+
+	stats.LastUpdated, _ = s.GetMetadata("last_updated")
+	return stats, nil
+}
+
+// scanStatsCounts populates the scalar count fields on stats by running each
+// COUNT(*) query in turn. Returns the first error encountered.
+func (s *PostgresStore) scanStatsCounts(ctx context.Context, stats *GraphStats) error {
+	queries := []struct {
+		query string
+		dst   *int
+	}{
+		{"SELECT COUNT(*) FROM nodes", &stats.TotalNodes},
+		{"SELECT COUNT(*) FROM edges", &stats.TotalEdges},
+		{"SELECT COUNT(*) FROM nodes WHERE kind='File'", &stats.FilesCount},
+		{"SELECT COUNT(*) FROM kg_notes", &stats.NotesCount},
+		{"SELECT COUNT(*) FROM note_symbol_links", &stats.LinksCount},
+	}
+	for _, q := range queries {
+		if err := s.pool.QueryRow(ctx, q.query).Scan(q.dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// collectKindCounts executes a "SELECT kind, COUNT(*) ..." style query and
+// fills dst with the resulting kind→count pairs.
+func (s *PostgresStore) collectKindCounts(ctx context.Context, query string, dst map[string]int) error {
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 	for rows.Next() {
 		var k string
 		var c int
 		if err := rows.Scan(&k, &c); err != nil {
-			rows.Close()
-			return stats, err
+			return err
 		}
-		stats.EdgesByKind[k] = c
+		dst[k] = c
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return stats, err
-	}
+	return rows.Err()
+}
 
-	rows, err = s.pool.Query(ctx, "SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''")
+// collectLanguages returns the distinct non-empty language values stored on
+// nodes.
+func (s *PostgresStore) collectLanguages(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, "SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''")
 	if err != nil {
-		return stats, err
+		return nil, err
 	}
+	defer rows.Close()
+	var languages []string
 	for rows.Next() {
 		var l string
 		if err := rows.Scan(&l); err != nil {
-			rows.Close()
-			return stats, err
+			return nil, err
 		}
-		stats.Languages = append(stats.Languages, l)
+		languages = append(languages, l)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return stats, err
-	}
-
-	stats.LastUpdated, _ = s.GetMetadata("last_updated")
-	return stats, nil
+	return languages, rows.Err()
 }
 
 // GetImpactRadius performs a pure-Go BFS from the nodes in changedFiles,

@@ -73,29 +73,29 @@ func ReadFrontmatterDescription(mdPath string) string {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	lineNum := 0
+	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
+		return ""
+	}
 	for scanner.Scan() {
 		line := scanner.Text()
-		lineNum++
-		if lineNum == 1 {
-			if strings.TrimSpace(line) == "---" {
-				inFrontmatter = true
-			} else {
-				return ""
-			}
-			continue
+		if strings.TrimSpace(line) == "---" {
+			return ""
 		}
-		if inFrontmatter {
-			if strings.TrimSpace(line) == "---" {
-				break
-			}
-			if val, ok := strings.CutPrefix(line, "description:"); ok {
-				val = strings.TrimSpace(val)
-				val = strings.Trim(val, `"'`)
-				return val
-			}
+		if val, ok := frontmatterDescription(line); ok {
+			return val
 		}
 	}
 	return ""
+}
+
+// frontmatterDescription returns the trimmed/unquoted value of a
+// "description:" frontmatter line, and whether the line matched.
+func frontmatterDescription(line string) (string, bool) {
+	val, ok := strings.CutPrefix(line, "description:")
+	if !ok {
+		return "", false
+	}
+	val = strings.TrimSpace(val)
+	val = strings.Trim(val, `"'`)
+	return val, true
 }
