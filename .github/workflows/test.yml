@@ -136,16 +136,18 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents --version
-          ./bin/dot-agents --version | grep -q "dot-agents"
+          output="$(./bin/dot-agents --version)"
+          printf '%s\n' "$output"
+          grep -q "dot-agents" <<<"$output"
 
       - name: Test --help
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents --help
-          ./bin/dot-agents --help | grep -q "Usage:"
+          output="$(./bin/dot-agents --help)"
+          printf '%s\n' "$output"
+          grep -q "Usage:" <<<"$output"
 
       - name: Test init --dry-run
         env:
@@ -231,7 +233,9 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents workflow health | grep -qiE "(healthy|health)"
+          output="$(./bin/dot-agents workflow health)"
+          printf '%s\n' "$output"
+          grep -qiE "(healthy|health)" <<<"$output"
 
       - name: Test workflow plan
         env:
@@ -268,7 +272,9 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/dot-agents kg --help | grep -q "knowledge graph"
+          output="$(./bin/dot-agents kg --help)"
+          printf '%s\n' "$output"
+          grep -q "knowledge graph" <<<"$output"
 
       - name: Test kg bridge health
         env:
