@@ -648,21 +648,11 @@ func scanNode(row nodeScanner) (*GraphNode, error) {
 func collectNodes(rows *sql.Rows) ([]GraphNode, error) {
 	var result []GraphNode
 	for rows.Next() {
-		var n GraphNode
-		var isTest int
-		var extraStr, modifiers string
-		err := rows.Scan(
-			&n.ID, &n.Kind, &n.Name, &n.QualifiedName, &n.FilePath,
-			&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
-			&n.Params, &n.ReturnType, &modifiers, &isTest,
-			&n.FileHash, &extraStr, &n.UpdatedAt,
-		)
+		n, err := scanNode(rows)
 		if err != nil {
 			return nil, err
 		}
-		n.IsTest = isTest != 0
-		n.Extra = decodeExtra(extraStr)
-		result = append(result, n)
+		result = append(result, *n)
 	}
 	return result, rows.Err()
 }

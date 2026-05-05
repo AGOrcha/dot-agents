@@ -438,18 +438,17 @@ func setupTestProject(t *testing.T) string {
 	return dir
 }
 
-func setupFanoutSliceProject(t *testing.T, sliceStatus string) string {
+func setupFanoutBase(t *testing.T, planTitle string) (dir, plansDir string) {
 	t.Helper()
-	dir := t.TempDir()
-	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "p1")
+	dir = t.TempDir()
+	plansDir = filepath.Join(dir, ".agents", "workflow", "plans", "p1")
 	if err := os.MkdirAll(plansDir, 0755); err != nil {
 		t.Fatalf("mkdir plans: %v", err)
 	}
-
 	plan := CanonicalPlan{
 		SchemaVersion: 1,
 		ID:            "p1",
-		Title:         "Fanout Test Plan",
+		Title:         planTitle,
 		Status:        "active",
 		CreatedAt:     "2026-04-10T00:00:00Z",
 		UpdatedAt:     "2026-04-10T00:00:00Z",
@@ -461,6 +460,12 @@ func setupFanoutSliceProject(t *testing.T, sliceStatus string) string {
 	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
 		t.Fatalf("write PLAN.yaml: %v", err)
 	}
+	return dir, plansDir
+}
+
+func setupFanoutSliceProject(t *testing.T, sliceStatus string) string {
+	t.Helper()
+	dir, plansDir := setupFanoutBase(t, "Fanout Test Plan")
 
 	tasks := CanonicalTaskFile{
 		SchemaVersion: 1,
@@ -517,26 +522,8 @@ func executeWorkflowCommand(t *testing.T, repo string, args ...string) error {
 }
 func setupFanoutTwoTaskProject(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	plansDir := filepath.Join(dir, ".agents", "workflow", "plans", "p1")
-	if err := os.MkdirAll(plansDir, 0755); err != nil {
-		t.Fatalf("mkdir plans: %v", err)
-	}
-	plan := CanonicalPlan{
-		SchemaVersion: 1,
-		ID:            "p1",
-		Title:         "Two-task fanout",
-		Status:        "active",
-		CreatedAt:     "2026-04-10T00:00:00Z",
-		UpdatedAt:     "2026-04-10T00:00:00Z",
-	}
-	planData, err := yaml.Marshal(plan)
-	if err != nil {
-		t.Fatalf("marshal plan: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), planData, 0644); err != nil {
-		t.Fatalf("write PLAN.yaml: %v", err)
-	}
+	dir, plansDir := setupFanoutBase(t, "Two-task fanout")
+
 	tasks := CanonicalTaskFile{
 		SchemaVersion: 1,
 		PlanID:        "p1",

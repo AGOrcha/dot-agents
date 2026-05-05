@@ -188,80 +188,41 @@ func (s *MCPServer) dispatch(method string, id json.RawMessage, params json.RawM
 	}
 }
 
+func toolWithProps(name, desc string, props map[string]any) toolDescriptor {
+	return toolDescriptor{
+		Name:        name,
+		Description: desc,
+		InputSchema: map[string]any{"type": "object", "properties": props},
+	}
+}
+
 func (s *MCPServer) handleToolsList(_ json.RawMessage) (json.RawMessage, error) {
 	tools := []toolDescriptor{
-		{
-			Name:        "build_or_update_graph_tool",
-			Description: "Build or update the code graph for the current repository.",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-		{
-			Name:        "embed_graph_tool",
-			Description: "Run graph post-processing for downstream queries.",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-		{
-			Name:        "list_graph_stats_tool",
-			Description: "Return code graph statistics.",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-		{
-			Name:        "get_impact_radius_tool",
-			Description: "Return the impact radius for a symbol.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"symbol": map[string]any{"type": "string"},
-					"depth":  map[string]any{"type": "integer"},
-				},
+		toolWithProps("build_or_update_graph_tool", "Build or update the code graph for the current repository.", map[string]any{}),
+		toolWithProps("embed_graph_tool", "Run graph post-processing for downstream queries.", map[string]any{}),
+		toolWithProps("list_graph_stats_tool", "Return code graph statistics.", map[string]any{}),
+		toolWithProps("get_impact_radius_tool", "Return the impact radius for a symbol.", map[string]any{
+			"symbol": map[string]any{"type": "string"},
+			"depth":  map[string]any{"type": "integer"},
+		}),
+		toolWithProps("semantic_search_nodes_tool", "Search the graph for matching code symbols.", map[string]any{
+			"query": map[string]any{"type": "string"},
+			"limit": map[string]any{"type": "integer"},
+		}),
+		toolWithProps("query_graph_tool", "Run a higher-level graph query by intent.", map[string]any{
+			"intent": map[string]any{"type": "string"},
+			"query":  map[string]any{"type": "string"},
+			"scope":  map[string]any{"type": "string"},
+		}),
+		toolWithProps("get_review_context_tool", "Summarize changed symbols and impact radius for a file set.", map[string]any{
+			"files": map[string]any{
+				"type":  "array",
+				"items": map[string]any{"type": "string"},
 			},
-		},
-		{
-			Name:        "semantic_search_nodes_tool",
-			Description: "Search the graph for matching code symbols.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{"type": "string"},
-					"limit": map[string]any{"type": "integer"},
-				},
-			},
-		},
-		{
-			Name:        "query_graph_tool",
-			Description: "Run a higher-level graph query by intent.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"intent": map[string]any{"type": "string"},
-					"query":  map[string]any{"type": "string"},
-					"scope":  map[string]any{"type": "string"},
-				},
-			},
-		},
-		{
-			Name:        "get_review_context_tool",
-			Description: "Summarize changed symbols and impact radius for a file set.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"files": map[string]any{
-						"type":  "array",
-						"items": map[string]any{"type": "string"},
-					},
-				},
-			},
-		},
-		{
-			Name:        "get_docs_section_tool",
-			Description: "Return a documentation section by heading.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"section": map[string]any{"type": "string"},
-				},
-			},
-		},
+		}),
+		toolWithProps("get_docs_section_tool", "Return a documentation section by heading.", map[string]any{
+			"section": map[string]any{"type": "string"},
+		}),
 	}
 	payload := map[string]any{"tools": tools}
 	return json.Marshal(payload)

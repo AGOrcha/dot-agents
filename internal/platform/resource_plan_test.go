@@ -398,12 +398,7 @@ func TestExecutePluginBundleIntentReplacesAllowlistedImportedPluginDir(t *testin
 		t.Fatal(err)
 	}
 
-	intent := validSharedPluginIntent(".opencode/plugins/runtime-plugin", "opencode")
-	plan, err := BuildResourcePlan([]ResourceIntent{intent})
-	if err != nil {
-		t.Fatalf("BuildResourcePlan: %v", err)
-	}
-	if err := plan.Execute(repo, agentsHome); err != nil {
+	if err := executePluginPlan(t, repo, agentsHome); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -431,12 +426,7 @@ func TestExecutePluginBundleIntentRejectsAllowlistedDirectoryWithoutImportedMark
 		t.Fatal(err)
 	}
 
-	intent := validSharedPluginIntent(".opencode/plugins/runtime-plugin", "opencode")
-	plan, err := BuildResourcePlan([]ResourceIntent{intent})
-	if err != nil {
-		t.Fatalf("BuildResourcePlan: %v", err)
-	}
-	err = plan.Execute(repo, agentsHome)
+	err := executePluginPlan(t, repo, agentsHome)
 	if err == nil {
 		t.Fatal("expected error when allowlisted plugin dir lacks imported marker files")
 	}
@@ -591,12 +581,7 @@ func TestExecuteDirSymlinkIntentRejectsAllowlistedDirectoryWithoutImportedMarker
 		t.Fatal(err)
 	}
 
-	intent := validSharedSkillIntent(".agents/skills/review", "test")
-	plan, err := BuildResourcePlan([]ResourceIntent{intent})
-	if err != nil {
-		t.Fatalf("BuildResourcePlan: %v", err)
-	}
-	err = plan.Execute(repo, agentsHome)
+	err := executeSkillPlan(t, repo, agentsHome)
 	if err == nil {
 		t.Fatal("expected error when allowlisted dir lacks imported marker files")
 	}
@@ -617,12 +602,7 @@ func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPr
 		t.Fatal(err)
 	}
 
-	intent := validSharedSkillIntent(".agents/skills/review", "test")
-	plan, err := BuildResourcePlan([]ResourceIntent{intent})
-	if err != nil {
-		t.Fatalf("BuildResourcePlan: %v", err)
-	}
-	if err := plan.Execute(repo, agentsHome); err != nil {
+	if err := executeSkillPlan(t, repo, agentsHome); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	info, err := os.Lstat(target)
@@ -850,4 +830,28 @@ func validSharedPluginIntent(targetPath, emitter string) ResourceIntent {
 			Emitter: emitter,
 		},
 	}
+}
+
+// executePluginPlan builds and executes a shared plugin intent for the
+// standard test path (.opencode/plugins/runtime-plugin / opencode).
+func executePluginPlan(t *testing.T, repo, agentsHome string) error {
+	t.Helper()
+	intent := validSharedPluginIntent(".opencode/plugins/runtime-plugin", "opencode")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	return plan.Execute(repo, agentsHome)
+}
+
+// executeSkillPlan builds and executes a shared skill intent for the
+// standard test path (.agents/skills/review / test).
+func executeSkillPlan(t *testing.T, repo, agentsHome string) error {
+	t.Helper()
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	return plan.Execute(repo, agentsHome)
 }

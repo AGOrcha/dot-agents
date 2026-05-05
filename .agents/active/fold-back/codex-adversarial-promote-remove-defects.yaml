@@ -1,0 +1,28 @@
+schema_version: 1
+id: codex-adversarial-promote-remove-defects
+plan_id: ""
+task_id: ""
+observation: |-
+  Codex adversarial review (2026-05-05) of branch feature/PA-cursor-projectsync-phase1-extract-293f
+  surfaced two high-severity filesystem defects not caught by prior reviews.
+
+  Finding 1 — Promote silently drops symlinked content (internal/projectsync/promote.go:107-178):
+  PromoteResource copies the source tree into canonical storage then unconditionally removes the
+  source via os.RemoveAll. CopyTree explicitly skips symlink entries. Any promoted resource
+  containing symlinks is copied incompletely and then destroyed — the command reports success
+  while the canonical copy is truncated. Recovery is manual. Fix: fail fast on symlink-bearing
+  source trees, or resolve symlink targets before deletion. Add regression test for nested-symlink
+  promote.
+
+  Finding 2 — agents remove --purge trusts raw path segments (commands/agents/remove.go:30-170):
+  RemoveAgentIn constructs canonicalPath from rc.Project and the raw name input without validating
+  that either segment stays within ~/.agents/agents/<project>/. A malicious or corrupted repo can
+  turn --purge into deletion of sibling trees under ~/.agents. Fix: reject identifiers containing
+  separators, .., or absolute paths; enforce final target with filepath.Rel/prefix check before
+  RemoveAll. Add traversal regression tests for both manifest-sourced project names and CLI-supplied
+  agent names.
+
+  Verdict: needs-attention / no-ship for these two issues before release.
+classification: medium
+routed_to: unrouted
+created_at: "2026-05-05T00:00:00Z"

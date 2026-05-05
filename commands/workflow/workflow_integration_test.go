@@ -53,6 +53,25 @@ func setupCheckpointStateTest(t *testing.T, nextAction, status, timestamp, missi
 	return state
 }
 
+// setupVerifyRecordReviewTest initialises a workflow-proj repo with a review
+// gate checkpoint and a delegation contract, then chdirs into the repo.
+// Returns the repo path. sliceID and contractID distinguish test cases.
+func setupVerifyRecordReviewTest(t *testing.T, sliceID, contractID string) string {
+	t.Helper()
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, sliceID, "plan-loop", contractID)
+
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
 func assertWorkflowTaskStatus(t *testing.T, tf *CanonicalTaskFile, taskID, want string) {
 	t.Helper()
 	for _, task := range tf.Tasks {
@@ -264,17 +283,7 @@ func TestReviewDecisionSchema_Validate(t *testing.T) {
 }
 
 func TestWorkflow_VerifyRecordReview_WritesArtifactAndLog(t *testing.T) {
-	repo := initWorkflowTestRepo(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
-	saveTestDelegationContract(t, repo, "slice-99", "plan-loop", "del-slice-99-1")
-
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
+	repo := setupVerifyRecordReviewTest(t, "slice-99", "del-slice-99-1")
 
 	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
 		Scope:       "repo",
@@ -316,17 +325,7 @@ func TestWorkflow_VerifyRecordReview_WritesArtifactAndLog(t *testing.T) {
 }
 
 func TestWorkflow_VerifyRecordReview_Errors(t *testing.T) {
-	repo := initWorkflowTestRepo(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
-	saveTestDelegationContract(t, repo, "slice-err", "plan-loop", "del-slice-err")
-
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
+	setupVerifyRecordReviewTest(t, "slice-err", "del-slice-err")
 
 	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
 		Scope:    "repo",

@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,31 +74,7 @@ func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {
 // LoadAgentsRC → append Skills → Save path keeps ExtraFields (custom keys) and known
 // multi-source declarations — not only the isolated marshal tests.
 func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, "agents")
-	projectPath := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(agentsHome, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(projectPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	manifest := `{
-  "version": 1,
-  "project": "regproj",
-  "sources": [{"type":"local"},{"type":"git","url":"https://example.com/repo.git"}],
-  "hooks": false,
-  "mcp": false,
-  "settings": false,
-  "customPolicy": {"interval": "daily", "auto": true},
-  "myteam": "platform"
-}`
-	if err := os.WriteFile(filepath.Join(projectPath, config.AgentsRCFile), []byte(manifest), 0644); err != nil {
-		t.Fatal(err)
-	}
-
+	_, projectPath := testutil.WritePreservationManifest(t)
 	testutil.WriteSkillManifest(t, projectPath, "extra-skill")
 
 	if err := PromoteSkillIn("extra-skill", projectPath); err != nil {
@@ -110,25 +85,7 @@ func TestPromoteSkillIn_PreservesManifestUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentsRC: %v", err)
 	}
-	if len(rc.ExtraFields) < 2 {
-		t.Fatalf("ExtraFields: got %d keys, want at least 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
-	}
-	if _, ok := rc.ExtraFields["customPolicy"]; !ok {
-		t.Error("ExtraFields missing 'customPolicy' after promote")
-	}
-	if _, ok := rc.ExtraFields["myteam"]; !ok {
-		t.Error("ExtraFields missing 'myteam' after promote")
-	}
-	var policyVal map[string]any
-	if err := json.Unmarshal(rc.ExtraFields["customPolicy"], &policyVal); err != nil {
-		t.Fatalf("unmarshal customPolicy: %v", err)
-	}
-	if policyVal["interval"] != "daily" {
-		t.Errorf("customPolicy.interval: got %v, want daily", policyVal["interval"])
-	}
-	if len(rc.Sources) < 2 {
-		t.Errorf("Sources: want at least 2 entries preserved, got %+v", rc.Sources)
-	}
+	testutil.AssertExtraFieldsPreserved(t, rc)
 	found := false
 	for _, s := range rc.Skills {
 		if s == "extra-skill" {
@@ -195,22 +152,7 @@ func TestPromoteSkillIn_ErrorSkillNotFound(t *testing.T) {
 }
 
 func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, "agents")
-	projectPath := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(agentsHome, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(projectPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTS_HOME", agentsHome)
-
-	// Write manifest with empty project name.
-	rc := &config.AgentsRC{Version: 1, Project: ""}
-	if err := rc.Save(projectPath); err != nil {
-		t.Fatalf("rc.Save: %v", err)
-	}
+	_, projectPath := testutil.NewTempProject(t, "")
 	testutil.WriteSkillManifest(t, projectPath, "some-skill")
 
 	err := PromoteSkillIn("some-skill", projectPath)
