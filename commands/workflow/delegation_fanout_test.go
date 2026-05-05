@@ -103,44 +103,69 @@ func writeFanoutPromptFixture(t *testing.T, repo string) {
 	}
 }
 
+func assertFanoutWorkerProfile(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	if bundle.Worker.Profile != "custom-worker" {
+		t.Fatalf("profile %q", bundle.Worker.Profile)
+	}
+}
+
+func assertFanoutPromptFields(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	if len(bundle.Prompt.Inline) != 2 || bundle.Prompt.Inline[0] != "line one" {
+		t.Fatalf("inline prompt: %+v", bundle.Prompt.Inline)
+	}
+	if len(bundle.Prompt.PromptFiles) != 1 || bundle.Prompt.PromptFiles[0] != ".agents/ctx/prompt.md" {
+		t.Fatalf("prompt_files: %+v", bundle.Prompt.PromptFiles)
+	}
+}
+
+func assertFanoutContextFields(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	if len(bundle.Context.RequiredFiles) != 1 {
+		t.Fatalf("context: %+v", bundle.Context.RequiredFiles)
+	}
+}
+
+func assertFanoutVerificationFields(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	if bundle.Verification.FeedbackGoal != "Prove fanout bundles persist." {
+		t.Fatalf("feedback_goal %q", bundle.Verification.FeedbackGoal)
+	}
+	if len(bundle.Verification.ScenarioTags) != 2 {
+		t.Fatalf("scenario_tags: %+v", bundle.Verification.ScenarioTags)
+	}
+	if len(bundle.Verification.RegressionArtifacts) != 1 || !strings.HasSuffix(bundle.Verification.RegressionArtifacts[0], "TASKS.yaml") {
+		t.Fatalf("regression: %+v", bundle.Verification.RegressionArtifacts)
+	}
+}
+
+func assertFanoutSelectionPolicy(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	if bundle.Selection == nil || bundle.Selection.Reason != "integration test" {
+		t.Fatalf("selection: %+v", bundle.Selection)
+	}
+	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.RequireNegativeCoverage == nil || !*bundle.Verification.EvidencePolicy.RequireNegativeCoverage {
+		t.Fatal("expected require_negative_coverage")
+	}
+}
+
 func assertFanoutPromptBundle(t *testing.T, bundle delegationBundleYAML) {
 	t.Helper()
 	t.Run("worker-profile", func(t *testing.T) {
-		if bundle.Worker.Profile != "custom-worker" {
-			t.Fatalf("profile %q", bundle.Worker.Profile)
-		}
+		assertFanoutWorkerProfile(t, bundle)
 	})
 	t.Run("prompt-fields", func(t *testing.T) {
-		if len(bundle.Prompt.Inline) != 2 || bundle.Prompt.Inline[0] != "line one" {
-			t.Fatalf("inline prompt: %+v", bundle.Prompt.Inline)
-		}
-		if len(bundle.Prompt.PromptFiles) != 1 || bundle.Prompt.PromptFiles[0] != ".agents/ctx/prompt.md" {
-			t.Fatalf("prompt_files: %+v", bundle.Prompt.PromptFiles)
-		}
+		assertFanoutPromptFields(t, bundle)
 	})
 	t.Run("context-fields", func(t *testing.T) {
-		if len(bundle.Context.RequiredFiles) != 1 {
-			t.Fatalf("context: %+v", bundle.Context.RequiredFiles)
-		}
+		assertFanoutContextFields(t, bundle)
 	})
 	t.Run("verification-fields", func(t *testing.T) {
-		if bundle.Verification.FeedbackGoal != "Prove fanout bundles persist." {
-			t.Fatalf("feedback_goal %q", bundle.Verification.FeedbackGoal)
-		}
-		if len(bundle.Verification.ScenarioTags) != 2 {
-			t.Fatalf("scenario_tags: %+v", bundle.Verification.ScenarioTags)
-		}
-		if len(bundle.Verification.RegressionArtifacts) != 1 || !strings.HasSuffix(bundle.Verification.RegressionArtifacts[0], "TASKS.yaml") {
-			t.Fatalf("regression: %+v", bundle.Verification.RegressionArtifacts)
-		}
+		assertFanoutVerificationFields(t, bundle)
 	})
 	t.Run("selection-policy", func(t *testing.T) {
-		if bundle.Selection == nil || bundle.Selection.Reason != "integration test" {
-			t.Fatalf("selection: %+v", bundle.Selection)
-		}
-		if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.RequireNegativeCoverage == nil || !*bundle.Verification.EvidencePolicy.RequireNegativeCoverage {
-			t.Fatal("expected require_negative_coverage")
-		}
+		assertFanoutSelectionPolicy(t, bundle)
 	})
 }
 
