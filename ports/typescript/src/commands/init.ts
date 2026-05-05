@@ -65,19 +65,20 @@ function handleExistingHome(home: string, result: InitResult): InitResult {
 }
 
 /** Create a single directory, handling EEXIST gracefully. */
-async function createDir(dir: string, result: InitResult, dryRun: boolean): Promise<void> {
-  if (dryRun) {
+async function createDir(dir: string, result: InitResult): Promise<void> {
+  try {
+    await mkdir(dir, { recursive: true });
     result.created.push(dir);
-  } else {
-    try {
-      await mkdir(dir, { recursive: true });
-      result.created.push(dir);
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code !== "EEXIST") throw e;
-      result.skipped.push(dir);
-    }
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code !== "EEXIST") throw e;
+    result.skipped.push(dir);
   }
+}
+
+/** Create a single directory in dry-run mode (no-op). */
+async function createDirDryRun(dir: string, result: InitResult): Promise<void> {
+  result.created.push(dir);
 }
 
 /** Run the init command. Returns a result summary. */
@@ -94,8 +95,24 @@ export async function runInit(opts: InitOptions = {}): Promise<InitResult> {
   }
 
   const dirs = standardDirs(home);
+  if (opts.dryRun) {
+    return runInitDryRun(dirs, result);
+  }
+  return runInitExecute(dirs, result);
+}
+
+/** Execute init with actual directory creation. */
+async function runInitExecute(dirs: string[], result: InitResult): Promise<InitResult> {
   for (const dir of dirs) {
-    await createDir(dir, result, opts.dryRun ?? false);
+    await createDir(dir, result);
+  }
+  return result;
+}
+
+/** Execute init in dry-run mode (no filesystem changes). */
+async function runInitDryRun(dirs: string[], result: InitResult): Promise<InitResult> {
+  for (const dir of dirs) {
+    await createDirDryRun(dir, result);
   }
   return result;
 }

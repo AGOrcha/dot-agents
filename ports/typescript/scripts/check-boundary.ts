@@ -364,28 +364,56 @@ function extractLocalFlags(src: string): string[] {
   return [...out].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Determine if a character should update quote state.
+ * Returns true and updates quote if we enter/exit a string literal.
+ */
+function updateQuoteState(ch: string, quote: string | null, prevCh?: string): string | null {
+  if (quote) {
+    // In a quoted string: check for escape or closing quote
+    if (prevCh === "\\" && ch === quote) {
+      // Escaped quote — stay in quote
+      return quote;
+    }
+    if (ch === quote) {
+      // Closing quote
+      return null;
+    }
+    return quote;
+  }
+  // Not in a quote: check for opening quote
+  if (ch === '"' || ch === "'" || ch === "`") {
+    return ch;
+  }
+  return null;
+}
+
 function findCallEnd(src: string, open: number): number {
   let depth = 0;
   let quote: string | null = null;
+  let prevCh = "";
   for (let i = open; i < src.length; i++) {
     const ch = src[i];
-    if (quote) {
-      if (ch === "\\" && i+1 < src.length) {
-        i++;
-        continue;
+    const newQuote = updateQuoteState(ch, quote, prevCh);
+    quote = newQuote;
+
+    // Handle escape sequences in quoted strings
+    if (quote && ch === "\\" && i + 1 < src.length) {
+      prevCh = ch;
+      i++;
+      continue;
+    }
+
+    // Track parenthesis depth only outside quoted strings
+    if (!quote) {
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        if (depth === 0) return i;
       }
-      if (ch === quote) quote = null;
-      continue;
     }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "(") depth++;
-    if (ch === ")") {
-      depth--;
-      if (depth === 0) return i;
-    }
+
+    prevCh = ch;
   }
   return -1;
 }

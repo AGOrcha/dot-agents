@@ -94,8 +94,10 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<DoctorResult>
   const home = opts.agentsHomeOverride ?? agentsHome();
   const checks: DoctorCheck[] = [];
 
-  checks.push(await checkAgentsHome(home));
-  checks.push(await checkConfigJson(home));
+  checks.push(
+    await checkAgentsHome(home),
+    await checkConfigJson(home),
+  );
 
   const cfg = await loadConfig(home);
   const names = listProjects(cfg);
