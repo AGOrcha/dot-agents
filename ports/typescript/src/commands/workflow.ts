@@ -99,9 +99,7 @@ export async function runWorkflowOrient(
   // Branch: loop-state.md doesn't always encode it in the Current Position section.
   // Attempt a best-effort parse from the checkpoint reference line if present.
   let branchMatch = /sha\s+`[a-f0-9]+`/.exec(section);
-  if (!branchMatch) {
-    branchMatch = /branch[:\s]+`([^`]+)`/i.exec(section);
-  }
+  branchMatch ??= /branch[:\s]+`([^`]+)`/i.exec(section);
   const branch = branchMatch ? (branchMatch[1] ?? null) : null;
 
   return { branch, plan, task, found: true, warnings };

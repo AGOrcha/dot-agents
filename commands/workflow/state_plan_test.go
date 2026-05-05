@@ -12,39 +12,8 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
-func TestCurrentWorkflowProjectUsesManifestProjectName(t *testing.T) {
-	repo := initWorkflowTestRepo(t)
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
-
-	project, err := currentWorkflowProject()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if project.Name != "workflow-proj" {
-		t.Fatalf("project.Name = %q, want workflow-proj", project.Name)
-	}
-	gotPath, err := filepath.EvalSymlinks(project.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantPath, err := filepath.EvalSymlinks(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotPath != wantPath {
-		t.Fatalf("project.Path = %q, want %q", gotPath, wantPath)
-	}
-}
-
-func TestCollectWorkflowStateReadsPlansCheckpointSourcesAndProposals(t *testing.T) {
-	repo := initWorkflowTestRepo(t)
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
-
+func seedWorkflowStateContext(t *testing.T, repo, agentsHome string) {
+	t.Helper()
 	contextDir := filepath.Join(config.AgentsContextDir(), "workflow-proj")
 	if err := os.MkdirAll(contextDir, 0755); err != nil {
 		t.Fatal(err)
@@ -78,6 +47,67 @@ blockers: []
 	if err := os.WriteFile(filepath.Join(proposalsDir, "one.yaml"), []byte("id: one\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func assertWorkflowStateOverview(t *testing.T, state *workflowOrientState) {
+	t.Helper()
+	if state.Project.Name != "workflow-proj" {
+		t.Fatalf("project name = %q", state.Project.Name)
+	}
+	if len(state.ActivePlans) != 1 || state.ActivePlans[0].Title != "Sample Plan" {
+		t.Fatalf("unexpected plans: %+v", state.ActivePlans)
+	}
+	if len(state.ActivePlans[0].PendingItems) == 0 || state.ActivePlans[0].PendingItems[0] != "First pending task" {
+		t.Fatalf("unexpected pending items: %+v", state.ActivePlans[0].PendingItems)
+	}
+}
+
+func assertWorkflowStateAncillary(t *testing.T, state *workflowOrientState) {
+	t.Helper()
+	if len(state.Handoffs) != 1 || state.Handoffs[0].Title != "Next Handoff" {
+		t.Fatalf("unexpected handoffs: %+v", state.Handoffs)
+	}
+	if len(state.Lessons) != 2 {
+		t.Fatalf("unexpected lessons: %+v", state.Lessons)
+	}
+	if state.Proposals.PendingCount != 1 {
+		t.Fatalf("pending proposals = %d, want 1", state.Proposals.PendingCount)
+	}
+}
+
+func TestCurrentWorkflowProjectUsesManifestProjectName(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	project, err := currentWorkflowProject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "workflow-proj" {
+		t.Fatalf("project.Name = %q, want workflow-proj", project.Name)
+	}
+	gotPath, err := filepath.EvalSymlinks(project.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != wantPath {
+		t.Fatalf("project.Path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestCollectWorkflowStateReadsPlansCheckpointSourcesAndProposals(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	seedWorkflowStateContext(t, repo, agentsHome)
 
 	oldwd, _ := os.Getwd()
 	defer os.Chdir(oldwd)
@@ -91,15 +121,7 @@ blockers: []
 	}
 
 	t.Run("project-and-plans", func(t *testing.T) {
-		if state.Project.Name != "workflow-proj" {
-			t.Fatalf("project name = %q", state.Project.Name)
-		}
-		if len(state.ActivePlans) != 1 || state.ActivePlans[0].Title != "Sample Plan" {
-			t.Fatalf("unexpected plans: %+v", state.ActivePlans)
-		}
-		if len(state.ActivePlans[0].PendingItems) == 0 || state.ActivePlans[0].PendingItems[0] != "First pending task" {
-			t.Fatalf("unexpected pending items: %+v", state.ActivePlans[0].PendingItems)
-		}
+		assertWorkflowStateOverview(t, state)
 	})
 
 	t.Run("checkpoint-and-actions", func(t *testing.T) {
@@ -115,15 +137,7 @@ blockers: []
 	})
 
 	t.Run("ancillary-artifacts", func(t *testing.T) {
-		if len(state.Handoffs) != 1 || state.Handoffs[0].Title != "Next Handoff" {
-			t.Fatalf("unexpected handoffs: %+v", state.Handoffs)
-		}
-		if len(state.Lessons) != 2 {
-			t.Fatalf("unexpected lessons: %+v", state.Lessons)
-		}
-		if state.Proposals.PendingCount != 1 {
-			t.Fatalf("pending proposals = %d, want 1", state.Proposals.PendingCount)
-		}
+		assertWorkflowStateAncillary(t, state)
 	})
 }
 
@@ -768,7 +782,6 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 	t.Run("actionable", func(t *testing.T) {
 		repo := initWorkflowTestRepo(t)
 		addCanonicalPendingPlanFixture(t, repo)
-
 		state, err := collectWorkflowCompletionState(repo, "wave-next")
 		if err != nil {
 			t.Fatal(err)
@@ -787,17 +800,14 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 	t.Run("locked", func(t *testing.T) {
 		repo := initWorkflowTestRepo(t)
 		addCanonicalPendingPlanFixture(t, repo)
-
 		now := time.Now().UTC().Format(time.RFC3339)
-		c := &DelegationContract{
+		if err := saveDelegationContract(repo, &DelegationContract{
 			SchemaVersion: 1, ID: "del-planner", ParentPlanID: "wave-next", ParentTaskID: "planner",
 			Title: "x", WriteScope: []string{"commands/"}, Status: "active",
 			CreatedAt: now, UpdatedAt: now,
-		}
-		if err := saveDelegationContract(repo, c); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
-
 		state, err := collectWorkflowCompletionState(repo, "wave-next")
 		if err != nil {
 			t.Fatal(err)
@@ -816,7 +826,6 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 	t.Run("paused", func(t *testing.T) {
 		repo := initWorkflowTestRepo(t)
 		savePausedPlanFixture(t, repo)
-
 		state, err := collectWorkflowCompletionState(repo, "paused-plan")
 		if err != nil {
 			t.Fatal(err)

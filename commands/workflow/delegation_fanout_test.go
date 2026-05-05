@@ -10,6 +10,63 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+func loadFanoutContractAndBundle(t *testing.T, repo, taskID string) (*DelegationContract, delegationBundleYAML) {
+	t.Helper()
+	contract, err := loadDelegationContract(repo, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle delegationBundleYAML
+	if err := yaml.Unmarshal(data, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	return contract, bundle
+}
+
+func assertFanoutContract(t *testing.T, contract *DelegationContract, owner, taskID string, wantScope []string) {
+	t.Helper()
+	if contract.ParentTaskID != taskID {
+		t.Fatalf("parent_task_id = %q, want %s", contract.ParentTaskID, taskID)
+	}
+	if contract.Owner != owner {
+		t.Fatalf("owner = %q, want %s", contract.Owner, owner)
+	}
+	if !strings.HasPrefix(contract.ID, "del-"+taskID+"-") {
+		t.Fatalf("contract id = %q, want prefix del-%s-", contract.ID, taskID)
+	}
+	if len(contract.WriteScope) != len(wantScope) {
+		t.Fatalf("write_scope = %+v, want %+v", contract.WriteScope, wantScope)
+	}
+	for i := range wantScope {
+		if contract.WriteScope[i] != wantScope[i] {
+			t.Fatalf("write_scope = %+v, want %+v", contract.WriteScope, wantScope)
+		}
+	}
+}
+
+func assertFanoutBundleDefaults(t *testing.T, bundle delegationBundleYAML, delegationID, planID, taskID, sliceID string) {
+	t.Helper()
+	if bundle.DelegationID != delegationID || bundle.PlanID != planID || bundle.TaskID != taskID {
+		t.Fatalf("bundle ids: %+v", bundle)
+	}
+	if bundle.SliceID != sliceID {
+		t.Fatalf("slice_id = %q, want %s", bundle.SliceID, sliceID)
+	}
+	if bundle.Worker.Profile != defaultDelegateProfile {
+		t.Fatalf("profile = %q", bundle.Worker.Profile)
+	}
+	if bundle.Verification.FeedbackGoal == "" {
+		t.Fatal("expected default feedback_goal")
+	}
+	if len(bundle.Closeout.WorkerMust) == 0 || len(bundle.Closeout.ParentMust) == 0 {
+		t.Fatal("expected closeout defaults")
+	}
+}
+
 func TestLoadSaveDelegationContract_RoundTrip(t *testing.T) {
 	dir := setupTestProject(t)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -104,47 +161,9 @@ func TestFanoutFromSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	contract, err := loadDelegationContract(repo, "t1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if contract.ParentTaskID != "t1" {
-		t.Fatalf("parent_task_id = %q, want t1", contract.ParentTaskID)
-	}
-	if contract.Owner != "test" {
-		t.Fatalf("owner = %q, want test", contract.Owner)
-	}
-	if !strings.HasPrefix(contract.ID, "del-t1-") {
-		t.Fatalf("contract id = %q, want prefix del-t1-", contract.ID)
-	}
-	if len(contract.WriteScope) != 1 || contract.WriteScope[0] != "commands/" {
-		t.Fatalf("write_scope = %+v, want [commands/]", contract.WriteScope)
-	}
-
-	bundlePath := filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml")
-	data, err := os.ReadFile(bundlePath)
-	if err != nil {
-		t.Fatalf("delegation bundle: %v", err)
-	}
-	var bundle delegationBundleYAML
-	if err := yaml.Unmarshal(data, &bundle); err != nil {
-		t.Fatal(err)
-	}
-	if bundle.DelegationID != contract.ID || bundle.PlanID != "p1" || bundle.TaskID != "t1" {
-		t.Fatalf("bundle ids: %+v", bundle)
-	}
-	if bundle.SliceID != "s1" {
-		t.Fatalf("slice_id = %q, want s1", bundle.SliceID)
-	}
-	if bundle.Worker.Profile != defaultDelegateProfile {
-		t.Fatalf("profile = %q", bundle.Worker.Profile)
-	}
-	if bundle.Verification.FeedbackGoal == "" {
-		t.Fatal("expected default feedback_goal")
-	}
-	if len(bundle.Closeout.WorkerMust) == 0 || len(bundle.Closeout.ParentMust) == 0 {
-		t.Fatal("expected closeout defaults")
-	}
+	contract, bundle := loadFanoutContractAndBundle(t, repo, "t1")
+	assertFanoutContract(t, contract, "test", "t1", []string{"commands/"})
+	assertFanoutBundleDefaults(t, bundle, contract.ID, "p1", "t1", "s1")
 }
 
 func TestFanoutTwoTasksDistinctBundles(t *testing.T) {
@@ -226,18 +245,7 @@ func TestFanoutDelegationBundlePromptAndFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contract, err := loadDelegationContract(repo, "t1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", contract.ID+".yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var bundle delegationBundleYAML
-	if err := yaml.Unmarshal(data, &bundle); err != nil {
-		t.Fatal(err)
-	}
+	_, bundle := loadFanoutContractAndBundle(t, repo, "t1")
 
 	t.Run("worker-profile", func(t *testing.T) {
 		if bundle.Worker.Profile != "custom-worker" {

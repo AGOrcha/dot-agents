@@ -303,6 +303,16 @@ func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 	return applier(p, value)
 }
 
+func preferenceSourceFromPresence(repoSet, localSet bool) string {
+	if localSet {
+		return "local"
+	}
+	if repoSet {
+		return "repo"
+	}
+	return "default"
+}
+
 func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSource, error) {
 	defaults := defaultWorkflowPreferences()
 	var repo WorkflowPreferences
@@ -323,46 +333,17 @@ func resolvePreferencesWithSources(projectPath, project string) ([]preferenceSou
 	}
 	resolved := mergePreferences(defaults, repo, local)
 
-	strSrc := func(_, r, l *string) string {
-		if l != nil {
-			return "local"
-		}
-		if r != nil {
-			return "repo"
-		}
-		return "default"
-	}
-	boolSrc := func(_, r, l *bool) string {
-		if l != nil {
-			return "local"
-		}
-		if r != nil {
-			return "repo"
-		}
-		return "default"
-	}
-
-	intSrc := func(_, r, l *int) string {
-		if l != nil {
-			return "local"
-		}
-		if r != nil {
-			return "repo"
-		}
-		return "default"
-	}
-
 	return []preferenceSource{
-		{preferenceKeyVerificationTestCommand, strPtrVal(resolved.Verification.TestCommand), strSrc(defaults.Verification.TestCommand, repo.Verification.TestCommand, local.Verification.TestCommand)},
-		{preferenceKeyVerificationLintCommand, strPtrVal(resolved.Verification.LintCommand), strSrc(defaults.Verification.LintCommand, repo.Verification.LintCommand, local.Verification.LintCommand)},
-		{preferenceKeyVerificationRequireRegressionBeforeHandoff, boolPtrStr(resolved.Verification.RequireRegressionBeforeHandoff), boolSrc(defaults.Verification.RequireRegressionBeforeHandoff, repo.Verification.RequireRegressionBeforeHandoff, local.Verification.RequireRegressionBeforeHandoff)},
-		{preferenceKeyPlanningPlanDirectory, strPtrVal(resolved.Planning.PlanDirectory), strSrc(defaults.Planning.PlanDirectory, repo.Planning.PlanDirectory, local.Planning.PlanDirectory)},
-		{preferenceKeyPlanningRequirePlanBeforeCode, boolPtrStr(resolved.Planning.RequirePlanBeforeCode), boolSrc(defaults.Planning.RequirePlanBeforeCode, repo.Planning.RequirePlanBeforeCode, local.Planning.RequirePlanBeforeCode)},
-		{preferenceKeyReviewReviewOrder, strPtrVal(resolved.Review.ReviewOrder), strSrc(defaults.Review.ReviewOrder, repo.Review.ReviewOrder, local.Review.ReviewOrder)},
-		{preferenceKeyReviewRequireFindingsFirst, boolPtrStr(resolved.Review.RequireFindingsFirst), boolSrc(defaults.Review.RequireFindingsFirst, repo.Review.RequireFindingsFirst, local.Review.RequireFindingsFirst)},
-		{preferenceKeyExecutionPackageManager, strPtrVal(resolved.Execution.PackageManager), strSrc(defaults.Execution.PackageManager, repo.Execution.PackageManager, local.Execution.PackageManager)},
-		{preferenceKeyExecutionFormatter, strPtrVal(resolved.Execution.Formatter), strSrc(defaults.Execution.Formatter, repo.Execution.Formatter, local.Execution.Formatter)},
-		{preferenceKeyExecutionMaxParallelWorkers, intPtrStr(resolved.Execution.MaxParallelWorkers), intSrc(defaults.Execution.MaxParallelWorkers, repo.Execution.MaxParallelWorkers, local.Execution.MaxParallelWorkers)},
+		{preferenceKeyVerificationTestCommand, strPtrVal(resolved.Verification.TestCommand), preferenceSourceFromPresence(repo.Verification.TestCommand != nil, local.Verification.TestCommand != nil)},
+		{preferenceKeyVerificationLintCommand, strPtrVal(resolved.Verification.LintCommand), preferenceSourceFromPresence(repo.Verification.LintCommand != nil, local.Verification.LintCommand != nil)},
+		{preferenceKeyVerificationRequireRegressionBeforeHandoff, boolPtrStr(resolved.Verification.RequireRegressionBeforeHandoff), preferenceSourceFromPresence(repo.Verification.RequireRegressionBeforeHandoff != nil, local.Verification.RequireRegressionBeforeHandoff != nil)},
+		{preferenceKeyPlanningPlanDirectory, strPtrVal(resolved.Planning.PlanDirectory), preferenceSourceFromPresence(repo.Planning.PlanDirectory != nil, local.Planning.PlanDirectory != nil)},
+		{preferenceKeyPlanningRequirePlanBeforeCode, boolPtrStr(resolved.Planning.RequirePlanBeforeCode), preferenceSourceFromPresence(repo.Planning.RequirePlanBeforeCode != nil, local.Planning.RequirePlanBeforeCode != nil)},
+		{preferenceKeyReviewReviewOrder, strPtrVal(resolved.Review.ReviewOrder), preferenceSourceFromPresence(repo.Review.ReviewOrder != nil, local.Review.ReviewOrder != nil)},
+		{preferenceKeyReviewRequireFindingsFirst, boolPtrStr(resolved.Review.RequireFindingsFirst), preferenceSourceFromPresence(repo.Review.RequireFindingsFirst != nil, local.Review.RequireFindingsFirst != nil)},
+		{preferenceKeyExecutionPackageManager, strPtrVal(resolved.Execution.PackageManager), preferenceSourceFromPresence(repo.Execution.PackageManager != nil, local.Execution.PackageManager != nil)},
+		{preferenceKeyExecutionFormatter, strPtrVal(resolved.Execution.Formatter), preferenceSourceFromPresence(repo.Execution.Formatter != nil, local.Execution.Formatter != nil)},
+		{preferenceKeyExecutionMaxParallelWorkers, intPtrStr(resolved.Execution.MaxParallelWorkers), preferenceSourceFromPresence(repo.Execution.MaxParallelWorkers != nil, local.Execution.MaxParallelWorkers != nil)},
 	}, nil
 }
 

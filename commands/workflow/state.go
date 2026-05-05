@@ -489,6 +489,21 @@ func isCheckpointCurrent(git workflowGitSummary, checkpoint *workflowCheckpoint)
 	return checkpoint.Git.Branch == git.Branch && checkpoint.Git.SHA == git.SHA
 }
 
+func completedPlanStatus(trimmed string) (bool, bool) {
+	if !strings.HasPrefix(trimmed, "Status:") {
+		return false, false
+	}
+	status := strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
+	return strings.HasPrefix(strings.ToLower(status), "completed"), true
+}
+
+func pendingPlanItem(trimmed string) (string, bool) {
+	if !strings.HasPrefix(trimmed, "- [ ] ") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "- [ ] ")), true
+}
+
 func readWorkflowPlan(path string) (workflowPlanSummary, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -510,15 +525,14 @@ func readWorkflowPlan(path string) (workflowPlanSummary, error) {
 		if trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "Status:") {
-			status := strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
-			if strings.HasPrefix(strings.ToLower(status), "completed") {
+		if isCompleted, ok := completedPlanStatus(trimmed); ok {
+			if isCompleted {
 				completed = true
 			}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "- [ ] ") {
-			pending = append(pending, strings.TrimSpace(strings.TrimPrefix(trimmed, "- [ ] ")))
+		if item, ok := pendingPlanItem(trimmed); ok {
+			pending = append(pending, item)
 			if len(pending) == 3 {
 				break
 			}

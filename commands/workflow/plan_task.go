@@ -326,55 +326,54 @@ func deriveScopeRunScopeLane(projectPath string, seedSymbols, seedPaths []string
 		}
 	}
 
-	// symbol_lookup and callers_of for each seed symbol.
 	for _, sym := range seedSymbols {
 		for _, intent := range []string{"symbol_lookup", "callers_of"} {
-			files := deriveScopeKGBridgeQuery(projectPath, intent, sym)
-			q := ScopeQuery{
-				Tool:    "kg",
-				Kind:    "bridge_query",
-				Intent:  intent,
-				Subject: sym,
-			}
-			if len(files) > 0 {
-				q.Summary = &ScopeQuerySummary{Files: files}
+			if files := appendScopeBridgeQuery(projectPath, intent, sym, ev); len(files) > 0 {
 				addFiles(files)
 			}
-			ev.Queries = append(ev.Queries, q)
 		}
 	}
 
-	// impact_radius for each seed path.
 	for _, p := range seedPaths {
-		files := deriveScopeKGBridgeQuery(projectPath, "impact_radius", p)
-		q := ScopeQuery{
-			Tool:    "kg",
-			Kind:    "bridge_query",
-			Intent:  "impact_radius",
-			Subject: p,
-		}
-		if len(files) > 0 {
-			q.Summary = &ScopeQuerySummary{Files: files}
+		if files := appendScopeBridgeQuery(projectPath, "impact_radius", p, ev); len(files) > 0 {
 			addFiles(files)
 		}
-		ev.Queries = append(ev.Queries, q)
 	}
 
-	// Merge query-discovered files into required_paths (dedup against existing).
+	appendScopeRequiredPaths(ev, allFiles)
+	return allFiles
+}
+
+func appendScopeBridgeQuery(projectPath, intent, subject string, ev *ScopeEvidence) []string {
+	files := deriveScopeKGBridgeQuery(projectPath, intent, subject)
+	q := ScopeQuery{
+		Tool:    "kg",
+		Kind:    "bridge_query",
+		Intent:  intent,
+		Subject: subject,
+	}
+	if len(files) > 0 {
+		q.Summary = &ScopeQuerySummary{Files: files}
+	}
+	ev.Queries = append(ev.Queries, q)
+	return files
+}
+
+func appendScopeRequiredPaths(ev *ScopeEvidence, files []string) {
 	existingPaths := make(map[string]bool)
 	for _, rp := range ev.RequiredPaths {
 		existingPaths[rp.Path] = true
 	}
-	for _, f := range allFiles {
-		if !existingPaths[f] {
-			ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{
-				Path:    f,
-				Because: []string{"discovered via scope-lane graph query"},
-			})
-			existingPaths[f] = true
+	for _, f := range files {
+		if existingPaths[f] {
+			continue
 		}
+		ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{
+			Path:    f,
+			Because: []string{"discovered via scope-lane graph query"},
+		})
+		existingPaths[f] = true
 	}
-	return allFiles
 }
 
 // deriveScopeKGBridgeQuery runs one kg bridge query subcommand and returns the
@@ -436,27 +435,34 @@ func deriveScopeRunContextLane(planID, taskID string, adapter *LocalGraphAdapter
 			Intent:  intent,
 			Subject: q,
 		}
-		if len(resp.Results) > 0 {
-			var files []string
-			for _, r := range resp.Results {
-				if r.Path != "" {
-					files = append(files, r.Path)
-				}
-			}
-			if len(files) > 0 {
-				sq.Summary = &ScopeQuerySummary{Files: files}
-			}
-			// Add as required_reads entries.
-			for _, r := range resp.Results {
-				if r.Path != "" {
-					ev.RequiredReads = append(ev.RequiredReads, ScopeRequiredRead{
-						Path: r.Path,
-						Why:  r.Title + " — " + r.Summary,
-					})
-				}
-			}
+		files := scopeResponseFiles(resp.Results)
+		if len(files) > 0 {
+			sq.Summary = &ScopeQuerySummary{Files: files}
 		}
+		appendScopeRequiredReads(ev, resp.Results)
 		ev.Queries = append(ev.Queries, sq)
+	}
+}
+
+func scopeResponseFiles(results []GraphBridgeResult) []string {
+	var files []string
+	for _, r := range results {
+		if r.Path != "" {
+			files = append(files, r.Path)
+		}
+	}
+	return files
+}
+
+func appendScopeRequiredReads(ev *ScopeEvidence, results []GraphBridgeResult) {
+	for _, r := range results {
+		if r.Path == "" {
+			continue
+		}
+		ev.RequiredReads = append(ev.RequiredReads, ScopeRequiredRead{
+			Path: r.Path,
+			Why:  r.Title + " — " + r.Summary,
+		})
 	}
 }
 
@@ -1131,37 +1137,51 @@ func writeScopesConflict(a, b []string) bool {
 // Schema rule: ConflictsWith per task is []string{} not nil. MaxBatch is []string{} not nil.
 // ConflictGraph values are []string{} not nil for every key.
 func computeWriteScopeConflicts(tasks []workflowNextTaskSuggestion) writeScopeConflictResult {
-	n := len(tasks)
+	initializeTaskConflicts(tasks)
+	populateTaskConflicts(tasks)
+	conflictGraph := buildTaskConflictGraph(tasks)
+	maxBatch := greedyNonConflictingBatch(tasks)
 
-	// Initialize ConflictsWith on every task to []string{} per schema rule.
+	return writeScopeConflictResult{
+		EligibleTasks: tasks,
+		MaxBatch:      maxBatch,
+		ConflictGraph: conflictGraph,
+	}
+}
+
+func initializeTaskConflicts(tasks []workflowNextTaskSuggestion) {
 	for i := range tasks {
 		tasks[i].ConflictsWith = []string{}
 	}
+}
 
-	// Build conflict graph: for each pair (i,j) check scope overlap.
-	for i := 0; i < n; i++ {
-		for j := i + 1; j < n; j++ {
-			if writeScopesConflict(tasks[i].WriteScope, tasks[j].WriteScope) {
-				tasks[i].ConflictsWith = append(tasks[i].ConflictsWith, tasks[j].TaskID)
-				tasks[j].ConflictsWith = append(tasks[j].ConflictsWith, tasks[i].TaskID)
+func populateTaskConflicts(tasks []workflowNextTaskSuggestion) {
+	for i := 0; i < len(tasks); i++ {
+		for j := i + 1; j < len(tasks); j++ {
+			if !writeScopesConflict(tasks[i].WriteScope, tasks[j].WriteScope) {
+				continue
 			}
+			tasks[i].ConflictsWith = append(tasks[i].ConflictsWith, tasks[j].TaskID)
+			tasks[j].ConflictsWith = append(tasks[j].ConflictsWith, tasks[i].TaskID)
 		}
 	}
+}
 
-	// Build ConflictGraph map from populated ConflictsWith slices.
-	conflictGraph := make(map[string][]string, n)
+func buildTaskConflictGraph(tasks []workflowNextTaskSuggestion) map[string][]string {
+	conflictGraph := make(map[string][]string, len(tasks))
 	for _, t := range tasks {
 		if t.ConflictsWith == nil {
 			conflictGraph[t.TaskID] = []string{}
-		} else {
-			conflictGraph[t.TaskID] = t.ConflictsWith
+			continue
 		}
+		conflictGraph[t.TaskID] = t.ConflictsWith
 	}
+	return conflictGraph
+}
 
-	// Greedy MaxNonConflictingBatch: iterate in input order, add a task if it
-	// does not conflict with any already-included task.
-	inBatch := make(map[string]bool, n)
-	maxBatch := []string{}
+func greedyNonConflictingBatch(tasks []workflowNextTaskSuggestion) []string {
+	inBatch := make(map[string]bool, len(tasks))
+	var maxBatch []string
 	for _, t := range tasks {
 		canAdd := true
 		for _, conflictID := range t.ConflictsWith {
@@ -1175,12 +1195,7 @@ func computeWriteScopeConflicts(tasks []workflowNextTaskSuggestion) writeScopeCo
 			maxBatch = append(maxBatch, t.TaskID)
 		}
 	}
-
-	return writeScopeConflictResult{
-		EligibleTasks: tasks,
-		MaxBatch:      maxBatch,
-		ConflictGraph: conflictGraph,
-	}
+	return maxBatch
 }
 
 type workflowCompletionScopeState struct {
@@ -2264,32 +2279,41 @@ func buildPlanScheduleGraph(tf *CanonicalTaskFile) (inDegree []int, adj [][]int)
 // Returns the wave-grouped task indices and the total number of processed tasks.
 func runKahnBFSWaves(inDegree []int, adj [][]int) (waveSlots map[int][]int, processed int) {
 	waveIdx := make([]int, len(inDegree))
-	queue := []int{}
+	queue := zeroDegreeQueue(inDegree)
+	waveSlots = map[int][]int{}
+	for len(queue) > 0 {
+		queue, processed = processKahnWave(queue, adj, inDegree, waveIdx, waveSlots, processed)
+	}
+	return waveSlots, processed
+}
+
+func zeroDegreeQueue(inDegree []int) []int {
+	queue := make([]int, 0, len(inDegree))
 	for i, deg := range inDegree {
 		if deg == 0 {
 			queue = append(queue, i)
 		}
 	}
-	waveSlots = map[int][]int{}
-	for len(queue) > 0 {
-		var nextQueue []int
-		for _, idx := range queue {
-			w := waveIdx[idx]
-			waveSlots[w] = append(waveSlots[w], idx)
-			processed++
-			for _, dep := range adj[idx] {
-				inDegree[dep]--
-				if waveIdx[dep] < w+1 {
-					waveIdx[dep] = w + 1
-				}
-				if inDegree[dep] == 0 {
-					nextQueue = append(nextQueue, dep)
-				}
+	return queue
+}
+
+func processKahnWave(queue []int, adj [][]int, inDegree, waveIdx []int, waveSlots map[int][]int, processed int) ([]int, int) {
+	var nextQueue []int
+	for _, idx := range queue {
+		w := waveIdx[idx]
+		waveSlots[w] = append(waveSlots[w], idx)
+		processed++
+		for _, dep := range adj[idx] {
+			inDegree[dep]--
+			if waveIdx[dep] < w+1 {
+				waveIdx[dep] = w + 1
+			}
+			if inDegree[dep] == 0 {
+				nextQueue = append(nextQueue, dep)
 			}
 		}
-		queue = nextQueue
 	}
-	return waveSlots, processed
+	return nextQueue, processed
 }
 
 func buildPlanScheduleWaves(tf *CanonicalTaskFile, waveSlots map[int][]int) ([]PlanScheduleWave, int) {

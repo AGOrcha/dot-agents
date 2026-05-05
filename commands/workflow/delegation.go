@@ -563,6 +563,28 @@ func dispatchFoldBackUpsert(projectPath string, in *foldBackUpsertInputs, prior 
 	}
 }
 
+func validatePriorFoldBack(prior *foldBackArtifact, in *foldBackUpsertInputs) error {
+	if err := validateFoldBackPriorAgreement(prior, in); err != nil {
+		return err
+	}
+	if prior.Classification == "small" && in.propose {
+		return fmt.Errorf("cannot use --propose for slug %q: existing artifact is inline (small)", in.slug)
+	}
+	return nil
+}
+
+func assignFoldBackArtifactIdentity(artifact *foldBackArtifact, prior *foldBackArtifact, priorExists bool, slug string, ts int64) {
+	switch {
+	case priorExists:
+		artifact.ID = prior.ID
+		artifact.CreatedAt = prior.CreatedAt
+	case slug != "":
+		artifact.ID = slug
+	default:
+		artifact.ID = fmt.Sprintf("fold-%d", ts)
+	}
+}
+
 func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -589,11 +611,8 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		return fmt.Errorf("no fold-back artifact with slug %q", in.slug)
 	}
 	if priorExists {
-		if err := validateFoldBackPriorAgreement(prior, in); err != nil {
+		if err := validatePriorFoldBack(prior, in); err != nil {
 			return err
-		}
-		if prior.Classification == "small" && in.propose {
-			return fmt.Errorf("cannot use --propose for slug %q: existing artifact is inline (small)", in.slug)
 		}
 	}
 
@@ -603,15 +622,7 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		Observation:   in.observation,
 		CreatedAt:     createdAt,
 	}
-	switch {
-	case priorExists:
-		artifact.ID = prior.ID
-		artifact.CreatedAt = prior.CreatedAt
-	case in.slug != "":
-		artifact.ID = in.slug
-	default:
-		artifact.ID = fmt.Sprintf("fold-%d", ts)
-	}
+	assignFoldBackArtifactIdentity(&artifact, prior, priorExists, in.slug, ts)
 
 	if err := dispatchFoldBackUpsert(project.Path, in, prior, priorExists, ts, createdAt, &artifact); err != nil {
 		return err
@@ -898,41 +909,67 @@ func persistFanoutArtifacts(projectPath string, contract *DelegationContract, bu
 	return nil
 }
 
-func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
-	project, err := currentWorkflowProject()
-	if err != nil {
-		return err
-	}
+type fanoutInputs struct {
+	planID             string
+	taskID             string
+	sliceID            string
+	owner              string
+	writeScopeCSV      string
+	writeScopeExplicit bool
+}
 
+func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
 	planID, _ := cmd.Flags().GetString("plan")
 	taskID, _ := cmd.Flags().GetString("task")
 	sliceID, _ := cmd.Flags().GetString("slice")
 	owner, _ := cmd.Flags().GetString("owner")
 	writeScopeCSV, _ := cmd.Flags().GetString("write-scope")
-	writeScopeExplicit := cmd.Flags().Changed("write-scope")
+	return fanoutInputs{
+		planID:             planID,
+		taskID:             taskID,
+		sliceID:            sliceID,
+		owner:              owner,
+		writeScopeCSV:      writeScopeCSV,
+		writeScopeExplicit: cmd.Flags().Changed("write-scope"),
+	}
+}
 
-	plan, err := loadCanonicalPlan(project.Path, planID)
+func resolveFanoutTaskSelection(projectPath string, in fanoutInputs) (string, []string, error) {
+	if in.sliceID != "" && in.taskID != "" {
+		return "", nil, fmt.Errorf("provide --slice or --task, not both")
+	}
+	taskID, writeScope, err := resolveFanoutSliceTask(projectPath, in.planID, in.sliceID, in.taskID, in.writeScopeExplicit)
 	if err != nil {
-		return fmt.Errorf("plan %s not found: %w", planID, err)
+		return "", nil, err
 	}
-
-	if sliceID != "" && taskID != "" {
-		return fmt.Errorf("provide --slice or --task, not both")
+	if taskID == "" {
+		return "", nil, fmt.Errorf("provide --slice <slice-id> or --task <task-id>")
 	}
+	return taskID, writeScope, nil
+}
 
-	taskID, writeScope, err := resolveFanoutSliceTask(project.Path, planID, sliceID, taskID, writeScopeExplicit)
+func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
+	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
 	}
-	if taskID == "" {
-		return fmt.Errorf("provide --slice <slice-id> or --task <task-id>")
+	in := parseFanoutInputs(cmd)
+
+	plan, err := loadCanonicalPlan(project.Path, in.planID)
+	if err != nil {
+		return fmt.Errorf("plan %s not found: %w", in.planID, err)
 	}
 
-	tf, err := loadCanonicalTasks(project.Path, planID)
+	taskID, writeScope, err := resolveFanoutTaskSelection(project.Path, in)
 	if err != nil {
-		return fmt.Errorf("tasks for plan %s not found: %w", planID, err)
+		return err
 	}
-	targetTask, err := resolveFanoutTargetTask(tf, taskID, planID)
+
+	tf, err := loadCanonicalTasks(project.Path, in.planID)
+	if err != nil {
+		return fmt.Errorf("tasks for plan %s not found: %w", in.planID, err)
+	}
+	targetTask, err := resolveFanoutTargetTask(tf, taskID, in.planID)
 	if err != nil {
 		return err
 	}
@@ -941,7 +978,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("task %s already has an active delegation contract", taskID)
 	}
 
-	writeScope = resolveFanoutWriteScope(writeScope, writeScopeCSV, writeScopeExplicit, targetTask.WriteScope)
+	writeScope = resolveFanoutWriteScope(writeScope, in.writeScopeCSV, in.writeScopeExplicit, targetTask.WriteScope)
 
 	if err := ensureTaskVerificationDir(project.Path, taskID); err != nil {
 		return fmt.Errorf("prepare verification directory: %w", err)
@@ -952,7 +989,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 
 	skipEvidenceCheck, _ := cmd.Flags().GetBool("skip-evidence-check")
-	checkFanoutScopeEvidenceWarnings(project.Path, planID, taskID, skipEvidenceCheck)
+	checkFanoutScopeEvidenceWarnings(project.Path, in.planID, taskID, skipEvidenceCheck)
 
 	if err := checkFanoutWriteScopeConflicts(project.Path, writeScope, taskID); err != nil {
 		return err
@@ -962,13 +999,13 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	contract := &DelegationContract{
 		SchemaVersion:   1,
 		ID:              fmt.Sprintf("del-%s-%d", taskID, time.Now().Unix()),
-		ParentPlanID:    planID,
+		ParentPlanID:    in.planID,
 		ParentTaskID:    taskID,
 		Title:           targetTask.Title,
 		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
 		WriteScope:      writeScope,
 		SuccessCriteria: targetTask.Notes,
-		Owner:           owner,
+		Owner:           in.owner,
 		Status:          "active",
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -976,9 +1013,9 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
 		ProjectPath:      project.Path,
 		Cmd:              cmd,
-		PlanID:           planID,
+		PlanID:           in.planID,
 		TaskID:           taskID,
-		SliceID:          sliceID,
+		SliceID:          in.sliceID,
 		Plan:             plan,
 		TargetTask:       targetTask,
 		Contract:         contract,
@@ -1022,6 +1059,41 @@ func gitDiffChangedFiles(projectPath string) []string {
 	return files
 }
 
+func buildMergeBackSummary(taskID, summary, verificationStatus, integrationNotes, now string, contract *DelegationContract, filesChanged []string) *MergeBackSummary {
+	return &MergeBackSummary{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		ParentPlanID:  contract.ParentPlanID,
+		Title:         contract.Title,
+		Summary:       summary,
+		FilesChanged:  filesChanged,
+		VerificationResult: MergeBackVerification{
+			Status:  verificationStatus,
+			Summary: integrationNotes,
+		},
+		IntegrationNotes: integrationNotes,
+		CreatedAt:        now,
+	}
+}
+
+func buildMergeBackVerificationDoc(taskID, summary, verificationStatus, integrationNotes, now string, contract *DelegationContract, filesChanged []string) *VerificationResultDoc {
+	verifSummary := strings.TrimSpace(integrationNotes)
+	if verifSummary == "" {
+		verifSummary = summary
+	}
+	return &VerificationResultDoc{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		ParentPlanID:  contract.ParentPlanID,
+		VerifierType:  VerifierTypeMergeBack,
+		Status:        verificationStatus,
+		Summary:       verifSummary,
+		RecordedAt:    now,
+		DelegationID:  contract.ID,
+		ArtifactPaths: append([]string(nil), filesChanged...),
+	}
+}
+
 func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -1048,39 +1120,12 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	filesChanged := gitDiffChangedFiles(project.Path)
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	mergeBack := &MergeBackSummary{
-		SchemaVersion: 1,
-		TaskID:        taskID,
-		ParentPlanID:  contract.ParentPlanID,
-		Title:         contract.Title,
-		Summary:       summary,
-		FilesChanged:  filesChanged,
-		VerificationResult: MergeBackVerification{
-			Status:  verificationStatus,
-			Summary: integrationNotes,
-		},
-		IntegrationNotes: integrationNotes,
-		CreatedAt:        now,
-	}
+	mergeBack := buildMergeBackSummary(taskID, summary, verificationStatus, integrationNotes, now, contract, filesChanged)
 	if err := saveMergeBack(project.Path, mergeBack); err != nil {
 		return fmt.Errorf("save merge-back: %w", err)
 	}
 
-	verifSummary := strings.TrimSpace(integrationNotes)
-	if verifSummary == "" {
-		verifSummary = summary
-	}
-	vrDoc := &VerificationResultDoc{
-		SchemaVersion: 1,
-		TaskID:        taskID,
-		ParentPlanID:  contract.ParentPlanID,
-		VerifierType:  VerifierTypeMergeBack,
-		Status:        verificationStatus,
-		Summary:       verifSummary,
-		RecordedAt:    now,
-		DelegationID:  contract.ID,
-		ArtifactPaths: append([]string(nil), filesChanged...),
-	}
+	vrDoc := buildMergeBackVerificationDoc(taskID, summary, verificationStatus, integrationNotes, now, contract, filesChanged)
 	if err := writeVerificationResultYAML(project.Path, vrDoc); err != nil {
 		return fmt.Errorf("write verification result: %w", err)
 	}
@@ -1207,6 +1252,43 @@ func validateVerifierProfileRefs(sequence []string, profiles map[string]json.Raw
 	return nil
 }
 
+func explicitVerifierSequence(projectPath, verifierSeqFlag string) ([]string, error) {
+	sequence := splitCommaVerifierList(verifierSeqFlag)
+	if len(sequence) == 0 {
+		return nil, fmt.Errorf("--verifier-sequence is non-empty but yielded no verifier profile ids")
+	}
+	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	var profiles map[string]json.RawMessage
+	if d != nil {
+		profiles = d.VerifierProfiles
+	}
+	if err := validateVerifierProfileRefs(sequence, profiles); err != nil {
+		return nil, err
+	}
+	return sequence, nil
+}
+
+func mappedVerifierSequence(projectPath, appType string) ([]string, error) {
+	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil || len(d.AppTypeVerifierMap) == 0 || appType == "" {
+		return nil, nil
+	}
+	sequence := append([]string(nil), d.AppTypeVerifierMap[appType]...)
+	if len(sequence) == 0 {
+		return nil, nil
+	}
+	if err := validateVerifierProfileRefs(sequence, d.VerifierProfiles); err != nil {
+		return nil, err
+	}
+	return sequence, nil
+}
+
 func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan *CanonicalPlan, task *CanonicalTask) (appType string, sequence []string, err error) {
 	appType = strings.TrimSpace(task.AppType)
 	if appType == "" && plan != nil {
@@ -1216,40 +1298,14 @@ func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan 
 	verifierSeqFlag, _ := cmd.Flags().GetString("verifier-sequence")
 	verifierSeqFlag = strings.TrimSpace(verifierSeqFlag)
 	if verifierSeqFlag != "" {
-		sequence = splitCommaVerifierList(verifierSeqFlag)
-		if len(sequence) == 0 {
-			return "", nil, fmt.Errorf("--verifier-sequence is non-empty but yielded no verifier profile ids")
-		}
-		d, err := loadAgentsrcFanoutDispatch(projectPath)
+		sequence, err = explicitVerifierSequence(projectPath, verifierSeqFlag)
 		if err != nil {
-			return "", nil, err
-		}
-		var profiles map[string]json.RawMessage
-		if d != nil {
-			profiles = d.VerifierProfiles
-		}
-		if err := validateVerifierProfileRefs(sequence, profiles); err != nil {
 			return "", nil, err
 		}
 		return appType, sequence, nil
 	}
-
-	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	sequence, err = mappedVerifierSequence(projectPath, appType)
 	if err != nil {
-		return "", nil, err
-	}
-	if d == nil || len(d.AppTypeVerifierMap) == 0 {
-		return appType, nil, nil
-	}
-	if appType == "" {
-		return "", nil, nil
-	}
-	seq := d.AppTypeVerifierMap[appType]
-	if len(seq) == 0 {
-		return appType, nil, nil
-	}
-	sequence = append([]string(nil), seq...)
-	if err := validateVerifierProfileRefs(sequence, d.VerifierProfiles); err != nil {
 		return "", nil, err
 	}
 	return appType, sequence, nil

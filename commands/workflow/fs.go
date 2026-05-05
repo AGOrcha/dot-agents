@@ -114,25 +114,11 @@ func mergePlanDirCompareAndCopy(srcPath, dstPath, rel string, dryRun bool) error
 	}
 
 	if dstStatErr == nil {
-		dstHash, err := sha256File(dstPath)
+		skip, err := shouldSkipPlanDirCopy(srcPath, dstPath, rel, dryRun, srcHash, dstStat)
 		if err != nil {
-			return fmt.Errorf("hash dst %s: %w", rel, err)
+			return err
 		}
-		if srcHash == dstHash {
-			if dryRun {
-				fmt.Printf("  [dry-run] skip (identical) %s\n", rel)
-			}
-			return nil
-		}
-		srcStat, err := os.Stat(srcPath)
-		if err != nil {
-			return fmt.Errorf("stat src %s: %w", rel, err)
-		}
-		if dstStat.ModTime().After(srcStat.ModTime()) {
-			fmt.Printf("  warn: history file is newer than source, skipping %s\n", rel)
-			if dryRun {
-				fmt.Printf("  [dry-run] skip (history newer) %s\n", rel)
-			}
+		if skip {
 			return nil
 		}
 	}
@@ -142,6 +128,31 @@ func mergePlanDirCompareAndCopy(srcPath, dstPath, rel string, dryRun bool) error
 		return nil
 	}
 	return copyWorkflowArtifact(srcPath, dstPath)
+}
+
+func shouldSkipPlanDirCopy(srcPath, dstPath, rel string, dryRun bool, srcHash [32]byte, dstStat os.FileInfo) (bool, error) {
+	dstHash, err := sha256File(dstPath)
+	if err != nil {
+		return false, fmt.Errorf("hash dst %s: %w", rel, err)
+	}
+	if srcHash == dstHash {
+		if dryRun {
+			fmt.Printf("  [dry-run] skip (identical) %s\n", rel)
+		}
+		return true, nil
+	}
+	srcStat, err := os.Stat(srcPath)
+	if err != nil {
+		return false, fmt.Errorf("stat src %s: %w", rel, err)
+	}
+	if !dstStat.ModTime().After(srcStat.ModTime()) {
+		return false, nil
+	}
+	fmt.Printf("  warn: history file is newer than source, skipping %s\n", rel)
+	if dryRun {
+		fmt.Printf("  [dry-run] skip (history newer) %s\n", rel)
+	}
+	return true, nil
 }
 
 // mergePlanDirFile applies all merge rules to one file from the walk.

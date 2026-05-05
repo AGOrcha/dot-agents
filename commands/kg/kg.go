@@ -220,7 +220,7 @@ func updateIndex(kgHomeDir string, note *GraphNote) error {
 	lines := strings.Split(string(data), "\n")
 	entryLine := buildIndexEntryLine(note)
 
-	if replaced := replaceIndexEntry(lines, fmt.Sprintf("- [%s]", note.ID), entryLine); !replaced {
+	if !replaceIndexEntry(lines, fmt.Sprintf("- [%s]", note.ID), entryLine) {
 		lines = insertIndexEntry(lines, note.Type, entryLine)
 	}
 	return os.WriteFile(indexPath, []byte(strings.Join(lines, "\n")), 0644)

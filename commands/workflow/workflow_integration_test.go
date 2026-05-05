@@ -53,6 +53,19 @@ func setupCheckpointStateTest(t *testing.T, nextAction, status, timestamp, missi
 	return state
 }
 
+func assertWorkflowTaskStatus(t *testing.T, tf *CanonicalTaskFile, taskID, want string) {
+	t.Helper()
+	for _, task := range tf.Tasks {
+		if task.ID == taskID {
+			if task.Status != want {
+				t.Fatalf("%s status = %q, want %s", taskID, task.Status, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %s not found", taskID)
+}
+
 func TestWorkflow_CheckpointThenOrient(t *testing.T) {
 	state := setupCheckpointStateTest(t,
 		"Continue wave-3 implementation", "pass", "2026-04-10T10:00:00Z",
@@ -122,15 +135,7 @@ func TestWorkflow_PlanLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var t1Status string
-		for _, task := range tf.Tasks {
-			if task.ID == "t1" {
-				t1Status = task.Status
-			}
-		}
-		if t1Status != "completed" {
-			t.Fatalf("t1 status = %q, want completed", t1Status)
-		}
+		assertWorkflowTaskStatus(t, tf, "t1", "completed")
 	})
 
 	t.Run("advance-t2-updates-focus", func(t *testing.T) {

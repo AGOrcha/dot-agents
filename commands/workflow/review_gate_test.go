@@ -119,22 +119,24 @@ func TestEvaluateDelegationGateDecisions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("evaluateDelegationGate: %v", err)
 			}
-
-			t.Run("outcome-and-flags", func(t *testing.T) {
-				if got.Outcome != tc.wantOutcome {
-					t.Fatalf("outcome = %q, want %q", got.Outcome, tc.wantOutcome)
-				}
-				if got.CloseoutAllowed != tc.wantCloseout {
-					t.Fatalf("closeout_allowed = %t, want %t", got.CloseoutAllowed, tc.wantCloseout)
-				}
-				if got.PlanningRequired != tc.wantPlanning {
-					t.Fatalf("planning_required = %t, want %t", got.PlanningRequired, tc.wantPlanning)
-				}
-				if got.ReviewDecisionPresent != tc.wantReviewDecision {
-					t.Fatalf("review_decision_present = %t, want %t", got.ReviewDecisionPresent, tc.wantReviewDecision)
-				}
-			})
+			assertDelegationGateDecision(t, got, tc.wantOutcome, tc.wantCloseout, tc.wantPlanning, tc.wantReviewDecision)
 		})
+	}
+}
+
+func assertDelegationGateDecision(t *testing.T, got *DelegationGateDecision, wantOutcome string, wantCloseout, wantPlanning, wantReviewDecision bool) {
+	t.Helper()
+	if got.Outcome != wantOutcome {
+		t.Fatalf("outcome = %q, want %q", got.Outcome, wantOutcome)
+	}
+	if got.CloseoutAllowed != wantCloseout {
+		t.Fatalf("closeout_allowed = %t, want %t", got.CloseoutAllowed, wantCloseout)
+	}
+	if got.PlanningRequired != wantPlanning {
+		t.Fatalf("planning_required = %t, want %t", got.PlanningRequired, wantPlanning)
+	}
+	if got.ReviewDecisionPresent != wantReviewDecision {
+		t.Fatalf("review_decision_present = %t, want %t", got.ReviewDecisionPresent, wantReviewDecision)
 	}
 }
 

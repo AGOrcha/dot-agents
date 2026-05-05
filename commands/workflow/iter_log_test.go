@@ -11,6 +11,104 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+func assertIterLogHeader(t *testing.T, content string) {
+	t.Helper()
+	if !strings.HasPrefix(content, "# yaml-language-server:") {
+		t.Errorf("missing yaml-language-server header; got: %q", content[:min(len(content), 80)])
+	}
+	if !strings.Contains(content, "workflow-iter-log.schema.json") {
+		t.Errorf("header does not reference schema: %s", content[:min(len(content), 120)])
+	}
+}
+
+func assertIterLogDeterministicFields(t *testing.T, entry iterLogEntry, iterN int) {
+	t.Helper()
+	if entry.SchemaVersion != 2 {
+		t.Errorf("schema_version = %d, want 2", entry.SchemaVersion)
+	}
+	if entry.Iteration != iterN {
+		t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	if entry.Date != today {
+		t.Errorf("date = %q, want %q", entry.Date, today)
+	}
+	if entry.Commit == "" {
+		t.Errorf("commit sha is empty; expected a git SHA")
+	}
+	if entry.FilesChanged < 0 {
+		t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
+	}
+}
+
+func assertIterLogImplDefaults(t *testing.T, entry iterLogEntry) {
+	t.Helper()
+	impl := entry.Impl
+	if impl.Item != "" {
+		t.Errorf("impl.item = %q, want empty string", impl.Item)
+	}
+	if impl.Summary != "" {
+		t.Errorf("impl.summary = %q, want empty", impl.Summary)
+	}
+	if impl.ScopeNote != "" {
+		t.Errorf("impl.scope_note = %q, want empty", impl.ScopeNote)
+	}
+	if impl.FeedbackGoal != "" {
+		t.Errorf("impl.feedback_goal = %q, want empty", impl.FeedbackGoal)
+	}
+	if impl.Retries != 0 {
+		t.Errorf("impl.retries = %d, want 0", impl.Retries)
+	}
+	if impl.FocusedTestsAdded != 0 {
+		t.Errorf("impl.focused_tests_added = %d, want 0", impl.FocusedTestsAdded)
+	}
+	if impl.FocusedTestsPass != nil {
+		t.Errorf("impl.focused_tests_pass = %v, want nil", impl.FocusedTestsPass)
+	}
+}
+
+func assertIterLogSelfAssessmentDefaults(t *testing.T, entry iterLogEntry) {
+	t.Helper()
+	isa := entry.Impl.SelfAssessment
+	if isa.ReadLoopState {
+		t.Error("impl.self_assessment.read_loop_state should be false")
+	}
+	if isa.OneItemOnly {
+		t.Error("impl.self_assessment.one_item_only should be false")
+	}
+	if isa.CommittedAfterTests {
+		t.Error("impl.self_assessment.committed_after_tests should be false")
+	}
+	if isa.AlignedWithCanonicalTasks {
+		t.Error("impl.self_assessment.aligned_with_canonical_tasks should be false")
+	}
+	if isa.PersistedViaWorkflowCommands != "" {
+		t.Errorf("impl.self_assessment.persisted_via_workflow_commands = %q, want empty", isa.PersistedViaWorkflowCommands)
+	}
+	if isa.StayedUnder10Files {
+		t.Error("impl.self_assessment.stayed_under_10_files should be false")
+	}
+	if isa.NoDestructiveCommands {
+		t.Error("impl.self_assessment.no_destructive_commands should be false")
+	}
+	if isa.ScopedTestsToWriteScope {
+		t.Error("impl.self_assessment.scoped_tests_to_write_scope should be false")
+	}
+	if isa.TddRefreshPerformed {
+		t.Error("impl.self_assessment.tdd_refresh_performed should be false")
+	}
+}
+
+func assertIterLogVerifierDefaults(t *testing.T, entry iterLogEntry) {
+	t.Helper()
+	if len(entry.Verifiers) != 0 {
+		t.Errorf("verifiers = %v, want empty", entry.Verifiers)
+	}
+	if entry.Review.Phase1Decision != "" || entry.Review.Phase2Decision != "" || entry.Review.OverallDecision != "" {
+		t.Errorf("review decisions should be empty stubs, got %#v", entry.Review)
+	}
+}
+
 func TestCheckpointLogToIter(t *testing.T) {
 	repo := initWorkflowTestRepoWithCommit(t)
 	agentsHome := t.TempDir()
@@ -29,12 +127,7 @@ func TestCheckpointLogToIter(t *testing.T) {
 	content := string(raw)
 
 	t.Run("header-schema", func(t *testing.T) {
-		if !strings.HasPrefix(content, "# yaml-language-server:") {
-			t.Errorf("missing yaml-language-server header; got: %q", content[:min(len(content), 80)])
-		}
-		if !strings.Contains(content, "workflow-iter-log.schema.json") {
-			t.Errorf("header does not reference schema: %s", content[:min(len(content), 120)])
-		}
+		assertIterLogHeader(t, content)
 	})
 
 	var entry iterLogEntry
@@ -43,87 +136,19 @@ func TestCheckpointLogToIter(t *testing.T) {
 	}
 
 	t.Run("cli-deterministic", func(t *testing.T) {
-		if entry.SchemaVersion != 2 {
-			t.Errorf("schema_version = %d, want 2", entry.SchemaVersion)
-		}
-		if entry.Iteration != iterN {
-			t.Errorf("iteration = %d, want %d", entry.Iteration, iterN)
-		}
-		today := time.Now().UTC().Format("2006-01-02")
-		if entry.Date != today {
-			t.Errorf("date = %q, want %q", entry.Date, today)
-		}
-		if entry.Commit == "" {
-			t.Errorf("commit sha is empty; expected a git SHA")
-		}
-		if entry.FilesChanged < 0 {
-			t.Errorf("files_changed = %d, want >= 0", entry.FilesChanged)
-		}
+		assertIterLogDeterministicFields(t, entry, iterN)
 	})
 
 	t.Run("impl-stubs", func(t *testing.T) {
-		impl := entry.Impl
-		if impl.Item != "" {
-			t.Errorf("impl.item = %q, want empty string", impl.Item)
-		}
-		if impl.Summary != "" {
-			t.Errorf("impl.summary = %q, want empty", impl.Summary)
-		}
-		if impl.ScopeNote != "" {
-			t.Errorf("impl.scope_note = %q, want empty", impl.ScopeNote)
-		}
-		if impl.FeedbackGoal != "" {
-			t.Errorf("impl.feedback_goal = %q, want empty", impl.FeedbackGoal)
-		}
-		if impl.Retries != 0 {
-			t.Errorf("impl.retries = %d, want 0", impl.Retries)
-		}
-		if impl.FocusedTestsAdded != 0 {
-			t.Errorf("impl.focused_tests_added = %d, want 0", impl.FocusedTestsAdded)
-		}
-		if impl.FocusedTestsPass != nil {
-			t.Errorf("impl.focused_tests_pass = %v, want nil", impl.FocusedTestsPass)
-		}
+		assertIterLogImplDefaults(t, entry)
 	})
 
 	t.Run("self-assessment-defaults", func(t *testing.T) {
-		isa := entry.Impl.SelfAssessment
-		if isa.ReadLoopState {
-			t.Error("impl.self_assessment.read_loop_state should be false")
-		}
-		if isa.OneItemOnly {
-			t.Error("impl.self_assessment.one_item_only should be false")
-		}
-		if isa.CommittedAfterTests {
-			t.Error("impl.self_assessment.committed_after_tests should be false")
-		}
-		if isa.AlignedWithCanonicalTasks {
-			t.Error("impl.self_assessment.aligned_with_canonical_tasks should be false")
-		}
-		if isa.PersistedViaWorkflowCommands != "" {
-			t.Errorf("impl.self_assessment.persisted_via_workflow_commands = %q, want empty", isa.PersistedViaWorkflowCommands)
-		}
-		if isa.StayedUnder10Files {
-			t.Error("impl.self_assessment.stayed_under_10_files should be false")
-		}
-		if isa.NoDestructiveCommands {
-			t.Error("impl.self_assessment.no_destructive_commands should be false")
-		}
-		if isa.ScopedTestsToWriteScope {
-			t.Error("impl.self_assessment.scoped_tests_to_write_scope should be false")
-		}
-		if isa.TddRefreshPerformed {
-			t.Error("impl.self_assessment.tdd_refresh_performed should be false")
-		}
+		assertIterLogSelfAssessmentDefaults(t, entry)
 	})
 
 	t.Run("verifiers-and-review", func(t *testing.T) {
-		if len(entry.Verifiers) != 0 {
-			t.Errorf("verifiers = %v, want empty", entry.Verifiers)
-		}
-		if entry.Review.Phase1Decision != "" || entry.Review.Phase2Decision != "" || entry.Review.OverallDecision != "" {
-			t.Errorf("review decisions should be empty stubs, got %#v", entry.Review)
-		}
+		assertIterLogVerifierDefaults(t, entry)
 	})
 
 	t.Run("schema-validation", func(t *testing.T) {

@@ -97,6 +97,14 @@ func TestScopeEvidenceUnmarshalRoundTrip(t *testing.T) {
 
 func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
 	t.Helper()
+	assertScopeEvidenceIdentity(t, ev)
+	assertScopeEvidenceReadsAndSeeds(t, ev)
+	assertScopeEvidenceQueriesAndPaths(t, ev)
+	assertScopeEvidenceOutputs(t, ev)
+}
+
+func assertScopeEvidenceIdentity(t *testing.T, ev ScopeEvidence) {
+	t.Helper()
 	if ev.SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1", ev.SchemaVersion)
 	}
@@ -109,11 +117,16 @@ func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
 	if ev.Confidence != "medium" {
 		t.Errorf("Confidence = %q, want medium", ev.Confidence)
 	}
+}
+
+func assertScopeEvidenceReadsAndSeeds(t *testing.T, ev ScopeEvidence) {
+	t.Helper()
 	if len(ev.DecisionLocks) != 2 {
 		t.Errorf("DecisionLocks len = %d, want 2", len(ev.DecisionLocks))
 	}
 	if len(ev.RequiredReads) != 1 {
 		t.Errorf("RequiredReads len = %d, want 1", len(ev.RequiredReads))
+		return
 	}
 	if ev.RequiredReads[0].Path != ".agents/workflow/plans/loop-agent-pipeline/loop-agent-pipeline.plan.md" {
 		t.Errorf("RequiredReads[0].Path = %q", ev.RequiredReads[0].Path)
@@ -124,10 +137,13 @@ func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
 	if len(ev.Seeds.Symbols) != 1 {
 		t.Errorf("Seeds.Symbols len = %d, want 1", len(ev.Seeds.Symbols))
 	}
+}
+
+func assertScopeEvidenceQueriesAndPaths(t *testing.T, ev ScopeEvidence) {
+	t.Helper()
 	if len(ev.Queries) != 1 {
 		t.Errorf("Queries len = %d, want 1", len(ev.Queries))
-	}
-	if ev.Queries[0].Summary == nil || len(ev.Queries[0].Summary.Files) != 1 {
+	} else if ev.Queries[0].Summary == nil || len(ev.Queries[0].Summary.Files) != 1 {
 		t.Error("Queries[0].Summary.Files not populated")
 	}
 	if len(ev.RequiredPaths) != 1 {
@@ -139,6 +155,10 @@ func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
 	if len(ev.ExcludedPaths) != 1 {
 		t.Errorf("ExcludedPaths len = %d, want 1", len(ev.ExcludedPaths))
 	}
+}
+
+func assertScopeEvidenceOutputs(t *testing.T, ev ScopeEvidence) {
+	t.Helper()
 	if len(ev.Provides) != 1 {
 		t.Errorf("Provides len = %d, want 1", len(ev.Provides))
 	}
@@ -153,6 +173,75 @@ func assertScopeEvidenceFields(t *testing.T, ev ScopeEvidence) {
 	}
 	if len(ev.OpenGaps) != 1 {
 		t.Errorf("OpenGaps len = %d, want 1", len(ev.OpenGaps))
+	}
+}
+
+func writeDeriveScopeFixture(t *testing.T, repo string) string {
+	t.Helper()
+	planDir := repo + "/.agents/workflow/plans/test-derive-plan"
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planDir+"/PLAN.yaml", []byte(`schema_version: 1
+id: test-derive-plan
+title: Test Derive Plan
+status: active
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(planDir+"/TASKS.yaml", []byte(`schema_version: 1
+plan_id: test-derive-plan
+tasks:
+  - id: my-task
+    title: My Task
+    status: pending
+    depends_on: []
+    blocks: []
+    owner: test
+    app_type: go-cli
+    write_scope:
+      - commands/workflow/cmd.go
+    verification_required: true
+    notes: "Implement the feature"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return planDir
+}
+
+func assertDerivedScopeEvidence(t *testing.T, planDir string) {
+	t.Helper()
+	sidecarPath := planDir + "/evidence/my-task.scope.yaml"
+	data, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		t.Fatalf("sidecar not written: %v", err)
+	}
+	var ev ScopeEvidence
+	if err := yaml.Unmarshal(data, &ev); err != nil {
+		t.Fatalf("unmarshal sidecar: %v", err)
+	}
+	if ev.PlanID != "test-derive-plan" {
+		t.Errorf("PlanID = %q, want test-derive-plan", ev.PlanID)
+	}
+	if ev.TaskID != "my-task" {
+		t.Errorf("TaskID = %q, want my-task", ev.TaskID)
+	}
+	if ev.Confidence != "low" {
+		t.Errorf("Confidence = %q, want low (no graph)", ev.Confidence)
+	}
+	if ev.Mode != "code" {
+		t.Errorf("Mode = %q, want code", ev.Mode)
+	}
+	if ev.Seeds == nil || len(ev.Seeds.Symbols) == 0 {
+		t.Error("Seeds.Symbols not populated from --seed-symbol")
+	}
+	if len(ev.RequiredPaths) == 0 {
+		t.Error("RequiredPaths empty, expected at least write_scope paths")
+	}
+	if len(ev.OpenGaps) == 0 {
+		t.Error("OpenGaps should contain graph-not-ready warnings")
 	}
 }
 
@@ -269,37 +358,7 @@ func TestDeriveScopeConfidence(t *testing.T) {
 
 func TestRunWorkflowPlanDeriveScopeDegradesGracefully(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
-	// Write a minimal plan+tasks fixture with a code task.
-	planDir := repo + "/.agents/workflow/plans/test-derive-plan"
-	if err := os.MkdirAll(planDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(planDir+"/PLAN.yaml", []byte(`schema_version: 1
-id: test-derive-plan
-title: Test Derive Plan
-status: active
-created_at: "2026-01-01T00:00:00Z"
-updated_at: "2026-01-01T00:00:00Z"
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(planDir+"/TASKS.yaml", []byte(`schema_version: 1
-plan_id: test-derive-plan
-tasks:
-  - id: my-task
-    title: My Task
-    status: pending
-    depends_on: []
-    blocks: []
-    owner: test
-    app_type: go-cli
-    write_scope:
-      - commands/workflow/cmd.go
-    verification_required: true
-    notes: "Implement the feature"
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	planDir := writeDeriveScopeFixture(t, repo)
 
 	origDir, _ := os.Getwd()
 	if err := os.Chdir(repo); err != nil {
@@ -308,42 +367,10 @@ tasks:
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	t.Run("success-degraded-gracefully", func(t *testing.T) {
-		// Positive: command must succeed and write a sidecar with confidence:low (no graph available).
 		if err := runWorkflowPlanDeriveScope("test-derive-plan", "my-task", []string{"MySymbol"}, nil); err != nil {
 			t.Fatalf("runWorkflowPlanDeriveScope: %v", err)
 		}
-
-		sidecarPath := planDir + "/evidence/my-task.scope.yaml"
-		data, err := os.ReadFile(sidecarPath)
-		if err != nil {
-			t.Fatalf("sidecar not written: %v", err)
-		}
-		var ev ScopeEvidence
-		if err := yaml.Unmarshal(data, &ev); err != nil {
-			t.Fatalf("unmarshal sidecar: %v", err)
-		}
-		if ev.PlanID != "test-derive-plan" {
-			t.Errorf("PlanID = %q, want test-derive-plan", ev.PlanID)
-		}
-		if ev.TaskID != "my-task" {
-			t.Errorf("TaskID = %q, want my-task", ev.TaskID)
-		}
-		if ev.Confidence != "low" {
-			t.Errorf("Confidence = %q, want low (no graph)", ev.Confidence)
-		}
-		if ev.Mode != "code" {
-			t.Errorf("Mode = %q, want code", ev.Mode)
-		}
-		if ev.Seeds == nil || len(ev.Seeds.Symbols) == 0 {
-			t.Error("Seeds.Symbols not populated from --seed-symbol")
-		}
-		if len(ev.RequiredPaths) == 0 {
-			t.Error("RequiredPaths empty, expected at least write_scope paths")
-		}
-		// Verify warnings captured in open_gaps.
-		if len(ev.OpenGaps) == 0 {
-			t.Error("OpenGaps should contain graph-not-ready warnings")
-		}
+		assertDerivedScopeEvidence(t, planDir)
 	})
 
 	t.Run("error-nonexistent-task", func(t *testing.T) {

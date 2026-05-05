@@ -245,15 +245,12 @@ func appendNeighborMatches(
 		if edgeKind != "" && edge.Kind != edgeKind {
 			continue
 		}
-		neighborQN := edge.SourceQualified
-		if !inbound {
-			neighborQN = edge.TargetQualified
-		}
+		neighborQN := neighborQualifiedName(edge, inbound)
 		if seen[neighborQN] {
 			continue
 		}
-		neighbor, err := store.GetNode(neighborQN)
-		if err != nil || neighbor == nil {
+		neighbor, ok := loadNeighborNode(store, neighborQN)
+		if !ok {
 			continue
 		}
 		if shouldSkipNeighborForKind(edgeKind, neighbor) {
@@ -266,6 +263,18 @@ func appendNeighborMatches(
 		}
 	}
 	return false, nil
+}
+
+func neighborQualifiedName(edge graphstore.GraphEdge, inbound bool) string {
+	if inbound {
+		return edge.SourceQualified
+	}
+	return edge.TargetQualified
+}
+
+func loadNeighborNode(store *graphstore.SQLiteStore, neighborQN string) (*graphstore.GraphNode, bool) {
+	neighbor, err := store.GetNode(neighborQN)
+	return neighbor, err == nil && neighbor != nil
 }
 
 // shouldSkipNeighborForKind returns true if the neighbor should be excluded based on edge kind.
