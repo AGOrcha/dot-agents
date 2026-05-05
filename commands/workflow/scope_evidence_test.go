@@ -162,19 +162,19 @@ func TestNewScopeEvidenceSlicesNotNil(t *testing.T) {
 
 	t.Run("slice-fields-not-nil", func(t *testing.T) {
 		sliceFields := map[string][]interface{}{
-			"DecisionLocks":      {ev.DecisionLocks},
-			"RequiredReads":      {ev.RequiredReads},
-			"Queries":            {ev.Queries},
-			"RequiredPaths":      {ev.RequiredPaths},
-			"OptionalPaths":      {ev.OptionalPaths},
-			"ExcludedPaths":      {ev.ExcludedPaths},
-			"Provides":           {ev.Provides},
-			"Consumes":           {ev.Consumes},
-			"FinalWriteScope":    {ev.FinalWriteScope},
-			"VerificationFocus":  {ev.VerificationFocus},
+			"DecisionLocks":       {ev.DecisionLocks},
+			"RequiredReads":       {ev.RequiredReads},
+			"Queries":             {ev.Queries},
+			"RequiredPaths":       {ev.RequiredPaths},
+			"OptionalPaths":       {ev.OptionalPaths},
+			"ExcludedPaths":       {ev.ExcludedPaths},
+			"Provides":            {ev.Provides},
+			"Consumes":            {ev.Consumes},
+			"FinalWriteScope":     {ev.FinalWriteScope},
+			"VerificationFocus":   {ev.VerificationFocus},
 			"AllowedLocalChoices": {ev.AllowedLocalChoices},
-			"StopConditions":     {ev.StopConditions},
-			"OpenGaps":           {ev.OpenGaps},
+			"StopConditions":      {ev.StopConditions},
+			"OpenGaps":            {ev.OpenGaps},
 		}
 		for name, vals := range sliceFields {
 			if vals[0] == nil {

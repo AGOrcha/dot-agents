@@ -833,7 +833,6 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 	})
 }
 
-
 func TestRunWorkflowCompleteRejectsBlankPlanFilter(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 
