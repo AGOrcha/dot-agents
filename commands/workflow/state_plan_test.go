@@ -75,6 +75,45 @@ func assertWorkflowStateAncillary(t *testing.T, state *workflowOrientState) {
 	}
 }
 
+func assertCompletionStateActionable(t *testing.T, state *workflowCompletionScopeState) {
+	t.Helper()
+	if state.State != "actionable" {
+		t.Fatalf("state = %q, want actionable", state.State)
+	}
+	if state.Next == nil || state.Next.TaskID != "planner" {
+		t.Fatalf("next = %+v, want planner", state.Next)
+	}
+	if len(state.PausedPlans) != 0 || len(state.LockedPlans) != 0 {
+		t.Fatalf("unexpected paused/locked plans: %+v", state)
+	}
+}
+
+func assertCompletionStateLocked(t *testing.T, state *workflowCompletionScopeState) {
+	t.Helper()
+	if state.State != "locked" {
+		t.Fatalf("state = %q, want locked", state.State)
+	}
+	if state.Next != nil {
+		t.Fatalf("next = %+v, want nil", state.Next)
+	}
+	if len(state.LockedPlans) != 1 || state.LockedPlans[0] != "wave-next" {
+		t.Fatalf("locked plans = %+v, want [wave-next]", state.LockedPlans)
+	}
+}
+
+func assertCompletionStatePaused(t *testing.T, state *workflowCompletionScopeState) {
+	t.Helper()
+	if state.State != "paused" {
+		t.Fatalf("state = %q, want paused", state.State)
+	}
+	if state.Next != nil {
+		t.Fatalf("next = %+v, want nil", state.Next)
+	}
+	if len(state.PausedPlans) != 1 || state.PausedPlans[0] != "paused-plan" {
+		t.Fatalf("paused plans = %+v, want [paused-plan]", state.PausedPlans)
+	}
+}
+
 func TestCurrentWorkflowProjectUsesManifestProjectName(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	oldwd, _ := os.Getwd()
@@ -786,15 +825,7 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.State != "actionable" {
-			t.Fatalf("state = %q, want actionable", state.State)
-		}
-		if state.Next == nil || state.Next.TaskID != "planner" {
-			t.Fatalf("next = %+v, want planner", state.Next)
-		}
-		if len(state.PausedPlans) != 0 || len(state.LockedPlans) != 0 {
-			t.Fatalf("unexpected paused/locked plans: %+v", state)
-		}
+		assertCompletionStateActionable(t, state)
 	})
 
 	t.Run("locked", func(t *testing.T) {
@@ -812,15 +843,7 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.State != "locked" {
-			t.Fatalf("state = %q, want locked", state.State)
-		}
-		if state.Next != nil {
-			t.Fatalf("next = %+v, want nil", state.Next)
-		}
-		if len(state.LockedPlans) != 1 || state.LockedPlans[0] != "wave-next" {
-			t.Fatalf("locked plans = %+v, want [wave-next]", state.LockedPlans)
-		}
+		assertCompletionStateLocked(t, state)
 	})
 
 	t.Run("paused", func(t *testing.T) {
@@ -830,15 +853,7 @@ func TestCollectWorkflowCompletionStateDistinguishesActionableLockedAndPaused(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if state.State != "paused" {
-			t.Fatalf("state = %q, want paused", state.State)
-		}
-		if state.Next != nil {
-			t.Fatalf("next = %+v, want nil", state.Next)
-		}
-		if len(state.PausedPlans) != 1 || state.PausedPlans[0] != "paused-plan" {
-			t.Fatalf("paused plans = %+v, want [paused-plan]", state.PausedPlans)
-		}
+		assertCompletionStatePaused(t, state)
 	})
 }
 

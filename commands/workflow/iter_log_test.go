@@ -109,6 +109,104 @@ func assertIterLogVerifierDefaults(t *testing.T, entry iterLogEntry) {
 	}
 }
 
+func writeDelegationFlowArtifacts(t *testing.T, delegDir, bundleDir, taskID, bundleID string) {
+	t.Helper()
+	contract := fmt.Sprintf(`schema_version: 1
+id: %s
+parent_plan_id: plan-x
+parent_task_id: %s
+title: t
+write_scope: []
+status: active
+created_at: "2026-04-18T00:00:00Z"
+updated_at: "2026-04-18T00:00:00Z"
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(delegDir, taskID+".yaml"), []byte(contract), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bundle := fmt.Sprintf(`schema_version: 1
+delegation_id: %s
+plan_id: plan-x
+task_id: %s
+owner: test
+worker:
+  profile: loop-worker
+scope:
+  write_scope: []
+prompt: {}
+context: {}
+verification:
+  feedback_goal: bundle-fg
+closeout: {}
+`, bundleID, taskID)
+	if err := os.WriteFile(filepath.Join(bundleDir, bundleID+".yaml"), []byte(bundle), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func patchIterLogImplItem(t *testing.T, repo string, iter int, item string) {
+	t.Helper()
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", fmt.Sprintf("iter-%d.yaml", iter))
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	entry.Impl.Item = item
+	body, err := yaml.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
+	if err := os.WriteFile(iterPath, append([]byte(header), body...), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeVerifierResultFixture(t *testing.T, repo, taskID string) {
+	t.Helper()
+	verDir := filepath.Join(repo, ".agents", "active", "verification", taskID)
+	if err := os.MkdirAll(verDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	result := fmt.Sprintf(`schema_version: 1
+task_id: %s
+parent_plan_id: plan-x
+verifier_type: unit
+status: pass
+summary: ok
+recorded_at: "2026-04-18T12:00:00Z"
+`, taskID)
+	if err := os.WriteFile(filepath.Join(verDir, "unit.result.yaml"), []byte(result), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertVerifierMergePreservedImpl(t *testing.T, repo string, iter int) {
+	t.Helper()
+	iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", fmt.Sprintf("iter-%d.yaml", iter))
+	raw, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out iterLogEntry
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Impl.Item != "keep-me" {
+		t.Errorf("impl.item = %q, want keep-me (verifier merge must not wipe impl)", out.Impl.Item)
+	}
+	if len(out.Verifiers) != 1 {
+		t.Fatalf("verifiers len = %d, want 1", len(out.Verifiers))
+	}
+	if out.Verifiers[0].Type != "unit" || out.Verifiers[0].Status != "pass" || !out.Verifiers[0].GatePassed {
+		t.Fatalf("unexpected verifier row: %#v", out.Verifiers[0])
+	}
+}
+
 func TestCheckpointLogToIter(t *testing.T) {
 	repo := initWorkflowTestRepoWithCommit(t)
 	agentsHome := t.TempDir()
@@ -398,100 +496,22 @@ func TestCheckpointLogToIterVerifierMergePreservesImpl(t *testing.T) {
 	repo, delegDir, bundleDir := setupDelegationFlowEnv(t)
 	const taskID = "slice-task"
 	const bundleID = "del-slice-task-999001"
-	contract := fmt.Sprintf(`schema_version: 1
-id: %s
-parent_plan_id: plan-x
-parent_task_id: %s
-title: t
-write_scope: []
-status: active
-created_at: "2026-04-18T00:00:00Z"
-updated_at: "2026-04-18T00:00:00Z"
-`, bundleID, taskID)
-	if err := os.WriteFile(filepath.Join(delegDir, taskID+".yaml"), []byte(contract), 0644); err != nil {
-		t.Fatal(err)
-	}
-	bundle := fmt.Sprintf(`schema_version: 1
-delegation_id: %s
-plan_id: plan-x
-task_id: %s
-owner: test
-worker:
-  profile: loop-worker
-scope:
-  write_scope: []
-prompt: {}
-context: {}
-verification:
-  feedback_goal: bundle-fg
-closeout: {}
-`, bundleID, taskID)
-	if err := os.WriteFile(filepath.Join(bundleDir, bundleID+".yaml"), []byte(bundle), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeDelegationFlowArtifacts(t, delegDir, bundleDir, taskID, bundleID)
 
 	t.Run("stub-and-patch", func(t *testing.T) {
 		if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77"); err != nil {
 			t.Fatalf("stub: %v", err)
 		}
-		iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
-		raw, err := os.ReadFile(iterPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var entry iterLogEntry
-		if err := yaml.Unmarshal(raw, &entry); err != nil {
-			t.Fatal(err)
-		}
-		entry.Impl.Item = "keep-me"
-		body, err := yaml.Marshal(entry)
-		if err != nil {
-			t.Fatal(err)
-		}
-		const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
-		if err := os.WriteFile(iterPath, append([]byte(header), body...), 0644); err != nil {
-			t.Fatal(err)
-		}
+		patchIterLogImplItem(t, repo, 77, "keep-me")
 	})
 
-	verDir := filepath.Join(repo, ".agents", "active", "verification", taskID)
-	if err := os.MkdirAll(verDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	result := fmt.Sprintf(`schema_version: 1
-task_id: %s
-parent_plan_id: plan-x
-verifier_type: unit
-status: pass
-summary: ok
-recorded_at: "2026-04-18T12:00:00Z"
-`, taskID)
-	if err := os.WriteFile(filepath.Join(verDir, "unit.result.yaml"), []byte(result), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeVerifierResultFixture(t, repo, taskID)
 
 	t.Run("verifier-merge-preserves", func(t *testing.T) {
 		if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "77", "--role", "verifier", "--verifier-type", "unit"); err != nil {
 			t.Fatalf("verifier merge: %v", err)
 		}
-		iterPath := filepath.Join(repo, ".agents", "active", "iteration-log", "iter-77.yaml")
-		raw2, err := os.ReadFile(iterPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out iterLogEntry
-		if err := yaml.Unmarshal(raw2, &out); err != nil {
-			t.Fatal(err)
-		}
-		if out.Impl.Item != "keep-me" {
-			t.Errorf("impl.item = %q, want keep-me (verifier merge must not wipe impl)", out.Impl.Item)
-		}
-		if len(out.Verifiers) != 1 {
-			t.Fatalf("verifiers len = %d, want 1", len(out.Verifiers))
-		}
-		if out.Verifiers[0].Type != "unit" || out.Verifiers[0].Status != "pass" || !out.Verifiers[0].GatePassed {
-			t.Fatalf("unexpected verifier row: %#v", out.Verifiers[0])
-		}
+		assertVerifierMergePreservedImpl(t, repo, 77)
 	})
 }
 

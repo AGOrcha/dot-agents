@@ -27,6 +27,12 @@ func loadFanoutContractAndBundle(t *testing.T, repo, taskID string) (*Delegation
 	return contract, bundle
 }
 
+func loadFanoutBundleYAML(t *testing.T, repo, taskID string) delegationBundleYAML {
+	t.Helper()
+	_, bundle := loadFanoutContractAndBundle(t, repo, taskID)
+	return bundle
+}
+
 func assertFanoutContract(t *testing.T, contract *DelegationContract, owner, taskID string, wantScope []string) {
 	t.Helper()
 	if contract.ParentTaskID != taskID {
@@ -65,6 +71,77 @@ func assertFanoutBundleDefaults(t *testing.T, bundle delegationBundleYAML, deleg
 	if len(bundle.Closeout.WorkerMust) == 0 || len(bundle.Closeout.ParentMust) == 0 {
 		t.Fatal("expected closeout defaults")
 	}
+}
+
+func assertDistinctFanoutBundles(t *testing.T, x1, x2 delegationBundleYAML) {
+	t.Helper()
+	t.Run("task-ids-correct", func(t *testing.T) {
+		if x1.TaskID != "t1" || x2.TaskID != "t2" {
+			t.Fatalf("task mismatch: %s / %s", x1.TaskID, x2.TaskID)
+		}
+	})
+	t.Run("owners-distinct", func(t *testing.T) {
+		if x1.Owner != "a" || x2.Owner != "b" {
+			t.Fatalf("owner leak: %s / %s", x1.Owner, x2.Owner)
+		}
+	})
+	t.Run("slice-id-only-on-slice-task", func(t *testing.T) {
+		if x2.SliceID != "" {
+			t.Fatalf("t2 bundle should not set slice_id, got %q", x2.SliceID)
+		}
+	})
+}
+
+func writeFanoutPromptFixture(t *testing.T, repo string) {
+	t.Helper()
+	promptPath := filepath.Join(repo, ".agents", "ctx", "prompt.md")
+	if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(promptPath, []byte("# hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertFanoutPromptBundle(t *testing.T, bundle delegationBundleYAML) {
+	t.Helper()
+	t.Run("worker-profile", func(t *testing.T) {
+		if bundle.Worker.Profile != "custom-worker" {
+			t.Fatalf("profile %q", bundle.Worker.Profile)
+		}
+	})
+	t.Run("prompt-fields", func(t *testing.T) {
+		if len(bundle.Prompt.Inline) != 2 || bundle.Prompt.Inline[0] != "line one" {
+			t.Fatalf("inline prompt: %+v", bundle.Prompt.Inline)
+		}
+		if len(bundle.Prompt.PromptFiles) != 1 || bundle.Prompt.PromptFiles[0] != ".agents/ctx/prompt.md" {
+			t.Fatalf("prompt_files: %+v", bundle.Prompt.PromptFiles)
+		}
+	})
+	t.Run("context-fields", func(t *testing.T) {
+		if len(bundle.Context.RequiredFiles) != 1 {
+			t.Fatalf("context: %+v", bundle.Context.RequiredFiles)
+		}
+	})
+	t.Run("verification-fields", func(t *testing.T) {
+		if bundle.Verification.FeedbackGoal != "Prove fanout bundles persist." {
+			t.Fatalf("feedback_goal %q", bundle.Verification.FeedbackGoal)
+		}
+		if len(bundle.Verification.ScenarioTags) != 2 {
+			t.Fatalf("scenario_tags: %+v", bundle.Verification.ScenarioTags)
+		}
+		if len(bundle.Verification.RegressionArtifacts) != 1 || !strings.HasSuffix(bundle.Verification.RegressionArtifacts[0], "TASKS.yaml") {
+			t.Fatalf("regression: %+v", bundle.Verification.RegressionArtifacts)
+		}
+	})
+	t.Run("selection-policy", func(t *testing.T) {
+		if bundle.Selection == nil || bundle.Selection.Reason != "integration test" {
+			t.Fatalf("selection: %+v", bundle.Selection)
+		}
+		if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.RequireNegativeCoverage == nil || !*bundle.Verification.EvidencePolicy.RequireNegativeCoverage {
+			t.Fatal("expected require_negative_coverage")
+		}
+	})
 }
 
 func TestLoadSaveDelegationContract_RoundTrip(t *testing.T) {
@@ -188,49 +265,14 @@ func TestFanoutTwoTasksDistinctBundles(t *testing.T) {
 		t.Fatalf("expected distinct delegation ids: %s", c1.ID)
 	}
 
-	b1, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c1.ID+".yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b2, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "delegation-bundles", c2.ID+".yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var x1, x2 delegationBundleYAML
-	if err := yaml.Unmarshal(b1, &x1); err != nil {
-		t.Fatal(err)
-	}
-	if err := yaml.Unmarshal(b2, &x2); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("task-ids-correct", func(t *testing.T) {
-		if x1.TaskID != "t1" || x2.TaskID != "t2" {
-			t.Fatalf("task mismatch: %s / %s", x1.TaskID, x2.TaskID)
-		}
-	})
-	t.Run("owners-distinct", func(t *testing.T) {
-		if x1.Owner != "a" || x2.Owner != "b" {
-			t.Fatalf("owner leak: %s / %s", x1.Owner, x2.Owner)
-		}
-	})
-	t.Run("slice-id-only-on-slice-task", func(t *testing.T) {
-		if x2.SliceID != "" {
-			t.Fatalf("t2 bundle should not set slice_id, got %q", x2.SliceID)
-		}
-	})
+	x1 := loadFanoutBundleYAML(t, repo, "t1")
+	x2 := loadFanoutBundleYAML(t, repo, "t2")
+	assertDistinctFanoutBundles(t, x1, x2)
 }
 
 func TestFanoutDelegationBundlePromptAndFiles(t *testing.T) {
 	repo := setupFanoutSliceProject(t, "in_progress")
-	promptPath := filepath.Join(repo, ".agents", "ctx", "prompt.md")
-	if err := os.MkdirAll(filepath.Dir(promptPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(promptPath, []byte("# hi\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeFanoutPromptFixture(t, repo)
 	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--slice", "s1", "--owner", "w",
 		"--delegate-profile", "custom-worker",
 		"--prompt", "line one", "--prompt", "line two",
@@ -245,45 +287,8 @@ func TestFanoutDelegationBundlePromptAndFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bundle := loadFanoutContractAndBundle(t, repo, "t1")
-
-	t.Run("worker-profile", func(t *testing.T) {
-		if bundle.Worker.Profile != "custom-worker" {
-			t.Fatalf("profile %q", bundle.Worker.Profile)
-		}
-	})
-	t.Run("prompt-fields", func(t *testing.T) {
-		if len(bundle.Prompt.Inline) != 2 || bundle.Prompt.Inline[0] != "line one" {
-			t.Fatalf("inline prompt: %+v", bundle.Prompt.Inline)
-		}
-		if len(bundle.Prompt.PromptFiles) != 1 || bundle.Prompt.PromptFiles[0] != ".agents/ctx/prompt.md" {
-			t.Fatalf("prompt_files: %+v", bundle.Prompt.PromptFiles)
-		}
-	})
-	t.Run("context-fields", func(t *testing.T) {
-		if len(bundle.Context.RequiredFiles) != 1 {
-			t.Fatalf("context: %+v", bundle.Context.RequiredFiles)
-		}
-	})
-	t.Run("verification-fields", func(t *testing.T) {
-		if bundle.Verification.FeedbackGoal != "Prove fanout bundles persist." {
-			t.Fatalf("feedback_goal %q", bundle.Verification.FeedbackGoal)
-		}
-		if len(bundle.Verification.ScenarioTags) != 2 {
-			t.Fatalf("scenario_tags: %+v", bundle.Verification.ScenarioTags)
-		}
-		if len(bundle.Verification.RegressionArtifacts) != 1 || !strings.HasSuffix(bundle.Verification.RegressionArtifacts[0], "TASKS.yaml") {
-			t.Fatalf("regression: %+v", bundle.Verification.RegressionArtifacts)
-		}
-	})
-	t.Run("selection-policy", func(t *testing.T) {
-		if bundle.Selection == nil || bundle.Selection.Reason != "integration test" {
-			t.Fatalf("selection: %+v", bundle.Selection)
-		}
-		if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.RequireNegativeCoverage == nil || !*bundle.Verification.EvidencePolicy.RequireNegativeCoverage {
-			t.Fatal("expected require_negative_coverage")
-		}
-	})
+	bundle := loadFanoutBundleYAML(t, repo, "t1")
+	assertFanoutPromptBundle(t, bundle)
 }
 
 func TestFanoutDelegationBundleRejectsEscapePath(t *testing.T) {

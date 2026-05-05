@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -585,6 +586,56 @@ func assignFoldBackArtifactIdentity(artifact *foldBackArtifact, prior *foldBackA
 	}
 }
 
+func readFoldBackArtifacts(dir, planFilter string) ([]foldBackArtifact, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var artifacts []foldBackArtifact
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var a foldBackArtifact
+		if err := yaml.Unmarshal(data, &a); err != nil {
+			return nil, fmt.Errorf("parse fold-back %s: %w", e.Name(), err)
+		}
+		if planFilter != "" && a.PlanID != planFilter {
+			continue
+		}
+		artifacts = append(artifacts, a)
+	}
+	sort.Slice(artifacts, func(i, j int) bool {
+		return artifacts[i].CreatedAt < artifacts[j].CreatedAt
+	})
+	return artifacts, nil
+}
+
+func renderFoldBackList(out io.Writer, artifacts []foldBackArtifact) error {
+	if len(artifacts) == 0 {
+		fmt.Fprintf(out, "  %s\n", "No fold-back observations recorded.")
+		return nil
+	}
+	fmt.Fprintf(out, ui.ThreeStringPlaceHolder, ui.Bold, "Fold-back observations", ui.Reset)
+	fmt.Fprintln(out, strings.Repeat("─", 40))
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tPLAN\tTASK\tCLASSIFICATION\tROUTED-TO\tCREATED-AT")
+	for _, a := range artifacts {
+		taskCol := a.TaskID
+		if taskCol == "" {
+			taskCol = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.ID, a.PlanID, taskCol, a.Classification, a.RoutedTo, a.CreatedAt)
+	}
+	_ = w.Flush()
+	fmt.Fprintln(out)
+	return nil
+}
+
 func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -656,7 +707,7 @@ func runWorkflowFoldBackList(cmd *cobra.Command, _ []string) error {
 	out := cmd.OutOrStdout()
 
 	dir := foldBackDir(project.Path)
-	entries, err := os.ReadDir(dir)
+	artifacts, err := readFoldBackArtifacts(dir, planFilter)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if deps.Flags.JSON() {
@@ -670,54 +721,12 @@ func runWorkflowFoldBackList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	var artifacts []foldBackArtifact
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return err
-		}
-		var a foldBackArtifact
-		if err := yaml.Unmarshal(data, &a); err != nil {
-			return fmt.Errorf("parse fold-back %s: %w", e.Name(), err)
-		}
-		if planFilter != "" && a.PlanID != planFilter {
-			continue
-		}
-		artifacts = append(artifacts, a)
-	}
-
-	sort.Slice(artifacts, func(i, j int) bool {
-		return artifacts[i].CreatedAt < artifacts[j].CreatedAt
-	})
-
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(artifacts)
 	}
-
-	if len(artifacts) == 0 {
-		fmt.Fprintf(out, "  %s\n", "No fold-back observations recorded.")
-		return nil
-	}
-
-	fmt.Fprintf(out, ui.ThreeStringPlaceHolder, ui.Bold, "Fold-back observations", ui.Reset)
-	fmt.Fprintln(out, strings.Repeat("─", 40))
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tPLAN\tTASK\tCLASSIFICATION\tROUTED-TO\tCREATED-AT")
-	for _, a := range artifacts {
-		taskCol := a.TaskID
-		if taskCol == "" {
-			taskCol = "—"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.ID, a.PlanID, taskCol, a.Classification, a.RoutedTo, a.CreatedAt)
-	}
-	_ = w.Flush()
-	fmt.Fprintln(out)
-	return nil
+	return renderFoldBackList(out, artifacts)
 }
 
 func ensureTaskVerificationDir(projectPath, taskID string) error {

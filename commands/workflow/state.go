@@ -504,35 +504,33 @@ func pendingPlanItem(trimmed string) (string, bool) {
 	return strings.TrimSpace(strings.TrimPrefix(trimmed, "- [ ] ")), true
 }
 
-func readWorkflowPlan(path string) (workflowPlanSummary, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return workflowPlanSummary{}, err
-	}
-	lines := strings.Split(string(content), "\n")
+func readWorkflowPlanTitle(lines []string, path string) string {
 	title := filepath.Base(path)
-	if len(lines) > 0 {
-		first := strings.TrimSpace(lines[0])
-		if strings.HasPrefix(first, "#") {
-			title = strings.TrimSpace(strings.TrimLeft(first, "# "))
-		}
+	if len(lines) == 0 {
+		return title
 	}
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "#") {
+		return strings.TrimSpace(strings.TrimLeft(first, "# "))
+	}
+	return title
+}
+
+func collectWorkflowPlanItems(lines []string) ([]string, []string, bool) {
 	var pending []string
 	var fallback []string
 	completed := false
-	for _, line := range lines[1:] {
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
 		if isCompleted, ok := completedPlanStatus(trimmed); ok {
-			if isCompleted {
-				completed = true
-			}
+			completed = completed || isCompleted
 			continue
 		}
 		if item, ok := pendingPlanItem(trimmed); ok {
-			pending = append(pending, item)
+			pending = appendPendingItem(pending, item)
 			if len(pending) == 3 {
 				break
 			}
@@ -541,10 +539,30 @@ func readWorkflowPlan(path string) (workflowPlanSummary, error) {
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if len(fallback) < 3 {
-			fallback = append(fallback, trimmed)
-		}
+		fallback = appendFallbackItem(fallback, trimmed)
 	}
+	return pending, fallback, completed
+}
+
+func appendPendingItem(pending []string, item string) []string {
+	return append(pending, item)
+}
+
+func appendFallbackItem(fallback []string, item string) []string {
+	if len(fallback) >= 3 {
+		return fallback
+	}
+	return append(fallback, item)
+}
+
+func readWorkflowPlan(path string) (workflowPlanSummary, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return workflowPlanSummary{}, err
+	}
+	lines := strings.Split(string(content), "\n")
+	title := readWorkflowPlanTitle(lines, path)
+	pending, fallback, completed := collectWorkflowPlanItems(lines[1:])
 	if completed {
 		pending = nil
 	} else if len(pending) == 0 {
