@@ -18,6 +18,7 @@ import (
 const (
 	defaultCheckpointStaleDays = 7
 	defaultProposalStaleDays   = 30
+	driftAgentsDir             = ".agents"
 )
 
 // ManagedProject is one entry from ~./agents/config.json loaded for drift checks.
@@ -115,12 +116,12 @@ func driftStaleProposalPhase(report *RepoDriftReport, proposalStaleDays int) {
 }
 
 func driftWorkflowDirPhase(report *RepoDriftReport, project ManagedProject) {
-	workflowDir := filepath.Join(project.Path, ".agents", "workflow")
+	workflowDir := filepath.Join(project.Path, driftAgentsDir, "workflow")
 	if _, err := os.Stat(workflowDir); os.IsNotExist(err) {
 		report.MissingWorkflowDir = true
 		report.Warnings = append(report.Warnings, "no .agents/workflow/ directory — workflow not initialized")
 	}
-	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
+	plansDir := filepath.Join(project.Path, driftAgentsDir, "workflow", "plans")
 	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
 		report.MissingPlanStructure = true
 		if !report.MissingWorkflowDir {
@@ -144,7 +145,7 @@ func driftPlanScanPhase(report *RepoDriftReport, project ManagedProject) {
 	if report.MissingPlanStructure {
 		return
 	}
-	plansDir := filepath.Join(project.Path, ".agents", "workflow", "plans")
+	plansDir := filepath.Join(project.Path, driftAgentsDir, "workflow", "plans")
 	entries, err := os.ReadDir(plansDir)
 	if err != nil {
 		return

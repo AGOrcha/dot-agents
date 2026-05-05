@@ -233,15 +233,29 @@ func validateVerifyRecordInputs(kind, status, scope string) error {
 	return nil
 }
 
+// verifyResultArtifactInputs bundles the fields needed by writeVerifyResultArtifact
+// so the function stays under the parameter limit while the call site keeps
+// each field individually addressable.
+type verifyResultArtifactInputs struct {
+	ProjectPath  string
+	TaskID       string
+	Kind         string
+	Status       string
+	Command      string
+	Summary      string
+	VerifierType string
+	Now          string
+}
+
 // writeVerifyResultArtifact writes the typed <verifier_type>.result.yaml when
 // taskID is non-empty and returns the slash-joined relative artifact path.
-func writeVerifyResultArtifact(projectPath, taskID, kind, status, command, summary, verifierType, now string) (string, error) {
-	if taskID == "" {
+func writeVerifyResultArtifact(in verifyResultArtifactInputs) (string, error) {
+	if in.TaskID == "" {
 		return "", nil
 	}
-	vt := strings.TrimSpace(verifierType)
+	vt := strings.TrimSpace(in.VerifierType)
 	if vt == "" {
-		vt = strings.TrimSpace(strings.ToLower(kind))
+		vt = strings.TrimSpace(strings.ToLower(in.Kind))
 	}
 	if !validVerificationVerifierTypeStem(vt) {
 		return "", deps.ErrorWithHints(
@@ -249,32 +263,44 @@ func writeVerifyResultArtifact(projectPath, taskID, kind, status, command, summa
 			"Use a profile id like `unit`, `api`, `batch`, or omit --verifier-type to derive it from --kind.",
 		)
 	}
-	contract, cerr := loadDelegationContract(projectPath, taskID)
+	contract, cerr := loadDelegationContract(in.ProjectPath, in.TaskID)
 	if cerr != nil {
-		return "", fmt.Errorf("load delegation contract for task %q: %w", taskID, cerr)
+		return "", fmt.Errorf("load delegation contract for task %q: %w", in.TaskID, cerr)
 	}
 	doc := &VerificationResultDoc{
 		SchemaVersion: 1,
-		TaskID:        taskID,
+		TaskID:        in.TaskID,
 		ParentPlanID:  contract.ParentPlanID,
 		VerifierType:  vt,
-		Status:        status,
-		Summary:       strings.TrimSpace(summary),
-		RecordedAt:    now,
+		Status:        in.Status,
+		Summary:       strings.TrimSpace(in.Summary),
+		RecordedAt:    in.Now,
 		DelegationID:  contract.ID,
 		RecordedBy:    verifyRecordedByLabel,
 	}
-	if strings.TrimSpace(command) != "" {
-		doc.Commands = []string{command}
+	if strings.TrimSpace(in.Command) != "" {
+		doc.Commands = []string{in.Command}
 	}
-	if err := writeVerificationResultYAML(projectPath, doc); err != nil {
+	if err := writeVerificationResultYAML(in.ProjectPath, doc); err != nil {
 		return "", fmt.Errorf("write verification result artifact: %w", err)
 	}
-	return filepath.ToSlash(filepath.Join(".agents", "active", "verification", taskID, vt+".result.yaml")), nil
+	return filepath.ToSlash(filepath.Join(".agents", "active", "verification", in.TaskID, vt+".result.yaml")), nil
 }
 
-func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, verifierType string) error {
-	if err := validateVerifyRecordInputs(kind, status, scope); err != nil {
+// verifyRecordInputs bundles inputs for runWorkflowVerifyRecord so the signature
+// stays under the parameter limit while keeping each field individually addressable.
+type verifyRecordInputs struct {
+	Kind         string
+	Status       string
+	Command      string
+	Scope        string
+	Summary      string
+	TaskID       string
+	VerifierType string
+}
+
+func runWorkflowVerifyRecord(in verifyRecordInputs) error {
+	if err := validateVerifyRecordInputs(in.Kind, in.Status, in.Scope); err != nil {
 		return err
 	}
 	project, err := currentWorkflowProject()
@@ -282,9 +308,18 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, veri
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	taskID = strings.TrimSpace(taskID)
+	taskID := strings.TrimSpace(in.TaskID)
 
-	artifactRel, err := writeVerifyResultArtifact(project.Path, taskID, kind, status, command, summary, verifierType, now)
+	artifactRel, err := writeVerifyResultArtifact(verifyResultArtifactInputs{
+		ProjectPath:  project.Path,
+		TaskID:       taskID,
+		Kind:         in.Kind,
+		Status:       in.Status,
+		Command:      in.Command,
+		Summary:      in.Summary,
+		VerifierType: in.VerifierType,
+		Now:          now,
+	})
 	if err != nil {
 		return err
 	}
@@ -296,18 +331,18 @@ func runWorkflowVerifyRecord(kind, status, command, scope, summary, taskID, veri
 	rec := VerificationRecord{
 		SchemaVersion: 1,
 		Timestamp:     now,
-		Kind:          kind,
-		Status:        status,
-		Command:       command,
-		Scope:         scope,
-		Summary:       summary,
+		Kind:          in.Kind,
+		Status:        in.Status,
+		Command:       in.Command,
+		Scope:         in.Scope,
+		Summary:       in.Summary,
 		Artifacts:     artifacts,
 		RecordedBy:    verifyRecordedByLabel,
 	}
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err
 	}
-	ui.Success(fmt.Sprintf("Verification recorded: %s %s (%s)", kind, status, summary))
+	ui.Success(fmt.Sprintf("Verification recorded: %s %s (%s)", in.Kind, in.Status, in.Summary))
 	return nil
 }
 

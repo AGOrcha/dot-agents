@@ -63,6 +63,7 @@ data["refresh"] = refresh
 manifest_path.write_text(json.dumps(data, indent=2) + "\n")
 PY
   rm -f "$project_path/.agents-refresh"
+  return 0
 }
 
 cmd_install_help() {

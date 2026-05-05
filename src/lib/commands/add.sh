@@ -72,6 +72,7 @@ dot_agents_map_resource_rel_to_agents_dest() {
       echo ""
       ;;
   esac
+  return 0
 }
 
 dot_agents_platform_has_active_backup() {

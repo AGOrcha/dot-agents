@@ -256,7 +256,7 @@ func appendNeighborMatches(
 		if err != nil || neighbor == nil {
 			continue
 		}
-		if edgeKind == graphstore.EdgeKindTestedBy && !neighbor.IsTest && neighbor.Kind != graphstore.NodeKindTest {
+		if shouldSkipNeighborForKind(edgeKind, neighbor) {
 			continue
 		}
 		seen[neighborQN] = true
@@ -266,6 +266,14 @@ func appendNeighborMatches(
 		}
 	}
 	return false, nil
+}
+
+// shouldSkipNeighborForKind returns true if the neighbor should be excluded based on edge kind.
+func shouldSkipNeighborForKind(edgeKind string, neighbor *graphstore.GraphNode) bool {
+	if edgeKind == graphstore.EdgeKindTestedBy && !neighbor.IsTest && neighbor.Kind != graphstore.NodeKindTest {
+		return true
+	}
+	return false
 }
 
 func collectSymbolDecisionResults(store *graphstore.SQLiteStore, nodes []graphstore.GraphNode, limit int) ([]GraphQueryResult, error) {

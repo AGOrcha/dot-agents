@@ -575,8 +575,21 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 		),
 		Args: deps.NoArgsWithHints("Provide verification details through flags such as `--kind`, `--status`, and `--summary`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowVerifyRecordDispatch(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary,
-				reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, verifyVerifierType, reviewFailedGates)
+			return runWorkflowVerifyRecordDispatch(verifyRecordDispatchInputs{
+				Kind:         verifyKind,
+				Status:       verifyStatus,
+				Command:      verifyCommand,
+				Scope:        verifyScope,
+				Summary:      verifySummary,
+				Phase1:       reviewPhase1,
+				Phase2:       reviewPhase2,
+				Overall:      reviewOverall,
+				Escalation:   reviewEscalation,
+				Notes:        reviewNotes,
+				Task:         reviewTask,
+				VerifierType: verifyVerifierType,
+				FailedGates:  reviewFailedGates,
+			})
 		},
 	}
 	verifyRecordCmd.Flags().StringVar(&verifyKind, "kind", "", "Kind: test|lint|build|format|custom|review (required)")
@@ -597,45 +610,76 @@ func newWorkflowVerifyRecordCmd() *cobra.Command {
 	return verifyRecordCmd
 }
 
+// verifyRecordDispatchInputs bundles all flags forwarded from the cobra command
+// into runWorkflowVerifyRecordDispatch so the function stays under the parameter
+// limit while keeping each field individually addressable.
+type verifyRecordDispatchInputs struct {
+	Kind         string
+	Status       string
+	Command      string
+	Scope        string
+	Summary      string
+	Phase1       string
+	Phase2       string
+	Overall      string
+	Escalation   string
+	Notes        string
+	Task         string
+	VerifierType string
+	FailedGates  []string
+}
+
 // runWorkflowVerifyRecordDispatch validates flag combinations and dispatches to the
 // appropriate runWorkflowVerifyRecord{Review,} runner.
-func runWorkflowVerifyRecordDispatch(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary,
-	reviewPhase1, reviewPhase2, reviewOverall, reviewEscalation, reviewNotes, reviewTask, verifyVerifierType string,
-	reviewFailedGates []string) error {
-	k := strings.TrimSpace(strings.ToLower(verifyKind))
+func runWorkflowVerifyRecordDispatch(in verifyRecordDispatchInputs) error {
+	k := strings.TrimSpace(strings.ToLower(in.Kind))
 	if k == "" {
 		return fmt.Errorf("--kind is required")
 	}
-	if strings.TrimSpace(verifySummary) == "" {
+	if strings.TrimSpace(in.Summary) == "" {
 		return fmt.Errorf("--summary is required")
 	}
 	if k == "review" {
-		if strings.TrimSpace(verifyStatus) != "" {
-			return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
-		}
-		if strings.TrimSpace(reviewPhase1) == "" || strings.TrimSpace(reviewPhase2) == "" {
-			return deps.ErrorWithHints(
-				"--phase1-decision and --phase2-decision are required when --kind review",
-				"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
-			)
-		}
-		return runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Command:       verifyCommand,
-			Scope:         verifyScope,
-			Summary:       verifySummary,
-			Phase1In:      reviewPhase1,
-			Phase2In:      reviewPhase2,
-			OverallIn:     reviewOverall,
-			Escalation:    reviewEscalation,
-			ReviewerNotes: reviewNotes,
-			TaskFlag:      reviewTask,
-			FailedGates:   reviewFailedGates,
-		})
+		return dispatchVerifyRecordReview(in)
 	}
-	if strings.TrimSpace(verifyStatus) == "" {
+	if strings.TrimSpace(in.Status) == "" {
 		return fmt.Errorf("--status is required when --kind is not review")
 	}
-	return runWorkflowVerifyRecord(verifyKind, verifyStatus, verifyCommand, verifyScope, verifySummary, reviewTask, verifyVerifierType)
+	return runWorkflowVerifyRecord(verifyRecordInputs{
+		Kind:         in.Kind,
+		Status:       in.Status,
+		Command:      in.Command,
+		Scope:        in.Scope,
+		Summary:      in.Summary,
+		TaskID:       in.Task,
+		VerifierType: in.VerifierType,
+	})
+}
+
+// dispatchVerifyRecordReview validates the review-specific flag combination and
+// forwards to runWorkflowVerifyRecordReview.
+func dispatchVerifyRecordReview(in verifyRecordDispatchInputs) error {
+	if strings.TrimSpace(in.Status) != "" {
+		return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
+	}
+	if strings.TrimSpace(in.Phase1) == "" || strings.TrimSpace(in.Phase2) == "" {
+		return deps.ErrorWithHints(
+			"--phase1-decision and --phase2-decision are required when --kind review",
+			"Example: dot-agents workflow verify record --kind review --phase1-decision accept --phase2-decision accept --summary \"LGTM\"",
+		)
+	}
+	return runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Command:       in.Command,
+		Scope:         in.Scope,
+		Summary:       in.Summary,
+		Phase1In:      in.Phase1,
+		Phase2In:      in.Phase2,
+		OverallIn:     in.Overall,
+		Escalation:    in.Escalation,
+		ReviewerNotes: in.Notes,
+		TaskFlag:      in.Task,
+		FailedGates:   in.FailedGates,
+	})
 }
 
 func newWorkflowVerifyLogCmd() *cobra.Command {

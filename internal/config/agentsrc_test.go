@@ -351,11 +351,11 @@ func TestAgentsRCSaveTrailingNewline(t *testing.T) {
 
 func TestMergeGenerateAgentsRCNilArgs(t *testing.T) {
 	gen := &AgentsRC{Version: 1, Project: "g", Sources: []Source{{Type: testSourceTypeLocal}}}
-	if got := MergeGenerateAgentsRC(nil, gen); got != gen {
+	if MergeGenerateAgentsRC(nil, gen) != gen {
 		t.Fatal("nil existing should return generated pointer")
 	}
 	ex := &AgentsRC{Version: 1, Project: "e"}
-	if got := MergeGenerateAgentsRC(ex, nil); got != ex {
+	if MergeGenerateAgentsRC(ex, nil) != ex {
 		t.Fatal("nil generated should return existing pointer")
 	}
 }

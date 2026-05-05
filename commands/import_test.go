@@ -748,32 +748,13 @@ func TestBuildCanonicalHookOutputs_setsOrigin(t *testing.T) {
 }
 
 func TestProcessImportOutput_preservesHookConflict(t *testing.T) {
-	agentsHome := t.TempDir()
-	t.Setenv("AGENTS_HOME", agentsHome)
+	agentsHome, srcRoot, srcFile, primary, oldYAML, newYAML := setupHookConflictTest(t)
 
-	srcRoot := t.TempDir()
-	srcFile := filepath.Join(srcRoot, ".cursor", "hooks.json")
-	if err := os.MkdirAll(filepath.Dir(srcFile), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(srcFile, []byte(`{"hooks":{"preToolUse":[{"command":"x","matcher":""}]}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	primary := filepath.Join(agentsHome, "hooks", "proj", "pre-tool-use-echo", "HOOK.yaml")
-	if err := os.MkdirAll(filepath.Dir(primary), 0755); err != nil {
-		t.Fatal(err)
-	}
-	oldYAML := []byte("name: old\nwhen: pre_tool_use\nrun:\n  command: old\n")
-	if err := os.WriteFile(primary, oldYAML, 0644); err != nil {
-		t.Fatal(err)
-	}
 	fi, err := os.Stat(primary)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	newYAML := []byte("name: new\nwhen: pre_tool_use\nrun:\n  command: new\n")
 	out := importOutput{
 		destRel: "hooks/proj/pre-tool-use-echo/HOOK.yaml",
 		content: newYAML,
@@ -785,9 +766,49 @@ func TestProcessImportOutput_preservesHookConflict(t *testing.T) {
 		sourcePath: srcFile,
 	}
 	res := processImportOutput(c, out, agentsHome, "20260101120000", fi)
+
+	assertHookConflictImportResult(t, res)
+	assertPrimaryFilePreserved(t, primary, oldYAML)
+	assertAlternateFileCreated(t, agentsHome, newYAML)
+	assertConflictNoteCreated(t, agentsHome, out)
+}
+
+func setupHookConflictTest(t *testing.T) (agentsHome, srcRoot, srcFile, primary string, oldYAML, newYAML []byte) {
+	t.Helper()
+	agentsHome = t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	srcRoot = t.TempDir()
+	srcFile = filepath.Join(srcRoot, ".cursor", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(srcFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srcFile, []byte(`{"hooks":{"preToolUse":[{"command":"x","matcher":""}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	primary = filepath.Join(agentsHome, "hooks", "proj", "pre-tool-use-echo", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(primary), 0755); err != nil {
+		t.Fatal(err)
+	}
+	oldYAML = []byte("name: old\nwhen: pre_tool_use\nrun:\n  command: old\n")
+	if err := os.WriteFile(primary, oldYAML, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	newYAML = []byte("name: new\nwhen: pre_tool_use\nrun:\n  command: new\n")
+	return agentsHome, srcRoot, srcFile, primary, oldYAML, newYAML
+}
+
+func assertHookConflictImportResult(t *testing.T, res importResult) {
+	t.Helper()
 	if res.imported != 1 || res.skipped != 0 {
 		t.Fatalf("imported=%d skipped=%d", res.imported, res.skipped)
 	}
+}
+
+func assertPrimaryFilePreserved(t *testing.T, primary string, oldYAML []byte) {
+	t.Helper()
 	primaryBytes, err := os.ReadFile(primary)
 	if err != nil {
 		t.Fatal(err)
@@ -795,6 +816,10 @@ func TestProcessImportOutput_preservesHookConflict(t *testing.T) {
 	if string(primaryBytes) != string(oldYAML) {
 		t.Fatal("primary file should be preserved")
 	}
+}
+
+func assertAlternateFileCreated(t *testing.T, agentsHome string, newYAML []byte) {
+	t.Helper()
 	alt := filepath.Join(agentsHome, "hooks", "proj", "cursor-pre-tool-use-echo", "HOOK.yaml")
 	altBytes, err := os.ReadFile(alt)
 	if err != nil {
@@ -803,7 +828,10 @@ func TestProcessImportOutput_preservesHookConflict(t *testing.T) {
 	if string(altBytes) != string(newYAML) {
 		t.Fatalf("alternate content mismatch: %s", altBytes)
 	}
+}
 
+func assertConflictNoteCreated(t *testing.T, agentsHome string, out importOutput) {
+	t.Helper()
 	matches, _ := filepath.Glob(filepath.Join(agentsHome, "review-notes", "import-conflicts", "ic-*.yaml"))
 	if len(matches) != 1 {
 		t.Fatalf("expected one review note, got %d", len(matches))

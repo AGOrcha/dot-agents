@@ -178,7 +178,13 @@ func TestWorkflow_VerifyThenHealth(t *testing.T) {
 	}
 
 	// Record a passing verification
-	if err := runWorkflowVerifyRecord("test", "pass", "go test ./...", "repo", "all tests green", "", ""); err != nil {
+	if err := runWorkflowVerifyRecord(verifyRecordInputs{
+		Kind:    "test",
+		Status:  "pass",
+		Command: "go test ./...",
+		Scope:   "repo",
+		Summary: "all tests green",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
