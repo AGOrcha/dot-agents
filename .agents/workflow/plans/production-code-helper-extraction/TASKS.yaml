@@ -3,7 +3,7 @@ plan_id: production-code-helper-extraction
 tasks:
     - id: t1-triage-and-classify
       title: Triage Cluster E.other groups; classify extract-vs-accept per group
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-graphstore-helpers
@@ -63,10 +63,9 @@ tasks:
           output contract: design.md updated with per-group
                            classification; T2-T6 task scopes adjusted
       app_type: research
-
     - id: t2-graphstore-helpers
       title: Extract graphstore shared helpers (Group GS)
-      status: pending
+      status: completed
       depends_on:
         - t1-triage-and-classify
       blocks: []
@@ -113,7 +112,6 @@ tasks:
                                        graphstore_test fixtures
           output contract: ~150-200 dup lines removed from Group GS
       app_type: code-fix
-
     - id: t3-resource-plan-helper
       title: Extract internal/platform/resource_plan.go bucket-listing helper (Group RP)
       status: pending
@@ -151,7 +149,6 @@ tasks:
                                        file's three offending blocks
           output contract: ~70 dup lines removed from Group RP
       app_type: code-fix
-
     - id: t4-commands-cli-family
       title: Extract commands/{settings,mcp,rules,...} CLI helpers (Group CMDS)
       status: pending
@@ -203,7 +200,6 @@ tasks:
                                        cobra.Command precedents
           output contract: ~150-200 dup lines removed from Group CMDS
       app_type: code-fix
-
     - id: t5-platform-mcp-settings
       title: Extract internal/platform/mcp_settings + plugins helper (Group MCP)
       status: pending
@@ -240,7 +236,6 @@ tasks:
                                        analysis
           output contract: ~50 dup lines removed from Group MCP
       app_type: code-fix
-
     - id: t6-typescript-port-mirrors
       title: Mirror Go projectsync extraction in TypeScript port (Group TS)
       status: pending
@@ -286,7 +281,6 @@ tasks:
                                        plan owner contact
           output contract: ~40 dup lines removed from Group TS
       app_type: code-fix
-
     - id: t7-archive
       title: Open follow-up PR; verify gate; archive plan
       status: pending

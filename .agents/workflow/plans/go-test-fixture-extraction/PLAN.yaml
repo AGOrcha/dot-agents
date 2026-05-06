@@ -19,7 +19,7 @@ summary: |-
     Source decision: docs/adr/0008-pr10-duplication-scope.md (option B)
     Source classification: .agents/workflow/plans/sonarqube-pr10/findings.md (Cluster D)
 created_at: "2026-05-04T00:00:00Z"
-updated_at: "2026-05-04T00:00:00Z"
+updated_at: "2026-05-06T05:35:07Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate on the follow-up PR reports
@@ -43,4 +43,4 @@ verification_strategy: |-
 
     Plan archives when the follow-up PR merges. ADR-0008 is the cross
     reference linking this plan to PR#10's waiver.
-current_focus_task: T1 audit — re-snapshot live Cluster D inventory and converge helper signatures before any extraction commits land
+current_focus_task: Refactor commands/*_test.go (root) to use internal/testutil

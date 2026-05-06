@@ -3,7 +3,7 @@ plan_id: go-test-fixture-extraction
 tasks:
     - id: t1-audit-and-helper-design
       title: Audit Cluster D fixtures; design canonical helper signatures
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-create-internal-testutil
@@ -50,10 +50,9 @@ tasks:
                                        the 21 *_test.go files
           output contract: design.md updated with concrete signatures
       app_type: research
-
     - id: t2-create-internal-testutil
       title: Land internal/testutil with helpers + unit tests
-      status: pending
+      status: completed
       depends_on:
         - t1-audit-and-helper-design
       blocks:
@@ -94,10 +93,9 @@ tasks:
           output contract: internal/testutil exists with helpers,
                            docs, tests; importable by any *_test.go
       app_type: code-fix
-
     - id: t3-extract-platform-tests
       title: Refactor internal/platform/*_test.go to use internal/testutil
-      status: pending
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -139,10 +137,9 @@ tasks:
           output contract: ~250 dup lines removed; gate-relevant
                            density falls
       app_type: code-fix
-
     - id: t4-extract-workflow-tests
       title: Refactor commands/workflow/*_test.go to use internal/testutil
-      status: pending
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -180,7 +177,6 @@ tasks:
                                        internal/testutil API
           output contract: ~610 dup lines removed
       app_type: code-fix
-
     - id: t5-extract-commands-root-tests
       title: Refactor commands/*_test.go (root) to use internal/testutil
       status: pending
@@ -215,7 +211,6 @@ tasks:
                                        internal/testutil API
           output contract: ~230 dup lines removed
       app_type: code-fix
-
     - id: t6-extract-graphstore-tests
       title: Refactor internal/graphstore/*_test.go to use internal/testutil
       status: pending
@@ -256,10 +251,9 @@ tasks:
                                        resolution from T1
           output contract: ~156 dup lines removed
       app_type: code-fix
-
     - id: t7-extract-skills-and-agents-tests
       title: Refactor commands/{agents,skills,kg}/*_test.go to use internal/testutil
-      status: pending
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -295,7 +289,6 @@ tasks:
                                        and BucketSpec field shapes
           output contract: ~318 dup lines removed
       app_type: code-fix
-
     - id: t8-archive
       title: Open follow-up PR; verify gate; archive plan
       status: pending
