@@ -311,10 +311,8 @@ func (s *SQLiteStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, error
 			args[j] = q
 		}
 
-		rows, err := s.db.Query(
-			fmt.Sprintf("SELECT * FROM edges WHERE source_qualified IN (%s)", placeholders),
-			args...,
-		)
+		query := "SELECT * FROM edges WHERE source_qualified IN (" + placeholders + ")"
+		rows, err := s.db.Query(query, args...)
 		if err != nil {
 			return nil, err
 		}
