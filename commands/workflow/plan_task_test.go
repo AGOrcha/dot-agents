@@ -1319,3 +1319,782 @@ func TestRunWorkflowTasks_MissingPlanReturnsError(t *testing.T) {
 		t.Fatal("expected error for missing plan, got nil")
 	}
 }
+
+// ── PR3b plan/task lifecycle coverage (slice pr3b-plan-lifecycle) ─────────────
+
+// chdirRepo chdirs into repo, registering a cleanup to restore the previous wd.
+func chdirRepo(t *testing.T, repo string) {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ── runWorkflowPlanCreate ────────────────────────────────────────────────────
+
+// TestRunWorkflowPlanCreate_ScaffoldsPlanAndTasks ensures plan create writes a
+// PLAN.yaml + TASKS.yaml with the expected initial fields.
+func TestRunWorkflowPlanCreate_ScaffoldsPlanAndTasks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowPlanCreate("new-plan", "New Plan Title", "summary text", "owner-x", "criteria-x", "verification-x"); err != nil {
+		t.Fatalf("runWorkflowPlanCreate: %v", err)
+	}
+
+	plan, err := loadCanonicalPlan(repo, "new-plan")
+	if err != nil {
+		t.Fatalf("loadCanonicalPlan: %v", err)
+	}
+	if plan.Title != "New Plan Title" {
+		t.Errorf("title = %q, want New Plan Title", plan.Title)
+	}
+	if plan.Status != "draft" {
+		t.Errorf("status = %q, want draft", plan.Status)
+	}
+	if plan.Owner != "owner-x" || plan.Summary != "summary text" || plan.SuccessCriteria != "criteria-x" || plan.VerificationStrategy != "verification-x" {
+		t.Errorf("plan metadata not populated: %+v", plan)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "new-plan")
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	if tf.PlanID != "new-plan" {
+		t.Errorf("PlanID = %q, want new-plan", tf.PlanID)
+	}
+	if len(tf.Tasks) != 0 {
+		t.Errorf("expected empty Tasks slice; got %d entries", len(tf.Tasks))
+	}
+}
+
+// TestRunWorkflowPlanCreate_RejectsExisting verifies that creating a plan in
+// a directory that already exists fails fast.
+func TestRunWorkflowPlanCreate_RejectsExisting(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	err := runWorkflowPlanCreate("wave-2", "dup", "", "", "", "")
+	if err == nil {
+		t.Fatal("expected error when plan dir already exists, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should mention 'already exists'; got: %v", err)
+	}
+}
+
+// ── runWorkflowPlanUpdate ────────────────────────────────────────────────────
+
+// TestRunWorkflowPlanUpdate_UpdatesMutableFields verifies that plan update
+// mutates only the fields supplied (non-empty) and leaves others intact.
+func TestRunWorkflowPlanUpdate_UpdatesMutableFields(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowPlanUpdate("wave-2", "paused", "New Title", "new summary", "focus-x", "criteria-y", "ver-y"); err != nil {
+		t.Fatalf("runWorkflowPlanUpdate: %v", err)
+	}
+	plan, err := loadCanonicalPlan(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "paused" || plan.Title != "New Title" || plan.Summary != "new summary" ||
+		plan.CurrentFocusTask != "focus-x" || plan.SuccessCriteria != "criteria-y" || plan.VerificationStrategy != "ver-y" {
+		t.Errorf("plan update did not propagate fields: %+v", plan)
+	}
+}
+
+// TestRunWorkflowPlanUpdate_RejectsInvalidStatus verifies that supplying an
+// invalid status value returns an error and does not mutate the plan.
+func TestRunWorkflowPlanUpdate_RejectsInvalidStatus(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	err := runWorkflowPlanUpdate("wave-2", "bogus", "", "", "", "", "")
+	if err == nil {
+		t.Fatal("expected error for invalid status, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid plan status") {
+		t.Errorf("error should mention 'invalid plan status'; got: %v", err)
+	}
+}
+
+// TestRunWorkflowPlanUpdate_MissingPlanReturnsError covers the not-found path.
+func TestRunWorkflowPlanUpdate_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+
+	err := runWorkflowPlanUpdate("ghost", "active", "", "", "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("expected not-found error for plan 'ghost'; got: %v", err)
+	}
+}
+
+// ── runWorkflowTaskAdd extra coverage ────────────────────────────────────────
+
+// TestRunWorkflowTaskAdd_ParsesCSVScopeAndDeps verifies that comma-separated
+// inputs are split and trimmed into slice fields.
+func TestRunWorkflowTaskAdd_ParsesCSVScopeAndDeps(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID:               "wave-2",
+		TaskID:               "csv-task",
+		Title:                "csv task",
+		DependsOn:            " t1 , t2 , ",
+		Blocks:               "t3, ",
+		WriteScope:           "a/, b/,c/",
+		VerificationRequired: false,
+	}); err != nil {
+		t.Fatalf("runWorkflowTaskAdd: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *CanonicalTask
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == "csv-task" {
+			got = &tf.Tasks[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("csv-task not found after add")
+	}
+	if len(got.DependsOn) != 2 || got.DependsOn[0] != "t1" || got.DependsOn[1] != "t2" {
+		t.Errorf("DependsOn = %v, want [t1 t2]", got.DependsOn)
+	}
+	if len(got.Blocks) != 1 || got.Blocks[0] != "t3" {
+		t.Errorf("Blocks = %v, want [t3]", got.Blocks)
+	}
+	if len(got.WriteScope) != 3 || got.WriteScope[0] != "a/" || got.WriteScope[2] != "c/" {
+		t.Errorf("WriteScope = %v, want [a/ b/ c/]", got.WriteScope)
+	}
+}
+
+// TestRunWorkflowTaskAdd_MissingPlanReturnsError covers the no-such-plan path.
+func TestRunWorkflowTaskAdd_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+
+	err := runWorkflowTaskAdd(taskAddInputs{PlanID: "ghost", TaskID: "t1", Title: "x"})
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("expected missing-plan error; got: %v", err)
+	}
+}
+
+// ── runWorkflowTaskUpdate ────────────────────────────────────────────────────
+
+// TestRunWorkflowTaskUpdate_UpdatesFields verifies that task update mutates the
+// addressed task fields and leaves siblings untouched.
+func TestRunWorkflowTaskUpdate_UpdatesFields(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/"); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var t2 *CanonicalTask
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == "t2" {
+			t2 = &tf.Tasks[i]
+		}
+	}
+	if t2 == nil {
+		t.Fatal("t2 missing after update")
+	}
+	if t2.Title != "new title" {
+		t.Errorf("title = %q, want 'new title'", t2.Title)
+	}
+	if t2.Notes != "fresh notes" {
+		t.Errorf("notes = %q, want 'fresh notes'", t2.Notes)
+	}
+	if len(t2.WriteScope) != 2 || t2.WriteScope[0] != "x/" || t2.WriteScope[1] != "y/" {
+		t.Errorf("write_scope = %v, want [x/ y/]", t2.WriteScope)
+	}
+}
+
+// TestRunWorkflowTaskUpdate_PreservesUnsetFields verifies that empty arguments
+// do not overwrite existing values.
+func TestRunWorkflowTaskUpdate_PreservesUnsetFields(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", ""); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+	tf, _ := loadCanonicalTasks(repo, "wave-2")
+	for _, task := range tf.Tasks {
+		if task.ID == "t1" && task.Title != "implement structs" {
+			t.Errorf("t1 title got overwritten: %q", task.Title)
+		}
+	}
+}
+
+// TestRunWorkflowTaskUpdate_MissingTaskReturnsError covers the missing-task case.
+func TestRunWorkflowTaskUpdate_MissingTaskReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "")
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("expected missing-task error; got: %v", err)
+	}
+}
+
+// ── runWorkflowAdvance: advance → re-eligibility chain ────────────────────────
+
+// TestRunWorkflowAdvance_CompletingUnblocksDependent verifies that completing
+// the only dependency makes the downstream task eligible.
+func TestRunWorkflowAdvance_CompletingUnblocksDependent(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPendingPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	// 'prep' is already completed; planner depends on prep so planner should
+	// already be eligible. After advancing planner to in_progress and tests to
+	// completed-via-deps, we verify advance + re-compute behaviour.
+	if err := runWorkflowAdvance("wave-next", "planner", "in_progress"); err != nil {
+		t.Fatalf("advance planner: %v", err)
+	}
+	if err := runWorkflowAdvance("wave-next", "planner", "completed"); err != nil {
+		t.Fatalf("advance planner→completed: %v", err)
+	}
+	got, err := selectAllEligibleTasks(repo, []string{"wave-next"})
+	if err != nil {
+		t.Fatalf("selectAllEligibleTasks: %v", err)
+	}
+	foundTests := false
+	for _, s := range got {
+		if s.TaskID == "tests" {
+			foundTests = true
+		}
+		if s.TaskID == "planner" {
+			t.Errorf("completed planner should not be eligible; got %+v", s)
+		}
+	}
+	if !foundTests {
+		t.Errorf("tests task should be eligible after planner completion; got %v", got)
+	}
+}
+
+// TestRunWorkflowAdvance_FocusTaskResetWhenNotInProgress verifies that
+// advancing a task to a non-in_progress status recomputes CurrentFocusTask.
+func TestRunWorkflowAdvance_FocusTaskResetWhenNotInProgress(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	// t1 is in_progress and is the focus. Advance t1 → completed; focus must
+	// be recomputed (effectivePlanFocusTask picks a different task).
+	if err := runWorkflowAdvance("wave-2", "t1", "completed"); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loadCanonicalPlan(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.CurrentFocusTask == "implement structs" {
+		t.Errorf("focus_task should have been recomputed away from completed task; got %q", plan.CurrentFocusTask)
+	}
+}
+
+// ── runWorkflowNext / runWorkflowComplete plumbing ────────────────────────────
+
+// TestRunWorkflowNext_NoActionablePrintsHelp covers the empty-suggestion print
+// branch when there are no plans on disk.
+func TestRunWorkflowNext_NoActionablePrintsHelp(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowNext("") },
+		"No actionable canonical task found.",
+	)
+}
+
+// TestRunWorkflowComplete_EmptyPlanIDFails verifies the input guard.
+func TestRunWorkflowComplete_EmptyPlanIDFails(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowComplete("   "); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("expected empty-plan guard; got: %v", err)
+	}
+}
+
+// TestCollectWorkflowCompletionState_DrainedWhenNoPlans verifies that with no
+// plans on disk the result is "drained".
+func TestCollectWorkflowCompletionState_DrainedWhenNoPlans(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	got, err := collectWorkflowCompletionState(repo, "")
+	if err != nil {
+		t.Fatalf("collectWorkflowCompletionState: %v", err)
+	}
+	if got.State != "drained" {
+		t.Errorf("State = %q, want drained", got.State)
+	}
+	if got.Scope == nil || len(got.Scope) != 0 {
+		t.Errorf("Scope should be empty slice; got %v", got.Scope)
+	}
+}
+
+// ── parsePlanIDFilter / validateScopeIDsAgainstAvailable ──────────────────────
+
+func TestParsePlanIDFilter_TrimsAndDedupes(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"a", []string{"a"}},
+		{" a , b ", []string{"a", "b"}},
+		{"a,a,b", []string{"a", "b"}},
+		{"a,,b,", []string{"a", "b"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got := parsePlanIDFilter(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len=%d, want %d (got=%v)", len(got), len(tc.want), got)
+			}
+			for i, v := range got {
+				if v != tc.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, v, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestValidateScopeIDsAgainstAvailable_PassthroughEmptyScope(t *testing.T) {
+	got, err := validateScopeIDsAgainstAvailable(nil, []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("nil scope should be passthrough; got err=%v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil result for nil scope; got %v", got)
+	}
+}
+
+func TestValidateScopeIDsAgainstAvailable_ReturnsErrorOnUnknownID(t *testing.T) {
+	_, err := validateScopeIDsAgainstAvailable([]string{"unknown"}, []string{"a", "b"})
+	if err == nil {
+		t.Fatal("expected error for unknown scope id")
+	}
+	if !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("error should mention id; got: %v", err)
+	}
+}
+
+func TestValidateScopeIDsAgainstAvailable_AllPresent(t *testing.T) {
+	got, err := validateScopeIDsAgainstAvailable([]string{"a", "b"}, []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("got %v, want [a b]", got)
+	}
+}
+
+// ── deriveCompletionState ─────────────────────────────────────────────────────
+
+func TestDeriveCompletionState_TableDriven(t *testing.T) {
+	suggestion := &workflowNextTaskSuggestion{TaskID: "t1"}
+	tests := []struct {
+		name      string
+		sug       *workflowNextTaskSuggestion
+		paused    []string
+		locked    []string
+		wantState string
+	}{
+		{"actionable", suggestion, nil, nil, "actionable"},
+		{"paused", nil, []string{"p1"}, nil, "paused"},
+		{"locked", nil, nil, []string{"p1"}, "locked"},
+		{"drained", nil, nil, nil, "drained"},
+		{"actionable_wins_over_paused", suggestion, []string{"p1"}, []string{"p2"}, "actionable"},
+		{"paused_wins_over_locked", nil, []string{"p1"}, []string{"p2"}, "paused"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveCompletionState(tc.sug, tc.paused, tc.locked)
+			if got != tc.wantState {
+				t.Errorf("got %q, want %q", got, tc.wantState)
+			}
+		})
+	}
+}
+
+// ── splitTrimmedCSV ──────────────────────────────────────────────────────────
+
+func TestSplitTrimmedCSV(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"a", []string{"a"}},
+		{" a , b ", []string{"a", "b"}},
+		{",,a,,", []string{"a"}},
+		{"a,b,c", []string{"a", "b", "c"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			got := splitTrimmedCSV(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len=%d want %d (got=%v)", len(got), len(tc.want), got)
+			}
+			for i, v := range got {
+				if v != tc.want[i] {
+					t.Errorf("[%d]=%q want %q", i, v, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// ── plan scheduling: buildPlanScheduleGraph / runKahnBFSWaves / computePlanSchedule ──
+
+// TestBuildPlanScheduleGraph_EdgesAndInDegrees verifies adjacency + in-degree.
+func TestBuildPlanScheduleGraph_EdgesAndInDegrees(t *testing.T) {
+	tf := &CanonicalTaskFile{
+		PlanID: "p",
+		Tasks: []CanonicalTask{
+			{ID: "a"},
+			{ID: "b", DependsOn: []string{"a"}},
+			{ID: "c", DependsOn: []string{"a", "b"}},
+			{ID: "d", DependsOn: []string{"other-plan/x"}}, // cross-plan ignored
+		},
+	}
+	in, adj := buildPlanScheduleGraph(tf)
+	if len(in) != 4 || len(adj) != 4 {
+		t.Fatalf("expected slices of length 4; got in=%d adj=%d", len(in), len(adj))
+	}
+	if in[0] != 0 {
+		t.Errorf("inDegree[a] = %d, want 0", in[0])
+	}
+	if in[1] != 1 {
+		t.Errorf("inDegree[b] = %d, want 1", in[1])
+	}
+	if in[2] != 2 {
+		t.Errorf("inDegree[c] = %d, want 2", in[2])
+	}
+	if in[3] != 0 {
+		t.Errorf("inDegree[d] = %d, want 0 (cross-plan dep ignored)", in[3])
+	}
+	if len(adj[0]) != 2 { // a -> {b, c}
+		t.Errorf("adj[a] should have 2 successors; got %v", adj[0])
+	}
+}
+
+// TestComputePlanSchedule_AssignsWaves verifies topological wave assignment.
+func TestComputePlanSchedule_AssignsWaves(t *testing.T) {
+	tf := &CanonicalTaskFile{
+		PlanID: "p",
+		Tasks: []CanonicalTask{
+			{ID: "a"},
+			{ID: "b"},
+			{ID: "c", DependsOn: []string{"a"}},
+			{ID: "d", DependsOn: []string{"a", "b"}},
+			{ID: "e", DependsOn: []string{"c", "d"}},
+		},
+	}
+	got, err := computePlanSchedule(tf)
+	if err != nil {
+		t.Fatalf("computePlanSchedule: %v", err)
+	}
+	if got.PlanID != "p" {
+		t.Errorf("PlanID = %q, want p", got.PlanID)
+	}
+	if got.CriticalPathLength != 3 {
+		t.Errorf("CriticalPathLength = %d, want 3", got.CriticalPathLength)
+	}
+	if got.MaxIntraParallelism < 2 {
+		t.Errorf("MaxIntraParallelism = %d, want >=2", got.MaxIntraParallelism)
+	}
+	if len(got.Waves) != 3 {
+		t.Fatalf("expected 3 waves; got %d", len(got.Waves))
+	}
+	// Wave 1 must contain a & b
+	wave1IDs := map[string]bool{}
+	for _, task := range got.Waves[0].Tasks {
+		wave1IDs[task.ID] = true
+	}
+	if !wave1IDs["a"] || !wave1IDs["b"] {
+		t.Errorf("wave 1 missing a/b; got %v", wave1IDs)
+	}
+	// Wave 3 must contain only 'e'
+	if len(got.Waves[2].Tasks) != 1 || got.Waves[2].Tasks[0].ID != "e" {
+		t.Errorf("wave 3 should contain only [e]; got %+v", got.Waves[2].Tasks)
+	}
+}
+
+// TestComputePlanSchedule_DetectsCycle verifies that a dependency cycle yields
+// an error.
+func TestComputePlanSchedule_DetectsCycle(t *testing.T) {
+	tf := &CanonicalTaskFile{
+		PlanID: "p-cycle",
+		Tasks: []CanonicalTask{
+			{ID: "a", DependsOn: []string{"b"}},
+			{ID: "b", DependsOn: []string{"a"}},
+		},
+	}
+	_, err := computePlanSchedule(tf)
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error should mention 'cycle'; got: %v", err)
+	}
+}
+
+// TestComputePlanSchedule_EmptyTasksOK verifies an empty plan schedules cleanly.
+func TestComputePlanSchedule_EmptyTasksOK(t *testing.T) {
+	tf := &CanonicalTaskFile{PlanID: "empty"}
+	got, err := computePlanSchedule(tf)
+	if err != nil {
+		t.Fatalf("empty plan should not error; got: %v", err)
+	}
+	if got.CriticalPathLength != 0 || got.MaxIntraParallelism != 0 || len(got.Waves) != 0 {
+		t.Errorf("empty schedule should be all zeros; got %+v", got)
+	}
+}
+
+// TestRunWorkflowPlanSchedule_RendersWaves verifies the rendered output for an
+// active plan schedule.
+func TestRunWorkflowPlanSchedule_RendersWaves(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanSchedule("wave-2") },
+		"Plan Schedule: wave-2",
+		"Wave 1",
+		"Critical path length",
+	)
+}
+
+// TestRunWorkflowPlanSchedule_MissingPlanReturnsError covers the not-found path.
+func TestRunWorkflowPlanSchedule_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+	err := runWorkflowPlanSchedule("ghost")
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("expected ghost-plan error; got: %v", err)
+	}
+}
+
+// ── runWorkflowSlices ────────────────────────────────────────────────────────
+
+// TestRunWorkflowSlices_RendersSliceMetadata verifies the human render path.
+func TestRunWorkflowSlices_RendersSliceMetadata(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	addCanonicalSliceFixture(t, repo, "wave-2")
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowSlices("wave-2") },
+		"Slices: wave-2",
+		"slice-read-surface",
+		"slice-artifacts",
+		"summary: Add a read-only CLI surface for slices.",
+		"write scope:",
+		"verification:",
+		"depends: slice-read-surface",
+	)
+}
+
+// TestRunWorkflowSlices_MissingPlanReturnsError covers the missing-plan path.
+func TestRunWorkflowSlices_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+	err := runWorkflowSlices("ghost")
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("expected ghost-plan error; got: %v", err)
+	}
+}
+
+// TestRunWorkflowSlices_NoSlicesFileReturnsError verifies the case where a plan
+// exists but the SLICES.yaml file is absent.
+func TestRunWorkflowSlices_NoSlicesFileReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo) // no SLICES.yaml
+	chdirRepo(t, repo)
+	err := runWorkflowSlices("wave-2")
+	if err == nil || !strings.Contains(err.Error(), "slices for plan") {
+		t.Fatalf("expected slices-not-found error; got: %v", err)
+	}
+}
+
+// ── runWorkflowPlanList ──────────────────────────────────────────────────────
+
+// TestRunWorkflowPlanList_EmptyMessage verifies the empty-plans message.
+func TestRunWorkflowPlanList_EmptyMessage(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanList() },
+		"No canonical plans found.",
+	)
+}
+
+// TestRunWorkflowPlanList_RendersPlans verifies that each plan appears with its
+// status in the rendered output.
+func TestRunWorkflowPlanList_RendersPlans(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanList() },
+		"Canonical Plans",
+		"wave-2",
+		"Wave 2 Test Plan",
+		"active",
+	)
+}
+
+// ── runWorkflowPlanShow JSON branch ──────────────────────────────────────────
+
+// TestRunWorkflowPlanShow_JSONOutput verifies that JSON mode emits plan + tasks.
+func TestRunWorkflowPlanShow_JSONOutput(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanShow("wave-2") },
+		`"plan"`,
+		`"tasks"`,
+		`"wave-2"`,
+	)
+}
+
+// ── filterPlanIDsUnlocked / filterPlanIDsLocked ───────────────────────────────
+
+func TestFilterPlanIDsUnlocked_EmptyLockedReturnsAll(t *testing.T) {
+	ids := []string{"a", "b"}
+	got := filterPlanIDsUnlocked(ids, map[string]bool{})
+	if len(got) != 2 {
+		t.Errorf("with empty locked map should be passthrough; got %v", got)
+	}
+}
+
+func TestFilterPlanIDsUnlocked_RemovesLocked(t *testing.T) {
+	ids := []string{"a", "b", "c"}
+	got := filterPlanIDsUnlocked(ids, map[string]bool{"b": true})
+	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
+		t.Errorf("got %v, want [a c]", got)
+	}
+}
+
+func TestFilterPlanIDsLocked_EmptyLockedReturnsAll(t *testing.T) {
+	ids := []string{"a", "b"}
+	got := filterPlanIDsLocked(ids, map[string]bool{})
+	if len(got) != 2 {
+		t.Errorf("with empty locked map should be passthrough; got %v", got)
+	}
+}
+
+func TestFilterPlanIDsLocked_KeepsLocked(t *testing.T) {
+	ids := []string{"a", "b", "c"}
+	got := filterPlanIDsLocked(ids, map[string]bool{"b": true, "c": true})
+	if len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Errorf("got %v, want [b c]", got)
+	}
+}
+
+// ── activeDelegationPlanIDs ───────────────────────────────────────────────────
+
+func TestActiveDelegationPlanIDs_OnlyActiveOrPending(t *testing.T) {
+	contracts := []DelegationContract{
+		{ParentPlanID: "p1", Status: "active"},
+		{ParentPlanID: "p2", Status: "pending"},
+		{ParentPlanID: "p3", Status: "completed"},
+		{ParentPlanID: "p4", Status: "cancelled"},
+		{ParentPlanID: "", Status: "active"},
+	}
+	got := activeDelegationPlanIDs(contracts)
+	if !got["p1"] || !got["p2"] {
+		t.Errorf("p1/p2 should be in active set; got %v", got)
+	}
+	if got["p3"] || got["p4"] {
+		t.Errorf("non-active contracts should not appear; got %v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 entries; got %v", got)
+	}
+}
+
+// ── partitionScopePlansByStatus ───────────────────────────────────────────────
+
+// TestPartitionScopePlansByStatus_SortsAndFilters verifies the partition picks
+// paused plans and active-with-active-delegation plans.
+func TestPartitionScopePlansByStatus_SortsAndFilters(t *testing.T) {
+	proj := t.TempDir()
+	writePlanFixture(t, proj, "p-active-locked", "active", nil)
+	writePlanFixture(t, proj, "p-paused", "paused", nil)
+	writePlanFixture(t, proj, "p-active-free", "active", nil)
+	writePlanFixture(t, proj, "p-completed", "completed", nil)
+
+	locked := map[string]bool{"p-active-locked": true}
+	paused, lockedOut, err := partitionScopePlansByStatus(proj,
+		[]string{"p-active-locked", "p-paused", "p-active-free", "p-completed"}, locked)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paused) != 1 || paused[0] != "p-paused" {
+		t.Errorf("paused = %v, want [p-paused]", paused)
+	}
+	if len(lockedOut) != 1 || lockedOut[0] != "p-active-locked" {
+		t.Errorf("locked = %v, want [p-active-locked]", lockedOut)
+	}
+}
+
+// TestPartitionScopePlansByStatus_LoadErrorPropagates verifies a missing plan
+// surfaces as a load error.
+func TestPartitionScopePlansByStatus_LoadErrorPropagates(t *testing.T) {
+	proj := t.TempDir()
+	_, _, err := partitionScopePlansByStatus(proj, []string{"ghost"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("expected load error for ghost plan; got: %v", err)
+	}
+}
+
+// ── runKahnBFSWaves direct ────────────────────────────────────────────────────
+
+// TestRunKahnBFSWaves_LinearChain covers a → b → c.
+func TestRunKahnBFSWaves_LinearChain(t *testing.T) {
+	tf := &CanonicalTaskFile{Tasks: []CanonicalTask{
+		{ID: "a"},
+		{ID: "b", DependsOn: []string{"a"}},
+		{ID: "c", DependsOn: []string{"b"}},
+	}}
+	in, adj := buildPlanScheduleGraph(tf)
+	waves, processed := runKahnBFSWaves(in, adj)
+	if processed != 3 {
+		t.Errorf("processed = %d, want 3", processed)
+	}
+	if len(waves) != 3 {
+		t.Errorf("expected 3 wave slots; got %d (%v)", len(waves), waves)
+	}
+}
+
+// TestRunKahnBFSWaves_CycleStopsEarly verifies a cycle leaves processed<total.
+func TestRunKahnBFSWaves_CycleStopsEarly(t *testing.T) {
+	tf := &CanonicalTaskFile{Tasks: []CanonicalTask{
+		{ID: "a", DependsOn: []string{"b"}},
+		{ID: "b", DependsOn: []string{"a"}},
+	}}
+	in, adj := buildPlanScheduleGraph(tf)
+	_, processed := runKahnBFSWaves(in, adj)
+	if processed != 0 {
+		t.Errorf("processed = %d, want 0 (both in cycle)", processed)
+	}
+}
