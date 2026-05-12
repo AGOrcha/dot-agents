@@ -426,51 +426,63 @@ func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerF
 // listing hook event names that have at least one entry.
 func detectHookEvents(agentsHome, projectName string) StringsOrBool {
 	for _, scope := range []string{projectName, "global"} {
-		hooksDir := filepath.Join(agentsHome, "hooks", scope)
-		entries, err := os.ReadDir(hooksDir)
-		if err == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
-					return StringsOrBool{All: true}
-				}
-			}
+		if hasYAMLHooks(filepath.Join(agentsHome, "hooks", scope)) {
+			return StringsOrBool{All: true}
 		}
 	}
-
 	for _, scope := range []string{projectName, "global"} {
-		settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
-		data, err := os.ReadFile(settingsPath)
-		if err != nil {
-			continue
+		if result := detectSettingsHookEvents(agentsHome, scope); result.IsEnabled() {
+			return result
 		}
-		var settings map[string]any
-		if json.Unmarshal(data, &settings) != nil {
-			continue
-		}
-		hooksVal, ok := settings["hooks"]
-		if !ok {
-			continue
-		}
-		hooksMap, ok := hooksVal.(map[string]any)
-		if !ok {
-			continue
-		}
-		var hookEvents []string
-		for event, val := range hooksMap {
-			if list, ok := val.([]any); ok && len(list) > 0 {
-				hookEvents = append(hookEvents, event)
-			}
-		}
-		if len(hookEvents) == 0 {
-			continue
-		}
-		sort.Strings(hookEvents)
-		return StringsOrBool{Names: hookEvents}
 	}
 	return StringsOrBool{}
+}
+
+func hasYAMLHooks(hooksDir string) bool {
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func detectSettingsHookEvents(agentsHome, scope string) StringsOrBool {
+	settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return StringsOrBool{}
+	}
+	var settings map[string]any
+	if json.Unmarshal(data, &settings) != nil {
+		return StringsOrBool{}
+	}
+	hooksVal, ok := settings["hooks"]
+	if !ok {
+		return StringsOrBool{}
+	}
+	hooksMap, ok := hooksVal.(map[string]any)
+	if !ok {
+		return StringsOrBool{}
+	}
+	var hookEvents []string
+	for event, val := range hooksMap {
+		if list, ok := val.([]any); ok && len(list) > 0 {
+			hookEvents = append(hookEvents, event)
+		}
+	}
+	if len(hookEvents) == 0 {
+		return StringsOrBool{}
+	}
+	sort.Strings(hookEvents)
+	return StringsOrBool{Names: hookEvents}
 }
 
 // detectMCPServers scans MCP config files for the project and global scopes
