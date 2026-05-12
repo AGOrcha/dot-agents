@@ -1175,3 +1175,147 @@ func TestEligibleFooterLabel_ExplicitLimit(t *testing.T) {
 		t.Errorf("expected '--limit=4'; got %q", limitLabel)
 	}
 }
+
+// ── PR3b: plan show, task add, tasks list ───────────────────────────────────
+
+// TestRunWorkflowPlanShow_RendersPlanDetails creates a plan fixture and verifies
+// that runWorkflowPlanShow produces output containing plan details.
+func TestRunWorkflowPlanShow_RendersPlanDetails(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPlanShow("wave-2") },
+		"Wave 2 Test Plan",
+		"id: wave-2",
+		"status: active",
+		"focus task: implement structs",
+		"implement structs",
+		"add subcommands",
+		"add tests",
+	)
+}
+
+// TestRunWorkflowPlanShow_MissingPlanReturnsError verifies that showing a
+// non-existent plan returns a descriptive error.
+func TestRunWorkflowPlanShow_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowPlanShow("nonexistent-plan")
+	if err == nil {
+		t.Fatal("expected error for missing plan, got nil")
+	}
+	if !strings.Contains(err.Error(), "nonexistent-plan") {
+		t.Errorf("error should mention plan id; got: %v", err)
+	}
+}
+
+// TestRunWorkflowTaskAdd_CreatesTask creates a plan, runs task add, then
+// verifies the new task exists in the TASKS.yaml.
+func TestRunWorkflowTaskAdd_CreatesTask(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID:               "wave-2",
+		TaskID:               "t4",
+		Title:                "new test task",
+		Owner:                "test",
+		WriteScope:           "commands/workflow/",
+		VerificationRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("runWorkflowTaskAdd: %v", err)
+	}
+
+	// Verify the task was added
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatalf("loadCanonicalTasks: %v", err)
+	}
+	found := false
+	for _, task := range tf.Tasks {
+		if task.ID == "t4" {
+			found = true
+			if task.Title != "new test task" {
+				t.Errorf("task title = %q, want 'new test task'", task.Title)
+			}
+			if task.Status != "pending" {
+				t.Errorf("new task status = %q, want 'pending'", task.Status)
+			}
+		}
+	}
+	if !found {
+		t.Error("task t4 not found after task add")
+	}
+}
+
+// TestRunWorkflowTaskAdd_RejectsDuplicateID verifies that adding a task with
+// an existing ID returns an error.
+func TestRunWorkflowTaskAdd_RejectsDuplicateID(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID: "wave-2",
+		TaskID: "t1", // already exists
+		Title:  "duplicate",
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate task ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should mention 'already exists'; got: %v", err)
+	}
+}
+
+// TestRunWorkflowTasks_ListsTasks creates a plan with tasks and verifies
+// that runWorkflowTasks produces output listing all task IDs and titles.
+func TestRunWorkflowTasks_ListsTasks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowTasks("wave-2") },
+		"Tasks: wave-2",
+		"[t1] implement structs",
+		"[t2] add subcommands",
+		"[t3] add tests",
+		"in_progress",
+		"pending",
+		"completed",
+	)
+}
+
+// TestRunWorkflowTasks_MissingPlanReturnsError verifies tasks list for a
+// non-existent plan returns an error.
+func TestRunWorkflowTasks_MissingPlanReturnsError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowTasks("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for missing plan, got nil")
+	}
+}

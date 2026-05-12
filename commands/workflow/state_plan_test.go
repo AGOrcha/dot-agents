@@ -900,4 +900,109 @@ func TestRunWorkflowCompleteRejectsBlankPlanFilter(t *testing.T) {
 
 // ── Usage-flow scenario tests ─────────────────────────────────────────────────
 
+// TestRunWorkflowCheckpoint_WritesState verifies that runWorkflowCheckpoint
+// writes both checkpoint.yaml and session-log.md in the project context dir.
+func TestRunWorkflowCheckpoint_WritesState(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowCheckpoint("resume transport slice", "pass", "go test ./... passed"); err != nil {
+		t.Fatalf("runWorkflowCheckpoint: %v", err)
+	}
+
+	contextDir := filepath.Join(agentsHome, "context", "workflow-proj")
+	cpPath := filepath.Join(contextDir, "checkpoint.yaml")
+	if _, err := os.Stat(cpPath); err != nil {
+		t.Fatalf("checkpoint.yaml should exist: %v", err)
+	}
+	cpData, err := os.ReadFile(cpPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(cpData)
+	if !strings.Contains(s, "resume transport slice") {
+		t.Error("checkpoint should contain the message")
+	}
+	if !strings.Contains(s, "status: \"pass\"") && !strings.Contains(s, "status: pass") {
+		t.Error("checkpoint should contain verification status pass")
+	}
+}
+
+// TestRunWorkflowLog_WritesEntry verifies that running checkpoint creates a
+// session-log.md entry and that runWorkflowLog can read it without error.
+func TestRunWorkflowLog_WritesEntry(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowCheckpoint("first checkpoint", "pass", "tests passed"); err != nil {
+		t.Fatalf("first checkpoint: %v", err)
+	}
+
+	// Verify session-log.md was created
+	contextDir := filepath.Join(agentsHome, "context", "workflow-proj")
+	logPath := filepath.Join(contextDir, "session-log.md")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("session-log.md should exist: %v", err)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "first checkpoint") {
+		t.Error("session log should contain the checkpoint message")
+	}
+
+	// Write a second checkpoint
+	if err := runWorkflowCheckpoint("second checkpoint", "unknown", ""); err != nil {
+		t.Fatalf("second checkpoint: %v", err)
+	}
+	logData, err = os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := splitWorkflowLogEntries(string(logData))
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 log entries, got %d", len(entries))
+	}
+	if !strings.Contains(entries[1], "second checkpoint") {
+		t.Errorf("second entry should contain 'second checkpoint': %s", entries[1])
+	}
+}
+
+// TestRunWorkflowCheckpoint_RejectsInvalidVerificationStatus verifies that an
+// invalid verification status string is rejected.
+func TestRunWorkflowCheckpoint_RejectsInvalidVerificationStatus(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runWorkflowCheckpoint("msg", "invalid-status", "")
+	if err == nil {
+		t.Fatal("expected error for invalid verification status, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid verification status") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // TestWorkflow_CheckpointThenOrient writes a checkpoint with verification data and then
