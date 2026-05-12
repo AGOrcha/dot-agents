@@ -138,7 +138,7 @@ jobs:
         run: |
           output="$(./bin/da --version)"
           printf '%s\n' "$output"
-          grep -q "dot-agents" <<<"$output"
+          grep -q "^da " <<<"$output"
 
       - name: Test --help
         env:
