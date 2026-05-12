@@ -10,6 +10,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -415,7 +416,7 @@ func runAdd(pathArg, nameArg string) error {
 
 	// Step 4: Create project dirs
 	ui.Step("Creating project structure...")
-	if err := createProjectDirs(projectName); err != nil {
+	if err := projectsync.CreateProjectDirs(projectName); err != nil {
 		return err
 	}
 	ui.Bullet("ok", "Created ~/.agents/ directories")
@@ -442,7 +443,7 @@ func runAdd(pathArg, nameArg string) error {
 	}
 
 	// Add .agents-refresh to .gitignore
-	ensureGitignoreEntry(projectPath, ".agents-refresh")
+	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 
 	// Step 6: Register
 	cfg.AddProject(projectName, projectPath)
@@ -464,24 +465,6 @@ func runAdd(pathArg, nameArg string) error {
 		nextSteps = append(nextSteps, "Migrate deprecated formats: dot-agents migrate detect")
 	}
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
-	return nil
-}
-
-func createProjectDirs(project string) error {
-	agentsHome := config.AgentsHome()
-	dirs := []string{
-		filepath.Join(agentsHome, "rules", project),
-		filepath.Join(agentsHome, "settings", project),
-		filepath.Join(agentsHome, "mcp", project),
-		filepath.Join(agentsHome, "skills", project),
-		filepath.Join(agentsHome, "agents", project),
-		filepath.Join(agentsHome, "hooks", project),
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", d, err)
-		}
-	}
 	return nil
 }
 
@@ -608,22 +591,4 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0644)
-}
-
-func ensureGitignoreEntry(repoPath, entry string) {
-	gitignorePath := filepath.Join(repoPath, ".gitignore")
-	data, err := os.ReadFile(gitignorePath)
-	if err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) == entry {
-				return
-			}
-		}
-	}
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintln(f, entry)
 }

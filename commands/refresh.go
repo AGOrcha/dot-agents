@@ -8,6 +8,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -129,7 +130,7 @@ func runRefresh(projectFilter string) error {
 		}
 
 		if !Flags.DryRun {
-			createProjectDirs(name)
+			projectsync.CreateProjectDirs(name)
 			restoreFromResources(name, path)
 		}
 
@@ -182,7 +183,7 @@ func writeRefreshMarker(projectPath, commit, describe string) {
 	markerPath := filepath.Join(projectPath, ".agents-refresh")
 	content := refreshMarkerContent(Version, commit, describe)
 	os.WriteFile(markerPath, content, 0644)
-	ensureGitignoreEntry(projectPath, ".agents-refresh")
+	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 }
 
 func restoreFromResources(project, projectPath string) {
