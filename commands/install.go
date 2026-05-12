@@ -24,9 +24,9 @@ func NewInstallCmd() *cobra.Command {
 		Long: `Reads .agentsrc.json in the current directory, materializes declared skills and
 agents into ~/.agents/ from configured sources, then applies the manifest to each
 installed platform (rules, hooks, MCP configs, settings) with the same link pass
-as dot-agents refresh.
+as da refresh.
 
-Commit .agentsrc.json to git so any contributor can run 'dot-agents install'
+Commit .agentsrc.json to git so any contributor can run 'da install'
 after cloning — no manual init or sync required.
 
 Use --generate to create or refresh .agentsrc.json from the current ~/.agents/ state.
@@ -34,10 +34,10 @@ If a manifest already exists, generated skill and platform lists replace stale v
 but existing source entries (for example git remotes), a non-empty project name, and
 unknown JSON keys are preserved.`,
 		Example: ExampleBlock(
-			"  dot-agents install",
-			"  dot-agents install --strict",
-			"  dot-agents install --generate",
-			"  dot-agents install --generate --force",
+			"  da install",
+			"  da install --strict",
+			"  da install --generate",
+			"  da install --generate --force",
 		),
 		Args: NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -60,7 +60,7 @@ func runInstall(strict bool) error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	ui.Header("dot-agents install")
+	ui.Header("da install")
 
 	rc, err := loadInstallManifest(projectPath)
 	if err != nil {
@@ -93,8 +93,8 @@ func runInstall(strict bool) error {
 
 	ui.SuccessBox(
 		fmt.Sprintf("Project '%s' installed successfully!", projectName),
-		"Check links: dot-agents status --audit",
-		"Update manifest: dot-agents install --generate",
+		"Check links: da status --audit",
+		"Update manifest: da install --generate",
 	)
 	return nil
 }
@@ -107,8 +107,8 @@ func loadInstallManifest(projectPath string) (*config.AgentsRC, error) {
 	if os.IsNotExist(err) {
 		return nil, ErrorWithHints(
 			config.AgentsRCFile+" not found in current directory",
-			"Run `dot-agents install --generate` to create one from the current shared state.",
-			"If this project is not managed yet, run `dot-agents add .` first.",
+			"Run `da install --generate` to create one from the current shared state.",
+			"If this project is not managed yet, run `da add .` first.",
 		)
 	}
 	return nil, fmt.Errorf("reading %s: %w", config.AgentsRCFile, err)
@@ -118,7 +118,7 @@ func ensureAgentsHomeInitialized() error {
 	if _, err := os.Stat(filepath.Join(config.AgentsHome(), "config.json")); err != nil {
 		return ErrorWithHints(
 			"~/.agents/ not initialized",
-			"Run `dot-agents init` once on this machine before using install.",
+			"Run `da init` once on this machine before using install.",
 		)
 	}
 	return nil
@@ -272,7 +272,7 @@ func runInstallGenerate() error {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
 
-	ui.Header("dot-agents install --generate")
+	ui.Header("da install --generate")
 
 	// Derive project name from config.json or directory name
 	projectName := findProjectByPath(projectPath)
@@ -320,8 +320,8 @@ func runInstallGenerate() error {
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, "Next steps:")
 	fmt.Fprintf(os.Stdout, "  1. Review:  cat %s\n", config.AgentsRCFile)
-	fmt.Fprintf(os.Stdout, "  2. Commit:  git add %s && git commit -m 'Add dot-agents manifest'\n", config.AgentsRCFile)
-	fmt.Fprintln(os.Stdout, "  3. Others:  dot-agents install   (after cloning)")
+	fmt.Fprintf(os.Stdout, "  2. Commit:  git add %s && git commit -m 'Add da manifest'\n", config.AgentsRCFile)
+	fmt.Fprintln(os.Stdout, "  3. Others:  da install   (after cloning)")
 	return nil
 }
 

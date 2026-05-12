@@ -1,5 +1,5 @@
 /**
- * `dot-agents skills` — Manage skills in ~/.agents/skills/.
+ * `da skills` — Manage skills in ~/.agents/skills/.
  *
  * Supports list and new subcommands. Aligned with commands/skills.go.
  */

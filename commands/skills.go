@@ -7,6 +7,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/commands/skills"
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	scaffoldtemplates "github.com/NikashPrakash/dot-agents/internal/scaffold/templates"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -19,9 +20,9 @@ func NewSkillsCmd() *cobra.Command {
 ~/.agents/skills tree. Skills created here can be linked into projects and consumed
 by supported AI platforms through refresh or install.`,
 		Example: ExampleBlock(
-			"  dot-agents skills list",
-			"  dot-agents skills new agent-start",
-			"  dot-agents skills promote session-start",
+			"  da skills list",
+			"  da skills new agent-start",
+			"  da skills promote session-start",
 		),
 	}
 	cmd.AddCommand(newSkillsListCmd())
@@ -35,8 +36,8 @@ func newSkillsListCmd() *cobra.Command {
 		Use:   "list [project]",
 		Short: "List skills",
 		Example: ExampleBlock(
-			"  dot-agents skills list",
-			"  dot-agents skills list billing-api",
+			"  da skills list",
+			"  da skills list billing-api",
 		),
 		Args: MaximumNArgsWithHints(1, "Optionally pass a project scope to list project-local skills."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,8 +55,8 @@ func newSkillsNewCmd() *cobra.Command {
 		Use:   "new <name> [project]",
 		Short: "Create a new skill",
 		Example: ExampleBlock(
-			"  dot-agents skills new self-review",
-			"  dot-agents skills new repo-bootstrap billing-api",
+			"  da skills new self-review",
+			"  da skills new repo-bootstrap billing-api",
 		),
 		Args: RangeArgsWithHints(1, 2, "Pass a skill name and optionally a project scope."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,7 +94,10 @@ func appendSkillToAgentsRC(name, scope string) string {
 
 func ensureSkillMarkdown(skillMD, name string) error {
 	if _, err := os.Stat(skillMD); os.IsNotExist(err) {
-		content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\n## When to Use\n\n- \n\n## Steps\n\n1. \n", name, name)
+		content, err := scaffoldtemplates.RenderSkillManifest(name)
+		if err != nil {
+			return fmt.Errorf("rendering SKILL.md: %w", err)
+		}
 		if err := os.WriteFile(skillMD, []byte(content), 0644); err != nil {
 			return fmt.Errorf("creating SKILL.md: %w", err)
 		}
@@ -168,8 +172,8 @@ func newSkillsPromoteCmd() *cobra.Command {
 ~/.agents/skills/<project>/<name>/, registers it in .agentsrc.json, and
 refreshes shared skill mirrors for all platforms.`,
 		Example: ExampleBlock(
-			"  dot-agents skills promote session-start",
-			"  dot-agents status --audit",
+			"  da skills promote session-start",
+			"  da status --audit",
 		),
 		Args: ExactArgsWithHints(1, "Run this from the project repository that owns `.agents/skills/<name>/`."),
 		RunE: func(cmd *cobra.Command, args []string) error {

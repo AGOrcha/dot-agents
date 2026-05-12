@@ -7,10 +7,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DA="${DA:-${REPO_ROOT}/dot-agents}"
+DA="${DA:-${REPO_ROOT}/bin/da}"
 
 if [[ ! -x "$DA" ]]; then
-  echo "SKIP: dot-agents binary not found at $DA (set DA= to override)" >&2
+  echo "SKIP: da binary not found at $DA (set DA= to override)" >&2
   exit 0
 fi
 

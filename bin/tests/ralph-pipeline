@@ -119,8 +119,8 @@ if [[ -n "${DOT_AGENTS:-}" ]]; then
   DOT_AGENTS_CMD=( $DOT_AGENTS )
 elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
   DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS_CMD=(dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
 fi
 
 RUN_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"

@@ -1,7 +1,7 @@
 # KG & Adjacent Articles — Evaluation Against dot-agents
 
-**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14)
-**Scope:** 19 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
+**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17)
+**Scope:** 28 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
 **Rubric per article:** core idea → pros → cons/tradeoffs → mapping to our stack with one of three labels:
 - **[OVERLAP-SHARPEN]** — we do it, they do it better or differently in a way we should learn from
 - **[GAP-ADOPT]** — we don't do it, worth adding
@@ -142,6 +142,31 @@
 
 ---
 
+#### akshay_pachaar — *You're Doing RAG Wrong (IdeaBlocks)*
+
+*Second article by akshay_pachaar; the first (§A.1 above) covers memory architecture. This one covers RAG preprocessing.*
+
+**Core.** The chunk is the wrong unit of knowledge for RAG retrieval. Replace it with a **question-answer packet (IdeaBlock)**: one question, its validated answer, and typed governance fields (clearance level, version state, source) as a single typed schema object. Queries are already questions; when the index stores question-answer pairs, the match becomes structural rather than probabilistic. Benchmarks from Blockify (open-source, 17 documents / 298 pages): cosine distance 0.1585 (IdeaBlocks) vs 0.3624 (naive chunks) — **2.29× retrieval distance reduction**. Semantic deduplication at 80-85% similarity collapsed 2,042 raw blocks → 1,200 canonical blocks; **distilled corpus outperformed undistilled by 13.55%** because near-duplicates in the same embedding region distribute probability mass, degrading the canonical match score. Governance fields (clearance, version state, product line) are typed on the block — not logic bolted onto the orchestrator.
+
+**Pros.**
+- **"Fifteen near-duplicates create fifteen competing vectors"** is the clean explanation for why our warm-store deduplication step (scoped-KG same-scope contradiction driver, §2.5 driver 4) improves retrieval quality — not just hygiene.
+- **Governance in the data layer** maps exactly to our scoped-KG's per-note scope/permissions model. Their `version_state: current|deprecated` is the typed analog of our `ArchivedAt` field.
+- **Q/A packet matches how LLMs are queried.** For our research corpus (each article evaluation is a set of claims + recommendations), structuring evaluations as Q/A packets would improve vector retrieval in `kg query` calls.
+- The **7-stage preprocessing pipeline** (scope → ingest → chunk → dedup → tag → validate → export) is a worked example for how our dream-cycle consolidation pass should be specified.
+
+**Cons.**
+- Blockify benchmarks are internal, not peer-reviewed. The 40× corpus compression claim is headline-worthy; the methodology (17 documents) is too small to treat as load-bearing evidence.
+- The Q/A unit works well for factual corpora (docs, FAQs, policies). Our KG contains decision traces, plan notes, and open questions — not all of which map cleanly to a single Q/A pair.
+- Human validation step (SMEs spend 1-2 hours/quarter on their corpus slice) assumes stable organizational structure. Our notes evolve faster than a quarterly validation cycle allows.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** — **Our KG notes are already close to IdeaBlocks.** Each note is a single claim with typed metadata. What we're missing: (a) an explicit `question` field that frames what retrieval query this note answers, and (b) a `version_state: current|deprecated|draft` field distinct from `ArchivedAt`. `ArchivedAt` conflates "no longer active" with "specifically deprecated for a reason." Adding a `version_state` field makes the distinction machine-readable.
+- **[GAP-ADOPT — data layer]** — **Semantic deduplication pass in the dream-cycle.** Blockify's 80-85% cosine deduplication step (3-5 iterative rounds → canonical block per cluster) should be the shape of our scoped-KG consolidation: within a scope, cluster near-identical notes by cosine similarity, propose a canonical merge to the human reviewer, mark superseded notes `ArchivedAt`. Not automated — human validates the merge — but the pipeline shape is correct.
+- **[GAP-ADOPT — small]** — **Add `version_state` to `KGNote`** as a typed enum (`current | deprecated | draft | approved`). Pair with the `author` field rollout (C.1 / F.2.1). One field; large impact on provenance clarity and on the dream-cycle's pruning decision.
+- **[WE-AHEAD]** — Our scope chain (repo/user/team/org) is a more principled governance model than IdeaBlock's flat clearance level (PUBLIC/INTERNAL/CONFIDENTIAL/SECRET). Our model handles the team-org-user hierarchy; their model handles flat access control. Different problems; ours is more complex and more correct for a multi-user agent system.
+
+---
+
 ### A.2 Group: Memory / context substrates
 
 #### claude-obsidian-memory-stack (Nyk) — *3-Layer Memory*
@@ -238,6 +263,29 @@
 
 ---
 
+#### mem0ai — *Memory Decay: Recency-Aware Ranking*
+
+**Core.** A per-project toggle that applies recency-aware ranking to agent memory search. Every memory tracks its last 20 access timestamps; at search time, recently-accessed memories receive a boost (up to 1.5×) and idle memories are dampened (floor 0.3×) — a **5× spread** between fresh and stale. Nothing is deleted or hidden; stale memories still surface when genuinely relevant, just ranked lower. Search-time concern only — no reindexing, no schema migration. Roadmap: category-aware weighting (high-importance categories resist dampening) and per-project auto-tuning.
+
+**Pros.**
+- **Recency as a soft signal complements our event-driven staleness model.** Our scoped-KG marks notes stale via specific drivers (source-mutation, contradiction, revocation). Memory Decay handles the complementary case: nothing fired, but the note is simply forgotten — nobody has retrieved it in weeks. The two mechanisms are orthogonal, not competing.
+- **"History stays; present ranks correctly"** is a cleaner user-facing contract than our current model, which offers no retrieval bias. For agent orientation (SessionStart KG readback), recently-accessed notes should surface first without requiring the user to filter by date.
+- **Floor of 0.3×** prevents total suppression — stale but genuinely matching notes still appear. This is the right tradeoff: you want recency-weighting, not recency-filtering.
+- **Access count as a pruning signal** for the dream-cycle: notes with zero accesses over a window, no linked active plans, and no derivation children are consolidation candidates.
+
+**Cons.**
+- Product announcement, not a research paper. The 5× spread (0.3–1.5×) and the 20-timestamp window are engineering choices, not principled derivations. The right parameters for our KG may differ.
+- "Last accessed" conflates retrieval-by-agent with retrieval-by-human. A note accessed 50 times by automated SessionStart orientation should not rank the same as a note accessed 50 times because a human deliberately sought it out. Access source matters.
+- **Category-aware weighting** (roadmap item) is the more interesting primitive for our use case. A `decisions` note should not decay at the same rate as an `observation` note. The current feature release doesn't have this yet.
+
+**Mapping.**
+- **[GAP-ADOPT — small]** — **Add `last_accessed_at` and `access_count` to `KGNote`.** Two fields, no schema redesign. Feed them into: (1) `kg query` scoring (recently-accessed notes slightly preferred, like browser history); (2) dream-cycle pruning candidates (access_count = 0 in last N days + no linked active plans → archival candidate). Both are read-time or consolidation-time concerns.
+- **[OVERLAP-SHARPEN]** — **Our review-nudge axis (scoped-KG §2.7) fires on events; Decay fires on access patterns.** The two are complementary axes. A note can be review-nudged without being stale (a question was asked that should re-examine the note) and can be stale without a review-nudge (nobody remembered to ask). Add both to the dream-cycle's pruning decision tree.
+- **[WE-AHEAD]** — Our event-driven staleness model (source-mutation, revocation, contradiction) is more precise than decay-by-age for notes that are load-bearing. A spec's decision note should not decay just because nobody retrieved it last month; it should decay only when a superseding decision fires. Decay is the right signal for notes that are forgotten rather than superseded.
+- **[GAP-ADOPT — medium]** — **Per-category decay resistance as a `NoteType` property.** Once `version_state` and `NoteType` extensions land (F.2.1, C.1), add a `decay_resistance: low|medium|high` property to the NoteType enum definitions. `decisions` = high (decays slowly), `observations` = low (decays fast), `commitments` = high. This is the category-aware weighting Mem0 lists as roadmap — we can design it now as a schema property.
+
+---
+
 #### ashwingop — *Company Brain* (Parts 2 + 3)
 
 A series by Ashwin Gopinath (CEO, Sentra.app; ex-MIT). Part 1 (memory framing), Part 2 (Factual Memory), Part 3 (Interaction Memory), Part 4 announced as Action Memory. Treated together because Parts 2 and 3 are reciprocal halves of a single architecture.
@@ -274,6 +322,44 @@ A series by Ashwin Gopinath (CEO, Sentra.app; ex-MIT). Part 1 (memory framing), 
 - **[OVERLAP-SHARPEN]** — **"Proactive surfacing of patterns no individual holds in their head"** is the L5 hard test (annimaniac §A.5) re-stated. Reinforces C.12 (rename to "managed compounding") and L5's behavioral acceptance criterion. The two articles converge — we are not over-claiming when we say this is the goal.
 - **[WE-AHEAD]** — our scope chain (user → team → org) + promotion gate is a more concrete operationalization than Part 2's prose-level "individual outward" framing. We should stop apologizing for our model's specificity.
 - **[DEFERRED — not now]** — the agent-trace ingestion thread ("agents matter, agent traces will matter more over time"). Real but not load-bearing for our current synthesis. When the execution-telemetry pillar (§1.6 of the architecture note) lands, agent traces become a first-class scope; until then, defer.
+
+---
+
+#### ashwingop — *Company Brain* (Parts 4–7 extension)
+
+*Extends the Parts 2+3 evaluation above. Treated as a single continuing architecture series.*
+
+**Core (Part 4 — Action Memory).** Action memory is the third memory layer after factual and interaction: it remembers *how the company moves*, not just what it knows or why decisions were made. Four sub-types: **procedural** (how a process is supposed to work), **trigger** (when a condition should wake a workflow), **execution** (what actually happened in a specific case), **outcome** (what happened after the action — the feedback loop). Key principle: **doing nothing is a first-class action.** An agent that cannot stay still on purpose cannot be trusted to act on purpose. "Most workflow diagrams are polite fiction" — the documented path differs from the lived path; action memory must remember the actual path. Action memory is partly agentic: it has to *participate* (notice a condition changed, route, respect guardrails), not just sit still. Guardrails: not all actions are equal; some are routine, some require approval, some affect money or production. A one-percent threshold change can flip the entire operating path.
+
+**Core (Part 5 — Memory as State).** Enterprise AI is fragmenting memory into tool-local silos; the solution is a **shared semantic substrate — memory as state, not a service.** Substrate primitives: entities, facts, state changes (first-class, not just artifacts), relationships (typed edges). Ontologies sit *above* the substrate as lenses, not below it as schemas — this is what allows the same underlying memory to be read differently by sales, product, legal, and an agent without the memory splitting into copies. Trust requirements: provenance, permissions, version history, correctability, "what contradicts it?" Trust questions are load-bearing, not bureaucratic. "A database stores records. A substrate defines the rules by which records become shared operating state."
+
+**Core (Part 6 — Year of Building).** Retrospective on the "Company Brain" project. Three lessons: (1) company memory must emerge from the *work itself* (meetings/messages/calls), not from polling people; (2) interactions are the **chain of thought of the organization** — where the company reasons before it writes down what it decided; (3) ontology emerges from needing to make the same conversation mean different things to different functions. Memory traces → world model → learning from outcomes (described as "reinforcement learning inside the company: traces, actions, outcomes, feedback loops"). Customer case: compressing signal latency from "surfaced in weekly review" to "flagged while the conversation was still fresh" changes how the organization can respond. UI principle: memory should be experienced through *surfacing*, not browsing (TikTok analogy — not surveillance, but the right thing at the right moment).
+
+**Core (Part 7 — Semantics and Ontology).** Reacts to Anthropic's Claude Managed Agents memory launch (file-based, scoped, versioned, `/mnt/memory/`). Verdict: correct direction, necessary but not sufficient. Semantics = what something is. Ontology = why it matters per perspective. Personal ontology is fluid (we are many roles at once); organizational ontology is more stable (roles constrain the lenses: sales/product/support/legal/leadership). **Custom ontologies are the real path to organization-wide AI adoption** — adoption fails when one assistant carries one ontology and seven functions can't map their work onto it. Architectural move: separate substrate (shared, permissioned, durable) from lens (functional, customizable, per-vertical). The metric: "not how often people use AI. It is how often the company successfully does the thing it decided to do."
+
+**Pros.**
+- **Action memory's 4-layer taxonomy is the missing vocabulary for our workflow pipeline.** Our pipeline has `eligible` (= trigger), `plan` (= procedural), `merge-back` (= execution), `impl-results` (= outcome). These are the same four stages under different names; making the mapping explicit unlocks the "outcome → precedent" loop.
+- **"Doing nothing is a first-class action"** is the cleanest articulation of `on_fail: soft` + guard-condition semantics. It names why our verifier `on_fail: soft` is not a weakness but a design — the verifier is a guardrail that knows when to hold.
+- **Memory as state (Part 5) is architectural validation of our warm-store model.** Our sqlite warm store + hot markdown + MCP bridge is exactly the substrate-above-adapter model Parts 5 and 7 describe. Their `/mnt/memory/` = our `.agents/` hot filesystem. We are building this already.
+- **Part 7's reaction to Claude Managed Agents** gives us external corroboration that file-based memory stores with scoped permissions are the right primitive. But it also names the gap we have: semantic trace layer is missing. We store facts; we don't yet store "support trace / customer trace / product trace" as first-class derived note types.
+- **"Substrate generalizes; ontologies don't"** maps directly onto our scope chain (repo/user/team/org provide the substrate; NoteType + interaction labels provide the per-function lens). The claim is testable.
+- **"Chain of thought of the organization"** corroborates arscontexta's Reweave (updating prior artifacts) and the_smart_ape's source tiers — three sources converging on the same primitive: the reasoning that produced a decision matters more than the decision artifact.
+- **Latency as a dimension of memory quality** — Part 6's customer case (signal surfaced during the conversation rather than in the weekly review) names a quality metric our system has no surface for. Speed-of-surfacing is a capability.
+
+**Cons.**
+- **All 4 parts are marketing pieces for Sentra.app.** The architecture lessons are real and corroborated elsewhere in the corpus, but the implicit "and we're building this" is doing some of the work. Honor §E trust gate: adopt structural insights, not feature claims.
+- **"RL inside the company"** (Part 6) is a compelling framing but completely unoperationalized. The feedback loop requires: action labeling, outcome labeling, credit assignment across delayed outcomes, reward shaping. None of these are specified. Treat as a research direction, not a near-term design input.
+- **Part 7 references Claude Managed Agents specifics** ("dreaming," `/mnt/memory/`, workspace-scoped memory stores) that are Anthropic product claims at a specific point in time (May 2026). These may change.
+- **"One substrate, many lenses"** is the aspiration; the actual org-scale ontology engineering problem (who owns the sales lens, how does it evolve, who mediates conflicts between the legal lens and the product lens) is not addressed.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** — **Action memory's 4 sub-types (trigger / procedural / execution / outcome) map onto our workflow pipeline stages.** Name the correspondence explicitly in the scoped-KG spec as four `NoteType` sub-classes under a `workflow-trace` family. Execution + outcome traces live in `delegate-merge-back-archive/`; trigger traces live in `active/fold-back/`. The mapping closes the gap between "what the spec says" and "what the history already records."
+- **[GAP-ADOPT — spec-level]** — **Semantic trace types as NoteType extension.** Part 7's "support trace / customer trace / product trace / revenue trace / action trace / decision trace" are the conversation-shaped extensions to the factual NoteType enum (complement to Part 3's interaction ontology). Add a `trace_kind: workflow | interaction | outcome | commitment` sub-field to `KGNote` rather than multiplying the flat enum.
+- **[GAP-ADOPT — medium]** — **"Speed-of-surfacing" as a KG quality metric.** Today we measure provenance and freshness; we have no metric for latency-from-event-to-surfacing. A note written two weeks after the fact has lower signal value than one written at the moment. Add `capture_lag_seconds` to `KGNote` as an optional field (populated by ingest tooling); use it in the consolidation/dream-cycle to weight recently-captured notes higher for review-nudge firing.
+- **[WE-AHEAD]** — **Our scoped-KG with `derived_from` + scope hierarchy is more concrete than Part 5's "semantic memory filesystem" aspiration.** We should not apologize for our model's specificity. Where we lag: the "ontology as lens above substrate" framing is more elegant than our current flat `NoteType` enum. The enum should be refactored as a two-level structure: a canonical note-type (fact/decision/commitment/etc.) + a per-scope ontology overlay that decides the lens.
+- **[OVERLAP-SHARPEN]** — **"The metric is how often the company does the thing it decided to do"** (Part 7) is the external articulation of our `impl-results` + `history/` archive purpose. Today we archive passively; the metric suggests we should *compute* completion rate: plan started → impl-results written → outcomes described. A `da workflow stats` command over the history dir would surface this.
+- **[GAP-ADOPT — research-tier]** — **Verify "substrate generalizes; ontologies don't" against our scope chain.** This is a testable claim. The scope chain (repo/user/team/org) is our substrate; NoteType + interaction labels are our ontology. Does the same warm-store row read correctly through a repo lens and a user lens? If yes, the claim holds; if not, we have scope-collapse. Write this as a test case in the kg-command-surface-readiness verification plan.
+- **[DEFERRED]** — The "RL inside the company" thread (traces → world model → learning from outcomes) is worth tracking as a long-range goal. Not actionable until outcome labeling and delayed credit assignment are specified. Flag in the kg-command-surface-readiness open questions for a future spec cycle.
 
 ---
 
@@ -356,6 +442,56 @@ Benchmark: single-agent 36.5min/12 interventions/100% fail vs multi-agent 5.2min
 
 ---
 
+#### ghumare64 — *Agents Need Runbooks, Not Longer Chats*
+
+**Core.** Agent reliability comes from operational scaffolding, not better prompts. Two required layers: (1) **knowledge layer** (docs, skills, memory, conventions) and (2) **control layer** (state machine, tool policy, checks, approvals, rollback). Most teams over-invest in layer 1 and under-build layer 2. A prompt describes what should happen; a runbook *controls* what can happen. Verification must be external and programmatic (tests must actually run, exit codes must be checked), not agent self-assertion. "CLAUDE.md is not enough" — project instructions tell the agent how the project works but cannot guarantee the agent follows the release process. The right abstraction is "agent as production worker" not "agent as employee": constrain the environment, don't ask for carefulness.
+
+**Pros.**
+- **The two-layer framework (knowledge + control) is the clearest external validation of our spec/skill/plan (knowledge) + TASKS/ISP/iteration-close (control) split.**
+- **"Prompt is advice; runbook is infrastructure"** is the one-line articulation of why skills and CLAUDE.md alone are insufficient: they tell the agent what to do but cannot enforce it.
+- **The DevOps analogy** ("we learned this lesson, then forgot it with agents") is a memorable framing for why agent reliability is a platform problem, not a prompt problem.
+- **Per-task permissions (`allowed_tools`, `write_scope`)** and **per-step `on_failure` handling** are the exact fields our TASKS.yaml needs to be a real runbook rather than a status-tracking file.
+- **"Just ask the agent to verify is not enough"** maps directly to our verifier stage — and names the failure mode we must guard against: an agent that claims tests passed without the verifier stage checking an exit code.
+
+**Cons.**
+- Light on implementation specifics. The YAML snippets are conceptual sketches, not a real schema. Our actual runbook needs are more complex (dependency ordering, write-scope conflict detection, cross-plan deps).
+- The article is targeted at teams starting from scratch. We already have much of the control layer (ISP, iteration-close, delegation contracts). The gap is smaller than the article implies.
+- "Agent as production worker" is correct for bounded tasks but doesn't account for the orchestrator role, which needs broader judgment about *which* worker runs next.
+
+**Mapping.**
+- **[WE-AHEAD]** — **Our TASKS.yaml + ISP pipeline IS the runbook + control layer ghumare64 argues for.** We have: state (task status + iteration log), write-scope permissions (bounded by `write_scope` in TASKS), verification (verifier+review in ISP), checkpoints (iteration-close), approval gates (`review_kind: human`). The article is validating our architecture. We should make this explicit in the workflow artifact model documentation.
+- **[GAP-ADOPT — small]** — **Add `allowed_tools` as an explicit TASKS.yaml field**, mirroring app-type-profiles' `impl_defaults.allowed_tools`. Today write-scope says which files but not which tools. Adding per-task tool restrictions closes the gap between "runbook controls what can happen" and our current advisory write-scope model.
+- **[GAP-ADOPT — small]** — **Verifiers must produce a machine-checkable output, not a prose assertion.** Our iteration-close verification step should require: either a non-zero exit code check (for test suites), a file existence check (for generated artifacts), or a structured JSON output. An agent that writes "tests passed" in the merge-back without an exit code captured is the failure mode ghumare64 names. Add a `verification_evidence_kind: exit_code | file_exists | json_assertion | prose_only` field to task completion records; flag `prose_only` in the `da workflow checkpoint` output.
+- **[OVERLAP-SHARPEN]** — **PostToolUse hook for observability: "what did the agent read/modify?"** Our iteration-close captures what was done, but we have no per-task tool-call log. A lightweight PostToolUse hook that appends `{tool, path, timestamp}` to a per-task `tool-calls.jsonl` file in the active directory would give us the observability ghumare64 says is load-bearing. Claude Code supports this natively.
+
+---
+
+#### trq212 — *The Unreasonable Effectiveness of HTML*
+
+*Author is Thariq, Claude Code @ Anthropic. 2.3M views — most viral article in this corpus.*
+
+**Core.** HTML is a richer output format than Markdown for agent-produced artifacts. Markdown is appropriate for machine-to-machine handoffs (agent reads/writes it efficiently); HTML is appropriate for human consumption. Information density: HTML can represent tables, CSS styling, SVG diagrams, JavaScript interactions, spatial layouts — "almost no set of information that Claude can read cannot be represented in HTML." Visual clarity: humans stop reading Markdown past ~100 lines; HTML with tabs, collapsible sections, and diagrams holds attention. Shareability: upload to S3, share a URL. Two-way interaction: sliders, copy-as-prompt export. Key use cases: specs/explorations (compare 6 designs side-by-side), code review explainers (annotated diffs, better than GitHub's diff view), design prototypes, reports synthesized from cross-source data, custom throwaway editing interfaces (draggable task boards, structured config editors). Downside: HTML diffs are noisy in version control.
+
+**Pros.**
+- **"Humans stop reading Markdown past 100 lines"** is a direct observation about our current research evaluation docs. Our 845-line KG evaluation doc is a prime example — the HTML equivalent would be far more navigable for a human stakeholder review.
+- **Custom throwaway editing interface + copy-as-prompt** is immediately applicable to TASKS.yaml triage and plan priority editing. A drag-and-drop card board for our task backlog, ending with "copy as YAML" — this is the custom editing interface pattern at zero infrastructure cost.
+- **"I feel more in the loop with Claude"** names the real problem with large Markdown plans: the human disengages from planning because they can't see it clearly. HTML restores engagement without changing the underlying data model.
+- The **code review explainer use case** (annotated HTML diff attached to every PR) is immediately useful and maps to our `review-pr` skill's output — replace or supplement its Markdown output with an HTML artifact for the human reviewer.
+
+**Cons.**
+- **HTML diffs are noisy in git** — this is a genuine limitation for any artifact that must be version-controlled and reviewed as a diff. Our PLAN.yaml, TASKS.yaml, `.plan.md`, and KG notes must remain Markdown/YAML for diffability.
+- **2× to 4× generation time** vs Markdown. For agent-internal handoffs (orchestrator → worker context), the generation overhead is pure waste.
+- **Agent-consumed artifacts must remain machine-readable.** SessionStart rule loading, KG ingest, plan parsing — these must stay Markdown/YAML. HTML as a format is only appropriate for the human-facing output layer.
+- The article is from an Anthropic team member and is Claude Code-specific. The "two-way interaction" feature requires a browser and is a Claude Code UI affordance, not portable to Codex/Cursor/Copilot.
+
+**Mapping.**
+- **[GAP-ADOPT — workflow]** — **HTML as the human-facing output layer for plan presentations and PR explainers.** Our architecture already has a machine layer (YAML/Markdown) and a human layer (plan.md, impl-results.md). Add an optional HTML rendering step: `da plan view --html` generates an HTML dashboard from TASKS.yaml + PLAN.yaml for stakeholder review or archival. Not a replacement for the YAML; a derived human-readable view.
+- **[GAP-ADOPT — skill]** — **The `review-pr` skill should offer an HTML artifact output alongside its current Markdown report.** Given the trq212 observation that HTML code review explainers are "often better than the default GitHub diff view," the `review-pr` skill's output stage could produce an HTML annotated diff as an optional artifact, attachable to the PR description.
+- **[WE-AHEAD]** — **Our machine-readable artifact layer (YAML + Markdown) is correct and must not be replaced by HTML.** Agents consume PLAN.yaml, TASKS.yaml, and KG notes. HTML is strictly worse for this layer. The trq212 framing makes this explicit: "I'm not editing these files myself anymore" — but *our agents are*. Maintain the two-layer distinction: YAML/Markdown for machine layer, HTML only for human-facing output layer.
+- **[OVERLAP-SHARPEN]** — **Custom editing interface pattern for TASKS.yaml backlog triage.** The trq212 draggable-card / copy-as-YAML pattern could be generated as a `da workflow triage` output: render the current plan's tasks as a drag-and-drop HTML board, export the reordered result as TASKS.yaml. This is the throwaway editor pattern at exactly the right scope. Low priority but zero infrastructure cost.
+
+---
+
 ### A.4 Group: Automation / coordination
 
 #### openclaw-hermes — *Supervisor Pattern*
@@ -424,6 +560,30 @@ Benchmark: single-agent 36.5min/12 interventions/100% fail vs multi-agent 5.2min
 
 ---
 
+#### alphasignalai — *How to Choose Between Single and Multi-Agent Solutions*
+
+**Core.** Empirically-grounded framework for the single-vs-multi-agent decision, citing two studies: (1) Stanford — when controlled for "thinking budget" (same token count), single-agent matches or beats multi-agent on multi-hop reasoning; passing info between agents creates lossy summarization and compounds errors. (2) Google/MIT — independent agent swarms amplify baseline errors by up to **17.2×**; in 16-tool setups, single-agent coordination efficiency = 0.466 vs multi-agent 0.074–0.234 (2–6× penalty). Key heuristics: **45% accuracy threshold** — if single-agent accuracy on a task is below 45%, multi-agent can help; above 45%, single-agent usually wins. **Pre-answer scaffolding** — before committing, force the model to identify ambiguities, list candidate interpretations, and test alternatives; this recovers multi-agent benefits inside a single context. **Decision matrix**: tool-heavy (>10 tools) → single; context degradation → multi; natural decomposition + independent sub-tasks → multi; strict regulatory verification → centralized multi with orchestrator bottleneck (36.4% contradiction reduction, 66.8% context omission reduction).
+
+**Pros.**
+- **Empirical grounding is unique in this corpus.** Most articles are architectural reasoning; this one cites quantified study results (17.2× error amplification, coordination efficiency numbers, 45% threshold). Even second-hand, the magnitudes matter.
+- **"45% accuracy threshold"** is a concrete, actionable fanout criterion. Currently our `eligible` gating has no empirical trigger; this gives one.
+- **Pre-answer scaffolding** is immediately deployable as a prompt pattern for the orchestrator's planning phase.
+- **Centralized orchestrator with a validation bottleneck** is exactly what our ISP verifier+review stages are. The Google/MIT numbers (36.4% contradiction reduction, 66.8% context omission reduction) are external validation.
+
+**Cons.**
+- AlphaSignal is a newsletter aggregator, not original research — the studies cited are real, but second-hand with no methodology detail given. The 45% threshold comes from one study with specific task structures; generalizing requires care.
+- "Thinking budget" control is meaningful for reasoning tasks but our fanout tasks are write-scope-bounded (not open-ended reasoning) — the analogy is partial.
+- The decision matrix implicitly assumes homogeneous task types; our plans mix tool-heavy tasks (10+ tools in some delegations) with lightweight document edits in the same plan.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** — **Our ISP fanout gating (eligible → fanout vs single delegation) is empirically validated by the Stanford/Google findings.** Sequential tasks with clear single-agent context fit → stay single. Decomposable independent sub-tasks with write-scope conflicts → fanout. We do this already; the studies justify it. We should cite these numbers in any future spec that discusses the fanout decision rationale (skill-tiering-contract D4 — "compound attendance model" — is the right place).
+- **[GAP-ADOPT — small]** — **Add the 45% single-agent accuracy heuristic as an explicit `eligible` criterion note.** Before fanning out a task, the orchestrator prompt should ask: "can a single agent reliably complete this write scope, or does the scope complexity/size suggest coordination will compound errors?" This is not a hard gate but an explicit reasoning step — currently the decision is implicit.
+- **[GAP-ADOPT — prompt-level]** — **Pre-answer scaffolding for the orchestrator planning phase.** Before the orchestrator produces a delegation bundle, prompt it to: (a) identify ambiguities in the task spec, (b) list candidate interpretations of the write scope, (c) test alternatives before committing to the plan. This is the `open_questions` discipline from spec-writing applied at runtime.
+- **[WE-AHEAD]** — **Our orchestrator-does-not-implement-the-delegated-slice rule + bounded write scopes directly prevent the 17.2× error-amplification problem.** Bounded scopes contain what each agent can touch; the orchestrator/parent gate catches conflicts before merge. The architecture is already correct; the studies explain why.
+- **[WE-AHEAD]** — **Our verifier+review stages are the "centralized validation bottleneck"** the Google/MIT study recommends. The ISP structure (impl → verify → review → parent) matches their centralized multi-agent topology for regulated-verification cases. Numbers validate the pattern.
+
+---
+
 ### A.5 Group: Adoption maturity / organizational frame
 
 #### annimaniac — *Six Levels of AI-Pilled Organizations (L0–L5)*
@@ -478,7 +638,11 @@ dot-agents is a Camp 2 (context substrate) system with: a unified `.agents/` tre
 
 7. **Maturity ladders + four-question lenses are the right shape for declaring our target.** annimaniac's L0–L5 + see/do/extend/changed lens, paired with shivsakhuja's atom/molecule/compound (artifact-level autonomy) and arscontexta's three-space invariant (identity/knowledge/ops), gives us three axes that compose: scope (where), tier (how autonomous), and adoption level (how integrated). Our four anchor specs — scoped-KG, skill-tiering, app-type-profiles, agent-context-resolution — map onto these axes and should declare their target level explicitly. The L4 phrase "**managed compounding** (lifecycle, observability, evaluation), not chaotic proliferation" is the cleanest external articulation of our promotion-gate / crystallization design and is worth importing as the in-spec terminology.
 
-8. **Ontology is the load-bearing primitive that decides what gets remembered.** ashwingop's Part 3 names this directly: an ontology is the set of concepts and relationships a system uses to make sense of a domain. In a company, it decides whether something in conversation is a decision, commitment, objection, escalation, dependency, assumption, customer pain, owner, precedent, or open question — and those labels decide what survives capture. Our `NoteType` enum is implicitly an ontology, but it's coded for code-shaped artifacts (decision/rule/lesson/research-claim) and missing the conversation-shaped labels organizations need. Reinforced by the_smart_ape's source tiers, arscontexta's `cognitive_grounding`, kevin's authorship axis, akshay_pachaar's episodic/semantic/procedural — five articles converge on "the labels you choose at write time decide what's recoverable at read time." Two consequences: (a) extend `NoteType` with the conversation-shaped labels; (b) commit explicitly to "the ontology evolves; the system must reread its own past" as the dream-cycle's load-bearing motivation, not a hygiene pass.
+8. **Ontology is the load-bearing primitive that decides what gets remembered.** ashwingop's Part 3 names this directly: an ontology is the set of concepts and relationships a system uses to make sense of a domain. In a company, it decides whether something in conversation is a decision, commitment, objection, escalation, dependency, assumption, customer pain, owner, precedent, or open question — and those labels decide what survives capture. Our `NoteType` enum is implicitly an ontology, but it's coded for code-shaped artifacts (decision/rule/lesson/research-claim) and missing the conversation-shaped labels organizations need. Reinforced by the_smart_ape's source tiers, arscontexta's `cognitive_grounding`, kevin's authorship axis, akshay_pachaar's episodic/semantic/procedural — five articles converge on "the labels you choose at write time decide what's recoverable at read time." Two consequences: (a) extend `NoteType` with the conversation-shaped labels; (b) commit explicitly to "the ontology evolves; the system must reread its own past" as the dream-cycle's load-bearing motivation, not a hygiene pass. Parts 4–7 extend this: (c) action memory adds a *second ontology axis* — not just what something is, but when it should wake something up (trigger) vs what actually happened (execution) vs what the outcome was — and (d) "substrate generalizes; ontologies don't" (Part 7) confirms our scope-chain model is correct architecture; the per-function lens (NoteType + interaction labels) should be a refactored two-level structure, not a flat enum.
+
+10. **The knowledge layer and the control layer are both required; most teams under-build the second.** ghumare64 names this split explicitly (knowledge = docs/skills/memory; control = state machine/tool policy/checks/approvals/rollback). Our stack already has both layers — TASKS.yaml + ISP is the control layer; skills + CLAUDE.md + KG is the knowledge layer — but we haven't documented the split or made per-task tool permissions (`allowed_tools`) and machine-checkable verification evidence (`exit_code | file_exists`) first-class. Reinforces sullyai (context engineering, not iteration), thealexker (R.P.I. phases), and codex-multi-agent (front-load constraints). akshay_pachaar's IdeaBlock adds: governance (clearance level, version state) belongs in the data layer, not the orchestrator — the same principle applied to the knowledge layer. mem0ai's Decay adds the recency dimension: recently-accessed knowledge should rank higher without requiring event-driven staleness triggers. trq212 adds the output layer: HTML for humans, YAML/Markdown for agents — maintaining this two-layer distinction prevents us from collapsing machine-readable and human-readable artifacts into one.
+
+9. **Single-agent baseline is the correct default; multi-agent is a measured upgrade.** alphasignalai (citing Stanford + Google/MIT studies) adds empirical grounding to what sullyai, thealexker, and codex-multi-agent argued by reasoning: multi-agent coordination amplifies baseline errors by up to 17.2×; for tool-heavy tasks (>10 tools), coordination efficiency drops 2–6×; single-agent matches multi-agent when the thinking budget is equal. Our ISP fanout gating (eligible → fanout vs single delegation) is architecturally correct. Two additions: (a) pre-answer scaffolding — the orchestrator should explicitly enumerate ambiguities and candidate interpretations before committing to a delegation plan; (b) the 45% accuracy threshold: if estimated single-agent success on a write scope is above 45%, stay single-agent; only fan out when decomposition adds more than coordination costs.
 
 ### What we do well (and should keep)
 
@@ -664,10 +828,7 @@ see its Risk profile before deciding.
 
 - **F.3.2 — Auto-memory recommendations don't apply uniformly across platforms.** Lessons/memory P0 says "add `author: human | agent` to auto-memory files." Claude-Code auto-memory at `~/.claude/projects/<hash>/memory/` is platform-private. Cursor's nearest equivalent is Project Rules; Codex CLI uses a different memory surface; Copilot has no equivalent at all. The recommendation collapses across these. The right framing: define the trust schema (F.2.1) on the canonical scoped-KG `user`-scope note. Each platform's memory adapter projects from the warm store. The auto-memory surface becomes a *cache*, not a source of truth.
 
-- **F.3.3 — MCP tool surfaces (`kg_ingest`, `kg lint`, `get_impact_radius`) are Claude-Code + Cursor-class clients only.** The KG doc treats MCP as a unified runtime, but Codex CLI and Copilot do not currently run MCP. Recommendations to expose ingest/lint as MCP tools must be paired with: a CLI fallback (`da kg ingest …`) and a rule that declares "MCP-backed surfaces auto-degrade to CLI invocations on platforms without MCP, with platform-specific render guidance in the rule corpus." This is the same pattern config-distribution-model uses for verifier maps.
-  - Human correction 05/03/2026 - 14:01 (EST)
-    Codex CLI and Copilot do indeed run mcp, this is a false or stale claim.
-    However, mcp vs cli tool debate is on my mind and do see benefit of cli usage as there's more training data on how to use a cli tool.
+- **F.3.3 — MCP tool surfaces (`kg_ingest`, `kg lint`, `get_impact_radius`) are available on all four platforms.** ~~The KG doc treats MCP as a unified runtime, but Codex CLI and Copilot do not currently run MCP.~~ *Corrected 05/03/2026: Codex CLI and Copilot do run MCP — the original claim was incorrect.* The real tension is ergonomics: CLI invocations (`da kg ingest …`) have more LLM training data behind them and degrade more gracefully in constrained environments than MCP tool calls. Recommendations to expose ingest/lint as MCP tools should therefore be paired with: (a) a CLI fallback that is a first-class path, not a second-class degradation path; and (b) a rule in the corpus that says "prefer `da kg …` CLI over the MCP tool variant when the platform's tool-call latency is above N ms or when the task is script-driven." This is a pragmatic ergonomics decision, not a capability gap.
 ### F.4 Recursive accountability — apply our recommendations to this corpus
 
 Article evaluations are themselves Camp-2-substrate research artifacts. Three commitments fall out of the corpus that this corpus has not yet honored:
@@ -690,7 +851,97 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 - **NEW C.11 — split the contradiction skill** into same-scope (write-time, auto-stale-acknowledgment) vs cross-scope (read-time, precedence audit). One name, two modes.
 - **NEW C.12 — unify reweave (plan graph) and derivation propagation (KG graph)** into one propagation primitive, parameterized by store. Edge types differ; the walk and the bound do not.
 - **NEW C.13 — produce a per-platform enforcement matrix** as a precondition for any rule that says "blocked by hook." Without the matrix, recommendations ship as Claude-Code-only invariants disguised as cross-platform contracts.
+- **NEW C.14 — extend `NoteType` with action-memory workflow-trace sub-types** (trigger / procedural / execution / outcome) from ashwingop Part 4. These map to existing pipeline artifacts: `active/fold-back/` = trigger traces, plan body = procedural, `merge-back.md` = execution, `impl-results.md` = outcome. Add a `trace_kind` sub-field (orthogonal to `NoteType`) rather than multiplying the flat enum. (ashwingop Parts 4–7 §A.2.)
+- **NEW C.16 — add `allowed_tools` + `verification_evidence_kind` to TASKS.yaml** as the two missing fields that turn task specs from advisory runbooks into control runbooks. `allowed_tools` bounds what tools this task may call (mirroring app-type-profiles' `impl_defaults.allowed_tools`). `verification_evidence_kind: exit_code | file_exists | json_assertion | prose_only` makes verification machine-checkable; `da workflow checkpoint` should flag `prose_only` tasks as needing stronger evidence. (ghumare64 §A.3.)
+- **NEW C.17 — add `last_accessed_at`, `access_count`, and `version_state` to `KGNote`** as a combined field rollout alongside the `author`/`tier`/`cites` schema (F.2.1/C.1). `last_accessed_at` + `access_count` feed Memory Decay-style recency scoring in `kg query` and dream-cycle pruning. `version_state: current|deprecated|draft|approved` makes provenance state machine-readable without conflating it with `ArchivedAt`. One schema rollout, five new fields. (mem0ai §A.2; akshay_pachaar IdeaBlocks §A.1.)
+- **NEW C.15 — add an empirical basis to the `eligible` fanout criterion**: before escalating to multi-agent fanout, the orchestrator prompt should explicitly ask whether estimated single-agent success is above or below the 45% threshold identified by the Google/MIT study. Tool-heavy tasks (>10 tools) should default single-agent regardless. This is a prompt-level change to the `orchestrator-session-start` skill, not a pipeline change. Pairs with pre-answer scaffolding: enumerate ambiguities + candidate interpretations before committing to a delegation bundle. (alphasignalai §A.4; reinforces sullyai §A.3.)
 
 ---
 
-*Document status: draft. No changes made to code, specs, or plans. This is evaluation only. Part F adds contract-level couplings to the existing inventory addendum (Part D) and trust gate (Part E).*
+## Part G — Research Profile Verification Pass (2026-05-08)
+
+*Running the `research` profile verifier chain (`citation-presence → source-freshness → rubric-check`) against this corpus, as committed to in §F.4.2 and §F.5 NEW C.10. This is the self-test: treating each evaluation section as a `write_scope_kind: document` work item and auditing it against the profile's three verifiers.*
+
+---
+
+### G.1 citation-presence (hard verifier)
+
+**Rule:** Every claim in a mapping block must be traceable to a specific article handle, spec section, or plan. Orphaned claims (no cite, no source) are citation failures.
+
+**Findings:**
+
+| Location | Claim | Citation status |
+|---|---|---|
+| Part B Theme 1 ("Camp 2 is winning") | five articles cited | pass |
+| Part B Theme 2 ("derivation is load-bearing") | five articles cited | pass |
+| Part B Theme 3 ("compounding is nightly") | four articles cited | pass |
+| Part B Theme 4 ("context engineering > iteration") | "30%+ accuracy drop" attributed to akshay_pachaar | pass |
+| Part B Theme 9 ("single-agent baseline") | "17.2×", "45%", "0.466 vs 0.074-0.234" attributed to alphasignalai citing Stanford + Google/MIT | pass — but citation is second-hand; original study links not captured in article file |
+| §F.1 verifier-evolution paragraph | references "E.4", "C.6", "app-type-profiles §6" | partial — internal cross-refs to evaluation doc sections rather than article handles; acceptable as in-corpus citations |
+| §F.2.3 open-questions framing | cites spec sections by file path + §N | pass |
+| §F.3.3 MCP claim (Codex/Copilot don't run MCP) | no source — and already flagged as **incorrect** by human correction 05/03/2026 | **FAIL — incorrect uncited claim, corrected in-place; correction noted but not removed** |
+| §C.13 (Part C body) | "(ashwingop §A.2)" | pass |
+| Part A ashwingop Parts 4–7 Cons, "RL inside the company" | attributed to Part 6 | pass |
+
+**Summary:** Two actionable items:
+1. **Part B Theme 9** — the Stanford + Google/MIT study URLs should be captured in `alphasignalai-single-vs-multi-agent.md` article file for forward reference. Currently the article only cites the newsletter's paraphrase. Low risk since the studies are cited through a real article extract, not fabricated.
+2. **§F.3.3** — the incorrect MCP claim was corrected by human note but the incorrect paragraph text remains. It should be struck through or replaced rather than just annotated. Recommendation: replace the body text with the corrected claim (Codex CLI and Copilot do run MCP) and move the discussion to "CLI vs MCP ergonomics" rather than capability absence.
+
+---
+
+### G.2 source-freshness (soft verifier)
+
+**Rule:** Flag article sources whose host may have moved or whose content is more than 18 months old relative to evaluation date.
+
+**Findings:**
+
+| Article | Date | Freshness status |
+|---|---|---|
+| techwith_ram — *Knowledge Graphs Blazing Fast* | Unknown (inferred ~2024) | **SOFT FLAG** — no date in article file; article discusses SPARQL/triple stores without recent LLM context, suggests pre-2025 |
+| multi-agent-memory-dkg — *From AI Memory Silos* | Unknown | **SOFT FLAG** — §F.2.6 (now F.2) noted "pre-date late-2026 reorganizations"; OriginTrail DKG v9 reference should be verified against current docs |
+| jhleath — *Agents Share Environments, Not Data* | Unknown | SOFT FLAG — references "Archil's Serverless Execution" service; verify the service is still operational |
+| karpathy — *Second Brain Pattern* | Unknown | SOFT FLAG — Karpathy-attributed content, likely 2023-2024; may predate multi-agent norms |
+| arscontexta — *Claude Code Plugin* | Unknown | Pass — claims are architectural, not product-version-specific |
+| All ashwingop Parts 1–7 | 2026-04-28 through 2026-05-07 | Pass — fresh |
+| alphasignalai | 2026-05-06 | Pass — fresh |
+| All other articles | Various 2025-2026 dates | Pass |
+
+**Action on soft flags:** techwith_ram, multi-agent-memory-dkg, jhleath, karpathy — before any recommendation from these four is promoted to a plan, verify the source URL is live and the article content hasn't been superseded by a newer version. No immediate blocking action required.
+
+---
+
+### G.3 rubric-check (hard verifier)
+
+**Rule:** Each §A entry must have: Core (what the article claims), Pros, Cons, Mapping with at least one labeled item ([OVERLAP-SHARPEN], [GAP-ADOPT], or [WE-AHEAD]).
+
+**Findings:**
+
+| Entry | Core | Pros | Cons | Mapping with labels | Status |
+|---|---|---|---|---|---|
+| techwith_ram | ✓ | ✓ | ✓ | ✓ (3 labeled) | pass |
+| arscontexta | ✓ | ✓ | ✓ | ✓ (3 labeled) | pass |
+| multi-agent-memory-dkg | ✓ | ✓ | ✓ | ✓ (3 labeled) | pass |
+| All §A.1 remaining entries | ✓ | ✓ | ✓ | ✓ | pass |
+| ashwingop Parts 2+3 | ✓ (two Cores) | ✓ | ✓ | ✓ (8 labeled) | pass |
+| ashwingop Parts 4–7 (new) | ✓ (four Cores) | ✓ | ✓ | ✓ (7 labeled) | pass |
+| alphasignalai (new) | ✓ | ✓ | ✓ | ✓ (5 labeled) | pass |
+| annimaniac | needs spot-check | — | — | — | not re-verified here; was pass at Part D add |
+| §F sections | not article entries — analytical prose | N/A | N/A | N/A | not applicable |
+
+**One rubric gap:** The claude-obsidian-memory-stack, claude-obsidian-ai-employee, and second-brain-needs-two-authors entries (§A.2) were added before the rubric was formalized. They have abbreviated Mapping sections (1–2 labeled items) vs the 3–8 norm for later entries. **Soft flag** — not a hard failure but worth expanding in a future enrichment pass.
+
+---
+
+### G.4 Verification verdict
+
+| Verifier | Result | Blocking? |
+|---|---|---|
+| citation-presence | 1 hard failure (§F.3.3 incorrect uncited claim), 1 soft (Theme 9 second-hand studies) | Soft block on §F.3.3 — fix below |
+| source-freshness | 4 soft flags (techwith_ram, multi-agent-memory-dkg, jhleath, karpathy) | Non-blocking; note before promoting to plans |
+| rubric-check | 3 abbreviated §A.2 entries (soft) | Non-blocking; flag for future pass |
+
+**§F.3.3 fix (citation-presence hard failure):** Replacing the incorrect claim about Codex/Copilot MCP support in §F.3.3.
+
+---
+
+*Document status: draft. No changes made to code, specs, or plans. This is evaluation only.*

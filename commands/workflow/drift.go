@@ -313,7 +313,7 @@ func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("load managed projects: %w", err)
 	}
 	if len(projects) == 0 {
-		ui.Info("No managed projects registered. Add one with: dot-agents add <path>")
+		ui.Info("No managed projects registered. Add one with: da add <path>")
 		return nil
 	}
 

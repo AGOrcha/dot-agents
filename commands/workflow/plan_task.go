@@ -2392,7 +2392,7 @@ func loadCheckScopeSidecar(projectPath, planID, taskID string) (string, *ScopeEv
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "no scope sidecar found at %s\n", config.DisplayPath(sidecarPath))
-			fmt.Fprintln(os.Stderr, "Run 'dot-agents workflow plan derive-scope' to generate one.")
+			fmt.Fprintln(os.Stderr, "Run 'da workflow plan derive-scope' to generate one.")
 			os.Exit(2)
 		}
 		return "", nil, fmt.Errorf("read sidecar: %w", err)

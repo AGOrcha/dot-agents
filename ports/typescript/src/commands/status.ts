@@ -1,5 +1,5 @@
 /**
- * `dot-agents status` — Report project health and canonical store summary.
+ * `da status` — Report project health and canonical store summary.
  *
  * Reads config.json, checks each project path's existence, and summarizes the
  * canonical store directories. Aligned with the read-only portion of

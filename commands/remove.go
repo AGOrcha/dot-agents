@@ -15,17 +15,17 @@ func NewRemoveCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "remove <project>",
-		Short: "Remove a project from dot-agents management",
-		Long: `Unregisters a project from dot-agents and removes platform links (rules, hooks,
+		Short: "Remove a project from da management",
+		Long: `Unregisters a project from da and removes platform links (rules, hooks,
 MCP, settings, and other managed outputs) the same way install/refresh created them.
 
 With --clean, also removes project directories from ~/.agents/.`,
 		Example: ExampleBlock(
-			"  dot-agents remove billing-api",
-			"  dot-agents remove billing-api --clean",
-			"  dot-agents status",
+			"  da remove billing-api",
+			"  da remove billing-api --clean",
+			"  da status",
 		),
-		Args: ExactArgsWithHints(1, "Use the managed project name from `dot-agents status`."),
+		Args: ExactArgsWithHints(1, "Use the managed project name from `da status`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemove(args[0], cleanDirs)
 		},
@@ -44,13 +44,13 @@ func runRemove(projectName string, cleanDirs bool) error {
 	if projectPath == "" {
 		return ErrorWithHints(
 			fmt.Sprintf("project not found: %s", projectName),
-			"Run `dot-agents status` to see registered projects.",
+			"Run `da status` to see registered projects.",
 		)
 	}
 
 	displayPath := config.DisplayPath(projectPath)
 
-	ui.Header("dot-agents remove")
+	ui.Header("da remove")
 	fmt.Fprintf(os.Stdout, "Removing project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
 
@@ -151,12 +151,12 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	if cleanDirs {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' removed completely!", projectName),
-			"Verify removal: dot-agents status",
+			"Verify removal: da status",
 		)
 	} else {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' unlinked successfully!", projectName),
-			"Verify removal: dot-agents status",
-			"To also remove project directories: dot-agents remove "+projectName+" --clean",
+			"Verify removal: da status",
+			"To also remove project directories: da remove "+projectName+" --clean",
 		)
 	}
 	return nil

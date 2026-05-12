@@ -1,5 +1,5 @@
 /**
- * `dot-agents add` — Register a project directory in config.json.
+ * `da add` — Register a project directory in config.json.
  *
  * Resolves the absolute path, registers it under the given (or derived) name,
  * and writes back config.json. Aligned with commands/add.go.

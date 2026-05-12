@@ -753,7 +753,7 @@ func annotateBridgeSparsity(store *graphstore.SQLiteStore, resp *GraphQueryRespo
 	resp.SparsityScore = &score
 	if len(resp.Results) == 0 && nodeCount == 0 {
 		resp.Warnings = append(resp.Warnings,
-			fmt.Sprintf("[bridge-sparse] warm store has %d nodes — run 'dot-agents kg build' then 'dot-agents kg warm --include-code' to populate code-lane", nodeCount))
+			fmt.Sprintf("[bridge-sparse] warm store has %d nodes — run 'da kg build' then 'da kg warm --include-code' to populate code-lane", nodeCount))
 	}
 }
 
@@ -867,7 +867,7 @@ func executeBridgeQuery(kgHomeDir, bridgeIntent, query string) (GraphQueryRespon
 	}
 	adapter := NewLocalFileAdapter(kgHomeDir)
 	if !adapter.Available() {
-		return GraphQueryResponse{}, fmt.Errorf("KG not initialized at %s: run 'dot-agents kg setup' first", kgHomeDir)
+		return GraphQueryResponse{}, fmt.Errorf("KG not initialized at %s: run 'da kg setup' first", kgHomeDir)
 	}
 	var responses []GraphQueryResponse
 	for _, q := range queries {
@@ -920,7 +920,7 @@ func writeBridgeContract(kgHomeDir string) error {
 func runKGBridgeQuery(deps Deps, cmd *cobra.Command, args []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'da kg setup' first")
 	}
 	intent, _ := cmd.Flags().GetString("intent")
 	if intent == "" {

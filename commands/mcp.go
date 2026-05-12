@@ -27,7 +27,7 @@ func mcpCommandDeps() mcpDeps {
 	}
 }
 
-// NewMCPCmd builds the `dot-agents mcp` command tree.
+// NewMCPCmd builds the `da mcp` command tree.
 func NewMCPCmd() *cobra.Command {
 	deps := mcpCommandDeps()
 	cmd := &cobra.Command{
@@ -36,16 +36,16 @@ func NewMCPCmd() *cobra.Command {
 		Long: `Commands for MCP server configs stored under ~/.agents/mcp/<scope>/.
 
 Scopes are either global (~/.agents/mcp/global/) or a managed project name
-(~/.agents/mcp/<project>/), matching dot-agents status.
+(~/.agents/mcp/<project>/), matching da status.
 
 These files are what add, import, refresh, install, and remove wire into
 Cursor, Claude Code, Copilot, and related projections. Prefer editing canonical
 paths here, then run refresh or install for the project.`,
 		Example: rulesExampleBlock(
-			"  dot-agents mcp list",
-			"  dot-agents mcp list my-app",
-			"  dot-agents mcp show global mcp.json",
-			"  dot-agents mcp remove global stale.json",
+			"  da mcp list",
+			"  da mcp list my-app",
+			"  da mcp show global mcp.json",
+			"  da mcp remove global stale.json",
 		),
 	}
 	cmd.AddCommand(newMCPListCmd(deps))
@@ -59,8 +59,8 @@ func newMCPListCmd(deps mcpDeps) *cobra.Command {
 		Use:   "list [scope]",
 		Short: "List canonical MCP config files for a scope",
 		Example: rulesExampleBlock(
-			"  dot-agents mcp list",
-			"  dot-agents mcp list billing-api",
+			"  da mcp list",
+			"  da mcp list billing-api",
 		),
 		Args: deps.maxArgsWithHints(1, "Optionally pass a project scope (or `global`) to inspect that MCP tree."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -89,7 +89,7 @@ func newMCPRemoveCmd(deps mcpDeps) *cobra.Command {
 		Use:   "remove <scope> <name>",
 		Short: "Remove an MCP file from ~/.agents/mcp/ (canonical storage only)",
 		Long: `Deletes the file from managed MCP storage only (not repo links). After removal,
-run dot-agents refresh or install for the relevant project so platform MCP
+run da refresh or install for the relevant project so platform MCP
 links stay consistent.`,
 		Args: deps.exactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` matches list/show."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -152,13 +152,13 @@ func runMCPRemove(deps mcpDeps, scope, name string) error {
 func findMCPSpec(agentsHome, scope, name string) (*platform.MCPFileSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, UsageError("MCP file name is empty", "Pass the file name or stem shown by `dot-agents mcp list`.")
+		return nil, UsageError("MCP file name is empty", "Pass the file name or stem shown by `da mcp list`.")
 	}
 	spec, err := platform.ResolveCanonicalMCPFile(agentsHome, scope, name)
 	if err != nil {
 		return nil, ErrorWithHints(
 			fmt.Sprintf("MCP file not found: %s / %s", scope, name),
-			"Run `dot-agents mcp list "+scope+"` to see available files.",
+			"Run `da mcp list "+scope+"` to see available files.",
 		)
 	}
 	return spec, nil

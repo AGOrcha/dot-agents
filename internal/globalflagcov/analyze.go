@@ -25,7 +25,7 @@ type FlagSet struct {
 
 // Row is one CLI command path and observed global-flag coverage.
 type Row struct {
-	// Path is space-separated from the second segment (e.g. "workflow status"), excluding "dot-agents".
+	// Path is space-separated from the second segment (e.g. "workflow status"), excluding "da".
 	Path string
 	// Handler is the runtime symbol for the RunE func (or closure).
 	Handler string
@@ -71,7 +71,7 @@ func trimDotAgents(parts []string) []string {
 	if len(parts) == 0 {
 		return parts
 	}
-	if parts[0] == "dot-agents" {
+	if parts[0] == "da" {
 		return parts[1:]
 	}
 	return parts

@@ -60,9 +60,9 @@ status_json="$TMPDIR_ROOT/status.json"
 (
   cd "$REPO_ROOT"
   env HOME="$TMP_HOME" AGENTS_HOME="$TMP_AGENTS_HOME" KG_HOME="$TMP_KG_HOME" GOMODCACHE="$HOST_GOMODCACHE" GOCACHE="$HOST_GOCACHE" \
-    go run ./cmd/dot-agents --json kg build --repo "$TMP_REPO" >"$build_json"
+    go run ./cmd/da --json kg build --repo "$TMP_REPO" >"$build_json"
   env HOME="$TMP_HOME" AGENTS_HOME="$TMP_AGENTS_HOME" KG_HOME="$TMP_KG_HOME" GOMODCACHE="$HOST_GOMODCACHE" GOCACHE="$HOST_GOCACHE" \
-    go run ./cmd/dot-agents --json kg code-status --repo "$TMP_REPO" >"$status_json"
+    go run ./cmd/da --json kg code-status --repo "$TMP_REPO" >"$status_json"
 )
 
 python3 - <<'PY' "$build_json" "$status_json"

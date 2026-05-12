@@ -200,16 +200,16 @@ func NewAddCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <path>",
-		Short: "Add a project to dot-agents management",
-		Long: `Registers a project with dot-agents and sets up configuration links.
+		Short: "Add a project to da management",
+		Long: `Registers a project with da and sets up configuration links.
 Existing config files are backed up before being replaced.
 
 Use this when a project should consume shared configuration from ~/.agents/
 and stay refreshable by both human operators and AI agents.`,
 		Example: ExampleBlock(
-			"  dot-agents add .",
-			"  dot-agents add ~/src/my-repo --name billing-api",
-			"  dot-agents add . --dry-run",
+			"  da add .",
+			"  da add ~/src/my-repo --name billing-api",
+			"  da add . --dry-run",
 		),
 		Args: ExactArgsWithHints(1, "Pass a project directory such as `.` or `~/src/my-repo`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -243,13 +243,13 @@ func runAdd(pathArg, nameArg string) error {
 	displayPath := config.DisplayPath(projectPath)
 	displayAgentsHome := config.DisplayPath(agentsHome)
 
-	ui.Header("dot-agents add")
+	ui.Header("da add")
 	fmt.Fprintf(os.Stdout, "Adding project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
 
 	// Note if manifest already exists — user may prefer `install` instead
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		ui.Info(".agentsrc.json found — you can also use 'dot-agents install' to apply the manifest directly")
+		ui.Info(".agentsrc.json found — you can also use 'da install' to apply the manifest directly")
 	}
 
 	// Step 1: Scan
@@ -508,15 +508,15 @@ func runAdd(pathArg, nameArg string) error {
 
 	nextSteps := []string{
 		"Add project rules: edit ~/.agents/rules/" + projectName + "/rules.md",
-		"Check applied configs: dot-agents status --audit",
+		"Check applied configs: da status --audit",
 	}
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		nextSteps = append(nextSteps, "Manifest found — apply it: dot-agents install")
+		nextSteps = append(nextSteps, "Manifest found — apply it: da install")
 	} else {
-		nextSteps = append(nextSteps, "Make it git-portable: dot-agents install --generate")
+		nextSteps = append(nextSteps, "Make it git-portable: da install --generate")
 	}
 	if hasDeprecated {
-		nextSteps = append(nextSteps, "Migrate deprecated formats: dot-agents migrate detect")
+		nextSteps = append(nextSteps, "Migrate deprecated formats: da migrate detect")
 	}
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
 	return nil

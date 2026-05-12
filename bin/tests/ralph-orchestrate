@@ -68,10 +68,10 @@ if [[ -n "${DOT_AGENTS:-}" ]]; then
   DOT_AGENTS_CMD=( $DOT_AGENTS )
 elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
   DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS_CMD=(dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
 else
-  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
   exit 1
 fi
 
@@ -302,7 +302,7 @@ for tid in (data.get('max_batch') or []):
 create_bundle() {
   local plan_id="$1" task_id="$2" write_scope_csv="$3"
 
-  # Manual fanout + re-runs: if a contract already exists, dot-agents workflow fanout errors.
+  # Manual fanout + re-runs: if a contract already exists, da workflow fanout errors.
   # Match auto-discover behavior (skip when contract exists) by reusing the bundle path.
   local existing_contract="$REPO_ROOT/.agents/active/delegation/${task_id}.yaml"
   if [[ -f "$existing_contract" ]]; then
@@ -674,7 +674,7 @@ trap 'rm -rf "$snapshot" "$prompt_file" 2>/dev/null || true' EXIT
 
 {
   cat <<EOF
-You are the loop orchestrator for this repository (dot-agents workflow).
+You are the loop orchestrator for this repository (da workflow).
 Your job this pass: decide which tasks to delegate. Do NOT implement anything.
 
 EOF

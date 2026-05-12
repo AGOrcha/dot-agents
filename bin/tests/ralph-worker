@@ -509,10 +509,10 @@ if [[ -n "${DOT_AGENTS:-}" ]]; then
   DOT_AGENTS_CMD=( $DOT_AGENTS )
 elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
   DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS_CMD=(dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
 else
-  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
   exit 1
 fi
 
@@ -725,7 +725,7 @@ EOF
 When implementation is complete, write:
   ${impl_handoff_path}
 with fields: task_id, commit_sha, write_scope_touched, ready_for_verification, impl_notes
-Then run: dot-agents workflow checkpoint --message "impl complete"
+Then run: da workflow checkpoint --message "impl complete"
 Stop after writing impl-handoff.yaml. Do NOT write merge-back in this stage.
 
 EOF
@@ -747,7 +747,7 @@ EOF
 ## Done condition for this stage
 Read impl-handoff.yaml at: ${impl_handoff_path}
 Run verification. Then record result via:
-  dot-agents workflow verify record --kind test --status pass|fail --task ${TASK_ID} --verifier-type ${VERIFIER_TYPE} --summary "..."
+  da workflow verify record --kind test --status pass|fail --task ${TASK_ID} --verifier-type ${VERIFIER_TYPE} --summary "..."
 This writes: ${verifier_result_path}
 Stop after writing the result. Do NOT write merge-back in this stage.
 
@@ -770,9 +770,9 @@ EOF
 ## Done condition for this stage
 Read verifier result artifacts in: ${REPO_ROOT}/.agents/active/verification/${TASK_ID}/
 Run review. Record decision via:
-  dot-agents workflow verify record --kind review --phase1-decision <d> --phase2-decision <d> --task ${TASK_ID} --summary "..."
+  da workflow verify record --kind review --phase1-decision <d> --phase2-decision <d> --task ${TASK_ID} --summary "..."
 Then write merge-back via:
-  dot-agents workflow merge-back --task ${TASK_ID} --summary "..." --verification-status pass|fail
+  da workflow merge-back --task ${TASK_ID} --summary "..." --verification-status pass|fail
 Stop after writing merge-back.
 
 EOF

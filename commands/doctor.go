@@ -19,22 +19,22 @@ func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check installations, validate links, detect issues",
-		Long: `Audits the local dot-agents installation, installed platforms, manifest health,
-and managed project links using the same managed paths as dot-agents install and
+		Long: `Audits the local da installation, installed platforms, manifest health,
+and managed project links using the same managed paths as da install and
 refresh. Doctor is the fastest way to detect drift after manual edits, moved
 repositories, or partial setup on a new machine.`,
 		Example: ExampleBlock(
-			"  dot-agents doctor",
-			"  dot-agents doctor --verbose",
-			"  dot-agents doctor --dry-run",
+			"  da doctor",
+			"  da doctor --verbose",
+			"  da doctor --dry-run",
 		),
-		Args: NoArgsWithHints("`dot-agents doctor` audits the current installation and does not take a project argument."),
+		Args: NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
 		RunE: runDoctor,
 	}
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	ui.Header("dot-agents doctor")
+	ui.Header("da doctor")
 
 	agentsHome := config.AgentsHome()
 
@@ -43,7 +43,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(agentsHome); err == nil {
 		ui.Bullet("ok", "~/.agents/ exists")
 	} else {
-		ui.Bullet("error", "~/.agents/ not found — run: dot-agents init")
+		ui.Bullet("error", "~/.agents/ not found — run: da init")
 	}
 
 	cfgPath := filepath.Join(agentsHome, "config.json")
@@ -198,7 +198,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		rc, err := config.LoadAgentsRC(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: dot-agents install --generate", name))
+				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: da install --generate", name))
 			} else {
 				ui.Bullet("error", fmt.Sprintf("%s — corrupt manifest: %v", name, err))
 			}
@@ -221,7 +221,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 		if len(missingGit) > 0 {
 			for _, url := range missingGit {
-				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: dot-agents install", name, url))
+				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
 			}
 			anyManifestIssue = true
 		} else if len(presentGit) > 0 {
@@ -286,7 +286,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if Flags.DryRun {
 		ui.Info("Run without --dry-run to apply repairs.")
 	} else if totalFixed > 0 {
-		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'dot-agents status --audit' to verify.", totalFixed))
+		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'da status --audit' to verify.", totalFixed))
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil

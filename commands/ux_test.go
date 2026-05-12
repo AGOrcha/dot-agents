@@ -28,13 +28,13 @@ func TestInstallRejectsUnexpectedPositionalArgsWithUsageHint(t *testing.T) {
 	if !strings.Contains(cliErr.Error(), "does not accept positional arguments") {
 		t.Fatalf("unexpected error: %v", cliErr)
 	}
-	if got := strings.Join(cliErr.Hints, "\n"); !strings.Contains(got, "dot-agents install --help") {
+	if got := strings.Join(cliErr.Hints, "\n"); !strings.Contains(got, "da install --help") {
 		t.Fatalf("expected help hint, got %q", got)
 	}
 }
 
 func TestRenderCommandErrorAddsWorkflowRecoveryHints(t *testing.T) {
-	root := &cobra.Command{Use: "dot-agents"}
+	root := &cobra.Command{Use: "da"}
 	root.AddCommand(NewWorkflowCmd())
 
 	var buf bytes.Buffer
@@ -43,8 +43,8 @@ func TestRenderCommandErrorAddsWorkflowRecoveryHints(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"workflow commands must run inside a project directory",
-		"dot-agents add .",
-		"dot-agents workflow status --help",
+		"da add .",
+		"da workflow status --help",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered error missing %q:\n%s", want, out)
@@ -77,7 +77,7 @@ func TestRenderCommandErrorHandlesRootParseFailures(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"unknown flag: --bogus",
-		"Run `dot-agents --help` to see examples and supported flags.",
+		"Run `da --help` to see examples and supported flags.",
 		"Usage:",
 	} {
 		if !strings.Contains(out, want) {
@@ -99,8 +99,8 @@ func TestWorkflowHelpIncludesExamples(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"Examples:",
-		"dot-agents workflow orient",
-		"dot-agents workflow checkpoint",
+		"da workflow orient",
+		"da workflow checkpoint",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workflow help missing %q:\n%s", want, out)

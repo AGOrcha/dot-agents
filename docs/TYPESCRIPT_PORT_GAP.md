@@ -104,7 +104,7 @@ Source: `commands/init.go`. TS: `ports/typescript/src/commands/init.ts`.
 
 | Go subcommand / flag | TS coverage | Notes |
 |---|---|---|
-| `dot-agents init` (no subcommands) | implemented | TS creates the standard dirs plus `CANONICAL_BUCKET_SPECS` global-scope dirs, matching `commands/init.go`. |
+| `da init` (no subcommands) | implemented | TS creates the standard dirs plus `CANONICAL_BUCKET_SPECS` global-scope dirs, matching `commands/init.go`. |
 | `--dry-run` (persistent global) | implemented | Honored as `InitOptions.dryRun`. |
 | `--force` (persistent global) | implemented | Honored as `InitOptions.force`; reuses skip-vs-recreate semantics. |
 | Confirmation prompt (`--yes`) | deferred-by-design | TS dispatcher is non-interactive; no prompt to suppress. |
@@ -119,7 +119,7 @@ Source: `commands/add.go`. TS: `ports/typescript/src/commands/add.ts`.
 
 | Go subcommand / flag | TS coverage | Notes |
 |---|---|---|
-| `dot-agents add <path>` | implemented | TS resolves `path`, derives a name (`basename`), and registers in `config.json` via `addProject`. |
+| `da add <path>` | implemented | TS resolves `path`, derives a name (`basename`), and registers in `config.json` via `addProject`. |
 | `--name <name>` | implemented | Honored as `AddOptions.name`. |
 | `--force` | implemented | Honored as `AddOptions.force`; flips `already_registered` → `updated`. |
 | `--dry-run` | deferred-by-design | TS is a single config write; no preview pass to short-circuit. |
@@ -136,7 +136,7 @@ Source: `commands/refresh.go`. TS: `ports/typescript/src/commands/refresh.ts`.
 
 | Go subcommand / flag | TS coverage | Notes |
 |---|---|---|
-| `dot-agents refresh [project]` | partial | TS resolves managed projects, checks each path, and emits `{ status: "ok" \| "missing_path" \| "not_found" }` per project. No links re-created. |
+| `da refresh [project]` | partial | TS resolves managed projects, checks each path, and emits `{ status: "ok" \| "missing_path" \| "not_found" }` per project. No links re-created. |
 | `--import` (run `import` first) | missing | TS does not currently run an import pre-pass; a Stage 1 sync would have to either make the flag a no-op stub or implement read-only equivalent. |
 | `--dry-run` | deferred-by-design | TS is read-only by construction — every TS refresh is effectively a dry run. |
 | Per-platform link refresh (`p.CreateLinks`) | deferred-by-design | Go-only by boundary. |
@@ -148,7 +148,7 @@ Source: `commands/status.go`. TS: `ports/typescript/src/commands/status.ts`.
 
 | Go subcommand / flag | TS coverage | Notes |
 |---|---|---|
-| `dot-agents status` | implemented | TS reports `agents_home`, `config.json`, projects, and the same canonical bucket counts (scope/item) that `commands/status.go` emits. |
+| `da status` | implemented | TS reports `agents_home`, `config.json`, projects, and the same canonical bucket counts (scope/item) that `commands/status.go` emits. |
 | `--audit` | missing | Per-platform link-level audit. Stage 1 surface — could be fed into tp2 if we want CI to lock its presence; currently the TS dispatcher silently ignores the flag. |
 | `--agent <id>` | missing | Filter to a single platform; same family as `--audit`. |
 | `--json` (persistent global) | partial | Go emits `statusJSONReport`; TS dispatcher prints text only, but `runStatus()` returns a structured `StatusResult` library callers can JSON-encode. |
@@ -160,7 +160,7 @@ Source: `commands/doctor.go`. TS: `ports/typescript/src/commands/doctor.ts`.
 
 | Go subcommand / flag | TS coverage | Notes |
 |---|---|---|
-| `dot-agents doctor` | partial | TS reports `agents_home`, `config.json`, and per-project path / `.agentsrc.json` presence. |
+| `da doctor` | partial | TS reports `agents_home`, `config.json`, and per-project path / `.agentsrc.json` presence. |
 | `--verbose` (persistent global) | implemented | TS adds `ok` rows per healthy project under `--verbose`. |
 | `--dry-run` (persistent global) | deferred-by-design | Doctor is read-only in both ports. |
 | Platform installation detection (`platform.All().IsInstalled()`) | missing | Go enumerates Cursor / Claude / Codex / OpenCode / Copilot install state; TS does not. Stage 1 candidate to lock in tp2. |

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	scaffoldtemplates "github.com/NikashPrakash/dot-agents/internal/scaffold/templates"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
@@ -47,7 +48,10 @@ func writeAgentMDIfAbsent(agentMD, name string) error {
 	if _, err := os.Stat(agentMD); !os.IsNotExist(err) {
 		return nil
 	}
-	content := fmt.Sprintf("---\nname: %s\ndescription: \"\"\n---\n\n# %s\n\nAgent instructions here.\n", name, name)
+	content, err := scaffoldtemplates.RenderAgentManifest(name)
+	if err != nil {
+		return fmt.Errorf("rendering %s: %w", agentManifestName, err)
+	}
 	if err := os.WriteFile(agentMD, []byte(content), 0644); err != nil {
 		return fmt.Errorf("creating %s: %w", agentManifestName, err)
 	}

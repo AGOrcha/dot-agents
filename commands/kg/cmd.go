@@ -20,10 +20,10 @@ func NewKGCmd(deps Deps) *cobra.Command {
 		Long: `Creates, queries, and maintains the local knowledge graph used by dot-agents
 for structured project memory, bridge queries, and code-to-note context.`,
 		Example: deps.ExampleBlock(
-			"  dot-agents kg setup",
-			"  dot-agents kg health",
-			"  dot-agents kg query --intent repo_context \"workflow status\"",
-			"  dot-agents kg bridge health",
+			"  da kg setup",
+			"  da kg health",
+			"  da kg query --intent repo_context \"workflow status\"",
+			"  da kg bridge health",
 		),
 	}
 

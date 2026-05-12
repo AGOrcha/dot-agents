@@ -182,6 +182,18 @@ func TestRunReviewListShowsPendingOnly(t *testing.T) {
 		CreatedAt:     "2026-04-10T00:00:00Z",
 		CreatedBy:     "test",
 	})
+	writeTestProposal(t, config.Proposal{
+		SchemaVersion: 1,
+		ID:            "draft-one",
+		Status:        "draft",
+		Type:          "skill",
+		Action:        "add",
+		Target:        "skills/global/draft-one/SKILL.md",
+		Rationale:     "draft",
+		Content:       "draft\n",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		CreatedBy:     "test",
+	})
 	if err := os.MkdirAll(config.ArchivedProposalsDir(), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -223,5 +235,57 @@ func TestRunReviewListShowsPendingOnly(t *testing.T) {
 	}
 	if strings.Contains(rendered, "approved-one") {
 		t.Fatalf("archived proposal should not appear in pending list:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "draft-one") {
+		t.Fatalf("draft proposal should not appear in pending list:\n%s", rendered)
+	}
+}
+
+func TestRunReviewShowAllowsDraftProposal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	proposal := config.Proposal{
+		SchemaVersion: 1,
+		ID:            "draft-skill",
+		Status:        "draft",
+		Type:          "skill",
+		Action:        "add",
+		Target:        "skills/global/draft-skill/SKILL.md",
+		Rationale:     "working draft",
+		Content:       "draft\n",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		CreatedBy:     "test",
+	}
+	writeTestProposal(t, proposal)
+
+	if err := runReviewShow(proposal.ID); err != nil {
+		t.Fatalf("show draft proposal: %v", err)
+	}
+}
+
+func TestRunReviewApproveRejectRequirePendingStatus(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	proposal := config.Proposal{
+		SchemaVersion: 1,
+		ID:            "draft-skill",
+		Status:        "draft",
+		Type:          "skill",
+		Action:        "add",
+		Target:        "skills/global/draft-skill/SKILL.md",
+		Rationale:     "working draft",
+		Content:       "draft\n",
+		CreatedAt:     "2026-04-10T00:00:00Z",
+		CreatedBy:     "test",
+	}
+	writeTestProposal(t, proposal)
+
+	if err := runReviewApprove(proposal.ID); err == nil || !strings.Contains(err.Error(), "not pending") {
+		t.Fatalf("approve draft err = %v, want not pending", err)
+	}
+	if err := runReviewReject(proposal.ID, "not ready"); err == nil || !strings.Contains(err.Error(), "not pending") {
+		t.Fatalf("reject draft err = %v, want not pending", err)
 	}
 }

@@ -22,14 +22,14 @@ func hookKindLabel(kind platform.HookSourceKind) string {
 func findHookSpec(deps Deps, agentsHome, scope, name string) (*platform.HookSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, deps.UsageError("hook name is empty", "Pass the logical name shown by `dot-agents hooks list`.")
+		return nil, deps.UsageError("hook name is empty", "Pass the logical name shown by `da hooks list`.")
 	}
 	specs, err := platform.ListHookSpecs(agentsHome, scope)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, deps.ErrorWithHints(
 				fmt.Sprintf("no hooks directory for scope %q", scope),
-				"Create ~/.agents/hooks/"+scope+"/ or run `dot-agents import` to populate hooks.",
+				"Create ~/.agents/hooks/"+scope+"/ or run `da import` to populate hooks.",
 			)
 		}
 		return nil, err
@@ -41,6 +41,6 @@ func findHookSpec(deps Deps, agentsHome, scope, name string) (*platform.HookSpec
 	}
 	return nil, deps.ErrorWithHints(
 		fmt.Sprintf("hook not found: %s / %s", scope, name),
-		"Run `dot-agents hooks list "+scope+"` to see available names.",
+		"Run `da hooks list "+scope+"` to see available names.",
 	)
 }

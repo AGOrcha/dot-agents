@@ -13,9 +13,9 @@ import (
 // can inspect the live command tree without importing package main.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "dot-agents",
+		Use:   "da",
 		Short: "Manage AI agent configurations across projects",
-		Long: "dot-agents keeps your AI agent rules, settings, and skills in a single\n" +
+		Long: "da keeps your AI agent rules, settings, and skills in a single\n" +
 			"~/.agents/ directory and links them into each project you work on.\n\n" +
 			"It supports Cursor, Claude Code, Codex CLI, OpenCode, and GitHub Copilot.\n\n" +
 			"Use it to bootstrap shared agent configuration, keep project links healthy,\n" +
@@ -24,12 +24,12 @@ func NewRootCommand() *cobra.Command {
 			"Managed hook/rules/MCP/settings command boundaries are documented in\n" +
 			"docs/RESOURCE_COMMAND_CONTRACT.md (resource-command-parity plan).",
 		Example: strings.Join([]string{
-			"  dot-agents init",
-			"  dot-agents add .",
-			"  dot-agents status --audit",
-			"  dot-agents workflow orient",
-			"  dot-agents install --generate",
-			"  dot-agents sync status",
+			"  da init",
+			"  da add .",
+			"  da status --audit",
+			"  da workflow orient",
+			"  da install --generate",
+			"  da sync status",
 		}, "\n"),
 		Version:       Version,
 		SilenceUsage:  true,
@@ -72,7 +72,7 @@ func NewRootCommand() *cobra.Command {
 	}
 	cobra.EnableCommandSorting = false
 
-	root.SetVersionTemplate(fmt.Sprintf("dot-agents version %s\n", Version))
+	root.SetVersionTemplate(fmt.Sprintf("da version %s\n", Version))
 
 	return root
 }

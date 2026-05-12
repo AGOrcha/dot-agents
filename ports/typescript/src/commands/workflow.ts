@@ -1,5 +1,5 @@
 /**
- * `dot-agents workflow` — Read-only workflow surface for the TS port.
+ * `da workflow` — Read-only workflow surface for the TS port.
  *
  * Three commands implemented as pure file reads (no Go CLI invocation):
  *   - runWorkflowOrient  — parse loop-state.md Current Position section

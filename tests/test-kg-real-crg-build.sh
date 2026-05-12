@@ -42,11 +42,11 @@ mkdir -p "$TMP_HOME" "$TMP_KG_HOME" "$TMP_AGENTS_HOME"
     cd "$REPO_ROOT"
     env HOME="$TMP_HOME" AGENTS_HOME="$TMP_AGENTS_HOME" KG_HOME="$TMP_KG_HOME" \
         GOMODCACHE="$HOST_GOMODCACHE" GOCACHE="$HOST_GOCACHE" \
-        go run ./cmd/dot-agents --json kg build --repo "$REPO_ROOT" \
+        go run ./cmd/da --json kg build --repo "$REPO_ROOT" \
         --skip-flows --skip-postprocess >"$BUILD_JSON"
     env HOME="$TMP_HOME" AGENTS_HOME="$TMP_AGENTS_HOME" KG_HOME="$TMP_KG_HOME" \
         GOMODCACHE="$HOST_GOMODCACHE" GOCACHE="$HOST_GOCACHE" \
-        go run ./cmd/dot-agents --json kg code-status --repo "$REPO_ROOT" >"$STATUS_JSON"
+        go run ./cmd/da --json kg code-status --repo "$REPO_ROOT" >"$STATUS_JSON"
 )
 
 # Validate JSON output and graph.db.

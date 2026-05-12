@@ -11,7 +11,7 @@ var errNoWorkflowProject = &CLIError{
 	Message: "workflow commands must run inside a project directory",
 	Hints: []string{
 		"Run workflow commands from a repository that already contains `.agents/` or `.agentsrc.json`.",
-		"If this repo is not managed yet, start with `dot-agents add .` or `dot-agents install --generate`.",
+		"If this repo is not managed yet, start with `da add .` or `da install --generate`.",
 	},
 }
 
@@ -37,7 +37,7 @@ func WorkflowBridgeDeps() wf.Deps {
 	return workflowBridgeDeps()
 }
 
-// NewWorkflowCmd builds the `dot-agents workflow` command tree.
+// NewWorkflowCmd builds the `da workflow` command tree.
 func NewWorkflowCmd() *cobra.Command {
 	return wf.NewCmd(workflowBridgeDeps())
 }

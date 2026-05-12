@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test: ralph-review-gate auto mode delegates deterministic evaluation to
-# `dot-agents workflow delegation gate`.
+# `da workflow delegation gate`.
 # - outcome: accept   → exit 0
 # - outcome: reject   → exit 2
 # - outcome: escalate → exit 3
@@ -34,7 +34,7 @@ YAML
 
 write_fake_da() {
   local dir="$1" outcome="$2" closeout_allowed="$3" planning_required="$4" reason="$5"
-  cat >"$dir/fake-dot-agents" <<EOF
+  cat >"$dir/fake-da" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "--json" && "\${2:-}" == "workflow" && "\${3:-}" == "delegation" && "\${4:-}" == "gate" ]]; then
@@ -51,10 +51,10 @@ if [[ "\${1:-}" == "--json" && "\${2:-}" == "workflow" && "\${3:-}" == "delegati
 JSON
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: \$*" >&2
+echo "unexpected fake da invocation: \$*" >&2
 exit 1
 EOF
-  chmod +x "$dir/fake-dot-agents"
+  chmod +x "$dir/fake-da"
 }
 
 run_case() {
@@ -66,7 +66,7 @@ run_case() {
   write_fake_da "$dir" "$outcome" "$closeout_allowed" "$planning_required" "$reason"
 
   set +e
-  (cd "$dir" && DOT_AGENTS="$dir/fake-dot-agents" RALPH_REVIEW_GATE_AUTO=1 "$GATE_SCRIPT" --bundle "$bundle") 2>/dev/null
+  (cd "$dir" && DOT_AGENTS="$dir/fake-da" RALPH_REVIEW_GATE_AUTO=1 "$GATE_SCRIPT" --bundle "$bundle") 2>/dev/null
   rc=$?
   set -e
 

@@ -41,7 +41,7 @@ scenario_retry_recovery() {
   setup_common_snapshot "$dir"
   local repo="$dir/repo"
   local snapshot="$dir/snapshot"
-  local fake_da="$dir/fake-dot-agents"
+  local fake_da="$dir/fake-da"
   local out_file="$dir/pipeline.out"
   local log_dir="$dir/logs"
 
@@ -140,7 +140,7 @@ if [[ "${1:-}" == "workflow" && "${2:-}" == "bundle" && "${3:-}" == "stages" ]];
   printf 'impl\nverifier:unit\nreview\n'
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: $*" >&2
+echo "unexpected fake da invocation: $*" >&2
 exit 1
 EOF
   chmod +x "$fake_da"
@@ -192,7 +192,7 @@ scenario_non_resumable_hard_stop() {
   setup_common_snapshot "$dir"
   local repo="$dir/repo"
   local snapshot="$dir/snapshot"
-  local fake_da="$dir/fake-dot-agents"
+  local fake_da="$dir/fake-da"
   local out_file="$dir/pipeline.out"
 
   write_orchestrate "$snapshot" "''"
@@ -227,7 +227,7 @@ if [[ "${1:-}" == "workflow" && "${2:-}" == "bundle" && "${3:-}" == "stages" ]];
   printf 'impl\nreview\n'
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: $*" >&2
+echo "unexpected fake da invocation: $*" >&2
 exit 1
 EOF
   chmod +x "$fake_da"

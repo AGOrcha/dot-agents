@@ -324,7 +324,7 @@ when: post_tool_use
 match:
   expression: "Edit|Write|Bash"
 run:
-  command: dot-agents kg update --skip-flows
+  command: da kg update --skip-flows
   timeout_ms: 5000
 enabled_on:
   - claude

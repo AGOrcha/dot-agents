@@ -33,7 +33,7 @@ const warmStoreOpenErrFmt = "open warm store: %w"
 func runKGSync(cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized at %s: run 'dot-agents kg setup' first", home)
+		return fmt.Errorf("knowledge graph not initialized at %s: run 'da kg setup' first", home)
 	}
 
 	push, _ := cmd.Flags().GetBool("push")
@@ -73,7 +73,7 @@ func runKGSync(cmd *cobra.Command, _ []string) error {
 	if report.ErrorCount > 0 || report.WarnCount > 0 {
 		ui.InfoBox(
 			fmt.Sprintf("Sync complete — lint found issues (%d errors, %d warnings)", report.ErrorCount, report.WarnCount),
-			"Run 'dot-agents kg lint' for details",
+			"Run 'da kg lint' for details",
 		)
 	} else {
 		ui.Success(fmt.Sprintf("Sync complete — graph is clean (%d notes)", len(report.Results)+report.InfoCount))
@@ -365,7 +365,7 @@ func runKGFlows(deps Deps, cmd *cobra.Command, _ []string) error {
 	}
 	ui.Header(fmt.Sprintf("Execution Flows  [%s]", result.Summary))
 	if len(result.Flows) == 0 {
-		ui.Info("No flows detected. Run 'dot-agents kg postprocess' to detect flows.")
+		ui.Info("No flows detected. Run 'da kg postprocess' to detect flows.")
 		return nil
 	}
 	for _, f := range result.Flows {
@@ -597,8 +597,8 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	}
 
 	lines := []string{
-		"dot-agents kg link add <note-id> <symbol> — link a note to a code symbol",
-		"dot-agents kg link list <note-id>         — list all symbol links for a note",
+		"da kg link add <note-id> <symbol> — link a note to a code symbol",
+		"da kg link list <note-id>         — list all symbol links for a note",
 	}
 	summary := fmt.Sprintf("Warm sync complete: %d notes indexed, %d skipped", indexed, skipped)
 	if codeMsg != "" {

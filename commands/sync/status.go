@@ -13,7 +13,7 @@ func newStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
 
-			ui.Header("dot-agents sync status")
+			ui.Header("da sync status")
 			printBranchStatus(agentsHome)
 			hasRemote := printRemoteStatus(agentsHome)
 			printAheadBehind(agentsHome, hasRemote)

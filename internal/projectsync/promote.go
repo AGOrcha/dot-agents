@@ -73,7 +73,7 @@ func PromoteResource(name, projectPath string, spec PromoteSpec) error {
 	ui.SuccessBox(
 		fmt.Sprintf("Promoted %s '%s' for project '%s'", spec.Singular, name, projectName),
 		fmt.Sprintf("Registered in .agentsrc.json (%d %s(s) total)", count, spec.Singular),
-		"Run 'dot-agents refresh' to sync across all platforms",
+		"Run 'da refresh' to sync across all platforms",
 	)
 	return nil
 }
@@ -86,7 +86,7 @@ func loadPromoteRC(projectPath, name string, spec PromoteSpec) (*config.AgentsRC
 		return nil, "", fmt.Errorf("loading .agentsrc.json for %s %q: %w", spec.Singular, name, err)
 	}
 	if rc.Project == "" {
-		return nil, "", fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
+		return nil, "", fmt.Errorf(".agentsrc.json has no project name set: run `da install --generate` or `da add .` to repair the manifest")
 	}
 	return rc, rc.Project, nil
 }

@@ -17,9 +17,9 @@ func newCommitCmd(deps Deps) *cobra.Command {
 		Use:   "commit [message]",
 		Short: "Commit all changes in ~/.agents/",
 		Example: exampleBlock(
-			"  dot-agents sync commit",
-			"  dot-agents sync commit \"Update Codex rules\"",
-			"  dot-agents sync commit -m \"Refresh shared hooks\"",
+			"  da sync commit",
+			"  da sync commit \"Update Codex rules\"",
+			"  da sync commit -m \"Refresh shared hooks\"",
 		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()

@@ -175,14 +175,14 @@ print_fallback_orient() {
 }
 
 main() {
-  if command -v dot-agents >/dev/null 2>&1; then
+  if command -v da >/dev/null 2>&1; then
     if (
       cd "$project_dir" &&
-      dot-agents workflow orient
+      da workflow orient
     ); then
       return 0
     fi
-    printf 'session-orient warning: dot-agents workflow orient failed, using shell fallback\n' >&2
+    printf 'session-orient warning: da workflow orient failed, using shell fallback\n' >&2
   fi
   print_fallback_orient
 }

@@ -1,5 +1,5 @@
 /**
- * `dot-agents agents` — Manage agents in ~/.agents/agents/.
+ * `da agents` — Manage agents in ~/.agents/agents/.
  *
  * Supports list and new subcommands. Aligned with commands/agents.go.
  */

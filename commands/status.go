@@ -95,15 +95,15 @@ func NewStatusCmd() *cobra.Command {
 link health so you can quickly see whether configuration is present, stale, or broken.
 
 The manifest line reflects declared skills, agents, hooks, MCP, and settings in
-.agentsrc.json; canonical hook bundle inventory on disk is dot-agents hooks list
+.agentsrc.json; canonical hook bundle inventory on disk is da hooks list
 (or hooks show).
 
 Use --audit when you need file-level detail suitable for debugging or for an AI
 agent that must reason about the exact managed outputs.`,
 		Example: ExampleBlock(
-			"  dot-agents status",
-			"  dot-agents status --audit",
-			"  dot-agents status --agent codex",
+			"  da status",
+			"  da status --audit",
+			"  da status --agent codex",
 		),
 		Args: NoArgsWithHints("Use `--agent` to filter by platform instead of passing a positional argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -137,14 +137,14 @@ func probeAgentsHomeGit(agentsHome string) agentsHomeGitProbe {
 func printAgentsHomeGitStatusLine(agentsHome string) {
 	g := probeAgentsHomeGit(agentsHome)
 	if !g.IsRepo {
-		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: dot-agents sync init%s\n", ui.Yellow, ui.Reset)
+		fmt.Fprintf(os.Stdout, "  %s! not a git repo — run: da sync init%s\n", ui.Yellow, ui.Reset)
 		return
 	}
 	if g.Remote != "" {
 		fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s %s(%s)%s\n", ui.Dim, ui.Reset, ui.Bold, g.Branch, ui.Reset, ui.Dim, g.Remote, ui.Reset)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s  %s! no remote — run: dot-agents sync init%s\n", ui.Dim, ui.Reset, ui.Bold, g.Branch, ui.Reset, ui.Yellow, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sgit:%s %s%s%s  %s! no remote — run: da sync init%s\n", ui.Dim, ui.Reset, ui.Bold, g.Branch, ui.Reset, ui.Yellow, ui.Reset)
 }
 
 // collectProjectTextBadges builds the same per-platform row shown in text-mode status.
@@ -284,7 +284,7 @@ func copilotTextBadge(path string) platformBadge {
 func printStatusProjectManifestSummary(path string) {
 	rc, rcErr := config.LoadAgentsRC(path)
 	if rcErr != nil {
-		fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: dot-agents install --generate%s\n",
+		fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: da install --generate%s\n",
 			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
 		return
 	}
@@ -343,7 +343,7 @@ func runStatus(audit bool, agentFilter string) error {
 
 	displayHome := config.DisplayPath(agentsHome)
 
-	ui.Header("dot-agents status")
+	ui.Header("da status")
 	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, displayHome, ui.Reset)
 
 	printAgentsHomeGitStatusLine(agentsHome)
@@ -358,7 +358,7 @@ func runStatus(audit bool, agentFilter string) error {
 
 	if len(names) == 0 {
 		fmt.Fprintln(os.Stdout, "\n  No managed projects.")
-		fmt.Fprintln(os.Stdout, "  Add one with: dot-agents add <path>")
+		fmt.Fprintln(os.Stdout, "  Add one with: da add <path>")
 		return nil
 	}
 

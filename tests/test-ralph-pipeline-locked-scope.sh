@@ -41,7 +41,7 @@ chmod +x \
   "$dir/snapshot/ralph-worker" \
   "$dir/snapshot/ralph-closeout"
 
-cat >"$dir/fake-dot-agents" <<'EOF'
+cat >"$dir/fake-da" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "workflow" && "${2:-}" == "complete" && "${3:-}" == "--json" && "${4:-}" == "--plan" ]]; then
@@ -50,15 +50,15 @@ if [[ "${1:-}" == "workflow" && "${2:-}" == "complete" && "${3:-}" == "--json" &
 JSON
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: $*" >&2
+echo "unexpected fake da invocation: $*" >&2
 exit 1
 EOF
-chmod +x "$dir/fake-dot-agents"
+chmod +x "$dir/fake-da"
 
 out_file="$dir/pipeline.out"
 set +e
 RALPH_PIPELINE_SNAPSHOT_DIR="$dir/snapshot" \
-DOT_AGENTS="$dir/fake-dot-agents" \
+DOT_AGENTS="$dir/fake-da" \
 RALPH_NO_LOG=1 \
 RALPH_RUN_PLAN="p1" \
 "$dir/snapshot/ralph-pipeline" >"$out_file" 2>&1

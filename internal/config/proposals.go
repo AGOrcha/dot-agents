@@ -110,7 +110,7 @@ func ValidateProposal(proposal *Proposal) error {
 	if strings.TrimSpace(proposal.ID) == "" {
 		return fmt.Errorf("id is required")
 	}
-	if !containsString([]string{"pending", "approved", "rejected"}, proposal.Status) {
+	if !containsString([]string{"draft", "pending", "approved", "rejected"}, proposal.Status) {
 		return fmt.Errorf("invalid status %q", proposal.Status)
 	}
 	if !containsString([]string{"rule", "skill", "hook", "setting"}, proposal.Type) {

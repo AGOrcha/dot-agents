@@ -148,11 +148,11 @@ func ExampleBlock(lines ...string) string {
 
 func helpHintForCommand(cmd *cobra.Command) string {
 	if cmd == nil {
-		return "Run `dot-agents --help` to see available commands."
+		return "Run `da --help` to see available commands."
 	}
 	path := cmd.CommandPath()
-	if root := cmd.Root(); root == cmd && cmd.Name() != "dot-agents" {
-		path = "dot-agents " + path
+	if root := cmd.Root(); root == cmd && cmd.Name() != "da" {
+		path = "da " + path
 	}
 	return fmt.Sprintf("Run `%s --help` to see examples and supported flags.", path)
 }
@@ -232,21 +232,21 @@ func enrichCLIError(cliErr *CLIError, cmd *cobra.Command) *CLIError {
 	case errors.Is(cliErr, errNoWorkflowProject):
 		enriched.Hints = append(enriched.Hints,
 			"Run workflow commands from a repository that already contains `.agents/` or `.agentsrc.json`.",
-			"If this repo is not registered yet, start with `dot-agents add .` or `dot-agents install --generate`.",
+			"If this repo is not registered yet, start with `da add .` or `da install --generate`.",
 		)
 	case strings.Contains(msg, "manifest not found"):
 		enriched.Hints = append(enriched.Hints,
-			"Run `dot-agents install --generate` to create `.agentsrc.json` from the current shared state.",
-			"If the project is not managed yet, run `dot-agents add .` first.",
+			"Run `da install --generate` to create `.agentsrc.json` from the current shared state.",
+			"If the project is not managed yet, run `da add .` first.",
 		)
 	case strings.Contains(msg, "~/.agents/ not initialized"):
 		enriched.Hints = append(enriched.Hints,
-			"Run `dot-agents init` once on this machine before using install, add, or refresh.",
+			"Run `da init` once on this machine before using install, add, or refresh.",
 		)
 	case strings.Contains(msg, "project not found:"):
 		enriched.Hints = append(enriched.Hints,
-			"Use the registered project name from `dot-agents status`, not the filesystem path.",
-			"Run `dot-agents status` to list managed projects.",
+			"Use the registered project name from `da status`, not the filesystem path.",
+			"Run `da status` to list managed projects.",
 		)
 	case strings.Contains(msg, "invalid scope"):
 		enriched.Hints = append(enriched.Hints,
@@ -254,7 +254,7 @@ func enrichCLIError(cliErr *CLIError, cmd *cobra.Command) *CLIError {
 		)
 	case strings.Contains(msg, "unknown preference key"):
 		enriched.Hints = append(enriched.Hints,
-			"Run `dot-agents workflow prefs` to list valid preference keys and resolved values.",
+			"Run `da workflow prefs` to list valid preference keys and resolved values.",
 		)
 	case strings.Contains(msg, "invalid task status"):
 		enriched.Hints = append(enriched.Hints,
@@ -271,11 +271,11 @@ func enrichCLIError(cliErr *CLIError, cmd *cobra.Command) *CLIError {
 	case strings.Contains(msg, "not found in any source"):
 		enriched.Hints = append(enriched.Hints,
 			"Check that the resource name exists in one of the `.agentsrc.json` sources.",
-			"Use `dot-agents install --strict` when you want missing resources to fail fast.",
+			"Use `da install --strict` when you want missing resources to fail fast.",
 		)
 	case strings.Contains(msg, "unknown command"):
 		enriched.Hints = append(enriched.Hints,
-			"Run `dot-agents --help` to see available command families.",
+			"Run `da --help` to see available command families.",
 		)
 	}
 

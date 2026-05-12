@@ -255,14 +255,14 @@ those artifacts into the canonical ~/.agents/ layout so future refresh and insta
 operations can treat them as shared source of truth.
 
 Hook imports are written as canonical bundles under ~/.agents/hooks/<scope>/<name>/HOOK.yaml
-when the source can be normalized (see dot-agents hooks list / hooks show).
+when the source can be normalized (see da hooks list / hooks show).
 
 This is most useful when adopting dot-agents in an existing setup or when you want
 to normalize hand-edited config back into the managed store.`,
 		Example: ExampleBlock(
-			"  dot-agents import",
-			"  dot-agents import billing-api --scope project",
-			"  dot-agents import --scope global --dry-run",
+			"  da import",
+			"  da import billing-api --scope project",
+			"  da import --scope global --dry-run",
 		),
 		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to restrict project-scope imports."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -302,7 +302,7 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 	}
 	agentsHome := config.AgentsHome()
 
-	ui.Header("dot-agents import")
+	ui.Header("da import")
 
 	candidates, projectSet, err := collectImportCandidates(cfg, projectFilter, scope)
 	if err != nil {
@@ -503,7 +503,7 @@ func scanProjectImportCandidates(cfg *config.Config, projectFilter string) ([]im
 		if path == "" {
 			return nil, ErrorWithHints(
 				fmt.Sprintf("project not found: %s", projectFilter),
-				"Run `dot-agents status` to list the managed project names.",
+				"Run `da status` to list the managed project names.",
 			)
 		}
 		projects = []string{projectFilter}

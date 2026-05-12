@@ -1,5 +1,5 @@
 /**
- * `dot-agents refresh` — Report projects that need refreshing from ~/.agents/.
+ * `da refresh` — Report projects that need refreshing from ~/.agents/.
  *
  * The TypeScript port of `refresh` is scoped to: load config, resolve project
  * paths, and report which projects exist / are missing. Full link re-application

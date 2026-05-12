@@ -26,9 +26,9 @@ func NewRefreshCmd() *cobra.Command {
 		Long: `Re-applies links and config from ~/.agents/ into project directories.
 Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
 		Example: ExampleBlock(
-			"  dot-agents refresh",
-			"  dot-agents refresh billing-api",
-			"  dot-agents refresh --import --dry-run",
+			"  da refresh",
+			"  da refresh billing-api",
+			"  da refresh --import --dry-run",
 		),
 		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,11 +54,11 @@ func runRefresh(projectFilter string) error {
 	}
 
 	if len(cfg.Projects) == 0 {
-		ui.Info("No managed projects. Add one with: dot-agents add <path>")
+		ui.Info("No managed projects. Add one with: da add <path>")
 		return nil
 	}
 
-	ui.Header("dot-agents refresh")
+	ui.Header("da refresh")
 
 	// Determine which platforms are enabled
 	ui.Section("Enabled Platforms")
@@ -100,7 +100,7 @@ func runRefresh(projectFilter string) error {
 		if path == "" {
 			return ErrorWithHints(
 				fmt.Sprintf("project not found: %s", projectFilter),
-				"Run `dot-agents status` to see the registered project names.",
+				"Run `da status` to see the registered project names.",
 			)
 		}
 		projects = []string{projectFilter}
@@ -130,7 +130,7 @@ func runRefresh(projectFilter string) error {
 		if rc, err := config.LoadAgentsRC(path); err == nil {
 			for _, src := range rc.Sources {
 				if src.Type == "git" {
-					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'dot-agents install' to re-resolve%s\n", ui.Dim, ui.Reset)
+					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'da install' to re-resolve%s\n", ui.Dim, ui.Reset)
 					break
 				}
 			}

@@ -167,10 +167,10 @@ if [[ -n "${DOT_AGENTS:-}" ]]; then
   DOT_AGENTS_CMD=( $DOT_AGENTS )
 elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
   DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS_CMD=(dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
 else
-  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
   exit 1
 fi
 
@@ -470,11 +470,11 @@ EOF
 ## Your deliverables
 For each merge-back, decide: accept or reject.
 For each accepted task, run:
-  dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
-  dot-agents workflow advance <plan_id> --task <task_id> --status completed
+  da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
+  da workflow advance <plan_id> --task <task_id> --status completed
 
 For each rejected task, run:
-  dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision reject
+  da workflow delegation closeout --plan <plan_id> --task <task_id> --decision reject
 
 Do not implement anything. Only evaluate and close out.
 EOF

@@ -30,11 +30,11 @@ func pathExists(path string) bool {
 func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
-		return agentUserError(deps, "loading .agentsrc.json", "Run `dot-agents install --generate` or `dot-agents add .` to create the project manifest.")
+		return agentUserError(deps, "loading .agentsrc.json", "Run `da install --generate` or `da add .` to create the project manifest.")
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return agentUserError(deps, ".agentsrc.json has no project name set", "Run `dot-agents install --generate` or `dot-agents add .` again to repair the manifest.")
+		return agentUserError(deps, ".agentsrc.json has no project name set", "Run `da install --generate` or `da add .` again to repair the manifest.")
 	}
 
 	agentsHome := config.AgentsHome()
@@ -44,7 +44,7 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 
 	inList := containsString(rc.Agents, name)
 	if !inList && !pathExists(repoAgents) && !pathExists(repoClaude) {
-		return agentUserError(deps, fmt.Sprintf("agent %q is not linked in this project", name), "Run `dot-agents agents list` to inspect the managed agents in this repository.")
+		return agentUserError(deps, fmt.Sprintf("agent %q is not linked in this project", name), "Run `da agents list` to inspect the managed agents in this repository.")
 	}
 
 	if err := cleanupManagedAgentRepoPath(deps, repoAgents, agentsHome, name); err != nil {
@@ -137,10 +137,10 @@ func cleanupManagedAgentRepoPath(deps Deps, path, agentsHome, name string) error
 		if rerr != nil {
 			return rerr
 		}
-		return agentUserError(deps, fmt.Sprintf("refusing to remove unmanaged symlink for agent %q at %s (points to %s)", name, path, dest), "Remove the symlink manually or re-run `dot-agents agents remove --purge` after linking the agent through dot-agents.")
+		return agentUserError(deps, fmt.Sprintf("refusing to remove unmanaged symlink for agent %q at %s (points to %s)", name, path, dest), "Remove the symlink manually or re-run `da agents remove --purge` after linking the agent through dot-agents.")
 	}
 	if fi.IsDir() {
-		return agentUserError(deps, fmt.Sprintf("agent %q: %s is a real directory", name, path), "Remove or relocate the directory before running `dot-agents agents remove` again.")
+		return agentUserError(deps, fmt.Sprintf("agent %q: %s is a real directory", name, path), "Remove or relocate the directory before running `da agents remove` again.")
 	}
 	return agentUserError(deps, fmt.Sprintf("agent %q: unexpected file at %s", name, path), "Remove the file or replace it with a managed symlink before retrying.")
 }

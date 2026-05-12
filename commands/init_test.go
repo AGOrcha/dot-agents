@@ -73,8 +73,31 @@ func TestScaffoldWorkflowAssetsPreservesExistingHookBundle(t *testing.T) {
 	}
 }
 
-func TestStarterGitignoreContentIncludesContextDir(t *testing.T) {
-	if !strings.Contains(starterGitignoreContent(), "context/") {
-		t.Fatalf("starterGitignoreContent missing context/: %q", starterGitignoreContent())
+func TestScaffoldStarterHomeAssetsSeedsStarterSkillsAndGitignore(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	if err := scaffoldStarterHomeAssets(config.AgentsHome()); err != nil {
+		t.Fatalf("scaffoldStarterHomeAssets: %v", err)
+	}
+
+	gitignore, err := os.ReadFile(filepath.Join(config.AgentsHome(), ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gitignore), "context/") {
+		t.Fatalf(".gitignore missing context/:\n%s", string(gitignore))
+	}
+	for _, rel := range []string{
+		"README.md",
+		"rules/global/rules.mdc",
+		"settings/global/claude-code.json",
+		"skills/global/agent-start/SKILL.md",
+		"skills/global/review-delta/instructions/workflow.md",
+	} {
+		if _, err := os.Stat(filepath.Join(config.AgentsHome(), filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected %s to exist: %v", rel, err)
+		}
 	}
 }

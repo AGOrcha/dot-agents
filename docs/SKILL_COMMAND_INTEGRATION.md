@@ -11,7 +11,7 @@ New workflow planning work should use `da workflow` with canonical bundles under
 
 ## Purpose
 
-This document maps the bidirectional integration between dot-agents skills (agent-facing prompts), dot-agents commands (CLI surface), and the knowledge graph (data layer). Skills consume commands and graph data. Commands generate, validate, and reference skills. The graph serves both.
+This document maps the bidirectional integration between shared skills (agent-facing prompts), da commands (CLI surface), and the knowledge graph (data layer). Skills consume commands and graph data. Commands generate, validate, and reference skills. The graph serves both.
 
 ## Integration Model
 
@@ -175,7 +175,7 @@ Commands can reference, inject, or trigger skills:
 **What it does**: Initialize a project with dot-agents config.
 
 **Skill integration**:
-- Generates skill files from templates (currently from `src/share/templates/standard/skills/`)
+- Generates skill files from the embedded scaffold templates under `internal/scaffold/templates/`
 - Should include graph-aware skills when CRG is available
 - Should register `kg serve` MCP server config for detected platforms
 

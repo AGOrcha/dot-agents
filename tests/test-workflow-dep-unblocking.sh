@@ -6,10 +6,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DA="${DA:-${REPO_ROOT}/dot-agents}"
+DA="${DA:-${REPO_ROOT}/bin/da}"
 
 if [[ ! -x "$DA" ]]; then
-  echo "SKIP: dot-agents binary not found at $DA (set DA= to override)" >&2
+  echo "SKIP: da binary not found at $DA (set DA= to override)" >&2
   exit 0
 fi
 
@@ -24,7 +24,7 @@ mkdir -p "$FAKE_HOME"
 # Use an isolated AGENTS_HOME so prefs/context do not bleed from previous runs.
 export AGENTS_HOME="$FAKE_HOME"
 
-# Bootstrap a minimal dot-agents project in the sandbox.
+# Bootstrap a minimal da-managed project in the sandbox.
 (cd "$SANDBOX" && git init -q && "$DA" add . --name dep-smoke --yes >/dev/null 2>&1)
 
 # ── step 1: create plan and activate it ──────────────────────────────────────

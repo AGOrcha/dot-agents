@@ -30,7 +30,7 @@ export function boundaryHelpLines(): string[] {
     "Boundary (Phase 4 — workflow / KG / orchestration):",
     `  Decision: option ${CHOSEN_PHASE4_OPTION} — read-only workflow may be added later; not full parity.`,
     "  Implemented now: Stage 1 commands only (init, add, refresh, status, doctor, skills, agents, hooks).",
-    "  Use the Go dot-agents CLI for: kg/*, workflow writes (checkpoint, advance, merge-back, fanout, …),",
+    "  Use the Go da CLI for: kg/*, workflow writes (checkpoint, advance, merge-back, fanout, …),",
     "  and orchestration. See docs/TYPESCRIPT_PORT_BOUNDARY.md and ports/typescript/README.md (install).",
   ];
 }

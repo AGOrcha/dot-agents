@@ -132,7 +132,7 @@ type AgentsRC struct {
 	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
-// RefreshMetadata records the latest dot-agents install/refresh that updated a project.
+// RefreshMetadata records the latest da install/refresh that updated a project.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
 	Commit      string `json:"commit,omitempty"`

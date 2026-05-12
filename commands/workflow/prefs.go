@@ -297,7 +297,7 @@ func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {
 	if !ok {
 		return deps.ErrorWithHints(
 			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
-			"Run `dot-agents workflow prefs` to list valid preference keys.",
+			"Run `da workflow prefs` to list valid preference keys.",
 		)
 	}
 	return applier(p, value)
@@ -407,7 +407,7 @@ func runWorkflowPrefsSetLocal(key, value string) error {
 	if !isValidPreferenceKey(key) {
 		return deps.ErrorWithHints(
 			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
-			"Run `dot-agents workflow prefs` to see valid preference keys.",
+			"Run `da workflow prefs` to see valid preference keys.",
 		)
 	}
 	project, err := currentWorkflowProject()
@@ -425,7 +425,7 @@ func runWorkflowPrefsSetShared(key, value string) error {
 	if !isValidPreferenceKey(key) {
 		return deps.ErrorWithHints(
 			fmt.Sprintf(errUnknownPreferenceKeyFmt, key),
-			"Run `dot-agents workflow prefs` to see valid preference keys.",
+			"Run `da workflow prefs` to see valid preference keys.",
 		)
 	}
 	project, err := currentWorkflowProject()
@@ -461,6 +461,6 @@ func runWorkflowPrefsSetShared(key, value string) error {
 		return fmt.Errorf("save proposal: %w", err)
 	}
 	ui.Info(fmt.Sprintf("Proposal %s created for shared preference change.", id))
-	ui.Info("Run 'dot-agents review' to approve and apply.")
+	ui.Info("Run 'da review' to approve and apply.")
 	return nil
 }

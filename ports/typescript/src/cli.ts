@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dot-agents TypeScript CLI — Stage 1 MVP entry point.
+ * da-ts TypeScript CLI — Stage 1 MVP entry point.
  *
  * Wires the 8 Stage 1 commands (init, add, refresh, status, doctor, skills, agents, hooks)
  * into a minimal command dispatcher. No external CLI framework dependency — uses
@@ -69,7 +69,7 @@ async function cmdAdd(args: string[]): Promise<number> {
   const pos = positionals(args);
   if (pos.length === 0) {
     printError("add requires a project path argument");
-    printLine("Usage: dot-agents add <path> [--name <name>] [--force]");
+    printLine("Usage: da add <path> [--name <name>] [--force]");
     return 1;
   }
   const projectPath = pos[0];
@@ -98,7 +98,7 @@ async function cmdRefresh(args: string[]): Promise<number> {
   const filter = pos[0];
   const result = await runRefresh({ filter });
   if (result.noProjects) {
-    printLine("No managed projects. Add one with: dot-agents add <path>");
+    printLine("No managed projects. Add one with: da add <path>");
     return 0;
   }
   for (const p of result.projects) {
@@ -190,7 +190,7 @@ async function cmdSkills(args: string[]): Promise<number> {
   }
 
   printError(`Unknown skills subcommand: ${sub}`);
-  printLine("Usage: dot-agents skills [list|new] [args]");
+  printLine("Usage: da skills [list|new] [args]");
   return 1;
 }
 
@@ -238,7 +238,7 @@ async function cmdAgents(args: string[]): Promise<number> {
   }
 
   printError(`Unknown agents subcommand: ${sub}`);
-  printLine("Usage: dot-agents agents [list|new] [args]");
+  printLine("Usage: da agents [list|new] [args]");
   return 1;
 }
 
@@ -269,12 +269,12 @@ async function cmdHooks(args: string[]): Promise<number> {
   }
 
   printError(`Unknown hooks subcommand: ${sub}`);
-  printLine("Usage: dot-agents hooks [list] [scope]");
+  printLine("Usage: da hooks [list] [scope]");
   return 1;
 }
 
 function printHelp(): void {
-  printLine("dot-agents TypeScript CLI — Stage 1 variant (not full Go parity)");
+  printLine("da-ts TypeScript CLI — Stage 1 variant (not full Go parity)");
   printLine("");
   printLine("Usage: da-ts <command> [subcommand] [args...] [flags]");
   printLine("(Run from repo: npm run start -- <command> … after npm run build — see ports/typescript/README.md)");
@@ -284,7 +284,7 @@ function printHelp(): void {
   printLine("  add <path>            Register a project directory");
   printLine("  refresh [project]     Report refresh status for managed projects");
   printLine("  status                Show project health and canonical store summary");
-  printLine("  doctor                Audit local dot-agents installation");
+  printLine("  doctor                Audit local da installation");
   printLine("  skills list [scope]   List skills in ~/.agents/skills/");
   printLine("  skills new <name>     Create a new skill scaffold");
   printLine("  agents list [scope]   List agents in ~/.agents/agents/");

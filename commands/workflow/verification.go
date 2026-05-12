@@ -12,7 +12,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
-const verifyRecordedByLabel = "dot-agents workflow verify record"
+const verifyRecordedByLabel = "da workflow verify record"
 
 // ── Verification log ──────────────────────────────────────────────────────────
 

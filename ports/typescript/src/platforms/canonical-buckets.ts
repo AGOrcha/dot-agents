@@ -2,7 +2,7 @@
  * Canonical ~/.agents store buckets — mirrors internal/platform/buckets.go
  * (CanonicalStoreBucketSpecs, stage-1 + stage-2 ordering).
  *
- * Used by `status` for parity with Go `dot-agents status` and by `init` to
+ * Used by `status` for parity with Go `da status` and by `init` to
  * create `~/.agents/<bucket>/global` for each bucket (see commands/init.go).
  */
 

@@ -31,7 +31,7 @@ Git tracks every change with SHA1/SHA256 hashes. Signed commits (GPG/SSH) provid
 - Tamper detection via `git fsck`
 - Rollback via `git revert`
 
-**Fit:** Excellent for local-first, single-author or small-team scenarios. Git is already a dependency of dot-agents workflows.
+**Fit:** Excellent for local-first, single-author or small-team scenarios. Git is already a dependency of da workflows.
 
 **Gaps:**
 - Does not protect individual note files against out-of-git modification (e.g., direct filesystem writes)

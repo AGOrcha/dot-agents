@@ -1,5 +1,5 @@
 /**
- * `dot-agents hooks` — Inspect hook definitions in ~/.agents/.
+ * `da hooks` — Inspect hook definitions in ~/.agents/.
  *
  * Supports `list` subcommand: reads canonical HOOK.yaml bundles first,
  * then falls back to legacy claude-code.json settings.

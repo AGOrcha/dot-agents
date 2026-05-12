@@ -85,14 +85,14 @@ write_fallback_checkpoint() {
 }
 
 main() {
-  if command -v dot-agents >/dev/null 2>&1; then
+  if command -v da >/dev/null 2>&1; then
     if (
       cd "$project_dir" &&
-      dot-agents workflow checkpoint --verification-status unknown --verification-summary ""
+      da workflow checkpoint --verification-status unknown --verification-summary ""
     ); then
       return 0
     fi
-    printf 'session-capture warning: dot-agents workflow checkpoint failed, using shell fallback\n' >&2
+    printf 'session-capture warning: da workflow checkpoint failed, using shell fallback\n' >&2
   fi
   write_fallback_checkpoint
 }

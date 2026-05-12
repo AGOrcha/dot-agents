@@ -5,7 +5,7 @@ match:
   tools: []
   expression: ""
 run:
-  command: dot-agents kg status
+  command: da kg status
   timeout_ms: 3000
 enabled_on:
   - claude

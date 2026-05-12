@@ -27,7 +27,7 @@ func settingsCommandDeps() settingsDeps {
 	}
 }
 
-// NewSettingsCmd builds the `dot-agents settings` command tree.
+// NewSettingsCmd builds the `da settings` command tree.
 func NewSettingsCmd() *cobra.Command {
 	deps := settingsCommandDeps()
 	cmd := &cobra.Command{
@@ -36,16 +36,16 @@ func NewSettingsCmd() *cobra.Command {
 		Long: `Commands for platform settings files stored under ~/.agents/settings/<scope>/.
 
 Scopes are either global (~/.agents/settings/global/) or a managed project name
-(~/.agents/settings/<project>/), matching dot-agents status.
+(~/.agents/settings/<project>/), matching da status.
 
 Files include JSON/TOML/YAML configs (e.g. cursor.json, claude-code.json) and
 cursorignore. These are wired by add, import, refresh, install, and remove.
 Prefer editing canonical paths here, then run refresh or install.`,
 		Example: rulesExampleBlock(
-			"  dot-agents settings list",
-			"  dot-agents settings list my-app",
-			"  dot-agents settings show global cursor.json",
-			"  dot-agents settings remove proj cursorignore",
+			"  da settings list",
+			"  da settings list my-app",
+			"  da settings show global cursor.json",
+			"  da settings remove proj cursorignore",
 		),
 	}
 	cmd.AddCommand(newSettingsListCmd(deps))
@@ -59,8 +59,8 @@ func newSettingsListCmd(deps settingsDeps) *cobra.Command {
 		Use:   "list [scope]",
 		Short: "List canonical settings files for a scope",
 		Example: rulesExampleBlock(
-			"  dot-agents settings list",
-			"  dot-agents settings list billing-api",
+			"  da settings list",
+			"  da settings list billing-api",
 		),
 		Args: deps.maxArgsWithHints(1, "Optionally pass a project scope (or `global`) to inspect that settings tree."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -89,7 +89,7 @@ func newSettingsRemoveCmd(deps settingsDeps) *cobra.Command {
 		Use:   "remove <scope> <name>",
 		Short: "Remove a settings file from ~/.agents/settings/ (canonical storage only)",
 		Long: `Deletes the file from managed settings storage only (not repo links). After removal,
-run dot-agents refresh or install for the relevant project so platform settings
+run da refresh or install for the relevant project so platform settings
 links stay consistent.`,
 		Args: deps.exactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` matches list/show."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -151,13 +151,13 @@ func runSettingsRemove(deps settingsDeps, scope, name string) error {
 func findSettingsSpec(agentsHome, scope, name string) (*platform.SettingsFileSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, UsageError("settings file name is empty", "Pass the file name or stem shown by `dot-agents settings list`.")
+		return nil, UsageError("settings file name is empty", "Pass the file name or stem shown by `da settings list`.")
 	}
 	spec, err := platform.ResolveCanonicalSettingsFile(agentsHome, scope, name)
 	if err != nil {
 		return nil, ErrorWithHints(
 			fmt.Sprintf("settings file not found: %s / %s", scope, name),
-			"Run `dot-agents settings list "+scope+"` to see available files.",
+			"Run `da settings list "+scope+"` to see available files.",
 		)
 	}
 	return spec, nil

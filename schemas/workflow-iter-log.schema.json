@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-iter-log.schema.json",
-  "title": "dot-agents workflow iteration log entry",
+  "title": "da workflow iteration log entry",
   "description": "Schema for .agents/active/iteration-log/iter-N.yaml (schema_version 2). Top-level git and delegation fields are CLI-owned. Nested impl, verifiers[], and review are role-owned: each `workflow checkpoint --log-to-iter N --role …` merge updates only that role's block. `additionalProperties: false` keeps field names stable.",
   "type": "object",
   "additionalProperties": false,

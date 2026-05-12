@@ -130,7 +130,7 @@ func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
 	if strings.Contains(err.Error(), "workflow graph query does not handle") {
 		t.Fatalf("expected route to kg bridge, got old guard: %v", err)
 	}
-	if strings.Contains(err.Error(), "Use `dot-agents kg bridge query") {
+	if strings.Contains(err.Error(), "Use `da kg bridge query") {
 		t.Fatalf("expected route to kg bridge, got manual-use hint: %v", err)
 	}
 }

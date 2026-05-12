@@ -341,7 +341,7 @@ func executeBatchQuery(kgHomeDir string, queries []GraphQuery) ([]GraphQueryResp
 func runKGQuery(deps Deps, cmd *cobra.Command, args []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'da kg setup' first")
 	}
 
 	intent, _ := cmd.Flags().GetString("intent")
@@ -850,7 +850,7 @@ func findContradictions(kgHomeDir string) ([]GraphQueryResult, error) {
 func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized: run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized: run 'da kg setup' first")
 	}
 
 	checkFilter, _ := cmd.Flags().GetString("check")

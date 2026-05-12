@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewAgentsCmd builds the `dot-agents agents` command tree from injected dependencies.
+// NewAgentsCmd builds the `da agents` command tree from injected dependencies.
 func NewAgentsCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
@@ -16,12 +16,12 @@ func NewAgentsCmd(deps Deps) *cobra.Command {
 ~/.agents/agents tree. These definitions can then be distributed into projects
 through refresh or install flows.`,
 		Example: exampleBlock(
-			"  dot-agents agents list",
-			"  dot-agents agents new reviewer",
-			"  dot-agents agents promote reviewer",
-			"  dot-agents agents import reviewer",
-			"  dot-agents agents remove reviewer",
-			"  dot-agents agents new repo-owner billing-api",
+			"  da agents list",
+			"  da agents new reviewer",
+			"  da agents promote reviewer",
+			"  da agents import reviewer",
+			"  da agents remove reviewer",
+			"  da agents new repo-owner billing-api",
 		),
 	}
 	cmd.AddCommand(newAgentsListCmd(deps))
@@ -37,8 +37,8 @@ func newAgentsListCmd(deps Deps) *cobra.Command {
 		Use:   "list [project]",
 		Short: "List agents",
 		Example: exampleBlock(
-			"  dot-agents agents list",
-			"  dot-agents agents list billing-api",
+			"  da agents list",
+			"  da agents list billing-api",
 		),
 		Args: deps.MaximumNArgsWithHints(1, "Optionally pass a project scope to list project-local agents."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -52,8 +52,8 @@ func newAgentsNewCmd(deps Deps) *cobra.Command {
 		Use:   "new <name> [project]",
 		Short: "Create a new agent",
 		Example: exampleBlock(
-			"  dot-agents agents new reviewer",
-			"  dot-agents agents new doc-writer billing-api",
+			"  da agents new reviewer",
+			"  da agents new doc-writer billing-api",
 		),
 		Args: deps.RangeArgsWithHints(1, 2, "Pass an agent name and optionally a project scope."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,8 +71,8 @@ func newAgentsPromoteCmd(deps Deps) *cobra.Command {
 ~/.agents/agents/<project>/<name>/, registers it in .agentsrc.json, and
 ensures repo symlinks under .claude/agents/.`,
 		Example: exampleBlock(
-			"  dot-agents agents promote reviewer",
-			"  dot-agents agents promote reviewer --force",
+			"  da agents promote reviewer",
+			"  da agents promote reviewer --force",
 		),
 		Args: deps.ExactArgsWithHints(1, "Run this from the project repository that owns `.agents/agents/<name>/`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,8 +96,8 @@ func newAgentsRemoveCmd(deps Deps) *cobra.Command {
 and removes the name from .agentsrc.json agents[]. The canonical directory under
 ~/.agents/agents/<project>/<name>/ is left intact unless --purge is set.`,
 		Example: exampleBlock(
-			"  dot-agents agents remove reviewer",
-			"  dot-agents agents remove reviewer --purge",
+			"  da agents remove reviewer",
+			"  da agents remove reviewer --purge",
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the agent name as registered in .agentsrc.json."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -122,7 +122,7 @@ into the current repository: creates managed symlinks under .agents/agents/ and
 
 This is the reverse of promote: the canonical directory remains the source of truth.`,
 		Example: exampleBlock(
-			"  dot-agents agents import reviewer",
+			"  da agents import reviewer",
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the agent name as it appears under ~/.agents/agents/<project>/."),
 		RunE: func(cmd *cobra.Command, args []string) error {

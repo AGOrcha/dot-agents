@@ -4,6 +4,6 @@ set -eu
 payload="$(cat || true)"
 cmd="$(printf '%s' "$payload" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
 case "$cmd" in
-*git*commit*) exec dot-agents kg changes --brief ;;
+*git*commit*) exec da kg changes --brief ;;
 *) exit 0 ;;
 esac

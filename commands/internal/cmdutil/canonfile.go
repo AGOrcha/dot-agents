@@ -125,7 +125,7 @@ func RunCanonicalRemove(deps RemoveDeps, scope, name string, spec CanonicalFileS
 		return err
 	}
 
-	ui.Header(fmt.Sprintf("dot-agents %s remove", spec.DirSegment))
+	ui.Header(fmt.Sprintf("da %s remove", spec.DirSegment))
 	fmt.Fprintf(os.Stdout, "Remove %s %q from scope %s\n", spec.SingularRem, name, ui.BoldText(scope))
 	fmt.Fprintf(os.Stdout, "  %s\n", config.DisplayPath(entry.SourcePath))
 

@@ -3,7 +3,7 @@
 # Called by ralph-pipeline after all stages (impl → verifier(s) → review) complete for a bundle.
 #
 # Auto mode (RALPH_REVIEW_GATE_AUTO=1, default): evaluates task-local review evidence via
-# `dot-agents workflow delegation gate` and only passes explicit accept decisions.
+# `da workflow delegation gate` and only passes explicit accept decisions.
 # Agent mode (RALPH_REVIEW_GATE_AUTO=0): spawns orchestrator agent to review before advancing.
 # Exits 2 on reject, 3 on planning-required / escalate.
 #
@@ -20,7 +20,7 @@
 #   RALPH_ORCHESTRATOR_AGENT_BIN  agent binary for gate
 #   AGENT_BIN                   fallback agent binary (default: agent)
 #   RALPH_AGENT_OUTPUT_FORMAT   text|json|stream-json (default stream-json)
-#   DOT_AGENTS                  dot-agents binary or "go run ..." override
+#   DOT_AGENTS                  da binary or "go run ..." override
 
 set -euo pipefail
 
@@ -45,10 +45,10 @@ if [[ -n "${DOT_AGENTS:-}" ]]; then
   DOT_AGENTS_CMD=( $DOT_AGENTS )
 elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
   DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS_CMD=(dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
 else
-  echo "error: dot-agents not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
   exit 1
 fi
 

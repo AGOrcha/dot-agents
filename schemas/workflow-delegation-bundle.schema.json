@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-delegation-bundle.schema.json",
-  "title": "dot-agents workflow delegation bundle",
+  "title": "da workflow delegation bundle",
   "description": "Repo-local JSON Schema for .agents/active/delegation-bundles/<delegation-id>.yaml. Models the persisted worker/profile/prompt/context/verification payload paired with a delegation contract.",
   "type": "object",
   "additionalProperties": false,

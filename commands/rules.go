@@ -44,7 +44,7 @@ func rulesExampleBlock(lines ...string) string {
 	return strings.Join(lines, "\n")
 }
 
-// NewRulesCmd builds the `dot-agents rules` command tree.
+// NewRulesCmd builds the `da rules` command tree.
 func NewRulesCmd() *cobra.Command {
 	deps := rulesCommandDeps()
 	cmd := &cobra.Command{
@@ -53,17 +53,17 @@ func NewRulesCmd() *cobra.Command {
 		Long: `Commands for rule files stored under ~/.agents/rules/<scope>/.
 
 Scopes are either global (~/.agents/rules/global/) or a managed project name
-(~/.agents/rules/<project>/), matching dot-agents status.
+(~/.agents/rules/<project>/), matching da status.
 
 These files are what add, import, refresh, install, and remove wire into
 Cursor, Claude Code, Codex, and Copilot projections. Prefer editing canonical
 paths here, then run refresh or install for the project — do not hand-edit
 platform copies unless you know they are unmanaged.`,
 		Example: rulesExampleBlock(
-			"  dot-agents rules list",
-			"  dot-agents rules list my-app",
-			"  dot-agents rules show global rules.mdc",
-			"  dot-agents rules remove global old-rule.mdc",
+			"  da rules list",
+			"  da rules list my-app",
+			"  da rules show global rules.mdc",
+			"  da rules remove global old-rule.mdc",
 		),
 	}
 	cmd.AddCommand(newRulesListCmd(deps))
@@ -77,8 +77,8 @@ func newRulesListCmd(deps rulesDeps) *cobra.Command {
 		Use:   "list [scope]",
 		Short: "List canonical rule files for a scope",
 		Example: rulesExampleBlock(
-			"  dot-agents rules list",
-			"  dot-agents rules list billing-api",
+			"  da rules list",
+			"  da rules list billing-api",
 		),
 		Args: deps.maxArgsWithHints(1, "Optionally pass a project scope (or `global`) to inspect that rules tree."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -107,7 +107,7 @@ func newRulesRemoveCmd(deps rulesDeps) *cobra.Command {
 		Use:   "remove <scope> <name>",
 		Short: "Remove a rule file from ~/.agents/rules/ (canonical storage only)",
 		Long: `Deletes the file from managed rule storage only (not repo links). After removal,
-run dot-agents refresh or install for the relevant project so platform rule
+run da refresh or install for the relevant project so platform rule
 links stay consistent.`,
 		Args: deps.exactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` matches list/show."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -213,13 +213,13 @@ func runRulesRemove(deps rulesDeps, scope, name string) error {
 func findRuleSpec(deps rulesDeps, agentsHome, scope, name string) (*platform.RuleFileSpec, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, deps.usageError("rule name is empty", "Pass the file name or stem shown by `dot-agents rules list`.")
+		return nil, deps.usageError("rule name is empty", "Pass the file name or stem shown by `da rules list`.")
 	}
 	spec, err := platform.ResolveCanonicalRuleFile(agentsHome, scope, name)
 	if err != nil {
 		return nil, deps.errorWithHints(
 			fmt.Sprintf("rule not found: %s / %s", scope, name),
-			"Run `dot-agents rules list "+scope+"` to see available files.",
+			"Run `da rules list "+scope+"` to see available files.",
 		)
 	}
 	return spec, nil

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-scope-evidence.schema.json",
-  "title": "dot-agents workflow scope evidence sidecar",
+  "title": "da workflow scope evidence sidecar",
   "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/evidence/<task-id>.scope.yaml. Matches workflow.ScopeEvidence in commands/workflow/plan_task.go.",
   "type": "object",
   "additionalProperties": false,

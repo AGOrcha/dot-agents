@@ -71,7 +71,7 @@ func CreateProjectDirs(project string) error {
 // file, suitable for os.WriteFile.
 func RefreshMarkerContent(version, commit, describe string) []byte {
 	now := time.Now().UTC().Format(time.RFC3339)
-	content := "# dot-agents refresh marker — do not edit\n"
+	content := "# da refresh marker — do not edit\n"
 	content += "version=" + version + "\n"
 	if commit != "" {
 		content += "commit=" + commit + "\n"

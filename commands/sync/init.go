@@ -16,8 +16,8 @@ func newInitCmd(deps Deps) *cobra.Command {
 		Use:   "init",
 		Short: "Initialize git repo in ~/.agents/",
 		Example: exampleBlock(
-			"  dot-agents sync init",
-			"  dot-agents sync init --dry-run",
+			"  da sync init",
+			"  da sync init --dry-run",
 		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSyncInit(deps)
@@ -95,5 +95,5 @@ func printSyncNextSteps(agentsHome string) {
 	fmt.Fprintf(os.Stdout, "       cd %s\n", agentsHome)
 	fmt.Fprintln(os.Stdout, "       git remote add origin git@github.com:YOU/agents-config.git")
 	fmt.Fprintln(os.Stdout, "  3. Push your config:")
-	fmt.Fprintln(os.Stdout, "       dot-agents sync push")
+	fmt.Fprintln(os.Stdout, "       da sync push")
 }

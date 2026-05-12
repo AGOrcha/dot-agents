@@ -28,7 +28,7 @@ Rationale in one line: restricted-machine users still benefit from **read-only w
 
 **Not a commitment:** nothing in Phase 4 requires shipping a `workflow` subcommand in the next release; the decision only **allows** that class of surface and **forbids** pretending the TS port is a full workflow/KG replacement.
 
-## Permanently deferred from the TypeScript port (use Go `dot-agents`)
+## Permanently deferred from the TypeScript port (use Go `da`)
 
 - **All `kg` / knowledge-graph commands** (query, ingest, bridge, sync, setup, …)
 - **Workflow mutating and loop-driving commands** including but not limited to: `workflow checkpoint`, `workflow advance`, `workflow merge-back`, `workflow fanout`, `workflow verify record`, `workflow sweep`, delegation closeout, fold-back create, and similar write paths

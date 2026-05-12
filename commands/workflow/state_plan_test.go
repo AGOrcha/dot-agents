@@ -44,7 +44,34 @@ blockers: []
 	if err := os.MkdirAll(proposalsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(proposalsDir, "one.yaml"), []byte("id: one\n"), 0644); err != nil {
+	pendingProposal := `schema_version: 1
+id: one
+status: pending
+type: rule
+action: add
+target: rules/global/one.mdc
+rationale: pending proposal
+content: |
+  rule
+created_at: "2026-04-10T00:00:00Z"
+created_by: test
+`
+	if err := os.WriteFile(filepath.Join(proposalsDir, "one.yaml"), []byte(pendingProposal), 0644); err != nil {
+		t.Fatal(err)
+	}
+	draftProposal := `schema_version: 1
+id: draft-one
+status: draft
+type: skill
+action: add
+target: skills/global/draft-one/SKILL.md
+rationale: draft proposal
+content: |
+  draft
+created_at: "2026-04-10T00:00:00Z"
+created_by: test
+`
+	if err := os.WriteFile(filepath.Join(proposalsDir, "draft-one.yaml"), []byte(draftProposal), 0644); err != nil {
 		t.Fatal(err)
 	}
 }

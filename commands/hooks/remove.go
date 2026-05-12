@@ -25,7 +25,7 @@ func runHooksRemove(deps Deps, scope, name string) error {
 		return err
 	}
 
-	ui.Header("dot-agents hooks remove")
+	ui.Header("da hooks remove")
 	fmt.Fprintf(os.Stdout, "Remove %s hook %q\n", ui.BoldText(scope), name)
 	fmt.Fprintf(os.Stdout, "  %s\n", config.DisplayPath(target))
 

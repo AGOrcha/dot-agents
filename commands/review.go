@@ -12,7 +12,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const reviewProposalIDHint = "Pass the proposal ID from `dot-agents review`."
+const reviewProposalIDHint = "Pass the proposal ID from `da review`."
 
 func NewReviewCmd() *cobra.Command {
 	var rejectReason string
@@ -24,11 +24,11 @@ func NewReviewCmd() *cobra.Command {
 This is the approval surface for shared preference and rule changes that should
 not be applied silently.`,
 		Example: ExampleBlock(
-			"  dot-agents review",
-			"  dot-agents review show pref-default-model",
-			"  dot-agents review approve pref-default-model",
+			"  da review",
+			"  da review show pref-default-model",
+			"  da review approve pref-default-model",
 		),
-		Args: NoArgsWithHints("Use `dot-agents review` with no positional args to list pending proposals."),
+		Args: NoArgsWithHints("Use `da review` with no positional args to list pending proposals."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewList()
 		},
@@ -38,7 +38,7 @@ not be applied silently.`,
 		Use:   "show <id>",
 		Short: "Show a pending proposal",
 		Example: ExampleBlock(
-			"  dot-agents review show pref-default-model",
+			"  da review show pref-default-model",
 		),
 		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,7 +50,7 @@ not be applied silently.`,
 		Use:   "approve <id>",
 		Short: "Approve and apply a pending proposal",
 		Example: ExampleBlock(
-			"  dot-agents review approve pref-default-model",
+			"  da review approve pref-default-model",
 		),
 		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,7 +62,7 @@ not be applied silently.`,
 		Use:   "reject <id>",
 		Short: "Reject a pending proposal",
 		Example: ExampleBlock(
-			"  dot-agents review reject pref-default-model --reason \"not ready\"",
+			"  da review reject pref-default-model --reason \"not ready\"",
 		),
 		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -120,6 +120,9 @@ func runReviewApprove(id string) error {
 	if err := config.ValidateProposal(proposal); err != nil {
 		return err
 	}
+	if proposal.Status != "pending" {
+		return fmt.Errorf("proposal %q is %s, not pending", proposal.ID, proposal.Status)
+	}
 
 	targetPath, err := config.ProposalTargetPath(proposal.Target)
 	if err != nil {
@@ -156,6 +159,9 @@ func runReviewReject(id, reason string) error {
 	}
 	if err := config.ValidateProposal(proposal); err != nil {
 		return err
+	}
+	if proposal.Status != "pending" {
+		return fmt.Errorf("proposal %q is %s, not pending", proposal.ID, proposal.Status)
 	}
 	config.MarkProposalReviewed(proposal, "rejected", reason)
 	if err := config.ArchiveProposal(proposal); err != nil {

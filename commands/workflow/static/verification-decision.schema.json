@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/verification-decision.schema.json",
-  "title": "dot-agents review decision",
-  "description": "Canonical document for `.agents/active/verification/<task_id>/review-decision.yaml`. Written by `dot-agents workflow verify record --kind review` after phase decisions are supplied on the CLI. Consumed by `workflow checkpoint --log-to-iter --role review` when merging the review block.",
+  "title": "da review decision",
+  "description": "Canonical document for `.agents/active/verification/<task_id>/review-decision.yaml`. Written by `da workflow verify record --kind review` after phase decisions are supplied on the CLI. Consumed by `workflow checkpoint --log-to-iter --role review` when merging the review block.",
   "type": "object",
   "additionalProperties": false,
   "required": [

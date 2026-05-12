@@ -34,7 +34,7 @@ func hasGitManifests() bool {
 }
 
 func printGitSourcesHint() {
-	fmt.Fprintf(os.Stdout, "  %sProjects with git sources: run 'dot-agents install' in each to re-resolve resources.%s\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sProjects with git sources: run 'da install' in each to re-resolve resources.%s\n", ui.Dim, ui.Reset)
 }
 
 func postPullRefresh(deps Deps, hasManifests bool) error {
@@ -49,7 +49,7 @@ func postPullRefresh(deps Deps, hasManifests bool) error {
 		}
 		return nil
 	}
-	fmt.Fprintf(os.Stdout, "\n  %sRun 'dot-agents refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "\n  %sRun 'da refresh' to apply changes to managed projects.%s\n", ui.Dim, ui.Reset)
 	if hasManifests {
 		printGitSourcesHint()
 	}

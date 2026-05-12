@@ -496,7 +496,7 @@ func runKGSetup() error {
 			fmt.Sprintf("Graph home: %s", home),
 			fmt.Sprintf("Name: %s", name),
 		)
-		ui.Info("Run 'dot-agents kg health' to check graph status.")
+		ui.Info("Run 'da kg health' to check graph status.")
 		return nil
 	}
 
@@ -542,7 +542,7 @@ func runKGSetup() error {
 
 	// Write initial index
 	indexPath := filepath.Join(home, "notes", kgIndexFileName)
-	indexContent := "# Knowledge Graph Index\n\nThis file is maintained automatically by dot-agents kg.\n"
+	indexContent := "# Knowledge Graph Index\n\nThis file is maintained automatically by da kg.\n"
 	if err := os.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
 		return fmt.Errorf("write index: %w", err)
 	}
@@ -588,8 +588,8 @@ func runKGSetup() error {
 
 	ui.SuccessBox(
 		fmt.Sprintf("Knowledge graph initialized at %s", home),
-		"dot-agents kg health — check graph status",
-		"dot-agents kg ingest <file> — ingest raw sources",
+		"da kg health — check graph status",
+		"da kg ingest <file> — ingest raw sources",
 	)
 	return nil
 }
@@ -601,7 +601,7 @@ func runKGHealth(deps Deps, cmd *cobra.Command) error {
 
 	// Verify initialized
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized at %s — run 'dot-agents kg setup' first", home)
+		return fmt.Errorf("knowledge graph not initialized at %s — run 'da kg setup' first", home)
 	}
 
 	health, err := computeGraphHealth(home)
@@ -1184,7 +1184,7 @@ func truncate(s string, n int) string {
 func runKGIngest(deps Deps, cmd *cobra.Command, args []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized — run 'da kg setup' first")
 	}
 
 	opts := readIngestFlags(deps, cmd)
@@ -1345,7 +1345,7 @@ func runSingleIngest(deps Deps, home, sid string) {
 func runKGQueue(deps Deps) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
-		return fmt.Errorf("knowledge graph not initialized — run 'dot-agents kg setup' first")
+		return fmt.Errorf("knowledge graph not initialized — run 'da kg setup' first")
 	}
 
 	pending, err := listPendingRawSources(home)

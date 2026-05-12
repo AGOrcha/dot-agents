@@ -1,10 +1,10 @@
 name: graph-update
-description: Incrementally update the code-structure graph after file edits (dot-agents kg / CRG bridge)
+description: Incrementally update the code-structure graph after file edits (da kg / CRG bridge)
 when: post_tool_use
 match:
   expression: "Edit|Write|Bash"
 run:
-  command: dot-agents kg update --skip-flows
+  command: da kg update --skip-flows
   timeout_ms: 5000
 enabled_on:
   - claude

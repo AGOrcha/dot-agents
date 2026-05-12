@@ -463,24 +463,11 @@ func loadWorkflowCheckpoint(project string) (*workflowCheckpoint, []string) {
 }
 
 func countPendingWorkflowProposals() (int, error) {
-	dir := filepath.Join(config.AgentsHome(), "proposals")
-	entries, err := os.ReadDir(dir)
+	proposals, err := config.ListPendingProposals()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
 		return 0, err
 	}
-	count := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if strings.HasSuffix(entry.Name(), ".yaml") {
-			count++
-		}
-	}
-	return count, nil
+	return len(proposals), nil
 }
 
 func deriveWorkflowNextAction(git workflowGitSummary, checkpoint *workflowCheckpoint, canonicalPlans []workflowCanonicalPlanSummary, plans []workflowPlanSummary) (string, string) {
@@ -815,7 +802,7 @@ func renderOrientLocalDriftSection(state *workflowOrientState, out io.Writer) {
 	for _, w := range state.LocalDrift.Warnings {
 		fmt.Fprintf(out, "- warn: %s\n", w)
 	}
-	fmt.Fprintln(out, "  (run 'dot-agents workflow drift' for cross-repo view)")
+	fmt.Fprintln(out, "  (run 'da workflow drift' for cross-repo view)")
 }
 
 func renderOrientWarningsSection(state *workflowOrientState, out io.Writer) {

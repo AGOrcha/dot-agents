@@ -499,7 +499,7 @@ func TestRemoveAgentIn_ErrorNotLinked(t *testing.T) {
 	if cliErr.message != wantMsg {
 		t.Fatalf("unexpected error message:\n got: %q\nwant: %q", cliErr.message, wantMsg)
 	}
-	if got := strings.Join(cliErr.hints, "\n"); !strings.Contains(got, "dot-agents agents list") {
+	if got := strings.Join(cliErr.hints, "\n"); !strings.Contains(got, "da agents list") {
 		t.Fatalf("expected agents-list recovery hint, got %q", got)
 	}
 }

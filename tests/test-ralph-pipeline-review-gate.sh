@@ -8,7 +8,7 @@ trap 'rm -rf "$TMPDIR_ROOT"' EXIT
 
 TEST_REPO="$TMPDIR_ROOT/repo"
 SNAPSHOT_DIR="$TMPDIR_ROOT/snapshot"
-FAKE_DA="$TMPDIR_ROOT/fake-dot-agents"
+FAKE_DA="$TMPDIR_ROOT/fake-da"
 OUT_FILE="$TMPDIR_ROOT/pipeline.out"
 
 mkdir -p "$TEST_REPO" "$SNAPSHOT_DIR"
@@ -96,7 +96,7 @@ if [[ "${1:-}" == "workflow" && "${2:-}" == "bundle" && "${3:-}" == "stages" ]];
   printf 'impl\nreview\n'
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: $*" >&2
+echo "unexpected fake da invocation: $*" >&2
 exit 1
 EOF
 chmod +x "$FAKE_DA"

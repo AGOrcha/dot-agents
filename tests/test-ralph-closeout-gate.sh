@@ -30,7 +30,7 @@ YAML
 
 write_fake_da() {
   local dir="$1" task_id="$2" plan_id="$3" outcome="$4" closeout_allowed="$5" planning_required="$6"
-  cat >"$dir/fake-dot-agents" <<EOF
+  cat >"$dir/fake-da" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cmd="\$*"
@@ -56,10 +56,10 @@ if [[ "\${1:-}" == "workflow" && "\${2:-}" == "advance" ]]; then
   echo "advance-called" >>"${dir}/calls.log"
   exit 0
 fi
-echo "unexpected fake dot-agents invocation: \$cmd" >&2
+echo "unexpected fake da invocation: \$cmd" >&2
 exit 1
 EOF
-  chmod +x "$dir/fake-dot-agents"
+  chmod +x "$dir/fake-da"
 }
 
 run_case() {
@@ -69,7 +69,7 @@ run_case() {
   write_fake_da "$dir" "t1" "p1" "$outcome" "$closeout_allowed" "$planning_required"
 
   set +e
-  (cd "$dir" && DOT_AGENTS="$dir/fake-dot-agents" RALPH_NO_LOG=1 "$CLOSEOUT_SCRIPT") >/dev/null 2>&1
+  (cd "$dir" && DOT_AGENTS="$dir/fake-da" RALPH_NO_LOG=1 "$CLOSEOUT_SCRIPT") >/dev/null 2>&1
   rc=$?
   set -e
 

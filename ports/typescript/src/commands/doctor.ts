@@ -1,5 +1,5 @@
 /**
- * `dot-agents doctor` — Audit the local dot-agents installation.
+ * `da doctor` — Audit the local da installation.
  *
  * Checks ~/.agents/ existence, config.json, and managed project links.
  * Aligned with the structural checks in commands/doctor.go.
@@ -47,7 +47,7 @@ async function checkAgentsHome(home: string): Promise<DoctorCheck> {
     return {
       name: "agents_home",
       status: "error",
-      message: "~/.agents/ not found — run: dot-agents init",
+      message: "~/.agents/ not found — run: da init",
     };
   }
 }

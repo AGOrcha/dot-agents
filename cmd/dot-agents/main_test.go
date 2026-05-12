@@ -21,9 +21,9 @@ func TestRootHelpIncludesExamples(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"Examples:",
-		"dot-agents workflow orient",
-		"dot-agents install --generate",
-		"dot-agents status --audit",
+		"da workflow orient",
+		"da install --generate",
+		"da status --audit",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("root help missing %q:\n%s", want, out)

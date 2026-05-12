@@ -1,5 +1,5 @@
 /**
- * `dot-agents init` — Initialize the ~/.agents/ directory structure.
+ * `da init` — Initialize the ~/.agents/ directory structure.
  *
  * Creates standard subdirectories. Safe to run multiple times (existing dirs preserved).
  * Aligned with commands/init.go.
@@ -25,7 +25,7 @@ export interface InitResult {
   skipped: string[];
 }
 
-/** Standard directories created by `dot-agents init`. */
+/** Standard directories created by `da init`. */
 export function standardDirs(home: string): string[] {
   const dirs = [
     home,

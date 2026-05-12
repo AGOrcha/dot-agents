@@ -63,7 +63,7 @@ var workflowDotAgentsExe = func() (string, error) {
 func runWorkflowGraphQueryViaKGBridge(projectPath, intent string, queryArgs []string) error {
 	exe, err := workflowDotAgentsExe()
 	if err != nil {
-		return fmt.Errorf("resolve dot-agents executable: %w", err)
+		return fmt.Errorf("resolve da executable: %w", err)
 	}
 	argv := []string{"kg", "bridge", "query", "--intent", intent}
 	argv = append(argv, queryArgs...)

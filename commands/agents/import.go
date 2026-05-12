@@ -21,7 +21,7 @@ func ImportAgentIn(name, projectPath string) error {
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set: run `dot-agents install --generate` or `dot-agents add .` to repair the manifest")
+		return fmt.Errorf(".agentsrc.json has no project name set: run `da install --generate` or `da add .` to repair the manifest")
 	}
 
 	agentsHome := config.AgentsHome()
@@ -29,7 +29,7 @@ func ImportAgentIn(name, projectPath string) error {
 	agentMD := filepath.Join(canonicalPath, agentManifestName)
 	if _, err := os.Stat(agentMD); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("agent %q not found at canonical path %s (expected %s): create the canonical agent first or run `dot-agents agents list` to confirm the name", name, config.DisplayPath(canonicalPath), agentManifestName)
+			return fmt.Errorf("agent %q not found at canonical path %s (expected %s): create the canonical agent first or run `da agents list` to confirm the name", name, config.DisplayPath(canonicalPath), agentManifestName)
 		}
 		return fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -56,7 +56,7 @@ func ImportAgentIn(name, projectPath string) error {
 		fmt.Sprintf("Imported agent '%s' for project '%s'", name, projectName),
 		fmt.Sprintf("Canonical: %s", config.DisplayPath(canonicalPath)),
 		fmt.Sprintf("Registered in .agentsrc.json (%d agent(s) total)", len(rc.Agents)),
-		"Run 'dot-agents refresh' to sync across all platforms",
+		"Run 'da refresh' to sync across all platforms",
 	)
 	return nil
 }
@@ -82,7 +82,7 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 	}
 	if fi.IsDir() {
 		if _, err := os.Stat(filepath.Join(repoLocal, agentManifestName)); err == nil {
-			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use `dot-agents agents promote` first", name, repoLocal)
+			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use `da agents promote` first", name, repoLocal)
 		}
 	}
 	return fmt.Errorf("agent %q: unexpected path at %s; remove it before importing", name, repoLocal)
