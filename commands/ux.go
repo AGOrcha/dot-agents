@@ -226,6 +226,47 @@ func classifyCLIError(err error, cmd *cobra.Command) *CLIError {
 	return enrichCLIError(derived, cmd)
 }
 
+type cliHintRule struct {
+	contains string
+	hints    []string
+}
+
+var cliHintRules = []cliHintRule{
+	{"manifest not found", []string{
+		"Run `da install --generate` to create `.agentsrc.json` from the current shared state.",
+		"If the project is not managed yet, run `da add .` first.",
+	}},
+	{"~/.agents/ not initialized", []string{
+		"Run `da init` once on this machine before using install, add, or refresh.",
+	}},
+	{"project not found:", []string{
+		"Use the registered project name from `da status`, not the filesystem path.",
+		"Run `da status` to list managed projects.",
+	}},
+	{"invalid scope", []string{
+		"Supported scopes are `project`, `global`, and `all`.",
+	}},
+	{"unknown preference key", []string{
+		"Run `da workflow prefs` to list valid preference keys and resolved values.",
+	}},
+	{"invalid task status", []string{
+		"Valid task statuses are `pending`, `in_progress`, `blocked`, `completed`, and `cancelled`.",
+	}},
+	{"invalid plan status", []string{
+		"Valid plan statuses are `draft`, `active`, `paused`, `completed`, and `archived`.",
+	}},
+	{"invalid verification status", []string{
+		"Valid verification statuses are `pass`, `fail`, `partial`, and `unknown`.",
+	}},
+	{"not found in any source", []string{
+		"Check that the resource name exists in one of the `.agentsrc.json` sources.",
+		"Use `da install --strict` when you want missing resources to fail fast.",
+	}},
+	{"unknown command", []string{
+		"Run `da --help` to see available command families.",
+	}},
+}
+
 func enrichCLIError(cliErr *CLIError, cmd *cobra.Command) *CLIError {
 	if cliErr == nil {
 		return &CLIError{Message: "command failed"}
@@ -239,55 +280,18 @@ func enrichCLIError(cliErr *CLIError, cmd *cobra.Command) *CLIError {
 	}
 
 	msg := enriched.Message
-	switch {
-	case errors.Is(cliErr, errNoWorkflowProject):
+	if errors.Is(cliErr, errNoWorkflowProject) {
 		enriched.Hints = append(enriched.Hints,
 			"Run workflow commands from a repository that already contains `.agents/` or `.agentsrc.json`.",
 			"If this repo is not registered yet, start with `da add .` or `da install --generate`.",
 		)
-	case strings.Contains(msg, "manifest not found"):
-		enriched.Hints = append(enriched.Hints,
-			"Run `da install --generate` to create `.agentsrc.json` from the current shared state.",
-			"If the project is not managed yet, run `da add .` first.",
-		)
-	case strings.Contains(msg, "~/.agents/ not initialized"):
-		enriched.Hints = append(enriched.Hints,
-			"Run `da init` once on this machine before using install, add, or refresh.",
-		)
-	case strings.Contains(msg, "project not found:"):
-		enriched.Hints = append(enriched.Hints,
-			"Use the registered project name from `da status`, not the filesystem path.",
-			"Run `da status` to list managed projects.",
-		)
-	case strings.Contains(msg, "invalid scope"):
-		enriched.Hints = append(enriched.Hints,
-			"Supported scopes are `project`, `global`, and `all`.",
-		)
-	case strings.Contains(msg, "unknown preference key"):
-		enriched.Hints = append(enriched.Hints,
-			"Run `da workflow prefs` to list valid preference keys and resolved values.",
-		)
-	case strings.Contains(msg, "invalid task status"):
-		enriched.Hints = append(enriched.Hints,
-			"Valid task statuses are `pending`, `in_progress`, `blocked`, `completed`, and `cancelled`.",
-		)
-	case strings.Contains(msg, "invalid plan status"):
-		enriched.Hints = append(enriched.Hints,
-			"Valid plan statuses are `draft`, `active`, `paused`, `completed`, and `archived`.",
-		)
-	case strings.Contains(msg, "invalid verification status"):
-		enriched.Hints = append(enriched.Hints,
-			"Valid verification statuses are `pass`, `fail`, `partial`, and `unknown`.",
-		)
-	case strings.Contains(msg, "not found in any source"):
-		enriched.Hints = append(enriched.Hints,
-			"Check that the resource name exists in one of the `.agentsrc.json` sources.",
-			"Use `da install --strict` when you want missing resources to fail fast.",
-		)
-	case strings.Contains(msg, "unknown command"):
-		enriched.Hints = append(enriched.Hints,
-			"Run `da --help` to see available command families.",
-		)
+	} else {
+		for _, rule := range cliHintRules {
+			if strings.Contains(msg, rule.contains) {
+				enriched.Hints = append(enriched.Hints, rule.hints...)
+				break
+			}
+		}
 	}
 
 	if cmd != nil {

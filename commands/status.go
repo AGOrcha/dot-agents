@@ -1008,46 +1008,64 @@ func printCursorAudit(name, path, agentsHome string) {
 	fmt.Fprintln(os.Stdout)
 }
 
-func printClaudeAudit(name, path, agentsHome string) {
-	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
-	entries, err := os.ReadDir(rulesDir)
+// printSymlinkDirAudit reads dir for symlink entries and prints each entry's
+// status. The nameFormat is a printf format applied to the entry name (e.g.
+// "%s" or ".opencode/agent/%s"). The emptyLabel is shown after the ○ marker
+// when no symlinks were found. Returns the number of OK and broken entries.
+func printSymlinkDirAudit(dir, emptyLabel, nameFormat string) (int, int) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no %s/rules/)%s\n", ui.Dim, statusClaudeDir, ui.Reset)
-		fmt.Fprintln(os.Stdout)
-		return
+		return 0, 0
 	}
 	okCount, brokenCount := 0, 0
 	for _, e := range entries {
-		linkPath := filepath.Join(rulesDir, e.Name())
+		linkPath := filepath.Join(dir, e.Name())
 		dest, err := os.Readlink(linkPath)
 		if err != nil {
 			continue
 		}
 		displayDest := config.DisplayPath(dest)
+		display := fmt.Sprintf(nameFormat, e.Name())
 		if _, err := os.Stat(dest); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
 			okCount++
 		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
 			brokenCount++
 		}
 	}
 	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s %s/rules/ %s(empty)%s\n", ui.Dim, ui.Reset, statusClaudeDir, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(empty)%s\n", ui.Dim, ui.Reset, emptyLabel, ui.Dim, ui.Reset)
 	}
-	// Claude MCP link (.mcp.json)
-	claudeMCPPath := filepath.Join(path, statusClaudeMCPJSON)
-	if dest, err := os.Readlink(claudeMCPPath); err == nil {
+	return okCount, brokenCount
+}
+
+// printSymlinkAudit reads a single symlink and prints its ✓/✗/(not linked)
+// status with the supplied display label.
+func printSymlinkAudit(linkPath, label string) {
+	if dest, err := os.Readlink(linkPath); err == nil {
 		displayDest := config.DisplayPath(dest)
 		if _, err := os.Stat(dest); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s .mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s .mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		}
 	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s .mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
 	}
+}
+
+func printClaudeAudit(name, path, agentsHome string) {
+	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
+	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
+	if _, err := os.ReadDir(rulesDir); err != nil {
+		fmt.Fprintf(os.Stdout, "      %s(no %s/rules/)%s\n", ui.Dim, statusClaudeDir, ui.Reset)
+		fmt.Fprintln(os.Stdout)
+		return
+	}
+	printSymlinkDirAudit(rulesDir, statusClaudeDir+"/rules/", "%s")
+	// Claude MCP link (.mcp.json)
+	printSymlinkAudit(filepath.Join(path, statusClaudeMCPJSON), ".mcp.json")
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -1156,26 +1174,8 @@ func printOpenCodeAudit(name, path, agentsHome string) {
 
 	// .opencode/agent/ directory
 	opencodeAgentDir := filepath.Join(path, statusOpenCodeDir, "agent")
-	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
-		okCount, brokenCount := 0, 0
-		for _, e := range entries {
-			linkPath := filepath.Join(opencodeAgentDir, e.Name())
-			dest, err := os.Readlink(linkPath)
-			if err != nil {
-				continue
-			}
-			displayDest := config.DisplayPath(dest)
-			if _, err := os.Stat(dest); err == nil {
-				fmt.Fprintf(os.Stdout, "      %s✓%s .opencode/agent/%s %s→ %s%s\n", ui.Green, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
-				okCount++
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✗%s .opencode/agent/%s %s→ %s (broken)%s\n", ui.Red, ui.Reset, e.Name(), ui.Dim, displayDest, ui.Reset)
-				brokenCount++
-			}
-		}
-		if okCount == 0 && brokenCount == 0 {
-			fmt.Fprintf(os.Stdout, "      %s○%s .opencode/agent/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-		}
+	if _, err := os.ReadDir(opencodeAgentDir); err == nil {
+		printSymlinkDirAudit(opencodeAgentDir, ".opencode/agent/", ".opencode/agent/%s")
 	} else {
 		fmt.Fprintf(os.Stdout, "      %s(no .opencode/)%s\n", ui.Dim, ui.Reset)
 	}
@@ -1199,16 +1199,6 @@ func printCopilotAudit(name, path string) {
 		fmt.Fprintf(os.Stdout, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
 	}
 	// Copilot MCP link (.vscode/mcp.json)
-	vscodeMCPPath := filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON)
-	if dest, err := os.Readlink(vscodeMCPPath); err == nil {
-		displayDest := config.DisplayPath(dest)
-		if _, err := os.Stat(dest); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s .vscode/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s .vscode/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-		}
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s .vscode/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
+	printSymlinkAudit(filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON), ".vscode/mcp.json")
 	fmt.Fprintln(os.Stdout)
 }

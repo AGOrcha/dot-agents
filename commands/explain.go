@@ -138,23 +138,34 @@ func printManifestExplanation() {
 	fmt.Fprintf(os.Stdout, "  %s--force%s     Re-fetch git sources even if recently cached\n\n", ui.Cyan, ui.Reset)
 }
 
+func printLinkTypeSection(title, scope, body, example string) {
+	fmt.Fprintf(os.Stdout, "  %s%s%s %s(%s)%s\n", ui.Bold, title, ui.Reset, ui.Dim, scope, ui.Reset)
+	fmt.Fprint(os.Stdout, body)
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, example, ui.Reset)
+}
+
 func printLinkTypesExplanation() {
 	ui.Header("Link Types")
 	fmt.Fprintln(os.Stdout)
 
-	fmt.Fprintf(os.Stdout, "  %sHARD LINKS%s %s(Cursor)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  Cursor doesn't follow symlinks for rule files, so da creates\n")
-	fmt.Fprintf(os.Stdout, "  hard links instead. Hard links point to the same inode on disk —\n")
-	fmt.Fprintf(os.Stdout, "  edits to either file are reflected in both.\n")
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "  %s~/.agents/rules/global/rules.mdc → .cursor/rules/global--rules.mdc%s\n", ui.Dim, ui.Reset)
+	printLinkTypeSection(
+		"HARD LINKS",
+		"Cursor",
+		"  Cursor doesn't follow symlinks for rule files, so da creates\n"+
+			"  hard links instead. Hard links point to the same inode on disk —\n"+
+			"  edits to either file are reflected in both.\n",
+		"~/.agents/rules/global/rules.mdc → .cursor/rules/global--rules.mdc",
+	)
 
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "  %sSYMLINKS%s %s(all other platforms)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  Claude Code, Codex, OpenCode, and GitHub Copilot all follow symlinks\n")
-	fmt.Fprintf(os.Stdout, "  correctly, so da uses standard symbolic links.\n")
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "  %s~/.agents/rules/global/rules.mdc → AGENTS.md%s\n", ui.Dim, ui.Reset)
+	printLinkTypeSection(
+		"SYMLINKS",
+		"all other platforms",
+		"  Claude Code, Codex, OpenCode, and GitHub Copilot all follow symlinks\n"+
+			"  correctly, so da uses standard symbolic links.\n",
+		"~/.agents/rules/global/rules.mdc → AGENTS.md",
+	)
 	fmt.Fprintln(os.Stdout)
 
 	fmt.Fprintf(os.Stdout, "  %sCENTRALIZED SHARED TARGETS%s %s(shared skill mirrors)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
