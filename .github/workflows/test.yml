@@ -367,6 +367,13 @@ jobs:
         run: |
           "${DA_BIN}" workflow --help
 
+      - name: Test kg help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/da kg --help
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}

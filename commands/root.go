@@ -61,6 +61,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewInstallCmd())
 	root.AddCommand(NewSessionCmd())
 	root.AddCommand(NewWorkflowCmd())
+	root.AddCommand(NewKGCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)
