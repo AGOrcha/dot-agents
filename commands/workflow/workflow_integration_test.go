@@ -1,0 +1,760 @@
+package workflow
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"go.yaml.in/yaml/v3"
+)
+
+// writeRepoFile creates parent directories under repo and writes
+// content to repo/rel. Replaces the inline write closure repeated
+// across multiple workflow_integration tests.
+func writeRepoFile(t *testing.T, repo, rel, content string) {
+	t.Helper()
+	path := filepath.Join(repo, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setupCheckpointStateTest seeds a workflow-proj repo with a checkpoint
+// fixture (nextAction/status/timestamp), chdirs to it via t.Cleanup,
+// runs collectWorkflowState, and asserts a non-nil checkpoint loads.
+// Returns the loaded state for further per-test assertions.
+func setupCheckpointStateTest(t *testing.T, nextAction, status, timestamp, missingMsg string) *workflowOrientState {
+	t.Helper()
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, nextAction, status, timestamp)
+
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Checkpoint == nil {
+		t.Fatal(missingMsg)
+	}
+	return state
+}
+
+// setupVerifyRecordReviewTest initialises a workflow-proj repo with a review
+// gate checkpoint and a delegation contract, then chdirs into the repo.
+// Returns the repo path. sliceID and contractID distinguish test cases.
+func setupVerifyRecordReviewTest(t *testing.T, sliceID, contractID string) string {
+	t.Helper()
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, sliceID, "plan-loop", contractID)
+
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func assertWorkflowTaskStatus(t *testing.T, tf *CanonicalTaskFile, taskID, want string) {
+	t.Helper()
+	for _, task := range tf.Tasks {
+		if task.ID == taskID {
+			if task.Status != want {
+				t.Fatalf("%s status = %q, want %s", taskID, task.Status, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %s not found", taskID)
+}
+
+func assertPlanListOutput(t *testing.T, repo string) {
+	t.Helper()
+	ids, err := listCanonicalPlanIDs(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "wave-2" {
+		t.Fatalf("expected [wave-2], got %v", ids)
+	}
+}
+
+func assertPlanShowOutput(t *testing.T, repo string) {
+	t.Helper()
+	plan, err := loadCanonicalPlan(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "active" {
+		t.Fatalf("plan status = %q, want active", plan.Status)
+	}
+}
+
+func advanceAndAssertTask(t *testing.T, repo, taskID, status string) {
+	t.Helper()
+	if err := runWorkflowAdvance("wave-2", taskID, status); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkflowTaskStatus(t, tf, taskID, status)
+}
+
+func assertPlanFocusTask(t *testing.T, repo, want string) {
+	t.Helper()
+	reloaded, err := loadCanonicalPlan(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.CurrentFocusTask != want {
+		t.Fatalf("current_focus_task = %q, want %q", reloaded.CurrentFocusTask, want)
+	}
+}
+
+func assertPlanStateCounts(t *testing.T) {
+	t.Helper()
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.CanonicalPlans) != 1 {
+		t.Fatalf("expected 1 canonical plan, got %d", len(state.CanonicalPlans))
+	}
+	if state.CanonicalPlans[0].CompletedCount != 2 {
+		t.Fatalf("completed count = %d, want 2", state.CanonicalPlans[0].CompletedCount)
+	}
+}
+
+func TestWorkflow_CheckpointThenOrient(t *testing.T) {
+	state := setupCheckpointStateTest(t,
+		"Continue wave-3 implementation", "pass", "2026-04-10T10:00:00Z",
+		"expected checkpoint, got nil")
+
+	if state.Checkpoint.Verification.Status != "pass" {
+		t.Fatalf("checkpoint verification status = %q, want pass", state.Checkpoint.Verification.Status)
+	}
+	if state.NextAction != "Continue wave-3 implementation" {
+		t.Fatalf("next action = %q, want 'Continue wave-3 implementation'", state.NextAction)
+	}
+	if state.NextActionSource != "checkpoint" {
+		t.Fatalf("next action source = %q, want checkpoint", state.NextActionSource)
+	}
+
+	// Orient output must include the checkpoint's next action
+	var buf bytes.Buffer
+	renderWorkflowOrientMarkdown(state, &buf)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "Continue wave-3 implementation") {
+		t.Fatalf("orient output missing checkpoint next action:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "pass") {
+		t.Fatalf("orient output missing verification status:\n%s", rendered)
+	}
+}
+
+// TestWorkflow_PlanLifecycle creates PLAN.yaml + TASKS.yaml, lists the plan, shows it,
+// advances a task, and verifies the status and focus task are updated.
+func TestWorkflow_PlanLifecycle(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	addCanonicalPlanFixture(t, repo)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("list-plan", func(t *testing.T) {
+		assertPlanListOutput(t, repo)
+	})
+
+	t.Run("show-plan", func(t *testing.T) {
+		assertPlanShowOutput(t, repo)
+	})
+
+	t.Run("advance-t1-completed", func(t *testing.T) {
+		advanceAndAssertTask(t, repo, "t1", "completed")
+	})
+
+	t.Run("advance-t2-updates-focus", func(t *testing.T) {
+		if err := runWorkflowAdvance("wave-2", "t2", "in_progress"); err != nil {
+			t.Fatal(err)
+		}
+		assertPlanFocusTask(t, repo, "add subcommands")
+	})
+
+	t.Run("state-counts", func(t *testing.T) {
+		assertPlanStateCounts(t)
+	})
+}
+
+// TestWorkflow_VerifyThenHealth records a passing verification run, then calls computeWorkflowHealth
+// and verifies that having a checkpoint results in the "healthy" status (no "no checkpoint" warning).
+func TestWorkflow_VerifyThenHealth(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Seed a checkpoint so health does not warn about missing checkpoint
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "done", "pass", "2026-04-10T10:00:00Z")
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record a passing verification
+	if err := runWorkflowVerifyRecord(verifyRecordInputs{
+		Kind:    "test",
+		Status:  "pass",
+		Command: "go test ./...",
+		Scope:   "repo",
+		Summary: "all tests green",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read it back
+	records, err := readVerificationLog("workflow-proj", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("verification log count = %d, want 1", len(records))
+	}
+	if records[0].Status != "pass" {
+		t.Fatalf("verification status = %q, want pass", records[0].Status)
+	}
+
+	// Health should be "healthy" — checkpoint present, no excess dirty files or proposals
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := computeWorkflowHealth(state)
+	if health.Status != "healthy" {
+		t.Fatalf("health status = %q, want healthy; warnings: %v", health.Status, health.Warnings)
+	}
+	if !health.Workflow.HasCheckpoint {
+		t.Fatal("health.Workflow.HasCheckpoint should be true")
+	}
+}
+
+func TestReviewDecisionSchema_Validate(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	ok := &ReviewDecisionDoc{
+		SchemaVersion: 1, TaskID: "t1", ParentPlanID: "p1",
+		Phase1Decision: "accept", Phase2Decision: "accept", OverallDecision: "accept",
+		FailedGates: []string{}, RecordedAt: now,
+	}
+	if err := validateReviewDecisionDoc(ok); err != nil {
+		t.Fatalf("valid doc: %v", err)
+	}
+	escNoReason := &ReviewDecisionDoc{
+		SchemaVersion: 1, TaskID: "t1", ParentPlanID: "p1",
+		Phase1Decision: "escalate", Phase2Decision: "accept", OverallDecision: "escalate",
+		FailedGates: []string{}, RecordedAt: now,
+	}
+	if err := validateReviewDecisionDoc(escNoReason); err == nil {
+		t.Fatal("expected schema error for escalate without escalation_reason")
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_WritesArtifactAndLog(t *testing.T) {
+	repo := setupVerifyRecordReviewTest(t, "slice-99", "del-slice-99-1")
+
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:       "repo",
+		Summary:     "LGTM scoped surface",
+		Phase1In:    "accept",
+		Phase2In:    "accept",
+		TaskFlag:    "slice-99",
+		FailedGates: []string{"unit", "api"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	decPath := filepath.Join(repo, ".agents", "active", "verification", "slice-99", "review-decision.yaml")
+	data, err := os.ReadFile(decPath)
+	if err != nil {
+		t.Fatalf("read review decision: %v", err)
+	}
+	var got ReviewDecisionDoc
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.OverallDecision != "accept" || got.Phase1Decision != "accept" || len(got.FailedGates) != 2 {
+		t.Fatalf("unexpected decision doc: %+v", got)
+	}
+	if err := validateReviewDecisionDoc(&got); err != nil {
+		t.Fatalf("on disk doc invalid: %v", err)
+	}
+
+	records, err := readVerificationLog("workflow-proj", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Kind != "review" || records[0].Status != "pass" {
+		t.Fatalf("log: %+v", records)
+	}
+	if len(records[0].Artifacts) != 1 || !strings.HasSuffix(records[0].Artifacts[0], "review-decision.yaml") {
+		t.Fatalf("artifacts: %+v", records[0].Artifacts)
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_Errors(t *testing.T) {
+	setupVerifyRecordReviewTest(t, "slice-err", "del-slice-err")
+
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Summary:  "x",
+		Phase1In: "escalate",
+		Phase2In: "accept",
+		TaskFlag: "slice-err",
+	}); err == nil {
+		t.Fatal("expected error for escalate without escalation reason")
+	}
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:     "repo",
+		Summary:   "x",
+		Phase1In:  "accept",
+		Phase2In:  "accept",
+		OverallIn: "reject",
+		TaskFlag:  "slice-err",
+	}); err == nil {
+		t.Fatal("expected error when overall disagrees with phases")
+	}
+	if err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Summary:  "x",
+		Phase1In: "maybe",
+		Phase2In: "accept",
+		TaskFlag: "slice-err",
+	}); err == nil {
+		t.Fatal("expected error for invalid phase decision")
+	}
+}
+
+func TestWorkflow_VerifyRecordReview_Cobra(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeCheckpointFixture(t, agentsHome, "workflow-proj", repo, "review gate", "pass", "2026-04-10T10:00:00Z")
+	saveTestDelegationContract(t, repo, "t-cobra", "p-cobra", "del-t-cobra")
+
+	if err := executeWorkflowCommand(t, repo,
+		"verify", "record", "--kind", "review",
+		"--task", "t-cobra",
+		"--phase1-decision", "reject", "--phase2-decision", "accept",
+		"--failed-gate", "unit", "--summary", "blocked on unit"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := readVerificationLog("workflow-proj", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Status != "fail" {
+		t.Fatalf("want fail log, got %+v", records)
+	}
+}
+
+// TestWorkflow_StaleCheckpointState writes a checkpoint with an old timestamp and verifies
+// that collectWorkflowState succeeds, returns the checkpoint without error, and that the
+// orient output renders the old timestamp (no crash or data loss).
+func TestWorkflow_StaleCheckpointState(t *testing.T) {
+	// Checkpoint >7 days old relative to "now" (2026-04-10); use 2026-04-01
+	state := setupCheckpointStateTest(t,
+		"old task", "unknown", "2026-04-01T00:00:00Z",
+		"expected stale checkpoint to be loaded, got nil")
+
+	if state.Checkpoint.Timestamp != "2026-04-01T00:00:00Z" {
+		t.Fatalf("checkpoint timestamp = %q, want 2026-04-01T00:00:00Z", state.Checkpoint.Timestamp)
+	}
+	// Next action still comes from checkpoint because the git state still matches.
+	if state.NextAction != "old task" {
+		t.Fatalf("next action = %q, want 'old task'", state.NextAction)
+	}
+	if state.NextActionSource != "checkpoint" {
+		t.Fatalf("next action source = %q, want checkpoint", state.NextActionSource)
+	}
+	// Orient renders cleanly with the old timestamp
+	var buf bytes.Buffer
+	renderWorkflowOrientMarkdown(state, &buf)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "2026-04-01T00:00:00Z") {
+		t.Fatalf("orient output missing stale timestamp:\n%s", rendered)
+	}
+}
+
+func TestWorkflow_PrefersCanonicalWhenCheckpointGitStateIsStale(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	addCanonicalPlanFixture(t, repo)
+
+	writeCheckpointFixtureWithGitOverride(t, checkpointFixtureGitOverride{
+		AgentsHome:  agentsHome,
+		ProjectName: "workflow-proj",
+		Repo:        repo,
+		NextAction:  "stale checkpoint task",
+		VerStatus:   "pass",
+		Timestamp:   "2026-04-10T10:00:00Z",
+		Branch:      "other-branch",
+		SHA:         "deadbee",
+	})
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NextAction != "implement structs" {
+		t.Fatalf("next action = %q, want canonical focus task", state.NextAction)
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
+	}
+	found := false
+	for _, warning := range state.Warnings {
+		if strings.Contains(warning, "checkpoint next action") && strings.Contains(warning, "stale") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected stale-checkpoint warning, got %v", state.Warnings)
+	}
+}
+
+// TestWorkflow_DerivedFocusIgnoresStaleCurrentFocusTask verifies that orient NextAction
+// and canonical plan summaries derive focus from TASKS.yaml when PLAN.yaml current_focus_task
+// still names a completed task (common after workflow advance ... completed).
+func TestWorkflow_DerivedFocusIgnoresStaleCurrentFocusTask(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	write := func(rel, content string) { writeRepoFile(t, repo, rel, content) }
+
+	write(".agents/workflow/plans/z-stale-focus/PLAN.yaml", `schema_version: 1
+id: "z-stale-focus"
+title: "Stale focus fixture"
+status: "active"
+summary: "x"
+created_at: "2026-04-10T10:00:00Z"
+updated_at: "2026-04-10T10:00:00Z"
+owner: "test"
+success_criteria: ""
+verification_strategy: ""
+current_focus_task: "Phase A — done work"
+`)
+	write(".agents/workflow/plans/z-stale-focus/TASKS.yaml", `schema_version: 1
+plan_id: "z-stale-focus"
+tasks:
+  - id: "a1"
+    title: "Phase A — done work"
+    status: "completed"
+    depends_on: []
+    blocks: ["a2"]
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+  - id: "a2"
+    title: "Phase B — next work"
+    status: "pending"
+    depends_on: ["a1"]
+    blocks: []
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+`)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NextAction != "Phase B — next work" {
+		t.Fatalf("next action = %q, want %q", state.NextAction, "Phase B — next work")
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
+	}
+	var found bool
+	for _, cp := range state.CanonicalPlans {
+		if cp.ID == "z-stale-focus" {
+			found = true
+			if cp.CurrentFocusTask != "Phase B — next work" {
+				t.Fatalf("canonical plan summary focus = %q, want derived Phase B title", cp.CurrentFocusTask)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected z-stale-focus in canonical plans")
+	}
+}
+
+func TestReadWorkflowPlanCompletedStatusDoesNotCreatePendingFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "completed.plan.md")
+	content := `# Completed Plan
+
+Status: Completed (2026-04-11)
+Depends on: something else
+- [x] finished item
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := readWorkflowPlan(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.PendingItems) != 0 {
+		t.Fatalf("expected no pending items, got %+v", plan.PendingItems)
+	}
+}
+
+// TestWorkflow_MultiPlanPriority creates two canonical plans (one active, one paused) and verifies
+// that orient's NextAction is driven by the active plan's focus task, not the paused one.
+func TestWorkflow_MultiPlanPriority(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	write := func(rel, content string) { writeRepoFile(t, repo, rel, content) }
+
+	// Active plan
+	write(".agents/workflow/plans/alpha/PLAN.yaml", `schema_version: 1
+id: "alpha"
+title: "Alpha Plan"
+status: "active"
+summary: "first"
+created_at: "2026-04-10T10:00:00Z"
+updated_at: "2026-04-10T10:00:00Z"
+owner: "test"
+success_criteria: ""
+verification_strategy: ""
+current_focus_task: "alpha-focus-task"
+`)
+	write(".agents/workflow/plans/alpha/TASKS.yaml", `schema_version: 1
+plan_id: "alpha"
+tasks:
+  - id: "a1"
+    title: "alpha-focus-task"
+    status: "in_progress"
+    depends_on: []
+    blocks: []
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+`)
+	// Paused plan
+	write(".agents/workflow/plans/beta/PLAN.yaml", `schema_version: 1
+id: "beta"
+title: "Beta Plan"
+status: "paused"
+summary: "second"
+created_at: "2026-04-10T10:00:00Z"
+updated_at: "2026-04-10T10:00:00Z"
+owner: "test"
+success_criteria: ""
+verification_strategy: ""
+current_focus_task: "beta-focus-task"
+`)
+	write(".agents/workflow/plans/beta/TASKS.yaml", `schema_version: 1
+plan_id: "beta"
+tasks:
+  - id: "b1"
+    title: "beta-focus-task"
+    status: "pending"
+    depends_on: []
+    blocks: []
+    owner: "test"
+    write_scope: []
+    verification_required: false
+    notes: ""
+`)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.CanonicalPlans) != 2 {
+		t.Fatalf("expected 2 canonical plans, got %d", len(state.CanonicalPlans))
+	}
+	// NextAction must come from the active plan (alpha), not the paused one (beta)
+	if state.NextAction != "alpha-focus-task" {
+		t.Fatalf("next action = %q, want 'alpha-focus-task'", state.NextAction)
+	}
+	// Orient output must include both plans
+	var buf bytes.Buffer
+	renderWorkflowOrientMarkdown(state, &buf)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "Alpha Plan") {
+		t.Fatalf("orient missing Alpha Plan:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Beta Plan") {
+		t.Fatalf("orient missing Beta Plan:\n%s", rendered)
+	}
+}
+
+// TestWorkflow_DirtyGitWarning modifies a file without committing and verifies that
+// collectWorkflowState reports dirty_file_count > 0 in the git summary.
+func TestWorkflow_DirtyGitWarning(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// initWorkflowTestRepo already writes README.md without committing — README.md is dirty
+	// Confirm by writing another dirty file
+	dirtyPath := filepath.Join(repo, "dirty.txt")
+	if err := os.WriteFile(dirtyPath, []byte("uncommitted change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Git.DirtyFileCount == 0 {
+		t.Fatal("expected dirty_file_count > 0 for repo with uncommitted changes")
+	}
+}
+
+// TestWorkflow_EmptyStateGraceful runs orient and health in a fresh repo with no plans,
+// no checkpoint, and no proposals — verifying valid state is returned without errors.
+func TestWorkflow_EmptyStateGraceful(t *testing.T) {
+	repo := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	testutil.InitGitRepo(t, repo, map[string]string{
+		".agentsrc.json": `{"project":"empty-proj","version":1,"sources":[{"type":"local"}]}`,
+		"README.md":      "empty\n",
+	})
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatalf("collectWorkflowState on empty repo failed: %v", err)
+	}
+	if state.Project.Name != "empty-proj" {
+		t.Fatalf("project name = %q, want empty-proj", state.Project.Name)
+	}
+	if len(state.ActivePlans) != 0 {
+		t.Fatalf("expected 0 active plans, got %d", len(state.ActivePlans))
+	}
+	if len(state.CanonicalPlans) != 0 {
+		t.Fatalf("expected 0 canonical plans, got %d", len(state.CanonicalPlans))
+	}
+	if state.Checkpoint != nil {
+		t.Fatal("expected nil checkpoint in empty repo")
+	}
+	if state.NextAction == "" {
+		t.Fatal("NextAction should not be empty even with no plans")
+	}
+
+	// Health should return valid (possibly warn, but not error, and not panic)
+	health := computeWorkflowHealth(state)
+	if health.Status == "" {
+		t.Fatal("health status should not be empty")
+	}
+	if health.Status == "error" {
+		t.Fatalf("health status = 'error' for empty-but-valid repo; warnings: %v", health.Warnings)
+	}
+
+	// Orient renders without panic
+	var buf bytes.Buffer
+	renderWorkflowOrientMarkdown(state, &buf)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "# Next Action") {
+		t.Fatalf("orient output missing Next Action section:\n%s", rendered)
+	}
+}
+
+func TestCollectWorkflowStateIncludesCanonicalPlans(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	addCanonicalPlanFixture(t, repo)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.CanonicalPlans) != 1 {
+		t.Fatalf("canonical plans count = %d, want 1", len(state.CanonicalPlans))
+	}
+	if state.CanonicalPlans[0].ID != "wave-2" {
+		t.Fatalf("canonical plan id = %q", state.CanonicalPlans[0].ID)
+	}
+	// With no checkpoint, canonical plan's focus task should drive NextAction
+	if state.NextAction != "implement structs" {
+		t.Fatalf("next action = %q, want 'implement structs'", state.NextAction)
+	}
+	if state.NextActionSource != "canonical_plan" {
+		t.Fatalf("next action source = %q, want canonical_plan", state.NextActionSource)
+	}
+}
+
+// ── Wave 4: Preference tests ──────────────────────────────────────────────────

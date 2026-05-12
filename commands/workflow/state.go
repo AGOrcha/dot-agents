@@ -1,0 +1,974 @@
+package workflow
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
+)
+
+const (
+	stateGitRevParse  = "rev-parse"
+	stateGitShortFlag = "--short"
+	stateAgentsDir    = ".agents"
+	stateNoneBullet   = "- none"
+	stateBulletFmt    = "- %s\n"
+)
+
+func runWorkflowStatus() error {
+	state, err := collectWorkflowState()
+	if err != nil {
+		return err
+	}
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(state)
+	}
+
+	ui.Header("Workflow Status")
+	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Bold, state.Project.Name, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, state.Project.Path, ui.Reset)
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Project")
+	fmt.Fprintf(os.Stdout, "  branch: %s\n", state.Git.Branch)
+	fmt.Fprintf(os.Stdout, "  sha: %s\n", state.Git.SHA)
+	fmt.Fprintf(os.Stdout, "  dirty files: %d\n", state.Git.DirtyFileCount)
+	fmt.Fprintf(os.Stdout, "  canonical plans: %d\n", len(state.CanonicalPlans))
+	fmt.Fprintf(os.Stdout, "  active plans: %d\n", len(state.ActivePlans))
+	fmt.Fprintf(os.Stdout, "  pending handoffs: %d\n", len(state.Handoffs))
+	fmt.Fprintf(os.Stdout, "  lessons: %d\n", len(state.Lessons))
+	fmt.Fprintf(os.Stdout, "  pending proposals: %d\n", state.Proposals.PendingCount)
+	fmt.Fprintf(os.Stdout, "  active delegations: %d\n", state.ActiveDelegations.ActiveCount)
+	fmt.Fprintf(os.Stdout, "  pending merge-backs: %d\n", state.PendingMergeBacks)
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Last Checkpoint")
+	if state.Checkpoint == nil {
+		fmt.Fprintln(os.Stdout, "  none")
+	} else {
+		fmt.Fprintf(os.Stdout, "  timestamp: %s\n", state.Checkpoint.Timestamp)
+		fmt.Fprintf(os.Stdout, "  verification: %s\n", state.Checkpoint.Verification.Status)
+		if state.Checkpoint.Verification.Summary != "" {
+			fmt.Fprintf(os.Stdout, "  summary: %s\n", state.Checkpoint.Verification.Summary)
+		}
+		fmt.Fprintf(os.Stdout, "  next action: %s\n", state.Checkpoint.NextAction)
+	}
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Next Action")
+	fmt.Fprintf(os.Stdout, "  recommended: %s\n", state.NextAction)
+	fmt.Fprintf(os.Stdout, "  source: %s\n", state.NextActionSource)
+
+	if len(state.Warnings) > 0 {
+		fmt.Fprintln(os.Stdout)
+		ui.Section("Warnings")
+		for _, warning := range state.Warnings {
+			fmt.Fprintf(os.Stdout, "  - %s\n", warning)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+func runWorkflowOrient() error {
+	state, err := collectWorkflowState()
+	if err != nil {
+		return err
+	}
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(state)
+	}
+	renderWorkflowOrientMarkdown(state, os.Stdout)
+	return nil
+}
+
+func runWorkflowCheckpoint(message, verificationStatus, verificationSummary string) error {
+	if verificationStatus == "" {
+		verificationStatus = workflowDefaultVerificationState
+	}
+	if !isValidVerificationStatus(verificationStatus) {
+		return fmt.Errorf("invalid verification status %q", verificationStatus)
+	}
+
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	state, err := collectWorkflowState()
+	if err != nil {
+		return err
+	}
+
+	checkpoint := workflowCheckpoint{
+		SchemaVersion: 1,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Project:       project,
+		Git: workflowGitSummary{
+			Branch:         state.Git.Branch,
+			SHA:            state.Git.SHA,
+			DirtyFileCount: state.Git.DirtyFileCount,
+		},
+		Message:    message,
+		NextAction: state.NextAction,
+		Blockers:   []string{},
+	}
+	checkpoint.Files.Modified, err = gitModifiedFiles(project.Path)
+	if err != nil {
+		checkpoint.Files.Modified = []string{}
+	}
+	checkpoint.Verification.Status = verificationStatus
+	checkpoint.Verification.Summary = verificationSummary
+
+	contextDir := config.ProjectContextDir(project.Name)
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		return err
+	}
+	checkpointPath := filepath.Join(contextDir, "checkpoint.yaml")
+	content, err := yaml.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(checkpointPath, content, 0644); err != nil {
+		return err
+	}
+	if err := appendWorkflowSessionLog(filepath.Join(contextDir, "session-log.md"), checkpoint); err != nil {
+		return err
+	}
+
+	ui.Success("Checkpoint written")
+	fmt.Fprintf(os.Stdout, "  %s\n\n", config.DisplayPath(checkpointPath))
+	return nil
+}
+
+func runWorkflowLog(showAll bool) error {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return err
+	}
+	logPath := filepath.Join(config.ProjectContextDir(project.Name), "session-log.md")
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ui.Info("No session log found.")
+			return nil
+		}
+		return err
+	}
+
+	entries := splitWorkflowLogEntries(string(content))
+	if !showAll && len(entries) > 10 {
+		entries = entries[len(entries)-10:]
+	}
+
+	ui.Header("Workflow Log")
+	for _, entry := range entries {
+		fmt.Fprintln(os.Stdout, entry)
+		fmt.Fprintln(os.Stdout)
+	}
+	return nil
+}
+
+func collectDelegationSummary(projectPath string) (workflowDelegationSummary, int) {
+	contracts, err := listDelegationContracts(projectPath)
+	if err != nil {
+		return workflowDelegationSummary{}, 0
+	}
+	summary := workflowDelegationSummary{}
+	for _, c := range contracts {
+		if c.Status == "pending" || c.Status == "active" {
+			summary.ActiveCount++
+			if c.PendingIntent != CoordinationIntentNone {
+				summary.PendingIntents++
+			}
+		}
+	}
+	mergeBackEntries, err := os.ReadDir(mergeBackDir(projectPath))
+	pendingMergebacks := 0
+	if err == nil {
+		for _, e := range mergeBackEntries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				pendingMergebacks++
+			}
+		}
+	}
+	return summary, pendingMergebacks
+}
+
+// workflowStateInputs bundles the raw data collected from the project
+// before the orient state is composed.
+type workflowStateInputs struct {
+	project           workflowProjectRef
+	gitSummary        workflowGitSummary
+	activePlans       []workflowPlanSummary
+	canonicalPlans    []workflowCanonicalPlanSummary
+	handoffs          []workflowHandoffSummary
+	lessons           []string
+	checkpoint        *workflowCheckpoint
+	proposals         int
+	delegationSummary workflowDelegationSummary
+	pendingMergebacks int
+	warnings          []string
+}
+
+func gatherWorkflowStateInputs() (*workflowStateInputs, error) {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return nil, err
+	}
+	gitSummary, gitWarnings := collectWorkflowGitSummary(project.Path)
+	activePlans, err := collectWorkflowPlans(project.Path)
+	if err != nil {
+		return nil, err
+	}
+	canonicalPlans, canonicalWarnings := collectCanonicalPlans(project.Path)
+	handoffs, err := collectWorkflowHandoffs(project.Path)
+	if err != nil {
+		return nil, err
+	}
+	lessons, lessonWarnings := collectWorkflowLessons(project.Path)
+	checkpoint, checkpointWarnings := loadWorkflowCheckpoint(project.Name)
+	proposals, err := countPendingWorkflowProposals()
+	if err != nil {
+		return nil, err
+	}
+	delegationSummary, pendingMergebacks := collectDelegationSummary(project.Path)
+
+	warnings := append([]string{}, gitWarnings...)
+	warnings = append(warnings, canonicalWarnings...)
+	warnings = append(warnings, lessonWarnings...)
+	warnings = append(warnings, checkpointWarnings...)
+
+	return &workflowStateInputs{
+		project:           project,
+		gitSummary:        gitSummary,
+		activePlans:       activePlans,
+		canonicalPlans:    canonicalPlans,
+		handoffs:          handoffs,
+		lessons:           lessons,
+		checkpoint:        checkpoint,
+		proposals:         proposals,
+		delegationSummary: delegationSummary,
+		pendingMergebacks: pendingMergebacks,
+		warnings:          warnings,
+	}, nil
+}
+
+func appendBranchSessions(state *workflowOrientState, home, branch string) {
+	for _, p := range platform.All() {
+		finder, ok := p.(platform.BranchSessionFinder)
+		if !ok {
+			continue
+		}
+		platformName := p.ID()
+		if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() != "" {
+			platformName = sr.AIAgentPrefix()
+		}
+		for _, s := range finder.FindSessionsOnBranch(home, state.Project.Path, branch, 3) {
+			state.RecentSessions = append(state.RecentSessions, branchSessionInfo{
+				Platform:     platformName,
+				SessionID:    s.SessionID,
+				Timestamp:    s.Timestamp,
+				MessageCount: s.MessageCount,
+			})
+		}
+	}
+}
+
+func enrichWorkflowState(state *workflowOrientState) {
+	localDrift := detectRepoDrift(
+		ManagedProject{Name: state.Project.Name, Path: state.Project.Path},
+		defaultCheckpointStaleDays, defaultProposalStaleDays,
+	)
+	if localDrift.Status != "healthy" {
+		state.LocalDrift = &localDrift
+	}
+	health := computeWorkflowHealth(state)
+	state.Health = &health
+
+	if prefs, err := resolvePreferences(state.Project.Path, state.Project.Name); err == nil {
+		state.Preferences = &prefs
+	}
+
+	home, _ := os.UserHomeDir()
+	branch := state.Git.Branch
+	if home != "" && branch != "" {
+		appendBranchSessions(state, home, branch)
+	}
+}
+
+func collectWorkflowState() (*workflowOrientState, error) {
+	in, err := gatherWorkflowStateInputs()
+	if err != nil {
+		return nil, err
+	}
+
+	state := &workflowOrientState{
+		Project:        in.project,
+		Git:            in.gitSummary,
+		ActivePlans:    in.activePlans,
+		CanonicalPlans: in.canonicalPlans,
+		Checkpoint:     in.checkpoint,
+		Handoffs:       in.handoffs,
+		Lessons:        in.lessons,
+		Proposals: workflowProposalSummary{
+			PendingCount: in.proposals,
+		},
+		Warnings:          in.warnings,
+		ActiveDelegations: in.delegationSummary,
+		PendingMergeBacks: in.pendingMergebacks,
+	}
+	state.NextAction, state.NextActionSource = deriveWorkflowNextAction(in.gitSummary, in.checkpoint, in.canonicalPlans, in.activePlans)
+	if in.checkpoint != nil && strings.TrimSpace(in.checkpoint.NextAction) != "" && !isCheckpointCurrent(in.gitSummary, in.checkpoint) && state.NextActionSource != "checkpoint" {
+		state.Warnings = append(state.Warnings, fmt.Sprintf("checkpoint next action %q is stale relative to current git state; using %s", in.checkpoint.NextAction, state.NextActionSource))
+	}
+
+	enrichWorkflowState(state)
+	return state, nil
+}
+
+func currentWorkflowProject() (workflowProjectRef, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return workflowProjectRef{}, err
+	}
+	cwd, err = filepath.Abs(cwd)
+	if err != nil {
+		return workflowProjectRef{}, err
+	}
+
+	project := filepath.Base(cwd)
+	if rc, err := config.LoadAgentsRC(cwd); err == nil && strings.TrimSpace(rc.Project) != "" {
+		project = strings.TrimSpace(rc.Project)
+	}
+	return workflowProjectRef{Name: project, Path: cwd}, nil
+}
+
+func collectWorkflowGitSummary(projectPath string) (workflowGitSummary, []string) {
+	summary := workflowGitSummary{
+		Branch:         "unknown",
+		SHA:            "unknown",
+		DirtyFileCount: 0,
+	}
+	var warnings []string
+	if !isGitRepo(projectPath) {
+		warnings = append(warnings, "git repo not detected")
+		return summary, warnings
+	}
+
+	summary.Branch = strings.TrimSpace(gitOutput(projectPath, stateGitRevParse, "--abbrev-ref", "HEAD"))
+	if summary.Branch == "" {
+		summary.Branch = "unknown"
+	}
+	summary.SHA = strings.TrimSpace(gitOutput(projectPath, stateGitRevParse, stateGitShortFlag, "HEAD"))
+	if summary.SHA == "" {
+		summary.SHA = "unknown"
+	}
+	statusLines := strings.TrimSpace(gitOutput(projectPath, "status", stateGitShortFlag))
+	if statusLines != "" {
+		summary.DirtyFileCount = len(strings.Split(statusLines, "\n"))
+	}
+	commits := strings.TrimSpace(gitOutput(projectPath, "log", "--oneline", "-5"))
+	if commits != "" {
+		summary.RecentCommits = strings.Split(commits, "\n")
+	}
+	return summary, warnings
+}
+
+func collectWorkflowPlans(projectPath string) ([]workflowPlanSummary, error) {
+	paths, err := filepath.Glob(filepath.Join(projectPath, stateAgentsDir, "active", "*.plan.md"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	plans := make([]workflowPlanSummary, 0, len(paths))
+	for _, path := range paths {
+		plan, err := readWorkflowPlan(path)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+func collectWorkflowHandoffs(projectPath string) ([]workflowHandoffSummary, error) {
+	paths, err := filepath.Glob(filepath.Join(projectPath, stateAgentsDir, "active", "handoffs", "*.md"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	handoffs := make([]workflowHandoffSummary, 0, len(paths))
+	for _, path := range paths {
+		title, err := firstMarkdownTitle(path)
+		if err != nil {
+			return nil, err
+		}
+		handoffs = append(handoffs, workflowHandoffSummary{Path: path, Title: title})
+	}
+	return handoffs, nil
+}
+
+func collectWorkflowLessons(projectPath string) ([]string, []string) {
+	candidates := []string{
+		filepath.Join(projectPath, stateAgentsDir, "lessons", "index.md"),
+		filepath.Join(projectPath, stateAgentsDir, "lessons.md"),
+	}
+	for _, candidate := range candidates {
+		content, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		lines := make([]string, 0)
+		scanner := bufio.NewScanner(strings.NewReader(string(content)))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		if len(lines) > 10 {
+			lines = lines[len(lines)-10:]
+		}
+		return lines, nil
+	}
+	return []string{}, []string{"lessons index not found"}
+}
+
+func loadWorkflowCheckpoint(project string) (*workflowCheckpoint, []string) {
+	checkpointPath := filepath.Join(config.ProjectContextDir(project), "checkpoint.yaml")
+	content, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, []string{"checkpoint unreadable"}
+	}
+	var checkpoint workflowCheckpoint
+	if err := yaml.Unmarshal(content, &checkpoint); err != nil {
+		return nil, []string{"checkpoint unreadable"}
+	}
+	return &checkpoint, nil
+}
+
+func countPendingWorkflowProposals() (int, error) {
+	proposals, err := config.ListPendingProposals()
+	if err != nil {
+		return 0, err
+	}
+	return len(proposals), nil
+}
+
+func deriveWorkflowNextAction(git workflowGitSummary, checkpoint *workflowCheckpoint, canonicalPlans []workflowCanonicalPlanSummary, plans []workflowPlanSummary) (string, string) {
+	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" && isCheckpointCurrent(git, checkpoint) {
+		return strings.TrimSpace(checkpoint.NextAction), "checkpoint"
+	}
+	for _, cp := range canonicalPlans {
+		if cp.Status == "active" && strings.TrimSpace(cp.CurrentFocusTask) != "" {
+			return strings.TrimSpace(cp.CurrentFocusTask), "canonical_plan"
+		}
+	}
+	for _, plan := range plans {
+		if len(plan.PendingItems) > 0 {
+			return plan.PendingItems[0], "active_plan"
+		}
+	}
+	if checkpoint != nil && strings.TrimSpace(checkpoint.NextAction) != "" {
+		return strings.TrimSpace(checkpoint.NextAction), "checkpoint_stale"
+	}
+	return workflowDefaultNextAction, "default"
+}
+
+func isCheckpointCurrent(git workflowGitSummary, checkpoint *workflowCheckpoint) bool {
+	if checkpoint == nil {
+		return false
+	}
+	if strings.TrimSpace(checkpoint.Git.Branch) == "" || strings.TrimSpace(checkpoint.Git.SHA) == "" {
+		return false
+	}
+	return checkpoint.Git.Branch == git.Branch && checkpoint.Git.SHA == git.SHA
+}
+
+func completedPlanStatus(trimmed string) (bool, bool) {
+	if !strings.HasPrefix(trimmed, "Status:") {
+		return false, false
+	}
+	status := strings.TrimSpace(strings.TrimPrefix(trimmed, "Status:"))
+	return strings.HasPrefix(strings.ToLower(status), "completed"), true
+}
+
+func pendingPlanItem(trimmed string) (string, bool) {
+	if !strings.HasPrefix(trimmed, "- [ ] ") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "- [ ] ")), true
+}
+
+func readWorkflowPlanTitle(lines []string, path string) string {
+	title := filepath.Base(path)
+	if len(lines) == 0 {
+		return title
+	}
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "#") {
+		return strings.TrimSpace(strings.TrimLeft(first, "# "))
+	}
+	return title
+}
+
+func collectWorkflowPlanItems(lines []string) ([]string, []string, bool) {
+	var pending []string
+	var fallback []string
+	completed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if isCompleted, ok := completedPlanStatus(trimmed); ok {
+			completed = completed || isCompleted
+			continue
+		}
+		if item, ok := pendingPlanItem(trimmed); ok {
+			pending = appendPendingItem(pending, item)
+			if len(pending) == 3 {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		fallback = appendFallbackItem(fallback, trimmed)
+	}
+	return pending, fallback, completed
+}
+
+func appendPendingItem(pending []string, item string) []string {
+	return append(pending, item)
+}
+
+func appendFallbackItem(fallback []string, item string) []string {
+	if len(fallback) >= 3 {
+		return fallback
+	}
+	return append(fallback, item)
+}
+
+func readWorkflowPlan(path string) (workflowPlanSummary, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return workflowPlanSummary{}, err
+	}
+	lines := strings.Split(string(content), "\n")
+	title := readWorkflowPlanTitle(lines, path)
+	pending, fallback, completed := collectWorkflowPlanItems(lines[1:])
+	if completed {
+		pending = nil
+	} else if len(pending) == 0 {
+		pending = fallback
+	}
+	return workflowPlanSummary{Path: path, Title: title, PendingItems: pending}, nil
+}
+
+func firstMarkdownTitle(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") {
+			return strings.TrimSpace(strings.TrimLeft(line, "# ")), nil
+		}
+	}
+	return filepath.Base(path), nil
+}
+
+func renderOrientProjectSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Project")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "- name: %s\n", state.Project.Name)
+	fmt.Fprintf(out, "- path: %s\n", state.Project.Path)
+	fmt.Fprintf(out, "- branch: %s\n", state.Git.Branch)
+	fmt.Fprintf(out, "- sha: %s\n", state.Git.SHA)
+	fmt.Fprintf(out, "- dirty files: %d\n", state.Git.DirtyFileCount)
+	fmt.Fprintln(out)
+}
+
+func renderOrientCanonicalPlansSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Canonical Plans")
+	fmt.Fprintln(out)
+	if len(state.CanonicalPlans) == 0 {
+		fmt.Fprintln(out, stateNoneBullet)
+		fmt.Fprintln(out)
+		return
+	}
+	for _, cp := range state.CanonicalPlans {
+		fmt.Fprintf(out, "## %s (%s)\n", cp.Title, cp.Status)
+		fmt.Fprintf(out, "- id: %s\n", cp.ID)
+		if cp.CurrentFocusTask != "" {
+			fmt.Fprintf(out, "- focus: %s\n", cp.CurrentFocusTask)
+		}
+		fmt.Fprintf(out, "- tasks: %d pending, %d blocked, %d completed\n", cp.PendingCount, cp.BlockedCount, cp.CompletedCount)
+		fmt.Fprintln(out)
+	}
+}
+
+func renderOrientActivePlansSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Active Plans")
+	fmt.Fprintln(out)
+	if len(state.ActivePlans) == 0 {
+		fmt.Fprintln(out, stateNoneBullet)
+		fmt.Fprintln(out)
+		return
+	}
+	for _, plan := range state.ActivePlans {
+		fmt.Fprintf(out, "## %s\n", plan.Title)
+		fmt.Fprintf(out, "- path: %s\n", plan.Path)
+		if len(plan.PendingItems) == 0 {
+			fmt.Fprintln(out, "- no pending items found")
+		} else {
+			for _, item := range plan.PendingItems {
+				fmt.Fprintf(out, stateBulletFmt, item)
+			}
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func renderOrientLastCheckpointSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Last Checkpoint")
+	fmt.Fprintln(out)
+	if state.Checkpoint == nil {
+		fmt.Fprintln(out, stateNoneBullet)
+		fmt.Fprintln(out)
+		return
+	}
+	fmt.Fprintf(out, "- timestamp: %s\n", state.Checkpoint.Timestamp)
+	fmt.Fprintf(out, "- branch: %s\n", state.Checkpoint.Git.Branch)
+	fmt.Fprintf(out, "- sha: %s\n", state.Checkpoint.Git.SHA)
+	fmt.Fprintf(out, "- verification: %s\n", state.Checkpoint.Verification.Status)
+	if state.Checkpoint.Verification.Summary != "" {
+		fmt.Fprintf(out, "- summary: %s\n", state.Checkpoint.Verification.Summary)
+	}
+	fmt.Fprintf(out, "- next action: %s\n", state.Checkpoint.NextAction)
+	fmt.Fprintln(out)
+}
+
+func renderOrientPendingHandoffsSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Pending Handoffs")
+	fmt.Fprintln(out)
+	if len(state.Handoffs) == 0 {
+		fmt.Fprintln(out, stateNoneBullet)
+	} else {
+		for _, handoff := range state.Handoffs {
+			fmt.Fprintf(out, "- %s (%s)\n", handoff.Title, handoff.Path)
+		}
+	}
+	fmt.Fprintln(out)
+}
+
+func renderOrientDelegationsSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Delegations")
+	fmt.Fprintln(out)
+	if state.ActiveDelegations.ActiveCount == 0 && state.PendingMergeBacks == 0 {
+		fmt.Fprintln(out, stateNoneBullet)
+	} else {
+		fmt.Fprintf(out, "- active delegations: %d\n", state.ActiveDelegations.ActiveCount)
+		if state.ActiveDelegations.PendingIntents > 0 {
+			fmt.Fprintf(out, "- pending intents: %d (check delegation contracts)\n", state.ActiveDelegations.PendingIntents)
+		}
+		fmt.Fprintf(out, "- pending merge-backs: %d\n", state.PendingMergeBacks)
+	}
+	fmt.Fprintln(out)
+}
+
+func renderOrientLessonsSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Recent Lessons")
+	fmt.Fprintln(out)
+	if len(state.Lessons) == 0 {
+		fmt.Fprintln(out, stateNoneBullet)
+	} else {
+		for _, lesson := range state.Lessons {
+			fmt.Fprintf(out, stateBulletFmt, lesson)
+		}
+	}
+	fmt.Fprintln(out)
+}
+
+func renderOrientProposalsSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Pending Proposals")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "- count: %d\n", state.Proposals.PendingCount)
+	fmt.Fprintln(out)
+}
+
+func renderOrientNextActionSection(state *workflowOrientState, out io.Writer) {
+	fmt.Fprintln(out, "# Next Action")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, stateBulletFmt, state.NextAction)
+	fmt.Fprintf(out, "- source: %s\n", state.NextActionSource)
+}
+
+func renderOrientRecentCommitsSection(state *workflowOrientState, out io.Writer) {
+	if len(state.Git.RecentCommits) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "# Recent Commits")
+	fmt.Fprintln(out)
+	for _, commit := range state.Git.RecentCommits {
+		fmt.Fprintln(out, commit)
+	}
+}
+
+func renderOrientRecentSessionsSection(state *workflowOrientState, out io.Writer) {
+	if len(state.RecentSessions) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "## Recent sessions on this branch")
+	fmt.Fprintln(out)
+	for _, s := range state.RecentSessions {
+		sessionShort := s.SessionID
+		if len(sessionShort) > 8 {
+			sessionShort = sessionShort[:8]
+		}
+		ts := s.Timestamp
+		if len(ts) > 16 {
+			ts = ts[:16]
+		}
+		if s.MessageCount > 0 {
+			fmt.Fprintf(out, "%-14s  %s  %s  ~%d messages\n", s.Platform, sessionShort, ts, s.MessageCount)
+		} else {
+			fmt.Fprintf(out, "%-14s  %s  %s\n", s.Platform, sessionShort, ts)
+		}
+	}
+}
+
+func renderOrientHealthSection(state *workflowOrientState, out io.Writer) {
+	if state.Health == nil {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "# Health")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "- status: %s\n", state.Health.Status)
+	for _, w := range state.Health.Warnings {
+		fmt.Fprintf(out, "- warning: %s\n", w)
+	}
+}
+
+func renderOrientPreferencesSection(state *workflowOrientState, out io.Writer) {
+	p := state.Preferences
+	if p == nil {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "# Preferences")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "- test_command: %s\n", strPtrVal(p.Verification.TestCommand))
+	fmt.Fprintf(out, "- lint_command: %s\n", strPtrVal(p.Verification.LintCommand))
+	fmt.Fprintf(out, "- plan_directory: %s\n", strPtrVal(p.Planning.PlanDirectory))
+	fmt.Fprintf(out, "- package_manager: %s\n", strPtrVal(p.Execution.PackageManager))
+	fmt.Fprintf(out, "- formatter: %s\n", strPtrVal(p.Execution.Formatter))
+}
+
+func renderOrientLocalDriftSection(state *workflowOrientState, out io.Writer) {
+	if state.LocalDrift == nil {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "# Local Drift")
+	fmt.Fprintln(out)
+	for _, w := range state.LocalDrift.Warnings {
+		fmt.Fprintf(out, "- warn: %s\n", w)
+	}
+	fmt.Fprintln(out, "  (run 'da workflow drift' for cross-repo view)")
+}
+
+func renderOrientWarningsSection(state *workflowOrientState, out io.Writer) {
+	if len(state.Warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "# Warnings")
+	fmt.Fprintln(out)
+	for _, warning := range state.Warnings {
+		fmt.Fprintf(out, stateBulletFmt, warning)
+	}
+}
+
+func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
+	renderOrientProjectSection(state, out)
+	renderOrientCanonicalPlansSection(state, out)
+	renderOrientActivePlansSection(state, out)
+	renderOrientLastCheckpointSection(state, out)
+	renderOrientPendingHandoffsSection(state, out)
+	renderOrientDelegationsSection(state, out)
+	renderOrientLessonsSection(state, out)
+	renderOrientProposalsSection(state, out)
+	renderOrientNextActionSection(state, out)
+	renderOrientRecentCommitsSection(state, out)
+	renderOrientRecentSessionsSection(state, out)
+	renderOrientHealthSection(state, out)
+	renderOrientPreferencesSection(state, out)
+	renderOrientLocalDriftSection(state, out)
+	renderOrientWarningsSection(state, out)
+}
+
+func appendWorkflowSessionLog(path string, checkpoint workflowCheckpoint) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "## %s\n", checkpoint.Timestamp); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "branch: %s\n", checkpoint.Git.Branch); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "sha: %s\n", checkpoint.Git.SHA); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "files: %d\n", len(checkpoint.Files.Modified)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "verification: %s\n", checkpoint.Verification.Status); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "message: %s\n", checkpoint.Message); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "next_action: %s\n\n", checkpoint.NextAction); err != nil {
+		return err
+	}
+	return nil
+}
+
+func splitWorkflowLogEntries(content string) []string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	parts := strings.Split(content, "\n## ")
+	entries := make([]string, 0, len(parts))
+	for i, part := range parts {
+		entry := part
+		if i > 0 {
+			entry = "## " + part
+		}
+		entry = strings.TrimSpace(entry)
+		if entry != "" {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func isGitRepo(projectPath string) bool {
+	cmd := execabs.Command("git", "-C", projectPath, "rev-parse", "--is-inside-work-tree")
+	return cmd.Run() == nil
+}
+
+func gitOutput(projectPath string, args ...string) string {
+	cmd := execabs.Command("git", append([]string{"-C", projectPath}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+func gitModifiedFiles(projectPath string) ([]string, error) {
+	if !isGitRepo(projectPath) {
+		return []string{}, nil
+	}
+	output := strings.TrimSpace(gitOutput(projectPath, "status", "--short"))
+	if output == "" {
+		return []string{}, nil
+	}
+	lines := strings.Split(output, "\n")
+	files := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) < 4 {
+			continue
+		}
+		files = append(files, strings.TrimSpace(line[3:]))
+	}
+	return files, nil
+}
+
+func isValidVerificationStatus(status string) bool {
+	switch status {
+	case "pass", "fail", "partial", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func plansBaseDir(projectPath string) string {
+	return filepath.Join(projectPath, stateAgentsDir, "workflow", "plans")
+}
+
+func historyBaseDir(projectPath string) string {
+	return filepath.Join(projectPath, stateAgentsDir, "history")
+}
+
+func listCanonicalPlanIDs(projectPath string) ([]string, error) {
+	base := plansBaseDir(projectPath)
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		planPath := filepath.Join(base, e.Name(), "PLAN.yaml")
+		if _, err := os.Stat(planPath); err == nil {
+			ids = append(ids, e.Name())
+			continue
+		} else if os.IsNotExist(err) {
+			continue
+		} else {
+			return nil, err
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}

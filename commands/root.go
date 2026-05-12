@@ -29,6 +29,7 @@ func NewRootCommand() *cobra.Command {
 			"  da status --audit",
 			"  da install --generate",
 			"  da sync status",
+			"  da workflow orient",
 		}, "\n"),
 		Version:       Version,
 		SilenceUsage:  true,
@@ -59,6 +60,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewExplainCmd())
 	root.AddCommand(NewInstallCmd())
 	root.AddCommand(NewSessionCmd())
+	root.AddCommand(NewWorkflowCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)

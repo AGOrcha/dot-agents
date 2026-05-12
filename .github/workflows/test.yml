@@ -355,6 +355,20 @@ jobs:
       # so those steps would fail here ("unknown command"). pr3b re-adds
       # them after rebasing onto this test.yml.
 
+      - name: Test workflow orient (no project context)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/da workflow orient 2>&1 || true
+
+      - name: Test workflow help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/da workflow --help
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}
