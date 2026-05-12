@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -569,6 +570,42 @@ func collectCanonicalPlans(projectPath string) ([]workflowCanonicalPlanSummary, 
 	return summaries, warnings
 }
 
+// collectDraftPlanIDs returns the IDs of all canonical plans whose status is
+// "draft". Draft plans are silently skipped by selectAllEligibleTasks /
+// selectNextCanonicalTask; this helper lets eligible/next surface them so an
+// operator is never told "no eligible tasks" while plans sit unactivated.
+// Returns an empty (non-nil) slice when no drafts exist or on read errors.
+func collectDraftPlanIDs(projectPath string) []string {
+	ids, err := listCanonicalPlanIDs(projectPath)
+	if err != nil {
+		return []string{}
+	}
+	drafts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		plan, err := loadCanonicalPlan(projectPath, id)
+		if err != nil {
+			continue
+		}
+		if plan.Status == "draft" {
+			drafts = append(drafts, plan.ID)
+		}
+	}
+	return drafts
+}
+
+// renderDraftPlansHint writes the "draft plans not yet activated" guidance to
+// out. It is emitted by `workflow eligible` and `workflow next` when no
+// actionable task is found AND there are drafts the operator may have
+// forgotten to promote. Kept in one place so the wording stays consistent
+// across surfaces.
+func renderDraftPlansHint(out io.Writer, drafts []string) {
+	if len(drafts) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "Found %d draft plan(s) not yet activated: %s\n", len(drafts), strings.Join(drafts, ", "))
+	fmt.Fprintln(out, "  Run `da workflow plan update --status active --plan <id>` to activate.")
+}
+
 func isValidPlanStatus(s string) bool {
 	switch s {
 	case "draft", "active", "paused", "completed", "archived":
@@ -1103,6 +1140,7 @@ type eligibleOutput struct {
 	ConflictGraph map[string][]string `json:"conflict_graph"`
 	TotalEligible int                 `json:"total_eligible"`
 	MaxParallel   int                 `json:"max_parallel"`
+	DraftPlans    []string            `json:"draft_plans"`
 }
 
 // writeScopeConflictResult is the output of computeWriteScopeConflicts.
@@ -1217,8 +1255,21 @@ func runWorkflowNext(explicitPlanID string) error {
 		return err
 	}
 	if suggestion == nil {
+		drafts := collectDraftPlanIDs(project.Path)
+		if deps.Flags.JSON() {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(map[string]any{
+				"suggestion":  nil,
+				"draft_plans": drafts,
+			})
+		}
 		fmt.Fprintln(os.Stdout, "No actionable canonical task found.")
 		fmt.Fprintln(os.Stdout, "  Active plans are completed, blocked by dependencies, already delegated, or missing TASKS.yaml.")
+		if len(drafts) > 0 {
+			fmt.Fprintln(os.Stdout)
+			renderDraftPlansHint(os.Stdout, drafts)
+		}
 		return nil
 	}
 
@@ -1345,6 +1396,10 @@ func renderEligibleOutput(out eligibleOutput, maxWorkers, limit int) {
 	if len(out.MaxBatch) > 0 {
 		fmt.Fprintf(os.Stdout, "  max batch: %s\n", strings.Join(out.MaxBatch, ", "))
 	}
+	if out.TotalEligible == 0 && len(out.DraftPlans) > 0 {
+		fmt.Fprintln(os.Stdout)
+		renderDraftPlansHint(os.Stdout, out.DraftPlans)
+	}
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -1378,9 +1433,13 @@ func runWorkflowEligible(planFilter string, limit int) error {
 		ConflictGraph: conflictResult.ConflictGraph,
 		TotalEligible: len(annotated),
 		MaxParallel:   len(conflictResult.MaxBatch),
+		DraftPlans:    collectDraftPlanIDs(project.Path),
 	}
 	if out.EligibleTasks == nil {
 		out.EligibleTasks = []AnnotatedTask{}
+	}
+	if out.DraftPlans == nil {
+		out.DraftPlans = []string{}
 	}
 
 	if deps.Flags.JSON() {

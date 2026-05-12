@@ -53,8 +53,16 @@ func TestWorkflowLifecycle_PlanToCloseout(t *testing.T) {
 		}
 	}
 
-	// Plans are created with status=draft; lifecycle helpers like
-	// selectAllEligibleTasks only consider active plans. Promote to active.
+	// Plans are created with status=draft. Before activation, the eligible
+	// surface should explicitly call out the unactivated draft instead of
+	// silently reporting "no tasks". Verify that hint surfaces, then promote
+	// the plan and continue the lifecycle.
+	captureStdoutWhileRunning(t, repo,
+		func() error { return runWorkflowEligible("", 0) },
+		"Found 1 draft plan(s) not yet activated",
+		planID,
+		"da workflow plan update --status active",
+	)
 	if err := runWorkflowPlanUpdate(planID, "active", "", "", "", "", ""); err != nil {
 		t.Fatalf("plan update active: %v", err)
 	}

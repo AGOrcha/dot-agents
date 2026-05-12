@@ -336,9 +336,37 @@ func collectWorkflowState() (*workflowOrientState, error) {
 	if in.checkpoint != nil && strings.TrimSpace(in.checkpoint.NextAction) != "" && !isCheckpointCurrent(in.gitSummary, in.checkpoint) && state.NextActionSource != "checkpoint" {
 		state.Warnings = append(state.Warnings, fmt.Sprintf("checkpoint next action %q is stale relative to current git state; using %s", in.checkpoint.NextAction, state.NextActionSource))
 	}
+	if drafts := draftPlanIDsFromSummaries(in.canonicalPlans); len(drafts) > 0 && !canonicalPlansHaveActive(in.canonicalPlans) {
+		state.Warnings = append(state.Warnings,
+			fmt.Sprintf("found %d draft plan(s) not yet activated: %s; run `da workflow plan update --status active --plan <id>` to activate",
+				len(drafts), strings.Join(drafts, ", ")))
+	}
 
 	enrichWorkflowState(state)
 	return state, nil
+}
+
+// draftPlanIDsFromSummaries extracts the IDs of plans whose status is
+// "draft" from a pre-collected slice of canonical plan summaries. Used by
+// collectWorkflowState to emit a draft-plans warning in orient/status without
+// re-reading PLAN.yaml for every plan.
+func draftPlanIDsFromSummaries(summaries []workflowCanonicalPlanSummary) []string {
+	drafts := make([]string, 0, len(summaries))
+	for _, s := range summaries {
+		if s.Status == "draft" {
+			drafts = append(drafts, s.ID)
+		}
+	}
+	return drafts
+}
+
+func canonicalPlansHaveActive(summaries []workflowCanonicalPlanSummary) bool {
+	for _, s := range summaries {
+		if s.Status == "active" {
+			return true
+		}
+	}
+	return false
 }
 
 func currentWorkflowProject() (workflowProjectRef, error) {

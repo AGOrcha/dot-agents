@@ -1627,6 +1627,56 @@ func TestRunWorkflowNext_NoActionablePrintsHelp(t *testing.T) {
 	)
 }
 
+// TestRunWorkflowEligible_DraftPlansSurfaceHint verifies that when the only
+// plans on disk are drafts (the default for `plan create`), `workflow
+// eligible` surfaces an actionable hint instead of silently reporting zero
+// tasks. Regression guard for the "silent skip" anti-pattern observed in
+// brainstorm A1.
+func TestRunWorkflowEligible_DraftPlansSurfaceHint(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", fakeHome)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowPlanCreate("draft-plan", "Draft only",
+		"surfaced-by-test", "dot-agents", "x", "go test ./..."); err != nil {
+		t.Fatalf("plan create: %v", err)
+	}
+
+	captureStdoutWhileRunning(t, repo,
+		func() error { return runWorkflowEligible("", 0) },
+		"Found 1 draft plan(s) not yet activated",
+		"draft-plan",
+		"da workflow plan update --status active",
+	)
+}
+
+// TestRunWorkflowNext_DraftPlansSurfaceHint mirrors the eligible test for
+// `workflow next`: when there are no actionable tasks but draft plans exist,
+// the same activation hint must appear so the user sees a path forward.
+func TestRunWorkflowNext_DraftPlansSurfaceHint(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	fakeHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", fakeHome)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowPlanCreate("draft-plan", "Draft only",
+		"surfaced-by-test", "dot-agents", "x", "go test ./..."); err != nil {
+		t.Fatalf("plan create: %v", err)
+	}
+
+	captureStdoutWhileRunning(t, repo,
+		func() error { return runWorkflowNext("") },
+		"No actionable canonical task found.",
+		"Found 1 draft plan(s) not yet activated",
+		"draft-plan",
+	)
+}
+
 // TestRunWorkflowComplete_EmptyPlanIDFails verifies the input guard.
 func TestRunWorkflowComplete_EmptyPlanIDFails(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
