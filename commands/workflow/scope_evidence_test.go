@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -353,6 +354,160 @@ func TestDeriveScopeConfidence(t *testing.T) {
 	// Negative: research mode, no context lane → low.
 	if got := deriveScopeConfidence("research", false, false, false, 0); got != "low" {
 		t.Errorf("want low for research+no context, got %q", got)
+	}
+}
+
+// ── pr3b coverage: scope-evidence helpers not previously exercised ───────────
+
+func TestDeriveScopeWarningsForMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       string
+		codeReady  bool
+		hasInputs  bool
+		expectSkip bool
+	}{
+		{"code-ready-with-seeds-runs", "code", true, true, false},
+		{"non-code-mode-skips", "research", true, true, true},
+		{"doc-mode-skips", "doc", true, true, true},
+		{"code-but-no-code-lane-skips", "code", false, true, true},
+		{"code-but-no-seeds-skips", "code", true, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveScopeWarningsForMode(tc.mode, tc.codeReady, tc.hasInputs)
+			if tc.expectSkip && got == "" {
+				t.Errorf("expected non-empty skip reason, got empty")
+			}
+			if !tc.expectSkip && got != "" {
+				t.Errorf("expected empty (run scope lane), got %q", got)
+			}
+		})
+	}
+}
+
+func TestDeriveScopeEvidencePath(t *testing.T) {
+	p := deriveScopeEvidencePath("/tmp/proj", "my-plan", "my-task")
+	if filepath.Base(p) != "my-task.scope.yaml" {
+		t.Errorf("expected my-task.scope.yaml, got %s", filepath.Base(p))
+	}
+	if filepath.Base(filepath.Dir(p)) != "evidence" {
+		t.Errorf("expected evidence parent dir, got %s", filepath.Base(filepath.Dir(p)))
+	}
+}
+
+func TestPersistScopeEvidenceSidecar(t *testing.T) {
+	repo := t.TempDir()
+	ev := NewScopeEvidence("plan-x", "task-y")
+	ev.Confidence = "low"
+	ev.Mode = "code"
+
+	outPath, err := persistScopeEvidenceSidecar(repo, "plan-x", "task-y", ev)
+	if err != nil {
+		t.Fatalf("persistScopeEvidenceSidecar: %v", err)
+	}
+	if _, err := os.Stat(outPath); err != nil {
+		t.Errorf("sidecar not on disk: %v", err)
+	}
+	data, _ := os.ReadFile(outPath)
+	var got ScopeEvidence
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.PlanID != "plan-x" || got.TaskID != "task-y" {
+		t.Errorf("identity not preserved: %+v", got)
+	}
+	if got.Confidence != "low" {
+		t.Errorf("confidence: got %q, want low", got.Confidence)
+	}
+}
+
+func TestAppendScopeRequiredPaths_Dedup(t *testing.T) {
+	ev := NewScopeEvidence("p", "t")
+	ev.RequiredPaths = append(ev.RequiredPaths, ScopePath{Path: "a.go", Because: []string{"seed"}})
+
+	appendScopeRequiredPaths(ev, []string{"a.go", "b.go", "b.go", "c.go"})
+	if len(ev.RequiredPaths) != 3 {
+		t.Errorf("expected 3 unique paths, got %d (%+v)", len(ev.RequiredPaths), ev.RequiredPaths)
+	}
+	// a.go must keep its original reason ("seed"), not be overwritten.
+	for _, rp := range ev.RequiredPaths {
+		if rp.Path == "a.go" && (len(rp.Because) == 0 || rp.Because[0] != "seed") {
+			t.Errorf("existing a.go reason overwritten: %+v", rp)
+		}
+	}
+}
+
+func TestAppendScopeRequiredReads_SkipsEmptyPath(t *testing.T) {
+	ev := NewScopeEvidence("p", "t")
+	appendScopeRequiredReads(ev, []GraphBridgeResult{
+		{Path: "", Title: "skip-me", Summary: "no path"},
+		{Path: "x.md", Title: "T", Summary: "S"},
+	})
+	if len(ev.RequiredReads) != 1 {
+		t.Fatalf("expected 1 required read, got %d", len(ev.RequiredReads))
+	}
+	if ev.RequiredReads[0].Path != "x.md" {
+		t.Errorf("path = %q", ev.RequiredReads[0].Path)
+	}
+	if ev.RequiredReads[0].Why != "T — S" {
+		t.Errorf("why = %q, want 'T — S'", ev.RequiredReads[0].Why)
+	}
+}
+
+func TestScopeResponseFiles(t *testing.T) {
+	results := []GraphBridgeResult{
+		{Path: "a.go"},
+		{Path: ""},
+		{Path: "b.go"},
+	}
+	files := scopeResponseFiles(results)
+	if len(files) != 2 {
+		t.Errorf("expected 2 files, got %d", len(files))
+	}
+}
+
+func TestClassifyCheckScopeFiles(t *testing.T) {
+	ev := &ScopeEvidence{
+		FinalWriteScope: []string{"in.go", "in2.go"},
+		RequiredPaths: []ScopePath{
+			{Path: "in.go"}, {Path: "required-untouched.go"},
+		},
+		ExcludedPaths: []ScopeExcludedPath{
+			{Path: "excluded.go"},
+		},
+	}
+	changed := []string{"in.go", "excluded.go", "stranger.go"}
+	inside, outside, touchedExcluded, untouched := classifyCheckScopeFiles(ev, changed)
+
+	if len(inside) != 1 || inside[0] != "in.go" {
+		t.Errorf("inside = %v, want [in.go]", inside)
+	}
+	if len(outside) != 1 || outside[0] != "stranger.go" {
+		t.Errorf("outside = %v, want [stranger.go]", outside)
+	}
+	if len(touchedExcluded) != 1 || touchedExcluded[0] != "excluded.go" {
+		t.Errorf("touchedExcluded = %v, want [excluded.go]", touchedExcluded)
+	}
+	if len(untouched) != 1 || untouched[0] != "required-untouched.go" {
+		t.Errorf("untouchedRequired = %v, want [required-untouched.go]", untouched)
+	}
+}
+
+func TestGraphAdapterForProject_NoConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	adapter := graphAdapterForProject(dir)
+	if adapter == nil {
+		t.Fatal("expected non-nil adapter")
+	}
+	// Health should succeed and report not-available since graph home is empty.
+	h, err := adapter.Health()
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.AdapterAvailable {
+		t.Error("expected adapter to be unavailable without graph home setup")
 	}
 }
 

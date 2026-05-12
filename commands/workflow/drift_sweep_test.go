@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,3 +352,232 @@ func TestPlanSweep_NoArchiveActionsForCleanProject(t *testing.T) {
 }
 
 // ── Phase 6: fold-back ───────────────────────────────────────────────────────
+
+// ── pr3b coverage: helpers that previously had no direct tests ───────────────
+
+func TestExtractPlanStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"active", "schema_version: 1\nid: p\nstatus: active\n", "active"},
+		{"completed", "status: completed\n", "completed"},
+		{"missing-status", "schema_version: 1\nid: p\n", ""},
+		{"empty", "", ""},
+		{"malformed", "::not yaml::\n  - [", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractPlanStatus([]byte(tc.data)); got != tc.want {
+				t.Errorf("extractPlanStatus(%q) = %q, want %q", tc.data, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestJoinIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{"empty", []string{}, ""},
+		{"single", []string{"a"}, "a"},
+		{"multi", []string{"a", "b", "c"}, "a, b, c"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := joinIDs(tc.in); got != tc.want {
+				t.Errorf("joinIDs(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAggregateDrift_EmptyReports(t *testing.T) {
+	agg := aggregateDrift(nil)
+	if agg.TotalProjects != 0 {
+		t.Errorf("TotalProjects = %d, want 0", agg.TotalProjects)
+	}
+	if agg.HealthyCount+agg.WarnCount+agg.UnreachableCount != 0 {
+		t.Error("expected all counts to be zero on empty input")
+	}
+	if agg.Timestamp == "" {
+		t.Error("expected timestamp populated even on empty input")
+	}
+}
+
+func TestAggregateDrift_DeduplicatesTopWarnings(t *testing.T) {
+	reports := []RepoDriftReport{
+		{Project: ManagedProject{Name: "a"}, Status: "warn", Warnings: []string{"shared warning"}},
+		{Project: ManagedProject{Name: "b"}, Status: "warn", Warnings: []string{"shared warning", "unique-b"}},
+	}
+	agg := aggregateDrift(reports)
+	if len(agg.TopWarnings) != 2 {
+		t.Errorf("top warnings dedup: got %d, want 2 (one shared, one unique)", len(agg.TopWarnings))
+	}
+}
+
+func TestFilterDriftProjects(t *testing.T) {
+	all := []ManagedProject{
+		{Name: "alpha", Path: "/tmp/a"},
+		{Name: "beta", Path: "/tmp/b"},
+	}
+	t.Run("empty-filter-returns-all", func(t *testing.T) {
+		got, err := filterDriftProjects(all, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 {
+			t.Errorf("got %d, want 2", len(got))
+		}
+	})
+	t.Run("matching-filter", func(t *testing.T) {
+		got, err := filterDriftProjects(all, "beta")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].Name != "beta" {
+			t.Errorf("got %v, want [beta]", got)
+		}
+	})
+	t.Run("missing-filter-errors", func(t *testing.T) {
+		_, err := filterDriftProjects(all, "gamma")
+		if err == nil {
+			t.Error("expected error for missing filter")
+		}
+	})
+}
+
+func TestDriftStatusBadge(t *testing.T) {
+	for _, s := range []string{"warn", "unreachable", "healthy", "unknown-default"} {
+		got := driftStatusBadge(s)
+		if got == "" {
+			t.Errorf("driftStatusBadge(%q) = empty", s)
+		}
+	}
+}
+
+func TestSaveDriftReportRoundTrip(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("AGENTS_HOME", tmpHome)
+
+	agg := AggregateDriftReport{
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		TotalProjects: 1,
+		HealthyCount:  1,
+		Reports: []RepoDriftReport{
+			{Project: ManagedProject{Name: "x", Path: "/tmp/x"}, Status: "healthy"},
+		},
+	}
+	if err := saveDriftReport(agg); err != nil {
+		t.Fatalf("saveDriftReport: %v", err)
+	}
+	data, err := os.ReadFile(driftReportPath())
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty report")
+	}
+}
+
+func TestApplySweepAction_AllBranches(t *testing.T) {
+	dir := t.TempDir()
+	project := ManagedProject{Name: "p", Path: dir}
+
+	t.Run("scaffold-workflow-dir", func(t *testing.T) {
+		err := applySweepAction(SweepActionItem{
+			Project: project, Action: SweepActionScaffoldWorkflowDir,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".agents", "workflow")); err != nil {
+			t.Errorf("workflow dir not created: %v", err)
+		}
+	})
+
+	t.Run("create-plan-structure", func(t *testing.T) {
+		err := applySweepAction(SweepActionItem{
+			Project: project, Action: SweepActionCreatePlanStructure,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".agents", "workflow", "plans")); err != nil {
+			t.Errorf("plans dir not created: %v", err)
+		}
+	})
+
+	t.Run("informational-actions-no-op", func(t *testing.T) {
+		for _, a := range []SweepActionType{SweepActionCreateCheckpointReminder, SweepActionFlagStaleProposals} {
+			if err := applySweepAction(SweepActionItem{Project: project, Action: a}); err != nil {
+				t.Errorf("informational action %s returned error: %v", a, err)
+			}
+		}
+	})
+
+	t.Run("unknown-action-errors", func(t *testing.T) {
+		err := applySweepAction(SweepActionItem{Project: project, Action: SweepActionType("bogus")})
+		if err == nil {
+			t.Error("expected error for unknown action")
+		}
+	})
+}
+
+func TestSweepLogEntryFields(t *testing.T) {
+	action := SweepActionItem{
+		Project: ManagedProject{Name: "proj"}, Action: SweepActionScaffoldWorkflowDir, Description: "desc",
+	}
+	entry := sweepLogEntry(action, true, false)
+	if entry.Project != "proj" || entry.Action != SweepActionScaffoldWorkflowDir || entry.Description != "desc" {
+		t.Errorf("entry fields not populated: %+v", entry)
+	}
+	if !entry.Applied || entry.DryRun {
+		t.Errorf("expected Applied=true DryRun=false, got %+v", entry)
+	}
+	if entry.Timestamp == "" {
+		t.Error("expected timestamp populated")
+	}
+}
+
+func TestAppendSweepLog_AppendsJSONL(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+
+	for i := 0; i < 3; i++ {
+		appendSweepLog(SweepLogEntry{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Project:   "p", Action: SweepActionScaffoldWorkflowDir, Description: "d", DryRun: true,
+		})
+	}
+	data, err := os.ReadFile(sweepLogPath())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected 3 jsonl lines, got %d", len(lines))
+	}
+	for _, line := range lines {
+		var entry SweepLogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Errorf("invalid jsonl line %q: %v", line, err)
+		}
+	}
+}
+
+// drift report saved to context dir uses AGENTS_HOME — verify aggregate path stable.
+func TestDriftReportPathUnderContextDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+	p := driftReportPath()
+	if !strings.HasSuffix(p, "drift-report.json") {
+		t.Errorf("expected drift-report.json suffix, got %s", p)
+	}
+}
