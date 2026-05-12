@@ -63,10 +63,34 @@ func TestClaudeCreateLinksDualSkillOutputs(t *testing.T) {
 	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: review changes\n---\n")
 	mkdirAll(t, repo)
 
+	// Shared targets are now written by the command-layer plan before CreateLinks.
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
 	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "skills", "review"), skillDir)
 	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
+}
+
+func TestClaudeCreateLinksReplacesImportedRepoSkillDirWithManagedSymlink(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "review")
+	writeTextFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: review\ndescription: canonical review\n---\n")
+	writeTextFile(t, filepath.Join(repo, dirAgents, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: imported review\n---\n")
+
+	// Shared targets are now written by the command-layer plan before CreateLinks.
+	// The executor replaces the imported directory with a managed symlink.
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "skills", "review"), skillDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "skills", "review"), skillDir)
 }
 
 func TestClaudeCreateLinksSymlinksGlobalAgentsIntoUserHome(t *testing.T) {
@@ -82,6 +106,24 @@ func TestClaudeCreateLinksSymlinksGlobalAgentsIntoUserHome(t *testing.T) {
 	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
 
 	assertSymlinkTarget(t, filepath.Join(home, dirClaude, "agents", "reviewer"), globalAgentDir)
+}
+
+func TestClaudeCreateLinksSymlinksProjectAgentsIntoRepoMirrors(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	projectAgentDir := filepath.Join(agentsHome, "agents", fixtureProject, "docbot")
+	writeTextFile(t, filepath.Join(projectAgentDir, "AGENT.md"), "# Docbot\n")
+	mkdirAll(t, repo)
+
+	if err := CollectAndExecuteSharedTargetPlan(fixtureProject, repo, []Platform{NewClaude()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "agents", "docbot"), projectAgentDir)
+	assertSymlinkTarget(t, filepath.Join(repo, dirAgents, "agents", "docbot"), projectAgentDir)
 }
 
 func TestCursorCreateLinksHardlinksAndMCPSelection(t *testing.T) {
@@ -151,6 +193,26 @@ func TestCursorCreateLinksMCPFallsBackToProjectGenericBeforeGlobalPlatformFile(t
 	assertHardlinked(t, filepath.Join(repo, dirCursor, fileMCPJSON), projectGenericMCP)
 }
 
+func TestCursorCreateLinksPrunesStaleManagedRuleFiles(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	globalRule := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
+	writeTextFile(t, globalRule, "---\ndescription: global rules\n---\n")
+	mkdirAll(t, filepath.Join(repo, dirCursor, "rules"))
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "global--agents.mdc"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "proj--agents.mdc"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirCursor, "rules", "user-local.mdc"), "keep\n")
+
+	mustCreateLinks(t, "Cursor", NewCursor(), fixtureProject, repo)
+
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "global--agents.mdc"))
+	assertNoFile(t, filepath.Join(repo, dirCursor, "rules", "proj--agents.mdc"))
+	assertFileContains(t, filepath.Join(repo, dirCursor, "rules", "user-local.mdc"), "keep\n")
+	assertHardlinked(t, filepath.Join(repo, dirCursor, "rules", "global--rules.mdc"), globalRule)
+}
+
 func TestCopilotCreateLinksMCPSelectionAndHookFanout(t *testing.T) {
 	paths := newPlatformTestPaths(t)
 	agentsHome := paths.agentsHome
@@ -201,6 +263,24 @@ func TestClaudeCreateLinksPrefersHooksOverSettingsAndUsesGlobalCompatForUser(t *
 
 	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, fileSettingsLocalJSON), projectHook)
 	assertSymlinkTarget(t, filepath.Join(home, dirClaude, fileSettingsJSON), globalHook)
+}
+
+func TestClaudeCreateLinksPrunesStaleProjectRuleSymlinks(t *testing.T) {
+	paths := newPlatformTestPaths(t)
+	agentsHome := paths.agentsHome
+	repo := paths.repo
+
+	projectRule := filepath.Join(agentsHome, "rules", "proj", "lint.mdc")
+	writeTextFile(t, projectRule, "---\ndescription: lint\n---\n")
+	mkdirAll(t, filepath.Join(repo, dirClaude, "rules"))
+	writeTextFile(t, filepath.Join(repo, dirClaude, "rules", "proj--legacy.md"), "stale\n")
+	writeTextFile(t, filepath.Join(repo, dirClaude, "rules", "user-local.md"), "keep\n")
+
+	mustCreateLinks(t, "Claude", NewClaude(), fixtureProject, repo)
+
+	assertNoFile(t, filepath.Join(repo, dirClaude, "rules", "proj--legacy.md"))
+	assertFileContains(t, filepath.Join(repo, dirClaude, "rules", "user-local.md"), "keep\n")
+	assertSymlinkTarget(t, filepath.Join(repo, dirClaude, "rules", "proj--lint.md"), projectRule)
 }
 
 func TestCursorCreateLinksPrefersProjectHooksForRepoAndGlobalForUser(t *testing.T) {
@@ -305,6 +385,10 @@ func TestHookTranslationAcrossPlatformsUsesProjectHookSources(t *testing.T) {
 	writeTextFile(t, copilotProjectHook, "{\"name\":\"pre-tool\"}\n")
 	mkdirAll(t, repo)
 
+	platforms := []Platform{NewCursor(), NewCodex(), NewClaude(), NewCopilot()}
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewCursor().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("Cursor CreateLinks failed: %v", err)
 	}
@@ -343,6 +427,9 @@ func TestClaudeCompatTranslationFallsBackToSettingsBucket(t *testing.T) {
 	writeTextFile(t, globalSettings, "{\"scope\":\"global-settings\"}\n")
 	mkdirAll(t, repo)
 
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewClaude(), NewCopilot()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewClaude().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("Claude CreateLinks failed: %v", err)
 	}
@@ -630,6 +717,9 @@ func newPlatformTestPaths(t *testing.T) platformTestPaths {
 
 func mustCreateLinks(t *testing.T, label string, p Platform, project, repo string) {
 	t.Helper()
+	if err := CollectAndExecuteSharedTargetPlan(project, repo, []Platform{p}); err != nil {
+		t.Fatalf("%s CollectAndExecuteSharedTargetPlan: %v", label, err)
+	}
 	if err := p.CreateLinks(project, repo); err != nil {
 		t.Fatalf("%s CreateLinks failed: %v", label, err)
 	}
@@ -712,6 +802,17 @@ func assertNoFile(t *testing.T, path string) {
 	t.Helper()
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected %s to be absent, got err=%v", path, err)
+	}
+}
+
+func assertFileContains(t *testing.T, path, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(content) != want {
+		t.Fatalf("expected %s to contain %q, got %q", path, want, string(content))
 	}
 }
 

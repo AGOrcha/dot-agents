@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ const (
 	hooksTestCanonicalHookName    = "format-write"
 	hooksTestCanonicalMatcherExpr = "Write | Edit"
 	hooksTestCanonicalRunCommand  = "/tmp/run.sh"
+	hooksTestJSONUnmarshalFmt     = "json.Unmarshal failed: %v\n%s"
 )
 
 func TestResolveHookSpecPrefersProjectHooksOverSettingsAndGlobal(t *testing.T) {
@@ -52,7 +54,7 @@ func TestEmitHookFanoutSymlinksSelectedHookFiles(t *testing.T) {
 	writeTextFile(t, preTool, "{\"name\":\"pre-tool\"}\n")
 	writeTextFile(t, cursorHook, "{\"name\":\"cursor\"}\n")
 
-	specs, err := listHookSpecs(agentsHome, "proj")
+	specs, err := ListHookSpecs(agentsHome, "proj")
 	if err != nil {
 		t.Fatalf("listHookSpecs failed: %v", err)
 	}
@@ -94,7 +96,7 @@ enabled_on: [claude, cursor]
 	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"), "#!/bin/sh\nexit 0\n")
 	writeTextFile(t, filepath.Join(agentsHome, "hooks", "proj", "copilot-cli-policy.json"), "{\"version\":1}\n")
 
-	specs, err := listHookSpecs(agentsHome, "proj")
+	specs, err := ListHookSpecs(agentsHome, "proj")
 	if err != nil {
 		t.Fatalf("listHookSpecs failed: %v", err)
 	}
@@ -117,7 +119,7 @@ enabled_on: [claude, cursor]
 	if specs[1].MatchExpression != hooksTestCanonicalMatcherExpr {
 		t.Fatalf("expected canonical match expression %q, got %q", hooksTestCanonicalMatcherExpr, specs[1].MatchExpression)
 	}
-	if got, want := resolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"); got != want {
+	if got, want := ResolveHookCommand(specs[1]), filepath.Join(agentsHome, "hooks", "proj", hooksTestCanonicalHookName, "run.sh"); got != want {
 		t.Fatalf("resolved command = %q, want %q", got, want)
 	}
 }
@@ -140,6 +142,31 @@ func TestRenderClaudeHookSettingsPrefersCanonicalMatchExpression(t *testing.T) {
 	}
 }
 
+func TestRenderClaudeHookSettingsMatchesClaudeCodeSchema(t *testing.T) {
+	specs := []HookSpec{{
+		Name:            hooksTestCanonicalHookName,
+		When:            "pre_tool_use",
+		MatchTools:      []string{"Write", "Edit"},
+		MatchExpression: hooksTestCanonicalMatcherExpr,
+		Command:         hooksTestCanonicalRunCommand,
+		TimeoutMS:       15000,
+	}}
+
+	content, err := renderClaudeHookSettings(specs)
+	if err != nil {
+		t.Fatalf("renderClaudeHookSettings failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	assertHookJSONPathEquals(t, payload, "$schema", "https://json.schemastore.org/claude-code-settings.json")
+	assertHookJSONPathEquals(t, payload, "hooks.PreToolUse.0.matcher", hooksTestCanonicalMatcherExpr)
+	assertHookJSONPathEquals(t, payload, "hooks.PreToolUse.0.hooks.0.type", "command")
+	assertHookJSONPathEquals(t, payload, "hooks.PreToolUse.0.hooks.0.command", hooksTestCanonicalRunCommand)
+}
+
 func TestRenderCursorHookConfigPrefersCanonicalMatchExpression(t *testing.T) {
 	specs := []HookSpec{{
 		Name:            hooksTestCanonicalHookName,
@@ -158,6 +185,81 @@ func TestRenderCursorHookConfigPrefersCanonicalMatchExpression(t *testing.T) {
 	}
 }
 
+func TestRenderCursorHookConfigMatchesCursorDocsShape(t *testing.T) {
+	specs := []HookSpec{{
+		Name:            hooksTestCanonicalHookName,
+		When:            "pre_tool_use",
+		MatchTools:      []string{"Bash"},
+		MatchExpression: "Bash",
+		Command:         hooksTestCanonicalRunCommand,
+		TimeoutMS:       7000,
+	}}
+
+	content, err := renderCursorHookConfig(specs)
+	if err != nil {
+		t.Fatalf("renderCursorHookConfig failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	assertHookJSONPathEquals(t, payload, "version", float64(1))
+	assertHookJSONPathEquals(t, payload, "hooks.preToolUse.0.command", hooksTestCanonicalRunCommand)
+	assertHookJSONPathEquals(t, payload, "hooks.preToolUse.0.matcher", "Bash")
+	assertHookJSONPathEquals(t, payload, "hooks.preToolUse.0.timeout", float64(7))
+}
+
+func TestRenderCodexHookConfigMatchesCodexHookShape(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "session-banner",
+		When:       "session_start",
+		Command:    hooksTestCanonicalRunCommand,
+		EnabledOn:  []string{"codex"},
+		RequiredOn: []string{"codex"},
+	}}
+
+	content, err := renderCodexHookConfig(specs)
+	if err != nil {
+		t.Fatalf("renderCodexHookConfig failed: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	assertHookJSONPathEquals(t, payload, "hooks.SessionStart.0.matcher", "*")
+	assertHookJSONPathEquals(t, payload, "hooks.SessionStart.0.hooks.0.type", "command")
+	assertHookJSONPathEquals(t, payload, "hooks.SessionStart.0.hooks.0.command", hooksTestCanonicalRunCommand)
+}
+
+func TestRenderCopilotHookFileMatchesCopilotCLIShape(t *testing.T) {
+	name, content, ok, err := renderCopilotHookFile(HookSpec{
+		Name:      "prompt-log",
+		When:      "user_prompt_submit",
+		Command:   hooksTestCanonicalRunCommand,
+		TimeoutMS: 5000,
+	})
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected copilot hook render to be included")
+	}
+	if name != "prompt-log.json" {
+		t.Fatalf("file name = %q, want prompt-log.json", name)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	assertHookJSONPathEquals(t, payload, "version", float64(1))
+	assertHookJSONPathEquals(t, payload, "hooks.userPromptSubmitted.0.type", "command")
+	assertHookJSONPathEquals(t, payload, "hooks.userPromptSubmitted.0.bash", hooksTestCanonicalRunCommand)
+	assertHookJSONPathEquals(t, payload, "hooks.userPromptSubmitted.0.timeoutSec", float64(5))
+}
+
 func TestRenderCopilotHookFileSkipsWhenCanonicalMatchExpressionPresent(t *testing.T) {
 	_, _, ok, err := renderCopilotHookFile(HookSpec{
 		Name:            "prompt-log",
@@ -170,5 +272,102 @@ func TestRenderCopilotHookFileSkipsWhenCanonicalMatchExpressionPresent(t *testin
 	}
 	if ok {
 		t.Fatalf("expected copilot hook render to skip matcher-constrained hook")
+	}
+}
+
+func assertHookJSONPathEquals(t *testing.T, doc map[string]any, path string, want any) {
+	t.Helper()
+	parts := strings.Split(path, ".")
+	var cur any = doc
+	for _, part := range parts {
+		switch node := cur.(type) {
+		case map[string]any:
+			next, ok := node[part]
+			if !ok {
+				t.Fatalf("json path %q missing segment %q", path, part)
+			}
+			cur = next
+		case []any:
+			idx := int(mustParseHookIndex(t, part))
+			if idx < 0 || idx >= len(node) {
+				t.Fatalf("json path %q index %d out of range", path, idx)
+			}
+			cur = node[idx]
+		default:
+			t.Fatalf("json path %q hit non-container at segment %q", path, part)
+		}
+	}
+	if cur != want {
+		t.Fatalf("json path %q = %#v, want %#v", path, cur, want)
+	}
+}
+
+func mustParseHookIndex(t *testing.T, s string) int64 {
+	t.Helper()
+	var n int64
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			t.Fatalf("invalid array index %q", s)
+		}
+		n = n*10 + int64(ch-'0')
+	}
+	return n
+}
+
+func TestListHookSpecsGraphIntegrationBundles(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
+	globalRoot := filepath.Join(agentsHome, "hooks", "global")
+	writeTextFile(t, filepath.Join(globalRoot, "graph-update", "HOOK.yaml"), `name: graph-update
+description: test
+when: post_tool_use
+match:
+  expression: "Edit|Write|Bash"
+run:
+  command: da kg update --skip-flows
+  timeout_ms: 5000
+enabled_on:
+  - claude
+`)
+	writeTextFile(t, filepath.Join(globalRoot, "graph-precommit", "HOOK.yaml"), `name: graph-precommit
+description: test
+when: pre_tool_use
+match:
+  tools:
+    - Bash
+run:
+  command: ./graph-precommit.sh
+  timeout_ms: 10000
+`)
+	writeTextFile(t, filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh"), "#!/bin/sh\nexit 0\n")
+
+	specs, err := ListHookSpecs(agentsHome, "global")
+	if err != nil {
+		t.Fatalf("ListHookSpecs: %v", err)
+	}
+	var gotUpdate, gotPre *HookSpec
+	for i := range specs {
+		switch specs[i].Name {
+		case "graph-update":
+			gotUpdate = &specs[i]
+		case "graph-precommit":
+			gotPre = &specs[i]
+		}
+	}
+	if gotUpdate == nil {
+		t.Fatal("expected graph-update spec")
+	}
+	if gotUpdate.When != "post_tool_use" || !strings.Contains(gotUpdate.Command, "kg update") {
+		t.Fatalf("graph-update: %#v", gotUpdate)
+	}
+	if gotPre == nil {
+		t.Fatal("expected graph-precommit spec")
+	}
+	if gotPre.When != "pre_tool_use" || gotPre.Command != "./graph-precommit.sh" {
+		t.Fatalf("graph-precommit: %#v", gotPre)
+	}
+	wantResolved := filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh")
+	if got := ResolveHookCommand(*gotPre); got != wantResolved {
+		t.Fatalf("ResolveHookCommand = %q, want %q", got, wantResolved)
 	}
 }

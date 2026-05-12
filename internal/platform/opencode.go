@@ -1,23 +1,92 @@
 package platform
 
 import (
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
 type opencode struct{}
 
-const opencodeJSON = "opencode.json"
+const (
+	opencodeJSON = "opencode.json"
+	opencodeDir  = ".opencode"
+)
 
 func NewOpenCode() Platform { return &opencode{} }
 
 func (o *opencode) ID() string          { return "opencode" }
 func (o *opencode) DisplayName() string { return "OpenCode" }
+
+// SessionReader — env var contract not yet confirmed.
+func (o *opencode) AIAgentPrefix() string              { return "opencode" }
+func (o *opencode) SessionEnvs() []string              { return []string{"OPENCODE_SESSION_ID"} }
+func (o *opencode) EntrypointEnvs() []string           { return nil }
+func (o *opencode) ResolveModel(_, _, _ string) string { return "" }
+
+// StatsReader — OpenCode session schema not yet confirmed for aggregated stats.
+func (o *opencode) ReadUsageStats(_ string) *PlatformUsageStats { return nil }
+
+// SessionTokenScanner implementation.
+// Queries ~/.local/share/opencode/opencode.db (part table, type='step-finish').
+// Since OpenCode injects no session ID env var, filtering is by message
+// created_at (Unix ms) > afterTimestamp. All OpenCode usage across projects
+// in the time window is included.
+func (o *opencode) ScanSessionTokens(home, _, _, afterTimestamp string) SessionTokenMetrics {
+	return opencodeScanSessionTokens(home, afterTimestamp)
+}
+
+// opencodeScanSessionTokens queries the OpenCode SQLite database for
+// step-finish token totals after afterTimestamp.
+// Fields from the part.data JSON column: $.tokens.input, $.tokens.output,
+// $.tokens.cache.read, $.tokens.cache.write (all floats in the DB).
+func opencodeScanSessionTokens(home, afterTimestamp string) SessionTokenMetrics {
+	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return SessionTokenMetrics{}
+	}
+	defer db.Close()
+
+	var afterMs int64
+	if afterTimestamp != "" {
+		if t, err := time.Parse(time.RFC3339, afterTimestamp); err == nil {
+			afterMs = t.UnixMilli()
+		}
+	}
+
+	const query = `
+		SELECT
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.input')       AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.output')      AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.cache.read')  AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.cache.write') AS INTEGER)), 0),
+			COALESCE(COUNT(*), 0)
+		FROM part p
+		JOIN message m ON p.message_id = m.id
+		WHERE p.type = 'step-finish'
+		  AND (? = 0 OR m.created_at > ?)`
+
+	var m SessionTokenMetrics
+	row := db.QueryRow(query, afterMs, afterMs)
+	if err := row.Scan(
+		&m.InputTokens,
+		&m.OutputTokens,
+		&m.CacheReadTokens,
+		&m.CacheCreationTokens,
+		&m.MessageCount,
+	); err != nil {
+		return SessionTokenMetrics{}
+	}
+	return m
+}
 
 func (o *opencode) IsInstalled() bool {
 	_, err := exec.LookPath("opencode")
@@ -47,27 +116,15 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 		links.Symlink(src, filepath.Join(repoPath, opencodeJSON))
 	}
 
-	// .opencode/agent/ definitions from canonical agents/{scope}/{name}/AGENT.md
-	agentDir := filepath.Join(repoPath, ".opencode", "agent")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		return err
-	}
-
-	if err := syncScopedFileSymlinks(agentsHome, "agents", project, "AGENT.md", agentDir, ".md"); err != nil {
-		return err
-	}
-
-	// Project skills → .agents/skills/
-	if err := o.createSkillsLinks(project, repoPath, agentsHome); err != nil {
-		return err
-	}
+	// .opencode/agent/*.md and .agents/skills/ — emitted by CollectAndExecuteSharedTargetPlan
+	// via SharedTargetIntents; no direct action needed here.
 
 	return nil
 }
 
 func (o *opencode) ensureUserAgents(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
-		userAgentsDir := filepath.Join(homeRoot, ".opencode", "agent")
+		userAgentsDir := filepath.Join(homeRoot, opencodeDir, "agent")
 		if err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", userAgentsDir, ".md"); err != nil {
 			return err
 		}
@@ -75,16 +132,12 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 	return nil
 }
 
-func (o *opencode) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
-}
-
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
 	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, opencodeJSON), agentsHome)
 
-	agentDir := filepath.Join(repoPath, ".opencode", "agent")
+	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
 			links.RemoveIfSymlinkUnder(filepath.Join(agentDir, e.Name()), agentsHome)
@@ -99,4 +152,20 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 	}
 
 	return nil
+}
+
+func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	if err != nil {
+		return nil, err
+	}
+	plugins, err := BuildSharedPluginBundleIntents(project, filepath.Join(opencodeDir, "plugins"))
+	if err != nil {
+		return nil, err
+	}
+	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(opencodeDir, "agent"), ".md")
+	if err != nil {
+		return nil, err
+	}
+	return append(append(skills, plugins...), agents...), nil
 }

@@ -160,7 +160,10 @@ func resolveHookSpecInScopes(agentsHome string, buckets []string, scopes []strin
 	return nil
 }
 
-func listHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
+// ListHookSpecs returns hook entries under ~/.agents/hooks/<scope>/: canonical bundles
+// (…/<name>/HOOK.yaml) and legacy single-file JSON hooks. The hooks directory must exist;
+// if it is missing, ReadDir fails with an error satisfying os.IsNotExist.
+func ListHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
 	root := filepath.Join(agentsHome, "hooks", scope)
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -217,7 +220,7 @@ func loadHookSpecEntry(root, scope string, entry os.DirEntry) (HookSpec, bool, e
 }
 
 func listCanonicalHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
-	specs, err := listHookSpecs(agentsHome, scope)
+	specs, err := ListHookSpecs(agentsHome, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +534,8 @@ func hookRequiredOnPlatform(spec HookSpec, platformID string) bool {
 	return false
 }
 
-func resolveHookCommand(spec HookSpec) string {
+// ResolveHookCommand returns the hook command with relative paths resolved against the HOOK.yaml location.
+func ResolveHookCommand(spec HookSpec) string {
 	command := strings.TrimSpace(spec.Command)
 	if command == "" {
 		return ""
@@ -676,7 +680,7 @@ func renderClaudeHookSettings(specs []HookSpec) ([]byte, error) {
 			}
 			continue
 		}
-		command := resolveHookCommand(spec)
+		command := ResolveHookCommand(spec)
 		if command == "" {
 			if hookRequiredOnPlatform(spec, "claude") {
 				return nil, fmt.Errorf("hook %q has no command for claude", spec.Name)
@@ -704,7 +708,7 @@ func renderCodexHookConfig(specs []HookSpec) ([]byte, error) {
 			}
 			continue
 		}
-		command := resolveHookCommand(spec)
+		command := ResolveHookCommand(spec)
 		if command == "" {
 			if hookRequiredOnPlatform(spec, "codex") {
 				return nil, fmt.Errorf("hook %q has no command for codex", spec.Name)
@@ -753,7 +757,7 @@ func renderCursorHookEntry(spec HookSpec) (string, cursorRenderedEntry, bool, er
 		}
 		return "", cursorRenderedEntry{}, false, nil
 	}
-	command := resolveHookCommand(spec)
+	command := ResolveHookCommand(spec)
 	if command == "" {
 		if hookRequiredOnPlatform(spec, "cursor") {
 			return "", cursorRenderedEntry{}, false, fmt.Errorf("hook %q has no command for cursor", spec.Name)
@@ -787,7 +791,7 @@ func renderCopilotHookFile(spec HookSpec) (string, []byte, bool, error) {
 		}
 		return "", nil, false, nil
 	}
-	command := resolveHookCommand(spec)
+	command := ResolveHookCommand(spec)
 	if command == "" {
 		if hookRequiredOnPlatform(spec, "copilot") {
 			return "", nil, false, fmt.Errorf("hook %q has no command for copilot", spec.Name)

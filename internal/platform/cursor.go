@@ -1,13 +1,22 @@
 package platform
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	"golang.org/x/sys/execabs"
+	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
 type cursor struct{}
@@ -17,6 +26,12 @@ const (
 	cursorJSON        = "cursor.json"
 	cursorDir         = ".cursor"
 	globalRulesPrefix = "global--"
+
+	// cliVersionProbeTimeout bounds subprocess wall time for --version / defaults probes.
+	cliVersionProbeTimeout = 5 * time.Second
+	// cliExecPipeWaitDelay is exec.Cmd.WaitDelay: without this, Cmd.Output can block forever
+	// in awaitGoroutines after the process is killed if pipe copy goroutines stall (Go 1.20+).
+	cliExecPipeWaitDelay = 3 * time.Second
 )
 
 func NewCursor() Platform { return &cursor{} }
@@ -24,8 +39,136 @@ func NewCursor() Platform { return &cursor{} }
 func (c *cursor) ID() string          { return "cursor" }
 func (c *cursor) DisplayName() string { return "Cursor" }
 
+// SessionReader — env var contract not yet confirmed.
+// Model is readable from ~/.cursor/ai-tracking/ai-code-tracking.db
+// (conversation_summaries.model); deferred until P1 adds SQLite access.
+func (c *cursor) AIAgentPrefix() string              { return "cursor" }
+func (c *cursor) SessionEnvs() []string              { return []string{"CURSOR_SESSION_ID"} }
+func (c *cursor) EntrypointEnvs() []string           { return nil }
+func (c *cursor) ResolveModel(_, _, _ string) string { return "" }
+
+// StatsReader implementation.
+func (c *cursor) ReadUsageStats(home string) *PlatformUsageStats {
+	return cursorReadUsageStats(home)
+}
+
+func cursorReadUsageStats(home string) *PlatformUsageStats {
+	dbPath := filepath.Join(home, cursorDir, "ai-tracking", "ai-code-tracking.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	const query = `SELECT commitHash, branchName, scoredAt,
+		linesAdded, linesDeleted, composerLinesAdded, composerLinesDeleted,
+		humanLinesAdded, v2AiPercentage
+		FROM scored_commits ORDER BY scoredAt DESC LIMIT 10`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	stats := &PlatformUsageStats{PlatformID: "cursor"}
+	for rows.Next() {
+		var ca CommitAttribution
+		var scoredAtMs int64
+		if err := rows.Scan(&ca.CommitHash, &ca.BranchName, &scoredAtMs,
+			&ca.LinesAdded, &ca.LinesDeleted,
+			&ca.ComposerLinesAdded, &ca.ComposerLinesDeleted,
+			&ca.HumanLinesAdded, &ca.V2AIPercentage); err != nil {
+			continue
+		}
+		ca.ScoredAt = fmt.Sprintf("%d", scoredAtMs) // Unix ms; caller can format
+		stats.CommitAttribution = append(stats.CommitAttribution, ca)
+	}
+	if len(stats.CommitAttribution) == 0 {
+		return nil
+	}
+	return stats
+}
+
+// SessionTokenScanner implementation.
+// Scans ~/.cursor/projects/<slug>/agent-tools/*.txt — stream-json result files
+// written by the cursor agent binary per completed agent run. Each file has a
+// final line with {"type":"result","usage":{...}} in camelCase schema.
+func (c *cursor) ScanSessionTokens(home, projectPath, _, afterTimestamp string) SessionTokenMetrics {
+	return cursorScanSessionTokens(home, projectPath, afterTimestamp)
+}
+
+func cursorScanSessionTokens(home, projectPath, afterTimestamp string) SessionTokenMetrics {
+	var after time.Time
+	if afterTimestamp != "" {
+		after, _ = time.Parse(time.RFC3339, afterTimestamp)
+	}
+
+	var m SessionTokenMetrics
+	slug := strings.ReplaceAll(strings.TrimPrefix(projectPath, "/"), "/", "-")
+	agentToolsDir := filepath.Join(home, cursorDir, "projects", slug, "agent-tools")
+	entries, err := os.ReadDir(agentToolsDir)
+	if err != nil {
+		return m
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		if !after.IsZero() {
+			info, err := e.Info()
+			if err != nil || !info.ModTime().After(after) {
+				continue
+			}
+		}
+		cursorAccumulateResultTokens(filepath.Join(agentToolsDir, e.Name()), &m)
+	}
+	return m
+}
+
+// cursorAccumulateResultTokens scans a stream-json file for {"type":"result"}
+// lines and accumulates camelCase token usage into m.
+func cursorAccumulateResultTokens(path string, m *SessionTokenMetrics) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte(`"result"`)) {
+			continue
+		}
+		var entry struct {
+			Type  string `json:"type"`
+			Usage struct {
+				InputTokens      int `json:"inputTokens"`
+				OutputTokens     int `json:"outputTokens"`
+				CacheReadTokens  int `json:"cacheReadTokens"`
+				CacheWriteTokens int `json:"cacheWriteTokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "result" {
+			continue
+		}
+		if entry.Usage.InputTokens == 0 && entry.Usage.OutputTokens == 0 {
+			continue
+		}
+		m.InputTokens += entry.Usage.InputTokens
+		m.OutputTokens += entry.Usage.OutputTokens
+		m.CacheReadTokens += entry.Usage.CacheReadTokens
+		m.CacheCreationTokens += entry.Usage.CacheWriteTokens
+		m.MessageCount++
+	}
+}
+
 func (c *cursor) IsInstalled() bool {
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
+		return true
+	}
+	if _, err := exec.LookPath("agent"); err == nil {
 		return true
 	}
 	_, err := exec.LookPath("cursor")
@@ -33,30 +176,61 @@ func (c *cursor) IsInstalled() bool {
 }
 
 func (c *cursor) Version() string {
-	// Try app version on macOS
+	// macOS app bundle version via defaults; bounded so tests/doctor never hang.
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
-		out, err := exec.Command("defaults", "read",
-			"/Applications/Cursor.app/Contents/Info.plist",
-			"CFBundleShortVersionString").Output()
-		if err == nil {
-			appVer := strings.TrimSpace(string(out))
-			if path, err := exec.LookPath("cursor"); err == nil {
-				cliOut, err := exec.Command(path, "--version").Output()
-				if err == nil {
-					cliVer := strings.TrimSpace(strings.Split(string(cliOut), "\n")[0])
-					return appVer + " (CLI: " + cliVer + ")"
-				}
+		appVer, err := macOSCursorAppShortVersion()
+		if err == nil && appVer != "" {
+			if cli := firstCLIPeekVersion("agent", "cursor"); cli != "" {
+				return appVer + " (CLI: " + cli + ")"
 			}
 			return appVer + " (App)"
 		}
 	}
-	if path, err := exec.LookPath("cursor"); err == nil {
-		out, err := exec.Command(path, "--version").Output()
-		if err == nil {
-			return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return firstCLIPeekVersion("agent", "cursor")
+}
+
+func macOSCursorAppShortVersion() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
+	defer cancel()
+	cmd := execabs.CommandContext(ctx, "defaults", "read",
+		"/Applications/Cursor.app/Contents/Info.plist",
+		"CFBundleShortVersionString")
+	cmd.WaitDelay = cliExecPipeWaitDelay
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// firstCLIPeekVersion runs `<name> --version` for the first resolvable binary in order.
+// Official Cursor CLI uses `agent` (see install docs); `cursor` remains a fallback.
+func firstCLIPeekVersion(binNames ...string) string {
+	for _, name := range binNames {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		v, err := peekCLIVersionLine(path)
+		if err == nil && v != "" {
+			return v
 		}
 	}
 	return ""
+}
+
+// peekCLIVersionLine runs a CLI `--version` probe with a wall-clock bound so doctor and
+// tests cannot hang when a shim blocks (e.g. TTY/GUI interaction).
+func peekCLIVersionLine(path string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	cmd.WaitDelay = cliExecPipeWaitDelay
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.Split(string(out), "\n")[0]), nil
 }
 
 func (c *cursor) HasDeprecatedFormat(repoPath string) bool {
@@ -100,23 +274,29 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
-
-	c.linkRuleDir(filepath.Join(agentsHome, "rules", "global"), rulesDir, globalRulesPrefix)
-	c.linkRuleDir(filepath.Join(agentsHome, "rules", project), rulesDir, project+"--")
+	desired := map[string]string{}
+	c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired)
+	c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired)
+	if err := c.pruneRuleLinks(rulesDir, project, desired); err != nil {
+		return err
+	}
+	for target, src := range desired {
+		links.Hardlink(src, filepath.Join(rulesDir, target)) // best-effort
+	}
 	return nil
 }
 
-func (c *cursor) linkRuleDir(sourceDir, rulesDir, prefix string) {
+func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		c.linkRuleEntry(entry, sourceDir, rulesDir, prefix)
+		c.collectRuleEntry(entry, sourceDir, prefix, desired)
 	}
 }
 
-func (c *cursor) linkRuleEntry(entry os.DirEntry, sourceDir, rulesDir, prefix string) {
+func (c *cursor) collectRuleEntry(entry os.DirEntry, sourceDir, prefix string, desired map[string]string) {
 	if entry.IsDir() {
 		return
 	}
@@ -124,10 +304,30 @@ func (c *cursor) linkRuleEntry(entry os.DirEntry, sourceDir, rulesDir, prefix st
 	if !isCursorRuleFile(name) {
 		return
 	}
-	links.Hardlink(
-		filepath.Join(sourceDir, name),
-		filepath.Join(rulesDir, prefix+toMDC(name)),
-	) // best-effort
+	desired[prefix+toMDC(name)] = filepath.Join(sourceDir, name)
+}
+
+func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]string) error {
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, globalRulesPrefix) && !strings.HasPrefix(name, project+"--") {
+			continue
+		}
+		if _, ok := desired[name]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {
@@ -201,8 +401,9 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	)
 }
 
-func (c *cursor) createAgentsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md", filepath.Join(repoPath, ".claude", "agents"))
+func (c *cursor) createAgentsLinks(_, _, _ string) error {
+	// `.claude/agents/*` mirrors match Claude's layout; command layer runs CollectAndExecuteSharedTargetPlan first.
+	return nil
 }
 
 func (c *cursor) RemoveLinks(project, repoPath string) error {
@@ -290,4 +491,9 @@ func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
 		}
 	}
 	return false
+}
+
+func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
+	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
 }

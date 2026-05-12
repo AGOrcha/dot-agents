@@ -1,6 +1,8 @@
 package platform
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,12 +21,75 @@ const (
 	codexDir            = ".codex"
 	codexHooksJSON      = "hooks.json"
 	codexAgentsMarkdown = "AGENTS.md"
+	codexAgentMDFile    = "AGENT.md"
 )
 
 func NewCodex() Platform { return &codex{} }
 
 func (c *codex) ID() string          { return "codex" }
 func (c *codex) DisplayName() string { return "Codex CLI" }
+
+// SessionReader implementation.
+// CODEX_SESSION_ID: not yet confirmed from Codex docs; update SessionEnvs when verified.
+// ResolveModel: scans ~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl for the model field.
+func (c *codex) AIAgentPrefix() string    { return "codex" }
+func (c *codex) SessionEnvs() []string    { return []string{"CODEX_SESSION_ID"} }
+func (c *codex) EntrypointEnvs() []string { return nil }
+func (c *codex) ResolveModel(home, _ /* projectPath */, sessionID string) string {
+	return resolveCodexModelFromJSONL(home, sessionID)
+}
+
+// StatsReader implementation.
+func (c *codex) ReadUsageStats(home string) *PlatformUsageStats {
+	return codexReadUsageStats(home)
+}
+
+func codexReadUsageStats(home string) *PlatformUsageStats {
+	indexPath := filepath.Join(home, codexDir, "session_index.jsonl")
+	f, err := os.Open(indexPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	type entry struct {
+		ID         string `json:"id"`
+		ThreadName string `json:"thread_name"`
+		UpdatedAt  string `json:"updated_at"`
+	}
+	var all []entry
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var e entry
+		if err := json.Unmarshal(sc.Bytes(), &e); err == nil {
+			all = append(all, e)
+		}
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	stats := &PlatformUsageStats{
+		PlatformID:    "codex",
+		TotalSessions: len(all),
+	}
+	start := 0
+	if len(all) > 10 {
+		start = len(all) - 10
+	}
+	for _, e := range all[start:] {
+		stats.RecentSessions = append(stats.RecentSessions, SessionSummary{
+			ID:        e.ID,
+			Name:      e.ThreadName,
+			UpdatedAt: e.UpdatedAt,
+		})
+	}
+	return stats
+}
+
+// SessionTokenScanner implementation.
+func (c *codex) ScanSessionTokens(home, _ /* projectPath */, sessionID, afterTimestamp string) SessionTokenMetrics {
+	return codexScanSessionTokens(home, sessionID, afterTimestamp)
+}
 
 func (c *codex) IsInstalled() bool {
 	_, err := exec.LookPath("codex")
@@ -82,7 +147,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
 	}
 
-	// Project agents → .codex/agents/*.toml
+	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
@@ -128,15 +193,13 @@ func (c *codex) ensureUserSkills(agentsHome string) error {
 }
 
 func (c *codex) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, codexDir, "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-	return c.writeCodexAgents(agentsHome, project, agentsTarget)
+	// TOML files are materialized by CollectAndExecuteSharedTargetPlan; prune stale
+	// `.toml` when canonical agents are removed.
+	return pruneCodexRepoAgentTomls(project, repoPath, agentsHome)
 }
 
-func (c *codex) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, codexAgentsDir, "skills"))
+func (c *codex) createSkillsLinks(project, repoPath, _ string) error {
+	return nil
 }
 
 func (c *codex) createHooksLinks(project, repoPath, agentsHome string) error {
@@ -203,8 +266,31 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	return nil
 }
 
+func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
+	entries, err := listScopedResourceDirs(agentsHome, "agents", project, codexAgentMDFile)
+	if err != nil {
+		return nil
+	}
+	wanted := map[string]bool{}
+	for _, entry := range entries {
+		wanted[entry.Name+".toml"] = true
+	}
+	dstRoot := filepath.Join(repoPath, codexDir, "agents")
+	if existing, err := os.ReadDir(dstRoot); err != nil {
+		return nil
+	} else {
+		for _, e := range existing {
+			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+				continue
+			}
+			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+		}
+	}
+	return nil
+}
+
 func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
-	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
 		return nil
 	}
@@ -228,7 +314,7 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 }
 
 func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
-	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, "AGENT.md")
+	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
 		return nil
 	}
@@ -240,7 +326,7 @@ func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) e
 	return nil
 }
 
-func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+func writeCodexAgentTomlFile(dst, agentMD string) error {
 	content, err := renderCodexAgentToml(agentMD)
 	if err != nil {
 		return err
@@ -254,6 +340,10 @@ func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
 		}
 	}
 	return os.WriteFile(dst, content, 0644)
+}
+
+func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
+	return writeCodexAgentTomlFile(dst, agentMD)
 }
 
 func renderCodexAgentToml(agentMD string) ([]byte, error) {
@@ -306,4 +396,16 @@ func tomlMultilineString(value string) string {
 	escaped := strings.ReplaceAll(value, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
 	return "\"\"\"\n" + escaped + "\n\"\"\""
+}
+
+func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(codexAgentsDir, "skills"))
+	if err != nil {
+		return nil, err
+	}
+	tomls, err := BuildSharedCodexAgentTomlIntents(project)
+	if err != nil {
+		return nil, err
+	}
+	return append(skills, tomls...), nil
 }
