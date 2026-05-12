@@ -975,3 +975,271 @@ func TestFanoutEvidenceWarning_SkipCheckSuppressesLowConfidence(t *testing.T) {
 }
 
 // ── Wave 7: Drift & Sweep ─────────────────────────────────────────────────────
+
+// TestLoadMergeBack_MissingFrontmatter ensures loadMergeBack returns a clear
+// error when the file has no leading `---\n` block.
+func TestLoadMergeBack_MissingFrontmatter(t *testing.T) {
+	t.Parallel()
+	repo := setupTestProject(t)
+	dir := mergeBackDir(repo)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t1.md"), []byte("just a body\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadMergeBack(repo, "t1"); err == nil || !strings.Contains(err.Error(), "missing frontmatter") {
+		t.Fatalf("expected missing frontmatter error, got %v", err)
+	}
+}
+
+// TestLoadMergeBack_UnterminatedFrontmatter ensures unterminated `---` blocks
+// surface as a parse error.
+func TestLoadMergeBack_UnterminatedFrontmatter(t *testing.T) {
+	t.Parallel()
+	repo := setupTestProject(t)
+	dir := mergeBackDir(repo)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "t1.md"), []byte("---\ntask_id: t1\nno close\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadMergeBack(repo, "t1"); err == nil || !strings.Contains(err.Error(), "unterminated frontmatter") {
+		t.Fatalf("expected unterminated frontmatter error, got %v", err)
+	}
+}
+
+// TestLoadMergeBack_ParseError ensures malformed YAML inside the frontmatter
+// is reported as a parse error.
+func TestLoadMergeBack_ParseError(t *testing.T) {
+	t.Parallel()
+	repo := setupTestProject(t)
+	dir := mergeBackDir(repo)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\n\t:bogus yaml\n---\n\n## Summary\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "t1.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadMergeBack(repo, "t1"); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+// TestSaveMergeBack_Format checks the on-disk shape: frontmatter delimiters
+// and the two ## sections (Summary / Integration Notes).
+func TestSaveMergeBack_Format(t *testing.T) {
+	t.Parallel()
+	repo := setupTestProject(t)
+	s := &MergeBackSummary{
+		SchemaVersion:      1,
+		TaskID:             "t1",
+		ParentPlanID:       "p1",
+		Title:              "Title",
+		Summary:            "summary text",
+		FilesChanged:       []string{"a.go"},
+		VerificationResult: MergeBackVerification{Status: "pass", Summary: "ok"},
+		IntegrationNotes:   "integration body",
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := saveMergeBack(repo, s); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(mergeBackDir(repo), "t1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{"---\n", "## Summary", "summary text", "## Integration Notes", "integration body"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in merge-back body, got:\n%s", want, got)
+		}
+	}
+}
+
+// TestValidateFoldBackSlug_TableDriven exercises the allowed character set,
+// length cap, and edge boundaries for slug validation.
+func TestValidateFoldBackSlug_TableDriven(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		slug    string
+		wantErr bool
+	}{
+		{"valid_lower", "abc-123", false},
+		{"valid_underscore", "abc_def", false},
+		{"valid_mixed_case", "AbcDef", false},
+		{"empty", "", true},
+		{"whitespace_only", "   ", true},
+		{"leading_dash", "-abc", true},
+		{"trailing_dash", "abc-", true},
+		{"invalid_dot", "abc.def", true},
+		{"invalid_slash", "abc/def", true},
+		{"invalid_space_inside", "abc def", true},
+		{"too_long", strings.Repeat("a", 201), true},
+		{"max_length", strings.Repeat("a", 200), false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := validateFoldBackSlug(tc.slug)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.slug)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err for %q: %v", tc.slug, err)
+			}
+		})
+	}
+}
+
+// TestAppendFoldBackBullet covers empty/non-empty notes and trailing newline
+// trimming.
+func TestAppendFoldBackBullet(t *testing.T) {
+	t.Parallel()
+	if got := appendFoldBackBullet("", "first"); got != "- first" {
+		t.Fatalf("empty notes: got %q", got)
+	}
+	if got := appendFoldBackBullet("- existing\n", "next"); got != "- existing\n- next" {
+		t.Fatalf("non-empty: got %q", got)
+	}
+	if got := appendFoldBackBullet("- a\n- b\n\n", "c"); got != "- a\n- b\n- c" {
+		t.Fatalf("trailing newlines: got %q", got)
+	}
+}
+
+// TestSetFoldBackTaggedNote covers append + dedupe behavior for tagged lines.
+func TestSetFoldBackTaggedNote(t *testing.T) {
+	t.Parallel()
+	got := setFoldBackTaggedNote("", "slug-x", "obs one")
+	want := "- (fb:slug-x) obs one"
+	if got != want {
+		t.Fatalf("empty: got %q want %q", got, want)
+	}
+
+	// existing untagged note preserved, tagged note appended
+	got = setFoldBackTaggedNote("- pre-existing\n", "slug-x", "second")
+	if !strings.Contains(got, "- pre-existing") || !strings.HasSuffix(got, "- (fb:slug-x) second") {
+		t.Fatalf("append: got %q", got)
+	}
+
+	// re-running with same slug replaces previous tagged line in place
+	got = setFoldBackTaggedNote(got, "slug-x", "third")
+	if strings.Count(got, "(fb:slug-x)") != 1 {
+		t.Fatalf("expected exactly one tagged line, got: %q", got)
+	}
+	if !strings.HasSuffix(got, "- (fb:slug-x) third") {
+		t.Fatalf("expected refreshed tag, got %q", got)
+	}
+	if !strings.Contains(got, "- pre-existing") {
+		t.Fatalf("expected untagged line preserved, got %q", got)
+	}
+}
+
+// TestSetFoldBackTaggedNote_StrippedObservation ensures leading/trailing
+// whitespace in the observation is normalized.
+func TestSetFoldBackTaggedNote_StrippedObservation(t *testing.T) {
+	t.Parallel()
+	got := setFoldBackTaggedNote("", "s", "  spaced  ")
+	if got != "- (fb:s) spaced" {
+		t.Fatalf("expected trimmed observation, got %q", got)
+	}
+}
+
+// TestScopePathsOverlap covers identical / prefix / disjoint / sibling cases
+// used by writeScopeOverlaps for conflict detection.
+func TestScopePathsOverlap(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"commands/", "commands/", true},
+		{"commands", "commands/workflow.go", true},
+		{"commands/workflow.go", "commands", true},
+		{"commands", "commands_extra", false},
+		{"internal/", "commands/", false},
+		{"a/b", "a/b/c", true},
+		{"a/b", "a/bc", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.a+"_vs_"+tc.b, func(t *testing.T) {
+			t.Parallel()
+			if got := scopePathsOverlap(tc.a, tc.b); got != tc.want {
+				t.Fatalf("scopePathsOverlap(%q,%q) = %t, want %t", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWriteScopeOverlaps_ExcludesSelf ensures the excludeTaskID is honored:
+// a delegation does not conflict with itself when updated in place.
+func TestWriteScopeOverlaps_ExcludesSelf(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC().Format(time.RFC3339)
+	existing := []DelegationContract{
+		{ParentTaskID: "task-001", WriteScope: []string{"commands/"}, Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	conflicts := writeScopeOverlaps(existing, []string{"commands/"}, "task-001")
+	if len(conflicts) != 0 {
+		t.Errorf("self exclusion failed: %v", conflicts)
+	}
+}
+
+// TestIsValidDelegationStatus checks the status whitelist.
+func TestIsValidDelegationStatus(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"pending", "active", "completed", "failed", "cancelled"} {
+		if !isValidDelegationStatus(s) {
+			t.Errorf("%q should be valid", s)
+		}
+	}
+	for _, s := range []string{"", "in_progress", "done", "open"} {
+		if isValidDelegationStatus(s) {
+			t.Errorf("%q should be invalid", s)
+		}
+	}
+}
+
+// TestSaveDelegationContract_UpdatesUpdatedAt verifies saveDelegationContract
+// stamps a fresh UpdatedAt on each save (used by status transitions).
+func TestSaveDelegationContract_UpdatesUpdatedAt(t *testing.T) {
+	t.Parallel()
+	repo := setupTestProject(t)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-x", ParentPlanID: "p1", ParentTaskID: "x",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: "2026-04-10T10:00:00Z", UpdatedAt: "2026-04-10T10:00:00Z",
+	}
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadDelegationContract(repo, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UpdatedAt == "2026-04-10T10:00:00Z" {
+		t.Fatal("expected UpdatedAt to be refreshed on save")
+	}
+}
+
+// TestListDelegationContracts_EmptyDirReturnsNil exercises the missing-dir
+// short circuit.
+func TestListDelegationContracts_EmptyDirReturnsNil(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	got, err := listDelegationContracts(repo)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty slice, got %d", len(got))
+	}
+}

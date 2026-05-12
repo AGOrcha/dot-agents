@@ -164,3 +164,66 @@ func TestWorkflowBundleStages_MissingTaskID(t *testing.T) {
 		t.Fatalf("expected task_id error, got %v", err)
 	}
 }
+
+// TestWorkflowBundleStages_BundleNotFound covers the read-error branch.
+func TestWorkflowBundleStages_BundleNotFound(t *testing.T) {
+	err := runWorkflowBundleStages("/nonexistent/path/bundle.yaml")
+	if err == nil || !strings.Contains(err.Error(), "read bundle") {
+		t.Fatalf("expected read bundle error, got %v", err)
+	}
+}
+
+// TestWorkflowBundleStages_MalformedYAML covers the yaml.Unmarshal error path.
+func TestWorkflowBundleStages_MalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(p, []byte("\t:not yaml:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := runWorkflowBundleStages(p)
+	if err == nil || !strings.Contains(err.Error(), "parse bundle") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+// TestExpandBundleStages_TrimsWhitespace ensures verifier_type values are
+// trimmed before stage expansion.
+func TestExpandBundleStages_TrimsWhitespace(t *testing.T) {
+	b := &delegationBundleYAML{PlanID: "p1", TaskID: "t1"}
+	b.Verification.VerifierSequence = []string{"  unit  ", " api "}
+	stages := expandBundleStages(b)
+	if len(stages) != 4 {
+		t.Fatalf("expected 4 stages, got %d", len(stages))
+	}
+	if stages[1].VerifierType != "unit" || stages[2].VerifierType != "api" {
+		t.Fatalf("expected trimmed verifier_type values, got %+v", stages)
+	}
+}
+
+// TestWorkflowBundleStages_JSONOutput covers the JSON encoding branch.
+func TestWorkflowBundleStages_JSONOutput(t *testing.T) {
+	repo := setupTestProject(t)
+	bundlePath := writeBundleFixture(t, repo, []string{"unit"})
+
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
+
+	var buf bytes.Buffer
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runWorkflowBundleStages(bundlePath)
+	_ = w.Close()
+	os.Stdout = oldStdout
+	_, _ = buf.ReadFrom(r)
+	if err != nil {
+		t.Fatalf("runWorkflowBundleStages: %v", err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if !strings.HasPrefix(got, "[") || !strings.HasSuffix(got, "]") {
+		t.Fatalf("expected JSON array output, got: %s", got)
+	}
+	if !strings.Contains(got, `"stage": "impl"`) || !strings.Contains(got, `"verifier_type": "unit"`) || !strings.Contains(got, `"stage": "review"`) {
+		t.Fatalf("missing expected stage entries in JSON: %s", got)
+	}
+}
