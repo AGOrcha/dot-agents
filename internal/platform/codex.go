@@ -15,9 +15,9 @@ import (
 type codex struct{}
 
 const (
-	codexAgentsDir = ".agents"
-	codexDir = ".codex"
-	codexHooksJSON = "hooks.json"
+	codexAgentsDir      = ".agents"
+	codexDir            = ".codex"
+	codexHooksJSON      = "hooks.json"
 	codexAgentsMarkdown = "AGENTS.md"
 )
 

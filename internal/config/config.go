@@ -87,7 +87,7 @@ func (c *Config) AddProject(name, path string) {
 		c.Projects = make(map[string]Project)
 	}
 	c.Projects[name] = Project{
-		Path:  path,
+		Path:  filepath.Clean(path),
 		Added: time.Now().UTC(),
 	}
 }
@@ -100,7 +100,7 @@ func (c *Config) RemoveProject(name string) {
 // GetProjectPath returns the path for a registered project, or empty string.
 func (c *Config) GetProjectPath(name string) string {
 	if p, ok := c.Projects[name]; ok {
-		return p.Path
+		return filepath.Clean(p.Path)
 	}
 	return ""
 }

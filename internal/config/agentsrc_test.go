@@ -7,11 +7,13 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 const (
 	testProject         = "myproject"
 	testSourceTypeLocal = "local"
+	testMCPJSONFile     = "mcp.json"
 	testHookPreToolUse  = "PreToolUse"
 	testHookPostToolUse = "PostToolUse"
 	errFmtGenerateRC    = "GenerateAgentsRC: %v"
@@ -292,6 +294,7 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
 		},
 	}
+	orig.SetRefreshMetadata("1.2.3", "abcdef12", "v1.2.3", time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC))
 
 	if err := orig.Save(tmp); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -326,6 +329,12 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	if len(got.Sources) != 2 || got.Sources[1].URL != orig.Sources[1].URL {
 		t.Errorf("Sources: got %+v, want %+v", got.Sources, orig.Sources)
 	}
+	if got.Refresh == nil {
+		t.Fatal("Refresh: got nil, want metadata")
+	}
+	if !reflect.DeepEqual(got.Refresh, orig.Refresh) {
+		t.Errorf("Refresh: got %+v, want %+v", got.Refresh, orig.Refresh)
+	}
 }
 
 func TestAgentsRCSaveTrailingNewline(t *testing.T) {
@@ -337,6 +346,109 @@ func TestAgentsRCSaveTrailingNewline(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
 	if len(data) == 0 || data[len(data)-1] != '\n' {
 		t.Error("saved file should end with newline")
+	}
+}
+
+func TestMergeGenerateAgentsRCNilArgs(t *testing.T) {
+	gen := &AgentsRC{Version: 1, Project: "g", Sources: []Source{{Type: testSourceTypeLocal}}}
+	if MergeGenerateAgentsRC(nil, gen) != gen {
+		t.Fatal("nil existing should return generated pointer")
+	}
+	ex := &AgentsRC{Version: 1, Project: "e"}
+	if MergeGenerateAgentsRC(ex, nil) != ex {
+		t.Fatal("nil generated should return existing pointer")
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesGitSource(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Project: "keep-me",
+		Sources: []Source{
+			{Type: "git", URL: "https://example.com/skills.git", Ref: "main"},
+		},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Project: "scan-name",
+		Skills:  []string{"a"},
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.Project != "keep-me" {
+		t.Errorf("Project: got %q, want preserved existing", out.Project)
+	}
+	if len(out.Sources) != 2 {
+		t.Fatalf("Sources: got %d entries, want local + git", len(out.Sources))
+	}
+	if out.Sources[0].Type != testSourceTypeLocal {
+		t.Errorf("first source should be generated local, got %+v", out.Sources[0])
+	}
+	if out.Sources[1].Type != "git" || out.Sources[1].URL != "https://example.com/skills.git" {
+		t.Errorf("git source not preserved: %+v", out.Sources[1])
+	}
+	if len(out.Skills) != 1 || out.Skills[0] != "a" {
+		t.Errorf("generated skills should win: %+v", out.Skills)
+	}
+}
+
+func TestMergeGenerateAgentsRCDedupesLocalSources(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.Sources) != 1 {
+		t.Fatalf("Sources: got %v, want single local", out.Sources)
+	}
+}
+
+func TestMergeGenerateAgentsRCDedupesGitSources(t *testing.T) {
+	gitSrc := Source{Type: "git", URL: "https://example.com/r.git", Ref: "v1"}
+	existing := &AgentsRC{Version: 1, Sources: []Source{gitSrc}}
+	generated := &AgentsRC{Version: 1, Sources: []Source{{Type: testSourceTypeLocal}, gitSrc}}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.Sources) != 2 {
+		t.Fatalf("Sources: got %d entries %+v, want local + git only", len(out.Sources), out.Sources)
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
+	legacy := json.RawMessage(`{"interval":"1h"}`)
+	existing := &AgentsRC{
+		Version:     1,
+		Sources:     []Source{{Type: "git", URL: "https://x.test/r.git"}},
+		ExtraFields: map[string]json.RawMessage{"customExtension": legacy},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.ExtraFields) != 1 || string(out.ExtraFields["customExtension"]) != string(legacy) {
+		t.Errorf("ExtraFields not preserved: %#v", out.ExtraFields)
+	}
+}
+
+func TestMergeGenerateAgentsRCPreservesRefresh(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	existing.SetRefreshMetadata("1.0.0", "abc", "v1.0.0", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
+	generated := &AgentsRC{
+		Version: 1,
+		Skills:  []string{"s"},
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.Refresh == nil || out.Refresh.Version != "1.0.0" || out.Refresh.RefreshedAt == "" {
+		t.Fatalf("Refresh not preserved: %+v", out.Refresh)
 	}
 }
 
@@ -386,7 +498,7 @@ func agentsHomeFixture(t *testing.T) string {
 	}`)
 
 	// MCP: project-scoped mcp.json with two servers
-	writeFile(filepath.Join(home, "mcp", testProject, "mcp.json"), `{
+	writeFile(filepath.Join(home, "mcp", testProject, testMCPJSONFile), `{
 		"servers": {
 			"server-a": {},
 			"server-b": {}
@@ -495,6 +607,62 @@ func TestGenerateAgentsRCHooksNoSettings(t *testing.T) {
 	}
 }
 
+func TestGenerateAgentsRCHooksCanonicalBundlesEnableAll(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	bundleDir := filepath.Join(home, "hooks", "global", "session-orient")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte("name: session-orient\nwhen: session_start\nrun:\n  command: ./orient.sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if !rc.Hooks.All {
+		t.Fatalf("Hooks.All = false, want true when canonical hook bundles exist; got %+v", rc.Hooks)
+	}
+	if len(rc.Hooks.Names) != 0 {
+		t.Fatalf("Hooks.Names = %v, want empty when Hooks.All is true", rc.Hooks.Names)
+	}
+}
+
+func TestGenerateAgentsRCHooksLegacySettingsFallBackToGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	settingsDir := filepath.Join(home, "settings", "global")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{
+		"hooks": {
+			"PreToolUse": [{"command":"echo pre"}],
+			"PostToolUse": [],
+			"Stop": [{"command":"echo stop"}]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(settingsDir, "claude-code.json"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	got := rc.Hooks.Names
+	sort.Strings(got)
+	want := []string{"PreToolUse", "Stop"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Hooks.Names: got %v, want %v", got, want)
+	}
+}
+
 func TestGenerateAgentsRCMCPNamedServers(t *testing.T) {
 	home := agentsHomeFixture(t)
 	t.Setenv("AGENTS_HOME", home)
@@ -520,7 +688,7 @@ func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 	t.Setenv("AGENTS_HOME", home)
 
 	// Only global mcp, no project-scoped
-	mcpPath := filepath.Join(home, "mcp", "global", "mcp.json")
+	mcpPath := filepath.Join(home, "mcp", "global", testMCPJSONFile)
 	os.MkdirAll(filepath.Dir(mcpPath), 0755)
 	os.WriteFile(mcpPath, []byte(`{"servers":{"global-srv":{}}}`), 0644)
 
@@ -531,6 +699,80 @@ func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 
 	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
 		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	}
+}
+
+func TestGenerateAgentsRCMCPReadsDocumentedMCPServersShape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", testProject, testMCPJSONFile)
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{
+		"mcpServers": {
+			"code-review-graph": {},
+			"sonarqube": {}
+		}
+	}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	got := rc.MCP.Names
+	sort.Strings(got)
+	want := []string{"code-review-graph", "sonarqube"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MCP.Names: got %v, want %v", got, want)
+	}
+}
+
+func TestGenerateAgentsRCMCPFallsBackToGlobalDocumentedMCPServersShape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", "global", testMCPJSONFile)
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"global-srv":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
+		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	}
+}
+
+func TestGenerateAgentsRCMCPReadsDotMCPJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	mcpPath := filepath.Join(home, "mcp", testProject, ".mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"repo-srv":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if !reflect.DeepEqual(rc.MCP.Names, []string{"repo-srv"}) {
+		t.Errorf("MCP.Names: got %v, want [repo-srv]", rc.MCP.Names)
 	}
 }
 
@@ -622,6 +864,94 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	}
 }
 
+// ── Unknown field round-trip ─────────────────────────────────────────────────
+
+func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Write a manifest that contains custom keys that AgentsRC does not model.
+	// ("refresh" is now a first-class field; use a different key for unknown JSON.)
+	input := `{
+  "version": 1,
+  "project": "myproject",
+  "sources": [{"type":"local"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "customPolicy": {"interval": "daily", "auto": true},
+  "myteam": "platform"
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+
+	// Known fields intact
+	if rc.Project != "myproject" {
+		t.Errorf("Project: got %q, want %q", rc.Project, "myproject")
+	}
+	// Extra fields captured
+	if len(rc.ExtraFields) != 2 {
+		t.Fatalf("ExtraFields: got %d keys, want 2; keys: %v", len(rc.ExtraFields), rc.ExtraFields)
+	}
+	if _, ok := rc.ExtraFields["customPolicy"]; !ok {
+		t.Error("ExtraFields missing 'customPolicy'")
+	}
+	if _, ok := rc.ExtraFields["myteam"]; !ok {
+		t.Error("ExtraFields missing 'myteam'")
+	}
+
+	// Mutate a known field and save
+	rc.Project = "renamed"
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Reload and check both the mutation and the extra fields survived
+	rc2, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC after save: %v", err)
+	}
+	if rc2.Project != "renamed" {
+		t.Errorf("Project after save: got %q, want %q", rc2.Project, "renamed")
+	}
+	if len(rc2.ExtraFields) != 2 {
+		t.Fatalf("ExtraFields after save: got %d keys, want 2; keys: %v", len(rc2.ExtraFields), rc2.ExtraFields)
+	}
+	if _, ok := rc2.ExtraFields["customPolicy"]; !ok {
+		t.Error("ExtraFields after save missing 'customPolicy'")
+	}
+	var policyVal map[string]any
+	if err := json.Unmarshal(rc2.ExtraFields["customPolicy"], &policyVal); err != nil {
+		t.Fatalf("unmarshal customPolicy extra field: %v", err)
+	}
+	if policyVal["interval"] != "daily" {
+		t.Errorf("customPolicy.interval: got %v, want 'daily'", policyVal["interval"])
+	}
+}
+
+func TestAgentsRCKnownFieldsNotDuplicated(t *testing.T) {
+	// Known fields must not appear in ExtraFields even if the JSON has a key
+	// collision (e.g. someone accidentally writes "version" twice — last wins
+	// in Go's json.Unmarshal, and it should stay in the known slot only).
+	tmp := t.TempDir()
+	input := `{"version":1,"project":"p","sources":[{"type":"local"}],"hooks":false,"mcp":false,"settings":false}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if len(rc.ExtraFields) != 0 {
+		t.Errorf("ExtraFields should be empty for a manifest with only known keys, got: %v", rc.ExtraFields)
+	}
+}
+
 // ── JSON shape produced by Save ───────────────────────────────────────────────
 
 func TestAgentsRCJSONShape(t *testing.T) {
@@ -656,5 +986,80 @@ func TestAgentsRCJSONShape(t *testing.T) {
 	// $schema present
 	if raw["$schema"] == nil {
 		t.Error("$schema should be present")
+	}
+}
+
+// ── AgentsRCKG ────────────────────────────────────────────────────────────────
+
+func TestAgentsRCKG_Unmarshal(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"project": "demo",
+		"sources": [{"type": "local"}],
+		"kg": {
+			"graph_home": "/custom/kg",
+			"backend": "sqlite",
+			"bridge": {"enabled": true, "allowed_intents": ["symbol_lookup"]}
+		}
+	}`
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc.KG == nil {
+		t.Fatal("expected KG to be non-nil")
+	}
+	if rc.KG.GraphHome != "/custom/kg" {
+		t.Errorf("GraphHome: got %q", rc.KG.GraphHome)
+	}
+	if rc.KG.Backend != "sqlite" {
+		t.Errorf("Backend: got %q", rc.KG.Backend)
+	}
+	if !rc.KG.Bridge.Enabled {
+		t.Error("expected Bridge.Enabled = true")
+	}
+	if len(rc.KG.Bridge.AllowedIntents) != 1 || rc.KG.Bridge.AllowedIntents[0] != "symbol_lookup" {
+		t.Errorf("AllowedIntents: got %v", rc.KG.Bridge.AllowedIntents)
+	}
+}
+
+func TestAgentsRCKG_NilWhenAbsent(t *testing.T) {
+	raw := `{"version":1,"project":"demo","sources":[{"type":"local"}]}`
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc.KG != nil {
+		t.Errorf("expected KG nil when absent, got %+v", rc.KG)
+	}
+}
+
+func TestAgentsRCKG_MarshalRoundTrip(t *testing.T) {
+	rc := &AgentsRC{
+		Version: 1,
+		Project: "demo",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		KG: &AgentsRCKG{
+			GraphHome: "/my/graph",
+			Backend:   "sqlite",
+			Bridge:    AgentsRCKGBridge{Enabled: true},
+		},
+	}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var rc2 AgentsRC
+	if err := json.Unmarshal(data, &rc2); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if rc2.KG == nil {
+		t.Fatal("KG nil after round-trip")
+	}
+	if rc2.KG.GraphHome != "/my/graph" {
+		t.Errorf("GraphHome after round-trip: got %q", rc2.KG.GraphHome)
+	}
+	if !rc2.KG.Bridge.Enabled {
+		t.Error("Bridge.Enabled false after round-trip")
 	}
 }

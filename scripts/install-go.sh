@@ -1,12 +1,12 @@
 #!/bin/bash
-# dot-agents Go binary installer
+# da Go binary installer
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/install-go.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.sh | bash
 #
 # Options (via environment variables):
-#   INSTALL_DIR       - Installation directory (default: ~/.local/bin)
+#   DOT_AGENTS_INSTALL_DIR - Installation directory (default: ~/.local/bin)
 #   DOT_AGENTS_VERSION - Specific version to install (default: latest)
 
 set -euo pipefail
@@ -19,8 +19,8 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-REPO="dot-agents/dot-agents"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+REPO="NikashPrakash/dot-agents"
+INSTALL_DIR="${DOT_AGENTS_INSTALL_DIR:-${INSTALL_DIR:-$HOME/.local/bin}}"
 VERSION="${DOT_AGENTS_VERSION:-}"
 
 info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -56,7 +56,7 @@ get_latest_version() {
   elif command -v wget &>/dev/null; then
     wget -qO- "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
   else
-    die "curl or wget is required to download dot-agents"
+    die "curl or wget is required to download da"
   fi
 }
 
@@ -67,17 +67,17 @@ download_binary() {
   tmpdir=$(mktemp -d)
 
   local ext="tar.gz"
-  local binary="dot-agents"
+  local binary="da"
   # Windows releases use zip
   if [[ "$platform" == windows* ]]; then
     ext="zip"
-    binary="dot-agents.exe"
+    binary="da.exe"
   fi
 
   local filename="dot-agents_${version#v}_${platform}.${ext}"
   local url="https://github.com/${REPO}/releases/download/${version}/${filename}"
 
-  info "Downloading dot-agents ${version} for ${platform}..."
+  info "Downloading da ${version} for ${platform}..."
 
   if command -v curl &>/dev/null; then
     curl -fsSL "$url" -o "$tmpdir/$filename"
@@ -95,7 +95,7 @@ download_binary() {
 }
 
 main() {
-  echo -e "${BOLD}dot-agents installer${NC}"
+  echo -e "${BOLD}da installer${NC}"
   echo ""
 
   local platform
@@ -114,10 +114,10 @@ main() {
   binary=$(download_binary "$VERSION" "$platform")
 
   mkdir -p "$INSTALL_DIR"
-  cp "$binary" "$INSTALL_DIR/dot-agents"
-  chmod +x "$INSTALL_DIR/dot-agents"
+  cp "$binary" "$INSTALL_DIR/da"
+  chmod +x "$INSTALL_DIR/da"
 
-  success "Installed dot-agents ${VERSION} to ${INSTALL_DIR}/dot-agents"
+  success "Installed da ${VERSION} to ${INSTALL_DIR}/da"
 
   # Check if INSTALL_DIR is in PATH
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
@@ -130,8 +130,8 @@ main() {
   fi
 
   echo ""
-  echo "Run: dot-agents --help"
-  echo "Initialize: dot-agents init"
+  echo "Run: da --help"
+  echo "Initialize: da init"
 }
 
 main "$@"

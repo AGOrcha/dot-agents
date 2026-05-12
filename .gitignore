@@ -1,3 +1,6 @@
+# Secrets
+.github/.secrets/
+
 # Dependencies
 node_modules/
 vendor/
@@ -16,7 +19,7 @@ build/
 *.so
 *.dylib
 dot-agents-go
-
+bin/da
 # IDE
 .idea/
 .vscode/
@@ -55,7 +58,7 @@ coverage/
 .pytest_cache/
 .tox/
 htmlcov/
-
+.playwright-cli/
 # Temporary files
 *.tmp
 *.temp
@@ -74,6 +77,12 @@ CLAUDE.md
 AGENTS.md
 .agents-refresh
 .mcp.json
+# skill symlinks created by dot-agents refresh/install — not committed
+.agents/skills/
+.agents/agents/
+.github/agents/
+
+research/articles/images/
 
 # macOS
 .AppleDouble
@@ -87,6 +96,9 @@ __pycache__/
 .Python
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Ralph loop NDJSON captures (bin/tests/ralph-cursor-loop)
+.ralph-loop-streams/
 
 # Shell scripts
 *.sh~

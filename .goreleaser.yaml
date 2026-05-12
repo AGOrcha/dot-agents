@@ -9,7 +9,7 @@ before:
 builds:
   - id: dot-agents-unix
     main: ./cmd/dot-agents
-    binary: dot-agents
+    binary: da
     env:
       - CGO_ENABLED=0
     goos:
@@ -26,7 +26,7 @@ builds:
 
   - id: dot-agents-windows
     main: ./cmd/dot-agents
-    binary: dot-agents
+    binary: da
     env:
       - CGO_ENABLED=0
     goos:
@@ -42,19 +42,21 @@ builds:
 
 archives:
   - id: unix
-    builds:
+    ids:
       - dot-agents-unix
     name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats:
+      - tar.gz
     files:
       - README.md
       - LICENSE
 
   - id: windows
-    builds:
+    ids:
       - dot-agents-windows
     name_template: "dot-agents_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: zip
+    formats: 
+      - zip
     files:
       - README.md
       - LICENSE
@@ -67,21 +69,29 @@ release:
     owner: NikashPrakash
     name: dot-agents
 
-brews:
+homebrew_casks:
   - name: dot-agents
+    ids:
+      - unix
+    binaries:
+      - da
     commit_author:
       name: github-actions[bot]
       email: github-actions[bot]@users.noreply.github.com
+      signing:
+        enabled: true
+        key: "{{ .Env.HOMEBREW_TAP_GPG_KEY_ID }}"
+    url:
+      verified: "github.com/NikashPrakash/dot-agents/"
     repository:
-      owner: NikashPrakash
-      name: dot-agents
-      branch: master
-      token: "{{ .Env.DOT_AGENTS_PAT }}"
-      pull_request: 
+      owner: AGOrcha
+      name: homebrew-tap
+      branch: "goreleaser-cask-{{ .Version }}"
+      token: "{{ .Env.AGORCHA_PAT }}"
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          branch: main
     description: "Manage AI agent configurations across projects"
     homepage: "https://github.com/NikashPrakash/dot-agents"
-    license: "MIT"
-    install: |
-      bin.install "dot-agents"
-    test: |
-      system "#{bin}/dot-agents", "--version"

@@ -16,9 +16,9 @@ const (
 	copilotMCPJSON           = "mcp.json"
 	copilotClaudeDir         = ".claude"
 	copilotSettingsLocalJSON = "settings.local.json"
-	copilotInstructionsMD = "copilot-instructions.md"
-	copilotGitHubDir = ".github"
-	copilotVSCodeDir = ".vscode"
+	copilotInstructionsMD    = "copilot-instructions.md"
+	copilotGitHubDir         = ".github"
+	copilotVSCodeDir         = ".vscode"
 )
 
 func NewCopilot() Platform { return &copilot{} }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // isDirEntry reports whether the path is a directory, following symlinks.
@@ -94,18 +95,154 @@ func (s *StringsOrBool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// AgentsRCKGBridge is the bridge sub-config within the KG section.
+type AgentsRCKGBridge struct {
+	Enabled        bool     `json:"enabled"`
+	AllowedIntents []string `json:"allowed_intents,omitempty"`
+}
+
+// AgentsRCKG is the knowledge-graph configuration block in agentsrc.json.
+type AgentsRCKG struct {
+	// GraphHome overrides KG_HOME env var for this project. Defaults to ~/.knowledge-graph.
+	GraphHome string `json:"graph_home,omitempty"`
+	// Backend selects the storage backend: "sqlite" (default) or "postgres".
+	// Postgres requires KG_POSTGRES_URL.
+	Backend string `json:"backend,omitempty"`
+	// Bridge configures workflow/kg bridge query behaviour for this project.
+	Bridge AgentsRCKGBridge `json:"bridge"`
+}
+
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
 type AgentsRC struct {
-	Schema   string        `json:"$schema,omitempty"`
-	Version  int           `json:"version"`
-	Project  string        `json:"project,omitempty"`
-	Skills   []string      `json:"skills,omitempty"`
-	Rules    []string      `json:"rules,omitempty"`
-	Agents   []string      `json:"agents,omitempty"`
-	Hooks    StringsOrBool `json:"hooks"`
-	MCP      StringsOrBool `json:"mcp"`
-	Settings bool          `json:"settings"`
-	Sources  []Source      `json:"sources"`
+	Schema   string           `json:"$schema,omitempty"`
+	Version  int              `json:"version"`
+	Project  string           `json:"project,omitempty"`
+	Skills   []string         `json:"skills,omitempty"`
+	Rules    []string         `json:"rules,omitempty"`
+	Agents   []string         `json:"agents,omitempty"`
+	Hooks    StringsOrBool    `json:"hooks"`
+	MCP      StringsOrBool    `json:"mcp"`
+	Settings bool             `json:"settings"`
+	Sources  []Source         `json:"sources"`
+	KG       *AgentsRCKG      `json:"kg,omitempty"`
+	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+
+	// ExtraFields captures unknown JSON keys so Save() can round-trip them
+	// instead of silently dropping legacy or custom fields.
+	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// RefreshMetadata records the latest da install/refresh that updated a project.
+type RefreshMetadata struct {
+	Version     string `json:"version,omitempty"`
+	Commit      string `json:"commit,omitempty"`
+	Describe    string `json:"describe,omitempty"`
+	RefreshedAt string `json:"refreshedAt,omitempty"`
+}
+
+// SetRefreshMetadata stores the latest refresh details in the manifest.
+func (a *AgentsRC) SetRefreshMetadata(version, commit, describe string, refreshedAt time.Time) {
+	if a == nil {
+		return
+	}
+	a.Refresh = &RefreshMetadata{
+		Version:     version,
+		Commit:      commit,
+		Describe:    describe,
+		RefreshedAt: refreshedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+// agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
+var agentsRCKnown = map[string]bool{
+	"$schema": true, "version": true, "project": true,
+	"skills": true, "rules": true, "agents": true,
+	"hooks": true, "mcp": true, "settings": true, "sources": true,
+	"kg": true, "refresh": true,
+}
+
+// agentsRCCore is an alias used in custom marshal/unmarshal to avoid
+// infinite recursion while still using the standard json encoder.
+type agentsRCCore struct {
+	Schema   string           `json:"$schema,omitempty"`
+	Version  int              `json:"version"`
+	Project  string           `json:"project,omitempty"`
+	Skills   []string         `json:"skills,omitempty"`
+	Rules    []string         `json:"rules,omitempty"`
+	Agents   []string         `json:"agents,omitempty"`
+	Hooks    StringsOrBool    `json:"hooks"`
+	MCP      StringsOrBool    `json:"mcp"`
+	Settings bool             `json:"settings"`
+	Sources  []Source         `json:"sources"`
+	KG       *AgentsRCKG      `json:"kg,omitempty"`
+	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+}
+
+func (a *AgentsRC) UnmarshalJSON(data []byte) error {
+	var core agentsRCCore
+	if err := json.Unmarshal(data, &core); err != nil {
+		return err
+	}
+	a.Schema = core.Schema
+	a.Version = core.Version
+	a.Project = core.Project
+	a.Skills = core.Skills
+	a.Rules = core.Rules
+	a.Agents = core.Agents
+	a.Hooks = core.Hooks
+	a.MCP = core.MCP
+	a.Settings = core.Settings
+	a.Sources = core.Sources
+	a.KG = core.KG
+	a.Refresh = core.Refresh
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	for k, v := range all {
+		if !agentsRCKnown[k] {
+			if a.ExtraFields == nil {
+				a.ExtraFields = make(map[string]json.RawMessage)
+			}
+			a.ExtraFields[k] = v
+		}
+	}
+	return nil
+}
+
+func (a AgentsRC) MarshalJSON() ([]byte, error) {
+	core := agentsRCCore{
+		Schema:   a.Schema,
+		Version:  a.Version,
+		Project:  a.Project,
+		Skills:   a.Skills,
+		Rules:    a.Rules,
+		Agents:   a.Agents,
+		Hooks:    a.Hooks,
+		MCP:      a.MCP,
+		Settings: a.Settings,
+		Sources:  a.Sources,
+		KG:       a.KG,
+		Refresh:  a.Refresh,
+	}
+	data, err := json.Marshal(core)
+	if err != nil {
+		return nil, err
+	}
+	if len(a.ExtraFields) == 0 {
+		return data, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range a.ExtraFields {
+		if _, exists := m[k]; !exists {
+			m[k] = v
+		}
+	}
+	return json.Marshal(m)
 }
 
 // Source describes where to find agent resources.
@@ -195,6 +332,74 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	return rc, nil
 }
 
+// MergeGenerateAgentsRC overlays a freshly generated manifest onto an existing
+// on-disk manifest. Scan-derived lists (skills, rules, agents, hooks, mcp,
+// settings) come from generated; an existing non-empty project name, unknown
+// JSON keys (ExtraFields), and supplemental sources (e.g. git remotes not
+// produced by GenerateAgentsRC) are preserved. Source entries are unioned with
+// deduplication so the default local source is not duplicated when merging.
+func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
+	if existing == nil {
+		return generated
+	}
+	if generated == nil {
+		return existing
+	}
+	out := *generated
+	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
+	if existing.Project != "" {
+		out.Project = existing.Project
+	}
+	if len(existing.ExtraFields) > 0 {
+		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
+	}
+	if existing.Refresh != nil {
+		out.Refresh = existing.Refresh
+	}
+	return &out
+}
+
+func cloneExtraFieldsMap(m map[string]json.RawMessage) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func mergeSourceSlices(generated, existing []Source) []Source {
+	seen := make(map[string]bool)
+	var out []Source
+	for _, s := range generated {
+		k := sourceMergeKey(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	for _, s := range existing {
+		k := sourceMergeKey(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func sourceMergeKey(s Source) string {
+	switch s.Type {
+	case "local":
+		return "local:" + s.Path
+	case "git":
+		return "git:" + s.URL + "\x00" + s.Ref
+	default:
+		return "type:" + s.Type + "\x00" + s.Path + "\x00" + s.URL + "\x00" + s.Ref
+	}
+}
+
 // collectScopedDirs returns unique entry names from resource subdirs that contain markerFile.
 func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) []string {
 	var names []string
@@ -220,34 +425,52 @@ func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerF
 // detectHookEvents reads the project claude-code.json and returns a StringsOrBool
 // listing hook event names that have at least one entry.
 func detectHookEvents(agentsHome, projectName string) StringsOrBool {
-	settingsPath := filepath.Join(agentsHome, "settings", projectName, "claude-code.json")
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return StringsOrBool{}
-	}
-	var settings map[string]any
-	if json.Unmarshal(data, &settings) != nil {
-		return StringsOrBool{}
-	}
-	hooksVal, ok := settings["hooks"]
-	if !ok {
-		return StringsOrBool{}
-	}
-	hooksMap, ok := hooksVal.(map[string]any)
-	if !ok {
-		return StringsOrBool{}
-	}
-	var hookEvents []string
-	for event, val := range hooksMap {
-		if list, ok := val.([]any); ok && len(list) > 0 {
-			hookEvents = append(hookEvents, event)
+	for _, scope := range []string{projectName, "global"} {
+		hooksDir := filepath.Join(agentsHome, "hooks", scope)
+		entries, err := os.ReadDir(hooksDir)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
+					return StringsOrBool{All: true}
+				}
+			}
 		}
 	}
-	if len(hookEvents) == 0 {
-		return StringsOrBool{}
+
+	for _, scope := range []string{projectName, "global"} {
+		settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
+		data, err := os.ReadFile(settingsPath)
+		if err != nil {
+			continue
+		}
+		var settings map[string]any
+		if json.Unmarshal(data, &settings) != nil {
+			continue
+		}
+		hooksVal, ok := settings["hooks"]
+		if !ok {
+			continue
+		}
+		hooksMap, ok := hooksVal.(map[string]any)
+		if !ok {
+			continue
+		}
+		var hookEvents []string
+		for event, val := range hooksMap {
+			if list, ok := val.([]any); ok && len(list) > 0 {
+				hookEvents = append(hookEvents, event)
+			}
+		}
+		if len(hookEvents) == 0 {
+			continue
+		}
+		sort.Strings(hookEvents)
+		return StringsOrBool{Names: hookEvents}
 	}
-	sort.Strings(hookEvents)
-	return StringsOrBool{Names: hookEvents}
+	return StringsOrBool{}
 }
 
 // detectMCPServers scans MCP config files for the project and global scopes
@@ -261,10 +484,10 @@ func detectMCPServers(agentsHome, projectName string) StringsOrBool {
 	return StringsOrBool{}
 }
 
-// readMCPScope tries claude.json then mcp.json for a single scope directory
+// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope directory
 // and returns the server list from the first readable file.
 func readMCPScope(agentsHome, scope string) StringsOrBool {
-	for _, fname := range []string{"claude.json", "mcp.json"} {
+	for _, fname := range []string{"claude.json", "mcp.json", ".mcp.json"} {
 		mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
 		data, err := os.ReadFile(mcpPath)
 		if err != nil {
@@ -275,6 +498,9 @@ func readMCPScope(agentsHome, scope string) StringsOrBool {
 			continue
 		}
 		servers, ok := mcpConfig["servers"].(map[string]any)
+		if !ok {
+			servers, ok = mcpConfig["mcpServers"].(map[string]any)
+		}
 		if !ok {
 			break
 		}
