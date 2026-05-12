@@ -673,6 +673,173 @@ func TestCountKGNotes_AfterUpsert(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Commit (no-op)
+// ---------------------------------------------------------------------------
+
+func TestSQLiteCommit_NoOp(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.Commit(); err != nil {
+		t.Errorf("Commit should be a no-op: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetEdgesAmong — batching
+// ---------------------------------------------------------------------------
+
+func TestGetEdgesAmong_LargeBatch(t *testing.T) {
+	s := openTestStore(t)
+	// Build a set larger than the internal batch size (450) to exercise batching.
+	const n = 500
+	qns := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		src := "src" + string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)) + string(rune('a'+(i/676)%26))
+		tgt := "tgt" + string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)) + string(rune('a'+(i/676)%26))
+		qns = append(qns, src, tgt)
+		_, _ = s.UpsertEdge(graphstore.EdgeInfo{
+			Kind: graphstore.EdgeKindCalls, Source: src, Target: tgt, FilePath: "x.go",
+		})
+	}
+	edges, err := s.GetEdgesAmong(qns)
+	if err != nil {
+		t.Fatalf("GetEdgesAmong large batch: %v", err)
+	}
+	if len(edges) == 0 {
+		t.Error("expected edges from large batch")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SearchNodes — qualified-name matching
+// ---------------------------------------------------------------------------
+
+func TestSearchNodes_MatchesQualifiedName(t *testing.T) {
+	s := openTestStore(t)
+	_, _ = s.UpsertNode(graphstore.NodeInfo{
+		Kind: graphstore.NodeKindFunction, Name: "render",
+		ParentName: "myPkg", FilePath: "f.go", Language: "go",
+	}, "")
+	results, err := s.SearchNodes("myPkg", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes: %v", err)
+	}
+	if len(results) == 0 {
+		t.Errorf("expected match on qualified name")
+	}
+}
+
+func TestSearchNodes_NoResults(t *testing.T) {
+	s := openTestStore(t)
+	results, err := s.SearchNodes("nonexistent", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetStats — populated kinds + languages
+// ---------------------------------------------------------------------------
+
+func TestGetStats_LanguagesAndKinds(t *testing.T) {
+	s := openTestStore(t)
+	_, _ = s.UpsertNode(graphstore.NodeInfo{
+		Kind: graphstore.NodeKindFunction, Name: "Go1", FilePath: "a.go", Language: "go",
+	}, "")
+	_, _ = s.UpsertNode(graphstore.NodeInfo{
+		Kind: graphstore.NodeKindClass, Name: "Py1", FilePath: "a.py", Language: "python",
+	}, "")
+	_, _ = s.UpsertEdge(graphstore.EdgeInfo{
+		Kind: graphstore.EdgeKindCalls, Source: "a.go::Go1", Target: "a.py::Py1", FilePath: "a.go",
+	})
+
+	stats, err := s.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if stats.NodesByKind[graphstore.NodeKindFunction] != 1 {
+		t.Errorf("want 1 Function, got %d", stats.NodesByKind[graphstore.NodeKindFunction])
+	}
+	if stats.NodesByKind[graphstore.NodeKindClass] != 1 {
+		t.Errorf("want 1 Class, got %d", stats.NodesByKind[graphstore.NodeKindClass])
+	}
+	if stats.EdgesByKind[graphstore.EdgeKindCalls] != 1 {
+		t.Errorf("want 1 CALLS edge, got %d", stats.EdgesByKind[graphstore.EdgeKindCalls])
+	}
+	if len(stats.Languages) < 2 {
+		t.Errorf("expected at least 2 languages, got %v", stats.Languages)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StoreFileNodesEdges — extra payload preservation
+// ---------------------------------------------------------------------------
+
+func TestStoreFileNodesEdges_WithExtra(t *testing.T) {
+	s := openTestStore(t)
+	nodes := []graphstore.NodeInfo{{
+		Kind: graphstore.NodeKindFunction, Name: "F", FilePath: "e.go", Language: "go",
+		Extra: map[string]any{"tag": "alpha"},
+	}}
+	if err := s.StoreFileNodesEdges("e.go", nodes, nil, "h"); err != nil {
+		t.Fatalf("StoreFileNodesEdges: %v", err)
+	}
+	got, _ := s.GetNode("e.go::F")
+	if got == nil || got.Extra["tag"] != "alpha" {
+		t.Errorf("expected extra preserved, got %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpsertNode — preserves IsTest, Extra, FileHash
+// ---------------------------------------------------------------------------
+
+func TestUpsertNode_PreservesIsTestAndExtra(t *testing.T) {
+	s := openTestStore(t)
+	n := graphstore.NodeInfo{
+		Kind: graphstore.NodeKindFunction, Name: "TestX", FilePath: "x_test.go",
+		Language: "go", IsTest: true, Extra: map[string]any{"k": "v"},
+	}
+	_, _ = s.UpsertNode(n, "abc")
+	got, _ := s.GetNode("x_test.go::TestX")
+	if got == nil || !got.IsTest {
+		t.Errorf("expected IsTest=true, got %+v", got)
+	}
+	if got.Extra["k"] != "v" {
+		t.Errorf("expected extra preserved, got %v", got.Extra)
+	}
+	if got.FileHash != "abc" {
+		t.Errorf("expected file hash preserved, got %q", got.FileHash)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SearchKGNotes — limit + archived-filter
+// ---------------------------------------------------------------------------
+
+func TestSearchKGNotes_LimitAndArchivedFilter(t *testing.T) {
+	s := openTestStore(t)
+	_ = s.UpsertKGNote(graphstore.KGNote{
+		ID: "a", Title: "alpha graph", NoteType: "concept", Status: "active", FilePath: "a.md",
+	})
+	_ = s.UpsertKGNote(graphstore.KGNote{
+		ID: "b", Title: "beta graph", NoteType: "concept", Status: "active", FilePath: "b.md",
+		ArchivedAt: "2026-01-01T00:00:00Z",
+	})
+	results, err := s.SearchKGNotes("graph", 10)
+	if err != nil {
+		t.Fatalf("SearchKGNotes: %v", err)
+	}
+	for _, n := range results {
+		if n.ID == "b" {
+			t.Errorf("archived note should not be in search results: %+v", n)
+		}
+	}
+}
+
 // Ensure the test binary itself can be compiled without leaving temp files
 // under the source tree.
 func TestMain(m *testing.M) {

@@ -503,3 +503,19 @@ func TestPG_DeleteNoteSymbolLink(t *testing.T) {
 func TestPG_ImplementsStore(t *testing.T) {
 	var _ graphstore.Store = (*graphstore.PostgresStore)(nil)
 }
+
+// TestSQLite_ImplementsStore mirrors the Postgres check for SQLiteStore.
+func TestSQLite_ImplementsStore(t *testing.T) {
+	var _ graphstore.Store = (*graphstore.SQLiteStore)(nil)
+}
+
+// TestOpenPostgres_InvalidDSN exercises the pool-creation error path. The
+// pgxpool config parser rejects truly malformed URLs synchronously so this
+// runs without needing a live database.
+func TestOpenPostgres_InvalidDSN(t *testing.T) {
+	ctx := context.Background()
+	_, err := graphstore.OpenPostgres(ctx, "not-a-valid-dsn://!!!")
+	if err == nil {
+		t.Error("expected error from invalid DSN")
+	}
+}

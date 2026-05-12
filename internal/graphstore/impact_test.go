@@ -190,6 +190,32 @@ func TestExpandFrontier_SkipsVisited(t *testing.T) {
 	}
 }
 
+// TestBfsImpacted_EmptySeeds returns an empty impacted set when no seeds.
+func TestBfsImpacted_EmptySeeds(t *testing.T) {
+	impacted := bfsImpacted(map[string]bool{}, map[string][]string{"A": {"B"}}, map[string][]string{}, 10, 100)
+	if len(impacted) != 0 {
+		t.Errorf("expected empty impacted, got %d", len(impacted))
+	}
+}
+
+// TestBfsImpacted_ZeroDepth never expands beyond the seeds.
+func TestBfsImpacted_ZeroDepth(t *testing.T) {
+	seeds := map[string]bool{"A": true}
+	fwd := map[string][]string{"A": {"B"}}
+	impacted := bfsImpacted(seeds, fwd, map[string][]string{}, 0, 100)
+	if len(impacted) != 0 {
+		t.Errorf("depth=0 should yield no impacted, got %v", impacted)
+	}
+}
+
+// TestAllQualifiedNames_Empty returns empty slice for empty input.
+func TestAllQualifiedNames_Empty(t *testing.T) {
+	all := allQualifiedNames(nil, nil)
+	if len(all) != 0 {
+		t.Errorf("expected empty, got %v", all)
+	}
+}
+
 // TestAllQualifiedNames_Union verifies the union of seeds and impacted.
 func TestAllQualifiedNames_Union(t *testing.T) {
 	seeds := map[string]bool{"A": true, "B": true}

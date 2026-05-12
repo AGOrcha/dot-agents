@@ -142,6 +142,210 @@ func TestDiscoverCRGBin_returnsErrorWhenMissing(t *testing.T) {
 	}
 }
 
+// ── CRGDBPath / Available / DiscoverCRGBin ────────────────────────────────────
+
+func TestCRGDBPath(t *testing.T) {
+	got := graphstore.CRGDBPath("/repo/root")
+	if got != filepath.Join("/repo/root", ".code-review-graph", "graph.db") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCRGBridge_Available_EmptyBin(t *testing.T) {
+	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: ""}
+	if b.Available() {
+		t.Error("empty Bin should not be Available")
+	}
+}
+
+func TestCRGBridge_Available_MissingFile(t *testing.T) {
+	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: "/no/such/binary"}
+	if b.Available() {
+		t.Error("missing binary should not be Available")
+	}
+}
+
+func TestCRGBridge_Available_FileExists(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fake")
+	_ = os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: p}
+	if !b.Available() {
+		t.Errorf("existing binary should be Available")
+	}
+}
+
+// ── ReadNodes / ReadEdges / Status (against a fake graph.db) ──────────────────
+
+// writeFakeCRGDB seeds a .code-review-graph/graph.db SQLite file under repoRoot
+// containing the minimum schema needed by ReadNodes/ReadEdges/Status.
+func writeFakeCRGDB(t *testing.T, repoRoot string, nodeCount, edgeCount int) {
+	t.Helper()
+	dir := filepath.Join(repoRoot, ".code-review-graph")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dir, "graph.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open fake db: %v", err)
+	}
+	defer db.Close()
+
+	ddl := `
+		CREATE TABLE nodes (
+		  id INTEGER PRIMARY KEY AUTOINCREMENT,
+		  kind TEXT, name TEXT, qualified_name TEXT UNIQUE,
+		  file_path TEXT, line_start INTEGER, line_end INTEGER,
+		  language TEXT, parent_name TEXT, params TEXT, return_type TEXT,
+		  is_test INTEGER, file_hash TEXT, extra TEXT, updated_at REAL
+		);
+		CREATE TABLE edges (
+		  id INTEGER PRIMARY KEY AUTOINCREMENT,
+		  kind TEXT, source_qualified TEXT, target_qualified TEXT,
+		  file_path TEXT, line INTEGER, extra TEXT, updated_at REAL
+		);`
+	if _, err := db.Exec(ddl); err != nil {
+		t.Fatalf("ddl: %v", err)
+	}
+	for i := 0; i < nodeCount; i++ {
+		name := "fn" + string(rune('a'+i))
+		_, _ = db.Exec(
+			`INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end,language,parent_name,params,return_type,is_test,file_hash,extra,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			"Function", name, "pkg::"+name, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", 1.0,
+		)
+	}
+	for i := 0; i < edgeCount; i++ {
+		_, _ = db.Exec(
+			`INSERT INTO edges (kind,source_qualified,target_qualified,file_path,line,extra,updated_at)
+			 VALUES (?,?,?,?,?,?,?)`,
+			"CALLS", "pkg::A", "pkg::B", "f.go", 1, "{}", 1.0,
+		)
+	}
+}
+
+func TestCRGBridge_ReadNodes_NoDB(t *testing.T) {
+	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: ""}
+	nodes, err := b.ReadNodes(10)
+	if err != nil {
+		t.Errorf("missing db should not error: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Errorf("missing db should yield 0 nodes, got %d", len(nodes))
+	}
+}
+
+func TestCRGBridge_ReadNodes_WithDB(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 3, 0)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	nodes, err := b.ReadNodes(0)
+	if err != nil {
+		t.Fatalf("ReadNodes: %v", err)
+	}
+	if len(nodes) != 3 {
+		t.Errorf("expected 3 nodes, got %d", len(nodes))
+	}
+}
+
+func TestCRGBridge_ReadNodes_Limit(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 5, 0)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	nodes, err := b.ReadNodes(2)
+	if err != nil {
+		t.Fatalf("ReadNodes: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Errorf("expected 2 (limit), got %d", len(nodes))
+	}
+}
+
+func TestCRGBridge_ReadEdges_NoDB(t *testing.T) {
+	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: ""}
+	edges, err := b.ReadEdges(10)
+	if err != nil {
+		t.Errorf("missing db should not error: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Errorf("expected 0 edges, got %d", len(edges))
+	}
+}
+
+func TestCRGBridge_ReadEdges_WithDB(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 0, 4)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	edges, err := b.ReadEdges(0)
+	if err != nil {
+		t.Fatalf("ReadEdges: %v", err)
+	}
+	if len(edges) != 4 {
+		t.Errorf("expected 4 edges, got %d", len(edges))
+	}
+}
+
+func TestCRGBridge_ReadEdges_Limit(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 0, 5)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	edges, err := b.ReadEdges(2)
+	if err != nil {
+		t.Fatalf("ReadEdges: %v", err)
+	}
+	if len(edges) != 2 {
+		t.Errorf("expected 2 (limit), got %d", len(edges))
+	}
+}
+
+func TestCRGBridge_Status_MissingDB(t *testing.T) {
+	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: ""}
+	status, err := b.Status()
+	if err != nil {
+		t.Fatalf("Status missing-db: %v", err)
+	}
+	if status == nil {
+		t.Fatal("Status returned nil")
+	}
+	if status.State != graphstore.CRGReadinessUnbuilt {
+		t.Errorf("missing-db state: got %q", status.State)
+	}
+	if status.Ready {
+		t.Errorf("Ready should be false when db missing")
+	}
+}
+
+func TestCRGBridge_Status_PopulatedDB(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 3, 1)
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	status, err := b.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Nodes != 3 || status.Edges != 1 {
+		t.Errorf("got nodes=%d edges=%d", status.Nodes, status.Edges)
+	}
+	// 1 distinct file_path = 1 file
+	if status.Files != 1 {
+		t.Errorf("got files=%d, want 1", status.Files)
+	}
+}
+
+// ── CRGOperationReport JSON shape ─────────────────────────────────────────────
+
+func TestCRGOperationReport_JSONShape(t *testing.T) {
+	rep := graphstore.CRGOperationReport{
+		Operation: "build",
+		Outcome:   graphstore.CRGReadinessReady,
+		Summary:   "ok",
+	}
+	if rep.Operation != "build" || rep.Outcome != graphstore.CRGReadinessReady {
+		t.Errorf("unexpected: %+v", rep)
+	}
+}
+
 // parseCRGStatusOutputExported is a thin helper so tests in the _test package
 // can reach the unexported parsing function via a white-box re-export.
 // We use this approach rather than making the function exported to keep the
