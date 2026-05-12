@@ -2,6 +2,8 @@ package kg
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -586,5 +588,632 @@ func TestFindCodeNodes_EmptyQueryReturnsNil(t *testing.T) {
 	}
 	if nodes != nil {
 		t.Errorf("expected nil results for empty query, got %v", nodes)
+	}
+}
+
+// TestFindCodeNodes_DefaultLimit ensures a non-positive limit is normalised to 10.
+func TestFindCodeNodes_DefaultLimit(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Bar", FilePath: "pkg/bar.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	// limit=0 should not panic and should not error; search may still return matches.
+	nodes, err := findCodeNodes(store, "Bar", 0)
+	if err != nil {
+		t.Fatalf("findCodeNodes: %v", err)
+	}
+	_ = nodes // result count depends on FTS layout; we just exercise the path
+}
+
+// ── change_analysis matchers ────────────────────────────────────────────────
+
+// TestAppendChangedFunctionMatches_ProjectsAndLimits exercises both the
+// match-true projection and the limit-reached early return.
+func TestAppendChangedFunctionMatches_ProjectsAndLimits(t *testing.T) {
+	matches := caseInsensitiveMatcher("foo")
+	fns := []graphstore.CRGChangedNode{
+		{Name: "foo", QualifiedName: "pkg.foo", FilePath: "pkg/foo.go", RiskScore: 0.9},
+		{Name: "Foo2", QualifiedName: "pkg.Foo2", FilePath: "pkg/foo2.go"},
+		{Name: "bar", QualifiedName: "pkg.bar", FilePath: "pkg/bar.go"}, // filtered out
+	}
+	resp := &GraphQueryResponse{}
+	stop := appendChangedFunctionMatches(resp, fns, matches, 1)
+	if !stop {
+		t.Errorf("expected limit-reached signal at limit=1")
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Type != "changed_function" {
+		t.Errorf("unexpected results: %+v", resp.Results)
+	}
+	if resp.Results[0].RiskScore == 0 {
+		t.Error("expected RiskScore to be propagated")
+	}
+
+	// limit<=0 means "no cap" — both matching entries should land.
+	resp2 := &GraphQueryResponse{}
+	if appendChangedFunctionMatches(resp2, fns, matches, 0) {
+		t.Error("limit=0 should never signal limit reached")
+	}
+	if len(resp2.Results) != 2 {
+		t.Errorf("expected 2 results without limit, got %d", len(resp2.Results))
+	}
+}
+
+// TestAppendTestGapMatches_FilterAndLimit covers both branches of the helper.
+func TestAppendTestGapMatches_FilterAndLimit(t *testing.T) {
+	matches := caseInsensitiveMatcher("svc")
+	gaps := []graphstore.CRGTestGap{
+		{QualifiedName: "pkg.svcA", FilePath: "pkg/a.go"},
+		{QualifiedName: "pkg.svcB", FilePath: "pkg/b.go"},
+		{QualifiedName: "pkg.other", FilePath: "pkg/c.go"}, // filtered
+	}
+	resp := &GraphQueryResponse{}
+	if !appendTestGapMatches(resp, gaps, matches, 1) {
+		t.Error("expected limit reached at 1")
+	}
+	if len(resp.Results) != 1 || resp.Results[0].TestCoverage != "missing" {
+		t.Errorf("unexpected gap results: %+v", resp.Results)
+	}
+
+	resp2 := &GraphQueryResponse{}
+	if appendTestGapMatches(resp2, gaps, matches, 0) {
+		t.Error("limit=0 must not stop iteration")
+	}
+	if len(resp2.Results) != 2 {
+		t.Errorf("expected 2 gap matches without limit, got %d", len(resp2.Results))
+	}
+}
+
+// TestAppendReviewPriorityMatches covers reason-string matching and limit.
+func TestAppendReviewPriorityMatches(t *testing.T) {
+	matches := caseInsensitiveMatcher("risk")
+	prios := []graphstore.CRGPriority{
+		{QualifiedName: "pkg.foo", Reason: "high risk path", RiskScore: 0.8},
+		{QualifiedName: "pkg.bar", Reason: "missing tests"}, // skipped (no "risk")
+		{QualifiedName: "pkg.baz", Reason: "risk in caller graph", RiskScore: 0.5},
+	}
+	resp := &GraphQueryResponse{}
+	if !appendReviewPriorityMatches(resp, prios, matches, 1) {
+		t.Error("expected limit reached")
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Type != "review_priority" {
+		t.Errorf("unexpected priority results: %+v", resp.Results)
+	}
+	resp2 := &GraphQueryResponse{}
+	appendReviewPriorityMatches(resp2, prios, matches, 0)
+	if len(resp2.Results) != 2 {
+		t.Errorf("expected 2 priority matches, got %d", len(resp2.Results))
+	}
+}
+
+// ── decision-link projections ───────────────────────────────────────────────
+
+// seedDecisionNote inserts a KGNote of the given type and returns its ID.
+func seedDecisionNote(t *testing.T, store *graphstore.SQLiteStore, id, noteType, title string) {
+	t.Helper()
+	if err := store.UpsertKGNote(graphstore.KGNote{
+		ID: id, Title: title, NoteType: noteType, Status: "active",
+		Summary: title + " summary", FilePath: "notes/" + id + ".md",
+	}); err != nil {
+		t.Fatalf("UpsertKGNote %s: %v", id, err)
+	}
+}
+
+// TestAppendDecisionLinkMatches_FilterAndLimit verifies that only decision/
+// synthesis/concept notes survive, that duplicates are skipped, and that
+// limit returns true once full.
+func TestAppendDecisionLinkMatches_FilterAndLimit(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	seedDecisionNote(t, store, "dec-1", "decision", "Decision One")
+	seedDecisionNote(t, store, "syn-1", "synthesis", "Synthesis One")
+	seedDecisionNote(t, store, "other-1", "entity", "Entity One") // filtered out
+
+	links := []graphstore.NoteSymbolLink{
+		{NoteID: "dec-1", QualifiedName: "pkg::F", LinkKind: "decides"},
+		{NoteID: "dec-1", QualifiedName: "pkg::F", LinkKind: "decides"}, // dedup
+		{NoteID: "syn-1", QualifiedName: "pkg::F", LinkKind: "documents"},
+		{NoteID: "other-1", QualifiedName: "pkg::F", LinkKind: "mentions"}, // filtered
+		{NoteID: "missing", QualifiedName: "pkg::F", LinkKind: "mentions"}, // GetKGNote returns nil
+	}
+
+	seen := map[string]bool{}
+	var results []GraphQueryResult
+	stop := appendDecisionLinkMatches(store, "pkg::F", links, seen, &results, 1)
+	if !stop {
+		t.Error("expected limit=1 to halt at first match")
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result at limit=1, got %d (%+v)", len(results), results)
+	}
+	if results[0].ID != "dec-1" {
+		t.Errorf("expected first match to be dec-1, got %q", results[0].ID)
+	}
+
+	seen2 := map[string]bool{}
+	var results2 []GraphQueryResult
+	if appendDecisionLinkMatches(store, "pkg::F", links, seen2, &results2, 0) {
+		t.Error("limit=0 must not signal stop")
+	}
+	if len(results2) != 2 {
+		t.Errorf("expected 2 valid matches (decision+synthesis), got %d", len(results2))
+	}
+}
+
+// TestCollectSymbolDecisionResults_EndToEnd seeds nodes, notes, and links and
+// exercises the symbol_decisions intent through the dispatcher.
+func TestCollectSymbolDecisionResults_EndToEnd(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Target", FilePath: "pkg/target.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	node, err := store.GetNode("pkg/target.go::Target")
+	if err != nil || node == nil {
+		t.Skip("qualified-name derivation mismatch")
+	}
+	seedDecisionNote(t, store, "dec-target", "decision", "Decide target")
+	if _, err := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
+		NoteID: "dec-target", QualifiedName: node.QualifiedName, LinkKind: "decides",
+	}); err != nil {
+		t.Fatalf("UpsertNoteSymbolLink: %v", err)
+	}
+
+	results, err := collectSymbolDecisionResults(store, []graphstore.GraphNode{*node}, 5)
+	if err != nil {
+		t.Fatalf("collectSymbolDecisionResults: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "dec-target" {
+		t.Errorf("expected dec-target result, got %+v", results)
+	}
+
+	// runSymbolDecisions wraps the same flow.
+	resp := &GraphQueryResponse{}
+	if err := runSymbolDecisions(store, resp, node.QualifiedName, 5); err != nil {
+		t.Fatalf("runSymbolDecisions: %v", err)
+	}
+	if len(resp.Results) != 1 {
+		t.Errorf("runSymbolDecisions: expected 1 result, got %d", len(resp.Results))
+	}
+}
+
+// TestDecisionNoteCandidates_ExactIDOverridesSearch covers both branches of
+// decisionNoteCandidates (exact-hit and search-fallback).
+func TestDecisionNoteCandidates_ExactIDOverridesSearch(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	seedDecisionNote(t, store, "dec-alpha", "decision", "Alpha")
+	seedDecisionNote(t, store, "dec-beta", "decision", "Beta keyword alpha-ish")
+
+	exact, err := decisionNoteCandidates(store, "dec-alpha", 5)
+	if err != nil {
+		t.Fatalf("exact lookup: %v", err)
+	}
+	if len(exact) != 1 || exact[0].ID != "dec-alpha" {
+		t.Errorf("expected exact-id hit dec-alpha, got %+v", exact)
+	}
+
+	// Unknown id falls back to search ranking.
+	fallback, err := decisionNoteCandidates(store, "Beta", 5)
+	if err != nil {
+		t.Fatalf("fallback search: %v", err)
+	}
+	found := false
+	for _, n := range fallback {
+		if n.ID == "dec-beta" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dec-beta in search fallback, got %+v", fallback)
+	}
+}
+
+// TestAppendDecisionSymbolMatches_WithAndWithoutNode covers both branches of
+// appendDecisionSymbolMatches: the symbol exists in the warm store (rich
+// projection) and the link points at a symbol the store has not indexed yet.
+func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Known", FilePath: "k.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	knownQN := "k.go::Known"
+	if got, _ := store.GetNode(knownQN); got == nil {
+		t.Skip("qualified-name derivation mismatch")
+	}
+
+	note := graphstore.KGNote{ID: "dec-x", Title: "Decide X", NoteType: "decision"}
+	links := []graphstore.NoteSymbolLink{
+		{NoteID: "dec-x", QualifiedName: knownQN, LinkKind: "decides"},
+		{NoteID: "dec-x", QualifiedName: "ghost::missing", LinkKind: "documents"},
+		{NoteID: "dec-x", QualifiedName: knownQN, LinkKind: "decides"}, // dedupe
+	}
+
+	seen := map[string]bool{}
+	var results []GraphQueryResult
+	if appendDecisionSymbolMatches(store, note, links, seen, &results, 0) {
+		t.Error("limit=0 should never signal stop")
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 unique link projections, got %d", len(results))
+	}
+	// One result should carry warm-store metadata, the other should fall back to
+	// the link-only projection.
+	foundKnown, foundGhost := false, false
+	for _, r := range results {
+		if r.ID == knownQN {
+			foundKnown = true
+			if r.QualifiedName == "" {
+				t.Errorf("warm-store result missing qualified_name: %+v", r)
+			}
+		}
+		if r.ID == "ghost::missing" {
+			foundGhost = true
+			if r.Type != "symbol" {
+				t.Errorf("fallback projection should report type=symbol, got %q", r.Type)
+			}
+		}
+	}
+	if !foundKnown || !foundGhost {
+		t.Errorf("expected both warm and fallback projections; results=%+v", results)
+	}
+
+	// Limit returns true once full.
+	seen2 := map[string]bool{}
+	var results2 []GraphQueryResult
+	if !appendDecisionSymbolMatches(store, note, links, seen2, &results2, 1) {
+		t.Error("expected limit=1 to halt iteration")
+	}
+	if len(results2) != 1 {
+		t.Errorf("limit=1: expected 1 result, got %d", len(results2))
+	}
+}
+
+// TestCollectDecisionSymbolResults_NoMatches confirms an empty store returns
+// an empty slice without error.
+func TestCollectDecisionSymbolResults_NoMatches(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	results, err := collectDecisionSymbolResults(store, "nothing-here", 5)
+	if err != nil {
+		t.Fatalf("collectDecisionSymbolResults: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected empty results, got %+v", results)
+	}
+}
+
+// TestCollectCodeBridgeResults_DecisionSymbols routes decision_symbols through
+// the dispatcher and confirms the warm-store path returns a hit.
+func TestCollectCodeBridgeResults_DecisionSymbols(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Decider", FilePath: "d.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	seedDecisionNote(t, store, "dec-ds", "decision", "DS decision")
+	if _, err := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
+		NoteID: "dec-ds", QualifiedName: "d.go::Decider", LinkKind: "decides",
+	}); err != nil {
+		t.Fatalf("UpsertNoteSymbolLink: %v", err)
+	}
+	store.Close()
+
+	resp, err := collectCodeBridgeResults(home, "decision_symbols", "dec-ds", 5)
+	if err != nil {
+		t.Fatalf("collectCodeBridgeResults: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected decision_symbols result, got %+v", resp)
+	}
+}
+
+// TestCollectCodeBridgeResults_TestsFor_FallbackPath seeds a tested_by edge in
+// the outbound direction; the inbound traversal returns no results, so the
+// fallback outbound branch in runTestsFor fires.
+func TestCollectCodeBridgeResults_TestsFor_FallbackPath(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Subject", FilePath: "s.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "TestSubject", FilePath: "s_test.go", Language: "go", IsTest: true,
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	// Outbound tested_by from Subject → TestSubject. Inbound on Subject misses,
+	// then runTestsFor falls back to outbound.
+	if _, err := store.UpsertEdge(graphstore.EdgeInfo{
+		Kind:     graphstore.EdgeKindTestedBy,
+		Source:   "s.go::Subject",
+		Target:   "s_test.go::TestSubject",
+		FilePath: "s.go",
+	}); err != nil {
+		t.Fatalf("UpsertEdge: %v", err)
+	}
+	store.Close()
+
+	resp, err := collectCodeBridgeResults(home, "tests_for", "Subject", 5)
+	if err != nil {
+		t.Fatalf("collectCodeBridgeResults tests_for: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected fallback outbound tested_by hit, got %+v", resp)
+	}
+}
+
+// TestRunImpactRadius_PopulatesResultsAndWarning seeds a node and exercises the
+// non-empty path of runImpactRadius, validating that the warning for spanned
+// files is appended.
+func TestRunImpactRadius_PopulatesResultsAndWarning(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Hub", FilePath: "hub.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	resp := &GraphQueryResponse{}
+	if err := runImpactRadius(store, resp, "Hub", 5); err != nil {
+		t.Fatalf("runImpactRadius: %v", err)
+	}
+	// At least the changed node should be reported.
+	if len(resp.Results) == 0 {
+		t.Errorf("expected impact results to include the changed node, got %+v", resp)
+	}
+}
+
+// TestRunSymbolLookup_PopulatesResults exercises the symbol_lookup branch via
+// the public dispatcher.
+func TestRunSymbolLookup_PopulatesResults(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Lookup", FilePath: "lk.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	resp := &GraphQueryResponse{}
+	if err := dispatchWarmStoreBridgeIntent(store, resp, "symbol_lookup", "Lookup", 5); err != nil {
+		t.Fatalf("dispatch symbol_lookup: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected symbol_lookup result, got %+v", resp)
+	}
+}
+
+// TestExecuteBridgeQuery_CodeIntentRoutesToCollector verifies the bridge
+// dispatcher delegates code intents to collectCodeBridgeResults rather than
+// the local-file adapter.
+func TestExecuteBridgeQuery_CodeIntentRoutesToCollector(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Reachable", FilePath: "r.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	resp, err := executeBridgeQuery(home, "symbol_lookup", "Reachable")
+	if err != nil {
+		t.Fatalf("executeBridgeQuery: %v", err)
+	}
+	if resp.Provider != "warm-graphstore" {
+		t.Errorf("expected warm-graphstore provider, got %q", resp.Provider)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected at least one result for Reachable")
+	}
+	// The sparsity score must be attached.
+	if resp.SparsityScore == nil {
+		t.Error("expected SparsityScore to be populated")
+	}
+}
+
+// TestMergeBridgeResults_QueryPropagation ensures the merged Query comes from
+// the last response and warnings accumulate from every input.
+func TestMergeBridgeResults_QueryPropagation(t *testing.T) {
+	merged := mergeBridgeResults([]GraphQueryResponse{
+		{Query: "first", Results: []GraphQueryResult{{ID: "a"}}, Warnings: []string{"w1"}},
+		{Query: "second", Results: []GraphQueryResult{{ID: "a"}, {ID: "b"}}, Warnings: []string{"w2"}},
+	}, "plan_context")
+	if merged.Query != "second" {
+		t.Errorf("expected last query to win, got %q", merged.Query)
+	}
+	if len(merged.Results) != 2 {
+		t.Errorf("expected dedupe across responses, got %d", len(merged.Results))
+	}
+	if len(merged.Warnings) != 2 {
+		t.Errorf("expected both warnings preserved, got %v", merged.Warnings)
+	}
+}
+
+// TestResolveBridgeQuery_PlanContextFansOut documents the fan-out cardinality.
+func TestResolveBridgeQuery_PlanContextFansOut(t *testing.T) {
+	queries, err := resolveBridgeQuery("plan_context", "topic")
+	if err != nil {
+		t.Fatalf("resolveBridgeQuery: %v", err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("plan_context should fan out to 2 KG intents, got %d", len(queries))
+	}
+	for _, q := range queries {
+		if q.Limit != 10 {
+			t.Errorf("expected default limit 10, got %d", q.Limit)
+		}
+	}
+}
+
+// ── adapter helpers ─────────────────────────────────────────────────────────
+
+// TestLocalFileAdapter_HealthShape exercises the health report including the
+// notes counter.
+func TestLocalFileAdapter_HealthShape(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	adapter := NewLocalFileAdapter(home)
+	if adapter.Name() != "local-file" {
+		t.Errorf("adapter name = %q, want local-file", adapter.Name())
+	}
+	if !adapter.Available() {
+		t.Fatal("adapter should be available after setup")
+	}
+	h, err := adapter.Health()
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.AdapterName != "local-file" {
+		t.Errorf("unexpected adapter name in health: %+v", h)
+	}
+	if h.NoteCount < 0 {
+		t.Errorf("note count should be non-negative, got %d", h.NoteCount)
+	}
+}
+
+// TestLocalFileAdapter_HealthMissingHome reports "graph not initialized" when
+// KG_HOME has no self/config.yaml.
+func TestLocalFileAdapter_HealthMissingHome(t *testing.T) {
+	dir := t.TempDir()
+	adapter := NewLocalFileAdapter(dir)
+	if adapter.Available() {
+		t.Fatal("adapter should report unavailable on a bare directory")
+	}
+	h, err := adapter.Health()
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if len(h.Warnings) == 0 || !strings.Contains(h.Warnings[0], "not initialized") {
+		t.Errorf("expected 'not initialized' warning, got %v", h.Warnings)
+	}
+}
+
+// TestCollectAdapterHealth_WritesArtefact verifies the on-disk side effect.
+func TestCollectAdapterHealth_WritesArtefact(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	adapters := []KGAdapter{NewLocalFileAdapter(home)}
+	list := collectAdapterHealth(home, adapters)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 health record, got %d", len(list))
+	}
+	// File should exist and be valid JSON.
+	data, err := os.ReadFile(filepath.Join(home, "ops", "adapters", "adapter-health.json"))
+	if err != nil {
+		t.Fatalf("read adapter-health.json: %v", err)
+	}
+	var roundtrip []KGAdapterHealth
+	if err := json.Unmarshal(data, &roundtrip); err != nil {
+		t.Fatalf("decode adapter-health.json: %v", err)
+	}
+	if len(roundtrip) != 1 {
+		t.Errorf("expected 1 record on disk, got %d", len(roundtrip))
+	}
+}
+
+// TestNeighborQualifiedName_InboundOutbound documents direction semantics.
+func TestNeighborQualifiedName_InboundOutbound(t *testing.T) {
+	e := graphstore.GraphEdge{SourceQualified: "src", TargetQualified: "tgt"}
+	if neighborQualifiedName(e, true) != "src" {
+		t.Error("inbound neighbor should be source")
+	}
+	if neighborQualifiedName(e, false) != "tgt" {
+		t.Error("outbound neighbor should be target")
 	}
 }

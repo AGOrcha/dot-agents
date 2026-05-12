@@ -558,3 +558,176 @@ func TestKGNoteFile_RoundTrip(t *testing.T) {
 var _ = fmt.Sprintf
 var _ kgImpactJSONOutput
 var _ kgChangesJSONOutput
+
+// TestRenderImpactNodeSection_SkipsFileKind documents the file-suppression
+// branch in isolation.
+func TestRenderImpactNodeSection_SkipsFileKind(t *testing.T) {
+	out := captureStdout(t, func() {
+		renderImpactNodeSection("Section", "found", []graphstore.ImpactNode{
+			{Kind: "Function", Name: "Keep"},
+			{Kind: "File", Name: "skip.go"},
+		})
+	})
+	if !strings.Contains(string(out), "Keep") {
+		t.Errorf("expected function row in output:\n%s", out)
+	}
+	if strings.Contains(string(out), "skip.go") {
+		t.Errorf("file kinds must be suppressed:\n%s", out)
+	}
+
+	// Empty input emits nothing.
+	out2 := captureStdout(t, func() {
+		renderImpactNodeSection("Empty", "found", nil)
+	})
+	if strings.Contains(string(out2), "Empty") {
+		t.Errorf("empty section header should be suppressed, got:\n%s", out2)
+	}
+}
+
+// TestWarmActiveAndArchivedNotes covers warmNotesInDir for both the active
+// and archived flows, including the archive-timestamp adjust callback.
+func TestWarmActiveAndArchivedNotes(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-05-12T00:00:00Z"
+	// Active note in notes/decisions/
+	if err := createGraphNote(home, &GraphNote{
+		SchemaVersion: 1, ID: "wd-1", Type: "decision", Title: "Warm Decision",
+		Summary: "warm", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}, "body"); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	// Archived note placed under notes/_archived
+	archDir := filepath.Join(home, "notes", "_archived")
+	if err := os.MkdirAll(archDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	archived := &GraphNote{
+		SchemaVersion: 1, ID: "wd-arch", Type: "decision", Title: "Archived",
+		Summary: "old", Status: "archived", CreatedAt: now, UpdatedAt: now,
+	}
+	data, err := renderGraphNote(archived, "archived body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archDir, "wd-arch.md"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Also include a bogus file that parseGraphNote should reject so the
+	// skipped counter increments.
+	if err := os.WriteFile(filepath.Join(archDir, "broken.md"), []byte("not yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	subs, _ := warmNoteSubdirs("")
+	indexed, _ := warmActiveNotes(store, home, subs)
+	if indexed < 1 {
+		t.Errorf("active notes: expected ≥1 indexed, got %d", indexed)
+	}
+	archIdx, archSkip := warmArchivedNotes(store, home)
+	if archIdx != 1 {
+		t.Errorf("archived: expected 1 indexed (wd-arch), got %d", archIdx)
+	}
+	if archSkip < 1 {
+		t.Errorf("expected the broken archive entry to count as skipped, got %d", archSkip)
+	}
+
+	// The archived note must have ArchivedAt populated by the adjust callback.
+	got, err := store.GetKGNote("wd-arch")
+	if err != nil || got == nil {
+		t.Fatalf("GetKGNote wd-arch: %v", err)
+	}
+	if got.ArchivedAt == "" {
+		t.Errorf("expected ArchivedAt populated by warm archive adjust, got %+v", got)
+	}
+}
+
+// TestWarmNotesInDir_MissingDirReturnsZero ensures the helper short-circuits
+// when the directory does not exist.
+func TestWarmNotesInDir_MissingDirReturnsZero(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	indexed, skipped := warmNotesInDir(store, filepath.Join(home, "does-not-exist"), nil)
+	if indexed != 0 || skipped != 0 {
+		t.Errorf("expected 0/0 for missing dir, got indexed=%d skipped=%d", indexed, skipped)
+	}
+}
+
+// TestWarmCodeLane_CRGUnavailable hits the failure path: with no CRG binary
+// on PATH, warmCodeLane returns an empty summary and emits a warning.
+func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	t.Setenv("PATH", t.TempDir())
+	t.Chdir(t.TempDir())
+	out := captureStdout(t, func() {
+		if got := warmCodeLane(store); got != "" {
+			t.Errorf("expected empty summary when CRG missing, got %q", got)
+		}
+	})
+	_ = out // warning is emitted to stderr by ui.Warn — we only assert the return value
+}
+
+// TestRunKGLinkRemove_InvalidIDReturnsError covers the integer-parse error.
+func TestRunKGLinkRemove_InvalidIDReturnsError(t *testing.T) {
+	cmd := newKGLinkRemoveCmdForTest()
+	err := runKGLinkRemove(cmd, []string{"not-a-number"})
+	if err == nil {
+		t.Fatal("expected parse error for non-integer link id")
+	}
+	if !strings.Contains(err.Error(), "invalid link ID") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestRunKGLinkAdd_InvalidKindRejected exercises the kind-validation branch.
+func TestRunKGLinkAdd_InvalidKindRejected(t *testing.T) {
+	cmd := newKGLinkAddCmdForTest("not-real-kind")
+	err := runKGLinkAdd(cmd, []string{"some-id", "ns::F"})
+	if err == nil {
+		t.Fatal("expected error for invalid link kind")
+	}
+	if !strings.Contains(err.Error(), "invalid link kind") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestRunKGLinkAdd_MissingArgs covers the early usage-error branch.
+func TestRunKGLinkAdd_MissingArgs(t *testing.T) {
+	cmd := newKGLinkAddCmdForTest("mentions")
+	if err := runKGLinkAdd(cmd, nil); err == nil {
+		t.Error("expected usage error for missing args")
+	}
+}
+
+// TestRunKGSync_NotInitialized errors when no kg setup has been performed.
+func TestRunKGSync_NotInitialized(t *testing.T) {
+	t.Setenv("KG_HOME", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+	if err := runKGSync(cmd, nil); err == nil {
+		t.Error("expected not-initialized error from runKGSync")
+	}
+}
