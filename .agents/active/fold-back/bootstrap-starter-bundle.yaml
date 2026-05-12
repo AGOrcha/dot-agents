@@ -1,0 +1,8 @@
+schema_version: 1
+id: bootstrap-starter-bundle
+plan_id: legacy-shell-prune-share-rehome
+task_id: p0-decision-gate
+observation: 'Decision: dot-agents init should seed the curated starter bundle, including shipped starter skills and starter agents where provided, while skills new and agents new remain the command-owned authoring paths.'
+classification: small
+routed_to: task_note:legacy-shell-prune-share-rehome/p0-decision-gate
+created_at: "2026-05-12T03:11:25Z"

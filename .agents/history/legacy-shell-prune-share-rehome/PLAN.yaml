@@ -1,0 +1,11 @@
+schema_version: 1
+id: legacy-shell-prune-share-rehome
+title: Legacy Shell Prune and src/share Rehome
+status: archived
+summary: Retire the remaining src/lib shell layer, replace or deprecate the stale installer path, and re-home runtime-owned scaffold assets from src/share into canonical Go-owned scaffold locations.
+created_at: "2026-05-12T02:27:06Z"
+updated_at: "2026-05-12T03:33:26Z"
+owner: dot-agents
+success_criteria: The repo has a single authoritative runtime scaffold source, the supported installer path no longer depends on src/lib or src/share package payloads, and any remaining docs-only template examples live outside the runtime asset tree. No supported execution path references src/lib/**.
+verification_strategy: Use rg to prove no supported code path references src/lib or src/share runtime payloads after the migration, run focused go test on touched commands/internal packages, and manually smoke the supported install/bootstrap flow plus dot-agents init/skills new/agents new if their scaffolds move.
+current_focus_task: ""

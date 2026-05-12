@@ -1,0 +1,8 @@
+schema_version: 1
+id: ts-port-installer-target
+plan_id: legacy-shell-prune-share-rehome
+task_id: p3-replace-or-retire-installer
+observation: 'Decision: keep and replace the installer rather than retire it. The replacement installer should default to the Go CLI target and add an explicit target selector for the TypeScript port, using the accepted TS binary name da-ts rather than preserving the old src/lib/src/share shell payload model.'
+classification: small
+routed_to: task_note:legacy-shell-prune-share-rehome/p3-replace-or-retire-installer
+created_at: "2026-05-12T02:56:06Z"

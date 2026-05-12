@@ -1,0 +1,178 @@
+schema_version: 1
+plan_id: legacy-shell-prune-share-rehome
+tasks:
+    - id: p0-decision-gate
+      title: Decide supported installer/bootstrap contract
+      status: completed
+      depends_on: []
+      blocks:
+        - p1-classify-share-assets
+        - p2-rehome-runtime-assets
+        - p3-replace-or-retire-installer
+        - p4-delete-legacy-shell-tree
+      owner: dot-agents
+      write_scope:
+        - scripts/install.sh
+        - src/bin/dot-agents
+        - commands/init.go
+        - commands/skills.go
+        - commands/agents/new.go
+        - .agents/workflow/specs/legacy-shell-prune-share-rehome/design.md
+      verification_required: true
+      notes: |-
+        Resolve two contract questions before any deletion work:
+
+        1. Distribution:
+          - Resolved direction: keep `scripts/install.sh` as a supported install path, but
+            replace it with a target-aware installer instead of preserving the old shell payload.
+          - The replacement installer should default to the Go CLI target and expose an
+            explicit selector for the TS port target (`da-ts`).
+
+        2. Bootstrap:
+          - Resolved direction: `dot-agents init` seeds the curated starter bundle.
+          - It should create canonical directories plus starter files, embedded runtime bundles,
+            and shipped starter global skills/agents where the project intends them to exist
+            by default.
+          - `skills new` and `agents new` remain the command-owned authoring paths.
+
+        Current evidence to carry into the decision:
+          - No current Go command path depends on `src/lib/**`.
+          - `scripts/install.sh` still packages `src/lib/` and `src/share/`.
+          - `scripts/install.sh` still assumes an older installable shell launcher shape that
+            no longer matches `src/bin/dot-agents`.
+          - `commands/init.go` already writes starter files directly and scaffolds
+            embedded hook bundles.
+          - `commands/skills.go` and `commands/agents/new.go` already synthesize authoring
+            templates in Go instead of copying them from `src/share`.
+          - `commands/init.go` does not yet seed the legacy starter skill bundle, so the
+            bootstrap contract now requires a re-homed starter bundle under Go-owned scaffolds.
+        - (fb:bootstrap-starter-bundle) Decision: dot-agents init should seed the curated starter bundle, including shipped starter skills and starter agents where provided, while skills new and agents new remain the command-owned authoring paths.
+    - id: p1-classify-share-assets
+      title: Classify src/share assets by runtime ownership
+      status: completed
+      depends_on:
+        - p0-decision-gate
+      blocks:
+        - p2-rehome-runtime-assets
+        - p3-replace-or-retire-installer
+        - p4-delete-legacy-shell-tree
+      owner: dot-agents
+      write_scope:
+        - src/share/templates/standard/
+        - .agents/workflow/specs/legacy-shell-prune-share-rehome/design.md
+        - .agents/workflow/plans/legacy-shell-prune-share-rehome/legacy-shell-prune-share-rehome.plan.md
+      verification_required: true
+      notes: |-
+        Produce an explicit inventory for every file under `src/share/templates/standard/`
+        with one of four labels:
+
+          - runtime-bootstrap
+          - runtime-authoring-template
+          - docs-example
+          - delete
+
+        Expected first-pass classification:
+          - bootstrap candidates: `.gitignore`, `README.md`, `rules/global/rules.mdc`,
+            `settings/global/claude-code.json`, `skills/global/**`
+          - authoring candidates: `agents/_template/AGENT.md`, `skills/_template/SKILL.md`
+          - likely docs-example/delete: `agentsrc.json`, `settings/project/claude-code.json`
+          - likely delete: `config.json` because `init` generates it directly
+
+        The classification table should become the migration checklist for P2-P5.
+        - (fb:starter-skill-classification) Classification: src/share/templates/standard/skills/global/** is runtime-bootstrap content under the chosen bootstrap contract, while agentsrc.json and settings/project/claude-code.json remain docs examples and config.json remains generated rather than template-owned.
+    - id: p2-rehome-runtime-assets
+      title: Re-home runtime-owned scaffold assets into internal/scaffold
+      status: completed
+      depends_on:
+        - p0-decision-gate
+        - p1-classify-share-assets
+      blocks:
+        - p4-delete-legacy-shell-tree
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/
+        - commands/init.go
+        - commands/skills.go
+        - commands/agents/new.go
+        - docs/
+      verification_required: true
+      notes: |-
+        Create Go-owned scaffold homes that follow the existing embedded-hook pattern:
+
+          - `internal/scaffold/home/` for runtime bootstrap assets
+          - `internal/scaffold/templates/` for runtime authoring templates
+
+        Rules:
+          - if the CLI needs the asset at runtime, it belongs under `internal/scaffold/**`
+          - if only docs need it, move it under `docs/**`
+          - do not keep duplicate authoritative copies in both code and `src/share`
+
+        Update `dot-agents init`, `skills new`, and `agents new` to consume the new
+        runtime asset source where appropriate.
+    - id: p3-replace-or-retire-installer
+      title: Replace or retire the stale shell installer path
+      status: completed
+      depends_on:
+        - p0-decision-gate
+        - p1-classify-share-assets
+      blocks:
+        - p4-delete-legacy-shell-tree
+      owner: dot-agents
+      write_scope:
+        - scripts/install.sh
+        - src/bin/dot-agents
+        - docs/
+      verification_required: true
+      notes: |-
+        Decision: replace the installer rather than retire it.
+
+        P3 contract:
+          - `scripts/install.sh` remains supported
+          - it must stop depending on the old `src/lib` / `src/share` packaging model
+          - it should default to installing the Go CLI target
+          - it must expose an explicit installer selector for the TS target using the accepted
+            TS binary name `da-ts`
+
+        Recommended installer interface:
+          - CLI flag: `--port go|ts`
+          - environment fallback: `DOT_AGENTS_PORT=go|ts`
+
+        Expected behavior:
+          - `go` target installs the supported Go binary / release asset
+          - `ts` target installs the TypeScript port variant (`da-ts`) and validates the
+            documented Node.js prerequisite instead of pretending the Go and TS artifacts are interchangeable
+
+        Not acceptable:
+          - preserving `src/lib` solely because the old installer expects it
+          - hiding TS-port selection behind undocumented manual steps
+          - leaving `scripts/install.sh` in a state where it appears supported but ships a
+            launcher/payload combination that no longer matches the repo layout
+        - (fb:ts-port-installer-target) Decision: keep and replace the installer rather than retire it. The replacement installer should default to the Go CLI target and add an explicit target selector for the TypeScript port, using the accepted TS binary name da-ts rather than preserving the old src/lib/src/share shell payload model.
+    - id: p4-delete-legacy-shell-tree
+      title: Delete the remaining legacy shell tree and clean references
+      status: completed
+      depends_on:
+        - p2-rehome-runtime-assets
+        - p3-replace-or-retire-installer
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - src/lib/
+        - src/share/
+        - scripts/install.sh
+        - docs/
+        - tests/
+      verification_required: true
+      notes: |-
+        After runtime assets are re-homed and the installer story is explicit:
+
+          - delete `src/lib/commands/**`
+          - delete `src/lib/utils/**`
+          - delete `src/share/**` runtime payloads
+          - keep only intentional docs/examples outside the runtime path
+          - remove or update docs/tests that still describe the shell layer as active
+
+        Verification gate:
+          - `rg -n "src/lib|src/share/templates/standard" .` should only return intentional
+            documentation/history references after the migration
+          - no supported execution path should reference `src/lib/**`
