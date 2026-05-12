@@ -2,13 +2,15 @@ name: Test
 
 on:
   push:
-    branches: 
+    branches:
       - master
       - feature/*
+      - pr*/*
   pull_request:
-    branches: 
+    branches:
       - master
       - feature/*
+      - pr*/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
