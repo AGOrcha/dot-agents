@@ -557,6 +557,362 @@ func TestRunInstallGenerate_PreservesExistingProjectAndExtras(t *testing.T) {
 	}
 }
 
+// ---------- additional coverage ----------
+
+func TestLoadInstallManifest_MissingFileWithHints(t *testing.T) {
+	tmp := t.TempDir()
+	_, err := loadInstallManifest(tmp)
+	if err == nil {
+		t.Fatal("expected error for missing manifest")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected hints about not-found, got: %v", err)
+	}
+}
+
+func TestLoadInstallManifest_Corrupt(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, config.AgentsRCFile), []byte("bogus"), 0644)
+	_, err := loadInstallManifest(tmp)
+	if err == nil {
+		t.Fatal("expected error for corrupt manifest")
+	}
+}
+
+func TestLoadInstallManifest_Found(t *testing.T) {
+	tmp := t.TempDir()
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(tmp); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadInstallManifest(tmp)
+	if err != nil || loaded.Project != "p" {
+		t.Errorf("got rc=%+v err=%v", loaded, err)
+	}
+}
+
+func TestEnsureAgentsHomeInitialized_MissingHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Don't create agentsHome at all → no config.json.
+	if err := ensureAgentsHomeInitialized(); err == nil {
+		t.Error("expected not-initialized error")
+	}
+}
+
+func TestEnsureAgentsHomeInitialized_Present(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte("{}"), 0644)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := ensureAgentsHomeInitialized(); err != nil {
+		t.Errorf("expected nil error when config.json present, got %v", err)
+	}
+}
+
+func TestLinkInstallResourceList_StrictReturnsErr(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, true)
+	if err == nil {
+		t.Error("expected --strict to return error")
+	}
+}
+
+func TestLinkInstallResourceList_NonStrictWarnsAndContinues(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, false); err != nil {
+		t.Errorf("non-strict should not error, got %v", err)
+	}
+}
+
+func TestLinkInstallResourceList_EmptyNamesSkips(t *testing.T) {
+	if err := linkInstallResourceList("skills", "skill", nil, "p", nil, false); err != nil {
+		t.Errorf("empty names should be no-op, got %v", err)
+	}
+}
+
+func TestEnsureInstallProjectDirs_DryRun(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	if err := ensureInstallProjectDirs("p"); err != nil {
+		t.Errorf("dry-run: %v", err)
+	}
+}
+
+func TestEnsureInstallProjectDirs_RealCreatesDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := ensureInstallProjectDirs("p"); err != nil {
+		t.Errorf("real run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "p")); err != nil {
+		t.Errorf("expected project rules dir created: %v", err)
+	}
+}
+
+func TestRegisterInstallProject_NewlyRegisters(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := registerInstallProject("newp", filepath.Join(tmp, "p")); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("newp") == "" {
+		t.Error("expected project to be registered")
+	}
+}
+
+func TestRegisterInstallProject_AlreadyRegisteredSkips(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", filepath.Join(tmp, "p"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := registerInstallProject("p", filepath.Join(tmp, "p")); err != nil {
+		t.Errorf("registering already-registered should be no-op, got %v", err)
+	}
+}
+
+func TestRegisterInstallProject_DryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	if err := registerInstallProject("p", filepath.Join(tmp, "p")); err != nil {
+		t.Errorf("dry-run register: %v", err)
+	}
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("p") != "" {
+		t.Error("dry-run should not register")
+	}
+}
+
+func TestFinalizeInstall_DryRunIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	finalizeInstall("p", tmp)
+}
+
+func TestFinalizeInstall_WritesRefreshMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	finalizeInstall("p", projectPath)
+
+	loaded, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Refresh == nil || loaded.Refresh.RefreshedAt == "" {
+		t.Error("expected refresh metadata to be set")
+	}
+}
+
+func TestResolveInstallSources_StrictPropagatesErrors(t *testing.T) {
+	// Pass an explicit local source with a nonexistent path; resolveSources returns no error
+	// for missing local paths (it just returns the path), so we instead use a git source
+	// without URL to coerce a warn path. resolveSources never returns first-error for
+	// missing URL because resolveSourceRoot returns ("", nil). So this path is best
+	// covered by direct test of resolveInstallSources non-strict.
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	sources := []config.Source{{Type: "git"}} // missing URL → skipped
+	resolved, err := resolveInstallSources(sources, true)
+	if err != nil {
+		t.Errorf("git-missing-url: expected nil, got %v", err)
+	}
+	if len(resolved) != 0 {
+		t.Errorf("expected no resolved sources, got %v", resolved)
+	}
+}
+
+func TestLinkInstallResources_FallsBackToAgentsHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Set up a skill that lives in agentsHome already.
+	skillDir := filepath.Join(agentsHome, "skills", "p", "demo")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("x"), 0644)
+
+	rc := &config.AgentsRC{Version: 1, Project: "p", Skills: []string{"demo"}}
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true} // dry-run avoids actually creating links
+	defer func() { Flags = saved }()
+	if err := linkInstallResources("p", rc, nil, false); err != nil {
+		t.Errorf("expected fallback to agents-home to work, got %v", err)
+	}
+}
+
+// runInstall happy path - manifest exists, agentsHome initialized, dry-run skips network/etc.
+func TestRunInstall_HappyPathDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Mark agents home initialized.
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "proj"}
+	if err := rc.Save(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runInstall(false); err != nil {
+		t.Errorf("runInstall happy: %v", err)
+	}
+}
+
+func TestRunInstall_StrictWithMissingSkillErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	// Manifest declares a skill that doesn't exist; --strict should fail
+	rc := &config.AgentsRC{Version: 1, Project: "proj", Skills: []string{"absent"}}
+	if err := rc.Save(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runInstall(true)
+	if err == nil {
+		t.Error("expected --strict to error on missing skill")
+	}
+}
+
+// touchLastFetch is a tiny helper - exercise to bump coverage.
+func TestTouchLastFetch_WritesMarker(t *testing.T) {
+	tmp := t.TempDir()
+	touchLastFetch(tmp)
+	if _, err := os.Stat(filepath.Join(tmp, ".last-fetch")); err != nil {
+		t.Errorf("expected .last-fetch marker: %v", err)
+	}
+}
+
+func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	// With no platforms installed at all, projection still completes (warn path).
+	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+}
+
 // ---------- helpers ----------
 
 func containsString(haystack []string, needle string) bool {

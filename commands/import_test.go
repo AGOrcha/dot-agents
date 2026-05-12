@@ -1109,3 +1109,89 @@ func TestFoldImportCandidates_EmptyList(t *testing.T) {
 		t.Errorf("expected zero result, got %+v", r)
 	}
 }
+
+// runImport with project scope when there are no candidates ends successfully.
+func TestRunImport_ProjectScopeNoCandidates(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runImport("", "project"); err != nil {
+		t.Errorf("runImport project scope: %v", err)
+	}
+}
+
+// runImportFromRefresh forces Yes=true; verify no error on empty config.
+func TestRunImportFromRefresh_EmptyConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	defer func() { Flags = saved }()
+	Flags = GlobalFlags{}
+
+	if err := runImportFromRefresh("", "all"); err != nil {
+		t.Errorf("runImportFromRefresh: %v", err)
+	}
+}
+
+// runImportInternal with invalid scope returns usage error.
+func TestRunImportInternal_InvalidScope(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	defer func() { Flags = saved }()
+	Flags = GlobalFlags{}
+
+	if err := runImportInternal("", "bogus", false); err == nil {
+		t.Error("expected invalid-scope error")
+	}
+}
+
+// collectImportCandidates with a managed project that has no AI configs is empty.
+func TestCollectImportCandidates_RegisteredProjectEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "empty-proj")
+	os.MkdirAll(projectPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("empty-proj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, _, err := collectImportCandidates(cfg, "", importScopeProject)
+	if err != nil {
+		t.Errorf("collectImportCandidates: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Errorf("expected no candidates, got %+v", candidates)
+	}
+}

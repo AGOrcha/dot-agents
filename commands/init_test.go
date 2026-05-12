@@ -171,6 +171,31 @@ func TestScaffoldStarterHomeAssets_CreatesContent(t *testing.T) {
 	}
 }
 
+// ---------- additional coverage ----------
+
+// scaffoldStarterHomeAssets returns nil when called on a populated directory (idempotent).
+func TestScaffoldStarterHomeAssets_Idempotent(t *testing.T) {
+	tmp := t.TempDir()
+	if err := scaffoldStarterHomeAssets(tmp); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := scaffoldStarterHomeAssets(tmp); err != nil {
+		t.Fatalf("idempotent re-run: %v", err)
+	}
+}
+
+// scaffoldWorkflowAssets must also create hooks dir if missing.
+func TestScaffoldWorkflowAssets_NoHooksDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Do NOT pre-create hooks/global - exercises the auto-create branch.
+	if err := scaffoldWorkflowAssets(agentsHome); err != nil {
+		t.Fatalf("scaffoldWorkflowAssets without pre-existing hooks dir: %v", err)
+	}
+}
+
 func TestScaffoldWorkflowAssets_CreatesHookBundleRoot(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

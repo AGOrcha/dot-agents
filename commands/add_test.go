@@ -368,6 +368,164 @@ func TestRunAdd_DryRunSkipsRegistration(t *testing.T) {
 	}
 }
 
+// ---------- runAdd happy path (new project) ----------
+
+func TestRunAdd_HappyPathRegistersProject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myrepo")
+	os.MkdirAll(projectPath, 0755)
+	// Add a git dir so the "valid git repo" bullet branch runs.
+	os.MkdirAll(filepath.Join(projectPath, ".git"), 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myrepo") == "" {
+		t.Error("expected project to be registered")
+	}
+}
+
+// runAdd should report "already registered" then succeed with --force.
+func TestRunAdd_ForceUpdatesExisting(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, Force: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, "p"); err != nil {
+		t.Errorf("runAdd --force: %v", err)
+	}
+}
+
+// runAdd reports manifest hint when .agentsrc.json already exists.
+func TestRunAdd_WithExistingManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "withmanifest")
+	os.MkdirAll(projectPath, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "withmanifest"}
+	rc.Save(projectPath)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.Save()
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Errorf("runAdd with manifest: %v", err)
+	}
+}
+
+// scanExistingAIConfigs picks up nested AI config files (uses .aider patterns).
+func TestScanExistingAIConfigs_PicksUpAiderFiles(t *testing.T) {
+	tmp := t.TempDir()
+	// Create an .aider.conf.yml deep inside the tree
+	deep := filepath.Join(tmp, "src", "module")
+	os.MkdirAll(deep, 0755)
+	os.WriteFile(filepath.Join(deep, ".aider.conf.yml"), []byte("# aider"), 0644)
+	// Also create a skipped dir
+	skip := filepath.Join(tmp, "node_modules", "junk")
+	os.MkdirAll(skip, 0755)
+	os.WriteFile(filepath.Join(skip, "AGENTS.md"), []byte("junk"), 0644)
+
+	got := scanExistingAIConfigs(tmp)
+	foundAider := false
+	for _, p := range got {
+		if filepath.Base(p) == ".aider.conf.yml" {
+			foundAider = true
+		}
+		if filepath.Dir(p) == skip {
+			t.Errorf("scan should skip node_modules, but returned %s", p)
+		}
+	}
+	if !foundAider {
+		t.Error("expected scan to find .aider.conf.yml")
+	}
+}
+
+// isManagedProjectOutput when filePath fails Rel returns false.
+func TestIsManagedProjectOutput_LooseFileNotManaged(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	loose := filepath.Join(tmp, "random.txt")
+	os.WriteFile(loose, []byte("x"), 0644)
+	if isManagedProjectOutput("proj", tmp, loose, agentsHome) {
+		t.Error("loose file should not be detected as managed")
+	}
+}
+
+// restoreFromResourcesCounted: canonical resource files (skills/) take the canonical path.
+func TestRestoreFromResourcesCounted_SkipsCanonicalBackupSubtree(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// rules/ as a *resource* file should be skipped via isCanonicalResourceBackupRel
+	resourceRules := filepath.Join(agentsHome, "resources", "proj", "rules", "x.md")
+	os.MkdirAll(filepath.Dir(resourceRules), 0755)
+	os.WriteFile(resourceRules, []byte("# rules"), 0644)
+
+	if n := restoreFromResourcesCounted("proj", tmp); n != 0 {
+		t.Errorf("expected 0 restores for canonical resource backup subtree, got %d", n)
+	}
+}
+
+func TestIsCanonicalResourceBackupRel(t *testing.T) {
+	cases := map[string]bool{
+		"rules/foo.md":   true,
+		"settings/foo":   true,
+		"mcp/foo.json":   true,
+		"skills/foo":     true,
+		"agents/foo":     true,
+		"hooks/foo":      true,
+		"loose":          false,
+		"backups/x":      false, // backups handled separately by caller
+		".github/foo.md": false,
+	}
+	for in, want := range cases {
+		if got := isCanonicalResourceBackupRel(in); got != want {
+			t.Errorf("isCanonicalResourceBackupRel(%q)=%v want %v", in, got, want)
+		}
+	}
+}
+
 // ---------- KG MCP config writers ----------
 
 func TestKGConfigPath_UsesKGHomeEnv(t *testing.T) {

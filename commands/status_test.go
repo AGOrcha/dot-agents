@@ -386,3 +386,542 @@ func TestCountCursorRules_GlobalHardlink(t *testing.T) {
 		t.Errorf("expected (1,0) for healthy cursor hardlink, got (%d,%d)", ok, warn)
 	}
 }
+
+// ---------- additional coverage ----------
+
+// countCanonicalScopedFiles / countCanonicalScopedDirs
+func TestCountCanonicalScopedFiles_IgnoresDirs(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, "a.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(tmp, "b.json"), []byte("{}"), 0644)
+	os.MkdirAll(filepath.Join(tmp, "subdir"), 0755)
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countCanonicalScopedFiles(entries); got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+}
+
+func TestCountCanonicalScopedDirs_RequiresMarker(t *testing.T) {
+	tmp := t.TempDir()
+	a := filepath.Join(tmp, "withmarker")
+	b := filepath.Join(tmp, "nomarker")
+	os.MkdirAll(a, 0755)
+	os.MkdirAll(b, 0755)
+	os.WriteFile(filepath.Join(a, "SKILL.md"), []byte("x"), 0644)
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countCanonicalScopedDirs(tmp, entries, "SKILL.md"); got != 1 {
+		t.Errorf("expected 1, got %d", got)
+	}
+}
+
+func TestSummarizeCanonicalScope_BothModes(t *testing.T) {
+	tmp := t.TempDir()
+	scope := filepath.Join(tmp, "s")
+	os.MkdirAll(scope, 0755)
+	os.WriteFile(filepath.Join(scope, "f1.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(scope, "f2.json"), []byte("{}"), 0644)
+	if got := summarizeCanonicalScope(scope, false, ""); got != 2 {
+		t.Errorf("file mode expected 2, got %d", got)
+	}
+	if got := summarizeCanonicalScope(filepath.Join(tmp, "missing"), false, ""); got != 0 {
+		t.Errorf("missing path expected 0, got %d", got)
+	}
+}
+
+// countManagedFileOK: healthy file, symlink-to-good, symlink-to-broken, missing.
+func TestCountManagedFileOK_RegularFile(t *testing.T) {
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "f")
+	os.WriteFile(f, []byte("x"), 0644)
+	warn := 0
+	if got := countManagedFileOK(f, &warn); got != 1 || warn != 0 {
+		t.Errorf("regular file: got=%d warn=%d", got, warn)
+	}
+}
+
+func TestCountManagedFileOK_MissingFile(t *testing.T) {
+	warn := 0
+	if got := countManagedFileOK("/no/such/file/xyz123", &warn); got != 0 || warn != 0 {
+		t.Errorf("missing: got=%d warn=%d", got, warn)
+	}
+}
+
+func TestCountManagedFileOK_HealthySymlink(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target")
+	os.WriteFile(target, []byte("x"), 0644)
+	link := filepath.Join(tmp, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	warn := 0
+	if got := countManagedFileOK(link, &warn); got != 1 || warn != 0 {
+		t.Errorf("healthy symlink: got=%d warn=%d", got, warn)
+	}
+}
+
+func TestCountManagedFileOK_BrokenSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	link := filepath.Join(tmp, "link")
+	os.Symlink(filepath.Join(tmp, "ghost"), link)
+	warn := 0
+	if got := countManagedFileOK(link, &warn); got != 0 || warn != 1 {
+		t.Errorf("broken symlink: got=%d warn=%d", got, warn)
+	}
+}
+
+// formatRefreshDisplay edge cases.
+func TestFormatRefreshDisplay_ShortAndExact(t *testing.T) {
+	if got := formatRefreshDisplay(""); got != "" {
+		t.Errorf("empty: got %q", got)
+	}
+	// Exactly long enough boundary
+	in := "2026-01-02T03:04"
+	want := "2026-01-02 03:04 UTC"
+	if got := formatRefreshDisplay(in); got != want {
+		t.Errorf("len16: got %q want %q", got, want)
+	}
+}
+
+// readRefreshTimestamp uses rc.Refresh if present.
+func TestReadRefreshTimestamp_PrefersAgentsRC(t *testing.T) {
+	tmp := t.TempDir()
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "p",
+		Refresh: &config.RefreshMetadata{RefreshedAt: "2027-05-01T10:11:12Z"},
+	}
+	if err := rc.Save(tmp); err != nil {
+		t.Fatal(err)
+	}
+	got := readRefreshTimestamp(tmp)
+	if got != "2027-05-01 10:11 UTC" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestReadRefreshTimestamp_FallsBackToLegacy(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, ".agents-refresh"), []byte("refreshed_at=2024-12-31T23:59:00Z"), 0644)
+	got := readRefreshTimestamp(tmp)
+	if got != "2024-12-31 23:59 UTC" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// printBadgeRow / printAgentsHomeGitStatusLine smoke tests (just exercise without panic).
+func TestPrintBadgeRow_VariousStates(t *testing.T) {
+	printBadgeRow([]platformBadge{
+		{name: "A", present: true},
+		{name: "B", broken: true},
+		{name: "C"},
+	})
+}
+
+func TestPrintAgentsHomeGitStatusLine_NotRepo(t *testing.T) {
+	tmp := t.TempDir()
+	printAgentsHomeGitStatusLine(tmp)
+}
+
+func TestPrintAgentsHomeGitStatusLine_BareGit(t *testing.T) {
+	tmp := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, ".git"), 0755)
+	printAgentsHomeGitStatusLine(tmp)
+}
+
+// printManagedAuditPath / printManagedAuditDir smoke tests.
+func TestPrintManagedAuditPath_AllBranches(t *testing.T) {
+	tmp := t.TempDir()
+	rel := func(s string) string { return filepath.Base(s) }
+
+	// missing path
+	printManagedAuditPath(filepath.Join(tmp, "missing"), rel)
+
+	// regular file
+	f := filepath.Join(tmp, "f")
+	os.WriteFile(f, []byte("x"), 0644)
+	printManagedAuditPath(f, rel)
+
+	// healthy symlink
+	target := filepath.Join(tmp, "t")
+	os.WriteFile(target, []byte("x"), 0644)
+	link := filepath.Join(tmp, "l")
+	os.Symlink(target, link)
+	printManagedAuditPath(link, rel)
+
+	// broken symlink
+	broken := filepath.Join(tmp, "b")
+	os.Symlink(filepath.Join(tmp, "ghost"), broken)
+	printManagedAuditPath(broken, rel)
+}
+
+func TestPrintManagedAuditDir_Smoke(t *testing.T) {
+	tmp := t.TempDir()
+	d := filepath.Join(tmp, "d")
+	os.MkdirAll(d, 0755)
+	os.WriteFile(filepath.Join(d, "a"), []byte("x"), 0644)
+	rel := func(s string) string { return s }
+	printManagedAuditDir(d, rel)
+	// Missing dir is a no-op.
+	printManagedAuditDir(filepath.Join(tmp, "missing"), rel)
+}
+
+// printCanonicalStoreSection / printPluginsSection: smoke run.
+func TestPrintCanonicalStoreSection_Smoke(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	printCanonicalStoreSection(agentsHome)
+}
+
+func TestPrintPluginsSection_NoPlugins(t *testing.T) {
+	tmp := t.TempDir()
+	printPluginsSection(tmp)
+}
+
+// printStatusProjectManifestSummary: covers manifest missing + manifest present.
+func TestPrintStatusProjectManifestSummary_NoManifest(t *testing.T) {
+	tmp := t.TempDir()
+	printStatusProjectManifestSummary(tmp)
+}
+
+func TestPrintStatusProjectManifestSummary_PresentWithSkills(t *testing.T) {
+	tmp := t.TempDir()
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "demo",
+		Skills:  []string{"s1", "s2"},
+		Agents:  []string{"a1"},
+		Sources: []config.Source{{Type: "git", URL: "https://example.com/foo.git"}},
+	}
+	if err := rc.Save(tmp); err != nil {
+		t.Fatal(err)
+	}
+	printStatusProjectManifestSummary(tmp)
+}
+
+// printUserConfigSection: empty home → exercises the "no managed user-level config" branch.
+func TestPrintUserConfigSection_NoConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	printUserConfigSection(agentsHome, false, "")
+}
+
+func TestPrintUserConfigSection_WithClaudeMD(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	claudeHome := filepath.Join(tmp, ".claude")
+	os.MkdirAll(claudeHome, 0755)
+	os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("# claude"), 0644)
+	// Audit mode prints managed audit details.
+	printUserConfigSection(agentsHome, true, "")
+}
+
+// printSharedTargetRegistry: empty platforms hits the early-return branch.
+func TestPrintSharedTargetRegistry_NoPlatforms(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	printSharedTargetRegistry("proj", tmp, cfg)
+}
+
+func TestSharedTargetRegistryPlanLines_EmptyPlatforms(t *testing.T) {
+	lines, err := sharedTargetRegistryPlanLines("p", "/tmp/x", nil)
+	if err != nil || lines != nil {
+		t.Errorf("expected (nil, nil), got (%v, %v)", lines, err)
+	}
+}
+
+// printLinkedStatusLine: healthy and broken.
+func TestPrintLinkedStatusLine_HealthyAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "t")
+	os.WriteFile(target, []byte("x"), 0644)
+	link := filepath.Join(tmp, "l")
+	os.Symlink(target, link)
+	if !printLinkedStatusLine("label", link) {
+		t.Error("expected healthy symlink to return true")
+	}
+
+	broken := filepath.Join(tmp, "b")
+	os.Symlink(filepath.Join(tmp, "ghost"), broken)
+	if printLinkedStatusLine("label", broken) {
+		t.Error("expected broken symlink to return false")
+	}
+}
+
+// printCodexAgentsMD: symlink, regular file, missing.
+func TestPrintCodexAgentsMD_Variants(t *testing.T) {
+	tmp := t.TempDir()
+	printCodexAgentsMD(filepath.Join(tmp, "AGENTS.md")) // missing
+
+	plain := filepath.Join(tmp, "AGENTS.md")
+	os.WriteFile(plain, []byte("rules"), 0644)
+	printCodexAgentsMD(plain) // regular file
+
+	link := filepath.Join(tmp, "AGENTS-link.md")
+	os.Symlink(plain, link)
+	printCodexAgentsMD(link) // symlink
+}
+
+func TestPrintCodexSymlinkAudit_Variants(t *testing.T) {
+	tmp := t.TempDir()
+	// not linked
+	printCodexSymlinkAudit(filepath.Join(tmp, "missing"), "label")
+
+	// linked
+	target := filepath.Join(tmp, "target")
+	os.WriteFile(target, []byte("x"), 0644)
+	link := filepath.Join(tmp, "link")
+	os.Symlink(target, link)
+	printCodexSymlinkAudit(link, "label")
+}
+
+func TestPrintCodexSkillsAudit_EmptyAndPopulated(t *testing.T) {
+	// no dir → no-op
+	tmp := t.TempDir()
+	printCodexSkillsAudit(filepath.Join(tmp, "missing"))
+
+	// empty dir
+	emptyDir := filepath.Join(tmp, "empty")
+	os.MkdirAll(emptyDir, 0755)
+	printCodexSkillsAudit(emptyDir)
+
+	// dir with healthy + broken symlinks
+	d := filepath.Join(tmp, "d")
+	os.MkdirAll(d, 0755)
+	target := filepath.Join(tmp, "skill-target")
+	os.WriteFile(target, []byte("x"), 0644)
+	os.Symlink(target, filepath.Join(d, "ok"))
+	os.Symlink(filepath.Join(tmp, "ghost"), filepath.Join(d, "broken"))
+	printCodexSkillsAudit(d)
+}
+
+func TestPrintCodexAgentsAudit_Variants(t *testing.T) {
+	tmp := t.TempDir()
+	// missing dir
+	printCodexAgentsAudit(filepath.Join(tmp, "missing"))
+	// empty dir
+	emptyDir := filepath.Join(tmp, "empty")
+	os.MkdirAll(emptyDir, 0755)
+	printCodexAgentsAudit(emptyDir)
+	// populated
+	d := filepath.Join(tmp, "d")
+	os.MkdirAll(d, 0755)
+	os.WriteFile(filepath.Join(d, "agent.toml"), []byte("x"), 0644)
+	printCodexAgentsAudit(d)
+}
+
+// printCursorAudit / printClaudeAudit / printCodexAudit / printOpenCodeAudit / printCopilotAudit smoke tests.
+func TestPrintAuditFunctions_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	printCursorAudit("proj", tmp, agentsHome)
+	printClaudeAudit("proj", tmp, agentsHome)
+	printCodexAudit("proj", tmp, agentsHome)
+	printOpenCodeAudit("proj", tmp, agentsHome)
+	printCopilotAudit("proj", tmp)
+}
+
+func TestPrintCursorAudit_HealthyAndUnlinkedRule(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "rules", "global", "rule.mdc")
+	os.MkdirAll(filepath.Dir(src), 0755)
+	os.WriteFile(src, []byte("rule"), 0644)
+
+	rulesDir := filepath.Join(tmp, ".cursor", "rules")
+	os.MkdirAll(rulesDir, 0755)
+	// healthy hardlink
+	os.Link(src, filepath.Join(rulesDir, "global--rule.mdc"))
+	// unlinked managed-namespace file (will report "not linked")
+	os.WriteFile(filepath.Join(rulesDir, "proj--unlinked.mdc"), []byte("x"), 0644)
+	// local-file rule
+	os.WriteFile(filepath.Join(rulesDir, "local.mdc"), []byte("x"), 0644)
+	// non-mdc skipped
+	os.WriteFile(filepath.Join(rulesDir, "junk.txt"), []byte("x"), 0644)
+
+	// cursor mcp.json broken symlink
+	os.Symlink(filepath.Join(agentsHome, "ghost.json"), filepath.Join(tmp, ".cursor", "mcp.json"))
+
+	printCursorAudit("proj", tmp, agentsHome)
+}
+
+func TestPrintClaudeAudit_HealthyAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("# rules"), 0644)
+
+	rulesDir := filepath.Join(tmp, ".claude", "rules")
+	os.MkdirAll(rulesDir, 0755)
+	os.Symlink(target, filepath.Join(rulesDir, "ok.md"))
+	os.Symlink(filepath.Join(agentsHome, "ghost.md"), filepath.Join(rulesDir, "broken.md"))
+
+	// .mcp.json healthy
+	mcpTarget := filepath.Join(agentsHome, "mcp.json")
+	os.WriteFile(mcpTarget, []byte("{}"), 0644)
+	os.Symlink(mcpTarget, filepath.Join(tmp, ".mcp.json"))
+
+	printClaudeAudit("proj", tmp, agentsHome)
+}
+
+func TestPrintOpenCodeAudit_HealthyAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	target := filepath.Join(agentsHome, "settings", "proj", "opencode.json")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("{}"), 0644)
+	os.Symlink(target, filepath.Join(tmp, "opencode.json"))
+
+	agentDir := filepath.Join(tmp, ".opencode", "agent")
+	os.MkdirAll(agentDir, 0755)
+	agentTarget := filepath.Join(agentsHome, "agents", "proj", "ok", "AGENT.md")
+	os.MkdirAll(filepath.Dir(agentTarget), 0755)
+	os.WriteFile(agentTarget, []byte("ok"), 0644)
+	os.Symlink(agentTarget, filepath.Join(agentDir, "ok.md"))
+	os.Symlink(filepath.Join(agentsHome, "ghost"), filepath.Join(agentDir, "broken.md"))
+
+	printOpenCodeAudit("proj", tmp, agentsHome)
+}
+
+func TestPrintCopilotAudit_HealthyAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	target := filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("# instructions"), 0644)
+	os.MkdirAll(filepath.Join(tmp, ".github"), 0755)
+	os.Symlink(target, filepath.Join(tmp, ".github", "copilot-instructions.md"))
+
+	mcpTarget := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
+	os.MkdirAll(filepath.Dir(mcpTarget), 0755)
+	os.WriteFile(mcpTarget, []byte("{}"), 0644)
+	os.MkdirAll(filepath.Join(tmp, ".vscode"), 0755)
+	os.Symlink(mcpTarget, filepath.Join(tmp, ".vscode", "mcp.json"))
+
+	printCopilotAudit("proj", tmp)
+}
+
+// printAudit (top-level) with no platforms enabled — should just emit headers.
+func TestPrintAudit_AllPlatformsEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	printAudit("proj", tmp, agentsHome, "", cfg)
+	printAudit("proj", tmp, agentsHome, "claude", cfg)
+}
+
+// statusGitInfo with a fake .git dir reaches the IsRepo=true branch.
+func TestStatusGitInfo_WithGitDir(t *testing.T) {
+	tmp := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, ".git"), 0755)
+	g := statusGitInfo(tmp)
+	if !g.Initialized {
+		t.Errorf("expected Initialized=true, got %+v", g)
+	}
+}
+
+// runStatus --audit with a registered project and a manifest to exercise printAudit.
+func TestRunStatus_AuditMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	rc.Save(projectPath)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := runStatus(true, ""); err != nil {
+		t.Errorf("runStatus --audit: %v", err)
+	}
+}
+
+// runStatus with a project whose directory was removed → error bullet branch.
+func TestRunStatus_MissingProjectDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("gone", filepath.Join(tmp, "gone-dir"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := runStatus(false, ""); err != nil {
+		t.Errorf("runStatus with missing project dir: %v", err)
+	}
+}
+
+// collectUserConfigPlatforms with files present.
+func TestCollectUserConfigPlatforms_Populated(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	claudeDir := filepath.Join(tmp, ".claude")
+	os.MkdirAll(claudeDir, 0755)
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("x"), 0644)
+	got := collectUserConfigPlatforms("")
+	if len(got) == 0 {
+		t.Error("expected at least one platform reported")
+	}
+}
+
+// codexTextBadge / opencodeTextBadge / copilotTextBadge basic smoke.
+func TestPlatformTextBadges_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	for _, badge := range []platformBadge{
+		codexTextBadge(tmp),
+		opencodeTextBadge(tmp),
+		copilotTextBadge(tmp),
+	} {
+		if badge.present {
+			t.Errorf("expected no present badge for empty project, got %+v", badge)
+		}
+	}
+}

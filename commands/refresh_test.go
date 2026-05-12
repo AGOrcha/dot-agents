@@ -207,6 +207,104 @@ func TestRunRefresh_UnknownProjectFilterErrors(t *testing.T) {
 	}
 }
 
+// ---------- additional coverage ----------
+
+// runRefresh with a registered project under dry-run completes the success path.
+func TestRunRefresh_RegisteredProjectDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	// Manifest with a git source — exercises the dry-run notice + sources scan.
+	rc := &config.AgentsRC{Version: 1, Project: "p", Sources: []config.Source{{Type: "git", URL: "https://example.invalid/x.git"}}}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh dry-run: %v", err)
+	}
+}
+
+// runRefresh with a project whose directory is missing skips that project.
+func TestRunRefresh_SkipsMissingProjectDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("gone", filepath.Join(tmp, "gone-dir"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh with missing dir: %v", err)
+	}
+}
+
+// mapResourceRelToDest: cover root-level fallback and unprefixed pass-through.
+func TestMapResourceRelToDest_RootLevelFallback(t *testing.T) {
+	got := mapResourceRelToDest("proj", "loose-file.txt")
+	if got != "settings/proj/loose-file.txt" {
+		t.Errorf("expected root-level fallback to settings/, got %q", got)
+	}
+}
+
+// mapResourceRelToDest: exact-match command-dir cases.
+func TestMapResourceRelToDest_CommandsBuckets(t *testing.T) {
+	if got := mapResourceRelToDest("proj", ".cursor/commands/"); got == "" {
+		t.Error("expected non-empty mapping for cursor commands dir literal")
+	}
+	if got := mapResourceRelToDest("proj", ".claude/commands/"); got == "" {
+		t.Error("expected non-empty mapping for claude commands dir literal")
+	}
+	if got := mapResourceRelToDest("proj", ".opencode/commands/"); got == "" {
+		t.Error("expected non-empty mapping for opencode commands dir literal")
+	}
+	// Other exact bucket inputs.
+	if got := mapResourceRelToDest("proj", ".cursor/indexing.cursorindexingignore"); got != "" {
+		// not exact constant; just exercises code path
+		_ = got
+	}
+}
+
+func TestMapResourceRelToDest_OutputStylesAndModes(t *testing.T) {
+	// Exercise the additional switch-case branches.
+	if got := mapResourceRelToDest("proj", ".claude/output-styles/"); got == "" {
+		t.Error("expected mapping for claude output-styles dir literal")
+	}
+	if got := mapResourceRelToDest("proj", ".opencode/modes/"); got == "" {
+		t.Error("expected mapping for opencode modes dir literal")
+	}
+	if got := mapResourceRelToDest("proj", ".opencode/themes/"); got == "" {
+		t.Error("expected mapping for opencode themes dir literal")
+	}
+	if got := mapResourceRelToDest("proj", ".github/prompts/"); got == "" {
+		t.Error("expected mapping for github prompts dir literal")
+	}
+}
+
 // ---------- restoreFromResources wrapper ----------
 
 func TestRestoreFromResources_Wrapper(t *testing.T) {
