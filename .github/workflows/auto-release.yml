@@ -122,6 +122,7 @@ jobs:
           GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOT_AGENTS_PAT: ${{ secrets.DOT_AGENTS_PAT }}
+          AGORCHA_PAT: ${{ secrets.AGORCHA_PAT }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}

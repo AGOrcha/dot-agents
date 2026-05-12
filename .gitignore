@@ -1,3 +1,6 @@
+# Secrets
+.github/.secrets/
+
 # Dependencies
 node_modules/
 vendor/
@@ -16,7 +19,7 @@ build/
 *.so
 *.dylib
 dot-agents-go
-bin/dot-agents
+bin/da
 # IDE
 .idea/
 .vscode/

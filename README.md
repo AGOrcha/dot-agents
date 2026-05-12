@@ -6,7 +6,7 @@ One CLI to manage configurations — and soon, workflows — across Cursor, Clau
 
 ```bash
 # Install
-brew tap dot-agents/tap && brew install dot-agents
+brew tap AGOrcha/tap && brew install dot-agents
 
 # Set up
 da init
@@ -113,21 +113,35 @@ See [`research/`](research/) for the full analysis behind this direction.
 ### Homebrew (recommended)
 
 ```bash
-brew tap dot-agents/tap
+brew tap AGOrcha/tap
 brew install dot-agents
 ```
 
-### Direct Install
+### Direct Install (Go CLI, default)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+```
+
+### Direct Install (TypeScript port subset)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
+```
+
+### Windows PowerShell (Go CLI)
+
+```powershell
+irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.ps1 | iex
 ```
 
 ### Manual
 
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
-export PATH="$HOME/.dot-agents/src/bin:$PATH"
+cd ~/.dot-agents
+go build -o ./bin/da ./cmd/dot-agents
+export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
 ### TypeScript port (optional, Windows-friendly subset)
@@ -140,23 +154,21 @@ The primary CLI is the **Go** `da` binary (Homebrew or `scripts/install.sh` abov
 ## Quick Start
 
 ```bash
-# 1. Initialize ~/.agents/
+# 1. Initialize ~/.agents/ with starter skills, agents, hooks, and config
 da init
 
 # 2. Add a project
 da add ~/Github/myproject
 
-# 3. Add your rules to ~/.agents/rules/global/
-#    They'll be linked to all projects automatically
-
-# 4. Check what's applied
+# 3. Check what was linked
 da status --audit
+da doctor
 
-# 5. Create reusable skills and subagents
+# 4. Create reusable skills and subagents
 da skills new deploy
 da agents new reviewer
 
-# Or: set up from a project's manifest (for teams)
+# 5. Or, inside a repo that already committed .agentsrc.json:
 da install
 ```
 
@@ -179,13 +191,17 @@ da install
 
 | Command | Description |
 |---------|-------------|
-| `skills` | Manage reusable skills/procedures |
-| `skills new <name>` | Create a new skill |
-| `skills edit <name>` | Edit a skill in `$EDITOR` |
-| `agents` | Manage subagent definitions |
-| `agents new <name>` | Create a new subagent |
-| `agents edit <name>` | Edit a subagent in `$EDITOR` |
-| `hooks` | Manage Claude Code hooks |
+| `skills list [project]` | List shared or project-scoped skills |
+| `skills new <name> [project]` | Create a new skill |
+| `skills promote <name>` | Promote a repo-local skill into `~/.agents/skills/` |
+| `agents list [project]` | List shared or project-scoped agents |
+| `agents new <name> [project]` | Create a new subagent |
+| `agents promote <name>` | Promote a repo-local agent into `~/.agents/agents/` |
+| `agents import <name>` | Link a canonical agent into the current repo |
+| `agents remove <name>` | Remove an imported agent link from the current repo |
+| `hooks list [scope]` | List canonical hook bundles in `~/.agents/hooks/` |
+| `hooks show <scope> <name>` | Show one canonical hook bundle |
+| `hooks remove <scope> <name>` | Remove one canonical hook bundle |
 
 ### Sync
 
@@ -263,8 +279,8 @@ da add ~/Github/myproject  # Re-link your projects
 
 ## Requirements
 
-- **macOS** or **Linux** for the **Go** CLI installed via Homebrew or `install.sh` (those paths are what most contributors use day to day).
-- **Windows or other OS:** use the **TypeScript** port under `ports/typescript/` if you only need the Stage 1 subset documented there; use Go `da` when you need workflow and KG features.
+- **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
+- **Windows:** use `scripts/install-go.ps1` for the Go CLI, or the **TypeScript** port under `ports/typescript/` when you only need the Stage 1 subset documented there.
 - **git** (for sync features)
 
 ## Configuration
@@ -299,10 +315,10 @@ Skills are reusable procedure documents that agents can invoke:
 da skills new deploy
 
 # List all skills
-da skills
+da skills list
 
-# Edit a skill
-da skills edit deploy
+# Promote a repo-local skill into ~/.agents/
+da skills promote deploy
 ```
 
 Skills live in `~/.agents/skills/global/` with this structure:
@@ -319,10 +335,10 @@ Subagents are directory-based agent definitions:
 da agents new reviewer
 
 # List all subagents
-da agents
+da agents list
 
-# Validate an agent's frontmatter
-da agents validate reviewer
+# Promote a repo-local subagent into ~/.agents/
+da agents promote reviewer
 ```
 
 Each subagent is a directory containing:
@@ -330,30 +346,27 @@ Each subagent is a directory containing:
 - `scripts/` - Optional helper scripts
 - `references/` - Optional additional context documents
 
-### Claude Code Hooks
+### Hooks
 
-Manage Claude Code hooks for automation:
+Inspect canonical hook bundles stored in `~/.agents/hooks/`:
 
 ```bash
 # List all hooks
-da hooks
+da hooks list
 
-# Add a hook
-da hooks add PreToolUse -m "Bash" -c "echo \\$TOOL_INPUT >> log.txt"
-
-# Show hook examples
-da hooks examples
+# Inspect one hook bundle
+da hooks show global session-orient
 ```
 
 ### Project Manifests (.agentsrc.json)
 
-Commit a `.agentsrc.json` to your repo so any contributor can set up agent configs without manual init or sync:
+Commit a `.agentsrc.json` to your repo so any contributor can set up agent configs from the repo itself:
 
 ```bash
 # Generate manifest from current ~/.agents/ state
 da install --generate
 
-# Set up a project from its manifest (after cloning)
+# Set up a cloned repo from its manifest
 da install
 ```
 

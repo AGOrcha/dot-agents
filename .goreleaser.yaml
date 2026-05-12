@@ -84,17 +84,14 @@ homebrew_casks:
     url:
       verified: "github.com/NikashPrakash/dot-agents/"
     repository:
-      owner: NikashPrakash
-      name: dot-agents
+      owner: AGOrcha
+      name: homebrew-tap
       branch: "goreleaser-cask-{{ .Version }}"
-      token: "{{ .Env.DOT_AGENTS_PAT }}"
+      token: "{{ .Env.AGORCHA_PAT }}"
       pull_request:
         enabled: true
         draft: false
         base:
-          branch: master
-      git:
-        url: "git@github.com:NikashPrakash/dot-agents.git"
-        private_key: "{{ .Env.HOMEBREW_TAP_SSH_KEY }}"
+          branch: main
     description: "Manage AI agent configurations across projects"
     homepage: "https://github.com/NikashPrakash/dot-agents"
