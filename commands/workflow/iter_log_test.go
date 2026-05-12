@@ -725,9 +725,9 @@ func TestValidateIterLogRoleFlags(t *testing.T) {
 		{"impl", "", false},
 		{"review", "", false},
 		{"verifier", "unit", false},
-		{"verifier", "", true},  // verifier requires verifier-type
-		{"", "unit", true},      // verifier-type without role
-		{"impl", "unit", true},  // verifier-type only valid with verifier role
+		{"verifier", "", true}, // verifier requires verifier-type
+		{"", "unit", true},     // verifier-type without role
+		{"impl", "unit", true}, // verifier-type only valid with verifier role
 		{"unknown", "", true},
 	}
 	for _, tc := range cases {
