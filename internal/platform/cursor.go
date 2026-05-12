@@ -15,8 +15,8 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
-	_ "modernc.org/sqlite"
 	"golang.org/x/sys/execabs"
+	_ "modernc.org/sqlite"
 )
 
 type cursor struct{}
@@ -144,10 +144,10 @@ func cursorAccumulateResultTokens(path string, m *SessionTokenMetrics) {
 		var entry struct {
 			Type  string `json:"type"`
 			Usage struct {
-				InputTokens        int `json:"inputTokens"`
-				OutputTokens       int `json:"outputTokens"`
-				CacheReadTokens    int `json:"cacheReadTokens"`
-				CacheWriteTokens   int `json:"cacheWriteTokens"`
+				InputTokens      int `json:"inputTokens"`
+				OutputTokens     int `json:"outputTokens"`
+				CacheReadTokens  int `json:"cacheReadTokens"`
+				CacheWriteTokens int `json:"cacheWriteTokens"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "result" {
