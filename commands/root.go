@@ -61,6 +61,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewExplainCmd())
 	root.AddCommand(NewInstallCmd())
 	root.AddCommand(NewKGCmd())
+	root.AddCommand(NewSessionCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)

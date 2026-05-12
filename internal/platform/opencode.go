@@ -1,13 +1,16 @@
 package platform
 
 import (
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	_ "modernc.org/sqlite"
 )
 
 type opencode struct{}
@@ -21,6 +24,69 @@ func NewOpenCode() Platform { return &opencode{} }
 
 func (o *opencode) ID() string          { return "opencode" }
 func (o *opencode) DisplayName() string { return "OpenCode" }
+
+// SessionReader — env var contract not yet confirmed.
+func (o *opencode) AIAgentPrefix() string              { return "opencode" }
+func (o *opencode) SessionEnvs() []string              { return []string{"OPENCODE_SESSION_ID"} }
+func (o *opencode) EntrypointEnvs() []string           { return nil }
+func (o *opencode) ResolveModel(_, _, _ string) string { return "" }
+
+// StatsReader — OpenCode session schema not yet confirmed for aggregated stats.
+func (o *opencode) ReadUsageStats(_ string) *PlatformUsageStats { return nil }
+
+// SessionTokenScanner implementation.
+// Queries ~/.local/share/opencode/opencode.db (part table, type='step-finish').
+// Since OpenCode injects no session ID env var, filtering is by message
+// created_at (Unix ms) > afterTimestamp. All OpenCode usage across projects
+// in the time window is included.
+func (o *opencode) ScanSessionTokens(home, _, _, afterTimestamp string) SessionTokenMetrics {
+	return opencodeScanSessionTokens(home, afterTimestamp)
+}
+
+// opencodeScanSessionTokens queries the OpenCode SQLite database for
+// step-finish token totals after afterTimestamp.
+// Fields from the part.data JSON column: $.tokens.input, $.tokens.output,
+// $.tokens.cache.read, $.tokens.cache.write (all floats in the DB).
+func opencodeScanSessionTokens(home, afterTimestamp string) SessionTokenMetrics {
+	dbPath := filepath.Join(home, ".local", "share", "opencode", "opencode.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return SessionTokenMetrics{}
+	}
+	defer db.Close()
+
+	var afterMs int64
+	if afterTimestamp != "" {
+		if t, err := time.Parse(time.RFC3339, afterTimestamp); err == nil {
+			afterMs = t.UnixMilli()
+		}
+	}
+
+	const query = `
+		SELECT
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.input')       AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.output')      AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.cache.read')  AS INTEGER)), 0),
+			COALESCE(SUM(CAST(json_extract(p.data, '$.tokens.cache.write') AS INTEGER)), 0),
+			COALESCE(COUNT(*), 0)
+		FROM part p
+		JOIN message m ON p.message_id = m.id
+		WHERE p.type = 'step-finish'
+		  AND (? = 0 OR m.created_at > ?)`
+
+	var m SessionTokenMetrics
+	row := db.QueryRow(query, afterMs, afterMs)
+	if err := row.Scan(
+		&m.InputTokens,
+		&m.OutputTokens,
+		&m.CacheReadTokens,
+		&m.CacheCreationTokens,
+		&m.MessageCount,
+	); err != nil {
+		return SessionTokenMetrics{}
+	}
+	return m
+}
 
 func (o *opencode) IsInstalled() bool {
 	_, err := exec.LookPath("opencode")

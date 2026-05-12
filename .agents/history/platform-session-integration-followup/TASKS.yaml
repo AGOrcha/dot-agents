@@ -1,0 +1,82 @@
+schema_version: 1
+plan_id: platform-session-integration-followup
+tasks:
+    - id: f1-fix-branch-marker-validation
+      title: Fix gitBranch substring false-positive in claudeScanJSONLForBranch
+      status: completed
+      depends_on: []
+      blocks:
+        - f2-platform-scanner-tests
+      owner: dot-agents
+      write_scope:
+        - internal/platform/claude.go
+      verification_required: true
+      notes: |-
+        Bug: claudeScanJSONLForBranch in internal/platform/claude.go uses
+        strings.Contains(line, branchMarker) as a pre-filter, then unmarshals into a
+        struct that decodes only sessionId/uuid/timestamp. The matched gitBranch
+        substring is never re-verified after JSON parse, so any line whose JSON
+        contains a sessionId AND happens to embed `"gitBranch":"<branch>"` anywhere
+        (including in a quoted assistant text content block) is treated as a real
+        branch entry.
+
+        Fix:
+          1. Add `GitBranch string \`json:"gitBranch"\`` to the entry struct inside
+             claudeScanJSONLForBranch.
+          2. After json.Unmarshal succeeds, require entry.GitBranch == branch (the
+             full branch arg passed in from FindSessionsOnBranch). Continue if not.
+          3. Pass `branch` through into claudeScanJSONLForBranch alongside branchMarker
+             (signature change: add branch string parameter).
+
+        Companion clean-up (do in same edit, not a separate task):
+          - The comment near the SessionTokenScanner invocation in
+            commands/workflow/iter_log.go (`runWorkflowCheckpointLogToIter`) claims
+            "Errors are logged to stderr" but ScanSessionTokens has no error return
+            and nothing logs. Update comment to reflect actual behavior:
+            "Scanner errors are swallowed; metrics will be zero."
+    - id: f2-platform-scanner-tests
+      title: Add focused tests for the platform scanner family
+      status: completed
+      depends_on:
+        - f1-fix-branch-marker-validation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/claude_test.go
+        - internal/platform/cursor_test.go
+      verification_required: true
+      notes: |-
+        Backfill behavioral coverage for the platform scanner interfaces shipped in
+        the parent plan (P0-P3). Schema-parity test catches schema drift but not
+        JSONL parsing regressions when vendor formats change.
+
+        Required tests:
+
+          internal/platform/claude_test.go (new file, or extend existing):
+            - TestClaudeScanJSONLForBranch_RejectsSubstringFalsePositive
+                Synthetic JSONL fixture with one line that embeds the branchMarker
+                substring inside a `text` content block but whose top-level
+                gitBranch is a different branch. Assert the function returns nil
+                (or skips the line). Demonstrates f1 fix is real.
+            - TestClaudeScanJSONLForBranch_AcceptsRealMatch
+                Fixture with a line whose top-level gitBranch == target branch.
+                Assert returned BranchSessionInfo carries the correct SessionID
+                and Timestamp.
+            - TestClaudeScanSessionTokens_SumsUsageWithinTimeWindow
+                Synthetic JSONL with three assistant entries; pass an
+                afterTimestamp between the first and second; assert returned
+                SessionTokenMetrics sums only the second and third, with cache
+                hit rate computed correctly.
+
+          internal/platform/cursor_test.go (new file):
+            - TestCursorScanSessionTokens_AggregatesResultLines
+                Create a tmp dir with two .txt files, each containing several
+                JSON lines including a final `type=result` with usage. Assert
+                aggregated tokens and message_count.
+            - TestCursorScanSessionTokens_FiltersByMtime
+                Two files with mtime older / newer than afterTimestamp; assert
+                only the newer one contributes.
+
+        Use t.TempDir() for filesystem fixtures. Override home via the
+        home/projectPath args directly — no env var monkey-patching.
+        Table-driven where natural. No mocks: real os.WriteFile fixtures.

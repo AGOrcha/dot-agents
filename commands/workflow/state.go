@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
@@ -280,6 +281,29 @@ func enrichWorkflowState(state *workflowOrientState) {
 
 	if prefs, err := resolvePreferences(state.Project.Path, state.Project.Name); err == nil {
 		state.Preferences = &prefs
+	}
+
+	home, _ := os.UserHomeDir()
+	branch := state.Git.Branch
+	if home != "" && branch != "" {
+		for _, p := range platform.All() {
+			finder, ok := p.(platform.BranchSessionFinder)
+			if !ok {
+				continue
+			}
+			platformName := p.ID()
+			if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() != "" {
+				platformName = sr.AIAgentPrefix()
+			}
+			for _, s := range finder.FindSessionsOnBranch(home, state.Project.Path, branch, 3) {
+				state.RecentSessions = append(state.RecentSessions, branchSessionInfo{
+					Platform:     platformName,
+					SessionID:    s.SessionID,
+					Timestamp:    s.Timestamp,
+					MessageCount: s.MessageCount,
+				})
+			}
+		}
 	}
 }
 
@@ -725,6 +749,31 @@ func renderOrientRecentCommitsSection(state *workflowOrientState, out io.Writer)
 	}
 }
 
+func renderOrientRecentSessionsSection(state *workflowOrientState, out io.Writer) {
+	if len(state.RecentSessions) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "## Recent sessions on this branch")
+	fmt.Fprintln(out)
+	for _, s := range state.RecentSessions {
+		sessionShort := s.SessionID
+		if len(sessionShort) > 8 {
+			sessionShort = sessionShort[:8]
+		}
+		ts := s.Timestamp
+		if len(ts) > 16 {
+			ts = ts[:16]
+		}
+		if s.MessageCount > 0 {
+			fmt.Fprintf(out, "%-14s  %s  %s  ~%d messages\n", s.Platform, sessionShort, ts, s.MessageCount)
+		} else {
+			fmt.Fprintf(out, "%-14s  %s  %s\n", s.Platform, sessionShort, ts)
+		}
+	}
+}
+
 func renderOrientHealthSection(state *workflowOrientState, out io.Writer) {
 	if state.Health == nil {
 		return
@@ -793,6 +842,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 	renderOrientProposalsSection(state, out)
 	renderOrientNextActionSection(state, out)
 	renderOrientRecentCommitsSection(state, out)
+	renderOrientRecentSessionsSection(state, out)
 	renderOrientHealthSection(state, out)
 	renderOrientPreferencesSection(state, out)
 	renderOrientLocalDriftSection(state, out)

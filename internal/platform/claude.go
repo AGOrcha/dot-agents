@@ -1,9 +1,12 @@
 package platform
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -24,6 +27,187 @@ func NewClaude() Platform { return &claude{} }
 
 func (c *claude) ID() string          { return "claude" }
 func (c *claude) DisplayName() string { return "Claude Code" }
+
+// SessionReader implementation — confirmed env var contract as of Claude Code 2.x.
+func (c *claude) AIAgentPrefix() string    { return "claude-code" }
+func (c *claude) SessionEnvs() []string    { return []string{"CLAUDE_CODE_SESSION_ID"} }
+func (c *claude) EntrypointEnvs() []string { return []string{"CLAUDE_CODE_ENTRYPOINT"} }
+func (c *claude) ResolveModel(home, projectPath, sessionID string) string {
+	return resolveClaudeCodeModelFromJSONL(home, projectPath, sessionID)
+}
+
+// StatsReader implementation.
+func (c *claude) ReadUsageStats(home string) *PlatformUsageStats {
+	return claudeReadUsageStats(home)
+}
+
+func claudeReadUsageStats(home string) *PlatformUsageStats {
+	data, err := os.ReadFile(filepath.Join(home, claudeDir, "stats-cache.json"))
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		TotalSessions int `json:"totalSessions"`
+		TotalMessages int `json:"totalMessages"`
+		ModelUsage    map[string]struct {
+			InputTokens              int `json:"inputTokens"`
+			OutputTokens             int `json:"outputTokens"`
+			CacheReadInputTokens     int `json:"cacheReadInputTokens"`
+			CacheCreationInputTokens int `json:"cacheCreationInputTokens"`
+		} `json:"modelUsage"`
+		DailyActivity []struct {
+			Date          string `json:"date"`
+			MessageCount  int    `json:"messageCount"`
+			SessionCount  int    `json:"sessionCount"`
+			ToolCallCount int    `json:"toolCallCount"`
+		} `json:"dailyActivity"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	stats := &PlatformUsageStats{
+		PlatformID:    "claude",
+		TotalSessions: raw.TotalSessions,
+		TotalMessages: raw.TotalMessages,
+		TokensByModel: make(map[string]ModelTokenUsage, len(raw.ModelUsage)),
+	}
+	for model, u := range raw.ModelUsage {
+		stats.TokensByModel[model] = ModelTokenUsage{
+			InputTokens:              u.InputTokens,
+			OutputTokens:             u.OutputTokens,
+			CacheReadInputTokens:     u.CacheReadInputTokens,
+			CacheCreationInputTokens: u.CacheCreationInputTokens,
+		}
+	}
+	// Last 10 daily activity entries.
+	start := 0
+	if len(raw.DailyActivity) > 10 {
+		start = len(raw.DailyActivity) - 10
+	}
+	for _, d := range raw.DailyActivity[start:] {
+		stats.DailyActivity = append(stats.DailyActivity, DailyUsage{
+			Date:          d.Date,
+			MessageCount:  d.MessageCount,
+			SessionCount:  d.SessionCount,
+			ToolCallCount: d.ToolCallCount,
+		})
+	}
+	return stats
+}
+
+// BranchSessionFinder implementation.
+func (c *claude) FindSessionsOnBranch(home, projectPath, branch string, maxResults int) []BranchSessionInfo {
+	return claudeFindSessionsOnBranch(home, projectPath, branch, maxResults)
+}
+
+func claudeFindSessionsOnBranch(home, projectPath, branch string, maxResults int) []BranchSessionInfo {
+	slug := strings.ReplaceAll(projectPath, "/", "-")
+	projectsDir := filepath.Join(home, claudeDir, "projects", slug)
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+
+	// Sort by mtime descending — most recent JSONL files first.
+	type fileEntry struct {
+		name  string
+		mtime int64
+	}
+	var files []fileEntry
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileEntry{e.Name(), info.ModTime().UnixNano()})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mtime > files[j].mtime })
+
+	branchMarker := `"gitBranch":"` + branch + `"`
+	var results []BranchSessionInfo
+	scanned := 0
+	for _, fe := range files {
+		if scanned >= 20 || len(results) >= maxResults {
+			break
+		}
+		scanned++
+		path := filepath.Join(projectsDir, fe.name)
+		info := claudeScanJSONLForBranch(path, branchMarker, branch)
+		if info == nil {
+			continue
+		}
+		results = append(results, *info)
+	}
+	return results
+}
+
+func claudeScanJSONLForBranch(path, branchMarker, branch string) *BranchSessionInfo {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var info BranchSessionInfo
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 512*1024), 512*1024)
+	lineN := 0
+	assistantLines := 0
+	for sc.Scan() {
+		lineN++
+		if lineN > 50 {
+			break
+		}
+		line := sc.Text()
+		if strings.Contains(line, "assistant") {
+			assistantLines++
+		}
+		if !strings.Contains(line, branchMarker) {
+			continue
+		}
+		// Substring match — confirm the top-level gitBranch field actually equals
+		// branch before trusting it. The marker can appear inside quoted message
+		// content (e.g. an assistant pasting prior tool output), which would
+		// otherwise yield false positives.
+		var entry struct {
+			SessionID string `json:"sessionId"`
+			UUID      string `json:"uuid"`
+			Timestamp string `json:"timestamp"`
+			GitBranch string `json:"gitBranch"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.GitBranch != branch {
+			continue
+		}
+		if entry.SessionID == "" {
+			entry.SessionID = entry.UUID
+		}
+		if entry.SessionID == "" {
+			continue
+		}
+		ts := entry.Timestamp
+		if len(ts) > 16 {
+			ts = ts[:16] + "Z"
+		}
+		info.SessionID = entry.SessionID
+		info.Timestamp = ts
+	}
+	if info.SessionID == "" {
+		return nil
+	}
+	info.MessageCount = assistantLines
+	return &info
+}
+
+// SessionTokenScanner implementation.
+func (c *claude) ScanSessionTokens(home, projectPath, sessionID, afterTimestamp string) SessionTokenMetrics {
+	return claudeScanSessionTokens(home, projectPath, sessionID, afterTimestamp)
+}
 
 func (c *claude) IsInstalled() bool {
 	if _, err := exec.LookPath("claude"); err == nil {

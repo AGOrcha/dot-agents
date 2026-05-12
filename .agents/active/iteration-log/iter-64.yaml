@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 64
+date: "2026-05-12"
+wave: ""
+task_id: ""
+commit: 8b7097428dd640794134d948e42e20a2b884caf5
+files_changed: 19
+lines_added: 1373
+lines_removed: 42
+agent:
+    session_id: ed4c8af1-4683-4e96-9b76-76059b304bde
+    harness: claude-code
+    harness_version: 2.1.138
+    model: claude-opus-4-7
+    entrypoint: cli
+checkpoint_at: "2026-05-12T02:40:57Z"
+session_tokens:
+    input_tokens: 105
+    output_tokens: 62641
+    cache_read_tokens: 10963772
+    cache_creation_tokens: 83341
+    cache_hit_rate: 0.9924558570189334
+    message_count: 80
+impl:
+    item: ""
+    summary: ""
+    scope_note: ""
+    feedback_goal: ""
+    retries: 0
+    focused_tests_added: 0
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: ""
+    verify_record_appended: false

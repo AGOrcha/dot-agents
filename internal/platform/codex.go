@@ -1,6 +1,8 @@
 package platform
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +28,68 @@ func NewCodex() Platform { return &codex{} }
 
 func (c *codex) ID() string          { return "codex" }
 func (c *codex) DisplayName() string { return "Codex CLI" }
+
+// SessionReader implementation.
+// CODEX_SESSION_ID: not yet confirmed from Codex docs; update SessionEnvs when verified.
+// ResolveModel: scans ~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl for the model field.
+func (c *codex) AIAgentPrefix() string    { return "codex" }
+func (c *codex) SessionEnvs() []string    { return []string{"CODEX_SESSION_ID"} }
+func (c *codex) EntrypointEnvs() []string { return nil }
+func (c *codex) ResolveModel(home, _ /* projectPath */, sessionID string) string {
+	return resolveCodexModelFromJSONL(home, sessionID)
+}
+
+// StatsReader implementation.
+func (c *codex) ReadUsageStats(home string) *PlatformUsageStats {
+	return codexReadUsageStats(home)
+}
+
+func codexReadUsageStats(home string) *PlatformUsageStats {
+	indexPath := filepath.Join(home, codexDir, "session_index.jsonl")
+	f, err := os.Open(indexPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	type entry struct {
+		ID         string `json:"id"`
+		ThreadName string `json:"thread_name"`
+		UpdatedAt  string `json:"updated_at"`
+	}
+	var all []entry
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var e entry
+		if err := json.Unmarshal(sc.Bytes(), &e); err == nil {
+			all = append(all, e)
+		}
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	stats := &PlatformUsageStats{
+		PlatformID:    "codex",
+		TotalSessions: len(all),
+	}
+	start := 0
+	if len(all) > 10 {
+		start = len(all) - 10
+	}
+	for _, e := range all[start:] {
+		stats.RecentSessions = append(stats.RecentSessions, SessionSummary{
+			ID:        e.ID,
+			Name:      e.ThreadName,
+			UpdatedAt: e.UpdatedAt,
+		})
+	}
+	return stats
+}
+
+// SessionTokenScanner implementation.
+func (c *codex) ScanSessionTokens(home, _ /* projectPath */, sessionID, afterTimestamp string) SessionTokenMetrics {
+	return codexScanSessionTokens(home, sessionID, afterTimestamp)
+}
 
 func (c *codex) IsInstalled() bool {
 	_, err := exec.LookPath("codex")

@@ -8,24 +8,46 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
 )
 
+type iterLogAgentBlock struct {
+	SessionID      string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
+	Harness        string `yaml:"harness,omitempty" json:"harness,omitempty"`
+	HarnessVersion string `yaml:"harness_version,omitempty" json:"harness_version,omitempty"`
+	Model          string `yaml:"model,omitempty" json:"model,omitempty"`
+	Entrypoint     string `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
+}
+
+type iterLogSessionTokensBlock struct {
+	InputTokens         int     `yaml:"input_tokens" json:"input_tokens"`
+	OutputTokens        int     `yaml:"output_tokens" json:"output_tokens"`
+	CacheReadTokens     int     `yaml:"cache_read_tokens" json:"cache_read_tokens"`
+	CacheCreationTokens int     `yaml:"cache_creation_tokens" json:"cache_creation_tokens"`
+	ReasoningTokens     int     `yaml:"reasoning_tokens,omitempty" json:"reasoning_tokens,omitempty"`
+	CacheHitRate        float64 `yaml:"cache_hit_rate,omitempty" json:"cache_hit_rate,omitempty"`
+	MessageCount        int     `yaml:"message_count" json:"message_count"`
+}
+
 type iterLogEntry struct {
-	SchemaVersion int                    `yaml:"schema_version" json:"schema_version"`
-	Iteration     int                    `yaml:"iteration" json:"iteration"`
-	Date          string                 `yaml:"date" json:"date"`
-	Wave          string                 `yaml:"wave" json:"wave"`
-	TaskID        string                 `yaml:"task_id" json:"task_id"`
-	Commit        string                 `yaml:"commit" json:"commit"`
-	FilesChanged  int                    `yaml:"files_changed" json:"files_changed"`
-	LinesAdded    int                    `yaml:"lines_added" json:"lines_added"`
-	LinesRemoved  int                    `yaml:"lines_removed" json:"lines_removed"`
-	FirstCommit   bool                   `yaml:"first_commit,omitempty" json:"first_commit,omitempty"`
-	Impl          iterLogImplBlock       `yaml:"impl" json:"impl"`
-	Verifiers     []iterLogVerifierEntry `yaml:"verifiers" json:"verifiers"`
-	Review        iterLogReviewBlock     `yaml:"review" json:"review"`
+	SchemaVersion int                        `yaml:"schema_version" json:"schema_version"`
+	Iteration     int                        `yaml:"iteration" json:"iteration"`
+	Date          string                     `yaml:"date" json:"date"`
+	Wave          string                     `yaml:"wave" json:"wave"`
+	TaskID        string                     `yaml:"task_id" json:"task_id"`
+	Commit        string                     `yaml:"commit" json:"commit"`
+	FilesChanged  int                        `yaml:"files_changed" json:"files_changed"`
+	LinesAdded    int                        `yaml:"lines_added" json:"lines_added"`
+	LinesRemoved  int                        `yaml:"lines_removed" json:"lines_removed"`
+	FirstCommit   bool                       `yaml:"first_commit,omitempty" json:"first_commit,omitempty"`
+	Agent         *iterLogAgentBlock         `yaml:"agent,omitempty" json:"agent,omitempty"`
+	CheckpointAt  string                     `yaml:"checkpoint_at,omitempty" json:"checkpoint_at,omitempty"`
+	SessionTokens *iterLogSessionTokensBlock `yaml:"session_tokens,omitempty" json:"session_tokens,omitempty"`
+	Impl          iterLogImplBlock           `yaml:"impl" json:"impl"`
+	Verifiers     []iterLogVerifierEntry     `yaml:"verifiers" json:"verifiers"`
+	Review        iterLogReviewBlock         `yaml:"review" json:"review"`
 }
 
 type iterLogImplBlock struct {
@@ -322,7 +344,7 @@ func validateIterLogRoleFlags(role, verifierType string) error {
 	return nil
 }
 
-func mergeIterLogTopLevelGit(dst *iterLogEntry, n int, wave, taskID, commit string, diff iterLogDiffStat) {
+func mergeIterLogTopLevelGit(dst *iterLogEntry, n int, wave, taskID, commit, projectPath string, diff iterLogDiffStat) {
 	dst.SchemaVersion = 2
 	dst.Iteration = n
 	dst.Date = time.Now().UTC().Format("2006-01-02")
@@ -333,6 +355,93 @@ func mergeIterLogTopLevelGit(dst *iterLogEntry, n int, wave, taskID, commit stri
 	dst.LinesAdded = diff.LinesAdded
 	dst.LinesRemoved = diff.LinesRemoved
 	dst.FirstCommit = diff.FirstCommit
+	dst.CheckpointAt = time.Now().UTC().Format(time.RFC3339)
+	if a := resolveAgentBlock(projectPath); a != nil {
+		dst.Agent = a
+	}
+}
+
+// resolveAgentBlock iterates platform.All(), type-asserts to platform.SessionReader,
+// and produces an agent identity record. Returns nil when no platform signals are detectable.
+// Platform session env vars and model resolvers are maintained in internal/platform/;
+// no changes to this function are needed when adding a new platform.
+func resolveAgentBlock(projectPath string) *iterLogAgentBlock {
+	home, _ := os.UserHomeDir()
+
+	// AI_AGENT=<harness>_<version>_agent is the cross-platform harness identifier.
+	// When present it pins the platform and version without probing session env vars.
+	aiAgent := os.Getenv("AI_AGENT")
+	harness, harnessVersion := "", ""
+	var reader platform.SessionReader
+	if aiAgent != "" {
+		harness, harnessVersion = parseAIAgentEnv(aiAgent)
+		for _, p := range platform.All() {
+			if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() == harness {
+				reader = sr
+				break
+			}
+		}
+	}
+
+	// Fallback: probe each SessionReader's env vars to detect the active platform.
+	sessionID, entrypoint := "", ""
+	if reader == nil {
+		for _, p := range platform.All() {
+			sr, ok := p.(platform.SessionReader)
+			if !ok {
+				continue
+			}
+			if id := firstEnv(sr.SessionEnvs()); id != "" {
+				sessionID = id
+				if harness == "" {
+					harness = sr.AIAgentPrefix()
+				}
+				reader = sr
+				break
+			}
+		}
+	} else {
+		sessionID = firstEnv(reader.SessionEnvs())
+	}
+
+	if reader != nil {
+		entrypoint = firstEnv(reader.EntrypointEnvs())
+	}
+
+	if harness == "" && sessionID == "" && entrypoint == "" {
+		return nil
+	}
+
+	block := &iterLogAgentBlock{
+		SessionID:      sessionID,
+		Harness:        harness,
+		HarnessVersion: harnessVersion,
+		Entrypoint:     entrypoint,
+	}
+	if reader != nil && sessionID != "" && home != "" {
+		block.Model = reader.ResolveModel(home, projectPath, sessionID)
+	}
+	return block
+}
+
+func firstEnv(names []string) string {
+	for _, name := range names {
+		if v := os.Getenv(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// parseAIAgentEnv parses AI_AGENT=<harness>_<version-dashes>_agent into
+// harness and semver version strings (e.g. "2-1-138" → "2.1.138").
+func parseAIAgentEnv(raw string) (harness, version string) {
+	s := strings.TrimSuffix(raw, "_agent")
+	idx := strings.LastIndex(s, "_")
+	if idx < 0 {
+		return s, ""
+	}
+	return s[:idx], strings.ReplaceAll(s[idx+1:], "-", ".")
 }
 
 func mergeImplIterLog(dst *iterLogEntry, contract *DelegationContract, projectPath string) {
@@ -482,6 +591,25 @@ func writeIterLogEntry(iterPath string, entry *iterLogEntry) error {
 	return nil
 }
 
+// loadPrevCheckpointAt reads checkpoint_at from iter-(n-1).yaml for token
+// time-windowing. Returns "" when n==1 or the previous file is absent.
+func loadPrevCheckpointAt(iterDir string, n int) string {
+	if n <= 1 {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(iterDir, fmt.Sprintf("iter-%d.yaml", n-1)))
+	if err != nil {
+		return ""
+	}
+	var e struct {
+		CheckpointAt string `yaml:"checkpoint_at"`
+	}
+	if err := yaml.Unmarshal(data, &e); err != nil {
+		return ""
+	}
+	return e.CheckpointAt
+}
+
 func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	if err := validateIterLogRoleFlags(role, verifierType); err != nil {
 		return err
@@ -515,7 +643,35 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 		return err
 	}
 
-	mergeIterLogTopLevelGit(entry, n, wave, taskID, commit, diff)
+	mergeIterLogTopLevelGit(entry, n, wave, taskID, commit, project.Path, diff)
+
+	// Populate session_tokens by scanning the active session's JSONL.
+	// Scanner errors are swallowed; on any failure metrics will be zero and
+	// the SessionTokens block is omitted (MessageCount==0 guard below).
+	if entry.Agent != nil && entry.Agent.SessionID != "" && entry.Agent.Harness != "" {
+		prevAt := loadPrevCheckpointAt(iterDir, n)
+		home, _ := os.UserHomeDir()
+		for _, p := range platform.All() {
+			sr, isReader := p.(platform.SessionReader)
+			scanner, isScanner := p.(platform.SessionTokenScanner)
+			if !isReader || !isScanner || sr.AIAgentPrefix() != entry.Agent.Harness {
+				continue
+			}
+			metrics := scanner.ScanSessionTokens(home, project.Path, entry.Agent.SessionID, prevAt)
+			if metrics.MessageCount > 0 {
+				entry.SessionTokens = &iterLogSessionTokensBlock{
+					InputTokens:         metrics.InputTokens,
+					OutputTokens:        metrics.OutputTokens,
+					CacheReadTokens:     metrics.CacheReadTokens,
+					CacheCreationTokens: metrics.CacheCreationTokens,
+					ReasoningTokens:     metrics.ReasoningTokens,
+					CacheHitRate:        metrics.CacheHitRate,
+					MessageCount:        metrics.MessageCount,
+				}
+			}
+			break
+		}
+	}
 
 	if err := applyIterLogRole(entry, role, verifierType, feedbackGoal, project.Path, taskID, contract); err != nil {
 		return err

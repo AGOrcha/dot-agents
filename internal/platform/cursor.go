@@ -1,7 +1,12 @@
 package platform
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +15,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	_ "modernc.org/sqlite"
 	"golang.org/x/sys/execabs"
 )
 
@@ -32,6 +38,131 @@ func NewCursor() Platform { return &cursor{} }
 
 func (c *cursor) ID() string          { return "cursor" }
 func (c *cursor) DisplayName() string { return "Cursor" }
+
+// SessionReader — env var contract not yet confirmed.
+// Model is readable from ~/.cursor/ai-tracking/ai-code-tracking.db
+// (conversation_summaries.model); deferred until P1 adds SQLite access.
+func (c *cursor) AIAgentPrefix() string              { return "cursor" }
+func (c *cursor) SessionEnvs() []string              { return []string{"CURSOR_SESSION_ID"} }
+func (c *cursor) EntrypointEnvs() []string           { return nil }
+func (c *cursor) ResolveModel(_, _, _ string) string { return "" }
+
+// StatsReader implementation.
+func (c *cursor) ReadUsageStats(home string) *PlatformUsageStats {
+	return cursorReadUsageStats(home)
+}
+
+func cursorReadUsageStats(home string) *PlatformUsageStats {
+	dbPath := filepath.Join(home, ".cursor", "ai-tracking", "ai-code-tracking.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	const query = `SELECT commitHash, branchName, scoredAt,
+		linesAdded, linesDeleted, composerLinesAdded, composerLinesDeleted,
+		humanLinesAdded, v2AiPercentage
+		FROM scored_commits ORDER BY scoredAt DESC LIMIT 10`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	stats := &PlatformUsageStats{PlatformID: "cursor"}
+	for rows.Next() {
+		var ca CommitAttribution
+		var scoredAtMs int64
+		if err := rows.Scan(&ca.CommitHash, &ca.BranchName, &scoredAtMs,
+			&ca.LinesAdded, &ca.LinesDeleted,
+			&ca.ComposerLinesAdded, &ca.ComposerLinesDeleted,
+			&ca.HumanLinesAdded, &ca.V2AIPercentage); err != nil {
+			continue
+		}
+		ca.ScoredAt = fmt.Sprintf("%d", scoredAtMs) // Unix ms; caller can format
+		stats.CommitAttribution = append(stats.CommitAttribution, ca)
+	}
+	if len(stats.CommitAttribution) == 0 {
+		return nil
+	}
+	return stats
+}
+
+// SessionTokenScanner implementation.
+// Scans ~/.cursor/projects/<slug>/agent-tools/*.txt — stream-json result files
+// written by the cursor agent binary per completed agent run. Each file has a
+// final line with {"type":"result","usage":{...}} in camelCase schema.
+func (c *cursor) ScanSessionTokens(home, projectPath, _, afterTimestamp string) SessionTokenMetrics {
+	return cursorScanSessionTokens(home, projectPath, afterTimestamp)
+}
+
+func cursorScanSessionTokens(home, projectPath, afterTimestamp string) SessionTokenMetrics {
+	var after time.Time
+	if afterTimestamp != "" {
+		after, _ = time.Parse(time.RFC3339, afterTimestamp)
+	}
+
+	var m SessionTokenMetrics
+	slug := strings.ReplaceAll(strings.TrimPrefix(projectPath, "/"), "/", "-")
+	agentToolsDir := filepath.Join(home, ".cursor", "projects", slug, "agent-tools")
+	entries, err := os.ReadDir(agentToolsDir)
+	if err != nil {
+		return m
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		if !after.IsZero() {
+			info, err := e.Info()
+			if err != nil || !info.ModTime().After(after) {
+				continue
+			}
+		}
+		cursorAccumulateResultTokens(filepath.Join(agentToolsDir, e.Name()), &m)
+	}
+	return m
+}
+
+// cursorAccumulateResultTokens scans a stream-json file for {"type":"result"}
+// lines and accumulates camelCase token usage into m.
+func cursorAccumulateResultTokens(path string, m *SessionTokenMetrics) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte(`"result"`)) {
+			continue
+		}
+		var entry struct {
+			Type  string `json:"type"`
+			Usage struct {
+				InputTokens        int `json:"inputTokens"`
+				OutputTokens       int `json:"outputTokens"`
+				CacheReadTokens    int `json:"cacheReadTokens"`
+				CacheWriteTokens   int `json:"cacheWriteTokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "result" {
+			continue
+		}
+		if entry.Usage.InputTokens == 0 && entry.Usage.OutputTokens == 0 {
+			continue
+		}
+		m.InputTokens += entry.Usage.InputTokens
+		m.OutputTokens += entry.Usage.OutputTokens
+		m.CacheReadTokens += entry.Usage.CacheReadTokens
+		m.CacheCreationTokens += entry.Usage.CacheWriteTokens
+		m.MessageCount++
+	}
+}
 
 func (c *cursor) IsInstalled() bool {
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {

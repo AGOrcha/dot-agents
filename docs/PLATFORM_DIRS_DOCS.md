@@ -11,6 +11,8 @@ The cross-platform matrix below counts only officially documented project-level 
 
 Official docs were checked on 2026-03-29.
 
+Session storage section added 2026-05-10 from local file mining and vendor docs (all five platforms).
+
 Spot re-verification on 2026-04-11:
 
 - Codex, Claude Code, OpenCode, and GitHub Copilot locations below were re-checked against current vendor docs and remain directionally correct.
@@ -64,6 +66,84 @@ Spot re-verification on 2026-04-11:
 - [Hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks): hook files live in `.github/hooks/*.json`. The same docs note that Copilot CLI loads hooks from the current working directory.
 - [Coding-agent MCP](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/extend-coding-agent-with-mcp), [Copilot CLI MCP](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers), and the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference): coding-agent MCP can be configured in repository settings on GitHub.com. Copilot CLI also documents repository `.github/mcp.json`, workspace `.mcp.json` and `.vscode/mcp.json`, devcontainer `.devcontainer/devcontainer.json`, and user-level `~/.copilot/mcp-config.json`.
 - [Copilot CLI plugins overview](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-plugins), [find/install plugins](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing), [create plugins](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-creating), and [create marketplaces](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-marketplace): Copilot CLI now has installable plugins and plugin marketplaces. Plugins can be installed from marketplaces, repositories, or local paths; installed copies live under `~/.copilot/state/installed-plugins/`. A plugin package requires a root `plugin.json` manifest and can contain `agents/`, `skills/`, `hooks.json`, and `.mcp.json`. GitHub also documents direct repository installs when `plugin.json` is at the repository root, in `.github/plugin/`, or in `.claude-plugin/`. Marketplaces use `marketplace.json` as the required file and can live on GitHub, other git hosts, or local/shared filesystems.
+
+## Platform Session Storage
+
+This section covers where each platform stores active session data and whether token usage counts are accessible locally. Checked 2026-05-10 against local file system and vendor docs.
+
+### Claude Code
+
+- **Session files:** `~/.claude/projects/<project-hash>/<session-id>.jsonl`
+  - Project hash: `strings.ReplaceAll(absoluteProjectPath, "/", "-")` (e.g., `/Users/x/proj` → `-Users-x-proj`)
+  - Session ID: `CLAUDE_CODE_SESSION_ID` env var; format is a UUID
+- **Token data:** Yes — per-message in `assistant` type entries under `message.usage`:
+  - `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`
+- **Model:** `message.model` field on each `assistant` entry
+- **Other metadata:** `gitBranch` field on each JSONL entry; usable for branch-scoped session lookup
+- **Pre-aggregated stats:** `~/.claude/stats-cache.json` — daily activity, token totals by model, session count (version 3 JSON, maintained by Claude Code)
+- **Session ID env var:** `CLAUDE_CODE_SESSION_ID` (confirmed)
+- **Entrypoint env var:** `CLAUDE_CODE_ENTRYPOINT` (confirmed: `cli`, `ide`, `web`)
+
+### Codex (OpenAI)
+
+- **Session files:** `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`
+  - Session ID format: UUID suffix in the filename after the last `-`
+  - Session index: `~/.codex/session_index.jsonl` — one line per session with `id`, `thread_name`, `updated_at`
+- **Token data:** Yes — `event_msg` entries where `payload.type == "token_count"`:
+  - `payload.info.last_token_usage.{input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens}`
+  - Use `last_token_usage` (per-turn delta), not `total_token_usage` (cumulative)
+  - First `token_count` event in a session sometimes has null `info` — guard required
+- **Model:** `response_item` entries with `payload.type == "response"` carry `payload.model`
+- **Session ID env var:** Not confirmed (`CODEX_SESSION_ID` is a placeholder — verify before using)
+
+### Cursor
+
+- **Session files (native):** `~/.cursor/projects/<slug>/agent-transcripts/<session-uuid>/<session-uuid>.jsonl`
+  - Slug: project path with `/` replaced by `-` (e.g., `Users-nikashp-Documents-dot-agents`)
+  - Contains conversation turns (role/message pairs) — **no token counts**
+- **CLI agent mode:** `cursor agent` (subcommand, not `cursor --help`). Flags: `--print`, `--output-format stream-json`, `--resume <session-id>`, `--worktree`. Each completed agent run writes a result file at:
+  - `~/.cursor/projects/<slug>/agent-tools/<uuid>.txt` — stream-json lines, final line is `type=result` with token usage
+  - Schema 1 (camelCase): `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`
+  - `session_id` field present in result lines — use for cross-source deduplication
+- **Other native files:** `~/.cursor/projects/<slug>/worker.log` (indexing events only, no token data); `~/.cursor/chats/<workspace-hash>/<session-uuid>/store.db` (SQLite blobs, no token data)
+- **Token data:** Available for `cursor agent` CLI runs via `agent-tools/*.txt`. Standard IDE chat sessions write no token data to disk. Note: `.ralph-loop-streams/run-*/` (project-local, created by `bin/tests/ralph-worker`) is general ralph-worker output for any agent binary — not Cursor-specific; each platform scanner reads only its own native files.
+- **Session ID env var:** Not confirmed (no documented env var; `--resume` flag uses session IDs but no shell env var injection)
+
+### OpenCode
+
+- **Session database:** `~/.local/share/opencode/opencode.db` (XDG; same path on macOS — does not use `~/Library/Application Support`)
+  - Pre-v1.2 (legacy): `~/.local/share/opencode/storage/<project-slug>/session/` JSON files — migrated to SQLite at v1.2.0
+- **Token data:** Yes — `part` table, rows where `type = 'step-finish'`, token data in `data` JSON column:
+  - `$.tokens.input`, `$.tokens.output`, `$.tokens.cache.read`, `$.tokens.cache.write` (floats)
+  - Join to `message` table via `part.message_id = message.id` for `message.created_at` (Unix ms) time-windowing
+- **Session table:** `session` table has `id`, `title`, `message_count`, `prompt_tokens`, `completion_tokens`, `cost`, `created_at` (Unix ms), `updated_at` (Unix ms)
+- **Model:** `message.model` column — format is `provider/model-name` (e.g., `anthropic/claude-sonnet-4-5`, `openai/gpt-4o`)
+- **Session ID env var:** None — OpenCode does not inject a session ID into the shell environment. Session IDs are accessible via the plugin API or by querying the SQLite DB.
+
+### GitHub Copilot
+
+- **Session files (CLI):** `~/.copilot/session-state/<session-id>/events.jsonl`
+  - Session metadata: `~/.copilot/session-state/<session-id>/workspace.yaml` (`cwd`, `created_at`, `updated_at`)
+  - Session index DB: `~/.copilot/session-store.db` (SQLite — lightweight index only, no token rows)
+  - Process logs: `~/.copilot/logs/process-*.log` (connection/auth events, no token data)
+- **Token data:** Partial — per-turn counts are ephemeral (memory only, exposed via `/usage` slash command but not written to disk). Session-level aggregate token totals are written to `events.jsonl` on `session.shutdown`:
+  ```
+  modelMetrics.<model-name>.usage.{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}
+  ```
+  These are camelCase, session-level aggregates per model, not per-message.
+- **VS Code extension session files:** `~/Library/Application Support/Code/User/workspaceStorage/<hash>/GitHub.copilot-chat/chatSessions/<uuid>.json` — conversation history only, **no token counts**
+- **Session ID env var:** None — no env var is published by the CLI. Session IDs are directory names under `~/.copilot/session-state/`. Use `--resume` or `--continue` flags to reference sessions.
+- **Session-level token granularity note:** Only the `session.shutdown` aggregate is persisted. If per-turn granularity is needed, the Copilot SDK streaming events API or the `CompactionProcessor` entries in process logs can be used as a fallback (inference, not official).
+
+### Cross-Platform Session Storage Matrix
+
+| Platform | Session file location | Token data available | Token granularity | Session ID env var |
+|----------|-----------------------|---------------------|-------------------|--------------------|
+| Claude Code | `~/.claude/projects/<hash>/<session-id>.jsonl` | Yes | Per-message | `CLAUDE_CODE_SESSION_ID` (confirmed) |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl` | Yes | Per-turn delta (`last_token_usage`) | `CODEX_SESSION_ID` (unconfirmed) |
+| Cursor | `~/.cursor/projects/<slug>/agent-tools/*.txt` (`cursor agent` CLI) | Yes (`cursor agent` only; IDE chat = none) | Per agent run (`type=result` line) | None documented |
+| OpenCode | `~/.local/share/opencode/opencode.db` (`part` table) | Yes | Per LLM turn (`step-finish` parts) | None |
+| GitHub Copilot | `~/.copilot/session-state/<id>/events.jsonl` | Partial (session aggregate only) | Session-level (`session.shutdown`) | None |
 
 ## Canonical `~/.agents` Storage Policy
 

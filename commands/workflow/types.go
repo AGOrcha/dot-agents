@@ -69,6 +69,15 @@ type workflowOrientState struct {
 	ActiveDelegations workflowDelegationSummary      `json:"active_delegations"`
 	PendingMergeBacks int                            `json:"pending_merge_backs"`
 	LocalDrift        *RepoDriftReport               `json:"local_drift,omitempty"`
+	RecentSessions    []branchSessionInfo            `json:"recent_sessions,omitempty"`
+}
+
+// branchSessionInfo is a compact view of a platform session active on the current branch.
+type branchSessionInfo struct {
+	Platform     string `json:"platform"`
+	SessionID    string `json:"session_id"`
+	Timestamp    string `json:"timestamp"`
+	MessageCount int    `json:"message_count"`
 }
 
 // workflowDelegationSummary is a compact view of active delegation state for orient/status.

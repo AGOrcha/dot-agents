@@ -15,3 +15,4 @@
 - [`analysis-gaps-need-tasks`](./analysis-gaps-need-tasks/LESSON.md): When a session produces analysis results (A/B comparisons, gap findings, identified bugs), those findings must become canonical tasks before the session closes — prose notes are not tasks and don't get scheduled.
 - [`select-star-scan-order`](./select-star-scan-order/LESSON.md): When porting DB schemas to Go, SELECT * scans must match exact column order — enumerate columns explicitly or count and comment them inline.
 - [`use-existing-subdir-helpers`](./use-existing-subdir-helpers/LESSON.md): In kg.go, use `noteSubdir(t)` not `noteType+"s"` — "entity" maps to "entities" not "entitys".
+- [`symbol-only-references-in-artifacts`](./symbol-only-references-in-artifacts/LESSON.md): Workflow artifacts reference code by symbol/function/relational anchor — never line numbers. Line numbers drift the instant any sibling edit lands.
