@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1005,4 +1006,387 @@ func TestRunWorkflowCheckpoint_RejectsInvalidVerificationStatus(t *testing.T) {
 	}
 }
 
-// TestWorkflow_CheckpointThenOrient writes a checkpoint with verification data and then
+// TestRunWorkflowCheckpoint_StateRoundTrip writes a checkpoint with verification data
+// and verifies collectWorkflowState observes both the checkpoint and the next-action source.
+func TestRunWorkflowCheckpoint_StateRoundTrip(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowCheckpoint("resume coverage", "pass", "go test ./... passed"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Checkpoint == nil {
+		t.Fatal("expected checkpoint loaded into state after checkpoint write")
+	}
+	if state.Checkpoint.Verification.Status != "pass" {
+		t.Fatalf("verification = %q, want pass", state.Checkpoint.Verification.Status)
+	}
+	if state.Checkpoint.Message != "resume coverage" {
+		t.Fatalf("message = %q, want 'resume coverage'", state.Checkpoint.Message)
+	}
+	if state.Health == nil {
+		t.Fatal("expected health snapshot computed during enrichment")
+	}
+}
+
+// TestRunWorkflowStatus_Renders covers the human-readable status renderer.
+func TestRunWorkflowStatus_Renders(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	seedWorkflowStateContext(t, repo, agentsHome)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowStatus() },
+		"Workflow Status",
+		"workflow-proj",
+		"branch:",
+		"Last Checkpoint",
+		"Next Action",
+	)
+}
+
+// TestRunWorkflowOrient_Renders covers the markdown orient renderer end-to-end.
+func TestRunWorkflowOrient_Renders(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowOrient() },
+		"# Project",
+		"# Active Plans",
+		"# Next Action",
+	)
+}
+
+// TestRunWorkflowLog_NoLog reports a friendly message when no session log exists.
+func TestRunWorkflowLog_NoLog(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowLog(false) },
+		"No session log found",
+	)
+}
+
+// TestRunWorkflowLog_AllShowsEverything ensures --all includes more than the
+// most recent 10 entries when many checkpoints have been written.
+func TestRunWorkflowLog_AllShowsEverything(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write 12 checkpoints so the default (last-10) truncates and --all does not.
+	for i := 0; i < 12; i++ {
+		msg := "iter-" + strconv.Itoa(i)
+		if err := runWorkflowCheckpoint(msg, "pass", ""); err != nil {
+			t.Fatalf("checkpoint %d: %v", i, err)
+		}
+	}
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowLog(true) },
+		"iter-0",
+		"iter-11",
+	)
+}
+
+// TestCollectDelegationSummary_ActiveAndMergeBacks covers the delegation summary
+// and pending-merge-back counter that feeds workflowOrientState.
+func TestCollectDelegationSummary_ActiveAndMergeBacks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+
+	// Active contract.
+	writeActiveDelegationContract(t, repo, "del-active", "plan-x", "task-active")
+
+	// Completed contract — should not be counted.
+	delegDir := filepath.Join(repo, ".agents", "active", "delegation")
+	if err := os.MkdirAll(delegDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	completed := `schema_version: 1
+id: del-done
+parent_plan_id: plan-x
+parent_task_id: task-done
+title: t
+write_scope: []
+status: completed
+created_at: "2026-04-10T00:00:00Z"
+updated_at: "2026-04-10T00:00:00Z"
+`
+	if err := os.WriteFile(filepath.Join(delegDir, "task-done.yaml"), []byte(completed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two pending merge-backs.
+	mbDir := filepath.Join(repo, ".agents", "active", "merge-back")
+	if err := os.MkdirAll(mbDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.WriteFile(filepath.Join(mbDir, name), []byte("# merge"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Non-markdown file should be ignored.
+	if err := os.WriteFile(filepath.Join(mbDir, "ignore.txt"), []byte("nope"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, pendingMergebacks := collectDelegationSummary(repo)
+	if summary.ActiveCount != 1 {
+		t.Fatalf("ActiveCount = %d, want 1", summary.ActiveCount)
+	}
+	if pendingMergebacks != 2 {
+		t.Fatalf("pendingMergebacks = %d, want 2", pendingMergebacks)
+	}
+}
+
+// TestCollectWorkflowState_IncludesDelegationAndMergeBack ensures the orient
+// state assembly carries delegations and merge-back counts through to the
+// rendered surface.
+func TestCollectWorkflowState_IncludesDelegationAndMergeBack(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	writeActiveDelegationContract(t, repo, "del-a", "plan-x", "task-a")
+	mbDir := filepath.Join(repo, ".agents", "active", "merge-back")
+	if err := os.MkdirAll(mbDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mbDir, "a.md"), []byte("# merge"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := collectWorkflowState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.ActiveDelegations.ActiveCount != 1 {
+		t.Fatalf("ActiveDelegations.ActiveCount = %d, want 1", state.ActiveDelegations.ActiveCount)
+	}
+	if state.PendingMergeBacks != 1 {
+		t.Fatalf("PendingMergeBacks = %d, want 1", state.PendingMergeBacks)
+	}
+
+	var buf bytes.Buffer
+	renderWorkflowOrientMarkdown(state, &buf)
+	rendered := buf.String()
+	if !strings.Contains(rendered, "# Delegations") {
+		t.Fatalf("orient missing # Delegations section:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "active delegations: 1") {
+		t.Fatalf("orient missing active delegations count:\n%s", rendered)
+	}
+}
+
+// TestGitModifiedFiles_NonGit returns an empty slice for non-repo paths.
+func TestGitModifiedFiles_NonGit(t *testing.T) {
+	tmp := t.TempDir()
+	files, err := gitModifiedFiles(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected empty modified files for non-repo, got %v", files)
+	}
+}
+
+// TestGitModifiedFiles_TracksDirty surfaces dirty files in an initialized repo.
+func TestGitModifiedFiles_TracksDirty(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	dirtyPath := filepath.Join(repo, "dirty.txt")
+	if err := os.WriteFile(dirtyPath, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := gitModifiedFiles(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range files {
+		if f == "dirty.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected dirty.txt in modified files, got %v", files)
+	}
+}
+
+// TestCollectWorkflowGitSummary_NonRepoReturnsWarning ensures the git summary
+// gracefully degrades when the project path is not a git checkout.
+func TestCollectWorkflowGitSummary_NonRepoReturnsWarning(t *testing.T) {
+	tmp := t.TempDir()
+	summary, warnings := collectWorkflowGitSummary(tmp)
+	if summary.Branch != "unknown" || summary.SHA != "unknown" {
+		t.Fatalf("expected unknown/unknown for non-repo, got branch=%q sha=%q", summary.Branch, summary.SHA)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning when path is not a git repo")
+	}
+}
+
+// TestDeriveWorkflowNextAction_PrefersCanonicalThenActive verifies the
+// fallback chain when no checkpoint is current.
+func TestDeriveWorkflowNextAction_PrefersCanonicalThenActive(t *testing.T) {
+	git := workflowGitSummary{Branch: "main", SHA: "abc1234"}
+	canonical := []workflowCanonicalPlanSummary{{ID: "p1", Status: "active", CurrentFocusTask: "do canonical"}}
+	active := []workflowPlanSummary{{Title: "active", PendingItems: []string{"do active"}}}
+
+	action, source := deriveWorkflowNextAction(git, nil, canonical, active)
+	if action != "do canonical" || source != "canonical_plan" {
+		t.Fatalf("got (%q, %q), want (do canonical, canonical_plan)", action, source)
+	}
+
+	// Without canonical, fall back to active plan.
+	action, source = deriveWorkflowNextAction(git, nil, nil, active)
+	if action != "do active" || source != "active_plan" {
+		t.Fatalf("got (%q, %q), want (do active, active_plan)", action, source)
+	}
+
+	// Stale checkpoint when nothing else is available.
+	cp := &workflowCheckpoint{NextAction: "resume"}
+	cp.Git.Branch = "old"
+	cp.Git.SHA = "old"
+	action, source = deriveWorkflowNextAction(git, cp, nil, nil)
+	if action != "resume" || source != "checkpoint_stale" {
+		t.Fatalf("got (%q, %q), want (resume, checkpoint_stale)", action, source)
+	}
+
+	// Default when nothing is available.
+	action, source = deriveWorkflowNextAction(git, nil, nil, nil)
+	if source != "default" {
+		t.Fatalf("source = %q, want default", source)
+	}
+	if action == "" {
+		t.Fatal("default action should not be empty")
+	}
+}
+
+// TestIsCheckpointCurrent covers the freshness predicate.
+func TestIsCheckpointCurrent(t *testing.T) {
+	git := workflowGitSummary{Branch: "main", SHA: "abc1234"}
+
+	if isCheckpointCurrent(git, nil) {
+		t.Fatal("nil checkpoint is not current")
+	}
+
+	cp := &workflowCheckpoint{}
+	cp.Git.Branch = "main"
+	cp.Git.SHA = "abc1234"
+	if !isCheckpointCurrent(git, cp) {
+		t.Fatal("matching branch+sha checkpoint should be current")
+	}
+
+	cp.Git.SHA = "deadbeef"
+	if isCheckpointCurrent(git, cp) {
+		t.Fatal("mismatched SHA should not be current")
+	}
+
+	empty := &workflowCheckpoint{}
+	if isCheckpointCurrent(git, empty) {
+		t.Fatal("empty checkpoint git block is not current")
+	}
+}
+
+// TestCollectWorkflowLessons_ReadsIndex covers loading and trimming lessons.
+func TestCollectWorkflowLessons_ReadsIndex(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	lessonsDir := filepath.Join(repo, ".agents", "lessons")
+	if err := os.MkdirAll(lessonsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write 15 lines so we exercise the trim-to-last-10 path.
+	var b strings.Builder
+	for i := 0; i < 15; i++ {
+		b.WriteString("lesson ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteString("\n")
+	}
+	if err := os.WriteFile(filepath.Join(lessonsDir, "index.md"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	lessons, warnings := collectWorkflowLessons(repo)
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(lessons) != 10 {
+		t.Fatalf("len(lessons) = %d, want 10 (trimmed)", len(lessons))
+	}
+	if lessons[len(lessons)-1] != "lesson 14" {
+		t.Fatalf("last lesson = %q, want 'lesson 14'", lessons[len(lessons)-1])
+	}
+}
+
+// TestCollectWorkflowLessons_MissingReturnsWarning ensures a missing index
+// surfaces a warning rather than an error.
+func TestCollectWorkflowLessons_MissingReturnsWarning(t *testing.T) {
+	tmp := t.TempDir()
+	lessons, warnings := collectWorkflowLessons(tmp)
+	if len(lessons) != 0 {
+		t.Fatalf("expected no lessons, got %v", lessons)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected warning when lessons index is missing")
+	}
+}
+
+// TestLoadWorkflowCheckpoint_MissingReturnsNil ensures the loader produces
+// no warnings when there is simply no checkpoint yet.
+func TestLoadWorkflowCheckpoint_MissingReturnsNil(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	cp, warnings := loadWorkflowCheckpoint("no-such-project")
+	if cp != nil {
+		t.Fatalf("expected nil checkpoint, got %+v", cp)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings for missing checkpoint, got %v", warnings)
+	}
+}
+
+// TestLoadWorkflowCheckpoint_Unreadable ensures malformed YAML produces a warning.
+func TestLoadWorkflowCheckpoint_Unreadable(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	contextDir := filepath.Join(agentsHome, "context", "broken-proj")
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte("foo: bar\n\t- not: yaml\n\t\tbroken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cp, warnings := loadWorkflowCheckpoint("broken-proj")
+	if cp != nil {
+		t.Fatalf("expected nil checkpoint on parse failure, got %+v", cp)
+	}
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "checkpoint unreadable") {
+		t.Fatalf("expected 'checkpoint unreadable' warning, got %v", warnings)
+	}
+}

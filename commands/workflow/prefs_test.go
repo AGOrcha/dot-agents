@@ -186,4 +186,324 @@ func TestPreferences_OrientIncludesPreferences(t *testing.T) {
 	}
 }
 
+// TestPreferences_LoadRepoMissingReturnsNil ensures absence of repo prefs is
+// not an error.
+func TestPreferences_LoadRepoMissingReturnsNil(t *testing.T) {
+	tmp := t.TempDir()
+	f, err := loadRepoPreferences(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Fatalf("expected nil for missing repo prefs, got %+v", f)
+	}
+}
+
+// TestPreferences_LoadRepoMalformedYAML ensures malformed YAML returns an
+// error rather than panicking.
+func TestPreferences_LoadRepoMalformedYAML(t *testing.T) {
+	tmp := t.TempDir()
+	prefsDir := filepath.Join(tmp, ".agents", "workflow")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prefsDir, "preferences.yaml"), []byte("foo: bar\n  - this is not: valid yaml\n\t\tindent: broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadRepoPreferences(tmp)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+// TestPreferences_LoadLocalMissingReturnsNil mirrors the repo-prefs absence test.
+func TestPreferences_LoadLocalMissingReturnsNil(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	f, err := loadLocalPreferences("no-such-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Fatalf("expected nil for missing local prefs, got %+v", f)
+	}
+}
+
+// TestPreferences_LoadLocalMalformedYAML returns an error rather than panic.
+func TestPreferences_LoadLocalMalformedYAML(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	dir := filepath.Join(agentsHome, "context", "broken-proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "preferences.local.yaml"), []byte("foo: bar\n  - this is not: valid yaml\n\t\tindent: broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadLocalPreferences("broken-proj")
+	if err == nil {
+		t.Fatal("expected error for malformed local prefs YAML")
+	}
+}
+
+// TestPreferences_ApplyBoolPlanningRequirePlanBeforeCode covers a planning bool
+// applier so all categories get coverage.
+func TestPreferences_ApplyBoolPlanningRequirePlanBeforeCode(t *testing.T) {
+	p := WorkflowPreferences{}
+	if err := applyPreferenceKey(&p, "planning.require_plan_before_code", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Planning.RequirePlanBeforeCode == nil || *p.Planning.RequirePlanBeforeCode != true {
+		t.Fatalf("planning.require_plan_before_code not set to true: %+v", p.Planning.RequirePlanBeforeCode)
+	}
+}
+
+// TestPreferences_ApplyReviewAndExecutionStringFields covers the remaining
+// string appliers in review and execution categories.
+func TestPreferences_ApplyReviewAndExecutionStringFields(t *testing.T) {
+	p := WorkflowPreferences{}
+	for _, kv := range []struct{ key, val string }{
+		{"review.review_order", "tests-first"},
+		{"review.require_findings_first", "false"},
+		{"execution.package_manager", "yarn"},
+		{"planning.plan_directory", "docs/plans"},
+	} {
+		if err := applyPreferenceKey(&p, kv.key, kv.val); err != nil {
+			t.Fatalf("apply %s: %v", kv.key, err)
+		}
+	}
+	if strPtrVal(p.Review.ReviewOrder) != "tests-first" {
+		t.Fatalf("review.review_order = %q", strPtrVal(p.Review.ReviewOrder))
+	}
+	if p.Review.RequireFindingsFirst == nil || *p.Review.RequireFindingsFirst != false {
+		t.Fatalf("review.require_findings_first not false")
+	}
+	if strPtrVal(p.Execution.PackageManager) != "yarn" {
+		t.Fatalf("execution.package_manager = %q", strPtrVal(p.Execution.PackageManager))
+	}
+	if strPtrVal(p.Planning.PlanDirectory) != "docs/plans" {
+		t.Fatalf("planning.plan_directory = %q", strPtrVal(p.Planning.PlanDirectory))
+	}
+}
+
+// TestPreferences_MaxParallelWorkers_ValidAndInvalid covers the bespoke int
+// applier including range validation.
+func TestPreferences_MaxParallelWorkers_ValidAndInvalid(t *testing.T) {
+	p := WorkflowPreferences{}
+	if err := applyMaxParallelWorkers(&p, "4"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Execution.MaxParallelWorkers == nil || *p.Execution.MaxParallelWorkers != 4 {
+		t.Fatalf("max_parallel_workers = %v, want 4", p.Execution.MaxParallelWorkers)
+	}
+	for _, bad := range []string{"0", "9", "-1", "abc"} {
+		if err := applyMaxParallelWorkers(&p, bad); err == nil {
+			t.Fatalf("expected error for value %q", bad)
+		}
+	}
+}
+
+// TestPreferences_BoolPtrStrAndIntPtrStr covers the small ptr-to-string helpers.
+func TestPreferences_BoolPtrStrAndIntPtrStr(t *testing.T) {
+	if boolPtrStr(nil) != "" {
+		t.Fatal("boolPtrStr(nil) should be empty")
+	}
+	tr, fl := true, false
+	if boolPtrStr(&tr) != "true" || boolPtrStr(&fl) != "false" {
+		t.Fatal("boolPtrStr mismatch")
+	}
+	if intPtrStr(nil) != "" {
+		t.Fatal("intPtrStr(nil) should be empty")
+	}
+	n := 7
+	if intPtrStr(&n) != "7" {
+		t.Fatalf("intPtrStr(7) = %q, want 7", intPtrStr(&n))
+	}
+	if strPtrVal(nil) != "" {
+		t.Fatal("strPtrVal(nil) should be empty")
+	}
+}
+
+// TestPreferences_IsValidPreferenceKey covers the validation map both ways.
+func TestPreferences_IsValidPreferenceKey(t *testing.T) {
+	if !isValidPreferenceKey("verification.test_command") {
+		t.Fatal("verification.test_command should be valid")
+	}
+	if isValidPreferenceKey("nonsense.field") {
+		t.Fatal("nonsense.field should be invalid")
+	}
+}
+
+// TestPreferences_SetLocalRoundTripReset rebinds a local pref to its default
+// (acting as a reset) and verifies the persisted change.
+func TestPreferences_SetLocalRoundTripReset(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := setLocalPreference("reset-proj", "execution.formatter", "prettier"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := loadLocalPreferences("reset-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strPtrVal(f.Execution.Formatter) != "prettier" {
+		t.Fatalf("after set: formatter = %q, want prettier", strPtrVal(f.Execution.Formatter))
+	}
+
+	// Reset back to the default value.
+	defaults := defaultWorkflowPreferences()
+	if err := setLocalPreference("reset-proj", "execution.formatter", strPtrVal(defaults.Execution.Formatter)); err != nil {
+		t.Fatal(err)
+	}
+	f2, err := loadLocalPreferences("reset-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strPtrVal(f2.Execution.Formatter) != strPtrVal(defaults.Execution.Formatter) {
+		t.Fatalf("after reset: formatter = %q, want %q", strPtrVal(f2.Execution.Formatter), strPtrVal(defaults.Execution.Formatter))
+	}
+}
+
+// TestPreferences_SetLocalRejectsUnknownKey ensures invalid keys surface a hint.
+func TestPreferences_SetLocalRejectsUnknownKey(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	err := setLocalPreference("any-proj", "nope.field", "value")
+	if err == nil {
+		t.Fatal("expected error for unknown preference key in setLocalPreference")
+	}
+	if !strings.Contains(err.Error(), "unknown preference key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestRunWorkflowPrefs_RendersHumanReadable covers the listing renderer.
+func TestRunWorkflowPrefs_RendersHumanReadable(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPrefs() },
+		"Workflow Preferences",
+		"[verification]",
+		"test_command",
+		"(default)",
+	)
+}
+
+// TestRunWorkflowPrefsSetLocal_PersistsAndRejectsUnknown covers the user-facing
+// set-local command including invalid-key rejection.
+func TestRunWorkflowPrefsSetLocal_PersistsAndRejectsUnknown(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowPrefsSetLocal("verification.test_command", "pytest -x"); err != nil {
+		t.Fatalf("set-local valid: %v", err)
+	}
+	f, err := loadLocalPreferences("workflow-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strPtrVal(f.Verification.TestCommand) != "pytest -x" {
+		t.Fatalf("persisted value = %q, want 'pytest -x'", strPtrVal(f.Verification.TestCommand))
+	}
+
+	if err := runWorkflowPrefsSetLocal("bogus.key", "x"); err == nil {
+		t.Fatal("expected error for unknown key, got nil")
+	}
+}
+
+// TestRunWorkflowPrefsSetShared_CreatesProposal records a pending shared-pref
+// change as a config proposal rather than mutating the repo file directly.
+func TestRunWorkflowPrefsSetShared_CreatesProposal(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	oldwd, _ := os.Getwd()
+	defer os.Chdir(oldwd)
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runWorkflowPrefsSetShared("verification.test_command", "go test ./pkg/..."); err != nil {
+		t.Fatalf("set-shared: %v", err)
+	}
+
+	proposalsDir := filepath.Join(agentsHome, "proposals")
+	entries, err := os.ReadDir(proposalsDir)
+	if err != nil {
+		t.Fatalf("expected proposals dir written: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one proposal file recorded")
+	}
+	if err := runWorkflowPrefsSetShared("bogus.key", "x"); err == nil {
+		t.Fatal("expected error for unknown key in set-shared")
+	}
+}
+
+// TestPreferences_MergeOverwritesNilDestination verifies merge helpers replace
+// nil pointers with src values at every category.
+func TestPreferences_MergeOverwritesNilDestination(t *testing.T) {
+	d := defaultWorkflowPreferences()
+	// Override at the local layer for every category.
+	local := WorkflowPreferences{}
+	tc := "lint command"
+	rg := true
+	pd := ".plans"
+	rpb := false
+	ro := "tests-first"
+	rff := false
+	pm := "pnpm"
+	ft := "biome"
+	maxw := 2
+	local.Verification.LintCommand = &tc
+	local.Verification.RequireRegressionBeforeHandoff = &rg
+	local.Planning.PlanDirectory = &pd
+	local.Planning.RequirePlanBeforeCode = &rpb
+	local.Review.ReviewOrder = &ro
+	local.Review.RequireFindingsFirst = &rff
+	local.Execution.PackageManager = &pm
+	local.Execution.Formatter = &ft
+	local.Execution.MaxParallelWorkers = &maxw
+
+	out := mergePreferences(d, WorkflowPreferences{}, local)
+	if strPtrVal(out.Verification.LintCommand) != "lint command" {
+		t.Fatalf("Verification.LintCommand not overridden")
+	}
+	if *out.Verification.RequireRegressionBeforeHandoff != true {
+		t.Fatalf("Verification.RequireRegressionBeforeHandoff not overridden")
+	}
+	if strPtrVal(out.Planning.PlanDirectory) != ".plans" {
+		t.Fatalf("Planning.PlanDirectory not overridden")
+	}
+	if *out.Planning.RequirePlanBeforeCode != false {
+		t.Fatalf("Planning.RequirePlanBeforeCode not overridden")
+	}
+	if strPtrVal(out.Review.ReviewOrder) != "tests-first" {
+		t.Fatalf("Review.ReviewOrder not overridden")
+	}
+	if *out.Review.RequireFindingsFirst != false {
+		t.Fatalf("Review.RequireFindingsFirst not overridden")
+	}
+	if strPtrVal(out.Execution.PackageManager) != "pnpm" {
+		t.Fatalf("Execution.PackageManager not overridden")
+	}
+	if strPtrVal(out.Execution.Formatter) != "biome" {
+		t.Fatalf("Execution.Formatter not overridden")
+	}
+	if *out.Execution.MaxParallelWorkers != 2 {
+		t.Fatalf("Execution.MaxParallelWorkers not overridden")
+	}
+}
+
 // ── Wave 5: Graph bridge types ────────────────────────────────────────────────

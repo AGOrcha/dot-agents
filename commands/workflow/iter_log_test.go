@@ -640,6 +640,182 @@ self_assessment:
 	}
 }
 
+// TestParseAIAgentEnv covers the AI_AGENT decoder used to pin the active
+// platform without probing session env vars.
+func TestParseAIAgentEnv(t *testing.T) {
+	cases := []struct {
+		raw, wantHarness, wantVersion string
+	}{
+		{"claude_2-1-138_agent", "claude", "2.1.138"},
+		{"codex_0-9-0_agent", "codex", "0.9.0"},
+		{"cursor_agent", "cursor", ""}, // no underscore in version
+		{"unknown", "unknown", ""},     // no underscore at all
+	}
+	for _, tc := range cases {
+		h, v := parseAIAgentEnv(tc.raw)
+		if h != tc.wantHarness || v != tc.wantVersion {
+			t.Errorf("parseAIAgentEnv(%q) = (%q, %q), want (%q, %q)", tc.raw, h, v, tc.wantHarness, tc.wantVersion)
+		}
+	}
+}
+
+// clearAgentSessionEnv unsets AI_AGENT and every platform's session/entrypoint
+// env vars so resolveAgentBlock has no signals to discover.
+func clearAgentSessionEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"AI_AGENT",
+		"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+		"CODEX_SESSION_ID",
+		"CURSOR_SESSION_ID",
+		"OPENCODE_SESSION_ID",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+// TestResolveAgentBlock_NilWhenNoSignals returns nil when neither AI_AGENT
+// nor any platform session-env vars are set.
+func TestResolveAgentBlock_NilWhenNoSignals(t *testing.T) {
+	clearAgentSessionEnv(t)
+	block := resolveAgentBlock(t.TempDir())
+	if block != nil {
+		t.Fatalf("expected nil agent block when no signals present, got %+v", block)
+	}
+}
+
+// TestResolveAgentBlock_UsesAIAgentEnv parses the harness pin even when there
+// is no session reader to match.
+func TestResolveAgentBlock_UsesAIAgentEnv(t *testing.T) {
+	clearAgentSessionEnv(t)
+	t.Setenv("AI_AGENT", "codex_1-2-3_agent")
+	block := resolveAgentBlock(t.TempDir())
+	if block == nil {
+		t.Fatal("expected non-nil block when AI_AGENT is set")
+	}
+	if block.Harness != "codex" {
+		t.Errorf("harness = %q, want codex", block.Harness)
+	}
+	if block.HarnessVersion != "1.2.3" {
+		t.Errorf("version = %q, want 1.2.3", block.HarnessVersion)
+	}
+}
+
+// TestFirstEnv covers the env-var-first-wins helper used by resolveAgentBlock.
+func TestFirstEnv(t *testing.T) {
+	t.Setenv("PR3B_FIRST_ENV_A", "")
+	t.Setenv("PR3B_FIRST_ENV_B", "second")
+	got := firstEnv([]string{"PR3B_FIRST_ENV_A", "PR3B_FIRST_ENV_B"})
+	if got != "second" {
+		t.Fatalf("firstEnv = %q, want 'second'", got)
+	}
+	got = firstEnv([]string{"PR3B_FIRST_ENV_MISSING"})
+	if got != "" {
+		t.Fatalf("firstEnv missing = %q, want empty", got)
+	}
+}
+
+// TestValidateIterLogRoleFlags covers the role/verifier-type validation matrix.
+func TestValidateIterLogRoleFlags(t *testing.T) {
+	cases := []struct {
+		role, vt string
+		wantErr  bool
+	}{
+		{"", "", false},
+		{"impl", "", false},
+		{"review", "", false},
+		{"verifier", "unit", false},
+		{"verifier", "", true},  // verifier requires verifier-type
+		{"", "unit", true},      // verifier-type without role
+		{"impl", "unit", true},  // verifier-type only valid with verifier role
+		{"unknown", "", true},
+	}
+	for _, tc := range cases {
+		err := validateIterLogRoleFlags(tc.role, tc.vt)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("validateIterLogRoleFlags(role=%q, vt=%q) err=%v, wantErr=%v", tc.role, tc.vt, err, tc.wantErr)
+		}
+	}
+}
+
+// TestLoadPrevCheckpointAt_FirstIterReturnsEmpty covers the n<=1 short-circuit
+// and the missing-file fall-through.
+func TestLoadPrevCheckpointAt_FirstIterReturnsEmpty(t *testing.T) {
+	if got := loadPrevCheckpointAt(t.TempDir(), 1); got != "" {
+		t.Fatalf("iter 1 should return empty, got %q", got)
+	}
+	if got := loadPrevCheckpointAt(t.TempDir(), 5); got != "" {
+		t.Fatalf("missing prev iter should return empty, got %q", got)
+	}
+}
+
+// TestLoadPrevCheckpointAt_ReadsPrior returns the checkpoint_at from the prior
+// iter when present.
+func TestLoadPrevCheckpointAt_ReadsPrior(t *testing.T) {
+	dir := t.TempDir()
+	prior := `schema_version: 2
+iteration: 4
+checkpoint_at: "2026-04-18T12:34:56Z"
+`
+	if err := os.WriteFile(filepath.Join(dir, "iter-4.yaml"), []byte(prior), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := loadPrevCheckpointAt(dir, 5)
+	if got != "2026-04-18T12:34:56Z" {
+		t.Fatalf("got %q, want '2026-04-18T12:34:56Z'", got)
+	}
+}
+
+// TestCheckpointLogToIter_RecordsAgentBlockFromAIAgentEnv exercises the iter
+// log path with AI_AGENT set so the agent block is populated.
+func TestCheckpointLogToIter_RecordsAgentBlockFromAIAgentEnv(t *testing.T) {
+	repo := initWorkflowTestRepoWithCommit(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	clearAgentSessionEnv(t)
+	t.Setenv("AI_AGENT", "codex_9-9-9_agent")
+
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "42"); err != nil {
+		t.Fatalf("checkpoint --log-to-iter 42: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(repo, ".agents", "active", "iteration-log", "iter-42.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry iterLogEntry
+	if err := yaml.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Agent == nil {
+		t.Fatal("expected agent block recorded when AI_AGENT is set")
+	}
+	if entry.Agent.Harness != "codex" {
+		t.Fatalf("agent.harness = %q, want codex", entry.Agent.Harness)
+	}
+	if entry.Agent.HarnessVersion != "9.9.9" {
+		t.Fatalf("agent.harness_version = %q, want 9.9.9", entry.Agent.HarnessVersion)
+	}
+}
+
+// TestCheckpointLogToIter_VerifierMissingResultFileFails ensures the verifier
+// merge surfaces a clear error when the verifier result file is absent.
+func TestCheckpointLogToIter_VerifierMissingResultFileFails(t *testing.T) {
+	repo, delegDir, bundleDir := setupDelegationFlowEnv(t)
+	const taskID = "no-result"
+	const bundleID = "del-no-result-999003"
+	writeDelegationFlowArtifacts(t, delegDir, bundleDir, taskID, bundleID)
+
+	// Stub the iter first.
+	if err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "88"); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+	// No verifier result file exists yet — merge must fail with a read error.
+	err := executeWorkflowCommand(t, repo, "checkpoint", "--log-to-iter", "88", "--role", "verifier", "--verifier-type", "unit")
+	if err == nil {
+		t.Fatal("expected error when verifier result is missing")
+	}
+}
+
 func TestParseGitDiffStatSummary(t *testing.T) {
 	cases := []struct {
 		summary     string
