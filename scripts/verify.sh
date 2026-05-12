@@ -19,7 +19,7 @@ elif command -v da >/dev/null 2>&1; then
 elif command -v go >/dev/null 2>&1; then
   DOT_AGENTS="go run ./cmd/dot-agents"
 else
-  echo -e "${RED}Error: da not found${NC}"
+  echo -e "${RED}Error: da not found${NC}" >&2
   exit 1
 fi
 

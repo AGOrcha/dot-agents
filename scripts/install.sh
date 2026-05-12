@@ -56,10 +56,11 @@ EOF
 }
 
 parse_args() {
-  while [ $# -gt 0 ]; do
-    case "$1" in
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
+    case "$arg" in
       --port)
-        [ $# -ge 2 ] || die "--port requires a value"
+        [[ $# -ge 2 ]] || die "--port requires a value"
         PORT="$2"
         shift 2
         ;;
@@ -68,7 +69,7 @@ parse_args() {
         exit 0
         ;;
       *)
-        die "Unknown argument: $1"
+        die "Unknown argument: $arg"
         ;;
     esac
   done
@@ -95,7 +96,7 @@ ensure_install_dir_on_path() {
 }
 
 get_latest_version() {
-  if [ -n "$VERSION" ]; then
+  if [[ -n "$VERSION" ]]; then
     echo "$VERSION"
     return
   fi
@@ -103,7 +104,7 @@ get_latest_version() {
   version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
     grep '"tag_name"' |
     sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/' || true)
-  if [ -n "$version" ]; then
+  if [[ -n "$version" ]]; then
     echo "$version"
   else
     echo "main"
@@ -113,16 +114,16 @@ get_latest_version() {
 run_go_installer() {
   local script_path=""
   local ref="main"
-  if [ -n "$VERSION" ]; then
+  if [[ -n "$VERSION" ]]; then
     ref="$VERSION"
   fi
-  if [ -n "$LOCAL_SRC" ] && [ -f "$LOCAL_SRC/scripts/install-go.sh" ]; then
+  if [[ -n "$LOCAL_SRC" ]] && [[ -f "$LOCAL_SRC/scripts/install-go.sh" ]]; then
     script_path="$LOCAL_SRC/scripts/install-go.sh"
-  elif [ "${BASH_SOURCE[0]:-}" != "" ] && [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-go.sh" ]; then
+  elif [[ "${BASH_SOURCE[0]:-}" != "" ]] && [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-go.sh" ]]; then
     script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-go.sh"
   fi
 
-  if [ -n "$script_path" ]; then
+  if [[ -n "$script_path" ]]; then
     DOT_AGENTS_INSTALL_DIR="$INSTALL_DIR" DOT_AGENTS_VERSION="$VERSION" bash "$script_path"
     return
   fi
@@ -139,14 +140,14 @@ require_node() {
   command -v node >/dev/null 2>&1 || die "node is required for --port ts"
   local major
   major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "0")
-  if [ "$major" -lt 20 ]; then
+  if [[ "$major" -lt 20 ]]; then
     die "Node.js 20+ is required for --port ts"
   fi
 }
 
 build_ts_dist_if_needed() {
   local ts_root="$1"
-  if [ -f "$ts_root/dist/cli.js" ]; then
+  if [[ -f "$ts_root/dist/cli.js" ]]; then
     info "Using prebuilt TypeScript dist/"
     return
   fi
@@ -154,7 +155,7 @@ build_ts_dist_if_needed() {
   info "Building TypeScript port..."
   (
     cd "$ts_root"
-    if [ -f package-lock.json ]; then
+    if [[ -f package-lock.json ]]; then
       npm ci
     else
       npm install
@@ -168,14 +169,14 @@ install_ts_target() {
   local version repo_root ts_root tmpdir=""
   version=$(get_latest_version)
   info "Installing TypeScript port target (da-ts) from ${version}..."
-  if [ -n "$LOCAL_SRC" ]; then
-    [ -d "$LOCAL_SRC/ports/typescript" ] || die "DOT_AGENTS_LOCAL_SRC must point at a repo checkout with ports/typescript"
+  if [[ -n "$LOCAL_SRC" ]]; then
+    [[ -d "$LOCAL_SRC/ports/typescript" ]] || die "DOT_AGENTS_LOCAL_SRC must point at a repo checkout with ports/typescript"
     repo_root="$LOCAL_SRC"
   else
     local url
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' RETURN
-    if [ "$version" = "main" ]; then
+    if [[ "$version" = "main" ]]; then
       url="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
     else
       url="https://github.com/${REPO}/archive/refs/tags/${version}.tar.gz"
@@ -184,10 +185,10 @@ install_ts_target() {
     curl -fsSL "$url" -o "$tmpdir/dot-agents.tar.gz"
     tar -xzf "$tmpdir/dot-agents.tar.gz" -C "$tmpdir"
     repo_root=$(find "$tmpdir" -maxdepth 1 -type d -name 'dot-agents*' | head -1)
-    [ -n "$repo_root" ] || die "Could not resolve extracted source bundle"
+    [[ -n "$repo_root" ]] || die "Could not resolve extracted source bundle"
   fi
   ts_root="$repo_root/ports/typescript"
-  [ -d "$ts_root" ] || die "TypeScript port directory not found in source bundle"
+  [[ -d "$ts_root" ]] || die "TypeScript port directory not found in source bundle"
 
   build_ts_dist_if_needed "$ts_root"
 
@@ -221,6 +222,7 @@ main() {
   case "$PORT" in
     go) run_go_installer ;;
     ts) install_ts_target ;;
+    *) die "Unsupported port: $PORT" ;;
   esac
 }
 

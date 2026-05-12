@@ -10,7 +10,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
 type opencode struct{}

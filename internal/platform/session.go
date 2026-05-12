@@ -122,6 +122,42 @@ func parseJSONLTimestamp(ts string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// claudeAssistantUsage is the token usage shape inside a Claude Code assistant JSONL entry.
+type claudeAssistantUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
+// claudeAssistantEntry is the JSONL entry shape for Claude Code assistant turns.
+type claudeAssistantEntry struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Message   struct {
+		Usage claudeAssistantUsage `json:"usage"`
+	} `json:"message"`
+}
+
+// claudeAccumulateAssistantEntry parses one JSONL line and accumulates Claude Code
+// assistant token usage into m. Skips non-assistant entries and entries before after.
+func claudeAccumulateAssistantEntry(line []byte, after time.Time, m *SessionTokenMetrics) {
+	var entry claudeAssistantEntry
+	if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "assistant" {
+		return
+	}
+	if !after.IsZero() {
+		if ts, ok := parseJSONLTimestamp(entry.Timestamp); ok && !ts.After(after) {
+			return
+		}
+	}
+	m.InputTokens += entry.Message.Usage.InputTokens
+	m.OutputTokens += entry.Message.Usage.OutputTokens
+	m.CacheReadTokens += entry.Message.Usage.CacheReadInputTokens
+	m.CacheCreationTokens += entry.Message.Usage.CacheCreationInputTokens
+	m.MessageCount++
+}
+
 // claudeScanSessionTokens aggregates token usage from Claude Code assistant
 // turns in the session JSONL after afterTimestamp (RFC3339; empty = all).
 func claudeScanSessionTokens(home, projectPath, sessionID, afterTimestamp string) SessionTokenMetrics {
@@ -145,36 +181,61 @@ func claudeScanSessionTokens(home, projectPath, sessionID, afterTimestamp string
 		if !bytes.Contains(line, []byte(`"assistant"`)) {
 			continue
 		}
-		var entry struct {
-			Type      string `json:"type"`
-			Timestamp string `json:"timestamp"`
-			Message   struct {
-				Usage struct {
-					InputTokens              int `json:"input_tokens"`
-					OutputTokens             int `json:"output_tokens"`
-					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "assistant" {
-			continue
-		}
-		if !after.IsZero() {
-			if ts, ok := parseJSONLTimestamp(entry.Timestamp); ok && !ts.After(after) {
-				continue
-			}
-		}
-		m.InputTokens += entry.Message.Usage.InputTokens
-		m.OutputTokens += entry.Message.Usage.OutputTokens
-		m.CacheReadTokens += entry.Message.Usage.CacheReadInputTokens
-		m.CacheCreationTokens += entry.Message.Usage.CacheCreationInputTokens
-		m.MessageCount++
+		claudeAccumulateAssistantEntry(line, after, &m)
 	}
 	if total := m.CacheReadTokens + m.CacheCreationTokens; total > 0 {
 		m.CacheHitRate = float64(m.CacheReadTokens) / float64(total)
 	}
 	return m
+}
+
+// codexLastTokenUsage holds per-turn token delta from a Codex token_count event.
+type codexLastTokenUsage struct {
+	InputTokens           int `json:"input_tokens"`
+	OutputTokens          int `json:"output_tokens"`
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+}
+
+// codexTokenCountInfo wraps the info field in a Codex token_count payload.
+type codexTokenCountInfo struct {
+	LastTokenUsage *codexLastTokenUsage `json:"last_token_usage"`
+}
+
+// codexTokenCountEntry is the JSONL entry shape for Codex token_count events.
+type codexTokenCountEntry struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Payload   struct {
+		Type string               `json:"type"`
+		Info *codexTokenCountInfo `json:"info"`
+	} `json:"payload"`
+}
+
+// codexAccumulateTokenEntry parses one JSONL line and accumulates token usage into m.
+// Returns false if the line should be skipped.
+func codexAccumulateTokenEntry(line []byte, after time.Time, m *SessionTokenMetrics) {
+	var entry codexTokenCountEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		return
+	}
+	if entry.Type != "event_msg" || entry.Payload.Type != "token_count" {
+		return
+	}
+	if entry.Payload.Info == nil || entry.Payload.Info.LastTokenUsage == nil {
+		return
+	}
+	if !after.IsZero() {
+		if ts, ok := parseJSONLTimestamp(entry.Timestamp); ok && !ts.After(after) {
+			return
+		}
+	}
+	u := entry.Payload.Info.LastTokenUsage
+	m.InputTokens += u.InputTokens
+	m.OutputTokens += u.OutputTokens
+	m.CacheReadTokens += u.CachedInputTokens
+	m.ReasoningTokens += u.ReasoningOutputTokens
+	m.MessageCount++
 }
 
 // codexScanSessionTokens aggregates token usage from Codex token_count events
@@ -206,41 +267,7 @@ func codexScanSessionTokens(home, sessionID, afterTimestamp string) SessionToken
 		if !bytes.Contains(line, []byte(`"token_count"`)) {
 			continue
 		}
-		var entry struct {
-			Type      string `json:"type"`
-			Timestamp string `json:"timestamp"`
-			Payload   struct {
-				Type string `json:"type"`
-				Info *struct {
-					LastTokenUsage *struct {
-						InputTokens           int `json:"input_tokens"`
-						OutputTokens          int `json:"output_tokens"`
-						CachedInputTokens     int `json:"cached_input_tokens"`
-						ReasoningOutputTokens int `json:"reasoning_output_tokens"`
-					} `json:"last_token_usage"`
-				} `json:"info"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Type != "event_msg" || entry.Payload.Type != "token_count" {
-			continue
-		}
-		if entry.Payload.Info == nil || entry.Payload.Info.LastTokenUsage == nil {
-			continue
-		}
-		if !after.IsZero() {
-			if ts, ok := parseJSONLTimestamp(entry.Timestamp); ok && !ts.After(after) {
-				continue
-			}
-		}
-		u := entry.Payload.Info.LastTokenUsage
-		m.InputTokens += u.InputTokens
-		m.OutputTokens += u.OutputTokens
-		m.CacheReadTokens += u.CachedInputTokens
-		m.ReasoningTokens += u.ReasoningOutputTokens
-		m.MessageCount++
+		codexAccumulateTokenEntry(line, after, &m)
 	}
 	return m
 }

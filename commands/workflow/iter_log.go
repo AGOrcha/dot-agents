@@ -361,6 +361,31 @@ func mergeIterLogTopLevelGit(dst *iterLogEntry, n int, wave, taskID, commit, pro
 	}
 }
 
+// findReaderByHarness returns the SessionReader whose AIAgentPrefix matches harness.
+func findReaderByHarness(harness string) platform.SessionReader {
+	for _, p := range platform.All() {
+		if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() == harness {
+			return sr
+		}
+	}
+	return nil
+}
+
+// probeSessionReader scans all platform SessionReaders for active session env vars.
+// Returns the first reader that has a session ID set.
+func probeSessionReader() (platform.SessionReader, string, string) {
+	for _, p := range platform.All() {
+		sr, ok := p.(platform.SessionReader)
+		if !ok {
+			continue
+		}
+		if id := firstEnv(sr.SessionEnvs()); id != "" {
+			return sr, sr.AIAgentPrefix(), id
+		}
+	}
+	return nil, "", ""
+}
+
 // resolveAgentBlock iterates platform.All(), type-asserts to platform.SessionReader,
 // and produces an agent identity record. Returns nil when no platform signals are detectable.
 // Platform session env vars and model resolvers are maintained in internal/platform/;
@@ -375,31 +400,13 @@ func resolveAgentBlock(projectPath string) *iterLogAgentBlock {
 	var reader platform.SessionReader
 	if aiAgent != "" {
 		harness, harnessVersion = parseAIAgentEnv(aiAgent)
-		for _, p := range platform.All() {
-			if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() == harness {
-				reader = sr
-				break
-			}
-		}
+		reader = findReaderByHarness(harness)
 	}
 
 	// Fallback: probe each SessionReader's env vars to detect the active platform.
 	sessionID, entrypoint := "", ""
 	if reader == nil {
-		for _, p := range platform.All() {
-			sr, ok := p.(platform.SessionReader)
-			if !ok {
-				continue
-			}
-			if id := firstEnv(sr.SessionEnvs()); id != "" {
-				sessionID = id
-				if harness == "" {
-					harness = sr.AIAgentPrefix()
-				}
-				reader = sr
-				break
-			}
-		}
+		reader, harness, sessionID = probeSessionReader()
 	} else {
 		sessionID = firstEnv(reader.SessionEnvs())
 	}
@@ -610,6 +617,37 @@ func loadPrevCheckpointAt(iterDir string, n int) string {
 	return e.CheckpointAt
 }
 
+// populateIterLogSessionTokens scans the active session's JSONL and sets
+// entry.SessionTokens when token metrics are available. Scanner errors are
+// swallowed; on any failure the SessionTokens block is left nil.
+func populateIterLogSessionTokens(entry *iterLogEntry, projectPath, iterDir string, n int) {
+	if entry.Agent == nil || entry.Agent.SessionID == "" || entry.Agent.Harness == "" {
+		return
+	}
+	prevAt := loadPrevCheckpointAt(iterDir, n)
+	home, _ := os.UserHomeDir()
+	for _, p := range platform.All() {
+		sr, isReader := p.(platform.SessionReader)
+		scanner, isScanner := p.(platform.SessionTokenScanner)
+		if !isReader || !isScanner || sr.AIAgentPrefix() != entry.Agent.Harness {
+			continue
+		}
+		metrics := scanner.ScanSessionTokens(home, projectPath, entry.Agent.SessionID, prevAt)
+		if metrics.MessageCount > 0 {
+			entry.SessionTokens = &iterLogSessionTokensBlock{
+				InputTokens:         metrics.InputTokens,
+				OutputTokens:        metrics.OutputTokens,
+				CacheReadTokens:     metrics.CacheReadTokens,
+				CacheCreationTokens: metrics.CacheCreationTokens,
+				ReasoningTokens:     metrics.ReasoningTokens,
+				CacheHitRate:        metrics.CacheHitRate,
+				MessageCount:        metrics.MessageCount,
+			}
+		}
+		break
+	}
+}
+
 func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	if err := validateIterLogRoleFlags(role, verifierType); err != nil {
 		return err
@@ -646,32 +684,7 @@ func runWorkflowCheckpointLogToIter(n int, role, verifierType string) error {
 	mergeIterLogTopLevelGit(entry, n, wave, taskID, commit, project.Path, diff)
 
 	// Populate session_tokens by scanning the active session's JSONL.
-	// Scanner errors are swallowed; on any failure metrics will be zero and
-	// the SessionTokens block is omitted (MessageCount==0 guard below).
-	if entry.Agent != nil && entry.Agent.SessionID != "" && entry.Agent.Harness != "" {
-		prevAt := loadPrevCheckpointAt(iterDir, n)
-		home, _ := os.UserHomeDir()
-		for _, p := range platform.All() {
-			sr, isReader := p.(platform.SessionReader)
-			scanner, isScanner := p.(platform.SessionTokenScanner)
-			if !isReader || !isScanner || sr.AIAgentPrefix() != entry.Agent.Harness {
-				continue
-			}
-			metrics := scanner.ScanSessionTokens(home, project.Path, entry.Agent.SessionID, prevAt)
-			if metrics.MessageCount > 0 {
-				entry.SessionTokens = &iterLogSessionTokensBlock{
-					InputTokens:         metrics.InputTokens,
-					OutputTokens:        metrics.OutputTokens,
-					CacheReadTokens:     metrics.CacheReadTokens,
-					CacheCreationTokens: metrics.CacheCreationTokens,
-					ReasoningTokens:     metrics.ReasoningTokens,
-					CacheHitRate:        metrics.CacheHitRate,
-					MessageCount:        metrics.MessageCount,
-				}
-			}
-			break
-		}
-	}
+	populateIterLogSessionTokens(entry, project.Path, iterDir, n)
 
 	if err := applyIterLogRole(entry, role, verifierType, feedbackGoal, project.Path, taskID, contract); err != nil {
 		return err

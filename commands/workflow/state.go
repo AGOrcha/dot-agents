@@ -268,6 +268,27 @@ func gatherWorkflowStateInputs() (*workflowStateInputs, error) {
 	}, nil
 }
 
+func appendBranchSessions(state *workflowOrientState, home, branch string) {
+	for _, p := range platform.All() {
+		finder, ok := p.(platform.BranchSessionFinder)
+		if !ok {
+			continue
+		}
+		platformName := p.ID()
+		if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() != "" {
+			platformName = sr.AIAgentPrefix()
+		}
+		for _, s := range finder.FindSessionsOnBranch(home, state.Project.Path, branch, 3) {
+			state.RecentSessions = append(state.RecentSessions, branchSessionInfo{
+				Platform:     platformName,
+				SessionID:    s.SessionID,
+				Timestamp:    s.Timestamp,
+				MessageCount: s.MessageCount,
+			})
+		}
+	}
+}
+
 func enrichWorkflowState(state *workflowOrientState) {
 	localDrift := detectRepoDrift(
 		ManagedProject{Name: state.Project.Name, Path: state.Project.Path},
@@ -286,24 +307,7 @@ func enrichWorkflowState(state *workflowOrientState) {
 	home, _ := os.UserHomeDir()
 	branch := state.Git.Branch
 	if home != "" && branch != "" {
-		for _, p := range platform.All() {
-			finder, ok := p.(platform.BranchSessionFinder)
-			if !ok {
-				continue
-			}
-			platformName := p.ID()
-			if sr, ok := p.(platform.SessionReader); ok && sr.AIAgentPrefix() != "" {
-				platformName = sr.AIAgentPrefix()
-			}
-			for _, s := range finder.FindSessionsOnBranch(home, state.Project.Path, branch, 3) {
-				state.RecentSessions = append(state.RecentSessions, branchSessionInfo{
-					Platform:     platformName,
-					SessionID:    s.SessionID,
-					Timestamp:    s.Timestamp,
-					MessageCount: s.MessageCount,
-				})
-			}
-		}
+		appendBranchSessions(state, home, branch)
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"golang.org/x/sys/execabs"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
 type cursor struct{}

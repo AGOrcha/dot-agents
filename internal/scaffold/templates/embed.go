@@ -2,7 +2,7 @@ package templates
 
 import (
 	"bytes"
-	_ "embed"
+	_ "embed" // enable //go:embed directives
 	"strings"
 	texttemplate "text/template"
 )

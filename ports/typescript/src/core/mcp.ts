@@ -45,7 +45,7 @@ export async function readMCPScope(agentsHome: string, scope: string): Promise<S
       break;
     }
 
-    const names = Object.keys(serversVal as Record<string, unknown>).sort((a, b) => a.localeCompare(b));
+    const names = Object.keys(serversVal).sort((a, b) => a.localeCompare(b));
     if (names.length > 0) {
       return { all: false, names };
     }

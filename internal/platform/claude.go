@@ -144,6 +144,38 @@ func claudeFindSessionsOnBranch(home, projectPath, branch string, maxResults int
 	return results
 }
 
+// claudeGitBranchEntry is the JSONL entry shape used to identify branch and session.
+type claudeGitBranchEntry struct {
+	SessionID string `json:"sessionId"`
+	UUID      string `json:"uuid"`
+	Timestamp string `json:"timestamp"`
+	GitBranch string `json:"gitBranch"`
+}
+
+// claudeExtractBranchSession parses a JSONL line that matched the branch marker
+// and returns the session ID and truncated timestamp, or empty strings on mismatch.
+func claudeExtractBranchSession(line, branch string) (sessionID, timestamp string) {
+	var entry claudeGitBranchEntry
+	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		return "", ""
+	}
+	if entry.GitBranch != branch {
+		return "", ""
+	}
+	sid := entry.SessionID
+	if sid == "" {
+		sid = entry.UUID
+	}
+	if sid == "" {
+		return "", ""
+	}
+	ts := entry.Timestamp
+	if len(ts) > 16 {
+		ts = ts[:16] + "Z"
+	}
+	return sid, ts
+}
+
 func claudeScanJSONLForBranch(path, branchMarker, branch string) *BranchSessionInfo {
 	f, err := os.Open(path)
 	if err != nil {
@@ -172,29 +204,11 @@ func claudeScanJSONLForBranch(path, branchMarker, branch string) *BranchSessionI
 		// branch before trusting it. The marker can appear inside quoted message
 		// content (e.g. an assistant pasting prior tool output), which would
 		// otherwise yield false positives.
-		var entry struct {
-			SessionID string `json:"sessionId"`
-			UUID      string `json:"uuid"`
-			Timestamp string `json:"timestamp"`
-			GitBranch string `json:"gitBranch"`
-		}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+		sid, ts := claudeExtractBranchSession(line, branch)
+		if sid == "" {
 			continue
 		}
-		if entry.GitBranch != branch {
-			continue
-		}
-		if entry.SessionID == "" {
-			entry.SessionID = entry.UUID
-		}
-		if entry.SessionID == "" {
-			continue
-		}
-		ts := entry.Timestamp
-		if len(ts) > 16 {
-			ts = ts[:16] + "Z"
-		}
-		info.SessionID = entry.SessionID
+		info.SessionID = sid
 		info.Timestamp = ts
 	}
 	if info.SessionID == "" {

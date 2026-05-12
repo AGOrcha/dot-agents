@@ -57,6 +57,56 @@ func runSessionStats(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
+func renderTokensByModel(tokensByModel map[string]platform.ModelTokenUsage) {
+	if len(tokensByModel) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("token usage by model:")
+	models := make([]string, 0, len(tokensByModel))
+	for m := range tokensByModel {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	for _, model := range models {
+		u := tokensByModel[model]
+		fmt.Printf("  %-45s  in: %-14s  out: %-14s  cache-read: %-14s  cache-write: %s\n",
+			model,
+			commaInt(u.InputTokens),
+			commaInt(u.OutputTokens),
+			commaInt(u.CacheReadInputTokens),
+			commaInt(u.CacheCreationInputTokens))
+	}
+}
+
+func renderRecentSessions(sessions []platform.SessionSummary) {
+	if len(sessions) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("recent sessions:")
+	for _, sess := range sessions {
+		ts := formatTimestamp(sess.UpdatedAt)
+		fmt.Printf("  %-38s  %s  %s\n", truncate(sess.Name, 38), ts, truncate(sess.ID, 8))
+	}
+}
+
+func renderCommitAttribution(commits []platform.CommitAttribution) {
+	if len(commits) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("recent commits (AI attribution):")
+	for _, c := range commits {
+		ts := formatUnixMs(c.ScoredAt)
+		fmt.Printf("  %s  %s  %-38s  AI: %5.1f%%  +%d/-%d\n",
+			truncate(c.CommitHash, 8), ts,
+			truncate(c.BranchName, 38),
+			c.V2AIPercentage,
+			c.LinesAdded, c.LinesDeleted)
+	}
+}
+
 func renderPlatformStats(s *platform.PlatformUsageStats) {
 	if s.TotalSessions > 0 || s.TotalMessages > 0 {
 		if s.TotalMessages > 0 {
@@ -67,24 +117,7 @@ func renderPlatformStats(s *platform.PlatformUsageStats) {
 		}
 	}
 
-	if len(s.TokensByModel) > 0 {
-		fmt.Println()
-		fmt.Println("token usage by model:")
-		models := make([]string, 0, len(s.TokensByModel))
-		for m := range s.TokensByModel {
-			models = append(models, m)
-		}
-		sort.Strings(models)
-		for _, model := range models {
-			u := s.TokensByModel[model]
-			fmt.Printf("  %-45s  in: %-14s  out: %-14s  cache-read: %-14s  cache-write: %s\n",
-				model,
-				commaInt(u.InputTokens),
-				commaInt(u.OutputTokens),
-				commaInt(u.CacheReadInputTokens),
-				commaInt(u.CacheCreationInputTokens))
-		}
-	}
+	renderTokensByModel(s.TokensByModel)
 
 	if len(s.DailyActivity) > 0 {
 		fmt.Println()
@@ -95,27 +128,8 @@ func renderPlatformStats(s *platform.PlatformUsageStats) {
 		}
 	}
 
-	if len(s.RecentSessions) > 0 {
-		fmt.Println()
-		fmt.Println("recent sessions:")
-		for _, sess := range s.RecentSessions {
-			ts := formatTimestamp(sess.UpdatedAt)
-			fmt.Printf("  %-38s  %s  %s\n", truncate(sess.Name, 38), ts, truncate(sess.ID, 8))
-		}
-	}
-
-	if len(s.CommitAttribution) > 0 {
-		fmt.Println()
-		fmt.Println("recent commits (AI attribution):")
-		for _, c := range s.CommitAttribution {
-			ts := formatUnixMs(c.ScoredAt)
-			fmt.Printf("  %s  %s  %-38s  AI: %5.1f%%  +%d/-%d\n",
-				truncate(c.CommitHash, 8), ts,
-				truncate(c.BranchName, 38),
-				c.V2AIPercentage,
-				c.LinesAdded, c.LinesDeleted)
-		}
-	}
+	renderRecentSessions(s.RecentSessions)
+	renderCommitAttribution(s.CommitAttribution)
 }
 
 func commaInt(n int) string {
