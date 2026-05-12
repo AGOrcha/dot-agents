@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -123,6 +124,213 @@ func TestOneLine(t *testing.T) {
 		got := oneLine(tc.in)
 		if got != tc.want {
 			t.Errorf("oneLine(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// writeProposal stores a YAML proposal under AGENTS_HOME/proposals/<id>.yaml.
+func writeProposal(t *testing.T, agentsHome, id, body string) {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "proposals")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, id+".yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validProposalYAML(id, status string) string {
+	return `schema_version: 1
+id: ` + id + `
+status: ` + status + `
+type: rule
+action: add
+target: rules/global/` + id + `.md
+rationale: a meaningful rationale
+content: "# canonical content"
+created_at: "2025-01-01T00:00:00Z"
+created_by: test
+`
+}
+
+func TestRunReviewApprove_AppliesAndArchives(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "apply-me", validProposalYAML("apply-me", "pending"))
+
+	if err := runReviewApprove("apply-me"); err != nil {
+		t.Fatalf("runReviewApprove: %v", err)
+	}
+
+	// Target rule file should now exist.
+	target := filepath.Join(agentsHome, "rules", "global", "apply-me.md")
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("expected target file applied at %s: %v", target, err)
+	}
+
+	// Original proposal should have moved to archive.
+	if _, err := os.Stat(filepath.Join(agentsHome, "proposals", "apply-me.yaml")); !os.IsNotExist(err) {
+		t.Errorf("expected source proposal removed; stat err = %v", err)
+	}
+}
+
+func TestRunReviewApprove_RejectsNonPending(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "already-approved", validProposalYAML("already-approved", "approved"))
+
+	err := runReviewApprove("already-approved")
+	if err == nil {
+		t.Fatal("expected error when approving a non-pending proposal")
+	}
+	if !strings.Contains(err.Error(), "not pending") {
+		t.Errorf("expected 'not pending' in error, got %v", err)
+	}
+}
+
+func TestRunReviewApprove_InvalidProposal(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Missing rationale -> validation fails.
+	body := `schema_version: 1
+id: invalid
+status: pending
+type: rule
+action: add
+target: rules/global/x.md
+content: "# x"
+created_at: "2025-01-01T00:00:00Z"
+created_by: t
+`
+	writeProposal(t, agentsHome, "invalid", body)
+	if err := runReviewApprove("invalid"); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestRunReviewReject_MarksAndArchives(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "to-reject", validProposalYAML("to-reject", "pending"))
+
+	if err := runReviewReject("to-reject", "not ready"); err != nil {
+		t.Fatalf("runReviewReject: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "proposals", "to-reject.yaml")); !os.IsNotExist(err) {
+		t.Errorf("expected source proposal removed; stat err = %v", err)
+	}
+}
+
+func TestRunReviewReject_NonPending(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "stale", validProposalYAML("stale", "rejected"))
+	if err := runReviewReject("stale", ""); err == nil {
+		t.Fatal("expected error when rejecting non-pending proposal")
+	}
+}
+
+func TestRunReviewReject_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "proposals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := runReviewReject("ghost", "reason"); err == nil {
+		t.Fatal("expected error for missing proposal")
+	}
+}
+
+func TestRunReviewApprove_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "proposals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := runReviewApprove("ghost"); err == nil {
+		t.Fatal("expected error for missing proposal")
+	}
+}
+
+func TestCaptureProposalRollback_RestoresExistingFile(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "rule.md")
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := captureProposalRollback(target)
+	if err != nil {
+		t.Fatalf("captureProposalRollback: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("modified"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := restore(); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "original" {
+		t.Errorf("file not restored, got %q", got)
+	}
+}
+
+func TestCaptureProposalRollback_RemovesIfMissingBefore(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "sub", "rule.md")
+	restore, err := captureProposalRollback(target)
+	if err != nil {
+		t.Fatalf("captureProposalRollback: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := restore(); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("expected file removed after rollback; stat err = %v", err)
+	}
+	// Calling restore again should be a no-op (file already gone).
+	if err := restore(); err != nil {
+		t.Errorf("second restore returned %v", err)
+	}
+}
+
+func TestNewReviewCmd_Metadata(t *testing.T) {
+	cmd := NewReviewCmd()
+	if cmd.Use != "review" {
+		t.Errorf("Use = %q", cmd.Use)
+	}
+	wantSubs := map[string]bool{"show": false, "approve": false, "reject": false}
+	for _, c := range cmd.Commands() {
+		if _, ok := wantSubs[c.Name()]; ok {
+			wantSubs[c.Name()] = true
+		}
+	}
+	for name, found := range wantSubs {
+		if !found {
+			t.Errorf("missing subcommand: %s", name)
+		}
+	}
+	// The reject subcommand must expose a --reason flag.
+	var rejectCmd interface{ Flags() interface{} }
+	_ = rejectCmd
+	for _, c := range cmd.Commands() {
+		if c.Name() == "reject" {
+			if c.Flag("reason") == nil {
+				t.Error("reject subcommand should expose --reason flag")
+			}
 		}
 	}
 }
