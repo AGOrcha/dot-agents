@@ -1,0 +1,137 @@
+# graph-backend: ttrpg-campaign.v1
+#
+# Tabletop RPG campaign graph. Tracks characters, locations, factions,
+# events, plotlines, and session logs across a long-running campaign.
+#
+# Designed against the graph backend adapter contract in:
+#   .agents/workflow/specs/app-type-profiles/design.md §11
+# (per .agents/proposals/graph-backend-adapter-contract.md)
+
+name: ttrpg-campaign
+version: 0.1.0
+description: |-
+  TTRPG campaign continuity graph. Notes capture characters, locations,
+  factions, events, plotlines, and session logs. Edges capture spatial,
+  temporal, allegiance, and narrative relationships. Designed for in-the-
+  field use by a single GM or a small co-DM team.
+
+# ---------------------------------------------------------------------------
+# Note types
+# ---------------------------------------------------------------------------
+note_types:
+  - name: character
+    fields:
+      - { name: race,             type: string,                          required: false }
+      - { name: class,            type: string,                          required: false }
+      - { name: alignment,        type: enum, values: [LG,NG,CG,LN,N,CN,LE,NE,CE,unknown], required: false }
+      - { name: stated_location,  type: ref<location>,                   required: false }
+      - { name: pc_or_npc,        type: enum, values: [pc, npc],         required: true }
+      - { name: alive,            type: bool,                            required: true }
+
+  - name: location
+    fields:
+      - { name: region,           type: string,         required: false }
+      - { name: ruler,            type: ref<character>, required: false }   # rulers are characters; factions use a separate edge
+      - { name: kind,             type: enum, values: [city, dungeon, wilderness, plane, stronghold, settlement, other], required: false }
+
+  - name: faction
+    fields:
+      - { name: ideology,         type: string,         required: false }
+      - { name: stronghold,       type: ref<location>,  required: false }
+      - { name: leader,           type: ref<character>, required: false }
+
+  - name: event
+    fields:
+      - { name: occurred_at_session, type: ref<session_log>, required: true }
+      - { name: in_world_date,       type: string,           required: false } # campaign-defined calendar
+      - { name: kind,                type: enum, values: [combat, social, exploration, downtime, ritual, revelation, other], required: false }
+
+  - name: plotline
+    fields:
+      - { name: status,            type: enum, values: [active, resolved, dormant, twisted], required: true }
+      - { name: arc_owner,         type: ref<character>,   required: false }   # for faction-owned arcs use a separate edge
+      - { name: opened_at_session, type: ref<session_log>, required: false }
+
+  - name: session_log
+    fields:
+      - { name: real_date,         type: date,   required: true }
+      - { name: in_world_start,    type: string, required: false }
+      - { name: in_world_end,      type: string, required: false }
+      - { name: session_number,    type: int,    required: true }
+
+  - name: artifact
+    fields:
+      - { name: kind,              type: enum, values: [weapon, relic, document, consumable, tool, other], required: false }
+      - { name: current_holder,    type: ref<character>, required: false }   # location-stored artifacts use located_in edge
+      - { name: cursed,            type: bool,           required: false }
+
+# ---------------------------------------------------------------------------
+# Edge types
+# ---------------------------------------------------------------------------
+edge_types:
+  # Spatial / temporal
+  - { name: present_at,    from: character, to: event,       cardinality: many-to-many }
+  - { name: occurred_in,   from: event,     to: location,    cardinality: many-to-one  }
+  - { name: located_in,    from: artifact,  to: location,    cardinality: many-to-one  }
+  - { name: traveled_to,   from: character, to: location,    cardinality: many-to-many }
+
+  # Allegiance / membership
+  - { name: member_of,     from: character, to: faction,     cardinality: many-to-many }
+  - { name: allied_with,   from: faction,   to: faction,     cardinality: many-to-many, signed: true }
+  - { name: opposes,       from: faction,   to: faction,     cardinality: many-to-many }
+  - { name: serves,        from: character, to: character,   cardinality: many-to-many }
+
+  # Narrative
+  - { name: foreshadows,   from: event,     to: plotline,    cardinality: many-to-many }
+  - { name: advances,      from: event,     to: plotline,    cardinality: many-to-many }
+  - { name: resolves,      from: event,     to: plotline,    cardinality: many-to-many }
+  - { name: contradicts,   from: event,     to: event,       cardinality: many-to-many }
+
+  # Custody / ownership
+  - { name: holds,         from: character, to: artifact,    cardinality: many-to-many }
+  - { name: rules,         from: character, to: location,    cardinality: many-to-many }
+
+# ---------------------------------------------------------------------------
+# Impact radius — the load-bearing query.
+#
+# Invoked by the review pipeline whenever a note is edited (e.g., the GM
+# updates an event's outcome between sessions). Returns: plotlines this
+# event foreshadows/advances/resolves, characters present at the event,
+# events that contradict it, and locations where it occurred.
+#
+# This is the only query `da` core itself invokes.
+# ---------------------------------------------------------------------------
+impact_radius:
+  query: |-
+    MATCH (changed:event)
+    OPTIONAL MATCH (changed)-[:foreshadows|advances|resolves]->(p:plotline)
+    OPTIONAL MATCH (c:character)-[:present_at]->(changed)
+    OPTIONAL MATCH (changed)-[:contradicts]-(other:event)
+    OPTIONAL MATCH (changed)-[:occurred_in]->(loc:location)
+    WHERE changed.id IN $changed_ids
+    RETURN p.id, c.id, other.id, loc.id, hop_count
+  max_depth: 2
+  algorithm_hint: bidirectional_bfs
+  materialize:
+    - neighborhood_summary_for: [event]
+  index_hints:
+    - { predicate: present_at,  order: POS }
+    - { predicate: foreshadows, order: POS }
+    - { predicate: advances,    order: POS }
+    - { predicate: contradicts, order: POS }
+  cardinality_stats:
+    auto: true
+
+# ---------------------------------------------------------------------------
+# Staleness driver binding
+# ---------------------------------------------------------------------------
+staleness_drivers:
+  - source_mutation         # event outcome edited; character status flipped
+  - derivation_mutation     # plotline status cascade when a resolving event mutates
+  - explicit_revocation     # GM retcon — "that didn't happen"
+  - contradiction_arrival   # new event contradicts an existing one
+
+# ---------------------------------------------------------------------------
+# Bootstrap skill — parses session-log markdown into initial graph state
+# ---------------------------------------------------------------------------
+bootstrap_skill: ttrpg-campaign-bootstrap@^0.1
