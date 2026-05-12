@@ -27,6 +27,8 @@ import (
 )
 
 const crgReadOnlyPragma = "?_pragma=query_only(true)"
+const crgBinName = "code-review-graph"
+const crgFlagRepo = "--repo"
 
 // CRGBridge shells out to the code-review-graph Python CLI.
 type CRGBridge struct {
@@ -55,12 +57,12 @@ func NewCRGBridge(repoRoot string) (*CRGBridge, error) {
 //  3. code-review-graph on PATH
 func DiscoverCRGBin(repoRoot string) (string, error) {
 	candidates := []string{
-		filepath.Join(repoRoot, ".venv", "bin", "code-review-graph"),
+		filepath.Join(repoRoot, ".venv", "bin", crgBinName),
 	}
 	// also check parent dirs up to 2 levels for .venv
 	parent := filepath.Dir(repoRoot)
 	candidates = append(candidates,
-		filepath.Join(parent, ".venv", "bin", "code-review-graph"),
+		filepath.Join(parent, ".venv", "bin", crgBinName),
 	)
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -68,7 +70,7 @@ func DiscoverCRGBin(repoRoot string) (string, error) {
 		}
 	}
 	// fall back to PATH
-	if p, err := exec.LookPath("code-review-graph"); err == nil {
+	if p, err := exec.LookPath(crgBinName); err == nil {
 		return p, nil
 	}
 	return "", fmt.Errorf("code-review-graph not found in .venv or PATH; install with: uv pip install code-review-graph")
@@ -179,7 +181,7 @@ type CRGOperationReport struct {
 
 // BuildReport triggers a full graph rebuild and returns a structured summary.
 func (b *CRGBridge) BuildReport(opts BuildOptions) (*CRGOperationReport, error) {
-	args := []string{"build", "--repo", b.RepoRoot}
+	args := []string{"build", crgFlagRepo, b.RepoRoot}
 	if opts.SkipFlows {
 		args = append(args, "--skip-flows")
 	}
@@ -242,7 +244,7 @@ type UpdateOptions struct {
 
 // UpdateReport triggers an incremental graph update and returns a structured summary.
 func (b *CRGBridge) UpdateReport(opts UpdateOptions) (*CRGOperationReport, error) {
-	args := []string{"update", "--repo", b.RepoRoot}
+	args := []string{"update", crgFlagRepo, b.RepoRoot}
 	if opts.Base != "" {
 		args = append(args, "--base", opts.Base)
 	}
@@ -814,7 +816,7 @@ type PostprocessOptions struct {
 
 // Postprocess runs flows/communities/FTS rebuilding via `code-review-graph postprocess`.
 func (b *CRGBridge) Postprocess(opts PostprocessOptions) error {
-	args := []string{"postprocess", "--repo", b.RepoRoot}
+	args := []string{"postprocess", crgFlagRepo, b.RepoRoot}
 	if opts.NoFlows {
 		args = append(args, "--no-flows")
 	}
@@ -833,7 +835,7 @@ func (b *CRGBridge) Postprocess(opts PostprocessOptions) error {
 // JSON.  In that case we populate only CRGChangeReport.Summary with the raw
 // text and leave structured fields empty.
 func (b *CRGBridge) DetectChanges(opts DetectChangesOptions) (*CRGChangeReport, error) {
-	args := []string{"detect-changes", "--repo", b.RepoRoot}
+	args := []string{"detect-changes", crgFlagRepo, b.RepoRoot}
 	if opts.Base != "" {
 		args = append(args, "--base", opts.Base)
 	}
@@ -851,26 +853,30 @@ func (b *CRGBridge) DetectChanges(opts DetectChangesOptions) (*CRGChangeReport, 
 	}
 
 	// full mode → JSON, possibly prefixed with INFO: log lines
-	trimmed := bytes.TrimSpace(out)
 	var report CRGChangeReport
-	if err := json.Unmarshal(trimmed, &report); err != nil {
-		// strip leading INFO/WARNING lines and retry
-		lines := strings.Split(string(trimmed), "\n")
-		var jsonLines []string
-		inJSON := false
-		for _, l := range lines {
-			if !inJSON && strings.HasPrefix(strings.TrimSpace(l), "{") {
-				inJSON = true
-			}
-			if inJSON {
-				jsonLines = append(jsonLines, l)
-			}
-		}
-		if err2 := json.Unmarshal([]byte(strings.Join(jsonLines, "\n")), &report); err2 != nil {
-			return nil, fmt.Errorf("parse detect-changes output: %w (raw: %s)", err, string(out))
-		}
+	if err := unmarshalSkippingLogPrefix(out, &report); err != nil {
+		return nil, fmt.Errorf("parse detect-changes output: %w (raw: %s)", err, string(out))
 	}
 	return &report, nil
+}
+
+func unmarshalSkippingLogPrefix(out []byte, v any) error {
+	trimmed := bytes.TrimSpace(out)
+	if err := json.Unmarshal(trimmed, v); err == nil {
+		return nil
+	}
+	lines := strings.Split(string(trimmed), "\n")
+	var jsonLines []string
+	inJSON := false
+	for _, l := range lines {
+		if !inJSON && strings.HasPrefix(strings.TrimSpace(l), "{") {
+			inJSON = true
+		}
+		if inJSON {
+			jsonLines = append(jsonLines, l)
+		}
+	}
+	return json.Unmarshal([]byte(strings.Join(jsonLines, "\n")), v)
 }
 
 // ── Direct CRG database access ────────────────────────────────────────────────

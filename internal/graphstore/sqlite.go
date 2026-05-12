@@ -298,26 +298,8 @@ func (s *SQLiteStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, error
 	var result []GraphEdge
 
 	for i := 0; i < len(qualifiedNames); i += batchSize {
-		end := i + batchSize
-		if end > len(qualifiedNames) {
-			end = len(qualifiedNames)
-		}
-		batch := qualifiedNames[i:end]
-		placeholders := strings.Repeat("?,", len(batch))
-		placeholders = placeholders[:len(placeholders)-1]
-
-		args := make([]any, len(batch))
-		for j, q := range batch {
-			args[j] = q
-		}
-
-		query := "SELECT * FROM edges WHERE source_qualified IN (" + placeholders + ")"
-		rows, err := s.db.Query(query, args...)
-		if err != nil {
-			return nil, err
-		}
-		edges, err := collectEdges(rows)
-		rows.Close()
+		end := min(i+batchSize, len(qualifiedNames))
+		edges, err := s.queryEdgesBatch(qualifiedNames[i:end])
 		if err != nil {
 			return nil, err
 		}
@@ -328,6 +310,22 @@ func (s *SQLiteStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, error
 		}
 	}
 	return result, nil
+}
+
+func (s *SQLiteStore) queryEdgesBatch(batch []string) ([]GraphEdge, error) {
+	placeholders := strings.Repeat("?,", len(batch))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(batch))
+	for j, q := range batch {
+		args[j] = q
+	}
+	query := "SELECT * FROM edges WHERE source_qualified IN (" + placeholders + ")"
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return collectEdges(rows)
 }
 
 func (s *SQLiteStore) GetAllFiles() ([]string, error) {
@@ -379,54 +377,57 @@ func (s *SQLiteStore) GetStats() (GraphStats, error) {
 		return stats, err
 	}
 
-	stats.NodesByKind = map[string]int{}
-	rows, err := s.db.Query("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
+	var err error
+	stats.NodesByKind, err = s.queryKindCounts("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")
 	if err != nil {
 		return stats, err
 	}
-	for rows.Next() {
-		var k string
-		var c int
-		if err := rows.Scan(&k, &c); err != nil {
-			rows.Close()
-			return stats, err
-		}
-		stats.NodesByKind[k] = c
-	}
-	rows.Close()
-
-	stats.EdgesByKind = map[string]int{}
-	rows, err = s.db.Query("SELECT kind, COUNT(*) FROM edges GROUP BY kind")
+	stats.EdgesByKind, err = s.queryKindCounts("SELECT kind, COUNT(*) FROM edges GROUP BY kind")
 	if err != nil {
 		return stats, err
 	}
-	for rows.Next() {
-		var k string
-		var c int
-		if err := rows.Scan(&k, &c); err != nil {
-			rows.Close()
-			return stats, err
-		}
-		stats.EdgesByKind[k] = c
-	}
-	rows.Close()
-
-	rows, err = s.db.Query("SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''")
+	stats.Languages, err = s.queryDistinctStrings("SELECT DISTINCT language FROM nodes WHERE language IS NOT NULL AND language != ''")
 	if err != nil {
 		return stats, err
 	}
-	for rows.Next() {
-		var l string
-		if err := rows.Scan(&l); err != nil {
-			rows.Close()
-			return stats, err
-		}
-		stats.Languages = append(stats.Languages, l)
-	}
-	rows.Close()
 
 	stats.LastUpdated, _ = s.GetMetadata("last_updated")
 	return stats, nil
+}
+
+func (s *SQLiteStore) queryKindCounts(query string) (map[string]int, error) {
+	m := map[string]int{}
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var c int
+		if err := rows.Scan(&k, &c); err != nil {
+			return nil, err
+		}
+		m[k] = c
+	}
+	return m, nil
+}
+
+func (s *SQLiteStore) queryDistinctStrings(query string) ([]string, error) {
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		result = append(result, v)
+	}
+	return result, nil
 }
 
 // GetImpactRadius performs a pure-Go BFS from the nodes in changedFiles,

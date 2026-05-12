@@ -146,10 +146,17 @@ func TestDiscoverCRGBin_returnsErrorWhenMissing(t *testing.T) {
 // can reach the unexported parsing function via a white-box re-export.
 // We use this approach rather than making the function exported to keep the
 // public API surface small.
+func parseLeadingInt(s string) int {
+	n := 0
+	for _, ch := range s {
+		if ch >= '0' && ch <= '9' {
+			n = n*10 + int(ch-'0')
+		}
+	}
+	return n
+}
+
 func parseCRGStatusOutputExported(out []byte) *graphstore.CRGStatus {
-	// Reconstruct the same logic as the internal function — a duplicate here
-	// is acceptable because this file is test-only and the real implementation
-	// is tested end-to-end via CRGBridge.Status() in integration tests.
 	s := &graphstore.CRGStatus{}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
@@ -163,29 +170,11 @@ func parseCRGStatusOutputExported(out []byte) *graphstore.CRGStatus {
 		val = strings.TrimSpace(val)
 		switch strings.TrimSpace(key) {
 		case "Nodes":
-			n := 0
-			for _, ch := range val {
-				if ch >= '0' && ch <= '9' {
-					n = n*10 + int(ch-'0')
-				}
-			}
-			s.Nodes = n
+			s.Nodes = parseLeadingInt(val)
 		case "Edges":
-			n := 0
-			for _, ch := range val {
-				if ch >= '0' && ch <= '9' {
-					n = n*10 + int(ch-'0')
-				}
-			}
-			s.Edges = n
+			s.Edges = parseLeadingInt(val)
 		case "Files":
-			n := 0
-			for _, ch := range val {
-				if ch >= '0' && ch <= '9' {
-					n = n*10 + int(ch-'0')
-				}
-			}
-			s.Files = n
+			s.Files = parseLeadingInt(val)
 		case "Languages":
 			s.Languages = val
 		case "Last updated":
