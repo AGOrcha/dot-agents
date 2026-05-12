@@ -1,5 +1,5 @@
 #!/bin/bash
-# dot-agents verification script
+# da verification script
 # Quick smoke test of all CLI commands
 
 set -uo pipefail
@@ -11,19 +11,19 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Find dot-agents binary
-if [[ -x "./bin/dot-agents" ]]; then
-  DOT_AGENTS="./bin/dot-agents"
-elif [[ -f "./src/bin/dot-agents" ]]; then
-  DOT_AGENTS="./src/bin/dot-agents"
-elif command -v dot-agents >/dev/null 2>&1; then
-  DOT_AGENTS="dot-agents"
+# Find da binary
+if [[ -x "./bin/da" ]]; then
+  DOT_AGENTS="./bin/da"
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS="da"
+elif command -v go >/dev/null 2>&1; then
+  DOT_AGENTS="go run ./cmd/dot-agents"
 else
-  echo -e "${RED}Error: dot-agents not found${NC}"
+  echo -e "${RED}Error: da not found${NC}"
   exit 1
 fi
 
-echo -e "${BOLD}dot-agents Verification Script${NC}"
+echo -e "${BOLD}da Verification Script${NC}"
 echo -e "Binary: $DOT_AGENTS"
 echo ""
 
