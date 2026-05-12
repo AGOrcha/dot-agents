@@ -1,6 +1,10 @@
 # Go Native Code Graph Analysis
 
-**Status:** design artifact for the long-range replacement of the Python `code-review-graph` bridge. This is not the near-term readiness plan; short-term operational fixes belong in [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml).
+**Status:** superseded-in-part (2026-05-09)
+**Superseded by:** [graph-backend-adapter-contract §11 (CRG migration path)](../graph-backend-adapter-contract/design.md)
+**Remaining scope:** (a) the Tree-sitter binding choice for the CRG adapter's bootstrap skill; (b) the bootstrap-skill design itself. The broader Python-vs-Go architectural question is now answered by the adapter contract: CRG becomes a kg-native adapter writing to scoped KG storage; the subprocess bridge is decommissioned once the §11.1 tool-by-tool parity matrix passes. Sections of this document that argue for or against the subprocess bridge as an architecture choice are obsolete.
+
+**Original status (preserved for context):** design artifact for the long-range replacement of the Python `code-review-graph` bridge. This is not the near-term readiness plan; short-term operational fixes belong in [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml).
 
 ## Goal
 

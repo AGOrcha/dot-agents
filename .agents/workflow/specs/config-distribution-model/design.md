@@ -578,7 +578,7 @@ allowlist of permitted source URLs before this is safe to enable.
 
 Org config layers carry policy with high blast radius (affects verifier chains across
 all repos). External-agent-sources flags signing as v2. Should config layers be an
-exception — requiring earlier signing than skill/agent packages?
+exception — requiring earlier signing than skill/agent packages? | Human Addendum 2026-05-10T12:57 Yeah, let's bring in signing earlier then. |
 
 ### Q4: `da config explain` output format for CI
 
@@ -590,4 +590,4 @@ so tooling can depend on it.
 
 For a developer running one `dot-agents` binary across multiple repos (the `payout`-
 style workspace), should there be a workspace-level lockfile that aggregates resolved
-SHAs across repos, or does each repo own its own lockfile exclusively?
+SHAs across repos, or does each repo own its own lockfile exclusively? | Human Addendum 2026-05-10T12:56 (EST) So like git where the gitdir is just a pointer to the parent's .git/.. we should have it be either-or so that if by it's self then it has it, if in a workspace like payout then workspace manages the aggregate. | 

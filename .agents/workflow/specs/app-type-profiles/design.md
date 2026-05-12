@@ -80,9 +80,15 @@ Profile files are resolved through the same `sources` / `packages` machinery def
 
 ### 2.6 Review kind, graph backend, and impact radius are all pluggable
 
-A profile names its review kind (`code-review | rubric-review | citation-review | custom`), its graph backend (`crg | citation-graph | document-cross-ref | none`), and its impact radius kind (`symbol | section | citation | custom`). Each selection binds to a skill reference that implements it. New review/graph kinds are added by publishing new skills, not by patching the pipeline.
+A profile names three pluggable plug-points. Each is resolved through the standard config distribution machinery and binds to an artifact whose contract is defined elsewhere in this spec set:
 
-**Why:** the pipeline currently assumes code-review + CRG + symbol-radius are the only possibilities. Locking those assumptions into the code path makes the pipeline permanently software-only. Naming them as profile fields makes the software case just one configuration.
+- **`review_kind`** binds to a `review_skill` ref (skill-tier artifact). Built-ins: `code-review`, `rubric-review`, `citation-review`, `custom`.
+- **`graph_backend`** binds to a graph backend adapter ref (config-layer artifact, contract defined in [graph-backend-adapter-contract](../graph-backend-adapter-contract/design.md)). Built-ins: `crg`, `none`. Custom: `<source-id>:graph/<name>@<version>`.
+- **`impact_radius_kind`** is **derived** from the resolved graph backend adapter rather than independently declared. The adapter's `impact_radius` query and edge-type allowlist define the radius for that domain.
+
+All graph backends — built-in and custom, including `crg` — write to scoped KG storage per the scoped-knowledge-graphs spec. They do not introduce new database backends, separate stores, or sidecar processes. Adapters differ in **schema** (note/edge types) and **query** (impact radius), not in storage.
+
+**Why:** the pipeline currently assumes code-review + CRG + symbol-radius are the only possibilities. Locking those assumptions into the code path makes the pipeline permanently software-only. Naming them as profile fields and resolving them through the adapter contract makes the software case just one configuration, and lets community-published backends (compliance registers, worldbuilding graphs, lab notebooks) participate without `da` core changes.
 
 ---
 
@@ -124,7 +130,7 @@ review_skill: rubric-review@^1.0
 
 # Which KG backend review consults. Profiles that use CRG declare it
 # explicitly so the pipeline can precondition graph availability.
-graph_backend: citation-graph
+graph_backend: dotagents-builtin:graph/citation@^1.0
 
 # Impact-radius kind. Drives how "what changed" is computed for the review
 # stage and for cross-task conflict detection.
@@ -154,8 +160,8 @@ metadata:
 | `verifier_chain` | yes | array | Ordered; each entry has `name`, `version`, `on_fail` |
 | `review_kind` | yes | enum | `code-review \| rubric-review \| citation-review \| custom` |
 | `review_skill` | yes | skill-ref | Skill that implements the review kind |
-| `graph_backend` | yes | enum | `crg \| citation-graph \| document-cross-ref \| none` |
-| `impact_radius_kind` | yes | enum | `symbol \| section \| citation \| custom` |
+| `graph_backend` | yes | adapter-ref | refs a graph backend adapter (see [graph-backend-adapter-contract](../graph-backend-adapter-contract/design.md)). Built-ins: `crg`, `none`. Custom: `<source-id>:graph/<name>@<version>` |
+| `impact_radius_kind` | derived | enum | derived from the resolved graph backend adapter; not separately declared in profile YAML |
 | `impl_defaults` | no | object | Model preference, allowed tools, context packs |
 | `composes` | no | array | Composite case — see §4 |
 | `metadata` | no | object | Free-form; non-load-bearing |
@@ -173,8 +179,8 @@ composes:
 # Composite must resolve any field where children disagree. If all children
 # agree on review_kind, the composite may omit it.
 review_kind: code-review
-graph_backend: crg
-impact_radius_kind: symbol
+graph_backend: dotagents-builtin:graph/crg@^1.0
+# impact_radius_kind: derived from the resolved graph backend adapter
 
 # Composite-local additions (not inherited) — appended after the composed
 # chain in declaration order.
@@ -378,7 +384,7 @@ Verifier chain (resolved):
 
 Before fanout, the orchestrator asserts:
 
-- The resolved profile's `graph_backend` is available in the current environment (e.g., `crg` requires a CRG build present; `citation-graph` requires the citation-graph MCP server)
+- The resolved profile's `graph_backend` adapter is loaded; its declared note/edge types are registered with the active KG scope chain at the adapter's pinned schema version (per graph-backend-adapter-contract §10); its bootstrap skill (if declared) has run at least once for this scope chain; its named queries pass syntactic validation against the adapter contract DSL; declared `reads_from` cross-adapter dependencies are present at compatible schema versions
 - Every referenced verifier is installed or resolvable
 - Every referenced skill is present
 
@@ -401,8 +407,8 @@ verifier_chain:
   - { name: coverage, version: ^1.1, on_fail: soft }
 review_kind: code-review
 review_skill: review-pr@^1.0
-graph_backend: crg
-impact_radius_kind: symbol
+graph_backend: dotagents-builtin:graph/crg@^1.0
+# impact_radius_kind: derived from the crg adapter
 impl_defaults:
   allowed_tools: [read, edit, bash, grep, glob]
   model_preference: [sonnet, opus]
@@ -410,7 +416,7 @@ impl_defaults:
 
 ### 8.2 Composite `po-core-api-se` (api + batch + streaming)
 
-See §3.2 — the composite declares `composes: [api, batch, streaming]`, resolves `review_kind: code-review` and `graph_backend: crg` (all children agree), and adds `webhook-replay` as a composite-local verifier. The resolved chain is the union of the three children's chains plus `webhook-replay`.
+See §3.2 — the composite declares `composes: [api, batch, streaming]`, resolves `review_kind: code-review` and `graph_backend: dotagents-builtin:graph/crg@^1.0` (all children agree), and adds `webhook-replay` as a composite-local verifier. The resolved chain is the union of the three children's chains plus `webhook-replay`.
 
 Each child profile is published independently. An update to `streaming@1.0.1 → 1.1.0` (adding a new stream-replay variant) propagates to po-core-api-se on next resolution without requiring po-core-api-se to bump — so long as streaming's minor bump does not break the behavior-preservation gate.
 
@@ -420,8 +426,8 @@ See §3 — full schema shown there. Key differences from code profiles:
 
 - `write_scope_kind: document` — tasks edit document sections, not files wholesale
 - `verifier_chain` uses citation/source/rubric verifiers instead of test/lint/coverage
-- `graph_backend: citation-graph` — review consults a citation graph built from the source library, not CRG
-- `impact_radius_kind: citation` — "what does my edit affect" is answered in terms of downstream citers, not call-site symbols
+- `graph_backend: dotagents-builtin:graph/citation@^1.0` — review consults a citation graph built from the source library; this is a kg-native adapter sharing the same scoped storage as CRG (per [graph-backend-adapter-contract](../graph-backend-adapter-contract/design.md))
+- `impact_radius_kind` — derived from the citation adapter's `impact_radius` query and `derivation: true` edges; the spec no longer requires the profile to declare a separate enum value
 
 This profile drives a research workflow where: orchestrator fans out "rewrite section 3.2" and "expand section 4.1" tasks in parallel; conflict detection enforces no overlap on section paths; verifier chain ensures every cited source exists in the library, is recent enough, and the rewritten section passes the rubric; review consults the citation graph to flag any citation edges the rewrite broke.
 
@@ -439,7 +445,7 @@ verifier_chain:
   - { name: llm-judge, version: ^1.0, on_fail: soft }
 review_kind: custom
 review_skill: resume-review@^0.1
-graph_backend: document-cross-ref
+graph_backend: dotagents-builtin:graph/document-cross-ref@^1.0
 impact_radius_kind: custom
 impl_defaults:
   allowed_tools: [read, write]
@@ -478,7 +484,7 @@ This is a flat name → list-of-verifier-names map, without versions, without re
 
 ### 9.2 Migration steps
 
-1. **Introduce profile files** alongside the existing map. Each key in the map gets a corresponding profile file with `verifier_chain` populated from the list, `review_kind: code-review`, `graph_backend: crg`, `impact_radius_kind: symbol`, `write_scope_kind: code`, `impl_output_kind: code_change`. Version: start at `0.1.0` to signal draft status.
+1. **Introduce profile files** alongside the existing map. Each key in the map gets a corresponding profile file with `verifier_chain` populated from the list, `review_kind: code-review`, `graph_backend: dotagents-builtin:graph/crg@^1.0`, `write_scope_kind: code`, `impl_output_kind: code_change`. Version: start at `0.1.0` to signal draft status. (`impact_radius_kind` is derived from the resolved adapter; not declared in the profile.)
 2. **Dual-read phase**: the orchestrator reads the profile if present; falls back to the map entry if not. No consumer change required.
 3. **Consumer opt-in**: repos add `app_type: go-http-service@^0.1` to their `.agentsrc.json`. Repos without an explicit `app_type` continue using the map until they migrate.
 4. **Deprecation of the map**: once all active repos reference a profile, `app_type_verifier_map` is marked deprecated. `da doctor` warns on its presence. Removal after one release cycle.
@@ -509,11 +515,23 @@ If a repo's `app_type` names a bare profile (`go-http-service`) and the source i
 
 ### Q5: Can a single task span multiple profiles?
 
-A task that touches both code and docs (e.g., "add feature + update docs") could conceptually want both `go-http-service` and `research` verifier chains. Current spec forces one `app_type` per repo. An alternative: tasks can declare `profile_override` to pull in additional verifier chains for that task. Left open — may be solved by adding a `docs-update` composite that includes both chains.
+A task that touches both code and docs (e.g., "add feature + update docs") could conceptually want both `go-http-service` and `research` verifier chains. Current spec forces one `app_type` per repo. An alternative: tasks can declare `profile_override` to pull in additional verifier chains for that task. Left open — may be solved by adding a `docs-update` composite that includes both chains. | Human addendum 2026-05-10T12:14:00 (EST) there are might be examples of this, look through session history (~/.(codex|claude|cursor|copilot|opencode)/) and .agents/history/, .agents/workflow/, and (~/Documents/payout/.agents/) to see |
 
 ### Q6: Prerelease versions and the behavior gate
 
 Prerelease tags (`1.2.0-rc.1`) should be exempt from the behavior-preservation gate (by definition experimental) but consumed only under explicit opt-in (`app_type: go-http-service@1.2.0-rc.1`). `^1.2` should not resolve to a prerelease. Standard semver semantics suffice but should be called out in the consumer documentation.
+
+### Q7: Adapter schema migration across version bumps — CLOSED
+
+Closed by [graph-backend-adapter-contract §10](../graph-backend-adapter-contract/design.md). Adapter schema activation requires a lockfile-pinned digest, a compatibility check (new schema must be a superset of old, or a migration skill must transform old-version notes), and the behavior-preservation gate (§6.2) extension to schema changes. Cross-adapter cutover is dependent-owned via lockfile coordination.
+
+### Q8: v1.5 trigger budget threshold tuning
+
+Defined in [graph-backend-adapter-contract §12](../graph-backend-adapter-contract/design.md). Thresholds (5 / 8 points) are judgment-based defaults; re-tune after the first 3 months of TTRPG dogfood data and after the compliance-register adapter ships.
+
+### Q9: Cross-adapter view dependency `accepts_breaking_changes` opt-out
+
+Should dependents be allowed to declare `accepts_breaking_changes: true` to opt out of the dependee-upgrade gate, letting the dependee upgrade and accepting view-stale until manual rebuild? Trade-off: faster dependee upgrades vs. potential silent breakage. Lean: yes, opt-in only, requires acknowledgement in lockfile. Tracked in graph-backend-adapter-contract §14 Q2.
 
 ---
 
