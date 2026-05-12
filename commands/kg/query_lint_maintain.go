@@ -261,25 +261,24 @@ func executeQuery(kgHomeDir string, query GraphQuery) (GraphQueryResponse, error
 		limit = 10
 	}
 
+	intentToNoteType := map[string]string{
+		"source_lookup":    "source",
+		"entity_context":   "entity",
+		"concept_context":  "concept",
+		"decision_lookup":  "decision",
+		"repo_context":     "repo",
+		"synthesis_lookup": "synthesis",
+	}
+
 	var err error
-	switch query.Intent {
-	case "source_lookup":
-		resp.Results, err = searchNotes(kgHomeDir, "source", query.Query, limit)
-	case "entity_context":
-		resp.Results, err = searchNotes(kgHomeDir, "entity", query.Query, limit)
-	case "concept_context":
-		resp.Results, err = searchNotes(kgHomeDir, "concept", query.Query, limit)
-	case "decision_lookup":
-		resp.Results, err = searchNotes(kgHomeDir, "decision", query.Query, limit)
-	case "repo_context":
-		resp.Results, err = searchNotes(kgHomeDir, "repo", query.Query, limit)
-	case "synthesis_lookup":
-		resp.Results, err = searchNotes(kgHomeDir, "synthesis", query.Query, limit)
-	case "related_notes":
+	switch {
+	case intentToNoteType[query.Intent] != "":
+		resp.Results, err = searchNotes(kgHomeDir, intentToNoteType[query.Intent], query.Query, limit)
+	case query.Intent == "related_notes":
 		resp.Results, err = searchByLinks(kgHomeDir, query.Query)
-	case "contradictions":
+	case query.Intent == "contradictions":
 		resp.Results, err = findContradictions(kgHomeDir)
-	case "graph_health":
+	case query.Intent == "graph_health":
 		health, hErr := readGraphHealth(kgHomeDir)
 		if hErr != nil {
 			err = hErr

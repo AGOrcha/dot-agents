@@ -2081,26 +2081,27 @@ func TestRunKGWarm_IndexesNotes(t *testing.T) {
 	}
 }
 
-func TestRunKGWarm_TypeFilter(t *testing.T) {
-	home := setupKGWithNotes(t)
-	_ = home
-
+func runWarmWithFlag(t *testing.T, flagName, flagValue string) (home string, store *graphstore.SQLiteStore) {
+	t.Helper()
+	home = setupKGWithNotes(t)
 	cmd := newKGWarmCmdForTest()
-	if err := cmd.Flags().Set("type", "entity"); err != nil {
-		t.Fatalf("set type flag: %v", err)
+	if err := cmd.Flags().Set(flagName, flagValue); err != nil {
+		t.Fatalf("set %s flag: %v", flagName, err)
 	}
 	if err := runKGWarm(cmd, nil); err != nil {
-		t.Fatalf("runKGWarm with type=entity: %v", err)
+		t.Fatalf("runKGWarm with --%s=%s: %v", flagName, flagValue, err)
 	}
-
-	store, err := openKGStore(home)
+	s, err := openKGStore(home)
 	if err != nil {
 		t.Fatalf("openKGStore: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { s.Close() })
+	return home, s
+}
 
+func TestRunKGWarm_TypeFilter(t *testing.T) {
+	_, store := runWarmWithFlag(t, "type", "entity")
 	stats, _ := store.GetStats()
-	// Only 2 entity notes
 	if stats.NotesCount != 2 {
 		t.Errorf("expected 2 entity notes after type filter, got %d", stats.NotesCount)
 	}
@@ -2369,30 +2370,11 @@ func TestCollectCodeBridgeResults_EmptyStore_SparsityWarning(t *testing.T) {
 // ── runKGWarm --include-code flag: accepted and skips gracefully if no CRG ──
 
 func TestRunKGWarm_IncludeCode_NoCRGGraceful(t *testing.T) {
-	home := setupKGWithNotes(t)
-	_ = home
-
-	cmd := newKGWarmCmdForTest()
-	if err := cmd.Flags().Set("include-code", "true"); err != nil {
-		t.Fatalf("set include-code flag: %v", err)
-	}
-	// With no CRG db present, runKGWarm should warn but not fail
-	if err := runKGWarm(cmd, nil); err != nil {
-		t.Fatalf("runKGWarm with --include-code and no CRG: %v", err)
-	}
-
-	// Note sync should still complete normally
-	store, err := openKGStore(home)
-	if err != nil {
-		t.Fatalf("openKGStore: %v", err)
-	}
-	defer store.Close()
-
+	_, store := runWarmWithFlag(t, "include-code", "true")
 	stats, _ := store.GetStats()
 	if stats.NotesCount != 5 {
 		t.Errorf("expected 5 notes synced, got %d", stats.NotesCount)
 	}
-	// No code nodes should have been imported (CRG not available)
 	if store.CountNodes() != 0 {
 		t.Errorf("expected 0 code nodes with no CRG db, got %d", store.CountNodes())
 	}
