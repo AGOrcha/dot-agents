@@ -979,12 +979,10 @@ func containsLinkID(links []string, refID string) bool {
 	return false
 }
 
-// persistReweavedNote writes the repaired note back to disk, falling back
-// to a body-preserving rewrite when the empty-body update is rejected.
+// persistReweavedNote writes the repaired note back to disk while preserving
+// the existing note body. It reads the current body off disk and passes it
+// through to updateGraphNote so reweave only rewrites frontmatter (links).
 func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
-	if err := updateGraphNote(kgHomeDir, note, ""); err == nil {
-		return
-	}
 	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
 	existing, readErr := os.ReadFile(path)
 	if readErr != nil {

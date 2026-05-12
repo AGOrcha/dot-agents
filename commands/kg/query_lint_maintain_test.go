@@ -951,19 +951,12 @@ func TestRemoveIndexEntry_StripsTargetIDOnly(t *testing.T) {
 	}
 }
 
-// TestPersistReweavedNote_BodyLossOnRepair locks in the current (and likely
-// buggy) behavior of persistReweavedNote: the primary code path calls
-// updateGraphNote with an empty body string and returns when that call
-// succeeds. Because updateGraphNote happily accepts an empty body, the
-// body-preserving fallback is unreachable on the happy path, so any prior
-// body is wiped when reweave repairs a note's links.
-//
-// BUG NOTE (do-not-fix per delegation contract): persistReweavedNote should
-// either preserve the existing body unconditionally, or the fallback should
-// run when the new body is empty. As written, the fallback only runs if the
-// initial updateGraphNote call errors — which it does not for empty bodies.
-// Tracked for follow-up rather than patched in this test slice.
-func TestPersistReweavedNote_BodyLossOnRepair(t *testing.T) {
+// TestPersistReweavedNote_PreservesBody verifies that persistReweavedNote
+// rewrites only the note's frontmatter (links) during reweave and preserves
+// the existing body verbatim. Previously the function called updateGraphNote
+// with an empty body on the happy path, silently wiping any prior body; the
+// fix reads the body off disk and passes it through.
+func TestPersistReweavedNote_PreservesBody(t *testing.T) {
 	home, now := curationKG(t)
 	id := "dec-fallback"
 	note := makeNote(id, "decision", "Fallback", "S.", "active", now, nil, []string{"missing-target"})
@@ -979,11 +972,9 @@ func TestPersistReweavedNote_BodyLossOnRepair(t *testing.T) {
 	if strings.Contains(string(data), "missing-target") {
 		t.Errorf("expected missing-target link removed, got:\n%s", data)
 	}
-	// And, per the documented bug above, the body is currently lost — keep
-	// the assertion so a future fix surfaces here as a deliberate behavior
-	// change rather than a silent regression.
-	if strings.Contains(string(data), "important context") {
-		t.Log("body now preserved during reweave — persistReweavedNote bug may be fixed; update assertion")
+	// The existing body must be preserved across the reweave.
+	if !strings.Contains(string(data), "important context") {
+		t.Errorf("expected body 'important context' preserved after reweave, got:\n%s", data)
 	}
 }
 
