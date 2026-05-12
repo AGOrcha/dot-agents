@@ -39,23 +39,33 @@ func AgentsStateDir() string {
 	return filepath.Join(stateHome, "dot-agents")
 }
 
+// AgentsContextDir returns the local workflow context directory under ~/.agents.
+func AgentsContextDir() string {
+	return filepath.Join(AgentsHome(), "context")
+}
+
+// ProjectContextDir returns the local workflow context directory for a project.
+func ProjectContextDir(project string) string {
+	return filepath.Join(AgentsContextDir(), project)
+}
+
 // ExpandPath expands a path with ~ to the full absolute path.
 func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
+		return filepath.Clean(filepath.Join(home, path[2:]))
 	}
 	if path == "~" {
 		home, _ := os.UserHomeDir()
-		return home
+		return filepath.Clean(home)
 	}
 	if !filepath.IsAbs(path) {
 		abs, err := filepath.Abs(path)
 		if err == nil {
-			return abs
+			return filepath.Clean(abs)
 		}
 	}
-	return path
+	return filepath.Clean(path)
 }
 
 // DisplayPath converts an absolute path to a ~ prefixed display path.

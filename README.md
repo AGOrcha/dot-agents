@@ -1,28 +1,30 @@
 # dot-agents
 
-**Unified config layer for AI coding agents**
+**The operational layer for AI coding agents**
 
-One CLI to manage configurations across Cursor, Claude Code, Codex, GitHub Copilot, and more.
+One CLI to manage configurations — and soon, workflows — across Cursor, Claude Code, Codex, GitHub Copilot, and more.
 
 ```bash
 # Install
-brew tap dot-agents/tap && brew install dot-agents
+brew tap AGOrcha/tap && brew install dot-agents
 
 # Set up
-dot-agents init
-dot-agents add ~/Github/myproject
+da init
+da add ~/Github/myproject
 
 # Check status
-dot-agents status
-dot-agents doctor
+da status
+da doctor
 
 # Refresh after pulling changes
-dot-agents refresh
+da refresh
 ```
 
 ---
 
-## The Problem
+## The Problems
+
+### 1. Config Fragmentation
 
 Every AI coding agent has its own config location and format:
 
@@ -38,7 +40,23 @@ This leads to:
 - **No way to share** common configurations
 - **Inconsistent setups** between machines
 
+### 2. Workflow Fragmentation
+
+Autonomous agents already behave like a workflow system — resuming work across sessions, persisting plans, verifying as they go — but each platform scatters this state in its own format and location:
+
+- **Context amnesia**: 30-40 minutes per session re-explaining what the agent already knew yesterday
+- **Scattered plans**: Plans, tasks, and checkpoints live in different places per platform
+- **Repeated verification**: Agents rediscover what's broken vs. what they just caused
+- **Lost handoffs**: Session continuity depends on the agent reconstructing state from scratch
+
 ## The Solution
+
+**dot-agents** solves both problems in layers:
+
+- **Today**: Unified config management — one source of truth, distributed automatically
+- **Next**: Workflow management — agents orient, persist, and propose changes autonomously
+
+### Layer 1: Config Management (Shipped)
 
 **dot-agents** creates a single source of truth at `~/.agents/`:
 
@@ -76,46 +94,82 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 └── (your code)
 ```
 
+### Layer 2: Workflow Management (Coming)
+
+Agents will manage their own operational infrastructure through three primitives:
+
+| Primitive | What It Does | Who Runs It |
+|-----------|-------------|-------------|
+| **Orient** | Load active plan, last checkpoint, verification state, recent lessons at session start | Agent (via hook) |
+| **Persist** | Save files touched, tests run, blockers, and next action at natural breakpoints | Agent (auto) |
+| **Propose** | Queue rule/skill/config changes for human review when patterns emerge | Agent → Human reviews |
+
+The design principle: **agents operate, humans steer.** Zero new commands to learn — the agent handles workflow state and surfaces decisions through `da review`.
+
+See [`research/`](research/) for the full analysis behind this direction.
+
 ## Installation
 
 ### Homebrew (recommended)
 
 ```bash
-brew tap dot-agents/tap
+brew tap AGOrcha/tap
 brew install dot-agents
 ```
 
-### Direct Install
+### Direct Install (Go CLI, default)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+```
+
+### Direct Install (TypeScript port subset)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
+```
+
+### Windows PowerShell (Go CLI)
+
+```powershell
+irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.ps1 | iex
 ```
 
 ### Manual
 
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
-export PATH="$HOME/.dot-agents/src/bin:$PATH"
+cd ~/.dot-agents
+go build -o ./bin/da ./cmd/dot-agents
+export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
+
+### TypeScript port (optional, Windows-friendly subset)
+
+The primary CLI is the **Go** `da` binary (Homebrew or `scripts/install.sh` above). For machines where **Node.js 20+** is easier than Go, this repo also ships an experimental **TypeScript** implementation under [`ports/typescript/`](ports/typescript/README.md).
+
+- **Same goal:** Stage 1 config, links, skills, agents, and hooks — not a silent replacement for Go.
+- **Different limits:** Knowledge graph commands, workflow **writes**, and loop orchestration stay **Go-only**. Read the boundary once in [`docs/TYPESCRIPT_PORT_BOUNDARY.md`](docs/TYPESCRIPT_PORT_BOUNDARY.md), then run `npm run build` and `node dist/cli.js --help` inside `ports/typescript/` before relying on it.
 
 ## Quick Start
 
 ```bash
-# 1. Initialize ~/.agents/
-dot-agents init
+# 1. Initialize ~/.agents/ with starter skills, agents, hooks, and config
+da init
 
 # 2. Add a project
-dot-agents add ~/Github/myproject
+da add ~/Github/myproject
 
-# 3. Add your rules to ~/.agents/rules/global/
-#    They'll be linked to all projects automatically
+# 3. Check what was linked
+da status --audit
+da doctor
 
-# 4. Check what's applied
-dot-agents status --audit
+# 4. Create reusable skills and subagents
+da skills new deploy
+da agents new reviewer
 
-# 5. Create reusable skills and subagents
-dot-agents skills new deploy
-dot-agents agents new reviewer
+# 5. Or, inside a repo that already committed .agentsrc.json:
+da install
 ```
 
 ## Commands
@@ -127,6 +181,8 @@ dot-agents agents new reviewer
 | `init` | Initialize `~/.agents/` directory |
 | `add <path>` | Add a project to management |
 | `remove <project>` | Remove a project |
+| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one) |
+| `import [project]` | Import existing configs from a project into `~/.agents/` |
 | `status` | Show all managed projects (use `--audit` for details) |
 | `doctor` | Health check and diagnostics |
 | `refresh [project]` | Re-apply links and config to projects |
@@ -135,13 +191,17 @@ dot-agents agents new reviewer
 
 | Command | Description |
 |---------|-------------|
-| `skills` | Manage reusable skills/procedures |
-| `skills new <name>` | Create a new skill |
-| `skills edit <name>` | Edit a skill in `$EDITOR` |
-| `agents` | Manage subagent definitions |
-| `agents new <name>` | Create a new subagent |
-| `agents edit <name>` | Edit a subagent in `$EDITOR` |
-| `hooks` | Manage Claude Code hooks |
+| `skills list [project]` | List shared or project-scoped skills |
+| `skills new <name> [project]` | Create a new skill |
+| `skills promote <name>` | Promote a repo-local skill into `~/.agents/skills/` |
+| `agents list [project]` | List shared or project-scoped agents |
+| `agents new <name> [project]` | Create a new subagent |
+| `agents promote <name>` | Promote a repo-local agent into `~/.agents/agents/` |
+| `agents import <name>` | Link a canonical agent into the current repo |
+| `agents remove <name>` | Remove an imported agent link from the current repo |
+| `hooks list [scope]` | List canonical hook bundles in `~/.agents/hooks/` |
+| `hooks show <scope> <name>` | Show one canonical hook bundle |
+| `hooks remove <scope> <name>` | Remove one canonical hook bundle |
 
 ### Sync
 
@@ -158,7 +218,6 @@ dot-agents agents new reviewer
 | Command | Description |
 |---------|-------------|
 | `explain [topic]` | Self-documenting system descriptions |
-| `context` | Output JSON for AI agents |
 | `--help` | Show help for any command |
 | `--version` | Show version |
 
@@ -180,8 +239,11 @@ Hard links share the same file content (same inode), so edits in either location
 For `CLAUDE.md` and `AGENTS.md`, standard symlinks work:
 
 ```bash
-CLAUDE.md → ~/.agents/rules/global/claude-code.mdc
+CLAUDE.md  → ~/.agents/rules/global/claude-code.mdc
+AGENTS.md  → ~/.agents/rules/global/agents.md
 ```
+
+Codex also gets agent definitions (rendered to `.codex/agents/*.toml`), settings (`.codex/config.toml`), and hooks (`.codex/hooks.json`).
 
 ### Naming Convention
 
@@ -195,14 +257,14 @@ Your `~/.agents/` directory is designed to be git-tracked:
 
 ```bash
 # First time setup
-dot-agents sync init
+da sync init
 cd ~/.agents
 git remote add origin git@github.com:YOU/agents-config.git
-dot-agents sync push
+da sync push
 
 # On another machine
 git clone git@github.com:YOU/agents-config.git ~/.agents
-dot-agents add ~/Github/myproject  # Re-link your projects
+da add ~/Github/myproject  # Re-link your projects
 ```
 
 ## Supported Agents
@@ -211,15 +273,14 @@ dot-agents add ~/Github/myproject  # Re-link your projects
 |-------|--------|--------------|
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
 | **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/` |
-| **Codex** | ✅ Full | `AGENTS.md` |
+| **Codex** | ✅ Full | `AGENTS.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
 | **OpenCode** | ⚠️ Basic | `opencode.json`, `.opencode/agent/*.md` |
 | **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md`, `.github/agents/*.agent.md` |
 
 ## Requirements
 
-- **macOS** or **Linux**
-- **Bash** 3.2+ (ships with macOS)
-- **jq** (recommended, for JSON features)
+- **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
+- **Windows:** use `scripts/install-go.ps1` for the Go CLI, or the **TypeScript** port under `ports/typescript/` when you only need the Stage 1 subset documented there.
 - **git** (for sync features)
 
 ## Configuration
@@ -251,13 +312,13 @@ Skills are reusable procedure documents that agents can invoke:
 
 ```bash
 # Create a new skill
-dot-agents skills new deploy
+da skills new deploy
 
 # List all skills
-dot-agents skills
+da skills list
 
-# Edit a skill
-dot-agents skills edit deploy
+# Promote a repo-local skill into ~/.agents/
+da skills promote deploy
 ```
 
 Skills live in `~/.agents/skills/global/` with this structure:
@@ -271,13 +332,13 @@ Subagents are directory-based agent definitions:
 
 ```bash
 # Create a new subagent
-dot-agents agents new reviewer
+da agents new reviewer
 
 # List all subagents
-dot-agents agents
+da agents list
 
-# Validate an agent's frontmatter
-dot-agents agents validate reviewer
+# Promote a repo-local subagent into ~/.agents/
+da agents promote reviewer
 ```
 
 Each subagent is a directory containing:
@@ -285,20 +346,69 @@ Each subagent is a directory containing:
 - `scripts/` - Optional helper scripts
 - `references/` - Optional additional context documents
 
-### Claude Code Hooks
+### Hooks
 
-Manage Claude Code hooks for automation:
+Inspect canonical hook bundles stored in `~/.agents/hooks/`:
 
 ```bash
 # List all hooks
-dot-agents hooks
+da hooks list
 
-# Add a hook
-dot-agents hooks add PreToolUse -m "Bash" -c "echo \\$TOOL_INPUT >> log.txt"
-
-# Show hook examples
-dot-agents hooks examples
+# Inspect one hook bundle
+da hooks show global session-orient
 ```
+
+### Project Manifests (.agentsrc.json)
+
+Commit a `.agentsrc.json` to your repo so any contributor can set up agent configs from the repo itself:
+
+```bash
+# Generate manifest from current ~/.agents/ state
+da install --generate
+
+# Set up a cloned repo from its manifest
+da install
+```
+
+### Importing Existing Configs
+
+Already have agent configs scattered across your projects? Import them into `~/.agents/`:
+
+```bash
+da import myproject
+```
+
+This detects existing rules, skills, agents, and hooks in the project and copies them into the central `~/.agents/` directory.
+
+## Roadmap
+
+### Agent-as-Operator
+
+The next major evolution: agents run `da` autonomously instead of humans operating it manually. The agent manages config, skills, rules, and workflow state — surfacing only decisions that require human judgment.
+
+Changes follow an **approval gradient**:
+- **Auto-apply**: Checkpoints, verification results, plan progress, lessons after corrections
+- **Propose-and-apply**: New rules, skills, workflow config changes — human confirms
+- **Escalate**: Conflicting rules, stale config affecting production, cross-repo drift
+
+### Workflow State
+
+Based on analysis of real session data across Claude Code, Cursor, and Codex ([research](research/AUTONOMOUS_WORKFLOW_MANAGEMENT_RESEARCH.md)), dot-agents will manage six workflow concerns:
+
+1. **Resume context** — collect active plan, last handoff, and likely next step
+2. **Plan & task state** — canonical plan artifacts with dependency-aware phases
+3. **Verification state** — persist test/lint/build results so agents stop rediscovering what's broken
+4. **Approvals & tool health** — surface auth expiry, rate-limit risk, environment readiness
+5. **Repo preferences** — persist per-repo habits (test commands, CI expectations, review preferences)
+6. **Delegation & handoff** — bounded fan-out with ownership constraints and merge-back summaries
+
+### Multi-Agent Coordination
+
+Drawing from [supervisor patterns](research/openclaw-hermes-supervisor-pattern.md) and [swarm orchestration](research/codex-multi-agent-swarms-playbook.md), dot-agents will support:
+
+- **Context engineering**: Front-load subagents with structured context bundles so they don't waste tokens rediscovering state
+- **Structured coordination**: Intent marker protocols to prevent infinite loops and drift between cooperating agents
+- **Bounded fan-out**: Spawn workers with clear ownership constraints, collect results into parent continuation artifacts
 
 ## FAQ
 
@@ -308,7 +418,7 @@ Cursor's rule system doesn't follow symlinks. Hard links share the actual file c
 
 **Q: Can I use this with existing projects?**
 
-Yes! `dot-agents add` won't overwrite existing files unless you use `--force`.
+Yes! `da add` won't overwrite existing files unless you use `--force`.
 
 **Q: Is my config private?**
 
@@ -318,7 +428,7 @@ Yes. Everything stays in `~/.agents/` on your machine. Git sync is optional and 
 
 That's fine! dot-agents only creates config files for agents it detects or that you have rules for.
 
-**Q: What is `dot-agents refresh` for?**
+**Q: What is `da refresh` for?**
 
 After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config.
 
@@ -329,7 +439,7 @@ After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links 
 
 **Q: Can I sync my config across machines?**
 
-Yes! `dot-agents sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `dot-agents refresh` to set up all your projects.
+Yes! `da sync` helps you manage `~/.agents/` as a git repository. Clone it on another machine and run `da refresh` to set up all your projects.
 
 ## Contributing
 
@@ -341,4 +451,4 @@ Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ---
 
-Built for developers who use AI coding agents daily.
+Built for developers who use AI coding agents daily. Designed so agents can operate themselves.

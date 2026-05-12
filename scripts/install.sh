@@ -1,315 +1,229 @@
 #!/bin/bash
-# dot-agents installer
+# da multi-target installer
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/master/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
 #
-# Options (via environment variables):
-#   DOT_AGENTS_INSTALL_DIR  - Installation directory (default: ~/.local/bin)
-#   DOT_AGENTS_NO_MODIFY_PATH - Set to 1 to skip PATH modification
-#   DOT_AGENTS_VERSION - Specific version to install (default: latest)
+# Options:
+#   --port go|ts                 Install target (default: go)
+#
+# Environment:
+#   DOT_AGENTS_PORT              Install target fallback when --port is omitted
+#   DOT_AGENTS_INSTALL_DIR       Binary install directory (default: ~/.local/bin)
+#   DOT_AGENTS_LIB_DIR           TS runtime install dir (default: ~/.local/lib/dot-agents-ts)
+#   DOT_AGENTS_VERSION           Specific version tag (default: latest release)
+#   DOT_AGENTS_LOCAL_SRC         Local repo checkout for testing / local installs
 
 set -euo pipefail
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Configuration
-REPO="dot-agents/dot-agents"
-INSTALL_DIR="${DOT_AGENTS_INSTALL_DIR:-$HOME/.local/bin}"
-LIB_DIR="${DOT_AGENTS_LIB_DIR:-$HOME/.local/lib/dot-agents}"
-SHARE_DIR="${DOT_AGENTS_SHARE_DIR:-$HOME/.local/share/dot-agents}"
-LOCAL_SRC="${DOT_AGENTS_LOCAL_SRC:-}"  # Set to local src/ directory for testing
+REPO="NikashPrakash/dot-agents"
+INSTALL_DIR="${DOT_AGENTS_INSTALL_DIR:-${INSTALL_DIR:-$HOME/.local/bin}}"
+TS_LIB_DIR="${DOT_AGENTS_LIB_DIR:-$HOME/.local/lib/dot-agents-ts}"
+PORT="${DOT_AGENTS_PORT:-go}"
+VERSION="${DOT_AGENTS_VERSION:-}"
+LOCAL_SRC="${DOT_AGENTS_LOCAL_SRC:-}"
 
-# Logging functions
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
-die() { error "$1"; exit 1; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+die()     { error "$1"; exit 1; }
 
-# Check for existing installations that might conflict
-check_existing_installs() {
-  local homebrew_bin=""
+usage() {
+  cat <<'EOF'
+Usage: install.sh [--port go|ts]
 
-  # Check Homebrew locations
-  if [ -x "/opt/homebrew/bin/dot-agents" ]; then
-    homebrew_bin="/opt/homebrew/bin/dot-agents"
-  elif [ -x "/usr/local/bin/dot-agents" ]; then
-    homebrew_bin="/usr/local/bin/dot-agents"
-  fi
+Targets:
+  go  Install the Go CLI release binary (`da`). This is the default.
+  ts  Install the TypeScript port launcher (`da-ts`) from the repo source bundle.
 
-  if [ -n "$homebrew_bin" ]; then
-    local hb_version
-    hb_version=$("$homebrew_bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-
-    echo ""
-    warn "Homebrew installation detected!"
-    echo ""
-    echo "  Found: $homebrew_bin (v$hb_version)"
-    echo ""
-    echo "  Installing via curl will create a second installation."
-    echo "  This can cause version confusion and PATH conflicts."
-    echo ""
-    echo "  Recommended: Use Homebrew for updates:"
-    echo "    brew upgrade dot-agents"
-    echo ""
-
-    if [ "${DOT_AGENTS_FORCE_INSTALL:-}" != "1" ]; then
-      echo -n "Continue with curl install anyway? [y/N]: "
-      read -r response < /dev/tty
-      case "$response" in
-        [yY][eE][sS]|[yY]) ;;
-        *)
-          info "Aborted. Use 'brew upgrade dot-agents' instead."
-          exit 0
-          ;;
-      esac
-      echo ""
-    fi
-  fi
-
-  # Check for existing curl install
-  if [ -x "$HOME/.local/bin/dot-agents" ]; then
-    local curl_version
-    curl_version=$("$HOME/.local/bin/dot-agents" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-    info "Existing curl installation found (v$curl_version) - will be upgraded"
-  fi
+Environment:
+  DOT_AGENTS_PORT=go|ts
+  DOT_AGENTS_INSTALL_DIR=/path/to/bin
+  DOT_AGENTS_LIB_DIR=/path/to/ts/runtime
+  DOT_AGENTS_VERSION=vX.Y.Z
+  DOT_AGENTS_LOCAL_SRC=/path/to/repo
+EOF
 }
 
-# Header
-echo ""
-echo -e "${BOLD}dot-agents installer${NC}"
-echo "─────────────────────────────────────"
-echo ""
-
-# Check for required commands
-check_requirements() {
-  local missing=()
-
-  for cmd in curl tar; do
-    if ! command -v "$cmd" &>/dev/null; then
-      missing+=("$cmd")
-    fi
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
+    case "$arg" in
+      --port)
+        [[ $# -ge 2 ]] || die "--port requires a value"
+        PORT="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown argument: $arg"
+        ;;
+    esac
   done
+  case "$PORT" in
+    go|ts) ;;
+    *) die "Unsupported port: $PORT (expected go or ts)" ;;
+  esac
+}
 
-  if [ ${#missing[@]} -gt 0 ]; then
-    die "Missing required commands: ${missing[*]}"
+check_requirements() {
+  if ! command -v curl >/dev/null 2>&1; then
+    die "curl is required"
   fi
 }
 
-# Detect OS
-detect_os() {
-  case "$(uname -s)" in
-    Darwin*) echo "macos" ;;
-    Linux*)  echo "linux" ;;
-    *)       die "Unsupported operating system: $(uname -s)" ;;
-  esac
+ensure_install_dir_on_path() {
+  if echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+    return
+  fi
+  warn "${INSTALL_DIR} is not in your PATH."
+  echo ""
+  echo "Add it with:"
+  echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
 }
 
-# Detect architecture
-detect_arch() {
-  case "$(uname -m)" in
-    x86_64|amd64)  echo "x86_64" ;;
-    arm64|aarch64) echo "arm64" ;;
-    *)             die "Unsupported architecture: $(uname -m)" ;;
-  esac
-}
-
-# Get latest version from GitHub
 get_latest_version() {
-  if [ -n "${DOT_AGENTS_VERSION:-}" ]; then
-    echo "$DOT_AGENTS_VERSION"
+  if [[ -n "$VERSION" ]]; then
+    echo "$VERSION"
     return
   fi
-
   local version
-  version=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
-    grep '"tag_name":' |
-    sed -E 's/.*"([^"]+)".*/\1/' || echo "")
-
-  if [ -z "$version" ]; then
-    # Fallback to master branch if no releases yet
-    echo "master"
-  else
+  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
+    grep '"tag_name"' |
+    sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/' || true)
+  if [[ -n "$version" ]]; then
     echo "$version"
+  else
+    echo "main"
   fi
 }
 
-# Download and install
-install_dot_agents() {
-  local version="$1"
-  local src_dir=""
+run_go_installer() {
+  local script_path=""
+  local ref="main"
+  if [[ -n "$VERSION" ]]; then
+    ref="$VERSION"
+  fi
+  if [[ -n "$LOCAL_SRC" ]] && [[ -f "$LOCAL_SRC/scripts/install-go.sh" ]]; then
+    script_path="$LOCAL_SRC/scripts/install-go.sh"
+  elif [[ "${BASH_SOURCE[0]:-}" != "" ]] && [[ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-go.sh" ]]; then
+    script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-go.sh"
+  fi
 
-  # Check for local source (for testing)
-  if [ -n "$LOCAL_SRC" ]; then
-    info "Installing from local source: $LOCAL_SRC"
-    if [ ! -d "$LOCAL_SRC/lib" ] || [ ! -d "$LOCAL_SRC/bin" ]; then
-      die "Invalid local source: missing lib/ or bin/ directory"
-    fi
-    src_dir="$LOCAL_SRC"
-  else
-    # Download from GitHub
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    trap "rm -rf $tmp_dir" EXIT
+  if [[ -n "$script_path" ]]; then
+    DOT_AGENTS_INSTALL_DIR="$INSTALL_DIR" DOT_AGENTS_VERSION="$VERSION" bash "$script_path"
+    return
+  fi
 
-    info "Installing dot-agents ${version}..."
+  local tmp
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' RETURN
+  info "Fetching Go installer..."
+  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${ref}/scripts/install-go.sh" -o "$tmp"
+  DOT_AGENTS_INSTALL_DIR="$INSTALL_DIR" DOT_AGENTS_VERSION="$VERSION" bash "$tmp"
+}
 
-    local download_url
-    if [ "$version" = "master" ]; then
-      download_url="https://github.com/$REPO/archive/refs/heads/master.tar.gz"
+require_node() {
+  command -v node >/dev/null 2>&1 || die "node is required for --port ts"
+  local major
+  major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "0")
+  if [[ "$major" -lt 20 ]]; then
+    die "Node.js 20+ is required for --port ts"
+  fi
+}
+
+build_ts_dist_if_needed() {
+  local ts_root="$1"
+  if [[ -f "$ts_root/dist/cli.js" ]]; then
+    info "Using prebuilt TypeScript dist/"
+    return
+  fi
+  command -v npm >/dev/null 2>&1 || die "npm is required to build the TypeScript port"
+  info "Building TypeScript port..."
+  (
+    cd "$ts_root"
+    if [[ -f package-lock.json ]]; then
+      npm ci
     else
-      download_url="https://github.com/$REPO/archive/refs/tags/${version}.tar.gz"
+      npm install
     fi
-
-    info "Downloading from $download_url"
-    curl -fsSL "$download_url" -o "$tmp_dir/dot-agents.tar.gz" || die "Download failed"
-
-    info "Extracting..."
-    tar -xzf "$tmp_dir/dot-agents.tar.gz" -C "$tmp_dir" || die "Extraction failed"
-
-    local extracted_dir
-    extracted_dir=$(find "$tmp_dir" -maxdepth 1 -type d -name "dot-agents*" | head -1)
-
-    if [ -z "$extracted_dir" ] || [ ! -d "$extracted_dir/src" ]; then
-      die "Invalid archive structure"
-    fi
-    src_dir="$extracted_dir/src"
-  fi
-
-  # Create installation directories
-  info "Installing to $INSTALL_DIR"
-  mkdir -p "$INSTALL_DIR"
-  mkdir -p "$LIB_DIR"
-  mkdir -p "$SHARE_DIR"
-
-  # Copy files
-  cp -r "$src_dir/lib/"* "$LIB_DIR/"
-  cp -r "$src_dir/share/"* "$SHARE_DIR/"
-
-  # Copy VERSION file (located in repo root, parent of src_dir)
-  local repo_root="$(dirname "$src_dir")"
-  if [ -f "$repo_root/VERSION" ]; then
-    cp "$repo_root/VERSION" "$SHARE_DIR/VERSION"
-  fi
-
-  # Install main script with updated paths
-  local script_content
-  script_content=$(cat "$src_dir/bin/dot-agents")
-
-  # Rewrite paths for installed location
-  script_content=$(echo "$script_content" | sed "s|SRC_DIR=\"\$(dirname \"\$BIN_DIR\")\"|SRC_DIR=\"$HOME/.local\"|")
-  script_content=$(echo "$script_content" | sed "s|LIB_DIR=\"\$SRC_DIR/lib\"|LIB_DIR=\"$LIB_DIR\"|")
-  script_content=$(echo "$script_content" | sed "s|SHARE_DIR=\"\$SRC_DIR/share\"|SHARE_DIR=\"$SHARE_DIR\"|")
-
-  echo "$script_content" > "$INSTALL_DIR/dot-agents"
-  chmod +x "$INSTALL_DIR/dot-agents"
-
-  success "Installed dot-agents to $INSTALL_DIR/dot-agents"
+    npm run build
+  )
 }
 
-# Add to PATH if needed
-setup_path() {
-  if [ "${DOT_AGENTS_NO_MODIFY_PATH:-}" = "1" ]; then
-    return
-  fi
-
-  # Check if already in PATH
-  if echo "$PATH" | tr ':' '\n' | grep -q "^$INSTALL_DIR$"; then
-    return
-  fi
-
-  local shell_name
-  shell_name=$(basename "$SHELL")
-  local rc_file=""
-
-  case "$shell_name" in
-    bash)
-      if [ -f "$HOME/.bash_profile" ]; then
-        rc_file="$HOME/.bash_profile"
-      else
-        rc_file="$HOME/.bashrc"
-      fi
-      ;;
-    zsh)
-      rc_file="$HOME/.zshrc"
-      ;;
-    fish)
-      rc_file="$HOME/.config/fish/config.fish"
-      ;;
-    *)
-      warn "Unknown shell: $shell_name. Add $INSTALL_DIR to your PATH manually."
-      return
-      ;;
-  esac
-
-  if [ -n "$rc_file" ]; then
-    local path_line="export PATH=\"$INSTALL_DIR:\$PATH\""
-
-    if [ "$shell_name" = "fish" ]; then
-      path_line="set -gx PATH $INSTALL_DIR \$PATH"
-    fi
-
-    # Check if already added
-    if grep -q "dot-agents" "$rc_file" 2>/dev/null; then
-      return
-    fi
-
-    echo "" >> "$rc_file"
-    echo "# dot-agents" >> "$rc_file"
-    echo "$path_line" >> "$rc_file"
-
-    info "Added $INSTALL_DIR to PATH in $rc_file"
-    warn "Restart your shell or run: source $rc_file"
-  fi
-}
-
-# Verify installation
-verify_installation() {
-  if [ -x "$INSTALL_DIR/dot-agents" ]; then
-    success "Installation verified"
-    return 0
-  else
-    error "Installation verification failed"
-    return 1
-  fi
-}
-
-# Main
-main() {
-  check_requirements
-  check_existing_installs
-
-  local os arch version
-  os=$(detect_os)
-  arch=$(detect_arch)
+install_ts_target() {
+  require_node
+  local version repo_root ts_root tmpdir=""
   version=$(get_latest_version)
+  info "Installing TypeScript port target (da-ts) from ${version}..."
+  if [[ -n "$LOCAL_SRC" ]]; then
+    [[ -d "$LOCAL_SRC/ports/typescript" ]] || die "DOT_AGENTS_LOCAL_SRC must point at a repo checkout with ports/typescript"
+    repo_root="$LOCAL_SRC"
+  else
+    local url
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' RETURN
+    if [[ "$version" = "main" ]]; then
+      url="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+    else
+      url="https://github.com/${REPO}/archive/refs/tags/${version}.tar.gz"
+    fi
+    info "Downloading source bundle ${version}..."
+    curl -fsSL "$url" -o "$tmpdir/dot-agents.tar.gz"
+    tar -xzf "$tmpdir/dot-agents.tar.gz" -C "$tmpdir"
+    repo_root=$(find "$tmpdir" -maxdepth 1 -type d -name 'dot-agents*' | head -1)
+    [[ -n "$repo_root" ]] || die "Could not resolve extracted source bundle"
+  fi
+  ts_root="$repo_root/ports/typescript"
+  [[ -d "$ts_root" ]] || die "TypeScript port directory not found in source bundle"
 
-  info "Detected: $os ($arch)"
-  info "Version: $version"
+  build_ts_dist_if_needed "$ts_root"
+
+  mkdir -p "$INSTALL_DIR" "$TS_LIB_DIR"
+  rm -rf "$TS_LIB_DIR/dist"
+  cp -R "$ts_root/dist" "$TS_LIB_DIR/"
+
+  cat > "$INSTALL_DIR/da-ts" <<EOF
+#!/bin/sh
+exec node "$TS_LIB_DIR/dist/cli.js" "\$@"
+EOF
+  chmod +x "$INSTALL_DIR/da-ts"
+
+  success "Installed da-ts to ${INSTALL_DIR}/da-ts"
+  ensure_install_dir_on_path
   echo ""
+  echo "Run: da-ts --help"
+  echo "Initialize: da-ts init"
+}
 
-  install_dot_agents "$version"
-  setup_path
-  verify_installation
+main() {
+  parse_args "$@"
+  check_requirements
 
   echo ""
+  echo -e "${BOLD}da installer${NC}"
   echo "─────────────────────────────────────"
-  success "dot-agents installed successfully!"
   echo ""
-  echo "Next steps:"
-  echo "  1. Restart your shell (or run: source ~/.zshrc)"
-  echo "  2. Run: dot-agents init"
-  echo ""
-  echo "For help: dot-agents --help"
-  echo ""
+  info "Selected target: ${PORT}"
+
+  case "$PORT" in
+    go) run_go_installer ;;
+    ts) install_ts_target ;;
+    *) die "Unsupported port: $PORT" ;;
+  esac
 }
 
 main "$@"

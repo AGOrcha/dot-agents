@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/agentsrc.schema.json",
+  "title": "dot-agents project manifest",
+  "description": "Repo-local schema for .agentsrc.json. This intentionally tracks the current Go AgentsRC model and rejects unknown top-level fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skills": {
+      "$ref": "#/$defs/stringList"
+    },
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "global",
+          "project"
+        ]
+      }
+    },
+    "agents": {
+      "$ref": "#/$defs/stringList"
+    },
+    "hooks": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "mcp": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "settings": {
+      "type": "boolean"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "kg": {
+      "type": "object",
+      "description": "Knowledge-graph configuration for this project",
+      "additionalProperties": false,
+      "properties": {
+        "graph_home": {
+          "type": "string",
+          "description": "Path to KG_HOME. Overrides KG_HOME env var."
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["sqlite", "postgres"],
+          "description": "Storage backend. 'postgres' requires KG_POSTGRES_URL."
+        },
+        "bridge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether bridge queries are active for this project"
+            },
+            "allowed_intents": {
+              "$ref": "#/$defs/stringList",
+              "description": "If non-empty, restricts bridge to this intent set"
+            }
+          }
+        }
+      }
+    },
+    "verifier_profiles": {
+      "type": "object",
+      "description": "Named verifier profiles referenced by app_type_verifier_map and workflow fanout",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/stringList"
+          }
+        }
+      }
+    },
+    "app_type_verifier_map": {
+      "type": "object",
+      "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "refresh": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "required": true,
+          "example": "v1.0.0"
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "required": true,
+          "example": "ad213s5e"
+        },
+        "describe": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "required": true,
+          "example": "Refreshed dot-agents project from ~/.agents/ into project directories."
+        },
+        "refreshedAt": {
+          "type": "string",
+          "minLength": 1,
+          "required": true,
+          "format": "datetime",
+          "example": "2026-04-13T12:59:35Z"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stringsOrBool": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/stringList"
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "local",
+            "git"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "git"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

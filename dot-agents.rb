@@ -14,7 +14,7 @@ class DotAgents < Formula
       sha256 "a87a5cd9fb846f5fa953b8cced1ff429b0f98716136cf98da98b29bff75bfe10"
 
       define_method(:install) do
-        bin.install "dot-agents"
+        bin.install "da"
       end
     end
     if Hardware::CPU.arm?
@@ -22,7 +22,7 @@ class DotAgents < Formula
       sha256 "22c7e87083fa9f5a5f13b8c3d1a08d80de742f258d5bff2482a611a962c541fb"
 
       define_method(:install) do
-        bin.install "dot-agents"
+        bin.install "da"
       end
     end
   end
@@ -32,19 +32,19 @@ class DotAgents < Formula
       url "https://github.com/NikashPrakash/dot-agents/releases/download/v0.2.2/dot-agents_0.2.2_linux_amd64.tar.gz"
       sha256 "7c22b5ba2f6bf641d4d0347e58b1952b08055410b572042b2d66938eb06124fe"
       define_method(:install) do
-        bin.install "dot-agents"
+        bin.install "da"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
       url "https://github.com/NikashPrakash/dot-agents/releases/download/v0.2.2/dot-agents_0.2.2_linux_arm64.tar.gz"
       sha256 "eff90f17887b389bdd5acc16a5722e072721dac72e3a8bd6d58ee92d0f653a21"
       define_method(:install) do
-        bin.install "dot-agents"
+        bin.install "da"
       end
     end
   end
 
   test do
-    system "#{bin}/dot-agents", "--version"
+    system "#{bin}/da", "--version"
   end
 end

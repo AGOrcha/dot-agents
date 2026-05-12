@@ -98,18 +98,34 @@ func TestConfigPlatformEnabled(t *testing.T) {
 
 func TestExpandPath(t *testing.T) {
 	home, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
 	tests := []struct {
 		input    string
 		expected string
 	}{
 		{"~/foo", filepath.Join(home, "foo")},
 		{"~", home},
+		{"./foo/.", filepath.Clean(filepath.Join(cwd, "foo"))},
 	}
 	for _, tt := range tests {
 		got := ExpandPath(tt.input)
 		if got != tt.expected {
 			t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestConfigGetProjectPathCleansStoredPath(t *testing.T) {
+	cfg := &Config{
+		Version: 1,
+		Projects: map[string]Project{
+			"proj": {
+				Path: "/tmp/example/.",
+			},
+		},
+	}
+	if got := cfg.GetProjectPath("proj"); got != "/tmp/example" {
+		t.Fatalf("GetProjectPath returned %q, want /tmp/example", got)
 	}
 }
 

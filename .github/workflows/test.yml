@@ -2,13 +2,24 @@ name: Test
 
 on:
   push:
-    branches: [main, master]
+    branches: 
+      - master
+      - feature/*
   pull_request:
-    branches: [main, master]
+    branches: 
+      - master
+      - feature/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GO_TEST_FLAGS: -race -count=1 -timeout=300s
 
 jobs:
   lint-workflows:
@@ -16,14 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate YAML syntax
         run: |
-          for file in .github/workflows/*.yml; do
-            echo "Validating $file..."
-            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
-          done
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.yml"].sort.each { |f| puts "Validating #{f}..."; YAML.load_file(f) }'
           echo "All workflow files have valid YAML syntax"
 
       - name: Install actionlint
@@ -43,6 +51,9 @@ jobs:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: lint-workflows  # Only run tests if workflows are valid
+    env:
+      SMOKE_HOME: /tmp/smoke-${{ github.run_id }}
+      SMOKE_AGENTS_HOME: /tmp/smoke-${{ github.run_id }}/.agents
     strategy:
       fail-fast: false
       matrix:
@@ -50,10 +61,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.x'
 
@@ -64,62 +75,155 @@ jobs:
       - name: Verify jq installed
         run: jq --version
 
-      - name: Go test
-        run: go test ./...
-
-      - name: Make CLI executable
-        run: chmod +x src/bin/dot-agents
-
-      - name: Test --version
+      - name: Check gofmt
         run: |
-          ./src/bin/dot-agents --version
-          ./src/bin/dot-agents --version | grep -q "dot-agents"
+          unformatted=$(gofmt -l ./cmd ./commands ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "The following files need gofmt formatting:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        run: go test $GO_TEST_FLAGS ./...
+
+      - name: Build CLI
+        run: go build -o ./bin/da ./cmd/dot-agents
+
+      - name: Verify built binary is real Go binary (not a shim)
+        run: |
+          file ./bin/da | grep -qE "(ELF|Mach-O|PE32)"
+
+      - name: Install GoReleaser (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          install-only: true
+
+      - name: Validate GoReleaser config (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: goreleaser check
+
+      - name: Validate GoReleaser snapshot packaging (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOT_AGENTS_PAT: ${{ secrets.DOT_AGENTS_PAT }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
+          HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+        run: goreleaser release --snapshot --clean
+
+      # ── Smoke isolation ──────────────────────────────────────────────────
+      # All smoke steps below override HOME and AGENTS_HOME so they cannot
+      # inherit the runner's real ~/.agents config or links.
+      #
+      # Scenario families tracked here until .agents/workflow/testing-matrix.yaml
+      # is introduced:
+      # - built-binary-baseline
+      # - isolated-home-bootstrap
+      # - workflow-control-plane
+      # - kg-bridge-surface
+      # - managed-resource-listing
+      # - release-packaging-parity
+      - name: Test --version
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          output="$(./bin/da --version)"
+          printf '%s\n' "$output"
+          grep -q "^da " <<<"$output"
 
       - name: Test --help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents --help
-          ./src/bin/dot-agents --help | grep -q "USAGE"
+          output="$(./bin/da --help)"
+          printf '%s\n' "$output"
+          grep -q "Usage:" <<<"$output"
 
       - name: Test init --dry-run
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents init --dry-run
+          ./bin/da init --dry-run
 
       - name: Test init (creates ~/.agents/)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
           # Remove if exists from previous run
-          rm -rf ~/.agents
-          ./src/bin/dot-agents init --yes
-          test -d ~/.agents
-          test -f ~/.agents/config.json
+          rm -rf "${HOME}/.agents"
+          ./bin/da init --yes
+          test -d "${HOME}/.agents"
+          test -f "${HOME}/.agents/config.json"
 
       - name: Test status
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents status
-          ./src/bin/dot-agents status --json | jq .
+          ./bin/da status
 
       - name: Test doctor
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents doctor
+          ./bin/da doctor
 
       - name: Test add (with test project)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          mkdir -p /tmp/test-project
-          ./src/bin/dot-agents add /tmp/test-project --name ci-test --yes
-          ./src/bin/dot-agents status | grep -q "ci-test"
+          TEST_PROJECT="${SMOKE_HOME}/test-project"
+          mkdir -p "${TEST_PROJECT}"
+          ./bin/da add "${TEST_PROJECT}" --name ci-test --yes
+          ./bin/da status >/tmp/dot-agents-status.txt
+          grep -q "ci-test" /tmp/dot-agents-status.txt
 
       - name: Test status --audit
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents status --audit
+          ./bin/da status --audit
 
       - name: Test remove --dry-run
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents remove ci-test --dry-run
+          ./bin/da remove ci-test --dry-run
 
-      - name: Test sync (no git repo)
+      - name: Test sync status
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./src/bin/dot-agents sync status 2>&1 | grep -q "not a git repository" || true
+          ./bin/da sync status
+
+      - name: Test skills list
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          ./bin/da skills list
 
       - name: Cleanup
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          rm -rf ~/.agents
-          rm -rf /tmp/test-project
+          rm -rf "${HOME}/.agents"
+          rm -rf "${SMOKE_HOME}"
