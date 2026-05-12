@@ -53,7 +53,7 @@ func (c *cursor) ReadUsageStats(home string) *PlatformUsageStats {
 }
 
 func cursorReadUsageStats(home string) *PlatformUsageStats {
-	dbPath := filepath.Join(home, ".cursor", "ai-tracking", "ai-code-tracking.db")
+	dbPath := filepath.Join(home, cursorDir, "ai-tracking", "ai-code-tracking.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil
@@ -105,7 +105,7 @@ func cursorScanSessionTokens(home, projectPath, afterTimestamp string) SessionTo
 
 	var m SessionTokenMetrics
 	slug := strings.ReplaceAll(strings.TrimPrefix(projectPath, "/"), "/", "-")
-	agentToolsDir := filepath.Join(home, ".cursor", "projects", slug, "agent-tools")
+	agentToolsDir := filepath.Join(home, cursorDir, "projects", slug, "agent-tools")
 	entries, err := os.ReadDir(agentToolsDir)
 	if err != nil {
 		return m
