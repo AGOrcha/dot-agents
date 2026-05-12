@@ -836,13 +836,13 @@ func TestRepairNoteLinks_TableDriven(t *testing.T) {
 		"src-ref": {ID: "src-ref"},
 	}
 	cases := []struct {
-		name         string
-		current      []string
-		note         *GraphNote
-		wantLinks    []string
-		wantRemoved  int
-		wantAdded    int
-		wantChanged  bool
+		name        string
+		current     []string
+		note        *GraphNote
+		wantLinks   []string
+		wantRemoved int
+		wantAdded   int
+		wantChanged bool
 	}{
 		{
 			name:        "broken_link_removed",
