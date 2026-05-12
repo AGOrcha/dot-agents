@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
 // ---------- isBackupArtifact ----------
@@ -252,5 +255,394 @@ func TestCheckExistingConfigFiles_IdempotentAfterAdd(t *testing.T) {
 	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	if len(found) != 0 {
 		t.Errorf("second add should find nothing to back up, got: %v", found)
+	}
+}
+
+// ---------- NewAddCmd metadata ----------
+
+func TestNewAddCmd_FlagsAndArgs(t *testing.T) {
+	cmd := NewAddCmd()
+	if cmd.Use != "add <path>" {
+		t.Errorf("unexpected Use=%q", cmd.Use)
+	}
+	if cmd.Flags().Lookup("name") == nil {
+		t.Error("missing --name flag")
+	}
+	if err := cmd.Args(cmd, nil); err == nil {
+		t.Error("expected error when path arg missing")
+	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("expected error when too many args supplied")
+	}
+}
+
+// ---------- runAdd basic guards ----------
+
+func TestRunAdd_MissingDirectoryErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runAdd(filepath.Join(tmp, "nonexistent"), "")
+	if err == nil || !strings.Contains(err.Error(), "directory not found") {
+		t.Errorf("expected directory-not-found error, got: %v", err)
+	}
+}
+
+func TestRunAdd_InvalidProjectNameRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "valid-path")
+	os.MkdirAll(projectPath, 0755)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runAdd(projectPath, "bad name with spaces")
+	if err == nil || !strings.Contains(err.Error(), "invalid project name") {
+		t.Errorf("expected invalid project name error, got: %v", err)
+	}
+}
+
+func TestRunAdd_AlreadyRegisteredWithoutForceErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "already")
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("already", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runAdd(projectPath, "already")
+	if err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("expected already-registered error, got: %v", err)
+	}
+}
+
+func TestRunAdd_DryRunSkipsRegistration(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "drytest")
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.Save()
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Fatalf("runAdd dry-run: %v", err)
+	}
+
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("drytest") != "" {
+		t.Error("dry-run should not register project")
+	}
+}
+
+// ---------- KG MCP config writers ----------
+
+func TestKGConfigPath_UsesKGHomeEnv(t *testing.T) {
+	t.Setenv("KG_HOME", "/custom/kg")
+	got := kgConfigPath()
+	want := "/custom/kg/self/config.yaml"
+	if got != want {
+		t.Errorf("kgConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestKGConfigPath_FallsBackToHome(t *testing.T) {
+	t.Setenv("KG_HOME", "")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	got := kgConfigPath()
+	if !strings.HasSuffix(got, filepath.Join("knowledge-graph", "self", "config.yaml")) {
+		t.Errorf("unexpected fallback path: %q", got)
+	}
+}
+
+func TestWriteKGMCPConfigs_WritesThreeFiles(t *testing.T) {
+	tmp := t.TempDir()
+	if err := writeKGMCPConfigs(tmp); err != nil {
+		t.Fatalf("writeKGMCPConfigs: %v", err)
+	}
+	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
+		data, err := os.ReadFile(filepath.Join(tmp, name))
+		if err != nil {
+			t.Fatalf("expected %s: %v", name, err)
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("%s is not valid JSON: %v", name, err)
+		}
+		servers, _ := parsed["servers"].(map[string]any)
+		if servers == nil || servers["dot-agents-kg"] == nil {
+			t.Errorf("%s missing dot-agents-kg server entry: %+v", name, parsed)
+		}
+	}
+}
+
+func TestWriteKGMCPConfigFile_MergesExistingServers(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "claude.json")
+	// Pre-existing file with another server
+	pre := map[string]any{
+		"servers": map[string]any{"other": map[string]any{"command": "foo"}},
+	}
+	data, _ := json.Marshal(pre)
+	os.WriteFile(target, data, 0644)
+
+	server := map[string]any{"command": "exe", "args": []string{"kg", "serve"}, "type": "stdio"}
+	if err := writeKGMCPConfigFile(target, server); err != nil {
+		t.Fatalf("writeKGMCPConfigFile: %v", err)
+	}
+
+	out, _ := os.ReadFile(target)
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	servers, _ := parsed["servers"].(map[string]any)
+	if _, ok := servers["other"]; !ok {
+		t.Error("expected to preserve existing servers.other entry")
+	}
+	if _, ok := servers["dot-agents-kg"]; !ok {
+		t.Error("expected dot-agents-kg server entry")
+	}
+}
+
+func TestEnsureGlobalKGMCPConfigs_NoopWhenKGAbsent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("KG_HOME", filepath.Join(tmp, "no-kg-here"))
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := ensureGlobalKGMCPConfigs(agentsHome); err != nil {
+		t.Errorf("ensureGlobalKGMCPConfigs should be no-op when KG missing: %v", err)
+	}
+	// No mcp/global dir should have been created
+	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "global", "claude.json")); err == nil {
+		t.Error("expected no MCP config to be written")
+	}
+}
+
+func TestEnsureGlobalKGMCPConfigs_WritesWhenKGPresent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	kgHome := filepath.Join(tmp, "kgroot")
+	os.MkdirAll(filepath.Join(kgHome, "self"), 0755)
+	os.WriteFile(filepath.Join(kgHome, "self", "config.yaml"), []byte("k: v\n"), 0644)
+	t.Setenv("KG_HOME", kgHome)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := ensureGlobalKGMCPConfigs(agentsHome); err != nil {
+		t.Fatalf("ensureGlobalKGMCPConfigs: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "global", "claude.json")); err != nil {
+		t.Errorf("expected claude.json: %v", err)
+	}
+}
+
+func TestEnsureProjectKGMCPConfigs_NoopWithoutManifest(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome); err != nil {
+		t.Errorf("expected no-op when manifest missing, got: %v", err)
+	}
+}
+
+func TestEnsureProjectKGMCPConfigs_WritesWhenKGDeclared(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "p",
+		KG:      &config.AgentsRCKG{Backend: "sqlite"},
+	}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome); err != nil {
+		t.Fatalf("ensureProjectKGMCPConfigs: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "p", "claude.json")); err != nil {
+		t.Errorf("expected project KG MCP config: %v", err)
+	}
+}
+
+// ---------- isManagedCursorRuleRel / isManagedProjectOutput ----------
+
+func TestIsManagedCursorRuleRel(t *testing.T) {
+	cases := []struct {
+		project, rel string
+		want         bool
+	}{
+		{"proj", ".cursor/rules/global--foo.mdc", true},
+		{"proj", ".cursor/rules/proj--bar.mdc", true},
+		{"proj", ".cursor/rules/other--baz.mdc", false},
+		{"proj", ".cursor/rules/loose.mdc", false},
+		{"proj", "other/path.md", false},
+	}
+	for _, c := range cases {
+		got := isManagedCursorRuleRel(c.project, c.rel)
+		if got != c.want {
+			t.Errorf("isManagedCursorRuleRel(%q,%q)=%v, want %v", c.project, c.rel, got, c.want)
+		}
+	}
+}
+
+func TestIsManagedProjectOutput_ManagedHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	project := "proj"
+	source := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
+	os.MkdirAll(filepath.Dir(source), 0755)
+	os.WriteFile(source, []byte("rule"), 0644)
+
+	// A cursor-rules-managed hardlink should be detected as managed.
+	ruleLink := filepath.Join(tmp, ".cursor", "rules", "global--rules.mdc")
+	os.MkdirAll(filepath.Dir(ruleLink), 0755)
+	if err := os.Link(source, ruleLink); err != nil {
+		t.Fatal(err)
+	}
+	if !isManagedProjectOutput(project, tmp, ruleLink, agentsHome) {
+		t.Error("expected managed cursor hardlink to be detected as managed output")
+	}
+
+	// A loose unmanaged file should NOT be detected
+	loose := filepath.Join(tmp, "AGENTS.md")
+	os.WriteFile(loose, []byte("hi"), 0644)
+	if isManagedProjectOutput(project, tmp, loose, agentsHome) {
+		t.Error("loose AGENTS.md should not be detected as managed")
+	}
+}
+
+// ---------- mirrorBackup ----------
+
+func TestMirrorBackup_NoTimestampStillWritesActive(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	src := filepath.Join(tmp, "AGENTS.md")
+	os.WriteFile(src, []byte("hello"), 0644)
+
+	mirrorBackup("proj", tmp, src, "")
+
+	active := filepath.Join(agentsHome, "resources", "proj", "AGENTS.md")
+	if data, err := os.ReadFile(active); err != nil || string(data) != "hello" {
+		t.Errorf("expected active backup with content 'hello', got data=%q err=%v", string(data), err)
+	}
+	// No backups dir should be created when timestamp is empty
+	if _, err := os.Stat(filepath.Join(agentsHome, "resources", "proj", "backups")); err == nil {
+		t.Error("expected no backups/ subdir when timestamp empty")
+	}
+}
+
+func TestMirrorBackup_NestedRelativePath(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	srcDir := filepath.Join(tmp, ".github")
+	os.MkdirAll(srcDir, 0755)
+	src := filepath.Join(srcDir, "copilot-instructions.md")
+	os.WriteFile(src, []byte("instr"), 0644)
+
+	mirrorBackup("proj", tmp, src, "20260101-000000")
+
+	want := filepath.Join(agentsHome, "resources", "proj", ".github", "copilot-instructions.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("expected nested mirror: %v", err)
+	}
+	ts := filepath.Join(agentsHome, "resources", "proj", "backups", "20260101-000000", ".github", "copilot-instructions.md")
+	if _, err := os.Stat(ts); err != nil {
+		t.Errorf("expected timestamped mirror: %v", err)
+	}
+}
+
+// ---------- restoreFromResourcesCounted ----------
+
+func TestRestoreFromResourcesCounted_NoResourcesDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if n := restoreFromResourcesCounted("ghost", tmp); n != 0 {
+		t.Errorf("expected 0 restores for missing resources, got %d", n)
+	}
+}
+
+func TestRestoreFromResourcesCounted_RestoresAGENTSMD(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Stage a backed-up AGENTS.md in resources
+	resourceFile := filepath.Join(agentsHome, "resources", "proj", "AGENTS.md")
+	os.MkdirAll(filepath.Dir(resourceFile), 0755)
+	if err := os.WriteFile(resourceFile, []byte("# rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	n := restoreFromResourcesCounted("proj", tmp)
+	if n != 1 {
+		t.Errorf("expected 1 restore, got %d", n)
+	}
+	// Should have produced rules/proj/agents.md in agentsHome
+	want := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("expected restored agents.md at %s: %v", want, err)
+	}
+}
+
+func TestRestoreFromResourcesCounted_SkipsBackupsDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	backupFile := filepath.Join(agentsHome, "resources", "proj", "backups", "20260101", "AGENTS.md")
+	os.MkdirAll(filepath.Dir(backupFile), 0755)
+	os.WriteFile(backupFile, []byte("old"), 0644)
+
+	if n := restoreFromResourcesCounted("proj", tmp); n != 0 {
+		t.Errorf("expected 0 restores for backups-only resources dir, got %d", n)
 	}
 }

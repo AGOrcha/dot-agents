@@ -1,7 +1,11 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
@@ -96,5 +100,129 @@ func TestMapResourceRelToDest_UnknownReturnsEmpty(t *testing.T) {
 	got := mapResourceRelToDest("proj", ".some/unknown/path.json")
 	if got != "" {
 		t.Errorf("expected empty for unknown path, got %q", got)
+	}
+}
+
+// ---------- NewRefreshCmd metadata ----------
+
+func TestNewRefreshCmd_FlagsAndArgs(t *testing.T) {
+	cmd := NewRefreshCmd()
+	if cmd.Flags().Lookup("import") == nil {
+		t.Error("missing --import flag")
+	}
+	if err := cmd.Args(cmd, nil); err != nil {
+		t.Errorf("expected refresh to accept zero args, got: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"one"}); err != nil {
+		t.Errorf("expected refresh to accept one arg, got: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("expected refresh to reject more than one arg")
+	}
+}
+
+// ---------- refreshImportScope ----------
+
+func TestRefreshImportScope_DefaultsToProject(t *testing.T) {
+	saved := refreshImport
+	refreshImport = false
+	defer func() { refreshImport = saved }()
+
+	if got := refreshImportScope(); got != importScopeProject {
+		t.Errorf("expected %q, got %q", importScopeProject, got)
+	}
+}
+
+func TestRefreshImportScope_AllWhenImportFlagSet(t *testing.T) {
+	saved := refreshImport
+	refreshImport = true
+	defer func() { refreshImport = saved }()
+
+	if got := refreshImportScope(); got != importScopeAll {
+		t.Errorf("expected %q, got %q", importScopeAll, got)
+	}
+}
+
+// ---------- resolveRefreshCommit ----------
+
+func TestResolveRefreshCommit_ReflectsBuildVars(t *testing.T) {
+	savedCommit, savedDescribe := Commit, Describe
+	Commit = "abc1234567"
+	Describe = "v1.2.3-4-gabc"
+	defer func() {
+		Commit = savedCommit
+		Describe = savedDescribe
+	}()
+
+	c, d := resolveRefreshCommit()
+	if c != "abc1234567" || d != "v1.2.3-4-gabc" {
+		t.Errorf("resolveRefreshCommit = (%q,%q), want (abc1234567, v1.2.3-4-gabc)", c, d)
+	}
+}
+
+// ---------- runRefresh ----------
+
+func TestRunRefresh_NoManagedProjectsReturnsOk(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh with no projects: %v", err)
+	}
+}
+
+func TestRunRefresh_UnknownProjectFilterErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", filepath.Join(tmp, "p"))
+	os.MkdirAll(filepath.Join(tmp, "p"), 0755)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runRefresh("ghost")
+	if err == nil {
+		t.Fatal("expected error when filter targets unknown project")
+	}
+}
+
+// ---------- restoreFromResources wrapper ----------
+
+func TestRestoreFromResources_Wrapper(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	resource := filepath.Join(agentsHome, "resources", "proj", "AGENTS.md")
+	os.MkdirAll(filepath.Dir(resource), 0755)
+	os.WriteFile(resource, []byte("# rules"), 0644)
+
+	// Should not panic and should perform the same restore as Counted variant.
+	restoreFromResources("proj", tmp)
+
+	want := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("expected restore wrapper to write %s: %v", want, err)
 	}
 }
