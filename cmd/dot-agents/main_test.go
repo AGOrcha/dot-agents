@@ -21,7 +21,6 @@ func TestRootHelpIncludesExamples(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"Examples:",
-		"da workflow orient",
 		"da install --generate",
 		"da status --audit",
 	} {

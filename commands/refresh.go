@@ -25,7 +25,12 @@ func NewRefreshCmd() *cobra.Command {
 		Short: "Refresh managed setup in projects from ~/.agents/",
 		Long: `Re-applies links and config from ~/.agents/ into project directories.
 Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
-		Args: cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  da refresh",
+			"  da refresh billing-api",
+			"  da refresh --import --dry-run",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filter := ""
 			if len(args) > 0 {
@@ -34,15 +39,13 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			return runRefresh(filter)
 		},
 	}
-	cmd.Flags().BoolVar(&refreshImport, "import", false, "Import project/global configs into ~/.agents before relinking")
+	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
 	return cmd
 }
 
 func runRefresh(projectFilter string) error {
-	if refreshImport {
-		if err := runImportFromRefresh(projectFilter, "all"); err != nil {
-			return fmt.Errorf("import before refresh: %w", err)
-		}
+	if err := runImportFromRefresh(projectFilter, refreshImportScope()); err != nil {
+		return fmt.Errorf("import before refresh: %w", err)
 	}
 
 	cfg, err := config.Load()
@@ -51,11 +54,11 @@ func runRefresh(projectFilter string) error {
 	}
 
 	if len(cfg.Projects) == 0 {
-		ui.Info("No managed projects. Add one with: dot-agents add <path>")
+		ui.Info("No managed projects. Add one with: da add <path>")
 		return nil
 	}
 
-	ui.Header("dot-agents refresh")
+	ui.Header("da refresh")
 
 	// Determine which platforms are enabled
 	ui.Section("Enabled Platforms")
@@ -85,6 +88,8 @@ func runRefresh(projectFilter string) error {
 		return nil
 	}
 
+	installedEnabled := platform.InstalledEnabledPlatforms(cfg)
+
 	// Resolve dot-agents git commit
 	refreshCommit, refreshDescribe := resolveRefreshCommit()
 
@@ -93,7 +98,10 @@ func runRefresh(projectFilter string) error {
 	if projectFilter != "" {
 		path := cfg.GetProjectPath(projectFilter)
 		if path == "" {
-			return fmt.Errorf("project not found: %s", projectFilter)
+			return ErrorWithHints(
+				fmt.Sprintf("project not found: %s", projectFilter),
+				"Run `da status` to see the registered project names.",
+			)
 		}
 		projects = []string{projectFilter}
 	}
@@ -122,7 +130,7 @@ func runRefresh(projectFilter string) error {
 		if rc, err := config.LoadAgentsRC(path); err == nil {
 			for _, src := range rc.Sources {
 				if src.Type == "git" {
-					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'dot-agents install' to re-resolve%s\n", ui.Dim, ui.Reset)
+					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'da install' to re-resolve%s\n", ui.Dim, ui.Reset)
 					break
 				}
 			}
@@ -135,6 +143,22 @@ func runRefresh(projectFilter string) error {
 		}
 
 		config.SetWindowsMirrorContext(path)
+
+		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
+		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
+		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
+		if err != nil {
+			if Flags.DryRun {
+				ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
+			} else {
+				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+			}
+		} else if lines != nil {
+			for _, line := range lines {
+				ui.DryRun(line)
+			}
+		}
+
 		for _, p := range enabledPlatforms {
 			if !p.IsInstalled() {
 				ui.Skip(p.DisplayName() + " (not installed)")
@@ -152,9 +176,11 @@ func runRefresh(projectFilter string) error {
 		}
 
 		if !Flags.DryRun {
-			writeRefreshMarker(path, refreshCommit, refreshDescribe)
+			if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+				ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+			}
 		} else {
-			msg := "Write .agents-refresh"
+			msg := "Update .agentsrc.json refresh details"
 			if refreshCommit != "" {
 				msg += " (commit=" + refreshCommit[:8] + ")"
 			}
@@ -173,17 +199,17 @@ func runRefresh(projectFilter string) error {
 	return nil
 }
 
+func refreshImportScope() string {
+	if refreshImport {
+		return importScopeAll
+	}
+	return importScopeProject
+}
+
 // resolveRefreshCommit returns the commit hash and describe string embedded at build time.
 // Falls back to empty strings for dev builds.
 func resolveRefreshCommit() (string, string) {
 	return Commit, Describe
-}
-
-func writeRefreshMarker(projectPath, commit, describe string) {
-	markerPath := filepath.Join(projectPath, ".agents-refresh")
-	content := refreshMarkerContent(Version, commit, describe)
-	os.WriteFile(markerPath, content, 0644)
-	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 }
 
 func restoreFromResources(project, projectPath string) {
@@ -202,6 +228,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/cursor.json"
 	case relCursorIgnore:
 		return "settings/" + project + "/cursorignore"
+	case relCursorIndexingIgnore:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore")
 	case relClaudeSettingsLocal:
 		return "settings/" + project + "/claude-code.json"
 	case relMCPJSON:
@@ -220,6 +248,20 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
+	case relCursorCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relCursorCommandsDir))
+	case relClaudeCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relClaudeCommandsDir))
+	case relOpenCodeCommandsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relOpenCodeCommandsDir))
+	case relClaudeOutputStylesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketOutputStyles, project, strings.TrimPrefix(relPath, relClaudeOutputStylesDir))
+	case relOpenCodeModesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketModes, project, strings.TrimPrefix(relPath, relOpenCodeModesDir))
+	case relOpenCodeThemesDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketThemes, project, strings.TrimPrefix(relPath, relOpenCodeThemesDir))
+	case relGitHubPromptsDir:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketPrompts, project, strings.TrimPrefix(relPath, relGitHubPromptsDir))
 	}
 
 	// .cursor/rules/ → rules/
@@ -271,7 +313,21 @@ func mapResourceRelToDest(project, relPath string) string {
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+	for _, prefix := range []string{
+		"rules/",
+		"settings/",
+		"mcp/",
+		"skills/",
+		"agents/",
+		agentsHooksPrefix,
+		string(platform.CanonicalBucketCommands) + "/",
+		string(platform.CanonicalBucketOutputStyles) + "/",
+		string(platform.CanonicalBucketIgnore) + "/",
+		string(platform.CanonicalBucketModes) + "/",
+		string(platform.CanonicalBucketPlugins) + "/",
+		string(platform.CanonicalBucketThemes) + "/",
+		string(platform.CanonicalBucketPrompts) + "/",
+	} {
 		if strings.HasPrefix(relPath, prefix) {
 			return relPath
 		}

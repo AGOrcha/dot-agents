@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
@@ -126,9 +128,42 @@ func scanExistingAIConfigs(projectPath string) []string {
 	return results
 }
 
+func isManagedCursorRuleRel(project, rel string) bool {
+	if !strings.HasPrefix(rel, relCursorRulesDir) {
+		return false
+	}
+	name := filepath.Base(rel)
+	return strings.HasPrefix(name, "global--") || strings.HasPrefix(name, project+"--")
+}
+
+func isManagedProjectOutput(project, projectPath, filePath, agentsHome string) bool {
+	if isManagedSymlink(filePath, agentsHome) {
+		return true
+	}
+
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+
+	// Managed Cursor rule names live in a reserved namespace and should never
+	// be re-imported or backed up as user-authored files.
+	if isManagedCursorRuleRel(project, rel) {
+		return true
+	}
+
+	destRel := mapResourceRelToDest(project, rel)
+	if destRel == "" {
+		return false
+	}
+	linked, err := links.AreHardlinked(filePath, filepath.Join(agentsHome, destRel))
+	return err == nil && linked
+}
+
 // checkExistingConfigFiles returns root-level AI config files/entries that dot-agents would replace.
 // Excludes files already managed by dot-agents and backup artifacts.
-func checkExistingConfigFiles(projectPath, agentsHome string) []string {
+func checkExistingConfigFiles(project, projectPath, agentsHome string) []string {
 	candidates := []string{
 		filepath.Join(projectPath, ".mcp.json"),
 		filepath.Join(projectPath, "AGENTS.md"),
@@ -151,6 +186,9 @@ func checkExistingConfigFiles(projectPath, agentsHome string) []string {
 				continue // already managed
 			}
 		}
+		if isManagedProjectOutput(project, projectPath, f, agentsHome) {
+			continue
+		}
 		found = append(found, f)
 	}
 	return found
@@ -161,10 +199,18 @@ func NewAddCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <path>",
-		Short: "Add a project to dot-agents management",
-		Long: `Registers a project with dot-agents and sets up configuration links.
-Existing config files are backed up before being replaced.`,
-		Args: cobra.ExactArgs(1),
+		Short: "Add a project to da management",
+		Long: `Registers a project with da and sets up configuration links.
+Existing config files are backed up before being replaced.
+
+Use this when a project should consume shared configuration from ~/.agents/
+and stay refreshable by both human operators and AI agents.`,
+		Example: ExampleBlock(
+			"  da add .",
+			"  da add ~/src/my-repo --name billing-api",
+			"  da add . --dry-run",
+		),
+		Args: ExactArgsWithHints(1, "Pass a project directory such as `.` or `~/src/my-repo`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdd(args[0], name)
 		},
@@ -196,13 +242,13 @@ func runAdd(pathArg, nameArg string) error {
 	displayPath := config.DisplayPath(projectPath)
 	displayAgentsHome := config.DisplayPath(agentsHome)
 
-	ui.Header("dot-agents add")
+	ui.Header("da add")
 	fmt.Fprintf(os.Stdout, "Adding project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
 
 	// Note if manifest already exists — user may prefer `install` instead
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		ui.Info(".agentsrc.json found — you can also use 'dot-agents install' to apply the manifest directly")
+		ui.Info(".agentsrc.json found — you can also use 'da install' to apply the manifest directly")
 	}
 
 	// Step 1: Scan
@@ -333,7 +379,7 @@ func runAdd(pathArg, nameArg string) error {
 	)
 
 	// Identify files that will be replaced
-	existingFiles := checkExistingConfigFiles(projectPath, agentsHome)
+	existingFiles := checkExistingConfigFiles(projectName, projectPath, agentsHome)
 
 	// Show files that will be replaced
 	if len(existingFiles) > 0 {
@@ -427,23 +473,30 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
 	}
 
+	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {
+		return fmt.Errorf("writing KG MCP configs: %w", err)
+	}
+
 	// Step 5: Create links
 	ui.Step("Creating links...")
 	config.SetWindowsMirrorContext(projectPath)
 
+	var addInstalled []platform.Platform
 	for _, p := range platform.All() {
-		if !p.IsInstalled() {
-			continue
+		if p.IsInstalled() {
+			addInstalled = append(addInstalled, p)
 		}
+	}
+	if _, err := platform.RunSharedTargetProjection(projectName, projectPath, addInstalled, false); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+	}
+	for _, p := range addInstalled {
 		if err := p.CreateLinks(projectName, projectPath); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
 		} else {
 			ui.Bullet("ok", p.DisplayName()+" links created")
 		}
 	}
-
-	// Add .agents-refresh to .gitignore
-	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 
 	// Step 6: Register
 	cfg.AddProject(projectName, projectPath)
@@ -454,15 +507,15 @@ func runAdd(pathArg, nameArg string) error {
 
 	nextSteps := []string{
 		"Add project rules: edit ~/.agents/rules/" + projectName + "/rules.md",
-		"Check applied configs: dot-agents status --audit",
+		"Check applied configs: da status --audit",
 	}
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		nextSteps = append(nextSteps, "Manifest found — apply it: dot-agents install")
+		nextSteps = append(nextSteps, "Manifest found — apply it: da install")
 	} else {
-		nextSteps = append(nextSteps, "Make it git-portable: dot-agents install --generate")
+		nextSteps = append(nextSteps, "Make it git-portable: da install --generate")
 	}
 	if hasDeprecated {
-		nextSteps = append(nextSteps, "Migrate deprecated formats: dot-agents migrate detect")
+		nextSteps = append(nextSteps, "Migrate deprecated formats: da migrate detect")
 	}
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
 	return nil
@@ -518,7 +571,7 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 		return 0
 	}
 	relPath := strings.TrimPrefix(path, resourcesDir+"/")
-	if strings.HasPrefix(relPath, "backups/") {
+	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
 		return 0
 	}
 	canonicalCount, handled := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
@@ -526,6 +579,15 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 		return canonicalCount
 	}
 	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
+}
+
+func isCanonicalResourceBackupRel(relPath string) bool {
+	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+		if strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool) {
@@ -555,8 +617,7 @@ func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
 		return 0
 	}
 	destPath := filepath.Join(agentsHome, destRel)
-	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
-	if err := copyFile(path, destPath); err == nil {
+	if err := projectsync.CopyFile(path, destPath); err == nil {
 		return 1
 	}
 	return 0
@@ -574,21 +635,83 @@ func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 
 	// Active (latest) copy — overwritten on each backup run
 	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	os.MkdirAll(filepath.Dir(activeTarget), 0755)
-	copyFile(srcFile, activeTarget)
+	projectsync.CopyFile(srcFile, activeTarget) //nolint:errcheck
 
 	// Timestamped immutable copy
 	if timestamp != "" {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		os.MkdirAll(filepath.Dir(tsTarget), 0755)
-		copyFile(srcFile, tsTarget)
+		projectsync.CopyFile(srcFile, tsTarget) //nolint:errcheck
 	}
 }
 
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) error {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return nil
+	}
+	if rc.KG == nil {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName))
+}
+
+// kgConfigPath returns the path to KG_HOME/self/config.yaml without importing
+// the kg subpackage (deferred to PR3c).
+func kgConfigPath() string {
+	if v := os.Getenv("KG_HOME"); v != "" {
+		return filepath.Join(v, "self", "config.yaml")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "knowledge-graph", "self", "config.yaml")
+}
+
+func ensureGlobalKGMCPConfigs(agentsHome string) error {
+	if _, err := os.Stat(kgConfigPath()); err != nil {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"))
+}
+
+func writeKGMCPConfigs(scopeDir string) error {
+	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+		exe = resolved
+	}
+	server := map[string]any{
+		"command": exe,
+		"args":    []string{"kg", "serve"},
+		"type":    "stdio",
+	}
+	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
+		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeKGMCPConfigFile(path string, server map[string]any) error {
+	configMap := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &configMap)
+	}
+	servers, _ := configMap["servers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	servers["dot-agents-kg"] = server
+	configMap["servers"] = servers
+
+	data, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }

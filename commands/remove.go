@@ -15,11 +15,17 @@ func NewRemoveCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "remove <project>",
-		Short: "Remove a project from dot-agents management",
-		Long: `Unregisters a project from dot-agents and removes config symlinks.
+		Short: "Remove a project from da management",
+		Long: `Unregisters a project from da and removes platform links (rules, hooks,
+MCP, settings, and other managed outputs) the same way install/refresh created them.
 
 With --clean, also removes project directories from ~/.agents/.`,
-		Args: cobra.ExactArgs(1),
+		Example: ExampleBlock(
+			"  da remove billing-api",
+			"  da remove billing-api --clean",
+			"  da status",
+		),
+		Args: ExactArgsWithHints(1, "Use the managed project name from `da status`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemove(args[0], cleanDirs)
 		},
@@ -36,12 +42,15 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	projectPath := cfg.GetProjectPath(projectName)
 	if projectPath == "" {
-		return fmt.Errorf("project not found: %s\n\nRun 'dot-agents status' to see registered projects", projectName)
+		return ErrorWithHints(
+			fmt.Sprintf("project not found: %s", projectName),
+			"Run `da status` to see registered projects.",
+		)
 	}
 
 	displayPath := config.DisplayPath(projectPath)
 
-	ui.Header("dot-agents remove")
+	ui.Header("da remove")
 	fmt.Fprintf(os.Stdout, "Removing project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
 
@@ -56,6 +65,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 	ui.PreviewSection("From "+displayPath+":",
 		".cursor/rules/global--*.mdc     (hard links)",
 		".cursor/rules/"+projectName+"--*.mdc (hard links)",
+		".cursor/hooks.json, .codex/hooks.json (managed links)",
 		".claude/rules/"+projectName+"--*.md      (symlinks)",
 		"AGENTS.md                       (symlink)",
 		"opencode.json and .opencode/agent/* (symlinks)",
@@ -85,6 +95,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 			"  ~/.agents/rules/"+projectName+"/",
 			"  ~/.agents/settings/"+projectName+"/",
 			"  ~/.agents/mcp/"+projectName+"/",
+			"  ~/.agents/hooks/"+projectName+"/",
 			"  ~/.agents/skills/"+projectName+"/",
 			"  ~/.agents/agents/"+projectName+"/",
 		)
@@ -106,6 +117,15 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	if _, err := os.Stat(projectPath); err == nil {
 		config.SetWindowsMirrorContext(projectPath)
+		var installed []platform.Platform
+		for _, p := range platform.All() {
+			if p.IsInstalled() {
+				installed = append(installed, p)
+			}
+		}
+		if err := platform.RemoveSharedTargetPlan(projectName, projectPath, installed); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		}
 		for _, p := range platform.All() {
 			if err := p.RemoveLinks(projectName, projectPath); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
@@ -131,12 +151,12 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	if cleanDirs {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' removed completely!", projectName),
-			"Verify removal: dot-agents status",
+			"Verify removal: da status",
 		)
 	} else {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' unlinked successfully!", projectName),
-			"Verify removal: dot-agents status",
-			"To also remove project directories: dot-agents remove "+projectName+" --clean",
+			"Verify removal: da status",
+			"To also remove project directories: da remove "+projectName+" --clean",
 		)
 	}
 	return nil
@@ -148,6 +168,7 @@ func removeProjectDirs(project string) {
 		agentsHome + "/rules/" + project,
 		agentsHome + "/settings/" + project,
 		agentsHome + "/mcp/" + project,
+		agentsHome + "/hooks/" + project,
 		agentsHome + "/skills/" + project,
 		agentsHome + "/agents/" + project,
 	}

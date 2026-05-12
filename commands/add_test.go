@@ -41,7 +41,7 @@ func TestCheckExistingConfigFiles_SkipsBackupArtifacts(t *testing.T) {
 	os.WriteFile(artifact, []byte("old"), 0644)
 
 	// No actual AGENTS.md — only the artifact
-	found := checkExistingConfigFiles(tmp, agentsHome)
+	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	for _, f := range found {
 		if strings.Contains(f, ".dot-agents-backup") {
 			t.Errorf("checkExistingConfigFiles returned backup artifact: %s", f)
@@ -60,7 +60,7 @@ func TestCheckExistingConfigFiles_SkipsAlreadyManagedSymlinks(t *testing.T) {
 	linkPath := filepath.Join(tmp, "AGENTS.md")
 	os.Symlink(target, linkPath)
 
-	found := checkExistingConfigFiles(tmp, agentsHome)
+	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	for _, f := range found {
 		if f == linkPath {
 			t.Errorf("checkExistingConfigFiles should have skipped already-managed symlink %s", f)
@@ -77,9 +77,37 @@ func TestCheckExistingConfigFiles_IncludesUnmanagedFile(t *testing.T) {
 	agentsMD := filepath.Join(tmp, "AGENTS.md")
 	os.WriteFile(agentsMD, []byte("# instructions"), 0644)
 
-	found := checkExistingConfigFiles(tmp, agentsHome)
+	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	if len(found) != 1 || found[0] != agentsMD {
 		t.Errorf("expected [%s], got %v", agentsMD, found)
+	}
+}
+
+func TestCheckExistingConfigFiles_SkipsManagedCursorHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	project := "proj"
+	source := filepath.Join(agentsHome, "rules", "global", "rules.mdc")
+	if err := os.MkdirAll(filepath.Dir(source), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rulePath := filepath.Join(tmp, ".cursor", "rules", "global--rules.mdc")
+	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(source, rulePath); err != nil {
+		t.Fatal(err)
+	}
+
+	found := checkExistingConfigFiles(project, tmp, agentsHome)
+	for _, f := range found {
+		if f == rulePath {
+			t.Fatalf("checkExistingConfigFiles should have skipped managed hardlink %s", f)
+		}
 	}
 }
 
@@ -221,7 +249,7 @@ func TestCheckExistingConfigFiles_IdempotentAfterAdd(t *testing.T) {
 	os.Symlink(target, filepath.Join(tmp, "AGENTS.md"))
 
 	// No stale backup artifacts either
-	found := checkExistingConfigFiles(tmp, agentsHome)
+	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	if len(found) != 0 {
 		t.Errorf("second add should find nothing to back up, got: %v", found)
 	}

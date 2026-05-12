@@ -1,0 +1,14 @@
+name: auto-format
+description: Run best-effort formatters after file edits
+when: post_tool_use
+match:
+  tools:
+    - Write
+    - Edit
+run:
+  command: ./format.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
+  - cursor

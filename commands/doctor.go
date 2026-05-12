@@ -13,16 +13,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const doctorOpenCodeDir = ".opencode"
+
 func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check installations, validate links, detect issues",
-		RunE:  runDoctor,
+		Long: `Audits the local da installation, installed platforms, manifest health,
+and managed project links using the same managed paths as da install and
+refresh. Doctor is the fastest way to detect drift after manual edits, moved
+repositories, or partial setup on a new machine.`,
+		Example: ExampleBlock(
+			"  da doctor",
+			"  da doctor --verbose",
+			"  da doctor --dry-run",
+		),
+		Args: NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
+		RunE: runDoctor,
 	}
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	ui.Header("dot-agents doctor")
+	ui.Header("da doctor")
 
 	agentsHome := config.AgentsHome()
 
@@ -31,7 +43,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(agentsHome); err == nil {
 		ui.Bullet("ok", "~/.agents/ exists")
 	} else {
-		ui.Bullet("error", "~/.agents/ not found — run: dot-agents init")
+		ui.Bullet("error", "~/.agents/ not found — run: da init")
 	}
 
 	cfgPath := filepath.Join(agentsHome, "config.json")
@@ -115,14 +127,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		if total == 0 {
 			ui.Bullet("none", fmt.Sprintf("%s — no managed links detected", name))
 			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "")
+				printAudit(name, path, agentsHome, "", cfg)
 			}
 			continue
 		}
 		if len(brokenLinks) == 0 {
 			ui.Bullet("ok", fmt.Sprintf("%s — %d links healthy", name, ok))
 			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "")
+				printAudit(name, path, agentsHome, "", cfg)
 			}
 			continue
 		}
@@ -132,7 +144,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 		if Flags.Verbose {
 			// Show full audit detail (healthy + broken) in verbose mode
-			printAudit(name, path, agentsHome, "")
+			printAudit(name, path, agentsHome, "", cfg)
 		} else {
 			// Default: show only broken links
 			for _, bl := range brokenLinks {
@@ -186,7 +198,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		rc, err := config.LoadAgentsRC(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: dot-agents install --generate", name))
+				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: da install --generate", name))
 			} else {
 				ui.Bullet("error", fmt.Sprintf("%s — corrupt manifest: %v", name, err))
 			}
@@ -209,7 +221,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 		if len(missingGit) > 0 {
 			for _, url := range missingGit {
-				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: dot-agents install", name, url))
+				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
 			}
 			anyManifestIssue = true
 		} else if len(presentGit) > 0 {
@@ -220,6 +232,47 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	if !anyManifestIssue {
 		fmt.Fprintf(os.Stdout, "  %sTip: run with -v to see per-project manifest details%s\n", ui.Dim, ui.Reset)
+	}
+
+	ui.Section("Plugins")
+	pluginSpecs, pluginErr := platform.ListPluginSpecs(agentsHome, "")
+	if pluginErr != nil {
+		ui.Bullet("error", fmt.Sprintf("plugin bundles unavailable: %v", pluginErr))
+	} else if len(pluginSpecs) == 0 {
+		ui.Info("No canonical plugin bundles")
+	} else {
+		for _, spec := range pluginSpecs {
+			bundleLabel := filepath.Join(spec.Scope, spec.Name)
+			for _, platformID := range spec.Platforms {
+				if platformID != "opencode" {
+					ui.Bullet("warn", fmt.Sprintf("%s: platforms includes %s but no emitter is implemented yet", bundleLabel, platformID))
+				}
+			}
+			if hasPluginPlatform(spec.Platforms, "opencode") {
+				for _, name := range names {
+					projectPath := cfg.GetProjectPath(name)
+					if projectPath == "" {
+						continue
+					}
+					linkPath := filepath.Join(projectPath, doctorOpenCodeDir, "plugins", spec.Name)
+					info, err := os.Lstat(linkPath)
+					if err != nil || info.Mode()&os.ModeSymlink == 0 {
+						continue
+					}
+					dest, err := os.Readlink(linkPath)
+					if err != nil {
+						ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
+						continue
+					}
+					if !filepath.IsAbs(dest) {
+						dest = filepath.Clean(filepath.Join(filepath.Dir(linkPath), dest))
+					}
+					if _, err := os.Stat(dest); err != nil {
+						ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
+					}
+				}
+			}
+		}
 	}
 
 	fmt.Fprintln(os.Stdout)
@@ -233,10 +286,19 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if Flags.DryRun {
 		ui.Info("Run without --dry-run to apply repairs.")
 	} else if totalFixed > 0 {
-		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'dot-agents status --audit' to verify.", totalFixed))
+		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'da status --audit' to verify.", totalFixed))
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+func hasPluginPlatform(platforms []string, want string) bool {
+	for _, platformID := range platforms {
+		if platformID == want {
+			return true
+		}
+	}
+	return false
 }
 
 // brokenLink holds info about a single broken managed link.
@@ -485,7 +547,7 @@ func collectBrokenUserLinks(agentsHome string) []brokenLink {
 	}
 
 	// OpenCode: ~/.opencode/agent/*
-	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
 	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(opencodeAgentDir, e.Name())
@@ -662,7 +724,7 @@ func printUserConfigStatus(agentsHome string) {
 	}
 
 	// OpenCode
-	opencodeAgentDir := filepath.Join(homeDir, ".opencode", "agent")
+	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
 	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(opencodeAgentDir, e.Name())

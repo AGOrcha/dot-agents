@@ -11,9 +11,18 @@ import (
 func NewExplainCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "explain [topic]",
-		Short: "Explain dot-agents concepts",
-		Args:  cobra.MaximumNArgs(1),
-		RunE:  runExplain,
+		Short: "Explain da concepts",
+		Long: `Prints operator-facing documentation for the concepts that matter when
+setting up or debugging da. The output is intentionally compact enough
+for a human to scan and structured enough for an AI agent to quote or reason over.`,
+		Example: ExampleBlock(
+			"  da explain",
+			"  da explain manifest",
+			"  da explain structure",
+			"  da explain links",
+		),
+		Args: MaximumNArgsWithHints(1, "Supported topics include `manifest`, `structure`, `links`, and `platforms`."),
+		RunE: runExplain,
 	}
 }
 
@@ -39,8 +48,8 @@ func runExplain(cmd *cobra.Command, args []string) error {
 }
 
 func printOverviewExplanation() {
-	ui.Header("dot-agents overview")
-	fmt.Fprintf(os.Stdout, "  dot-agents manages AI agent configurations across your projects.\n")
+	ui.Header("da overview")
+	fmt.Fprintf(os.Stdout, "  da manages AI agent configurations across your projects.\n")
 	fmt.Fprintf(os.Stdout, "  It maintains a single source of truth in %s~/.agents/%s and creates links\n", ui.Bold, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  into each project directory for each AI platform you use.\n")
 
@@ -53,6 +62,8 @@ func printOverviewExplanation() {
 		{"status", "Show managed projects and link health"},
 		{"doctor", "Diagnose installation issues"},
 		{"skills", "Manage skills"},
+		{"hooks", "List/show/remove hook bundles under ~/.agents/hooks/"},
+		{"rules", "List/show/remove rule files under ~/.agents/rules/"},
 		{"agents", "Manage agent definitions"},
 		{"sync", "Git operations on ~/.agents/"},
 	}
@@ -62,26 +73,26 @@ func printOverviewExplanation() {
 
 	ui.Section("Workflow")
 	fmt.Fprintf(os.Stdout, "  %sOwner (once):%s\n", ui.Bold, ui.Reset)
-	fmt.Fprintf(os.Stdout, "    dot-agents add .               Register project\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents install --generate  Create .agentsrc.json\n")
+	fmt.Fprintf(os.Stdout, "    da add .               Register project\n")
+	fmt.Fprintf(os.Stdout, "    da install --generate  Create .agentsrc.json\n")
 	fmt.Fprintf(os.Stdout, "    git add .agentsrc.json && git commit\n")
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintf(os.Stdout, "  %sTeam member (after clone):%s\n", ui.Bold, ui.Reset)
-	fmt.Fprintf(os.Stdout, "    dot-agents install             Apply manifest, done\n")
+	fmt.Fprintf(os.Stdout, "    da install             Apply manifest, done\n")
 	fmt.Fprintln(os.Stdout)
 
 	ui.Section("Topics")
-	fmt.Fprintf(os.Stdout, "  %sdot-agents explain manifest%s    .agentsrc.json schema and workflow\n", ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  %sdot-agents explain links%s       Link types (symlinks vs hard links)\n", ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  %sdot-agents explain platforms%s   Supported AI platforms\n", ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  %sdot-agents explain structure%s   ~/.agents/ directory structure\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sda explain manifest%s    .agentsrc.json schema and workflow\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sda explain links%s       Link types (symlinks vs hard links)\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sda explain platforms%s   Supported AI platforms\n", ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sda explain structure%s   ~/.agents/ directory structure\n", ui.Dim, ui.Reset)
 	fmt.Fprintln(os.Stdout)
 }
 
 func printManifestExplanation() {
 	ui.Header("Manifest (.agentsrc.json)")
 	fmt.Fprintf(os.Stdout, "  Commit .agentsrc.json to git so any clone can run\n")
-	fmt.Fprintf(os.Stdout, "  %sdot-agents install%s to set up fully — no manual steps.\n\n", ui.Bold, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  %sda install%s to set up fully — no manual steps.\n\n", ui.Bold, ui.Reset)
 
 	ui.Section("Schema")
 	fields := [][2]string{
@@ -107,17 +118,18 @@ func printManifestExplanation() {
 
 	ui.Section("Workflow")
 	fmt.Fprintf(os.Stdout, "  %sOwner (once):%s\n", ui.Bold, ui.Reset)
-	fmt.Fprintf(os.Stdout, "    dot-agents add .               Register the project\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents install --generate  Create .agentsrc.json from current state\n")
-	fmt.Fprintf(os.Stdout, "    git add .agentsrc.json && git commit -m 'Add dot-agents manifest'\n\n")
+	fmt.Fprintf(os.Stdout, "    da add .               Register the project\n")
+	fmt.Fprintf(os.Stdout, "    da install --generate  Create .agentsrc.json from current state\n")
+	fmt.Fprintf(os.Stdout, "    git add .agentsrc.json && git commit -m 'Add da manifest'\n\n")
 	fmt.Fprintf(os.Stdout, "  %sTeam member (after clone):%s\n", ui.Bold, ui.Reset)
-	fmt.Fprintf(os.Stdout, "    dot-agents init                (one-time per machine)\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents install             Apply manifest — all links created\n\n")
+	fmt.Fprintf(os.Stdout, "    da init                (one-time per machine)\n")
+	fmt.Fprintf(os.Stdout, "    da install             Apply manifest — all links created\n\n")
 	fmt.Fprintf(os.Stdout, "  %sKeeping it up to date:%s\n", ui.Bold, ui.Reset)
-	fmt.Fprintf(os.Stdout, "    dot-agents skills new <n> --project <p>  → manifest updated automatically\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents agents new <n> --project <p>  → manifest updated automatically\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents hooks add <Event> ...         → manifest updated automatically\n")
-	fmt.Fprintf(os.Stdout, "    dot-agents install --generate            → regenerate from current state\n\n")
+	fmt.Fprintf(os.Stdout, "    da skills new <n> --project <p>  → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    da agents new <n> --project <p>  → manifest updated automatically\n")
+	fmt.Fprintf(os.Stdout, "    da hooks list|show|remove       → inspect ~/.agents/hooks bundles (author on disk, then refresh/install)\n")
+	fmt.Fprintf(os.Stdout, "    da rules list|show|remove       → inspect ~/.agents/rules files (author on disk, then refresh/install)\n")
+	fmt.Fprintf(os.Stdout, "    da install --generate            → regenerate from current state\n\n")
 
 	ui.Section("Flags")
 	fmt.Fprintf(os.Stdout, "  %s--generate%s  Create/overwrite .agentsrc.json from current ~/.agents/ state\n", ui.Cyan, ui.Reset)
@@ -131,7 +143,7 @@ func printLinkTypesExplanation() {
 	fmt.Fprintln(os.Stdout)
 
 	fmt.Fprintf(os.Stdout, "  %sHARD LINKS%s %s(Cursor)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
-	fmt.Fprintf(os.Stdout, "  Cursor doesn't follow symlinks for rule files, so dot-agents creates\n")
+	fmt.Fprintf(os.Stdout, "  Cursor doesn't follow symlinks for rule files, so da creates\n")
 	fmt.Fprintf(os.Stdout, "  hard links instead. Hard links point to the same inode on disk —\n")
 	fmt.Fprintf(os.Stdout, "  edits to either file are reflected in both.\n")
 	fmt.Fprintln(os.Stdout)
@@ -140,9 +152,20 @@ func printLinkTypesExplanation() {
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintf(os.Stdout, "  %sSYMLINKS%s %s(all other platforms)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  Claude Code, Codex, OpenCode, and GitHub Copilot all follow symlinks\n")
-	fmt.Fprintf(os.Stdout, "  correctly, so dot-agents uses standard symbolic links.\n")
+	fmt.Fprintf(os.Stdout, "  correctly, so da uses standard symbolic links.\n")
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintf(os.Stdout, "  %s~/.agents/rules/global/rules.mdc → AGENTS.md%s\n", ui.Dim, ui.Reset)
+	fmt.Fprintln(os.Stdout)
+
+	fmt.Fprintf(os.Stdout, "  %sCENTRALIZED SHARED TARGETS%s %s(shared skill mirrors)%s\n", ui.Bold, ui.Reset, ui.Dim, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  Shared repo-local skill targets such as .agents/skills/<name> are planned\n")
+	fmt.Fprintf(os.Stdout, "  centrally before writes so compatible Claude, Codex, OpenCode, and Copilot\n")
+	fmt.Fprintf(os.Stdout, "  projections converge on one managed mirror instead of each platform racing\n")
+	fmt.Fprintf(os.Stdout, "  to replace the same directory independently.\n")
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "  %sRegistry diagnostics:%s run %sda status --audit%s — the \"Shared target registry\"\n", ui.Dim, ui.Reset, ui.Cyan, ui.Reset)
+	fmt.Fprintf(os.Stdout, "  section per project lists the merged plan lines produced by the same builder\n")
+	fmt.Fprintf(os.Stdout, "  as %srefresh --dry-run%s (no filesystem writes).\n", ui.Cyan, ui.Reset)
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -150,10 +173,10 @@ func printPlatformsExplanation() {
 	ui.Header("Supported Platforms")
 	platforms := [][2]string{
 		{"Cursor", ".cursor/rules/ (hard links), .cursor/settings.json, .cursor/mcp.json"},
-		{"Claude Code", ".claude/rules/ (symlinks), .claude/agents/, .mcp.json"},
-		{"Codex CLI", "AGENTS.md (symlink), .agents/skills/, .codex/hooks.json"},
-		{"OpenCode", "opencode.json (symlink), .opencode/agent/*.md"},
-		{"GitHub Copilot", ".github/copilot-instructions.md (symlink), .vscode/mcp.json"},
+		{"Claude Code", ".claude/rules/ (symlinks), .claude/agents/, .claude/skills/, shared .agents/skills/, .mcp.json"},
+		{"Codex CLI", "AGENTS.md (symlink), shared .agents/skills/, .codex/hooks.json"},
+		{"OpenCode", "opencode.json (symlink), .opencode/agent/*.md, shared .agents/skills/"},
+		{"GitHub Copilot", ".github/copilot-instructions.md (symlink), .vscode/mcp.json, shared .agents/skills/"},
 	}
 	fmt.Fprintln(os.Stdout)
 	for _, p := range platforms {
@@ -186,6 +209,27 @@ func printStructureExplanation() {
 		{"  ├── ", "hooks/", ""},
 		{"  │   ├── ", "global/", "Global hook configs"},
 		{"  │   └── ", "{project}/", "Project-specific hook configs"},
+		{"  ├── ", "plugins/", ""},
+		{"  │   ├── ", "global/", "Plugin bundles"},
+		{"  │   └── ", "{project}/", "Project-specific plugin bundles"},
+		{"  ├── ", "commands/", ""},
+		{"  │   ├── ", "global/", "Command bundles"},
+		{"  │   └── ", "{project}/", "Project-specific command bundles"},
+		{"  ├── ", "output-styles/", ""},
+		{"  │   ├── ", "global/", "Claude output styles"},
+		{"  │   └── ", "{project}/", "Project-specific output styles"},
+		{"  ├── ", "ignore/", ""},
+		{"  │   ├── ", "global/", "Ignore files"},
+		{"  │   └── ", "{project}/", "Project-specific ignore files"},
+		{"  ├── ", "modes/", ""},
+		{"  │   ├── ", "global/", "OpenCode modes"},
+		{"  │   └── ", "{project}/", "Project-specific modes"},
+		{"  ├── ", "themes/", ""},
+		{"  │   ├── ", "global/", "OpenCode themes"},
+		{"  │   └── ", "{project}/", "Project-specific themes"},
+		{"  ├── ", "prompts/", ""},
+		{"  │   ├── ", "global/", "Copilot prompts"},
+		{"  │   └── ", "{project}/", "Project-specific prompts"},
 		{"  ├── ", "scripts/", "Helper scripts"},
 		{"  ├── ", "local/", "Machine-specific local files"},
 		{"  └── ", "resources/", "Backup files (auto-managed)"},
@@ -197,5 +241,13 @@ func printStructureExplanation() {
 			fmt.Fprintf(os.Stdout, "%s%s%s%s%s\n", l.indent, ui.Cyan, ui.Bold, l.name, ui.Reset)
 		}
 	}
+	fmt.Fprintln(os.Stdout)
+
+	ui.Section("Plugins")
+	fmt.Fprintf(os.Stdout, "  ~/.agents/plugins/{scope}/{name}/   Plugin bundles\n")
+	fmt.Fprintf(os.Stdout, "    PLUGIN.yaml                      Manifest: kind, name, platforms, resources, platform_overrides\n")
+	fmt.Fprintf(os.Stdout, "    resources/{agents,skills,...}/   Canonical shared components\n")
+	fmt.Fprintf(os.Stdout, "    files/                           Native runtime files (OpenCode JS/TS)\n")
+	fmt.Fprintf(os.Stdout, "    platforms/{id}/                  Platform-specific passthrough (e.g. plugin.json)\n")
 	fmt.Fprintln(os.Stdout)
 }
