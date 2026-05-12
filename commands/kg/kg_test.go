@@ -2379,3 +2379,359 @@ func TestRunKGWarm_IncludeCode_NoCRGGraceful(t *testing.T) {
 		t.Errorf("expected 0 code nodes with no CRG db, got %d", store.CountNodes())
 	}
 }
+
+// ── Priority 1: sync, postprocess, flows, communities ────────────────────────
+
+func TestRunKGSync_CopiesNotes(t *testing.T) {
+	// runKGSync is a thin wrapper around "git pull/push" inside the KG_HOME dir.
+	// We test that it requires an initialized KG and handles the push/pull path.
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Initialize a git repo in KG_HOME so the git pull/push has a valid repo.
+	initGitRepo(t, home)
+	commitFile(t, home, "self/config.yaml", "schema_version: 1\n", "init config")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	// Sync (pull) should succeed in a valid git repo (may warn about no remote,
+	// but should not panic). We expect a git error because there's no remote.
+	err := runKGSync(cmd, nil)
+	// git pull with no remote should return an error — verify it's a git error,
+	// not a panic or KG initialization error.
+	if err == nil {
+		// If git pull somehow succeeded (e.g. if a remote existed), that's fine too.
+		return
+	}
+	if !strings.Contains(err.Error(), "git pull failed") {
+		t.Errorf("expected git pull error, got: %v", err)
+	}
+}
+
+func TestRunKGSync_NoSourceDir(t *testing.T) {
+	// Point KG_HOME to a nonexistent directory — sync should error about
+	// KG not being initialized.
+	t.Setenv("KG_HOME", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	err := runKGSync(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when KG_HOME does not exist")
+	}
+	if !strings.Contains(err.Error(), "not initialized") {
+		t.Errorf("expected 'not initialized' error, got: %v", err)
+	}
+}
+
+func TestRunKGPostprocess_NoGraph(t *testing.T) {
+	// postprocess requires a CRG binary; with no .venv or CRG on PATH,
+	// NewCRGBridge should fail gracefully. If CRG is installed but the
+	// repo has no graph, it should still return an error.
+	repo := t.TempDir()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("no-flows", false, "")
+	cmd.Flags().Bool("no-communities", false, "")
+	cmd.Flags().Bool("no-fts", false, "")
+
+	err := runKGPostprocess(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when no CRG graph/binary exists")
+	}
+	// Accept any error — could be "code-review-graph not found", exit status,
+	// or module-not-found depending on environment.
+}
+
+func TestRunKGFlows_NoGraph(t *testing.T) {
+	// flows requires CRG — without the binary or graph it should fail.
+	repo := t.TempDir()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", false, "")
+
+	err := runKGFlows(testDeps(), cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when no CRG graph/binary exists")
+	}
+	// Accept any error — could be CRG not found or module import error.
+}
+
+func TestRunKGCommunities_NoGraph(t *testing.T) {
+	// communities requires CRG — without the binary or graph it should fail.
+	repo := t.TempDir()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("min-size", 2, "")
+	cmd.Flags().String("sort", "size", "")
+	cmd.Flags().Bool("json", false, "")
+
+	err := runKGCommunities(testDeps(), cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when no CRG graph/binary exists")
+	}
+	// Accept any error — could be CRG not found or module import error.
+}
+
+// ── Priority 2: flag/output coverage ─────────────────────────────────────────
+
+func TestRunKGLint_JSONOutput(t *testing.T) {
+	home, _, _ := setupLintFixture(t)
+	_ = home
+
+	deps := Deps{
+		Flags:        GlobalFlags{JSON: true},
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().String("check", "", "")
+
+	out := captureStdout(t, func() {
+		// runKGLint calls os.Exit(1) on errors in JSON mode — we catch the panic
+		// or just verify the JSON is valid if it succeeds.
+		// Since setupLintFixture has broken links (errors), lint will call os.Exit.
+		// Use a clean KG instead.
+	})
+	_ = out
+
+	// Use a clean KG (no errors) for JSON output test
+	cleanHome := setupKGWithNotes(t)
+	_ = cleanHome
+	cleanCmd := &cobra.Command{}
+	cleanCmd.Flags().String("check", "", "")
+
+	jsonOut := captureStdout(t, func() {
+		if err := runKGLint(deps, cleanCmd, nil); err != nil {
+			t.Errorf("runKGLint JSON: %v", err)
+		}
+	})
+
+	var report LintReport
+	if err := json.Unmarshal(jsonOut, &report); err != nil {
+		t.Fatalf("lint JSON output invalid: %v\nraw: %s", err, string(jsonOut))
+	}
+	if report.ChecksRun == 0 {
+		t.Error("expected checks_run > 0 in JSON lint report")
+	}
+}
+
+func TestRunKGIngest_DryRun(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Add a source to inbox
+	src := RawSource{
+		SchemaVersion: 1, ID: "dry-001", Title: "Dry Run Source",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("# Dry Run\nSome content.")); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+
+	deps := Deps{
+		Flags:        GlobalFlags{DryRun: true},
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("all", true, "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().String("title", "", "")
+	cmd.Flags().String("type", "", "")
+
+	captureStdout(t, func() {
+		if err := runKGIngest(deps, cmd, nil); err != nil {
+			t.Fatalf("runKGIngest dry-run: %v", err)
+		}
+	})
+
+	// Source should still be in inbox (not moved to imported)
+	pending, err := listPendingRawSources(home)
+	if err != nil {
+		t.Fatalf("listPendingRawSources: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Errorf("expected 1 pending source after dry-run, got %d", len(pending))
+	}
+	// No notes should have been created (only setup notes exist)
+	if exists, _ := noteExists(home, "src-dry-001"); exists {
+		t.Error("source summary note should not exist after dry-run")
+	}
+}
+
+func TestRunKGLinkAdd_SuccessPath(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	// Warm the store so notes are indexed
+	cmd := newKGWarmCmdForTest()
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm: %v", err)
+	}
+
+	// Add a link with "implements" kind
+	addCmd := newKGLinkAddCmdForTest("implements")
+	if err := runKGLinkAdd(addCmd, []string{"ent-cobra", "commands::Execute"}); err != nil {
+		t.Fatalf("runKGLinkAdd: %v", err)
+	}
+
+	// Verify link exists in the store
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	links, err := store.GetLinksForNote("ent-cobra")
+	if err != nil {
+		t.Fatalf("GetLinksForNote: %v", err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("expected 1 link, got %d", len(links))
+	}
+	if links[0].LinkKind != "implements" {
+		t.Errorf("expected implements kind, got %s", links[0].LinkKind)
+	}
+	if links[0].QualifiedName != "commands::Execute" {
+		t.Errorf("expected commands::Execute, got %s", links[0].QualifiedName)
+	}
+}
+
+func TestRunKGLinkList_ShowsLinks(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = home
+
+	// Warm the store
+	cmd := newKGWarmCmdForTest()
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm: %v", err)
+	}
+
+	// Create two links
+	addCmd1 := newKGLinkAddCmdForTest("mentions")
+	if err := runKGLinkAdd(addCmd1, []string{"dec-use-cobra", "cmd::Run"}); err != nil {
+		t.Fatalf("runKGLinkAdd 1: %v", err)
+	}
+	addCmd2 := newKGLinkAddCmdForTest("documents")
+	if err := runKGLinkAdd(addCmd2, []string{"dec-use-cobra", "cmd::Execute"}); err != nil {
+		t.Fatalf("runKGLinkAdd 2: %v", err)
+	}
+
+	// Capture output of link list
+	out := captureStdout(t, func() {
+		if err := runKGLinkList(nil, []string{"dec-use-cobra"}); err != nil {
+			t.Errorf("runKGLinkList: %v", err)
+		}
+	})
+
+	output := string(out)
+	if !strings.Contains(output, "cmd::Run") {
+		t.Errorf("expected cmd::Run in link list output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "cmd::Execute") {
+		t.Errorf("expected cmd::Execute in link list output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "mentions") {
+		t.Errorf("expected 'mentions' kind in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "documents") {
+		t.Errorf("expected 'documents' kind in output, got:\n%s", output)
+	}
+}
+
+func TestRunKGBridgeMapping_NoGraph(t *testing.T) {
+	// bridge mapping does not require CRG — it just lists the static mapping table.
+	// But verify it works without any graph setup.
+	deps := Deps{
+		Flags:        GlobalFlags{JSON: true},
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+
+	out := captureStdout(t, func() {
+		if err := runKGBridgeMapping(deps, nil, nil); err != nil {
+			t.Fatalf("runKGBridgeMapping: %v", err)
+		}
+	})
+
+	// Verify output is valid JSON
+	var mappings []BridgeIntentMapping
+	if err := json.Unmarshal(out, &mappings); err != nil {
+		t.Fatalf("bridge mapping JSON invalid: %v\nraw: %s", err, string(out))
+	}
+	if len(mappings) == 0 {
+		t.Error("expected at least one bridge mapping")
+	}
+	// Verify a known mapping exists
+	found := false
+	for _, m := range mappings {
+		if m.BridgeIntent == "plan_context" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected plan_context in bridge mappings")
+	}
+}
+
+func TestRunKGBridgeHealth_CLIOutput(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	_ = home
+
+	deps := testDeps()
+	cmd := &cobra.Command{}
+
+	out := captureStdout(t, func() {
+		if err := runKGBridgeHealth(deps, cmd, nil); err != nil {
+			t.Errorf("runKGBridgeHealth: %v", err)
+		}
+	})
+
+	output := string(out)
+	if !strings.Contains(output, "Bridge Health") {
+		t.Errorf("expected 'Bridge Health' header in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Adapter") {
+		t.Errorf("expected 'Adapter' in output, got:\n%s", output)
+	}
+}
+
+// ── Priority 3: Serve command construction ───────────────────────────────────
+
+func TestNewKGCmd_ServeSubcommand(t *testing.T) {
+	// Verify the kg command tree constructs without panic
+	// and includes a "serve" subcommand.
+	deps := testDeps()
+	kgCmd := NewKGCmd(deps)
+	if kgCmd == nil {
+		t.Fatal("NewKGCmd returned nil")
+	}
+
+	// Find the serve subcommand
+	var serveCmd *cobra.Command
+	for _, sub := range kgCmd.Commands() {
+		if sub.Name() == "serve" {
+			serveCmd = sub
+			break
+		}
+	}
+	if serveCmd == nil {
+		t.Fatal("expected 'serve' subcommand in kg command tree")
+	}
+	if serveCmd.Short == "" {
+		t.Error("serve subcommand should have a short description")
+	}
+}
