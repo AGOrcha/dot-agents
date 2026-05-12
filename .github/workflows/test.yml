@@ -20,6 +20,7 @@ defaults:
 
 env:
   GO_TEST_FLAGS: -race -count=1 -timeout=300s
+  GO_COVERAGE_FILE: coverage.out
 
 jobs:
   lint-workflows:
@@ -88,7 +89,7 @@ jobs:
         run: go vet ./...
 
       - name: Go test
-        run: go test $GO_TEST_FLAGS ./...
+        run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="${GO_COVERAGE_FILE}" ./...
 
       - name: Build CLI
         run: go build -o ./bin/da ./cmd/dot-agents
@@ -227,3 +228,8 @@ jobs:
         run: |
           rm -rf "${HOME}/.agents"
           rm -rf "${SMOKE_HOME}"
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
