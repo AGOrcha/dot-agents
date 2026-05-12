@@ -9,6 +9,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -152,7 +153,7 @@ func ensureInstallProjectDirs(projectName string) error {
 		ui.DryRun("create ~/.agents/ directories for '" + projectName + "'")
 		return nil
 	}
-	if err := createProjectDirs(projectName); err != nil {
+	if err := projectsync.CreateProjectDirs(projectName); err != nil {
 		return err
 	}
 	ui.Bullet("ok", "Ensured ~/.agents/ project directories")
@@ -208,7 +209,7 @@ func finalizeInstall(projectPath string) {
 		return
 	}
 	writeRefreshMarker(projectPath, Commit, Describe)
-	ensureGitignoreEntry(projectPath, ".agents-refresh")
+	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
 	ui.Bullet("ok", "Wrote .agents-refresh marker")
 }
 

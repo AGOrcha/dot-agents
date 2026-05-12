@@ -90,6 +90,9 @@ Build the feature and keep tests green.
 		t.Fatal(err)
 	}
 
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewCodex()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewCodex().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("CreateLinks failed: %v", err)
 	}

@@ -1,10 +1,14 @@
 package platform
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -25,6 +29,103 @@ func NewCopilot() Platform { return &copilot{} }
 
 func (c *copilot) ID() string          { return "copilot" }
 func (c *copilot) DisplayName() string { return "GitHub Copilot" }
+
+// SessionReader — no env var injects session ID during a Copilot CLI run.
+func (c *copilot) AIAgentPrefix() string              { return "copilot" }
+func (c *copilot) SessionEnvs() []string              { return nil }
+func (c *copilot) EntrypointEnvs() []string           { return nil }
+func (c *copilot) ResolveModel(_, _, _ string) string { return "" }
+
+// StatsReader — Copilot CLI session stats not exposed as a queryable local file.
+func (c *copilot) ReadUsageStats(_ string) *PlatformUsageStats { return nil }
+
+// SessionTokenScanner implementation.
+// Scans ~/.copilot/session-state/*/events.jsonl for session.shutdown events,
+// which carry per-model aggregate token totals. Per-turn counts are ephemeral
+// in the Copilot CLI (kept in memory for /usage only, never written to disk).
+// sessionID and projectPath are ignored — Copilot CLI publishes no session ID
+// env var; filtering is by events.jsonl mtime > afterTimestamp.
+func (c *copilot) ScanSessionTokens(home, _, _, afterTimestamp string) SessionTokenMetrics {
+	return copilotScanSessionTokens(home, afterTimestamp)
+}
+
+// copilotScanSessionTokens walks ~/.copilot/session-state/ for events.jsonl
+// files modified after afterTimestamp and sums the modelMetrics from
+// session.shutdown events. Fields are camelCase: inputTokens, outputTokens,
+// cacheReadTokens, cacheWriteTokens.
+func copilotScanSessionTokens(home, afterTimestamp string) SessionTokenMetrics {
+	stateDir := filepath.Join(home, ".copilot", "session-state")
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return SessionTokenMetrics{}
+	}
+
+	var after time.Time
+	if afterTimestamp != "" {
+		after, _ = time.Parse(time.RFC3339, afterTimestamp)
+	}
+
+	var m SessionTokenMetrics
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		eventsPath := filepath.Join(stateDir, e.Name(), "events.jsonl")
+		info, err := os.Stat(eventsPath)
+		if err != nil {
+			continue
+		}
+		if !after.IsZero() && !info.ModTime().After(after) {
+			continue
+		}
+		copilotAccumulateShutdownTokens(eventsPath, &m)
+	}
+	return m
+}
+
+// copilotAccumulateShutdownTokens reads a Copilot events.jsonl and adds the
+// modelMetrics from any session.shutdown event into m.
+func copilotAccumulateShutdownTokens(path string, m *SessionTokenMetrics) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte(`"session.shutdown"`)) {
+			continue
+		}
+		var event struct {
+			Type string `json:"type"`
+			Data struct {
+				ModelMetrics map[string]struct {
+					Usage struct {
+						InputTokens      int `json:"inputTokens"`
+						OutputTokens     int `json:"outputTokens"`
+						CacheReadTokens  int `json:"cacheReadTokens"`
+						CacheWriteTokens int `json:"cacheWriteTokens"`
+						ReasoningTokens  int `json:"reasoningTokens"`
+					} `json:"usage"`
+				} `json:"modelMetrics"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil || event.Type != "session.shutdown" {
+			continue
+		}
+		for _, mm := range event.Data.ModelMetrics {
+			m.InputTokens += mm.Usage.InputTokens
+			m.OutputTokens += mm.Usage.OutputTokens
+			m.CacheReadTokens += mm.Usage.CacheReadTokens
+			m.CacheCreationTokens += mm.Usage.CacheWriteTokens
+			m.ReasoningTokens += mm.Usage.ReasoningTokens
+			m.MessageCount++
+		}
+	}
+}
 
 func (c *copilot) IsInstalled() bool {
 	home, _ := os.UserHomeDir()
@@ -147,35 +248,12 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	return nil
 }
 
-func (c *copilot) createSkillsLinks(project, repoPath, agentsHome string) error {
-	return syncScopedDirSymlinksTargets(agentsHome, "skills", project, "SKILL.md", filepath.Join(repoPath, ".agents", "skills"))
+func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
+	return nil
 }
 
 func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error {
-	agentsTarget := filepath.Join(repoPath, copilotGitHubDir, "agents")
-	if err := os.MkdirAll(agentsTarget, 0755); err != nil {
-		return err
-	}
-	projectAgents := filepath.Join(agentsHome, "agents", project)
-	entries, err := os.ReadDir(projectAgents)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		agentDir := filepath.Join(projectAgents, e.Name())
-		if !links.IsDirEntry(agentDir) {
-			continue
-		}
-		agentMD := filepath.Join(agentDir, "AGENT.md")
-		if _, err := os.Stat(agentMD); err != nil {
-			continue
-		}
-		target := filepath.Join(agentsTarget, e.Name()+".agent.md")
-		if _, err := os.Lstat(target); err == nil {
-			continue
-		}
-		links.Symlink(agentMD, target)
-	}
+	// `.github/agents/*.agent.md` — symlinked from canonical AGENT.md by CollectAndExecuteSharedTargetPlan
 	return nil
 }
 
@@ -238,7 +316,7 @@ func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir strin
 }
 
 func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
-	specs, err := listHookSpecs(agentsHome, project)
+	specs, err := ListHookSpecs(agentsHome, project)
 	if err != nil {
 		return pruneManagedRenderedFanoutExtras(hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
 	}
@@ -344,4 +422,16 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) {
 			}
 		}
 	}
+}
+
+func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	if err != nil {
+		return nil, err
+	}
+	agents, err := BuildSharedAgentFileSymlinkIntents(project, filepath.Join(copilotGitHubDir, "agents"), ".agent.md")
+	if err != nil {
+		return nil, err
+	}
+	return append(skills, agents...), nil
 }

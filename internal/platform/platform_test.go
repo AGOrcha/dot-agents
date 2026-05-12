@@ -42,6 +42,9 @@ func TestOpenCodeCreateLinksUsesCanonicalAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewOpenCode()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewOpenCode().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("CreateLinks failed: %v", err)
 	}
@@ -83,6 +86,9 @@ func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := CollectAndExecuteSharedTargetPlan("proj", repo, []Platform{NewCodex()}); err != nil {
+		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
+	}
 	if err := NewCodex().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("CreateLinks failed: %v", err)
 	}
