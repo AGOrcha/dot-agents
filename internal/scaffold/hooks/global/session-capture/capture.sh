@@ -17,6 +17,7 @@ project_name() {
 }
 
 write_fallback_checkpoint() {
+  default_val="unknown"
   timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   project="$(project_name)"
   context_dir="$agents_home/context/$project"
@@ -25,13 +26,13 @@ write_fallback_checkpoint() {
 
   mkdir -p "$context_dir"
 
-  git_branch="unknown"
-  git_sha="unknown"
+  git_branch="$default_val"
+  git_sha="$default_val"
   dirty_count="0"
   modified_files=""
   if git -C "$project_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git_branch=$(git -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'unknown')
-    git_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+    git_branch=$(git -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s' "$default_val")
+    git_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || printf '%s' "$default_val")
     modified_files=$(git -C "$project_dir" status --short 2>/dev/null | sed 's/^...//' || true)
     dirty_count=$(printf '%s\n' "$modified_files" | sed '/^$/d' | wc -l | tr -d ' ')
   fi
@@ -67,7 +68,7 @@ write_fallback_checkpoint() {
     fi
     printf 'message: ""\n'
     printf 'verification:\n'
-    printf '  status: "unknown"\n'
+    printf '  status: "%s"\n' "$default_val"
     printf '  summary: ""\n'
     printf 'next_action: "%s"\n' "$next_action"
     printf 'blockers: []\n'
@@ -78,10 +79,11 @@ write_fallback_checkpoint() {
     printf 'branch: %s\n' "$git_branch"
     printf 'sha: %s\n' "$git_sha"
     printf 'files: %s\n' "$dirty_count"
-    printf 'verification: unknown\n'
+    printf 'verification: %s\n' "$default_val"
     printf 'message: \n'
     printf 'next_action: %s\n\n' "$next_action"
   } >>"$session_log_path"
+  return 0
 }
 
 main() {

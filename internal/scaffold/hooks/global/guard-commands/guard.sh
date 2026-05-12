@@ -5,7 +5,8 @@ set -eu
 payload="$(cat || true)"
 
 matches() {
-  printf '%s' "$payload" | grep -Fqi "$1"
+  needle="$1"
+  printf '%s' "$payload" | grep -Fqi "$needle"
 }
 
 forbidden=""

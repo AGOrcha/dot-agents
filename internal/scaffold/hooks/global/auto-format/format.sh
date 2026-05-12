@@ -36,6 +36,8 @@ case "$file_path" in
   *.rs)
     run_if_available rustfmt rustfmt "$file_path"
     ;;
+  *)
+    ;;
 esac
 
 exit 0

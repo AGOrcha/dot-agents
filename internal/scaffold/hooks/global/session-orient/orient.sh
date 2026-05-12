@@ -17,18 +17,19 @@ project_name() {
 }
 
 print_fallback_orient() {
+  default_val="unknown"
   project="$(project_name)"
   checkpoint_path="$agents_home/context/$project/checkpoint.yaml"
   session_proposals_dir="$agents_home/proposals"
 
-  git_branch="unknown"
-  git_sha="unknown"
+  git_branch="$default_val"
+  git_sha="$default_val"
   dirty_count="0"
   recent_commits=""
   warnings=""
   if git -C "$project_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git_branch=$(git -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'unknown')
-    git_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+    git_branch=$(git -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s' "$default_val")
+    git_sha=$(git -C "$project_dir" rev-parse --short HEAD 2>/dev/null || printf '%s' "$default_val")
     dirty_count=$(git -C "$project_dir" status --short 2>/dev/null | wc -l | tr -d ' ')
     recent_commits=$(git -C "$project_dir" log --oneline -5 2>/dev/null || true)
   else
@@ -105,10 +106,10 @@ print_fallback_orient() {
 
   printf '# Last Checkpoint\n\n'
   if [ -f "$checkpoint_path" ]; then
-    printf -- '- timestamp: %s\n' "${checkpoint_timestamp:-unknown}"
-    printf -- '- branch: %s\n' "${checkpoint_branch:-unknown}"
-    printf -- '- sha: %s\n' "${checkpoint_sha:-unknown}"
-    printf -- '- verification: %s\n' "${checkpoint_verification:-unknown}"
+    printf -- '- timestamp: %s\n' "${checkpoint_timestamp:-$default_val}"
+    printf -- '- branch: %s\n' "${checkpoint_branch:-$default_val}"
+    printf -- '- sha: %s\n' "${checkpoint_sha:-$default_val}"
+    printf -- '- verification: %s\n' "${checkpoint_verification:-$default_val}"
     if [ -n "${checkpoint_summary:-}" ]; then
       printf -- '- summary: %s\n' "$checkpoint_summary"
     fi
@@ -172,6 +173,7 @@ print_fallback_orient() {
     printf '\n# Warnings\n\n'
     printf '%s' "$warnings" | sed '/^$/d; s/^/- /'
   fi
+  return 0
 }
 
 main() {

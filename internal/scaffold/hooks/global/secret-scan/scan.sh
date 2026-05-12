@@ -15,6 +15,8 @@ case "$file_path" in
   *.md|*.mdc|*.env.example|*_test.*)
     exit 0
     ;;
+  *)
+    ;;
 esac
 
 if grep -E 'sk-ant-api|AKIA[0-9A-Z]{16}|gh[pso]_|sk_live_|sk_test_|sk-[a-zA-Z0-9]{20,}' "$file_path" 2>/dev/null | \

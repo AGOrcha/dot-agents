@@ -12,6 +12,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+const fmtIndentedLine = "  %s\n\n"
+
 const reviewProposalIDHint = "Pass the proposal ID from `da review`."
 
 func NewReviewCmd() *cobra.Command {
@@ -89,7 +91,7 @@ func runReviewList() error {
 	for _, proposal := range proposals {
 		fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Bold, proposal.ID, ui.Reset)
 		fmt.Fprintf(os.Stdout, "  %s%s%s  %s%s%s  %s\n", ui.Cyan, proposal.Type, ui.Reset, ui.Dim, proposal.Action, ui.Reset, proposal.Target)
-		fmt.Fprintf(os.Stdout, "  %s\n\n", oneLine(proposal.Rationale))
+		fmt.Fprintf(os.Stdout, fmtIndentedLine, oneLine(proposal.Rationale))
 	}
 	return nil
 }
@@ -148,7 +150,7 @@ func runReviewApprove(id string) error {
 	}
 
 	ui.Success("Proposal approved")
-	fmt.Fprintf(os.Stdout, "  %s\n\n", proposal.ID)
+	fmt.Fprintf(os.Stdout, fmtIndentedLine, proposal.ID)
 	return nil
 }
 
@@ -168,7 +170,7 @@ func runReviewReject(id, reason string) error {
 		return err
 	}
 	ui.Success("Proposal rejected")
-	fmt.Fprintf(os.Stdout, "  %s\n\n", proposal.ID)
+	fmt.Fprintf(os.Stdout, fmtIndentedLine, proposal.ID)
 	return nil
 }
 
