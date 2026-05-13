@@ -94,6 +94,12 @@ jobs:
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="${GO_COVERAGE_FILE}" ./...
 
+      - name: Coverage gate (95% per package)
+        env:
+          COVERAGE_FILE: ${{ env.GO_COVERAGE_FILE }}
+          COVERAGE_THRESHOLD: '95'
+        run: bash scripts/coverage-gate.sh
+
       - name: Build CLI
         run: go build -o ./bin/da ./cmd/dot-agents
 
