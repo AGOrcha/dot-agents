@@ -587,6 +587,20 @@ func TestPrintPluginsSection_NoPlugins(t *testing.T) {
 	printPluginsSection(tmp)
 }
 
+func TestPrintPluginsSection_WithPlugins(t *testing.T) {
+	tmp := t.TempDir()
+	pluginDir := filepath.Join(tmp, "plugins", "scope1", "demo")
+	os.MkdirAll(pluginDir, 0755)
+	os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: demo\nplatforms: [opencode]\n"), 0644)
+	// Also a global plugin (no scope dir name; let's add another)
+	globalDir := filepath.Join(tmp, "plugins", "global", "another")
+	os.MkdirAll(globalDir, 0755)
+	os.WriteFile(filepath.Join(globalDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: another\nplatforms: [opencode]\n"), 0644)
+	printPluginsSection(tmp)
+}
+
 // printStatusProjectManifestSummary: covers manifest missing + manifest present.
 func TestPrintStatusProjectManifestSummary_NoManifest(t *testing.T) {
 	tmp := t.TempDir()

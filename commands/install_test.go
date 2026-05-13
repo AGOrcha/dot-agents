@@ -3,9 +3,11 @@ package commands
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
@@ -911,6 +913,290 @@ func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
 	defer func() { Flags = saved }()
 	// With no platforms installed at all, projection still completes (warn path).
 	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+}
+
+// ---------- git source helpers (fetch / clone / update) ----------
+
+func requireGitOrSkip(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+}
+
+// runGitCmd runs a git command in dir, failing the test on error.
+func runGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// ensureGoodCWD restores cwd to a valid directory in case an earlier test
+// in the package chdir'd into a temp dir that's already cleaned up. Other
+// tests register chdir cleanup that resolves *after* their t.TempDir()
+// cleanup runs, leaving subsequent subprocess execs without a valid cwd.
+// We chdir to a long-lived directory (the OS temp root) so the subprocess
+// has a valid cwd for the duration of the run.
+func ensureGoodCWD(t *testing.T) {
+	t.Helper()
+	prev, _ := os.Getwd()
+	if err := os.Chdir(os.TempDir()); err != nil {
+		t.Fatalf("chdir to os.TempDir: %v", err)
+	}
+	if prev != "" {
+		t.Cleanup(func() { _ = os.Chdir(prev) })
+	}
+}
+
+// makeBareGitFixture creates a bare repo at tmp/remote.git seeded with one
+// commit, and returns its absolute path along with the seed commit's first
+// file name. The bare repo is suitable as an `src.URL` argument.
+func makeBareGitFixture(t *testing.T) string {
+	t.Helper()
+	requireGitOrSkip(t)
+	ensureGoodCWD(t)
+	tmp := t.TempDir()
+	bare := filepath.Join(tmp, "remote.git")
+	if err := os.MkdirAll(bare, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, bare, "init", "--bare", "-q", "--initial-branch=main")
+
+	// Seed via a working clone.
+	work := filepath.Join(tmp, "work")
+	runGitCmd(t, tmp, "clone", "-q", bare, work)
+	runGitCmd(t, work, "config", "user.name", "Test")
+	runGitCmd(t, work, "config", "user.email", "test@example.com")
+	os.WriteFile(filepath.Join(work, "README.md"), []byte("# seed\n"), 0644)
+	runGitCmd(t, work, "add", "README.md")
+	runGitCmd(t, work, "commit", "-q", "-m", "seed")
+	runGitCmd(t, work, "push", "-q", "origin", "HEAD:main")
+
+	return bare
+}
+
+func TestFetchGitSource_ClonesIntoEmptyCache(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	cacheDir, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("fetchGitSource: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); err != nil {
+		t.Errorf("expected .git in cache: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "README.md")); err != nil {
+		t.Errorf("expected README.md in cache: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, ".last-fetch")); err != nil {
+		t.Errorf("expected .last-fetch marker: %v", err)
+	}
+}
+
+func TestFetchGitSource_UsesFreshCache(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	// Prime cache.
+	first, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("priming clone: %v", err)
+	}
+	// Mark a sentinel file so we know cache wasn't replaced.
+	sentinel := filepath.Join(first, "_sentinel")
+	os.WriteFile(sentinel, []byte("kept"), 0644)
+
+	second, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("second fetch: %v", err)
+	}
+	if second != first {
+		t.Errorf("cache dir changed: %q vs %q", first, second)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("sentinel removed → cache was rebuilt: %v", err)
+	}
+}
+
+func TestFetchGitSource_StaleCacheTriggersUpdate(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	saved := Flags
+	Flags = GlobalFlags{Verbose: true} // exercises the verbose log branch in updateCachedGitSource
+	defer func() { Flags = saved }()
+
+	first, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("priming clone: %v", err)
+	}
+	// Backdate .last-fetch so the cache is considered stale.
+	stale := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(filepath.Join(first, ".last-fetch"), stale, stale)
+
+	second, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("update fetch: %v", err)
+	}
+	if second != first {
+		t.Errorf("cache dir changed after update: %q vs %q", first, second)
+	}
+	info, err := os.Stat(filepath.Join(second, ".last-fetch"))
+	if err != nil || info.ModTime().Before(time.Now().Add(-30*time.Second)) {
+		t.Errorf("expected .last-fetch refreshed after update: %v info=%+v", err, info)
+	}
+}
+
+func TestFetchGitSource_StaleCacheDryRunSkipsUpdate(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	// Prime cache (non-dry-run).
+	saved := Flags
+	Flags = GlobalFlags{}
+	first, err := fetchGitSource(bare, "main")
+	if err != nil {
+		Flags = saved
+		t.Fatalf("priming clone: %v", err)
+	}
+	stale := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(filepath.Join(first, ".last-fetch"), stale, stale)
+
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	second, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("dry-run update: %v", err)
+	}
+	if second != first {
+		t.Errorf("cache dir changed during dry-run: %q vs %q", first, second)
+	}
+	// .last-fetch should still be stale because dry-run skipped update.
+	info, err := os.Stat(filepath.Join(second, ".last-fetch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(info.ModTime()) < time.Hour {
+		t.Errorf("dry-run should not refresh .last-fetch, got modtime %v", info.ModTime())
+	}
+}
+
+func TestFetchGitSource_DryRunCloneSkipsFilesystem(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	cacheDir, err := fetchGitSource(bare, "main")
+	if err != nil {
+		t.Fatalf("dry-run clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); err == nil {
+		t.Error("dry-run should not have cloned the repo")
+	}
+}
+
+func TestCloneGitSource_FailureCleansUpCacheDir(t *testing.T) {
+	requireGitOrSkip(t)
+	gitBin, _ := exec.LookPath("git")
+
+	cacheRoot := t.TempDir()
+	cacheDir := filepath.Join(cacheRoot, "should-be-removed")
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	bogusURL := filepath.Join(t.TempDir(), "does-not-exist.git")
+	_, err := cloneGitSource(gitBin, bogusURL, "main", cacheDir)
+	if err == nil {
+		t.Fatal("expected clone failure")
+	}
+	if _, statErr := os.Stat(cacheDir); statErr == nil {
+		t.Error("cacheDir should be removed after clone failure")
+	}
+}
+
+func TestUpdateCachedGitSource_RemoteAbsentLogsWarning(t *testing.T) {
+	requireGitOrSkip(t)
+	gitBin, _ := exec.LookPath("git")
+	tmp := t.TempDir()
+	// Working git repo, but with no remote configured.
+	runGitCmd(t, tmp, "init", "-q", "-b", "main", tmp)
+	runGitCmd(t, tmp, "config", "user.name", "Test")
+	runGitCmd(t, tmp, "config", "user.email", "test@example.com")
+	os.WriteFile(filepath.Join(tmp, "a"), []byte("a"), 0644)
+	runGitCmd(t, tmp, "add", "a")
+	runGitCmd(t, tmp, "commit", "-q", "-m", "x")
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	// Should not panic; logs warn and returns. .last-fetch is NOT created when pull fails.
+	updateCachedGitSource(gitBin, tmp, "irrelevant")
+	if _, err := os.Stat(filepath.Join(tmp, ".last-fetch")); err == nil {
+		t.Error("failed pull should not touch .last-fetch")
+	}
+}
+
+func TestResolveSourceRoot_GitSucceedsWithBareFixture(t *testing.T) {
+	requireGitOrSkip(t)
+	bare := makeBareGitFixture(t)
+
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	root, err := resolveSourceRoot(config.Source{Type: "git", URL: bare, Ref: "main"})
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if root == "" {
+		t.Error("expected non-empty cache dir")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		t.Errorf("expected cache root to contain a clone: %v", err)
+	}
 }
 
 // ---------- helpers ----------

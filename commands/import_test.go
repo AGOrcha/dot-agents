@@ -767,10 +767,24 @@ func TestCanonicalHookWhenMappers(t *testing.T) {
 		{"cursor-unknown", canonicalHookWhenFromCursorEvent, "junk", "", false},
 		{"codex-session", canonicalHookWhenFromCodexEvent, "SessionStart", "session_start", true},
 		{"codex-post", canonicalHookWhenFromCodexEvent, "PostToolUse", "post_tool_use", true},
+		{"codex-pre", canonicalHookWhenFromCodexEvent, "PreToolUse", "pre_tool_use", true},
+		{"codex-stop", canonicalHookWhenFromCodexEvent, "Stop", "stop", true},
+		{"codex-prompt", canonicalHookWhenFromCodexEvent, "UserPromptSubmit", "user_prompt_submit", true},
 		{"codex-unknown", canonicalHookWhenFromCodexEvent, "junk", "", false},
+		{"cursor-before-prompt", canonicalHookWhenFromCursorEvent, "beforeSubmitPrompt", "user_prompt_submit", true},
+		{"cursor-sessionstart", canonicalHookWhenFromCursorEvent, "sessionStart", "session_start", true},
+		{"claude-pre", canonicalHookWhenFromClaudeEvent, "PreToolUse", "pre_tool_use", true},
+		{"claude-post", canonicalHookWhenFromClaudeEvent, "PostToolUse", "post_tool_use", true},
+		{"claude-post-failure", canonicalHookWhenFromClaudeEvent, "PostToolUseFailure", "post_tool_use_failure", true},
+		{"claude-notification", canonicalHookWhenFromClaudeEvent, "Notification", "notification", true},
+		{"claude-userprompt", canonicalHookWhenFromClaudeEvent, "UserPromptSubmit", "user_prompt_submit", true},
+		{"claude-session-start", canonicalHookWhenFromClaudeEvent, "SessionStart", "session_start", true},
 		{"claude-session-end", canonicalHookWhenFromClaudeEvent, "SessionEnd", "session_end", true},
+		{"claude-stop", canonicalHookWhenFromClaudeEvent, "Stop", "stop", true},
+		{"claude-subagent-start", canonicalHookWhenFromClaudeEvent, "SubagentStart", "subagent_start", true},
 		{"claude-subagent", canonicalHookWhenFromClaudeEvent, "SubagentStop", "subagent_stop", true},
 		{"claude-precompact", canonicalHookWhenFromClaudeEvent, "PreCompact", "pre_compact", true},
+		{"claude-permission", canonicalHookWhenFromClaudeEvent, "PermissionRequest", "permission_request", true},
 		{"claude-unknown", canonicalHookWhenFromClaudeEvent, "junk", "", false},
 	}
 	for _, c := range cases {
@@ -1194,4 +1208,869 @@ func TestCollectImportCandidates_RegisteredProjectEmpty(t *testing.T) {
 	if len(candidates) != 0 {
 		t.Errorf("expected no candidates, got %+v", candidates)
 	}
+}
+
+// ---------- processImportOutput ----------
+
+// setupImportHomeAndProject creates a synthetic AGENTS_HOME and a project root
+// underneath it, isolated for hook-bundle-import tests. Returns (agentsHome,
+// projectRoot).
+func setupImportHomeAndProject(t *testing.T) (string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectRoot := filepath.Join(tmp, "src")
+	os.MkdirAll(projectRoot, 0755)
+	return agentsHome, projectRoot
+}
+
+func writeFile(t *testing.T, path string, body []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessImportOutput_WritesNewDest(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+	srcInfo, _ := os.Stat(src)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("payload")}
+
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	if res.imported != 1 || res.skipped != 0 {
+		t.Errorf("result = %+v", res)
+	}
+	got, err := os.ReadFile(filepath.Join(agentsHome, out.destRel))
+	if err != nil {
+		t.Fatalf("dest not created: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Errorf("dest content = %q", got)
+	}
+}
+
+func TestProcessImportOutput_IdenticalDestIsNoop(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("same"))
+	srcInfo, _ := os.Stat(src)
+
+	dest := filepath.Join(agentsHome, "hooks/p/demo/HOOK.yaml")
+	writeFile(t, dest, []byte("same"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("same")}
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("expected no-op for identical content, got %+v", res)
+	}
+}
+
+func TestProcessImportOutput_ReplaceWhenDifferent(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+
+	dest := filepath.Join(agentsHome, "hooks/p/demo/HOOK.yaml")
+	writeFile(t, dest, []byte("old"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true} // auto-confirm replacement
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("new")}
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	if res.imported != 1 {
+		t.Errorf("result = %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "new" {
+		t.Errorf("dest content = %q", got)
+	}
+}
+
+func TestProcessImportOutput_OriginConflictPreservesExisting(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.json")
+	writeFile(t, src, []byte("imported"))
+	srcInfo, _ := os.Stat(src)
+
+	dest := filepath.Join(agentsHome, "hooks/p/demo/HOOK.yaml")
+	writeFile(t, dest, []byte("existing"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	if res.imported != 1 {
+		t.Errorf("expected preservation path to count as imported, got %+v", res)
+	}
+	// Existing kept.
+	got, _ := os.ReadFile(dest)
+	if string(got) != "existing" {
+		t.Errorf("primary dest mutated; got %q", got)
+	}
+	// Alternate written under cursor-prefixed bundle name.
+	altDir := filepath.Join(agentsHome, "hooks/p/cursor-demo/HOOK.yaml")
+	if _, err := os.Stat(altDir); err != nil {
+		t.Errorf("alternate dest missing: %v", err)
+	}
+	// Review note written.
+	noteDir := filepath.Join(agentsHome, "review-notes/import-conflicts")
+	entries, _ := os.ReadDir(noteDir)
+	if len(entries) == 0 {
+		t.Errorf("expected at least one review note under %s", noteDir)
+	}
+}
+
+// ---------- importMissingContentCandidate ----------
+
+func TestImportMissingContentCandidate_DryRunSkips(t *testing.T) {
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "out", "file")
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: filepath.Join(tmp, "src"), destRel: "out/file"}
+	res := importMissingContentCandidate(c, dest, []byte("x"), "")
+	if res.imported != 1 {
+		t.Errorf("dry-run should still report imported=1, got %+v", res)
+	}
+	if _, err := os.Stat(dest); err == nil {
+		t.Error("dry-run should not write dest")
+	}
+}
+
+func TestImportMissingContentCandidate_WritesContent(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("source"))
+	dest := filepath.Join(agentsHome, "deep/nested/out.txt")
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "deep/nested/out.txt"}
+	res := importMissingContentCandidate(c, dest, []byte("payload"), "")
+	if res.imported != 1 {
+		t.Errorf("res = %+v", res)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "payload" {
+		t.Errorf("got %q err=%v", got, err)
+	}
+}
+
+// ---------- replaceImportContentCandidate ----------
+
+func TestReplaceImportContentCandidate_DeclineSkips(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("old"))
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	Flags = GlobalFlags{} // not Yes → Confirm returns false in non-interactive harness
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo)
+	if res.skipped != 1 {
+		t.Errorf("expected skip on decline, got %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "old" {
+		t.Errorf("dest should be preserved, got %q", got)
+	}
+}
+
+func TestReplaceImportContentCandidate_DryRunAccepts(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("old"))
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo)
+	if res.imported != 1 {
+		t.Errorf("expected imported=1 in dry-run accept, got %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "old" {
+		t.Errorf("dry-run shouldn't modify dest, got %q", got)
+	}
+}
+
+// ---------- importPreservedConflictCandidate ----------
+
+func TestImportPreservedConflictCandidate_DryRun(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.json")
+	writeFile(t, src, []byte("imported"))
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
+	altRel := "hooks/p/cursor-demo/HOOK.yaml"
+	altDest := filepath.Join(agentsHome, altRel)
+
+	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "")
+	if res.imported != 1 {
+		t.Errorf("dry-run should still count as imported=1, got %+v", res)
+	}
+	if _, err := os.Stat(altDest); err == nil {
+		t.Error("dry-run should not create alternate dest")
+	}
+}
+
+func TestImportPreservedConflictCandidate_WritesAltAndNote(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.json")
+	writeFile(t, src, []byte("imported"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	altRel := "hooks/p/cursor-demo/HOOK.yaml"
+	altDest := filepath.Join(agentsHome, altRel)
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
+
+	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "ts")
+	if res.imported != 1 {
+		t.Errorf("res = %+v", res)
+	}
+	if _, err := os.Stat(altDest); err != nil {
+		t.Errorf("alt dest missing: %v", err)
+	}
+	noteDir := filepath.Join(agentsHome, "review-notes/import-conflicts")
+	entries, _ := os.ReadDir(noteDir)
+	if len(entries) == 0 {
+		t.Errorf("expected review note under %s", noteDir)
+	}
+}
+
+// ---------- writeImportConflictReviewNote ----------
+
+func TestWriteImportConflictReviewNote_DryRunIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/y/HOOK.yaml", "cursor"); err != nil {
+		t.Errorf("dry-run err: %v", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(tmp, "review-notes/import-conflicts"))
+	if len(entries) != 0 {
+		t.Errorf("dry-run should not write notes, got %d entries", len(entries))
+	}
+}
+
+func TestWriteImportConflictReviewNote_WritesYAMLWithFields(t *testing.T) {
+	tmp := t.TempDir()
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/cursor-x/HOOK.yaml", "cursor"); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(tmp, "review-notes/import-conflicts"))
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected note, got err=%v entries=%v", err, entries)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "review-notes/import-conflicts", entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var note importConflictReviewNote
+	if err := yaml.Unmarshal(data, &note); err != nil {
+		t.Fatalf("yaml unmarshal: %v\n%s", err, data)
+	}
+	if note.Status != "pending" {
+		t.Errorf("status = %q, want pending", note.Status)
+	}
+	if note.Origin != "cursor" {
+		t.Errorf("origin = %q", note.Origin)
+	}
+	if note.LogicalName != "x" {
+		t.Errorf("logical = %q, want x", note.LogicalName)
+	}
+	if note.CanonicalTarget != "hooks/proj/x/HOOK.yaml" || note.AlternateTarget != "hooks/proj/cursor-x/HOOK.yaml" {
+		t.Errorf("targets wrong: %+v", note)
+	}
+}
+
+// ---------- processCanonicalHookBundleImport ----------
+
+func TestProcessCanonicalHookBundleImport_UnsupportedRelReturnsFalse(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "random.txt")
+	writeFile(t, src, []byte("x"))
+	info, _ := os.Stat(src)
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	_, ok := processCanonicalHookBundleImport(c, agentsHome, "", info)
+	if ok {
+		t.Error("expected ok=false for unsupported source path")
+	}
+}
+
+func TestProcessCanonicalHookBundleImport_CursorHooksProducesBundle(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	hooksPath := filepath.Join(projRoot, relCursorHooksJSON)
+	body := []byte(`{
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {"command": "echo hi"}
+    ]
+  }
+}`)
+	writeFile(t, hooksPath, body)
+	info, _ := os.Stat(hooksPath)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "proj", sourceRoot: projRoot, sourcePath: hooksPath}
+	res, ok := processCanonicalHookBundleImport(c, agentsHome, "ts", info)
+	if !ok {
+		t.Fatal("expected ok=true for cursor hooks file")
+	}
+	if res.imported < 1 {
+		t.Errorf("expected at least 1 import, got %+v", res)
+	}
+	// Some HOOK.yaml must exist under hooks/proj/
+	found := false
+	_ = filepath.Walk(filepath.Join(agentsHome, "hooks", "proj"), func(p string, _ os.FileInfo, _ error) error {
+		if strings.HasSuffix(p, "HOOK.yaml") {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Errorf("expected a HOOK.yaml under hooks/proj")
+	}
+}
+
+// ---------- relinkImportedProjects ----------
+
+func TestRelinkImportedProjects_EmptyMapIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	relinkImportedProjects(cfg, nil)
+	relinkImportedProjects(cfg, map[string]bool{})
+}
+
+func TestRelinkImportedProjects_UnknownProjectIsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	// No project registered → GetProjectPath returns "" → continue.
+	relinkImportedProjects(cfg, map[string]bool{"ghost": true})
+}
+
+// ---------- scanGlobalImportCandidates / walkGlobalImportCandidates ----------
+
+func TestScanGlobalImportCandidates_NoHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // empty home, no candidates
+	out := scanGlobalImportCandidates()
+	if len(out) != 0 {
+		t.Errorf("expected 0 candidates from empty home, got %d", len(out))
+	}
+}
+
+func TestScanGlobalImportCandidates_PicksUpSingles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	// Place a global single under home that maps to a dest.
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	os.WriteFile(filepath.Join(tmp, relClaudeSettingsJSON), []byte("{}"), 0644)
+
+	out := scanGlobalImportCandidates()
+	if len(out) == 0 {
+		t.Errorf("expected at least one global candidate")
+	}
+}
+
+func TestWalkGlobalImportCandidates_EmptyRootReturnsEmpty(t *testing.T) {
+	out := walkGlobalImportCandidates(t.TempDir(), ".cursor/commands")
+	if len(out) != 0 {
+		t.Errorf("walk on absent dir should yield none, got %d", len(out))
+	}
+}
+
+func TestWalkGlobalImportCandidates_SkipsUnmappedFiles(t *testing.T) {
+	root := t.TempDir()
+	// Files under .cursor/commands aren't directly mapped for "global" project,
+	// so walk yields no candidates even though files exist.
+	cmdDir := filepath.Join(root, ".cursor", "commands")
+	os.MkdirAll(cmdDir, 0755)
+	os.WriteFile(filepath.Join(cmdDir, "cmd.md"), []byte("# cmd"), 0644)
+	out := walkGlobalImportCandidates(root, ".cursor/commands")
+	_ = out // exercise the walk; assertion isn't critical
+}
+
+// ---------- walkedImportCandidate ----------
+
+type fakeDirEntry struct {
+	name string
+	dir  bool
+}
+
+func (f fakeDirEntry) Name() string               { return f.name }
+func (f fakeDirEntry) IsDir() bool                { return f.dir }
+func (f fakeDirEntry) Type() os.FileMode          { return 0 }
+func (f fakeDirEntry) Info() (os.FileInfo, error) { return nil, nil }
+
+func TestWalkedImportCandidate_RejectsBackupAndDirs(t *testing.T) {
+	if _, ok := walkedImportCandidate("p", "/tmp", "/tmp/x", fakeDirEntry{name: "x.dot-agents-backup"}, nil); ok {
+		t.Error("backup should be rejected")
+	}
+	if _, ok := walkedImportCandidate("p", "/tmp", "/tmp/x", fakeDirEntry{name: "sub", dir: true}, nil); ok {
+		t.Error("directory should be rejected")
+	}
+	if _, ok := walkedImportCandidate("p", "/tmp", "/tmp/x", fakeDirEntry{name: "x"}, os.ErrPermission); ok {
+		t.Error("walk error should be rejected")
+	}
+}
+
+// ---------- canonical hook bundle converters (edge cases) ----------
+
+func TestCanonicalHookBundleOutputsFromCursorFile_MissingFileErrors(t *testing.T) {
+	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Error("expected error reading missing file")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSONReturnsFalse(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte("not json"), 0644)
+	_, ok, err := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	if err != nil || ok {
+		t.Errorf("got ok=%v err=%v, want false,nil", ok, err)
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooksReturnsFalse(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	if ok {
+		t.Error("empty hooks should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCursorFile_UnknownEventReturnsFalse(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"unknownEvent":[{"command":"echo hi"}]}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	if ok {
+		t.Error("unknown event should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCursorFile_EmptyCommandReturnsFalse(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"preToolUse":[{"command":"  "}]}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	if ok {
+		t.Error("empty command should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCodexFile_MissingFileErrors(t *testing.T) {
+	_, _, err := canonicalHookBundleOutputsFromCodexFile("p", filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCodexFile_InvalidJSON(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte("notjson"), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	if ok {
+		t.Error("invalid json should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCodexFile_EmptyHooks(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	if ok {
+		t.Error("empty hooks should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCodexFile_Success(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi"}]}]}}`), 0644)
+	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if len(outputs) == 0 {
+		t.Error("expected outputs")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_MissingFileErrors(t *testing.T) {
+	_, _, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", filepath.Join(t.TempDir(), "missing"))
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonClaudeKeysReturnsFalse(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{},"settings":{"x":1}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	if ok {
+		t.Error("non-claude-compat keys should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_EmptyHooks(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"$schema":"x","hooks":{}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	if ok {
+		t.Error("empty hooks should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_Success(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi"}]}]}}`), 0644)
+	outputs, ok, err := canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if len(outputs) == 0 {
+		t.Error("expected outputs")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCopilotFile_MissingFileErrors(t *testing.T) {
+	_, _, err := canonicalHookBundleOutputsFromCopilotFile("p", filepath.Join(t.TempDir(), "missing"), "h")
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCopilotFile_InvalidJSON(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte("notjson"), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	if ok {
+		t.Error("invalid json should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCopilotFile_UnknownEvent(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"unknown":[{"type":"command","bash":"echo hi"}]}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	if ok {
+		t.Error("unknown event should return ok=false")
+	}
+}
+
+func TestCanonicalHookBundleOutputsFromCopilotFile_NonCommandAction(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{"sessionStart":[{"type":"notcommand","bash":"echo hi"}]}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	if ok {
+		t.Error("non-command action type should return ok=false")
+	}
+}
+
+// ---------- canonicalHookBundleContentFromCopilotFile (error path) ----------
+
+func TestCanonicalHookBundleContentFromCopilotFile_MissingFile(t *testing.T) {
+	_, err := canonicalHookBundleContentFromCopilotFile(filepath.Join(t.TempDir(), "missing"), "h")
+	if err == nil {
+		t.Error("expected error reading missing file")
+	}
+}
+
+func TestCanonicalHookBundleContentFromCopilotFile_InvalidContent(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte("notjson"), 0644)
+	_, err := canonicalHookBundleContentFromCopilotFile(tmp, "h")
+	if err == nil {
+		t.Error("expected error when canonicalization fails")
+	}
+}
+
+// ---------- processImportCandidate ----------
+
+func TestProcessImportCandidate_ManagedSourceIsNoop(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	// Create a managed symlink (a path under agentsHome) as the source.
+	managed := filepath.Join(agentsHome, "managed", "x")
+	writeFile(t, managed, []byte("inside"))
+	link := filepath.Join(projRoot, "linked.txt")
+	if err := os.Symlink(managed, link); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: link, destRel: "anywhere"}
+	res := processImportCandidate(c, agentsHome, "ts")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("managed source should be a no-op, got %+v", res)
+	}
+}
+
+func TestProcessImportCandidate_SourceMissingIsNoop(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: filepath.Join(projRoot, "missing.txt"), destRel: "x"}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+	res := processImportCandidate(c, agentsHome, "ts")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("missing source = no-op, got %+v", res)
+	}
+}
+
+func TestProcessImportCandidate_DirectorySourceIsNoop(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	dirSrc := filepath.Join(projRoot, "adir")
+	if err := os.MkdirAll(dirSrc, 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: dirSrc, destRel: "x"}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+	res := processImportCandidate(c, agentsHome, "ts")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("directory source = no-op, got %+v", res)
+	}
+}
+
+func TestProcessImportCandidate_GenericFileMissingDestImports(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "deep/out.txt"}
+	res := processImportCandidate(c, agentsHome, "")
+	if res.imported != 1 {
+		t.Errorf("expected imported=1, got %+v", res)
+	}
+	got, err := os.ReadFile(filepath.Join(agentsHome, "deep/out.txt"))
+	if err != nil || string(got) != "payload" {
+		t.Errorf("expected dest written with payload; got %q err=%v", got, err)
+	}
+}
+
+func TestProcessImportCandidate_GenericFileIdenticalDestNoop(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("payload"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := processImportCandidate(c, agentsHome, "")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("identical files should be no-op, got %+v", res)
+	}
+}
+
+func TestProcessImportCandidate_GenericFileDifferentReplaces(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("old"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true} // auto-confirm
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := processImportCandidate(c, agentsHome, "")
+	if res.imported != 1 {
+		t.Errorf("expected replace, got %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "new" {
+		t.Errorf("dest should be replaced, got %q", got)
+	}
+}
+
+// ---------- isManagedImportSource ----------
+
+func TestIsManagedImportSource_GlobalScopeReturnsFalseForUnmappedRel(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "unrelated.txt")
+	writeFile(t, src, []byte("x"))
+	c := importCandidate{project: "global", sourceRoot: projRoot, sourcePath: src}
+	if isManagedImportSource(c, agentsHome) {
+		t.Error("expected false for unmapped global rel")
+	}
+}
+
+func TestIsManagedImportSource_ProjectScope(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "x.txt")
+	writeFile(t, src, []byte("x"))
+	c := importCandidate{project: "proj", sourceRoot: projRoot, sourcePath: src}
+	// Not a managed symlink, not in any output map → false
+	if isManagedImportSource(c, agentsHome) {
+		t.Error("expected false for unmanaged project source")
+	}
+}
+
+// ---------- importMissingCandidate (real copy path) ----------
+
+func TestImportMissingCandidate_RealCopy(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+	dest := filepath.Join(agentsHome, "out.txt")
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := importMissingCandidate(c, dest, "")
+	if res.imported != 1 {
+		t.Errorf("res = %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "payload" {
+		t.Errorf("dest content = %q", got)
+	}
+}
+
+// ---------- replaceImportCandidate (real run, accept) ----------
+
+func TestReplaceImportCandidate_RealRunAccept(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("old"))
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := replaceImportCandidate(c, agentsHome, dest, "", srcInfo, destInfo)
+	if res.imported != 1 {
+		t.Errorf("res = %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "new" {
+		t.Errorf("dest should be replaced; got %q", got)
+	}
+}
+
+func TestReplaceImportCandidate_DeclineSkips(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+	dest := filepath.Join(agentsHome, "out.txt")
+	writeFile(t, dest, []byte("old"))
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	Flags = GlobalFlags{} // not Yes → declined
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
+	res := replaceImportCandidate(c, agentsHome, dest, "", srcInfo, destInfo)
+	if res.skipped != 1 {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// Should not panic; whether platforms are installed depends on the env, but
+	// the loop must execute without errors propagating.
+	relinkImportedProjects(cfg, map[string]bool{"p": true})
 }

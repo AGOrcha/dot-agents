@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -440,6 +441,360 @@ func TestGatherDirectPackagePluginCandidates_DirRefCollectsFiles(t *testing.T) {
 	candidates := gatherDirectPackagePluginCandidates("proj", projectPath)
 	if len(candidates) != 2 {
 		t.Fatalf("expected 2 candidates from agents dir, got %d: %#v", len(candidates), candidates)
+	}
+}
+
+// ---------- packagePluginLayoutKind (extended cases) ----------
+
+func TestPackagePluginLayoutKind_AllSwitchArms(t *testing.T) {
+	cases := []struct {
+		rel        string
+		rootPrefix string
+		want       string
+	}{
+		{".claude-plugin/plugin.json", ".claude-plugin/", packagePluginManifestFile},
+		{".claude-plugin/marketplace.json", ".claude-plugin/", packagePluginMarketplaceFile},
+		{".claude-plugin/commands/plugin.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/agents/plugin.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/skills/plugin.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/hooks/plugin.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/rules/plugin.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/mcp.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/.mcp.json", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/commands/x.md", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/agents/x.md", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/skills/SKILL.md", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/hooks/h.yaml", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/rules/r.md", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/mcp/x", ".claude-plugin/", packagePluginComponentFile},
+		{".claude-plugin/other.txt", ".claude-plugin/", packagePluginOverlayFile},
+		{".claude-plugin/", ".claude-plugin/", ""},
+	}
+	for _, c := range cases {
+		got := packagePluginLayoutKind(c.rel, c.rootPrefix)
+		if got != c.want {
+			t.Errorf("packagePluginLayoutKind(%q, %q) = %q, want %q", c.rel, c.rootPrefix, got, c.want)
+		}
+	}
+}
+
+// ---------- canonicalPluginOutputs error / fallback paths ----------
+
+func TestCanonicalPluginOutputs_PathWithoutManifestNameReturnsFalse(t *testing.T) {
+	// Source dir has .claude-plugin/commands/x.md but no plugin.json next to it.
+	root := t.TempDir()
+	src := filepath.Join(root, ".claude-plugin", "commands", "x.md")
+	os.MkdirAll(filepath.Dir(src), 0755)
+	os.WriteFile(src, []byte("body"), 0644)
+
+	c := importCandidate{project: "p", sourceRoot: root, sourcePath: src}
+	outputs, ok, err := canonicalPluginOutputs(c, ".claude-plugin/commands/x.md")
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if ok || outputs != nil {
+		t.Errorf("expected ok=false when manifest name is missing; got ok=%v outputs=%v", ok, outputs)
+	}
+}
+
+func TestCanonicalPluginOutputs_MarketplaceRoute(t *testing.T) {
+	root := t.TempDir()
+	// .github/plugin/plugin.json names the plugin; marketplace.json is the source path.
+	manifestPath := filepath.Join(root, ".github", "plugin", "plugin.json")
+	os.MkdirAll(filepath.Dir(manifestPath), 0755)
+	os.WriteFile(manifestPath, []byte(`{"name":"acme"}`), 0644)
+	marketPath := filepath.Join(root, relCopilotPluginMarket)
+	os.WriteFile(marketPath, []byte(`{"plugins":[{"name":"acme"}]}`), 0644)
+
+	c := importCandidate{project: "p", sourceRoot: root, sourcePath: marketPath}
+	outputs, ok, err := canonicalPluginOutputs(c, relCopilotPluginMarket)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if len(outputs) != 1 || !strings.HasSuffix(outputs[0].destRel, "marketplace.json") {
+		t.Errorf("unexpected outputs: %+v", outputs)
+	}
+}
+
+func TestCanonicalPluginOutputs_ComponentRoute(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := filepath.Join(root, ".claude-plugin", "plugin.json")
+	os.MkdirAll(filepath.Dir(manifestPath), 0755)
+	os.WriteFile(manifestPath, []byte(`{"name":"acme"}`), 0644)
+	componentPath := filepath.Join(root, ".claude-plugin", "commands", "x.md")
+	os.MkdirAll(filepath.Dir(componentPath), 0755)
+	os.WriteFile(componentPath, []byte("body"), 0644)
+
+	c := importCandidate{project: "p", sourceRoot: root, sourcePath: componentPath}
+	outputs, ok, err := canonicalPluginOutputs(c, ".claude-plugin/commands/x.md")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if outputs[0].destRel != "plugins/p/acme/resources/commands/x.md" {
+		t.Errorf("destRel = %q", outputs[0].destRel)
+	}
+}
+
+func TestCanonicalPluginOutputs_OverlayRoute(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := filepath.Join(root, ".claude-plugin", "plugin.json")
+	os.MkdirAll(filepath.Dir(manifestPath), 0755)
+	os.WriteFile(manifestPath, []byte(`{"name":"acme"}`), 0644)
+	overlayPath := filepath.Join(root, ".claude-plugin", "extras", "f.txt")
+	os.MkdirAll(filepath.Dir(overlayPath), 0755)
+	os.WriteFile(overlayPath, []byte("over"), 0644)
+
+	c := importCandidate{project: "p", sourceRoot: root, sourcePath: overlayPath}
+	outputs, ok, err := canonicalPluginOutputs(c, ".claude-plugin/extras/f.txt")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if outputs[0].destRel != "plugins/p/acme/platforms/claude/extras/f.txt" {
+		t.Errorf("destRel = %q", outputs[0].destRel)
+	}
+}
+
+// ---------- canonicalPluginOutputsFromOpenCodeFile (error path) ----------
+
+func TestCanonicalPluginOutputsFromOpenCodeFile_MissingSourceErrors(t *testing.T) {
+	rel := relOpenCodePluginsDir + "myplugin/file.js"
+	src := filepath.Join(t.TempDir(), "missing.js")
+	_, _, err := canonicalPluginOutputsFromOpenCodeFile("proj", rel, src)
+	if err == nil {
+		t.Error("expected error for missing source")
+	}
+}
+
+// ---------- directPluginFileCandidate ----------
+
+func TestDirectPluginFileCandidate_CoveredRel(t *testing.T) {
+	tmp := t.TempDir()
+	// `.mcp.json` is a covered single → expected false even if file exists
+	target := filepath.Join(tmp, ".mcp.json")
+	os.WriteFile(target, []byte("{}"), 0644)
+	_, ok := directPluginFileCandidate(tmp, ".mcp.json")
+	if ok {
+		t.Error("covered rel should return ok=false")
+	}
+}
+
+func TestDirectPluginFileCandidate_BackupFile(t *testing.T) {
+	tmp := t.TempDir()
+	rel := "extras/x.dot-agents-backup"
+	target := filepath.Join(tmp, filepath.FromSlash(rel))
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("x"), 0644)
+	_, ok := directPluginFileCandidate(tmp, rel)
+	if ok {
+		t.Error("backup file should be rejected")
+	}
+}
+
+func TestDirectPluginFileCandidate_DirectoryRejected(t *testing.T) {
+	tmp := t.TempDir()
+	rel := "subdir"
+	os.MkdirAll(filepath.Join(tmp, rel), 0755)
+	_, ok := directPluginFileCandidate(tmp, rel)
+	if ok {
+		t.Error("directory should be rejected as file candidate")
+	}
+}
+
+func TestDirectPluginFileCandidate_OK(t *testing.T) {
+	tmp := t.TempDir()
+	rel := "extras/x.json"
+	target := filepath.Join(tmp, filepath.FromSlash(rel))
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("{}"), 0644)
+	got, ok := directPluginFileCandidate(tmp, rel)
+	if !ok || got != target {
+		t.Errorf("got=%q ok=%v", got, ok)
+	}
+}
+
+// ---------- packagePluginNameFromMarketplace ----------
+
+func TestPackagePluginNameFromMarketplace_PrefersSourcePath(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "mp.json")
+	os.WriteFile(src, []byte(`{"plugins":[{"name":"primary"}]}`), 0644)
+
+	name, err := packagePluginNameFromMarketplace(src, "copilot", filepath.Join(dir, "plugin.json"))
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if name != "primary" {
+		t.Errorf("name = %q, want primary", name)
+	}
+}
+
+func TestPackagePluginNameFromMarketplace_FallsBackToSiblingMarketplace(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "plugin.json")
+	// source path is the manifest itself with no name → empty
+	os.WriteFile(manifestPath, []byte(`{"plugins":[]}`), 0644)
+	// sibling marketplace.json provides the name
+	os.WriteFile(filepath.Join(dir, importMarketplaceJSON), []byte(`{"plugins":[{"name":"sibling"}]}`), 0644)
+
+	name, err := packagePluginNameFromMarketplace(manifestPath, "claude", manifestPath)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if name != "sibling" {
+		t.Errorf("name = %q, want sibling", name)
+	}
+}
+
+func TestPackagePluginNameFromMarketplace_NoneFound(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "absent.json")
+	// unknown platform skips sibling lookup; manifest path doesn't exist → empty
+	name, err := packagePluginNameFromMarketplace(manifestPath, "opencode", manifestPath)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if name != "" {
+		t.Errorf("name = %q, want empty", name)
+	}
+}
+
+// ---------- canonicalPackagePluginMarketplaceOutputs ----------
+
+func TestCanonicalPackagePluginMarketplaceOutputs_WritesMarketplaceUnderPlatform(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "marketplace.json")
+	body := []byte(`{"plugins":[{"name":"acme"}]}`)
+	os.WriteFile(src, body, 0644)
+
+	c := importCandidate{project: "proj", sourceRoot: filepath.Dir(src), sourcePath: src}
+	outputs, ok, err := canonicalPackagePluginMarketplaceOutputs(c, "copilot", "acme", "ignored")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if len(outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outputs))
+	}
+	want := "plugins/proj/acme/platforms/copilot/marketplace.json"
+	if outputs[0].destRel != want {
+		t.Errorf("destRel = %q, want %q", outputs[0].destRel, want)
+	}
+	if string(outputs[0].content) != string(body) {
+		t.Errorf("content mismatch")
+	}
+}
+
+func TestCanonicalPackagePluginMarketplaceOutputs_MissingSourceErrors(t *testing.T) {
+	c := importCandidate{project: "proj", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "missing.json")}
+	_, _, err := canonicalPackagePluginMarketplaceOutputs(c, "copilot", "acme", "")
+	if err == nil {
+		t.Error("expected error reading missing source")
+	}
+}
+
+// ---------- canonicalPackagePluginComponentOutput ----------
+
+func TestCanonicalPackagePluginComponentOutput_StripsRootRel(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "x.md")
+	body := []byte("# component")
+	os.WriteFile(src, body, 0644)
+	c := importCandidate{project: "proj", sourceRoot: filepath.Dir(src), sourcePath: src}
+
+	outputs, ok, err := canonicalPackagePluginComponentOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/commands/x.md")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if len(outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outputs))
+	}
+	want := "plugins/proj/acme/resources/commands/x.md"
+	if outputs[0].destRel != want {
+		t.Errorf("destRel = %q, want %q", outputs[0].destRel, want)
+	}
+}
+
+func TestCanonicalPackagePluginComponentOutput_NoRootRel(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "y.md")
+	os.WriteFile(src, []byte("body"), 0644)
+	c := importCandidate{project: "proj", sourceRoot: filepath.Dir(src), sourcePath: src}
+
+	outputs, ok, err := canonicalPackagePluginComponentOutput(c, "copilot", "acme", "", "agents/y.md")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if outputs[0].destRel != "plugins/proj/acme/resources/agents/y.md" {
+		t.Errorf("destRel = %q", outputs[0].destRel)
+	}
+}
+
+func TestCanonicalPackagePluginComponentOutput_RelDoesNotStartWithRootRel(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "x")}
+	// rel not prefixed by rootRel/ → returns ok=false
+	outputs, ok, err := canonicalPackagePluginComponentOutput(c, "claude", "acme", ".claude-plugin", "other/path.md")
+	if err != nil || ok || outputs != nil {
+		t.Errorf("expected (nil,false,nil); got outputs=%v ok=%v err=%v", outputs, ok, err)
+	}
+}
+
+func TestCanonicalPackagePluginComponentOutput_UnknownTrimmedReturnsFalse(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "x")}
+	// trimmed=garbage doesn't match any prefix rule
+	outputs, ok, err := canonicalPackagePluginComponentOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/unrelated/path")
+	if err != nil || ok || outputs != nil {
+		t.Errorf("expected (nil,false,nil); got outputs=%v ok=%v err=%v", outputs, ok, err)
+	}
+}
+
+func TestCanonicalPackagePluginComponentOutput_MissingSourceErrors(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "missing.md")}
+	_, _, err := canonicalPackagePluginComponentOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/commands/x.md")
+	if err == nil {
+		t.Error("expected error reading missing source")
+	}
+}
+
+// ---------- canonicalPackagePluginOverlayOutput ----------
+
+func TestCanonicalPackagePluginOverlayOutput_PreservesRelativePath(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "extra.txt")
+	body := []byte("overlay")
+	os.WriteFile(src, body, 0644)
+	c := importCandidate{project: "proj", sourceRoot: filepath.Dir(src), sourcePath: src}
+
+	outputs, ok, err := canonicalPackagePluginOverlayOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/extras/extra.txt")
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	want := "plugins/proj/acme/platforms/claude/extras/extra.txt"
+	if outputs[0].destRel != want {
+		t.Errorf("destRel = %q, want %q", outputs[0].destRel, want)
+	}
+	if string(outputs[0].content) != "overlay" {
+		t.Errorf("content mismatch")
+	}
+}
+
+func TestCanonicalPackagePluginOverlayOutput_NoRootRelMatchReturnsFalse(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "x")}
+	// rel doesn't have rootRel/ prefix → trimmed == rel → ok=false
+	outputs, ok, err := canonicalPackagePluginOverlayOutput(c, "claude", "acme", ".claude-plugin", "other/file")
+	if err != nil || ok || outputs != nil {
+		t.Errorf("expected (nil,false,nil); got %v %v %v", outputs, ok, err)
+	}
+}
+
+func TestCanonicalPackagePluginOverlayOutput_EmptyTrimmedReturnsFalse(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "x")}
+	// rel == rootRel + "/" → trimmed becomes "" → ok=false
+	outputs, ok, err := canonicalPackagePluginOverlayOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/")
+	if err != nil || ok || outputs != nil {
+		t.Errorf("expected (nil,false,nil); got %v %v %v", outputs, ok, err)
+	}
+}
+
+func TestCanonicalPackagePluginOverlayOutput_MissingSourceErrors(t *testing.T) {
+	c := importCandidate{project: "p", sourceRoot: t.TempDir(), sourcePath: filepath.Join(t.TempDir(), "missing")}
+	_, _, err := canonicalPackagePluginOverlayOutput(c, "claude", "acme", ".claude-plugin", ".claude-plugin/file")
+	if err == nil {
+		t.Error("expected error reading missing source")
 	}
 }
 
