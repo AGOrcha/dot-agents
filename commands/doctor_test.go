@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -599,6 +600,89 @@ func TestNewDoctorCmd_Metadata(t *testing.T) {
 	}
 	if err := cmd.Args(cmd, nil); err != nil {
 		t.Errorf("doctor should accept zero args, got %v", err)
+	}
+}
+
+// TestCollectOrphanCanonicals verifies the unit helper detects only
+// canonical resource dirs missing a repo-local back-link.
+func TestCollectOrphanCanonicals(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	canonicalBase := filepath.Join(agentsHome, "skills", "proj")
+	os.MkdirAll(filepath.Join(canonicalBase, "alpha"), 0755) // orphan
+	os.MkdirAll(filepath.Join(canonicalBase, "beta"), 0755)  // linked
+
+	// Back-link only for beta.
+	repoLocal := filepath.Join(projectPath, ".agents", "skills")
+	os.MkdirAll(repoLocal, 0755)
+	if err := os.Symlink(filepath.Join(canonicalBase, "beta"), filepath.Join(repoLocal, "beta")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
+	if len(got) != 1 || got[0] != "alpha" {
+		t.Errorf("expected ['alpha'], got %v", got)
+	}
+
+	// No canonical dir at all -> nil result.
+	if got := collectOrphanCanonicals("proj", projectPath, agentsHome, "missing"); got != nil {
+		t.Errorf("expected nil for missing canonical bucket, got %v", got)
+	}
+}
+
+// TestRunDoctor_DetectsOrphanCanonicalResource ensures doctor surfaces the
+// orphan canonical case (canonical exists, no repo-local back-link).
+func TestRunDoctor_DetectsOrphanCanonicalResource(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projectPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical skill exists, no repo-local back-link.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "myproj", "ghostskill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture stdout so we can assert the warning message.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	runErr := runDoctor(NewDoctorCmd(), nil)
+	w.Close()
+	os.Stdout = oldStdout
+
+	if runErr != nil {
+		t.Errorf("runDoctor: %v", runErr)
+	}
+
+	buf := make([]byte, 1<<14)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+	if !strings.Contains(out, "orphan") {
+		t.Errorf("expected 'orphan' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ghostskill") {
+		t.Errorf("expected resource name in output, got:\n%s", out)
 	}
 }
 

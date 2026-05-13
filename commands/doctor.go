@@ -234,6 +234,29 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stdout, "  %sTip: run with -v to see per-project manifest details%s\n", ui.Dim, ui.Reset)
 	}
 
+	// Orphan canonical resources: ~/.agents/{skills,agents}/<project>/<name>/
+	// exists but the project has no .agents/<bucket>/<name> back-link
+	// (symlink or real dir).
+	ui.Section("Canonical Resources")
+	anyOrphan := false
+	for _, bucket := range []string{"skills", "agents"} {
+		for _, name := range names {
+			path := cfg.GetProjectPath(name)
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			orphans := collectOrphanCanonicals(name, path, agentsHome, bucket)
+			for _, orphan := range orphans {
+				anyOrphan = true
+				ui.Bullet("warn", fmt.Sprintf("%s — orphan canonical %s %q at %s; hint: Run 'da %s promote --force' or symlink manually to restore.",
+					name, bucket, orphan, filepath.Join(agentsHome, bucket, name, orphan), bucket))
+			}
+		}
+	}
+	if !anyOrphan {
+		ui.Bullet("ok", "No orphan canonical resources")
+	}
+
 	ui.Section("Plugins")
 	pluginSpecs, pluginErr := platform.ListPluginSpecs(agentsHome, "")
 	if pluginErr != nil {
@@ -290,6 +313,30 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+// collectOrphanCanonicals returns the resource names under
+// ~/.agents/<bucket>/<projectName>/ that have no back-link
+// (symlink or real dir) at <projectPath>/.agents/<bucket>/<name>.
+// These are leftovers when a user manually deleted the repo-local source
+// after a promote, leaving the canonical copy orphaned.
+func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string) []string {
+	canonicalDir := filepath.Join(agentsHome, bucket, projectName)
+	entries, err := os.ReadDir(canonicalDir)
+	if err != nil {
+		return nil
+	}
+	var orphans []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		backLink := filepath.Join(projectPath, ".agents", bucket, e.Name())
+		if _, err := os.Lstat(backLink); err != nil {
+			orphans = append(orphans, e.Name())
+		}
+	}
+	return orphans
 }
 
 func hasPluginPlatform(platforms []string, want string) bool {
