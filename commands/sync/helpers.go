@@ -38,7 +38,7 @@ func printGitSourcesHint() {
 }
 
 func postPullRefresh(deps Deps, hasManifests bool) error {
-	if deps.Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", true) {
+	if deps.Flags.Yes || ui.Confirm("Refresh managed projects with pulled changes?", false) {
 		fmt.Fprintln(os.Stdout)
 		if err := deps.RunRefresh(""); err != nil {
 			return err

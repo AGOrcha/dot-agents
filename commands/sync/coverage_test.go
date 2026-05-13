@@ -141,12 +141,56 @@ func TestPostPullRefresh_RefreshErrorBubblesUp(t *testing.T) {
 	}
 }
 
-// TestPostPullRefresh_DefaultPromptHitsAutoYesBranch covers the
-// `ui.Confirm(..., true)` branch when deps.Flags.Yes is false. Because the
-// hardcoded autoYes=true argument always returns true, this still routes
-// through the refresh path — exercising the "ui.Confirm returned true" branch
-// of the short-circuit OR.
-func TestPostPullRefresh_DefaultPromptHitsAutoYesBranch(t *testing.T) {
+// TestPostPullRefresh_DeclineSkipsRefresh covers the !ui.Confirm branch
+// where the user declines the refresh prompt. We feed an "n\n" line into
+// stdin via a pipe so the prompt receives a real negative answer.
+func TestPostPullRefresh_DeclineSkipsRefresh(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("n\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	called := 0
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error {
+		called++
+		return nil
+	}}
+	if err := postPullRefresh(deps, true); err != nil {
+		t.Fatalf("postPullRefresh: %v", err)
+	}
+	if called != 0 {
+		t.Errorf("RunRefresh called %d times; want 0 after decline", called)
+	}
+}
+
+// TestPostPullRefresh_AcceptedPromptCallsRefresh covers the prompted-accept
+// branch (stdin returns "y").
+func TestPostPullRefresh_AcceptedPromptCallsRefresh(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("y\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
 	called := 0
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error {
 		called++
@@ -156,7 +200,7 @@ func TestPostPullRefresh_DefaultPromptHitsAutoYesBranch(t *testing.T) {
 		t.Fatalf("postPullRefresh: %v", err)
 	}
 	if called != 1 {
-		t.Errorf("RunRefresh called %d times; want 1", called)
+		t.Errorf("RunRefresh called %d times; want 1 after accept", called)
 	}
 }
 
