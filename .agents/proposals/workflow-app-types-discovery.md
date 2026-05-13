@@ -1,4 +1,35 @@
-# Proposal: `workflow app-types` Discovery Command
+# Proposal: `workflow app-types` Discovery Command — ACCEPTED
+
+**Status:** ACCEPTED 2026-05-12 — implemented in workflow CLI
+**Implementation artifacts:** `commands/workflow/cmd.go`, `commands/workflow/app_types.go`, `commands/workflow/delegation.go`, `commands/workflow/app_types_test.go`, `commands/workflow/delegation_fanout_test.go`
+**Written:** 2026-05-12 / accepted and implemented 2026-05-12
+**Author:** drafted with agent assist
+
+---
+
+## Acceptance note
+
+This proposal is now implemented.
+
+Delivered behavior:
+
+- `da workflow app-types` lists the currently valid `app_type` values for the repo using the same `.agentsrc.json` dispatch map that `workflow fanout` uses today.
+- `da workflow app-types --json` emits machine-readable output for scripts and editor integrations.
+- `da workflow app-types --format flag|task|plan|doc` prints ready-to-paste authoring snippets when there is a single recommended key.
+- `da workflow app-types --verbose` shows the current source file and recommendation / alias reasoning.
+- `da workflow task add --app-type` help text now points users at `da workflow app-types`.
+- `workflow fanout` now fails clearly on unknown `app_type` values and points users at `da workflow app-types` to inspect valid values.
+
+Validation completed from the maintained WSL shell:
+
+- `go test ./commands/workflow -run 'TestWorkflowAppTypes|TestFanout_VerifierSequenceRejectsUnknownAppType'`
+- `go build -o /tmp/da-app-types ./cmd/dot-agents && /tmp/da-app-types workflow app-types --format flag` from `provider-admin-batch`, which returned `--app-type pa-java-batch`
+
+This proposal file is preserved as the historical record of the design and acceptance. Future follow-on work should treat the CLI implementation as the active contract for the repo-local v1 path.
+
+---
+
+## Original proposal text (preserved for context)
 
 ## Problem
 
