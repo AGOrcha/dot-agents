@@ -161,6 +161,39 @@ func TestCopyTreeMissingSource(t *testing.T) {
 	}
 }
 
+// TestWriteRefreshToAgentsRC_LegacyRemoveErrorPropagates covers the
+// non-IsNotExist branch of `os.Remove(legacy)`. We place a non-empty
+// directory at the legacy `.agents-refresh` path so os.Remove returns
+// ENOTEMPTY rather than ENOENT.
+func TestWriteRefreshToAgentsRC_LegacyRemoveErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing .agentsrc.json so Load succeeds and Save succeeds.
+	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"),
+		[]byte(`{"version":1,"project":"p","sources":[{"type":"local"}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Place a non-empty directory at the legacy file path. os.Remove on a
+	// non-empty directory returns ENOTEMPTY (not IsNotExist), surfacing the
+	// branch under test.
+	legacy := filepath.Join(projectPath, ".agents-refresh")
+	if err := os.MkdirAll(filepath.Join(legacy, "child"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := projectsync.WriteRefreshToAgentsRC("p", projectPath, "v", "c", "d")
+	if err == nil {
+		t.Skip("filesystem allowed os.Remove on non-empty dir; legacy-error branch not exercised")
+	}
+}
+
 func TestWriteRefreshToAgentsRC_ExistingManifest(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")

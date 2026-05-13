@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -102,6 +103,86 @@ func TestPathExists(t *testing.T) {
 	}
 	if !pathExists(tmp) {
 		t.Error("pathExists should return true for existing path")
+	}
+}
+
+// chdirToDeletedDir cds into a fresh tempdir, then removes it. On most
+// Unix-likes, the process retains a working directory pointer at the now-gone
+// inode and subsequent os.Getwd calls return ENOENT. Tests use this to drive
+// the os.Getwd error branch inside the promote/remove/import RunE wrappers.
+func chdirToDeletedDir(t *testing.T) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(orig)
+	})
+	if err := os.Remove(dir); err != nil {
+		t.Skipf("could not remove cwd to provoke Getwd error: %v", err)
+	}
+	// Confirm Getwd actually errors now; otherwise skip — some kernels keep cwd valid.
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("os.Getwd still succeeds after rmdir; cannot exercise error branch")
+	}
+}
+
+func TestAgentsPromoteCmd_RunE_GetwdError(t *testing.T) {
+	chdirToDeletedDir(t)
+	root := NewAgentsCmd(noOpHints())
+	var promote *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "promote" {
+			promote = c
+		}
+	}
+	if promote == nil {
+		t.Fatal("promote not found")
+	}
+	err := promote.RunE(promote, []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "resolv") {
+		t.Errorf("expected resolve project path error, got: %v", err)
+	}
+}
+
+func TestAgentsRemoveCmd_RunE_GetwdError(t *testing.T) {
+	chdirToDeletedDir(t)
+	root := NewAgentsCmd(noOpHints())
+	var remove *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "remove" {
+			remove = c
+		}
+	}
+	if remove == nil {
+		t.Fatal("remove not found")
+	}
+	err := remove.RunE(remove, []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "resolv") {
+		t.Errorf("expected resolve project path error, got: %v", err)
+	}
+}
+
+func TestAgentsImportCmd_RunE_GetwdError(t *testing.T) {
+	chdirToDeletedDir(t)
+	root := NewAgentsCmd(noOpHints())
+	var imp *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "import" {
+			imp = c
+		}
+	}
+	if imp == nil {
+		t.Fatal("import not found")
+	}
+	err := imp.RunE(imp, []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "resolv") {
+		t.Errorf("expected resolve project path error, got: %v", err)
 	}
 }
 

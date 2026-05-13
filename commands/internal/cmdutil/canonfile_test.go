@@ -347,6 +347,73 @@ func TestRunCanonicalRemove_Yes(t *testing.T) {
 	}
 }
 
+// TestRunCanonicalRemove_ConfirmDeclined exercises the !Yes && !Force branch
+// where the user declines the confirmation prompt — we close stdin so
+// ui.Confirm returns false. The file must remain on disk and the function
+// returns nil.
+func TestRunCanonicalRemove_ConfirmDeclined(t *testing.T) {
+	home := setAgentsHome(t)
+	scopeDir := filepath.Join(home, "settings", "user")
+	if err := os.MkdirAll(scopeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	fpath := filepath.Join(scopeDir, "config.json")
+	if err := os.WriteFile(fpath, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	spec := fakeSpec(home, "settings")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	out := captureStdout(t, func() {
+		if err := RunCanonicalRemove(RemoveDeps{}, "user", "config.json", spec); err != nil {
+			t.Fatalf("unexpected error on declined confirm: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Cancelled") {
+		t.Fatalf("expected Cancelled message, got: %q", out)
+	}
+	if _, statErr := os.Stat(fpath); statErr != nil {
+		t.Fatalf("file should remain after declined confirm, got: %v", statErr)
+	}
+}
+
+// TestRunCanonicalRemove_OsRemoveFails forces os.Remove to fail by replacing
+// the resolved source path with a non-empty directory (Remove fails on
+// non-empty dirs). Resolve returns the dir; EnsureScope passes; the Yes
+// branch skips the prompt; os.Remove then fails.
+func TestRunCanonicalRemove_OsRemoveFails(t *testing.T) {
+	home := setAgentsHome(t)
+	scopeDir := filepath.Join(home, "settings", "user")
+	if err := os.MkdirAll(scopeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Create a directory with content so os.Remove returns ENOTEMPTY.
+	target := filepath.Join(scopeDir, "stubborn")
+	if err := os.MkdirAll(filepath.Join(target, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "nested", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write nested: %v", err)
+	}
+	spec := fakeSpec(home, "settings")
+
+	err := RunCanonicalRemove(RemoveDeps{Yes: true}, "user", "stubborn", spec)
+	if err == nil || !strings.Contains(err.Error(), "removing fake file") {
+		t.Fatalf("expected wrapped removing error, got: %v", err)
+	}
+}
+
 func TestMissingDirMessage_Defaults(t *testing.T) {
 	spec := CanonicalFileSpec{DirSegment: "settings"}
 	msg := missingDirMessage("user", spec)
