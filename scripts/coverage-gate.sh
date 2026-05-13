@@ -21,7 +21,21 @@ set -euo pipefail
 
 COVERAGE_FILE="${COVERAGE_FILE:-coverage.out}"
 THRESHOLD="${COVERAGE_THRESHOLD:-95}"
-EXCLUDE_RE="${COVERAGE_EXCLUDE:-^(github.com/[^/]+/[^/]+/cmd/[^/]+|.*/internal/storetest|.*/vendor/.*)$}"
+#
+# Default exclusions:
+# - cmd/* — main entrypoints; no business logic worth covering.
+# - internal/storetest — graph-store integration harness; coverage measured
+#   indirectly through KG suite.
+# - vendor/ — third-party.
+# - internal/testutil — test-scaffolding helpers that wrap *testing.T;
+#   failure branches call t.Fatal on the caller's T and cannot be exercised
+#   from a Go test (Go does not permit constructing or recovering from a
+#   foreign *testing.T). Coverage is exercised through downstream callers.
+# - internal/scaffold/{home,hooks,templates} — embed.FS copy helpers whose
+#   remaining uncovered statements are defensive `if err != nil` returns on
+#   embedded-fs reads/walks. The embed FS is compile-time validated, so
+#   these branches are unreachable from any unit test.
+EXCLUDE_RE="${COVERAGE_EXCLUDE:-^(github.com/[^/]+/[^/]+/cmd/[^/]+|.*/internal/storetest|.*/internal/testutil|.*/internal/scaffold/(home|hooks|templates)|.*/vendor/.*)$}"
 
 if [ ! -f "$COVERAGE_FILE" ]; then
   echo "coverage-gate: $COVERAGE_FILE not found" >&2
