@@ -1317,6 +1317,9 @@ func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan 
 	if err != nil {
 		return "", nil, err
 	}
+	if appType != "" && len(sequence) == 0 {
+		return "", nil, fmt.Errorf("app_type %q is not defined in %s app_type_verifier_map; run `da workflow app-types` to list valid values for this repo", appType, config.AgentsRCFile)
+	}
 	return appType, sequence, nil
 }
 

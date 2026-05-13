@@ -38,6 +38,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowOrientCmd(),
 		newWorkflowCheckpointCmd(),
 		newWorkflowLogCmd(),
+		newWorkflowAppTypesCmd(),
 		newWorkflowPlanCmd(),
 		newWorkflowTaskCmd(),
 		newWorkflowTasksCmd(),
@@ -74,6 +75,28 @@ func newWorkflowStatusCmd() *cobra.Command {
 			return runWorkflowStatus()
 		},
 	}
+}
+
+func newWorkflowAppTypesCmd() *cobra.Command {
+	var format string
+	var verbose bool
+	cmd := &cobra.Command{
+		Use:   "app-types",
+		Short: "List available app_type values for the current repo",
+		Example: deps.ExampleBlock(
+			"  da workflow app-types",
+			"  da --json workflow app-types",
+			"  da workflow app-types --verbose",
+			"  da workflow app-types --format flag",
+		),
+		Args: deps.NoArgsWithHints("Run workflow app-types from inside the project repository."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowAppTypes(format, verbose)
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "", "Print only the recommended authoring snippet: flag, task, plan, or doc")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show source and recommendation details for each app_type")
+	return cmd
 }
 
 func newWorkflowOrientCmd() *cobra.Command {
@@ -391,7 +414,7 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 	taskAddCmd.Flags().StringVar(&taskAddDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on")
 	taskAddCmd.Flags().StringVar(&taskAddBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks")
 	taskAddCmd.Flags().StringVar(&taskAddWriteScope, workflowFlagWriteScope, "", "Comma-separated file/dir patterns this task may touch")
-	taskAddCmd.Flags().StringVar(&taskAddAppType, "app-type", "", "Task verifier routing key written to TASKS.yaml app_type. Must exactly match a .agentsrc.json app_type_verifier_map key, for example go-http-service or pa-angular-ui")
+	taskAddCmd.Flags().StringVar(&taskAddAppType, "app-type", "", "Task verifier routing key written to TASKS.yaml app_type. Must exactly match a .agentsrc.json app_type_verifier_map key. Run `da workflow app-types` to list valid values for the current repo")
 	taskAddCmd.Flags().BoolVar(&taskAddVerification, "verification-required", true, "Whether verification is required before marking complete")
 	_ = taskAddCmd.MarkFlagRequired("id")
 	_ = taskAddCmd.MarkFlagRequired("title")

@@ -434,6 +434,19 @@ func TestFanout_VerifierSequenceUsesPlanDefaultAppType(t *testing.T) {
 	}
 }
 
+func TestFanout_VerifierSequenceRejectsUnknownAppType(t *testing.T) {
+	repo := setupVerifierDispatchProject(t, "unknown-app", "")
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w", "--skip-tdd-gate")
+	if err == nil {
+		t.Fatal("expected error for unknown app_type")
+	}
+	for _, want := range []string{"unknown-app", "da workflow app-types"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("unexpected err: %v", err)
+		}
+	}
+}
+
 func TestFanout_VerifierSequenceFlagOverridesMap(t *testing.T) {
 	repo := setupVerifierDispatchProject(t, "api", "")
 	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-vd", "--task", "task-vd", "--owner", "w",
