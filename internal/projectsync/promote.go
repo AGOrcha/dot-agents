@@ -35,6 +35,13 @@ type PromoteSpec struct {
 	MirrorRefresh func(projectName, projectPath string) error
 }
 
+// Test seams: replaced in tests to drive the symlink/rollback failure paths
+// in materializePromoteSource. Production code never overrides these.
+var (
+	osSymlink = os.Symlink
+	osRename  = os.Rename
+)
+
 // PromoteResource promotes a repo-local resource (.agents/<bucket>/<name>/)
 // into the shared agents store at ~/.agents/<bucket>/<project>/<name>/. The
 // canonical location becomes the real directory and the repo-local path is
@@ -120,8 +127,14 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 	if err := os.RemoveAll(sourcePath); err != nil {
 		return fmt.Errorf("removing repo-local %s directory for %q: %w", spec.Singular, name, err)
 	}
-	if err := os.Symlink(canonicalPath, sourcePath); err != nil {
-		return fmt.Errorf("creating repo-local managed symlink for %s %q: %w", spec.Singular, name, err)
+	if err := osSymlink(canonicalPath, sourcePath); err != nil {
+		// Rollback: restore the repo-local directory from the canonical copy so
+		// we never leave the source path missing if symlink creation fails.
+		if rerr := osRename(canonicalPath, sourcePath); rerr != nil {
+			return fmt.Errorf("creating managed symlink failed and rollback also failed; canonical=%s, source=%s now missing: symlink=%w; rollback=%w",
+				canonicalPath, sourcePath, err, rerr)
+		}
+		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q: %w", spec.Singular, name, err)
 	}
 	return nil
 }
