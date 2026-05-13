@@ -64,7 +64,10 @@
         },
         "backend": {
           "type": "string",
-          "enum": ["sqlite", "postgres"],
+          "enum": [
+            "sqlite",
+            "postgres"
+          ],
           "description": "Storage backend. 'postgres' requires KG_POSTGRES_URL."
         },
         "bridge": {
@@ -101,7 +104,7 @@
     },
     "app_type_verifier_map": {
       "type": "object",
-      "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
+      "description": "Maps app_type strings to ordered verifier profile ids for workflow fanout. Lookup is exact-string only: task.app_type or plan.default_app_type must match one of these keys exactly.",
       "additionalProperties": {
         "type": "array",
         "items": {

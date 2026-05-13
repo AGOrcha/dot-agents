@@ -187,7 +187,7 @@
         "app_type": {
           "type": "string",
           "minLength": 1,
-          "description": "Resolved task or plan default_app_type used with app_type_verifier_map"
+          "description": "Resolved verifier routing key from TASKS.yaml app_type or PLAN.yaml default_app_type, used for exact lookup in .agentsrc.json app_type_verifier_map"
         },
         "verifier_sequence": {
           "type": "array",

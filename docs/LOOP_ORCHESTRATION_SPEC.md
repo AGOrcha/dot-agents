@@ -126,6 +126,46 @@ Phase 8 models handoff as three layers (do not collapse into a single ad hoc pro
 
 **Manual workflow (optional):** you can still hand-edit a bundle after fanout if you need content the CLI does not yet model; prefer re-running fanout when possible so the contract and bundle stay aligned.
 
+### Verifier routing authoring
+
+When you want `workflow fanout` to choose a verifier chain automatically, author one exact routing key and reuse it consistently.
+
+- Put the task-specific value in `TASKS.yaml` as `app_type`.
+- Put the plan-wide fallback in `PLAN.yaml` as `default_app_type`.
+- `da workflow task add --app-type ...` writes the same `TASKS.yaml app_type` field.
+- The value must exactly match a key in `.agentsrc.json.app_type_verifier_map`.
+- Prefer one shared stack key such as `go-http-service` or `next-frontend` over mixing stack keys and repo names.
+- If a Markdown plan, handoff, or design doc mentions verifier routing, repeat the exact YAML key being used instead of inventing a synonym.
+
+Example:
+
+```json
+{
+  "app_type_verifier_map": {
+    "go-http-service": ["unit", "api", "integration"]
+  }
+}
+```
+
+```yaml
+# PLAN.yaml
+default_app_type: go-http-service
+```
+
+```yaml
+# TASKS.yaml
+tasks:
+  - id: request-validation-fix
+    title: Fix request validation flow
+    app_type: go-http-service
+```
+
+```text
+da workflow task add example-service-rollout --id request-validation-fix --title "Fix request validation flow" --app-type go-http-service
+```
+
+`workflow fanout --plan example-service-rollout --task request-validation-fix` will read `TASKS.yaml app_type` first, fall back to `PLAN.yaml default_app_type` if needed, and then do an exact lookup in `.agentsrc.json app_type_verifier_map`.
+
 **Closeout responsibilities** — bundle `closeout.worker_must` / `closeout.parent_must` line up with workflow commands as follows:
 
 | Role | Schema token | Command |

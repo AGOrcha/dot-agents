@@ -5,7 +5,11 @@
   "description": "Repo-local JSON Schema for .agents/workflow/plans/<plan-id>/TASKS.yaml. Matches workflow.CanonicalTaskFile in commands/workflow/types.go.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "plan_id", "tasks"],
+  "required": [
+    "schema_version",
+    "plan_id",
+    "tasks"
+  ],
   "properties": {
     "schema_version": {
       "type": "integer",
@@ -37,7 +41,10 @@
             "pattern": "^[a-z0-9][a-z0-9._-]*$",
             "description": "Stable task identifier"
           },
-          "title": { "type": "string", "minLength": 1 },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -50,19 +57,36 @@
           },
           "depends_on": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "blocks": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
-          "owner": { "type": "string" },
+          "owner": {
+            "type": "string"
+          },
           "write_scope": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
-          "verification_required": { "type": "boolean" },
-          "notes": { "type": "string" }
+          "verification_required": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "app_type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional verifier routing key for this task. workflow fanout uses task.app_type first, then PLAN.yaml default_app_type. The value must exactly match a key in .agentsrc.json app_type_verifier_map, for example go-http-service or pa-angular-ui."
+          }
         }
       }
     }

@@ -25,12 +25,23 @@
       "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
       "description": "Directory name under .agents/workflow/plans/; use kebab-case"
     },
-    "title": { "type": "string", "minLength": 1 },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
     "status": {
       "type": "string",
-      "enum": ["draft", "active", "paused", "completed", "archived"]
+      "enum": [
+        "draft",
+        "active",
+        "paused",
+        "completed",
+        "archived"
+      ]
     },
-    "summary": { "type": "string" },
+    "summary": {
+      "type": "string"
+    },
     "created_at": {
       "type": "string",
       "description": "RFC3339 timestamp"
@@ -39,14 +50,22 @@
       "type": "string",
       "description": "RFC3339 timestamp"
     },
-    "owner": { "type": "string" },
-    "success_criteria": { "type": "string" },
-    "verification_strategy": { "type": "string" },
-    "current_focus_task": { "type": "string" },
+    "owner": {
+      "type": "string"
+    },
+    "success_criteria": {
+      "type": "string"
+    },
+    "verification_strategy": {
+      "type": "string"
+    },
+    "current_focus_task": {
+      "type": "string"
+    },
     "default_app_type": {
       "type": "string",
       "minLength": 1,
-      "description": "Fallback TASKS app_type when resolving workflow fanout verifier_sequence if a task omits app_type"
+      "description": "Fallback verifier routing key for tasks that omit app_type. workflow fanout reads TASKS.yaml app_type first, then PLAN.yaml default_app_type, and resolves the final string by exact match against .agentsrc.json app_type_verifier_map."
     }
   }
 }
