@@ -36,6 +36,12 @@ const (
 	statusCodexConfigToml         = "config.toml"
 	statusOpenCodeJSON            = "opencode.json"
 	statusVSCodeDir               = ".vscode"
+	// statusAuditLinkOkFormat and statusAuditLinkBrokenFormat are shared by
+	// the printSymlinkDirAudit / printSymlinkAudit helpers so per-platform
+	// audit output stays byte-identical across rules, MCP, agents, skills,
+	// hooks. Keep the 6-leading-space indentation; tests rely on it.
+	statusAuditLinkOkFormat     = "      %s✓%s %s %s→ %s%s\n"
+	statusAuditLinkBrokenFormat = "      %s✗%s %s %s→ %s (broken)%s\n"
 )
 
 type platformBadge struct {
@@ -1027,10 +1033,10 @@ func printSymlinkDirAudit(dir, emptyLabel, nameFormat string) (int, int) {
 		displayDest := config.DisplayPath(dest)
 		display := fmt.Sprintf(nameFormat, e.Name())
 		if _, err := os.Stat(dest); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
 			okCount++
 		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, display, ui.Dim, displayDest, ui.Reset)
 			brokenCount++
 		}
 	}
@@ -1046,9 +1052,9 @@ func printSymlinkAudit(linkPath, label string) {
 	if dest, err := os.Readlink(linkPath); err == nil {
 		displayDest := config.DisplayPath(dest)
 		if _, err := os.Stat(dest); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
+			fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		}
 	} else {
 		fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
@@ -1146,10 +1152,10 @@ func printLinkedStatusLine(label, linkPath string) bool {
 	dest, _ := os.Readlink(linkPath)
 	displayDest := config.DisplayPath(dest)
 	if _, err := os.Stat(dest); err == nil {
-		fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
+		fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		return true
 	}
-	fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
+	fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 	return false
 }
 

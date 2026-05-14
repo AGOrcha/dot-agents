@@ -37,7 +37,7 @@ THRESHOLD="${COVERAGE_THRESHOLD:-95}"
 #   these branches are unreachable from any unit test.
 EXCLUDE_RE="${COVERAGE_EXCLUDE:-^(github.com/[^/]+/[^/]+/cmd/[^/]+|.*/internal/storetest|.*/internal/testutil|.*/internal/scaffold/(home|hooks|templates)|.*/vendor/.*)$}"
 
-if [ ! -f "$COVERAGE_FILE" ]; then
+if [[ ! -f "$COVERAGE_FILE" ]]; then
   echo "coverage-gate: $COVERAGE_FILE not found" >&2
   exit 1
 fi
