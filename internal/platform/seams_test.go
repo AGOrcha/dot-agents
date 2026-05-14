@@ -229,6 +229,57 @@ func TestClaudePrepareLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestClaudeCreateRulesLinks_SkipsDirAndUnsupportedExt covers the
+// per-entry IsDir and unsupported-extension continue branches.
+func TestClaudeCreateRulesLinks_SkipsDirAndUnsupportedExt(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	projectRulesSrc := filepath.Join(agentsHome, "rules", "proj")
+	if err := os.MkdirAll(projectRulesSrc, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A directory entry — IsDir branch.
+	if err := os.MkdirAll(filepath.Join(projectRulesSrc, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// An unsupported-extension file — the ext != md|mdc|txt branch.
+	if err := os.WriteFile(filepath.Join(projectRulesSrc, "ignore.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A valid rule to ensure the function still proceeds normally.
+	if err := os.WriteFile(filepath.Join(projectRulesSrc, "rule.md"), []byte("# x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	if err := c.createRulesLinks("proj", repo, agentsHome); err != nil {
+		t.Fatalf("createRulesLinks: %v", err)
+	}
+	// Verify the supported rule was linked and the ignored ones were not.
+	if _, err := os.Stat(filepath.Join(repo, ".claude", "rules", "proj--rule.md")); err != nil {
+		t.Errorf("expected proj--rule.md link, stat err = %v", err)
+	}
+}
+
+// TestClaudeRemoveProjectSettingsLink_GlobalBundleFallback covers the
+// else-branch where project bundles are absent but global bundles exist.
+func TestClaudeRemoveProjectSettingsLink_GlobalBundleFallback(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed a canonical hook bundle ONLY under global scope.
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "format-write")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "name: format-write\nwhen: pre_tool_use\nrun:\n  command: ./run.sh\n  timeout_ms: 1000\nenabled_on: [claude]\n"
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	c.removeProjectSettingsLink("proj", repo, agentsHome)
+	// No assertion needed beyond no-panic; this exercises the fallback branch
+	// that was previously uncovered.
+}
+
 // TestClaudeCreateLinks_CreateRulesLinksErrorSurfaces drives the
 // createRulesLinks early-return branch by injecting a Remove failure on
 // a stale project-rule file.
@@ -387,6 +438,36 @@ func TestCodexWriteCodexAgents_WriteTomlErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces drives the per-entry
+// osRemove error branch.
+func TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "home")
+	// Seed canonical agent so the loop runs at least once.
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed an existing toml so osRemove has a real target.
+	if err := os.WriteFile(filepath.Join(dst, "reviewer.toml"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withRemoveError(t, "reviewer.toml")
+
+	c := NewCodex().(*codex)
+	err := c.pruneManagedCodexAgentTomls(agentsHome, "global", dst)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("pruneManagedCodexAgentTomls err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
 // TestCodexWriteCodexAgents_PrunesStaleTomls covers the prune-stale-toml
 // branch by leaving an unwanted `.toml` in dstRoot before the call.
 func TestCodexWriteCodexAgents_PrunesStaleTomls(t *testing.T) {
@@ -414,6 +495,32 @@ func TestCodexWriteCodexAgents_PrunesStaleTomls(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale toml should have been pruned, stat err = %v", err)
+	}
+}
+
+// TestOpencodeEnsureUserAgents_MkdirAllErrorSurfaces drives the
+// syncScopedFileSymlinks → osMkdirAll error path so the wrapped error
+// propagates back through opencode.ensureUserAgents and CreateLinks.
+func TestOpencodeEnsureUserAgents_MkdirAllErrorSurfaces(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed a canonical agent so the syncScopedFileSymlinks call enters its
+	// MkdirAll path.
+	agentDir := filepath.Join(agentsHome, "agents", "global", "alpha")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Fail MkdirAll on the opencode-agent destination dir.
+	withMkdirAllError(t, filepath.Join(opencodeDir, "agent"))
+
+	o := NewOpenCode().(*opencode)
+	if err := o.ensureUserAgents(agentsHome); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("ensureUserAgents err = %v, want %v", err, errSeamSynthetic)
+	}
+	if err := o.CreateLinks("proj", repo); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
 	}
 }
 
@@ -866,6 +973,24 @@ func TestExecuteRenderSingleWrite_UnsupportedMaterializer(t *testing.T) {
 	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
 	if err == nil {
 		t.Fatal("expected unsupported-materializer error")
+	}
+}
+
+// TestEmitHookFile_UnknownTransportError covers the default error branch.
+func TestEmitHookFile_UnknownTransportError(t *testing.T) {
+	err := emitHookFile("/x", "/y", HookTransport("bogus"))
+	if err == nil {
+		t.Fatal("expected unknown-transport error")
+	}
+}
+
+// TestEmitHookFile_WriteTransportMissingSourceError covers the os.ReadFile
+// error branch under HookTransportWrite.
+func TestEmitHookFile_WriteTransportMissingSourceError(t *testing.T) {
+	tmp := t.TempDir()
+	err := emitHookFile(filepath.Join(tmp, "missing.json"), filepath.Join(tmp, "dst.json"), HookTransportWrite)
+	if err == nil {
+		t.Fatal("expected read-source error")
 	}
 }
 

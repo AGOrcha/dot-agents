@@ -341,7 +341,7 @@ func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) e
 		return err
 	}
 	for _, entry := range entries {
-		if err := os.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
