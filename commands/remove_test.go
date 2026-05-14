@@ -256,3 +256,75 @@ func TestNewRemoveCmd_FlagsAndArgs(t *testing.T) {
 		t.Error("expected error for too many args")
 	}
 }
+
+// TestRunRemove_WithGitSourceManifestWarns covers the git-source warning
+// branch inside runRemove, plus the installed-platform RemoveLinks branch.
+func TestRunRemove_WithGitSourceManifestWarns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Make claude installed so platform RemoveLinks branches run
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projectPath, 0755)
+	// Manifest with git source triggers the warn branch.
+	rc := &config.AgentsRC{Version: 1, Project: "myproj", Sources: []config.Source{{Type: "git", URL: "https://example.invalid/repo.git"}}}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRemove("myproj", false); err != nil {
+		t.Fatalf("runRemove: %v", err)
+	}
+
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myproj") != "" {
+		t.Error("project should be unregistered after remove with git source")
+	}
+}
+
+// TestRunRemove_DryRunCleansFlagShowsDestructiveWarn covers the
+// destructive-warn branch with cleanDirs=true under dry-run (no actual delete).
+func TestRunRemove_DryRunCleansFlagShowsDestructiveWarn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRemove("myproj", true); err != nil {
+		t.Errorf("runRemove dry-run with --clean: %v", err)
+	}
+	// Should still be registered (dry run)
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myproj") == "" {
+		t.Error("project should still be registered after dry-run remove")
+	}
+}

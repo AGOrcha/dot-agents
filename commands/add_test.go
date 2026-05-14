@@ -804,3 +804,109 @@ func TestRestoreFromResourcesCounted_SkipsBackupsDir(t *testing.T) {
 		t.Errorf("expected 0 restores for backups-only resources dir, got %d", n)
 	}
 }
+
+// TestRunAdd_FullHappyPathWithInstalledClaude exercises the full happy path of
+// runAdd, including: existing AGENTS.md to back up, an existing deprecated
+// format (.claude.json), an installed Claude platform that creates real links,
+// scan-for-AI-configs hits, and the link-creation step.
+func TestRunAdd_FullHappyPathWithInstalledClaude(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Force claude.IsInstalled() = true
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myrepo")
+	os.MkdirAll(projectPath, 0755)
+	os.MkdirAll(filepath.Join(projectPath, ".git"), 0755)
+
+	// Existing AGENTS.md (will be backed up)
+	os.WriteFile(filepath.Join(projectPath, "AGENTS.md"), []byte("# user rules"), 0644)
+	// Deprecated .claude.json (triggers the deprecated-format detection branch)
+	os.WriteFile(filepath.Join(projectPath, ".claude.json"), []byte("{}"), 0644)
+	// .aider.conf.yml elsewhere triggers the "discovered" section
+	subPath := filepath.Join(projectPath, "src")
+	os.MkdirAll(subPath, 0755)
+	os.WriteFile(filepath.Join(subPath, ".aider.conf.yml"), []byte("# aider"), 0644)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Fatalf("runAdd full happy path: %v", err)
+	}
+
+	// Should be registered
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myrepo") == "" {
+		t.Error("expected project to be registered")
+	}
+
+	// AGENTS.md should have been backed up to ~/.agents/resources/myrepo/
+	if _, err := os.Stat(filepath.Join(agentsHome, "resources", "myrepo", "AGENTS.md")); err != nil {
+		t.Errorf("expected backup of AGENTS.md: %v", err)
+	}
+
+	// ~/.agents/rules/myrepo/ should exist (project structure was created)
+	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "myrepo")); err != nil {
+		t.Errorf("expected ~/.agents/rules/myrepo to exist: %v", err)
+	}
+}
+
+// TestRunAdd_DryRunWithExistingFilesShowsReplacements covers the
+// "Files to Replace" + "Other AI Configs Discovered" section rendering paths
+// that the existing dry-run test skips by having no existing config files.
+func TestRunAdd_DryRunWithExistingFilesShowsReplacements(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "replproj")
+	os.MkdirAll(projectPath, 0755)
+
+	// Real files to be replaced
+	os.WriteFile(filepath.Join(projectPath, "AGENTS.md"), []byte("# user"), 0644)
+	os.WriteFile(filepath.Join(projectPath, "opencode.json"), []byte("{}"), 0644)
+	// Unmanaged symlink for the file-type=symlink display branch
+	external := filepath.Join(tmp, "external.md")
+	os.WriteFile(external, []byte("x"), 0644)
+	os.Symlink(external, filepath.Join(projectPath, ".mcp.json"))
+
+	// Many .aider* files to trigger the "and N more" truncation in the
+	// discovered-configs section.
+	for i := 0; i < 12; i++ {
+		d := filepath.Join(projectPath, "pkg", "m"+string(rune('a'+i)))
+		os.MkdirAll(d, 0755)
+		os.WriteFile(filepath.Join(d, ".aider.conf.yml"), []byte("# aider"), 0644)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Errorf("runAdd dry-run with replacements: %v", err)
+	}
+
+	// Dry run must not register the project
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("replproj") != "" {
+		t.Error("dry-run should not register project")
+	}
+}

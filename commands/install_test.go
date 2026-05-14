@@ -1209,3 +1209,48 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// TestRunInstall_HappyPathWithInstalledClaude exercises the full install path
+// without --dry-run: createInstallPlatformLink calls into Claude's CreateLinks
+// (success branch), finalizeInstall writes the refresh metadata, and the
+// shared-target projection plan is materialized.
+func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Force claude installed
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Mark agents home initialized
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "proj"}
+	if err := rc.Save(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, Verbose: true}
+	defer func() { Flags = saved }()
+
+	if err := runInstall(false); err != nil {
+		t.Errorf("runInstall full happy: %v", err)
+	}
+
+	// finalizeInstall should have updated the manifest with refresh metadata.
+	if _, err := os.Stat(filepath.Join(projDir, ".agentsrc.json")); err != nil {
+		t.Errorf("expected manifest to remain: %v", err)
+	}
+}

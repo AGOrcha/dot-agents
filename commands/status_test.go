@@ -387,6 +387,42 @@ func TestCountCursorRules_GlobalHardlink(t *testing.T) {
 	}
 }
 
+// TestCountCursorRules_MDFallbackAndWarn covers the .md fallback success branch
+// and the "no link found" warn branch.
+func TestCountCursorRules_MDFallbackAndWarn(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	rulesDir := filepath.Join(tmp, ".cursor", "rules")
+	os.MkdirAll(rulesDir, 0755)
+
+	// Healthy via .md fallback: file on disk is global--foo.mdc but src is .md.
+	srcMD := filepath.Join(agentsHome, "rules", "global", "foo.md")
+	os.MkdirAll(filepath.Dir(srcMD), 0755)
+	os.WriteFile(srcMD, []byte("md"), 0644)
+	if err := os.Link(srcMD, filepath.Join(rulesDir, "global--foo.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unlinked global rule → warn++ branch.
+	os.WriteFile(filepath.Join(rulesDir, "global--orphan.mdc"), []byte("o"), 0644)
+
+	// Non-global prefix (continue branch)
+	os.WriteFile(filepath.Join(rulesDir, "proj--ignored.mdc"), []byte("p"), 0644)
+	// Non-mdc (continue)
+	os.WriteFile(filepath.Join(rulesDir, "notrule.txt"), []byte("x"), 0644)
+	// Backup artifact (continue)
+	os.WriteFile(filepath.Join(rulesDir, "global--x.mdc.dot-agents-backup"), []byte("x"), 0644)
+
+	ok, warn := countCursorRules(tmp, agentsHome)
+	if ok != 1 {
+		t.Errorf("expected ok=1 (md fallback), got %d", ok)
+	}
+	if warn != 1 {
+		t.Errorf("expected warn=1 (orphan), got %d", warn)
+	}
+}
+
 // ---------- additional coverage ----------
 
 // countCanonicalScopedFiles / countCanonicalScopedDirs
@@ -937,5 +973,108 @@ func TestPlatformTextBadges_Empty(t *testing.T) {
 		if badge.present {
 			t.Errorf("expected no present badge for empty project, got %+v", badge)
 		}
+	}
+}
+
+// TestPrintSharedTargetRegistry_WithInstalledClaude exercises the printer with
+// a real installed platform — covers the lines-rendering branch (post early
+// return).
+func TestPrintSharedTargetRegistry_WithInstalledClaude(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	// Seed a small canonical resource so the plan has at least one line.
+	os.MkdirAll(filepath.Join(agentsHome, "rules", "proj"), 0755)
+	os.WriteFile(filepath.Join(agentsHome, "rules", "proj", "agents.md"), []byte("# rules"), 0644)
+
+	repo := filepath.Join(tmp, "repo")
+	os.MkdirAll(repo, 0755)
+
+	// Should not panic and should print the registry header with lines.
+	printSharedTargetRegistry("proj", repo, cfg)
+}
+
+// TestBuildStatusJSONReport_WithPluginAndProjects exercises the buildStatusJSONReport
+// branches that populate plugin entries and project entries — the existing
+// JSON test only covers the empty-projects case.
+func TestBuildStatusJSONReport_WithPluginAndProjects(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Seed a plugin
+	pluginDir := filepath.Join(agentsHome, "plugins", "global", "demo")
+	os.MkdirAll(pluginDir, 0755)
+	os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: demo\nplatforms: [opencode]\n"), 0644)
+
+	// Seed a registered project
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	rc.Save(projectPath)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+
+	report, err := buildStatusJSONReport(cfg, agentsHome, "")
+	if err != nil {
+		t.Fatalf("buildStatusJSONReport: %v", err)
+	}
+	if len(report.Plugins) == 0 {
+		t.Error("expected at least one plugin entry")
+	}
+	if len(report.Projects) == 0 {
+		t.Error("expected at least one project entry")
+	}
+}
+
+// TestRunStatus_AuditModeWithRegisteredProject covers runStatus audit-mode with
+// a registered project and an installed claude platform — exercises the
+// per-project printAudit + printSharedTargetRegistry full path.
+func TestRunStatus_AuditModeWithRegisteredProject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	// Healthy AGENTS.md link + broken claude rule symlink to exercise both
+	// branches inside printAudit.
+	target := filepath.Join(agentsHome, "rules", "p", "agents.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("# rules"), 0644)
+	os.Symlink(target, filepath.Join(projectPath, "AGENTS.md"))
+
+	claudeRules := filepath.Join(projectPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	os.Symlink(filepath.Join(agentsHome, "missing"), filepath.Join(claudeRules, "p--ghost.md"))
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	// runStatus is the cobra RunE; invoke via cmd to ensure flags route through.
+	cmd := NewStatusCmd()
+	cmd.SetArgs([]string{"--audit"})
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("runStatus audit: %v", err)
 	}
 }

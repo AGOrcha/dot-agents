@@ -718,3 +718,310 @@ func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
 		t.Errorf("runDoctor --dry-run with broken link: %v", err)
 	}
 }
+
+// TestCountProjectLinks_AllHealthyVariants exercises the cursor global and
+// project hardlink "healthy" branches plus the multi single-file symlink
+// branches that the prior TestCountProjectLinks_HealthyAndBroken did not cover.
+func TestCountProjectLinks_AllHealthyVariants(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	// Cursor global hardlink (.mdc)
+	globalSrc := filepath.Join(agentsHome, "rules", "global", "g.mdc")
+	os.MkdirAll(filepath.Dir(globalSrc), 0755)
+	os.WriteFile(globalSrc, []byte("g"), 0644)
+	cursorRules := filepath.Join(projectPath, ".cursor", "rules")
+	os.MkdirAll(cursorRules, 0755)
+	if err := os.Link(globalSrc, filepath.Join(cursorRules, "global--g.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cursor global hardlink falling back to .md source (file named .mdc on disk but src is .md)
+	globalSrcMD := filepath.Join(agentsHome, "rules", "global", "h.md")
+	os.WriteFile(globalSrcMD, []byte("h"), 0644)
+	if err := os.Link(globalSrcMD, filepath.Join(cursorRules, "global--h.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backup artifact + non-.mdc entries (skipped)
+	os.WriteFile(filepath.Join(cursorRules, "global--g.mdc.dot-agents-backup"), []byte("x"), 0644)
+	os.WriteFile(filepath.Join(cursorRules, "loose.txt"), []byte("x"), 0644)
+
+	// Claude symlink (healthy)
+	claudeTarget := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	os.MkdirAll(filepath.Dir(claudeTarget), 0755)
+	os.WriteFile(claudeTarget, []byte("ok"), 0644)
+	claudeRules := filepath.Join(projectPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	if err := os.Symlink(claudeTarget, filepath.Join(claudeRules, "proj--agents.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Single-file healthy symlinks for all five paths
+	type linkPair struct {
+		src, dst string
+	}
+	files := []linkPair{
+		{filepath.Join(agentsHome, "rules", "proj", "AGENTS.md"), filepath.Join(projectPath, "AGENTS.md")},
+		{filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md"), filepath.Join(projectPath, ".github", "copilot-instructions.md")},
+		{filepath.Join(agentsHome, "settings", "proj", "opencode.json"), filepath.Join(projectPath, "opencode.json")},
+		{filepath.Join(agentsHome, "mcp", "proj", "mcp.json"), filepath.Join(projectPath, ".mcp.json")},
+		{filepath.Join(agentsHome, "mcp", "proj", "mcp.json.vscode"), filepath.Join(projectPath, ".vscode", "mcp.json")},
+	}
+	for _, lp := range files {
+		os.MkdirAll(filepath.Dir(lp.src), 0755)
+		os.WriteFile(lp.src, []byte("ok"), 0644)
+		os.MkdirAll(filepath.Dir(lp.dst), 0755)
+		if err := os.Symlink(lp.src, lp.dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ok, broken := countProjectLinks("proj", projectPath, agentsHome)
+	if broken != 0 {
+		t.Errorf("expected 0 broken, got %d", broken)
+	}
+	// Expect: 2 cursor + 1 claude + 5 single-file = 8
+	if ok < 8 {
+		t.Errorf("expected ok>=8, got %d", ok)
+	}
+}
+
+// TestCountProjectLinks_CursorProjectHardlinkHealthy covers the project--<name>
+// cursor hardlink healthy branches (.mdc and .md fallback) — these two
+// branches are not hit by the global-prefix tests above.
+func TestCountProjectLinks_CursorProjectHardlinkHealthy(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	cursorRules := filepath.Join(projectPath, ".cursor", "rules")
+	os.MkdirAll(cursorRules, 0755)
+
+	// Project hardlink (.mdc match)
+	src := filepath.Join(agentsHome, "rules", "proj", "p.mdc")
+	os.MkdirAll(filepath.Dir(src), 0755)
+	os.WriteFile(src, []byte("p"), 0644)
+	if err := os.Link(src, filepath.Join(cursorRules, "proj--p.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Project hardlink (.md fallback)
+	srcMD := filepath.Join(agentsHome, "rules", "proj", "q.md")
+	os.WriteFile(srcMD, []byte("q"), 0644)
+	if err := os.Link(srcMD, filepath.Join(cursorRules, "proj--q.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// countProjectLinks counts only global-- cursor in current implementation,
+	// but exercises the project-- branch in collectBrokenLinks. Confirm we get
+	// no broken entries reported for either pair.
+	_, broken := countProjectLinks("proj", projectPath, agentsHome)
+	if broken != 0 {
+		t.Errorf("expected 0 broken, got %d", broken)
+	}
+}
+
+// TestRunDoctor_WithInstalledClaudePlatformAndPlugins exercises the full doctor
+// loop: an installed claude platform, a registered project, a plugin spec with
+// an unsupported platform (triggers warning), and a plugin with opencode that
+// links into the project (triggers symlink validation).
+func TestRunDoctor_WithInstalledClaudePlatformAndPlugins(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Make claude.IsInstalled() return true via ~/.claude
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projectPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plugin: opencode (supported) — register a symlink under the project that
+	// points to the canonical plugin dir so the dest-stat branch is hit.
+	opencodePluginDir := filepath.Join(agentsHome, "plugins", "global", "demo")
+	os.MkdirAll(opencodePluginDir, 0755)
+	os.WriteFile(filepath.Join(opencodePluginDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: demo\nplatforms: [opencode]\n"), 0644)
+	pluginLink := filepath.Join(projectPath, ".opencode", "plugins", "demo")
+	os.MkdirAll(filepath.Dir(pluginLink), 0755)
+	if err := os.Symlink(opencodePluginDir, pluginLink); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plugin: unsupported platform (triggers the "no emitter implemented yet" warn)
+	unsupportedDir := filepath.Join(agentsHome, "plugins", "global", "alien")
+	os.MkdirAll(unsupportedDir, 0755)
+	os.WriteFile(filepath.Join(unsupportedDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: alien\nplatforms: [cursor]\n"), 0644)
+
+	// Plugin: opencode with broken symlink (triggers "broken symlink" error path)
+	brokenPluginDir := filepath.Join(agentsHome, "plugins", "global", "ghost")
+	os.MkdirAll(brokenPluginDir, 0755)
+	os.WriteFile(filepath.Join(brokenPluginDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: ghost\nplatforms: [opencode]\n"), 0644)
+	brokenLink := filepath.Join(projectPath, ".opencode", "plugins", "ghost")
+	if err := os.Symlink(filepath.Join(agentsHome, "missing"), brokenLink); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a healthy AGENTS.md symlink + a broken claude symlink so we exercise
+	// the link-health repair path with installed platform.
+	target := filepath.Join(agentsHome, "rules", "myproj", "agents.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("# rules"), 0644)
+	os.Symlink(target, filepath.Join(projectPath, "AGENTS.md"))
+
+	dangling := filepath.Join(agentsHome, "rules", "myproj", "missing.md")
+	claudeRules := filepath.Join(projectPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	os.Symlink(dangling, filepath.Join(claudeRules, "myproj--missing.md"))
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	r, w, _ := os.Pipe()
+	oldStdout := os.Stdout
+	os.Stdout = w
+	runErr := runDoctor(NewDoctorCmd(), nil)
+	w.Close()
+	os.Stdout = oldStdout
+
+	buf := make([]byte, 1<<16)
+	n, _ := r.Read(buf)
+	out := string(buf[:n])
+
+	if runErr != nil {
+		t.Errorf("runDoctor: %v", runErr)
+	}
+	// Plugin warnings should mention the alien spec
+	if !strings.Contains(out, "alien") {
+		t.Errorf("expected alien plugin to be mentioned, got:\n%s", out)
+	}
+}
+
+// TestRunDoctor_VerboseWithHealthyAndManifest covers the verbose-mode rendering
+// for projects whose manifest references no git source (local manifest "ok"
+// branch) and projects with no links yet.
+func TestRunDoctor_VerboseWithHealthyAndManifest(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+	// Local manifest with no sources
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Verbose: true}
+	defer func() { Flags = saved }()
+
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor verbose: %v", err)
+	}
+}
+
+// TestPrintUserConfigStatus_BrokenSymlinks covers all the broken-symlink
+// branches in printUserConfigStatus (the verbose user-config detail printer).
+func TestPrintUserConfigStatus_BrokenSymlinks(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	// Build broken symlinks across all five tracked user-config locations.
+	dangling := filepath.Join(agentsHome, "no-such-target")
+
+	claudeHome := filepath.Join(tmp, ".claude")
+	os.MkdirAll(filepath.Join(claudeHome, "agents"), 0755)
+	os.MkdirAll(filepath.Join(claudeHome, "skills"), 0755)
+	os.Symlink(dangling, filepath.Join(claudeHome, "CLAUDE.md"))
+	os.Symlink(dangling, filepath.Join(claudeHome, "settings.json"))
+	os.Symlink(dangling, filepath.Join(claudeHome, "agents", "a1"))
+	os.Symlink(dangling, filepath.Join(claudeHome, "skills", "s1"))
+
+	codexAgents := filepath.Join(tmp, ".codex", "agents")
+	os.MkdirAll(codexAgents, 0755)
+	os.Symlink(dangling, filepath.Join(codexAgents, "c1"))
+
+	opencodeAgents := filepath.Join(tmp, ".opencode", "agent")
+	os.MkdirAll(opencodeAgents, 0755)
+	os.Symlink(dangling, filepath.Join(opencodeAgents, "o1"))
+
+	// Should print without panicking even with all broken
+	printUserConfigStatus(agentsHome)
+}
+
+// TestPrintUserConfigStatus_LocalFiles covers the "local file" (not a symlink)
+// branches in printUserConfigStatus.
+func TestPrintUserConfigStatus_LocalFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	claudeHome := filepath.Join(tmp, ".claude")
+	os.MkdirAll(claudeHome, 0755)
+	// Regular files (not symlinks)
+	os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("# local"), 0644)
+	os.WriteFile(filepath.Join(claudeHome, "settings.json"), []byte("{}"), 0644)
+
+	printUserConfigStatus(agentsHome)
+}
+
+// TestRunDoctor_RepairBrokenLinksWithInstalledClaude covers the broken-link
+// repair branch in non-dry-run mode: doctor reruns CreateLinks for the affected
+// platform and reports "repaired".
+func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Make claude installed
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	os.MkdirAll(projectPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Introduce a broken claude rule symlink — repair should re-run CreateLinks.
+	dangling := filepath.Join(agentsHome, "rules", "myproj", "missing.md")
+	claudeRules := filepath.Join(projectPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	os.Symlink(dangling, filepath.Join(claudeRules, "myproj--missing.md"))
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor with broken links + installed claude: %v", err)
+	}
+}
