@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -332,8 +334,28 @@ func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string
 			continue
 		}
 		backLink := filepath.Join(projectPath, ".agents", bucket, e.Name())
-		if _, err := os.Lstat(backLink); err != nil {
-			orphans = append(orphans, e.Name())
+		info, err := os.Lstat(backLink)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				orphans = append(orphans, e.Name())
+			}
+			continue
+		}
+		// If the back-link is a symlink, verify it points at THIS canonical.
+		// A symlink that resolves to a different canonical (or anywhere else)
+		// is still an orphan — the canonical here has no live reference.
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(backLink)
+			if err != nil {
+				continue // unreadable symlink — other audits will surface it
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(backLink), target)
+			}
+			expected := filepath.Join(canonicalDir, e.Name())
+			if filepath.Clean(target) != filepath.Clean(expected) {
+				orphans = append(orphans, e.Name()+"  (mis-pointed: "+target+")")
+			}
 		}
 	}
 	return orphans

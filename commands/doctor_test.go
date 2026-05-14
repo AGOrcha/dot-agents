@@ -817,6 +817,76 @@ func TestCollectOrphanCanonicals(t *testing.T) {
 	}
 }
 
+// TestCollectOrphanCanonicals_DetectsMispointedSymlink verifies that a
+// back-link symlink whose target is NOT the matching canonical entry is
+// still reported as an orphan. Without this, a swapped/renamed canonical
+// would silently appear healthy to the doctor.
+func TestCollectOrphanCanonicals_DetectsMispointedSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	canonicalBase := filepath.Join(agentsHome, "skills", "proj")
+	// Two canonical entries: gamma is the one whose link is mis-pointed.
+	if err := os.MkdirAll(filepath.Join(canonicalBase, "gamma"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A different canonical that gamma's back-link will incorrectly target.
+	otherCanonical := filepath.Join(agentsHome, "skills", "otherproj", "delta")
+	if err := os.MkdirAll(otherCanonical, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	repoLocal := filepath.Join(projectPath, ".agents", "skills")
+	os.MkdirAll(repoLocal, 0755)
+	// gamma's back-link points at the WRONG canonical.
+	if err := os.Symlink(otherCanonical, filepath.Join(repoLocal, "gamma")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 orphan, got %v", got)
+	}
+	if !strings.HasPrefix(got[0], "gamma") {
+		t.Errorf("expected orphan entry for gamma, got %q", got[0])
+	}
+	if !strings.Contains(got[0], "mis-pointed") {
+		t.Errorf("expected 'mis-pointed' annotation, got %q", got[0])
+	}
+	if !strings.Contains(got[0], otherCanonical) {
+		t.Errorf("expected actual target in annotation, got %q", got[0])
+	}
+}
+
+// TestCollectOrphanCanonicals_CorrectlyLinkedSymlinkNotOrphan ensures the
+// happy path: a back-link that points at the matching canonical is NOT
+// reported. Guards against the mis-pointed check over-reporting.
+func TestCollectOrphanCanonicals_CorrectlyLinkedSymlinkNotOrphan(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	canonicalBase := filepath.Join(agentsHome, "skills", "proj")
+	canonical := filepath.Join(canonicalBase, "epsilon")
+	if err := os.MkdirAll(canonical, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	repoLocal := filepath.Join(projectPath, ".agents", "skills")
+	os.MkdirAll(repoLocal, 0755)
+	if err := os.Symlink(canonical, filepath.Join(repoLocal, "epsilon")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
+	if len(got) != 0 {
+		t.Errorf("expected no orphans for correctly-linked back-link, got %v", got)
+	}
+}
+
 // TestRunDoctor_DetectsOrphanCanonicalResource ensures doctor surfaces the
 // orphan canonical case (canonical exists, no repo-local back-link).
 func TestRunDoctor_DetectsOrphanCanonicalResource(t *testing.T) {
