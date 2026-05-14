@@ -332,6 +332,57 @@ func TestClaudeCreateLinks_CreateAgentsLinksErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCodexEnsureUserAgents_MkdirContinueAndWriteAgentsError covers the
+// per-homeRoot MkdirAll-continue branch and the writeCodexAgents return-err
+// branch.
+func TestCodexEnsureUserAgents_MkdirContinueAndWriteAgentsError(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	// Seed the canonical agents bucket so the loop runs.
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Force the per-homeRoot MkdirAll for `.codex/agents` to fail and
+	// continue. Then the loop body completes silently and returns nil.
+	withMkdirAllError(t, filepath.Join(codexDir, "agents"))
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("ensureUserAgents should swallow inner err, got %v", err)
+	}
+}
+
+// TestCodexEnsureUserAgents_WriteCodexAgentsErrorSurfaces drives the
+// writeCodexAgents error-return branch.
+func TestCodexEnsureUserAgents_WriteCodexAgentsErrorSurfaces(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	// Seed the canonical agents bucket and pre-existing dst so MkdirAll
+	// succeeds (no-op) and writeCodexAgents is reached.
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create the user .codex/agents dir so the MkdirAll succeeds, then
+	// fail the inner per-toml write to surface the error.
+	for _, homeRoot := range []string{os.Getenv("HOME")} {
+		if err := os.MkdirAll(filepath.Join(homeRoot, codexDir, "agents"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withWriteFileError(t, "reviewer.toml")
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("ensureUserAgents err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
 // --- codex.go seams -----------------------------------------------------
 
 func TestCodexCreateLinks_MkdirAllErrorSurfaces(t *testing.T) {
@@ -576,6 +627,50 @@ func TestCopilotCreateClaudeCompatLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCodexCreateLinks_EnsureUserAgentsErrorPropagates wires through
+// codex.CreateLinks → ensureUserAgents → writeCodexAgents failure.
+func TestCodexCreateLinks_EnsureUserAgentsErrorPropagates(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, homeRoot := range []string{os.Getenv("HOME")} {
+		if err := os.MkdirAll(filepath.Join(homeRoot, codexDir, "agents"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withWriteFileError(t, "reviewer.toml")
+
+	c := NewCodex().(*codex)
+	if err := c.CreateLinks("proj", repo); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestCodexCreateLinks_EnsureUserSkillsErrorPropagates covers the
+// ensureUserSkills error branch in codex.CreateLinks.
+func TestCodexCreateLinks_EnsureUserSkillsErrorPropagates(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed a canonical skill so syncScopedDirSymlinks enters MkdirAll.
+	skillDir := filepath.Join(agentsHome, "skills", "global", "alpha")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withMkdirAllError(t, filepath.Join(".agents", "skills"))
+
+	c := NewCodex().(*codex)
+	if err := c.CreateLinks("proj", repo); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
 // TestCodexCreateLinks_ChainEarlyReturns drives the per-child early-return
 // branches in codex.CreateLinks by failing the Nth MkdirAll call.
 func TestCodexCreateLinks_ChainEarlyReturns(t *testing.T) {
@@ -596,6 +691,64 @@ func TestCodexCreateLinks_ChainEarlyReturns(t *testing.T) {
 			}
 			_ = agentsHome
 		})
+	}
+}
+
+// TestClaudeEnsureUserSkills_ErrorSurfaces drives the syncScopedDirSymlinks
+// error-return branch through claude.ensureUserSkills.
+func TestClaudeEnsureUserSkills_ErrorSurfaces(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	skillDir := filepath.Join(agentsHome, "skills", "global", "alpha")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withMkdirAllError(t, filepath.Join(claudeDir, "skills"))
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserSkills(agentsHome); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("ensureUserSkills err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestCodexEnsureUserSkills_ErrorSurfaces drives the
+// syncScopedDirSymlinks-like flow for codex.ensureUserSkills.
+func TestCodexEnsureUserSkills_ErrorSurfaces(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	skillDir := filepath.Join(agentsHome, "skills", "global", "alpha")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withMkdirAllError(t, filepath.Join(".agents", "skills"))
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserSkills(agentsHome); !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("ensureUserSkills err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestClaudeEnsureUserAgents_ContinueOnInHomeError covers the continue
+// branch in the outer ensureUserAgents loop when ensureUserAgentsInHome
+// fails.
+func TestClaudeEnsureUserAgents_ContinueOnInHomeError(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	globalAgents := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(globalAgents, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalAgents, "AGENT.md"), []byte("# r"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withMkdirAllError(t, filepath.Join(".claude", "agents"))
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("ensureUserAgents should swallow inner err, got %v", err)
 	}
 }
 
@@ -973,6 +1126,39 @@ func TestExecuteRenderSingleWrite_UnsupportedMaterializer(t *testing.T) {
 	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
 	if err == nil {
 		t.Fatal("expected unsupported-materializer error")
+	}
+}
+
+// TestCollectCanonicalHookSpecsForPlatform_PropagatesNonENOENTError ensures
+// the non-ENOENT error branch returns rather than continuing.
+func TestCollectCanonicalHookSpecsForPlatform_PropagatesNonENOENTError(t *testing.T) {
+	tmp := t.TempDir()
+	bundleDir := filepath.Join(tmp, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collectCanonicalHookSpecsForPlatform(tmp, "proj", "claude", "global"); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestListHookSpecs_MalformedManifestSurfacesError covers the
+// loadHookSpecEntry error-return branch from a broken HOOK.yaml.
+func TestListHookSpecs_MalformedManifestSurfacesError(t *testing.T) {
+	tmp := t.TempDir()
+	bundleDir := filepath.Join(tmp, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid YAML.
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListHookSpecs(tmp, "global"); err == nil {
+		t.Fatal("expected manifest-parse error")
 	}
 }
 
