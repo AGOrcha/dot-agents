@@ -355,6 +355,68 @@ func TestWriteCodexAgentTomlFile_WriteFileErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCodexWriteCodexAgents_MissingBucketIsNoOp covers the os.IsNotExist
+// short-circuit when the canonical agents bucket does not exist.
+func TestCodexWriteCodexAgents_MissingBucketIsNoOp(t *testing.T) {
+	tmp := t.TempDir()
+	c := NewCodex().(*codex)
+	if err := c.writeCodexAgents(filepath.Join(tmp, "missing-agents-home"), "global", filepath.Join(tmp, "dst")); err != nil {
+		t.Fatalf("expected nil for missing bucket, got %v", err)
+	}
+}
+
+// TestCodexWriteCodexAgents_WriteTomlErrorSurfaces drives the per-entry
+// writeCodexAgentToml error branch via the osWriteFile seam.
+func TestCodexWriteCodexAgents_WriteTomlErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "home")
+	// Seed one canonical agent so writeCodexAgents enters the per-entry loop.
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n# r\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withWriteFileError(t, "reviewer.toml")
+
+	c := NewCodex().(*codex)
+	err := c.writeCodexAgents(agentsHome, "global", filepath.Join(tmp, "dst"))
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("writeCodexAgents err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestCodexWriteCodexAgents_PrunesStaleTomls covers the prune-stale-toml
+// branch by leaving an unwanted `.toml` in dstRoot before the call.
+func TestCodexWriteCodexAgents_PrunesStaleTomls(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "home")
+	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n# r\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dst, "stale.toml")
+	if err := os.WriteFile(stale, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCodex().(*codex)
+	if err := c.writeCodexAgents(agentsHome, "global", dst); err != nil {
+		t.Fatalf("writeCodexAgents: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale toml should have been pruned, stat err = %v", err)
+	}
+}
+
 // --- copilot.go seams ---------------------------------------------------
 
 func TestCopilotCreateInstructionsLink_MkdirAllErrorSurfaces(t *testing.T) {
@@ -512,6 +574,33 @@ func TestWriteManagedFile_WriteFileErrorSurfaces(t *testing.T) {
 	err := writeManagedFile(dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestResolveClaudeCodeModelFromJSONL_MalformedLineSkipped covers the
+// Unmarshal-error and non-assistant-type early-return branches in the
+// per-line callback.
+func TestResolveClaudeCodeModelFromJSONL_MalformedLineSkipped(t *testing.T) {
+	home := t.TempDir()
+	projectPath := "/repo"
+	sessionID := "abc"
+	jsonlPath := filepath.Join(home, ".claude", "projects", "-repo", sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(jsonlPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Mix of malformed-but-contains-assistant, non-assistant, and a valid
+	// trailing assistant entry.
+	content := strings.Join([]string{
+		`{"assistant": broken json`, // Unmarshal error (line contains literal "assistant")
+		`{"type":"user","message":{"model":"x"}}`,
+		`{"type":"assistant","message":{"model":"claude-opus"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(jsonlPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveClaudeCodeModelFromJSONL(home, projectPath, sessionID)
+	if got != "claude-opus" {
+		t.Errorf("model = %q, want claude-opus", got)
 	}
 }
 
