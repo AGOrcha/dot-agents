@@ -66,13 +66,40 @@ func PromoteResource(name, projectPath string, spec PromoteSpec) error {
 		return err
 	}
 
-	if err := materializePromoteSource(sourcePath, canonicalPath, sourceInfo, name, spec); err != nil {
+	journalPath, jerr := BeginPromoteJournal(config.AgentsHome(), PromoteJournalEntry{
+		Singular:      spec.Singular,
+		Bucket:        spec.Bucket,
+		Name:          name,
+		SourcePath:    sourcePath,
+		CanonicalPath: canonicalPath,
+	})
+	if jerr != nil {
+		// Journal failures are non-fatal: a missing journal degrades recovery
+		// quality but does not block a working promote. We surface a warning
+		// via ui.Bullet and continue.
+		ui.Bullet("warn", fmt.Sprintf("could not open promote journal: %v", jerr))
+		journalPath = ""
+	}
+
+	if err := materializePromoteSource(sourcePath, canonicalPath, sourceInfo, name, spec, journalPath); err != nil {
+		if journalPath != "" {
+			_ = AdvancePromoteJournal(journalPath, PromoteStateRolledBack)
+			_ = RemovePromoteJournal(journalPath)
+		}
 		return err
 	}
 
 	count := spec.RegisterInRC(rc, name)
 	if err := rc.Save(projectPath); err != nil {
+		if journalPath != "" {
+			_ = AdvancePromoteJournal(journalPath, PromoteStateRolledBack)
+			_ = RemovePromoteJournal(journalPath)
+		}
 		return fmt.Errorf("updating .agentsrc.json for %s %q: %w", spec.Singular, name, err)
+	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateRCSaved)
+		_ = RemovePromoteJournal(journalPath)
 	}
 
 	if spec.MirrorRefresh != nil {
@@ -113,7 +140,13 @@ func preparePromoteDest(name, projectName string, spec PromoteSpec) (string, err
 // materializePromoteSource handles the symlink-vs-real-dir branching for the
 // repo-local source path: an existing managed symlink is validated, while a
 // real directory is copied to canonical and replaced with a symlink.
-func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec) error {
+//
+// journalPath, when non-empty, is advanced after each destructive transition
+// so a SIGKILL leaves a recoverable breadcrumb under ~/.agents/.promote-journal/.
+// Journal advance failures are non-fatal — they are silently ignored because a
+// missing journal only degrades downstream recovery quality, never the promote
+// itself.
+func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec, journalPath string) error {
 	if sourceInfo.Mode()&os.ModeSymlink != 0 {
 		return validatePromoteSymlink(sourcePath, canonicalPath, name, spec)
 	}
@@ -126,8 +159,14 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 	if err := CopyTree(sourcePath, canonicalPath); err != nil {
 		return fmt.Errorf("copying %s %q to canonical path: %w", spec.Singular, name, err)
 	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateCanonicalCopied)
+	}
 	if err := os.RemoveAll(sourcePath); err != nil {
 		return fmt.Errorf("removing repo-local %s directory for %q: %w", spec.Singular, name, err)
+	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateSourceRemoved)
 	}
 	if err := osSymlink(canonicalPath, sourcePath); err != nil {
 		// Rollback: restore the repo-local directory from the canonical copy so
@@ -152,6 +191,9 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 				canonicalPath, sourcePath, err, rerr)
 		}
 		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q: %w", spec.Singular, name, err)
+	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateSymlinked)
 	}
 	return nil
 }
