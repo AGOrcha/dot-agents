@@ -133,7 +133,7 @@ func cleanupManagedAgentRepoPath(deps Deps, path, agentsHome, name string) error
 		return err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		dest, rerr := os.Readlink(path)
+		dest, rerr := osReadlink(path)
 		if rerr != nil {
 			return rerr
 		}

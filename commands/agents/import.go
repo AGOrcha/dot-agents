@@ -71,7 +71,7 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 		return err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		existing, err := os.Readlink(repoLocal)
+		existing, err := osReadlink(repoLocal)
 		if err != nil {
 			return fmt.Errorf("reading symlink for agent %q: %w", name, err)
 		}
