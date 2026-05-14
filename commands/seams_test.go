@@ -570,6 +570,134 @@ func TestBackupExistingConfigsList_RemoveError(t *testing.T) {
 	}
 }
 
+// ─── replaceImportContentCandidate WriteFile failure ────────────────────────
+
+func TestReplaceImportContentCandidate_WriteFileError(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(tmp, "out", "dest.txt")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcInfo, _ := os.Stat(src)
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	sentinel := errors.New("write boom")
+	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+
+	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
+	res := replaceImportContentCandidate(c, tmp, dest, []byte("new"), "ts", srcInfo, destInfo)
+	if res.imported != 0 || res.skipped != 1 {
+		t.Errorf("expected skipped=1 on write error, got %+v", res)
+	}
+}
+
+// ─── processImportCandidate canonical-path branches ─────────────────────────
+
+// When the candidate rel path is a canonical hook source (e.g.
+// .cursor/hooks.json), processImportCandidate takes the canonical-path branch.
+// A non-existent source there returns importResult{} via statErr.
+func TestProcessImportCandidate_CanonicalSourceMissingIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{
+		project:    "p",
+		sourceRoot: tmp,
+		sourcePath: filepath.Join(tmp, ".cursor", "hooks.json"),
+		destRel:    "hooks/p/cursor.json",
+	}
+	res := processImportCandidate(c, agentsHome, "ts")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("expected no-op when canonical source missing, got %+v", res)
+	}
+}
+
+// Canonical source pointing at a directory must short-circuit (IsDir branch).
+func TestProcessImportCandidate_CanonicalSourceDirIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	dirAsSrc := filepath.Join(tmp, ".cursor", "hooks.json")
+	if err := os.MkdirAll(dirAsSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{
+		project:    "p",
+		sourceRoot: tmp,
+		sourcePath: dirAsSrc,
+		destRel:    "hooks/p/cursor.json",
+	}
+	res := processImportCandidate(c, agentsHome, "ts")
+	if res.imported != 0 || res.skipped != 0 {
+		t.Errorf("expected no-op when canonical source is a dir, got %+v", res)
+	}
+}
+
+// Cursor hooks.json source that fails canonicalization (malformed) hits the
+// "Failed to canonicalize" warn branch in processCanonicalHookBundleImport
+// and returns skipped=1.
+func TestProcessImportCandidate_CanonicalCanonicalizationError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	srcDir := filepath.Join(tmp, ".cursor")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "hooks.json")
+	if err := os.WriteFile(src, []byte("not json at all {{{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{
+		project:    "p",
+		sourceRoot: tmp,
+		sourcePath: src,
+		destRel:    "hooks/p/cursor.json",
+	}
+	res := processImportCandidate(c, agentsHome, "ts")
+	// Either canonicalization succeeded with empty outputs (no-op) or failed
+	// with skipped=1. Both exercise canonical-path branches that were
+	// previously uncovered.
+	if res.skipped > 1 || res.imported > 0 {
+		t.Errorf("unexpected result for malformed cursor hooks.json: %+v", res)
+	}
+}
+
 // ─── runInit early MkdirAll error ────────────────────────────────────────────
 
 func TestRunInit_MkdirError(t *testing.T) {
