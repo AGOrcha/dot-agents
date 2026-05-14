@@ -172,14 +172,14 @@ func deriveScopeWarningsForMode(mode string, codeReady, hasScopeInputs bool) str
 
 func persistScopeEvidenceSidecar(projectPath, planID, taskID string, ev *ScopeEvidence) (string, error) {
 	outPath := deriveScopeEvidencePath(projectPath, planID, taskID)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(outPath), 0755); err != nil {
 		return "", fmt.Errorf("create evidence dir: %w", err)
 	}
 	data, err := yaml.Marshal(ev)
 	if err != nil {
 		return "", fmt.Errorf("marshal sidecar: %w", err)
 	}
-	if err := os.WriteFile(outPath, data, 0644); err != nil {
+	if err := osWriteFile(outPath, data, 0644); err != nil {
 		return "", fmt.Errorf("write sidecar: %w", err)
 	}
 	return outPath, nil
@@ -482,14 +482,14 @@ func loadCanonicalPlan(projectPath, planID string) (*CanonicalPlan, error) {
 
 func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 	dir := filepath.Join(plansBaseDir(projectPath), plan.ID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	content, err := yaml.Marshal(plan)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, workflowPlanFileName), content, 0644)
+	return osWriteFile(filepath.Join(dir, workflowPlanFileName), content, 0644)
 }
 
 func loadCanonicalTasks(projectPath, planID string) (*CanonicalTaskFile, error) {
@@ -520,14 +520,14 @@ func loadCanonicalSlices(projectPath, planID string) (*CanonicalSliceFile, error
 
 func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 	dir := filepath.Join(plansBaseDir(projectPath), tf.PlanID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	content, err := yaml.Marshal(tf)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
+	return osWriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
 }
 
 func collectCanonicalPlans(projectPath string) ([]workflowCanonicalPlanSummary, []string) {

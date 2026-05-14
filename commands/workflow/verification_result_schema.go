@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -137,14 +136,14 @@ func writeVerificationResultYAML(projectPath string, doc *VerificationResultDoc)
 	if err := validateVerificationResultDoc(doc); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("prepare verification dir: %w", err)
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal verification result yaml: %w", err)
 	}
-	if err := os.WriteFile(path, out, 0644); err != nil {
+	if err := osWriteFile(path, out, 0644); err != nil {
 		return fmt.Errorf("write verification result: %w", err)
 	}
 	return nil

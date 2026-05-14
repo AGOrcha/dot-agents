@@ -94,7 +94,7 @@ func loadDelegationContract(projectPath, taskID string) (*DelegationContract, er
 
 func saveDelegationContract(projectPath string, c *DelegationContract) error {
 	dir := delegationDir(projectPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -102,7 +102,7 @@ func saveDelegationContract(projectPath string, c *DelegationContract) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
+	return osWriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
 }
 
 func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
@@ -184,7 +184,7 @@ type MergeBackVerification struct {
 
 func saveMergeBack(projectPath string, s *MergeBackSummary) error {
 	dir := mergeBackDir(projectPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	frontmatter, err := yaml.Marshal(s)
@@ -193,7 +193,7 @@ func saveMergeBack(projectPath string, s *MergeBackSummary) error {
 	}
 	content := fmt.Sprintf("---\n%s---\n\n## Summary\n\n%s\n\n## Integration Notes\n\n%s\n",
 		string(frontmatter), s.Summary, s.IntegrationNotes)
-	return os.WriteFile(filepath.Join(dir, s.TaskID+".md"), []byte(content), 0644)
+	return osWriteFile(filepath.Join(dir, s.TaskID+".md"), []byte(content), 0644)
 }
 
 func loadMergeBack(projectPath, taskID string) (*MergeBackSummary, error) {
@@ -331,14 +331,14 @@ func readFoldBackProposalFile(path string) (foldBackProposalFrontmatter, string,
 
 func writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error {
 	dir := foldBackDir(projectPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(&artifact)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, artifact.ID+".yaml"), data, 0644)
+	return osWriteFile(filepath.Join(dir, artifact.ID+".yaml"), data, 0644)
 }
 
 func writeFoldBackProposalFile(path string, fm foldBackProposalFrontmatter, body string) error {
@@ -1207,14 +1207,14 @@ func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
 		return fmt.Errorf("delegation bundle: empty delegation_id")
 	}
 	dir := delegationBundlesDir(projectPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(b)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
+	return osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
 }
 
 type agentsrcFanoutDispatch struct {
@@ -1581,7 +1581,7 @@ func archiveCloseoutArtifacts(projectPath, taskID, planID, decision string, cont
 	if err != nil {
 		return "", "", err
 	}
-	if err = os.WriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
+	if err = osWriteFile(filepath.Join(archiveDir, "closeout.yaml"), closeoutData, 0644); err != nil {
 		return "", "", fmt.Errorf("write closeout record: %w", err)
 	}
 

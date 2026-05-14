@@ -57,14 +57,14 @@ func computeWorkflowHealth(state *workflowOrientState) WorkflowHealthSnapshot {
 }
 
 func writeHealthSnapshot(project string, h WorkflowHealthSnapshot) error {
-	if err := os.MkdirAll(config.ProjectContextDir(project), 0755); err != nil {
+	if err := osMkdirAll(config.ProjectContextDir(project), 0755); err != nil {
 		return err
 	}
 	content, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(healthSnapshotPath(project), content, 0644)
+	return osWriteFile(healthSnapshotPath(project), content, 0644)
 }
 
 func readHealthSnapshot(project string) (*WorkflowHealthSnapshot, error) {

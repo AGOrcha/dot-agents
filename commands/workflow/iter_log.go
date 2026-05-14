@@ -592,7 +592,7 @@ func writeIterLogEntry(iterPath string, entry *iterLogEntry) error {
 	}
 	const header = "# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json\n"
 	content := []byte(header + string(body))
-	if err := os.WriteFile(iterPath, content, 0644); err != nil {
+	if err := osWriteFile(iterPath, content, 0644); err != nil {
 		return fmt.Errorf("write iter log: %w", err)
 	}
 	return nil

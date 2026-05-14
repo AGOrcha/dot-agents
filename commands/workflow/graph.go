@@ -115,7 +115,7 @@ func loadGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 // with all defaults when the file is absent, so callers can proceed immediately.
 func scaffoldGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 	dir := filepath.Join(projectPath, ".agents", "workflow")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := osMkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create .agents/workflow dir: %w", err)
 	}
 	graphHome := defaultGraphHome(projectPath)
@@ -129,7 +129,7 @@ func scaffoldGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 		return nil, err
 	}
 	p := filepath.Join(dir, "graph-bridge.yaml")
-	if err := os.WriteFile(p, out, 0o644); err != nil {
+	if err := osWriteFile(p, out, 0o644); err != nil {
 		return nil, fmt.Errorf("write graph-bridge.yaml: %w", err)
 	}
 	return cfg, nil
@@ -185,14 +185,14 @@ type GraphBridgeHealth struct {
 
 func writeGraphBridgeHealth(project string, health GraphBridgeHealth) error {
 	dir := config.ProjectContextDir(project)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(health, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "graph-bridge-health.json"), data, 0644)
+	return osWriteFile(filepath.Join(dir, "graph-bridge-health.json"), data, 0644)
 }
 
 func readGraphBridgeHealth(project string) (*GraphBridgeHealth, error) {

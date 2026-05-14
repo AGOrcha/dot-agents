@@ -241,14 +241,14 @@ func driftReportPath() string {
 
 // saveDriftReport writes the aggregate drift report to disk.
 func saveDriftReport(agg AggregateDriftReport) error {
-	if err := os.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
+	if err := osMkdirAll(config.AgentsContextDir(), 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(agg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(driftReportPath(), data, 0644)
+	return osWriteFile(driftReportPath(), data, 0644)
 }
 
 func filterDriftProjects(projects []ManagedProject, projectFilter string) ([]ManagedProject, error) {

@@ -39,10 +39,10 @@ func verificationLogPath(project string) string {
 }
 
 func appendVerificationLog(project string, rec VerificationRecord) error {
-	if err := os.MkdirAll(config.ProjectContextDir(project), 0755); err != nil {
+	if err := osMkdirAll(config.ProjectContextDir(project), 0755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(verificationLogPath(project), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := osOpenFile(verificationLogPath(project), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}

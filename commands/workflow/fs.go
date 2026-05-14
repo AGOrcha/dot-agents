@@ -212,9 +212,9 @@ func mergeWorkflowPlanDir(planID, srcDir, dstDir string, dryRun bool) error {
 
 // removeAllWithRetry calls os.RemoveAll and retries once on failure.
 func removeAllWithRetry(path string) error {
-	if err := os.RemoveAll(path); err != nil {
+	if err := osRemoveAll(path); err != nil {
 		time.Sleep(50 * time.Millisecond)
-		return os.RemoveAll(path)
+		return osRemoveAll(path)
 	}
 	return nil
 }

@@ -135,7 +135,7 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 	checkpoint.Verification.Summary = verificationSummary
 
 	contextDir := config.ProjectContextDir(project.Name)
-	if err := os.MkdirAll(contextDir, 0755); err != nil {
+	if err := osMkdirAll(contextDir, 0755); err != nil {
 		return err
 	}
 	checkpointPath := filepath.Join(contextDir, "checkpoint.yaml")
@@ -143,7 +143,7 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(checkpointPath, content, 0644); err != nil {
+	if err := osWriteFile(checkpointPath, content, 0644); err != nil {
 		return err
 	}
 	if err := appendWorkflowSessionLog(filepath.Join(contextDir, "session-log.md"), checkpoint); err != nil {
@@ -869,7 +869,7 @@ func renderWorkflowOrientMarkdown(state *workflowOrientState, out io.Writer) {
 }
 
 func appendWorkflowSessionLog(path string, checkpoint workflowCheckpoint) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := osOpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}

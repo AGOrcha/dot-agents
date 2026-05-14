@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -138,14 +137,14 @@ func writeReviewDecisionYAML(projectPath string, doc *ReviewDecisionDoc) error {
 	if err := validateReviewDecisionDoc(doc); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("prepare verification dir: %w", err)
 	}
 	out, err := yaml.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal review decision yaml: %w", err)
 	}
-	if err := os.WriteFile(path, out, 0644); err != nil {
+	if err := osWriteFile(path, out, 0644); err != nil {
 		return fmt.Errorf("write review decision: %w", err)
 	}
 	return nil
