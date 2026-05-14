@@ -124,7 +124,7 @@ func scaffoldGraphBridgeConfig(projectPath string) (*GraphBridgeConfig, error) {
 		Enabled:       true,
 		GraphHome:     graphHome,
 	}
-	out, err := yaml.Marshal(cfg)
+	out, err := yamlMarshal(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func writeGraphBridgeHealth(project string, health GraphBridgeHealth) error {
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(health, "", "  ")
+	data, err := jsonMarshalIndent(health, "", "  ")
 	if err != nil {
 		return err
 	}

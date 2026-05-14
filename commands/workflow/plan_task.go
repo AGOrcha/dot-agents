@@ -175,7 +175,7 @@ func persistScopeEvidenceSidecar(projectPath, planID, taskID string, ev *ScopeEv
 	if err := osMkdirAll(filepath.Dir(outPath), 0755); err != nil {
 		return "", fmt.Errorf("create evidence dir: %w", err)
 	}
-	data, err := yaml.Marshal(ev)
+	data, err := yamlMarshal(ev)
 	if err != nil {
 		return "", fmt.Errorf("marshal sidecar: %w", err)
 	}
@@ -485,7 +485,7 @@ func saveCanonicalPlan(projectPath string, plan *CanonicalPlan) error {
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	content, err := yaml.Marshal(plan)
+	content, err := yamlMarshal(plan)
 	if err != nil {
 		return err
 	}
@@ -523,7 +523,7 @@ func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	content, err := yaml.Marshal(tf)
+	content, err := yamlMarshal(tf)
 	if err != nil {
 		return err
 	}

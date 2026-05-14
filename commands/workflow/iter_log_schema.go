@@ -46,7 +46,7 @@ func validateWorkflowIterLogEntry(entry *iterLogEntry) error {
 	if err != nil {
 		return err
 	}
-	b, err := json.Marshal(entry)
+	b, err := jsonMarshal(entry)
 	if err != nil {
 		return fmt.Errorf("marshal iteration log for schema validation: %w", err)
 	}

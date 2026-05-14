@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"go.yaml.in/yaml/v3"
 )
 
 //go:embed static/verification-decision.schema.json
@@ -99,7 +98,7 @@ func validateReviewDecisionDoc(doc *ReviewDecisionDoc) error {
 	if err != nil {
 		return err
 	}
-	b, err := json.Marshal(doc)
+	b, err := jsonMarshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal review decision for schema validation: %w", err)
 	}
@@ -140,7 +139,7 @@ func writeReviewDecisionYAML(projectPath string, doc *ReviewDecisionDoc) error {
 	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("prepare verification dir: %w", err)
 	}
-	out, err := yaml.Marshal(doc)
+	out, err := yamlMarshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal review decision yaml: %w", err)
 	}

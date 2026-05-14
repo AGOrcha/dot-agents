@@ -244,7 +244,7 @@ func saveDriftReport(agg AggregateDriftReport) error {
 	if err := osMkdirAll(config.AgentsContextDir(), 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(agg, "", "  ")
+	data, err := jsonMarshalIndent(agg, "", "  ")
 	if err != nil {
 		return err
 	}

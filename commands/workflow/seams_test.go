@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -646,5 +647,330 @@ func TestConfirmSweepAction_EmptyInputDeclines(t *testing.T) {
 	}
 	if confirmSweepAction(action) {
 		t.Error("expected empty input to decline (default N)")
+	}
+}
+
+// ─── Marshal seam helpers ────────────────────────────────────────────────────
+
+// withYAMLMarshalStub swaps yamlMarshal for the duration of the test.
+func withYAMLMarshalStub(t *testing.T, stub func(any) ([]byte, error)) {
+	t.Helper()
+	prev := yamlMarshal
+	yamlMarshal = stub
+	t.Cleanup(func() { yamlMarshal = prev })
+}
+
+// withJSONMarshalStub swaps jsonMarshal for the duration of the test.
+func withJSONMarshalStub(t *testing.T, stub func(any) ([]byte, error)) {
+	t.Helper()
+	prev := jsonMarshal
+	jsonMarshal = stub
+	t.Cleanup(func() { jsonMarshal = prev })
+}
+
+// withJSONMarshalIndentStub swaps jsonMarshalIndent for the duration of the test.
+func withJSONMarshalIndentStub(t *testing.T, stub func(any, string, string) ([]byte, error)) {
+	t.Helper()
+	prev := jsonMarshalIndent
+	jsonMarshalIndent = stub
+	t.Cleanup(func() { jsonMarshalIndent = prev })
+}
+
+func yamlMarshalErrStub(sentinel error) func(any) ([]byte, error) {
+	return func(any) ([]byte, error) { return nil, sentinel }
+}
+
+func jsonMarshalErrStub(sentinel error) func(any) ([]byte, error) {
+	return func(any) ([]byte, error) { return nil, sentinel }
+}
+
+func jsonMarshalIndentErrStub(sentinel error) func(any, string, string) ([]byte, error) {
+	return func(any, string, string) ([]byte, error) { return nil, sentinel }
+}
+
+// ─── yamlMarshal error branches ──────────────────────────────────────────────
+
+func TestSaveDelegationContract_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := saveDelegationContract(t.TempDir(), &DelegationContract{ParentTaskID: "t1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestSaveMergeBack_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := saveMergeBack(t.TempDir(), &MergeBackSummary{TaskID: "t1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestWriteFoldBackArtifact_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := writeFoldBackArtifact(t.TempDir(), foldBackArtifact{ID: "fb1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestWriteFoldBackProposalFile_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	path := filepath.Join(t.TempDir(), "p.md")
+	err := writeFoldBackProposalFile(path, foldBackProposalFrontmatter{}, "body")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestSaveDelegationBundle_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := saveDelegationBundle(t.TempDir(), &delegationBundleYAML{DelegationID: "d1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestPersistScopeEvidenceSidecar_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	_, err := persistScopeEvidenceSidecar(t.TempDir(), "plan", "task", &ScopeEvidence{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel wrapped, got %v", err)
+	}
+}
+
+func TestSaveCanonicalPlan_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := saveCanonicalPlan(t.TempDir(), &CanonicalPlan{ID: "p1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestSaveCanonicalTasks_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := saveCanonicalTasks(t.TempDir(), &CanonicalTaskFile{PlanID: "p1"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+func TestWriteIterLogEntry_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	iterPath := filepath.Join(t.TempDir(), "iter-1.yaml")
+	err := writeIterLogEntry(iterPath, newValidIterLogEntry())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel wrapped, got %v", err)
+	}
+}
+
+func TestWriteVerificationResultYAML_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := writeVerificationResultYAML(t.TempDir(), newValidVerificationResultDoc())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel wrapped, got %v", err)
+	}
+}
+
+func TestWriteReviewDecisionYAML_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	err := writeReviewDecisionYAML(t.TempDir(), newValidReviewDecisionDoc())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel wrapped, got %v", err)
+	}
+}
+
+func TestScaffoldGraphBridgeConfig_YAMLMarshalError(t *testing.T) {
+	sentinel := errors.New("yaml boom")
+	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
+
+	_, err := scaffoldGraphBridgeConfig(t.TempDir())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected yaml sentinel, got %v", err)
+	}
+}
+
+// ─── jsonMarshal error branches ──────────────────────────────────────────────
+
+func TestAppendVerificationLog_JSONMarshalError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sentinel := errors.New("json boom")
+	withJSONMarshalStub(t, jsonMarshalErrStub(sentinel))
+
+	err := appendVerificationLog("p", VerificationRecord{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel, got %v", err)
+	}
+}
+
+func TestValidateWorkflowIterLogEntry_JSONMarshalError(t *testing.T) {
+	sentinel := errors.New("json boom")
+	withJSONMarshalStub(t, jsonMarshalErrStub(sentinel))
+
+	err := validateWorkflowIterLogEntry(newValidIterLogEntry())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel wrapped, got %v", err)
+	}
+}
+
+func TestValidateReviewDecisionDoc_JSONMarshalError(t *testing.T) {
+	sentinel := errors.New("json boom")
+	withJSONMarshalStub(t, jsonMarshalErrStub(sentinel))
+
+	err := validateReviewDecisionDoc(newValidReviewDecisionDoc())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel wrapped, got %v", err)
+	}
+}
+
+func TestValidateVerificationResultDoc_JSONMarshalError(t *testing.T) {
+	sentinel := errors.New("json boom")
+	withJSONMarshalStub(t, jsonMarshalErrStub(sentinel))
+
+	err := validateVerificationResultDoc(newValidVerificationResultDoc())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel wrapped, got %v", err)
+	}
+}
+
+// ─── jsonMarshalIndent error branches ────────────────────────────────────────
+
+func TestSaveDriftReport_JSONMarshalIndentError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sentinel := errors.New("json boom")
+	withJSONMarshalIndentStub(t, jsonMarshalIndentErrStub(sentinel))
+
+	err := saveDriftReport(AggregateDriftReport{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel, got %v", err)
+	}
+}
+
+func TestWriteHealthSnapshot_JSONMarshalIndentError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sentinel := errors.New("json boom")
+	withJSONMarshalIndentStub(t, jsonMarshalIndentErrStub(sentinel))
+
+	err := writeHealthSnapshot("p", WorkflowHealthSnapshot{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel, got %v", err)
+	}
+}
+
+func TestWriteGraphBridgeHealth_JSONMarshalIndentError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sentinel := errors.New("json boom")
+	withJSONMarshalIndentStub(t, jsonMarshalIndentErrStub(sentinel))
+
+	err := writeGraphBridgeHealth("p", GraphBridgeHealth{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected json sentinel, got %v", err)
+	}
+}
+
+// ─── appendWorkflowSessionLog Fprintf-after-OpenFile error ───────────────────
+
+// closedFileOpenStub returns a *os.File that has already been closed, so any
+// Fprintf call against it returns os.ErrClosed. This drives the Fprintf-error
+// branches in writers that defer-Close their file handle.
+func closedFileOpenStub(t *testing.T) func(string, int, os.FileMode) (*os.File, error) {
+	t.Helper()
+	return func(string, int, os.FileMode) (*os.File, error) {
+		f, err := os.CreateTemp(t.TempDir(), "closed-*.tmp")
+		if err != nil {
+			return nil, err
+		}
+		_ = f.Close()
+		return f, nil
+	}
+}
+
+func TestAppendWorkflowSessionLog_FprintfError(t *testing.T) {
+	withOpenFileStub(t, closedFileOpenStub(t))
+
+	err := appendWorkflowSessionLog(filepath.Join(t.TempDir(), "log.md"), workflowCheckpoint{})
+	if err == nil {
+		t.Fatal("expected fprintf-after-close error, got nil")
+	}
+}
+
+func TestAppendVerificationLog_FprintfError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	withOpenFileStub(t, closedFileOpenStub(t))
+
+	err := appendVerificationLog("p", VerificationRecord{})
+	if err == nil {
+		t.Fatal("expected fprintf-after-close error, got nil")
+	}
+}
+
+// withFprintfStub swaps fprintfFunc for the duration of the test.
+func withFprintfStub(t *testing.T, stub func(io.Writer, string, ...any) (int, error)) {
+	t.Helper()
+	prev := fprintfFunc
+	fprintfFunc = stub
+	t.Cleanup(func() { fprintfFunc = prev })
+}
+
+// failOnNthFprintf returns a stub that succeeds for the first n-1 calls
+// then returns sentinel on the nth call onwards.
+func failOnNthFprintf(n int, sentinel error) func(io.Writer, string, ...any) (int, error) {
+	calls := 0
+	return func(w io.Writer, format string, args ...any) (int, error) {
+		calls++
+		if calls >= n {
+			return 0, sentinel
+		}
+		return fmt.Fprintf(w, format, args...)
+	}
+}
+
+func TestAppendWorkflowSessionLog_FprintfErrorPerCall(t *testing.T) {
+	for i := 1; i <= 7; i++ {
+		i := i
+		t.Run(fmt.Sprintf("call=%d", i), func(t *testing.T) {
+			sentinel := errors.New("fprintf boom")
+			withFprintfStub(t, failOnNthFprintf(i, sentinel))
+
+			err := appendWorkflowSessionLog(filepath.Join(t.TempDir(), "log.md"), workflowCheckpoint{})
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("expected fprintf sentinel on call %d, got %v", i, err)
+			}
+		})
+	}
+}
+
+func TestAppendVerificationLog_FprintfSeamError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sentinel := errors.New("fprintf boom")
+	withFprintfStub(t, func(io.Writer, string, ...any) (int, error) {
+		return 0, sentinel
+	})
+
+	err := appendVerificationLog("p", VerificationRecord{})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected fprintf sentinel, got %v", err)
 	}
 }

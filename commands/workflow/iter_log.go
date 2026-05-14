@@ -586,7 +586,7 @@ func writeIterLogEntry(iterPath string, entry *iterLogEntry) error {
 	if err := validateWorkflowIterLogEntry(entry); err != nil {
 		return err
 	}
-	body, err := yaml.Marshal(entry)
+	body, err := yamlMarshal(entry)
 	if err != nil {
 		return fmt.Errorf("marshal iter log: %w", err)
 	}

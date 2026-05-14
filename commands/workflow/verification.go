@@ -47,11 +47,11 @@ func appendVerificationLog(project string, rec VerificationRecord) error {
 		return err
 	}
 	defer f.Close()
-	line, err := json.Marshal(rec)
+	line, err := jsonMarshal(rec)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(f, "%s\n", line)
+	_, err = fprintfFunc(f, "%s\n", line)
 	return err
 }
 

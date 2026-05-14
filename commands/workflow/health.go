@@ -60,7 +60,7 @@ func writeHealthSnapshot(project string, h WorkflowHealthSnapshot) error {
 	if err := osMkdirAll(config.ProjectContextDir(project), 0755); err != nil {
 		return err
 	}
-	content, err := json.MarshalIndent(h, "", "  ")
+	content, err := jsonMarshalIndent(h, "", "  ")
 	if err != nil {
 		return err
 	}

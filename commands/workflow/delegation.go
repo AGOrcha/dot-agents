@@ -98,7 +98,7 @@ func saveDelegationContract(projectPath string, c *DelegationContract) error {
 		return err
 	}
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	data, err := yaml.Marshal(c)
+	data, err := yamlMarshal(c)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func saveMergeBack(projectPath string, s *MergeBackSummary) error {
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	frontmatter, err := yaml.Marshal(s)
+	frontmatter, err := yamlMarshal(s)
 	if err != nil {
 		return err
 	}
@@ -334,7 +334,7 @@ func writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error 
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(&artifact)
+	data, err := yamlMarshal(&artifact)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func writeFoldBackArtifact(projectPath string, artifact foldBackArtifact) error 
 }
 
 func writeFoldBackProposalFile(path string, fm foldBackProposalFrontmatter, body string) error {
-	header, err := yaml.Marshal(fm)
+	header, err := yamlMarshal(fm)
 	if err != nil {
 		return err
 	}
@@ -1210,7 +1210,7 @@ func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
 	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(b)
+	data, err := yamlMarshal(b)
 	if err != nil {
 		return err
 	}
@@ -1577,7 +1577,7 @@ func archiveCloseoutArtifacts(projectPath, taskID, planID, decision string, cont
 		return "", "", fmt.Errorf("archive delegation contract: %w", err)
 	}
 
-	closeoutData, err := yaml.Marshal(closeout)
+	closeoutData, err := yamlMarshal(closeout)
 	if err != nil {
 		return "", "", err
 	}

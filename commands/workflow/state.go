@@ -139,7 +139,7 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 		return err
 	}
 	checkpointPath := filepath.Join(contextDir, "checkpoint.yaml")
-	content, err := yaml.Marshal(checkpoint)
+	content, err := yamlMarshal(checkpoint)
 	if err != nil {
 		return err
 	}
@@ -875,25 +875,25 @@ func appendWorkflowSessionLog(path string, checkpoint workflowCheckpoint) error 
 	}
 	defer f.Close()
 
-	if _, err := fmt.Fprintf(f, "## %s\n", checkpoint.Timestamp); err != nil {
+	if _, err := fprintfFunc(f, "## %s\n", checkpoint.Timestamp); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "branch: %s\n", checkpoint.Git.Branch); err != nil {
+	if _, err := fprintfFunc(f, "branch: %s\n", checkpoint.Git.Branch); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "sha: %s\n", checkpoint.Git.SHA); err != nil {
+	if _, err := fprintfFunc(f, "sha: %s\n", checkpoint.Git.SHA); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "files: %d\n", len(checkpoint.Files.Modified)); err != nil {
+	if _, err := fprintfFunc(f, "files: %d\n", len(checkpoint.Files.Modified)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "verification: %s\n", checkpoint.Verification.Status); err != nil {
+	if _, err := fprintfFunc(f, "verification: %s\n", checkpoint.Verification.Status); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "message: %s\n", checkpoint.Message); err != nil {
+	if _, err := fprintfFunc(f, "message: %s\n", checkpoint.Message); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(f, "next_action: %s\n\n", checkpoint.NextAction); err != nil {
+	if _, err := fprintfFunc(f, "next_action: %s\n\n", checkpoint.NextAction); err != nil {
 		return err
 	}
 	return nil

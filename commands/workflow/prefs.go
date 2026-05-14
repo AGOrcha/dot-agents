@@ -246,7 +246,7 @@ func setLocalPreference(project, key, value string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	out, err := yaml.Marshal(&f)
+	out, err := yamlMarshal(&f)
 	if err != nil {
 		return err
 	}
