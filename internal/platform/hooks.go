@@ -865,7 +865,7 @@ func removeManagedFile(dst string, content []byte) error {
 	if !bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))
@@ -909,7 +909,7 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if !matches(content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))

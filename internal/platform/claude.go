@@ -368,7 +368,7 @@ func (c *claude) pruneProjectRuleLinks(rulesDir, project string, wanted ...map[s
 		if _, ok := keep[name]; ok {
 			continue
 		}
-		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

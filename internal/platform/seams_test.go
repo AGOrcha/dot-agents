@@ -229,6 +229,58 @@ func TestClaudePrepareLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestClaudeCreateLinks_CreateRulesLinksErrorSurfaces drives the
+// createRulesLinks early-return branch by injecting a Remove failure on
+// a stale project-rule file.
+func TestClaudeCreateLinks_CreateRulesLinksErrorSurfaces(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed a project rules dir so createRulesLinks proceeds and seed a stale
+	// repo rule that will be pruned -> osRemove invoked.
+	projectRulesSrc := filepath.Join(agentsHome, "rules", "proj")
+	if err := os.MkdirAll(projectRulesSrc, 0755); err != nil {
+		t.Fatal(err)
+	}
+	staleRulesDir := filepath.Join(repo, ".claude", "rules")
+	if err := os.MkdirAll(staleRulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(staleRulesDir, "proj--stale.md")
+	if err := os.WriteFile(stale, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withRemoveError(t, "proj--stale.md")
+
+	c := NewClaude().(*claude)
+	err := c.CreateLinks("proj", repo)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestClaudeCreateLinks_CreateAgentsLinksErrorSurfaces drives the
+// createAgentsLinks early-return branch.
+func TestClaudeCreateLinks_CreateAgentsLinksErrorSurfaces(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed an agents bucket entry so syncScopedDirSymlinksTargets enters its
+	// MkdirAll path, then fail that MkdirAll.
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# r"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Fail the MkdirAll inside syncResourceDirEntries for the `.agents/agents`
+	// destination. We use a tightly-scoped seam path so prepareLinks succeeds.
+	withMkdirAllError(t, filepath.Join(repo, ".agents", "agents"))
+
+	c := NewClaude().(*claude)
+	err := c.CreateLinks("proj", repo)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
 // --- codex.go seams -----------------------------------------------------
 
 func TestCodexCreateLinks_MkdirAllErrorSurfaces(t *testing.T) {
@@ -460,6 +512,294 @@ func TestWriteManagedFile_WriteFileErrorSurfaces(t *testing.T) {
 	err := writeManagedFile(dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// --- render helpers (hooks.go) -----------------------------------------
+
+// TestRenderCursorHookEntry_RequiredButNotRepresentable covers the
+// "event not representable + required" error branch.
+func TestRenderCursorHookEntry_RequiredButNotRepresentable(t *testing.T) {
+	spec := HookSpec{
+		Name:       "h",
+		When:       "OnUnknownEvent",
+		Command:    "echo hi",
+		RequiredOn: []string{"cursor"},
+	}
+	_, _, include, err := renderCursorHookEntry(spec)
+	if err == nil {
+		t.Fatal("expected error for unrepresentable event")
+	}
+	if include {
+		t.Fatal("include=true, want false on error")
+	}
+}
+
+// TestRenderCursorHookEntry_NotRequiredNotRepresentableSkipped covers the
+// silent-skip branch when the platform is optional.
+func TestRenderCursorHookEntry_NotRequiredNotRepresentableSkipped(t *testing.T) {
+	spec := HookSpec{Name: "h", When: "OnUnknownEvent", Command: "echo hi"}
+	_, _, include, err := renderCursorHookEntry(spec)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if include {
+		t.Fatal("expected include=false")
+	}
+}
+
+// TestRenderCursorHookEntry_RequiredButNoCommand covers the
+// "no command + required" error branch.
+func TestRenderCursorHookEntry_RequiredButNoCommand(t *testing.T) {
+	spec := HookSpec{
+		Name:       "h",
+		When:       "PreToolUse",
+		RequiredOn: []string{"cursor"},
+	}
+	_, _, include, err := renderCursorHookEntry(spec)
+	if err == nil {
+		t.Fatal("expected error for missing command")
+	}
+	if include {
+		t.Fatal("include=true, want false on error")
+	}
+}
+
+// TestRenderCursorHookEntry_NoCommandSkipped covers the silent-skip branch
+// when the command is empty but the platform is optional.
+func TestRenderCursorHookEntry_NoCommandSkipped(t *testing.T) {
+	spec := HookSpec{Name: "h", When: "PreToolUse"}
+	_, _, include, err := renderCursorHookEntry(spec)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if include {
+		t.Fatal("expected include=false")
+	}
+}
+
+// TestRenderCodexHookConfig_RequiredButNotRepresentable mirrors the
+// renderCursor coverage for the codex path.
+func TestRenderCodexHookConfig_RequiredButNotRepresentable(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "h",
+		When:       "OnUnknownEvent",
+		Command:    "echo hi",
+		RequiredOn: []string{"codex"},
+	}}
+	if _, err := renderCodexHookConfig(specs); err == nil {
+		t.Fatal("expected error for unrepresentable event")
+	}
+}
+
+// TestRenderCodexHookConfig_RequiredButNoCommand covers the missing-command
+// error branch in renderCodexHookConfig.
+func TestRenderCodexHookConfig_RequiredButNoCommand(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "h",
+		When:       "PreToolUse",
+		RequiredOn: []string{"codex"},
+	}}
+	if _, err := renderCodexHookConfig(specs); err == nil {
+		t.Fatal("expected error for missing command")
+	}
+}
+
+// TestRenderCodexHookConfig_NotRequiredUnrepresentableSkipped covers the
+// continue-on-skip branch.
+func TestRenderCodexHookConfig_NotRequiredUnrepresentableSkipped(t *testing.T) {
+	specs := []HookSpec{{Name: "h", When: "OnUnknownEvent", Command: "echo hi"}}
+	out, err := renderCodexHookConfig(specs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("expected non-empty output")
+	}
+}
+
+// TestRenderCodexHookConfig_NotRequiredNoCommandSkipped covers the
+// continue-on-no-command branch.
+func TestRenderCodexHookConfig_NotRequiredNoCommandSkipped(t *testing.T) {
+	specs := []HookSpec{{Name: "h", When: "pre_tool_use"}}
+	out, err := renderCodexHookConfig(specs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("expected non-empty output")
+	}
+}
+
+// TestRenderCopilotHookFile_RequiredButHasMatcher covers the
+// "matcher unsupported + required" branch.
+func TestRenderCopilotHookFile_RequiredButHasMatcher(t *testing.T) {
+	spec := HookSpec{
+		Name:       "h",
+		When:       "PreToolUse",
+		Command:    "echo hi",
+		MatchTools: []string{"Write"},
+		RequiredOn: []string{"copilot"},
+	}
+	_, _, include, err := renderCopilotHookFile(spec)
+	if err == nil {
+		t.Fatal("expected error for matcher use on copilot")
+	}
+	if include {
+		t.Fatal("include=true, want false")
+	}
+}
+
+// TestRenderCopilotHookFile_RequiredButNoCommand covers the missing-command
+// error branch.
+func TestRenderCopilotHookFile_RequiredButNoCommand(t *testing.T) {
+	spec := HookSpec{
+		Name:       "h",
+		When:       "PreToolUse",
+		RequiredOn: []string{"copilot"},
+	}
+	_, _, include, err := renderCopilotHookFile(spec)
+	if err == nil {
+		t.Fatal("expected error for missing command")
+	}
+	if include {
+		t.Fatal("include=true, want false")
+	}
+}
+
+// TestRemoveManagedFile_RemoveErrorSurfaces covers the os.Remove error
+// branch (real but ENOENT-tolerant; we trigger a non-ENOENT error via the
+// seam).
+func TestRemoveManagedFile_RemoveErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "managed.json")
+	content := []byte("payload")
+	if err := os.WriteFile(dst, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	withRemoveError(t, "managed.json")
+
+	err := removeManagedFile(dst, content)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("removeManagedFile err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestRemoveManagedFileIf_RemoveErrorSurfaces covers the os.Remove branch in
+// removeManagedFileIf.
+func TestRemoveManagedFileIf_RemoveErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "managed.json")
+	if err := os.WriteFile(dst, []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	withRemoveError(t, "managed.json")
+
+	err := removeManagedFileIf(dst, func([]byte) bool { return true })
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("removeManagedFileIf err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestExecuteResourceIntent_DirectDir_EmptySourceError covers
+// canonicalIntentSourcePath's empty-source error branch via the
+// ResourceShapeDirectDir/Symlink intent path.
+func TestExecuteResourceIntent_DirectDir_EmptySourceError(t *testing.T) {
+	intent := ResourceIntent{
+		IntentID:   "x",
+		TargetPath: "out",
+		Shape:      ResourceShapeDirectDir,
+		Transport:  ResourceTransportSymlink,
+		// SourceRef left zero -> CanonicalPath returns "" -> error.
+	}
+	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected empty-source error")
+	}
+}
+
+// TestExecuteResourceIntent_DirectFile_EmptySourceError covers the same for
+// the file-symlink shape.
+func TestExecuteResourceIntent_DirectFile_EmptySourceError(t *testing.T) {
+	intent := ResourceIntent{
+		IntentID:   "x",
+		TargetPath: "out",
+		Shape:      ResourceShapeDirectFile,
+		Transport:  ResourceTransportSymlink,
+	}
+	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected empty-source error")
+	}
+}
+
+// TestExecuteRenderSingleWrite_EmptySourceError covers the empty-source
+// branch for the codex-agent-toml materializer.
+func TestExecuteRenderSingleWrite_EmptySourceError(t *testing.T) {
+	intent := ResourceIntent{
+		IntentID:     "x",
+		TargetPath:   "out",
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+	}
+	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected empty-source error")
+	}
+}
+
+// TestExecuteResourceIntent_UnsupportedShape covers the default error branch
+// in executeResourceIntent.
+func TestExecuteResourceIntent_UnsupportedShape(t *testing.T) {
+	intent := ResourceIntent{
+		IntentID:   "x",
+		TargetPath: "out",
+		Shape:      "unknown",
+		Transport:  "unknown",
+	}
+	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected unsupported-shape error")
+	}
+}
+
+// TestExecuteRenderSingleWrite_UnsupportedMaterializer covers the default
+// error branch when materializer is unknown.
+func TestExecuteRenderSingleWrite_UnsupportedMaterializer(t *testing.T) {
+	intent := ResourceIntent{
+		IntentID:     "x",
+		TargetPath:   "out",
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: "unknown",
+	}
+	err := executeResourceIntent(intent, t.TempDir(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected unsupported-materializer error")
+	}
+}
+
+// TestRemoveSharedTargets_UnsupportedMaterializerError covers the
+// removeManagedIntentTarget error branch and the wrapping in
+// RemoveSharedTargets.
+func TestRemoveSharedTargets_UnsupportedMaterializerError(t *testing.T) {
+	tmp := t.TempDir()
+	plan := ResourcePlan{Resources: []plannedResource{{
+		Intent: ResourceIntent{
+			IntentID:     "test-intent",
+			TargetPath:   "subdir/file.toml",
+			Shape:        ResourceShapeRenderSingle,
+			Transport:    ResourceTransportWrite,
+			Materializer: "unknown-materializer",
+		},
+	}}}
+	err := plan.RemoveSharedTargets(tmp, tmp)
+	if err == nil {
+		t.Fatal("expected error for unsupported materializer")
+	}
+	if !strings.Contains(err.Error(), "test-intent") {
+		t.Errorf("err = %v, expected to mention intent id", err)
 	}
 }
 
