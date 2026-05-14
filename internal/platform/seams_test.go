@@ -216,6 +216,25 @@ func TestCopilotCreateLinks_ChainEarlyReturns(t *testing.T) {
 
 // --- claude.go seams ----------------------------------------------------
 
+// TestClaudePrepareLinks_EnsureUserSettingsErrorPropagates drives the
+// ensureUserSettings early-return inside prepareLinks via a malformed
+// global HOOK.yaml that surfaces a parse error.
+func TestClaudePrepareLinks_EnsureUserSettingsErrorPropagates(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	if err := c.prepareLinks(repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error from ensureUserSettings")
+	}
+}
+
 func TestClaudePrepareLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
 	// Restrict the failing path to the final MkdirAll call so the earlier
@@ -690,6 +709,25 @@ func TestCopilotCreateClaudeCompatLinks_PropagatesGlobalBundlesError(t *testing.
 	}
 }
 
+// TestCopilotEmitCanonicalProjectHookFiles_RenderedNamesError covers the
+// renderedCopilotHookNames error branch when a required-on copilot hook
+// uses MatchTools (which copilot does not support).
+func TestCopilotEmitCanonicalProjectHookFiles_RenderedNamesError(t *testing.T) {
+	tmp := t.TempDir()
+	hooksDir := filepath.Join(tmp, "hooks")
+	specs := []HookSpec{{
+		Name:       "h",
+		When:       "pre_tool_use",
+		Command:    "echo hi",
+		MatchTools: []string{"Write"},
+		RequiredOn: []string{"copilot"},
+	}}
+	c := NewCopilot().(*copilot)
+	if err := c.emitCanonicalProjectHookFiles(specs, hooksDir); err == nil {
+		t.Fatal("expected matcher-unsupported error")
+	}
+}
+
 // TestCopilotCreateProjectHookFiles_PropagatesParseError covers the early-
 // return when collectCanonical fails inside createProjectHookFiles.
 func TestCopilotCreateProjectHookFiles_PropagatesParseError(t *testing.T) {
@@ -1014,6 +1052,30 @@ func TestWriteManagedFile_WriteFileErrorSurfaces(t *testing.T) {
 	err := writeManagedFile(dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestResolveCodexModelFromJSONL_MalformedAndNonResponseSkipped covers the
+// Unmarshal-error and non-response-item early-return branches.
+func TestResolveCodexModelFromJSONL_MalformedAndNonResponseSkipped(t *testing.T) {
+	home := t.TempDir()
+	sessionID := "sess-x"
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "13")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "trace-"+sessionID+".jsonl")
+	content := strings.Join([]string{
+		`{"response_item": broken json`, // unmarshal error
+		`{"type":"response_item","payload":{"type":"function_call","model":"x"}}`,
+		`{"type":"response_item","payload":{"type":"response","model":"gpt-5"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveCodexModelFromJSONL(home, sessionID)
+	if got != "gpt-5" {
+		t.Errorf("model = %q, want gpt-5", got)
 	}
 }
 
