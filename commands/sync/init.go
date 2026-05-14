@@ -78,8 +78,16 @@ func initSyncRepo(agentsHome string) error {
 		_ = os.WriteFile(gitignorePath, []byte("local/\n*.dot-agents-backup\n"), 0644)
 	}
 
-	execabs.Command("git", "-C", agentsHome, "add", ".").Run()
-	execabs.Command("git", "-C", agentsHome, "commit", "-m", "Initial commit").Run()
+	if addOut, err := execabs.Command("git", "-C", agentsHome, "add", ".").CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w\n%s", err, strings.TrimSpace(string(addOut)))
+	}
+	if commitOut, err := execabs.Command("git", "-C", agentsHome, "commit", "-m", "Initial commit").CombinedOutput(); err != nil {
+		msg := string(commitOut)
+		if strings.Contains(msg, "user.email") || strings.Contains(msg, "user.name") {
+			return fmt.Errorf("git commit failed (likely missing git user config). Run `git config --global user.email \"you@example.com\"` and `git config --global user.name \"Your Name\"` then re-run `da sync init`: %w", err)
+		}
+		return fmt.Errorf("git commit: %w (output: %s)", err, strings.TrimSpace(msg))
+	}
 
 	ui.Success("Initialized git repository in ~/.agents/")
 	fmt.Fprintln(os.Stdout)

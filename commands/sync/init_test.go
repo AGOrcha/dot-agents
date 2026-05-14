@@ -3,6 +3,7 @@ package sync
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,48 @@ func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit on existing+remote repo: %v", err)
+	}
+}
+
+// TestRunSyncInit_GitCommitFailureSurfacesError ensures the friendly error
+// path fires when git refuses to commit because user.email/user.name are
+// unset. The previous code swallowed the .Run() error and lied to the user
+// with ui.Success.
+func TestRunSyncInit_GitCommitFailureSurfacesError(t *testing.T) {
+	requireGit(t)
+
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Strip every git identity source so the commit must fail. HOME +
+	// XDG_CONFIG_HOME point at empty dirs (no ~/.gitconfig). GIT_CONFIG_*
+	// vars are unset. GIT_AUTHOR_*/GIT_COMMITTER_* are unset so git falls
+	// back to user.email/user.name (which is also unset).
+	emptyHome := filepath.Join(tmp, "empty-home")
+	if err := os.MkdirAll(emptyHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", emptyHome)
+	t.Setenv("XDG_CONFIG_HOME", emptyHome)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(emptyHome, ".no-such-config"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(emptyHome, ".no-such-system"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "")
+	}
+
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	err := runSyncInit(deps)
+	if err == nil {
+		t.Skip("git accepted the commit even with no identity (likely a CI git build with implicit defaults); cannot exercise the error path here")
+	}
+	msg := err.Error()
+	if !(strings.Contains(msg, "user.email") || strings.Contains(msg, "user.name") || strings.Contains(msg, "git commit")) {
+		t.Errorf("expected git-commit/user-config error, got %q", msg)
 	}
 }
 
