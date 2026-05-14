@@ -397,11 +397,19 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 
 // BuildSharedAgentFileSymlinkIntents builds symlink intents from each canonical
 // AGENT.md file to a repo-local file path (OpenCode `.md`, Copilot `.agent.md`).
+//
+// A missing canonical agents bucket (ENOENT) is treated as an empty resource
+// set — projects without any agents yet are legitimate and should yield no
+// intents, not a hard failure. Other errors (permission denied, IO) propagate
+// so callers can surface them instead of silently producing an empty plan.
 func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical agents for project %q under %s: %w", project, targetRoot, err)
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {
@@ -432,11 +440,19 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 
 // BuildSharedCodexAgentTomlIntents builds render intents for `.codex/agents/*.toml`
 // from canonical project agent directories.
+//
+// A missing canonical agents bucket (ENOENT) is treated as an empty resource
+// set — projects without any agents yet are legitimate and should yield no
+// intents, not a hard failure. Other errors (permission denied, IO) propagate
+// so callers can surface them instead of silently producing an empty plan.
 func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical agents for project %q (codex toml intents): %w", project, err)
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {

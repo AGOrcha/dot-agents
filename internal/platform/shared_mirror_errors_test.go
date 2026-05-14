@@ -103,3 +103,166 @@ func TestBuildSharedPluginBundleIntents_NonENOENTErrorPropagates(t *testing.T) {
 		t.Errorf("error should mention failing bucket; got %q", err)
 	}
 }
+
+// TestBuildSharedAgentFileSymlinkIntents_MissingBucketIsEmpty asserts ENOENT
+// surfaces as empty intents (no error) — projects without agents yet.
+func TestBuildSharedAgentFileSymlinkIntents_MissingBucketIsEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	intents, err := BuildSharedAgentFileSymlinkIntents("never-promoted", ".github/agents", ".agent.md")
+	if err != nil {
+		t.Fatalf("ENOENT must not surface as error: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Errorf("want empty intents for missing bucket, got %d", len(intents))
+	}
+}
+
+// TestBuildSharedAgentFileSymlinkIntents_NonENOENTErrorPropagates asserts a
+// real listScopedResourceDirs failure (bucket path is a regular file, not a
+// directory — os.ReadDir errors with ENOTDIR) propagates up. Regression for
+// the previous `return nil, nil` swallow.
+func TestBuildSharedAgentFileSymlinkIntents_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "proj-file"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intents, err := BuildSharedAgentFileSymlinkIntents("proj-file", ".github/agents", ".agent.md")
+	if err == nil {
+		t.Fatalf("expected error from non-ENOENT readdir; got intents=%v", intents)
+	}
+	if !strings.Contains(err.Error(), "listing canonical agents") {
+		t.Errorf("error should mention failing bucket; got %q", err)
+	}
+	if intents != nil {
+		t.Errorf("error path must return nil intents, got %v", intents)
+	}
+}
+
+// TestBuildSharedCodexAgentTomlIntents_MissingBucketIsEmpty asserts ENOENT
+// surfaces as empty intents (no error).
+func TestBuildSharedCodexAgentTomlIntents_MissingBucketIsEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	intents, err := BuildSharedCodexAgentTomlIntents("never-promoted")
+	if err != nil {
+		t.Fatalf("ENOENT must not surface as error: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Errorf("want empty intents for missing bucket, got %d", len(intents))
+	}
+}
+
+// TestCopilotSharedTargetIntents_AgentFileErrorPropagates exercises the
+// previously-dead `if err != nil { return nil, err }` branch at the
+// BuildSharedAgentFileSymlinkIntents callsite in copilot.SharedTargetIntents.
+func TestCopilotSharedTargetIntents_AgentFileErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// skills bucket exists empty (so BuildSharedSkillMirrorIntents succeeds),
+	// agents bucket has a file masquerading as a project dir → ReadDir errors.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "agents", "broken-proj"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intents, err := NewCopilot().SharedTargetIntents("broken-proj")
+	if err == nil {
+		t.Fatalf("expected propagated error from agent file intents; got intents=%v", intents)
+	}
+	if !strings.Contains(err.Error(), "listing canonical agents") {
+		t.Errorf("error should mention failing bucket; got %q", err)
+	}
+}
+
+// TestOpencodeSharedTargetIntents_AgentFileErrorPropagates exercises the same
+// previously-dead branch in opencode.SharedTargetIntents.
+func TestOpencodeSharedTargetIntents_AgentFileErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "agents", "broken-proj"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intents, err := NewOpenCode().SharedTargetIntents("broken-proj")
+	if err == nil {
+		t.Fatalf("expected propagated error from agent file intents; got intents=%v", intents)
+	}
+	if !strings.Contains(err.Error(), "listing canonical agents") {
+		t.Errorf("error should mention failing bucket; got %q", err)
+	}
+}
+
+// TestCodexSharedTargetIntents_TomlErrorPropagates exercises the
+// previously-dead branch in codex.SharedTargetIntents on the
+// BuildSharedCodexAgentTomlIntents callsite.
+func TestCodexSharedTargetIntents_TomlErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "agents", "broken-proj"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intents, err := NewCodex().SharedTargetIntents("broken-proj")
+	if err == nil {
+		t.Fatalf("expected propagated error from codex toml intents; got intents=%v", intents)
+	}
+	if !strings.Contains(err.Error(), "listing canonical agents") {
+		t.Errorf("error should mention failing bucket; got %q", err)
+	}
+}
+
+// TestBuildSharedCodexAgentTomlIntents_NonENOENTErrorPropagates asserts the
+// same non-ENOENT failure mode propagates for the codex toml builder.
+// Regression for the previous `return nil, nil` swallow.
+func TestBuildSharedCodexAgentTomlIntents_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "proj-codex"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	intents, err := BuildSharedCodexAgentTomlIntents("proj-codex")
+	if err == nil {
+		t.Fatalf("expected error from non-ENOENT readdir; got intents=%v", intents)
+	}
+	if !strings.Contains(err.Error(), "listing canonical agents") {
+		t.Errorf("error should mention failing bucket; got %q", err)
+	}
+	if !strings.Contains(err.Error(), "codex toml") {
+		t.Errorf("error should mention codex toml context; got %q", err)
+	}
+	if intents != nil {
+		t.Errorf("error path must return nil intents, got %v", intents)
+	}
+}
