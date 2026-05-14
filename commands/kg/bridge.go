@@ -886,7 +886,7 @@ func executeBridgeQuery(kgHomeDir, bridgeIntent, query string) (GraphQueryRespon
 // writeBridgeContract writes KG_HOME/self/schema/bridge-contract.yaml.
 func writeBridgeContract(kgHomeDir string) error {
 	schemaDir := filepath.Join(kgHomeDir, "self", "schema")
-	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+	if err := osMkdirAll(schemaDir, 0755); err != nil {
 		return err
 	}
 	mappings := defaultBridgeMappings()
@@ -912,7 +912,7 @@ func writeBridgeContract(kgHomeDir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(schemaDir, "bridge-contract.yaml"), data, 0644)
+	return osWriteFile(filepath.Join(schemaDir, "bridge-contract.yaml"), data, 0644)
 }
 
 // ── kg bridge subcommands ─────────────────────────────────────────────────────

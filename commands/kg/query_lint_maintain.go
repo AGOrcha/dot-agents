@@ -433,7 +433,7 @@ func integrityManifestPath(kgHomeDir string) string {
 }
 
 func loadManifest(kgHomeDir string) (*IntegrityManifest, error) {
-	data, err := os.ReadFile(integrityManifestPath(kgHomeDir))
+	data, err := osReadFile(integrityManifestPath(kgHomeDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}, nil
@@ -453,14 +453,14 @@ func loadManifest(kgHomeDir string) (*IntegrityManifest, error) {
 func saveManifest(kgHomeDir string, m *IntegrityManifest) error {
 	m.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	p := integrityManifestPath(kgHomeDir)
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(p), 0755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
+	data, err := jsonMarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0644)
+	return osWriteFile(p, data, 0644)
 }
 
 // noteBodyHash computes SHA-256 of just the note body (excludes frontmatter).
@@ -788,14 +788,14 @@ func tallyLintSeverities(report *LintReport) {
 // behavior.
 func writeLintReport(kgHomeDir string, report *LintReport) {
 	reportPath := filepath.Join(kgHomeDir, "ops", "lint", "lint-report.json")
-	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(reportPath), 0755); err != nil {
 		return
 	}
-	data, err := json.MarshalIndent(report, "", "  ")
+	data, err := jsonMarshalIndent(report, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(reportPath, data, 0644)
+	_ = osWriteFile(reportPath, data, 0644)
 }
 
 // updateHealthFromLint folds lint metrics back into graph-health.json,
@@ -984,7 +984,7 @@ func containsLinkID(links []string, refID string) bool {
 // through to updateGraphNote so reweave only rewrites frontmatter (links).
 func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
 	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
-	existing, readErr := os.ReadFile(path)
+	existing, readErr := osReadFile(path)
 	if readErr != nil {
 		return
 	}
@@ -1039,7 +1039,7 @@ func markNoteStale(kgHomeDir, id string, note *GraphNote, cutoff time.Time) bool
 
 func runKGCompact(kgHomeDir string) error {
 	archiveDir := filepath.Join(kgHomeDir, "notes", "_archived")
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := osMkdirAll(archiveDir, 0755); err != nil {
 		return err
 	}
 

@@ -654,7 +654,7 @@ func warmArchivedNotes(store *graphstore.SQLiteStore, home string) (indexed, ski
 // resulting KGNote into store. Returns the indexed/skipped counters.
 // Missing directories are not counted as skips.
 func warmNotesInDir(store *graphstore.SQLiteStore, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
-	entries, err := os.ReadDir(dir)
+	entries, err := osReadDir(dir)
 	if err != nil {
 		return 0, 0
 	}
@@ -663,7 +663,7 @@ func warmNotesInDir(store *graphstore.SQLiteStore, dir string, adjust func(*grap
 			continue
 		}
 		fpath := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(fpath)
+		data, err := osReadFile(fpath)
 		if err != nil {
 			skipped++
 			continue
