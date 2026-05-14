@@ -55,7 +55,7 @@ unknown JSON keys are preserved.`,
 // ─── runInstall ──────────────────────────────────────────────────────────────
 
 func runInstall(strict bool) error {
-	projectPath, err := os.Getwd()
+	projectPath, err := osGetwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
@@ -267,7 +267,7 @@ func finalizeInstall(projectName, projectPath string) {
 // ─── runInstallGenerate ──────────────────────────────────────────────────────
 
 func runInstallGenerate() error {
-	projectPath, err := os.Getwd()
+	projectPath, err := osGetwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
@@ -446,7 +446,7 @@ func cloneGitSource(gitBin, url, ref, cacheDir string) (string, error) {
 	if Flags.Verbose {
 		ui.Info("Cloning source: " + url)
 	}
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := osMkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
 	args := []string{"clone", "--depth", "1"}
@@ -485,10 +485,10 @@ func linkResourceFromSources(resourceType, name, project string, sources []strin
 	if shouldSkipLinkDestination(destDir) {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return err
 	}
-	if err := os.Symlink(candidate, destDir); err != nil {
+	if err := osSymlink(candidate, destDir); err != nil {
 		return fmt.Errorf("symlinking %s: %w", name, err)
 	}
 	if Flags.Verbose {

@@ -673,7 +673,7 @@ func ensureGlobalKGMCPConfigs(agentsHome string) error {
 }
 
 func writeKGMCPConfigs(scopeDir string) error {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return err
 	}
@@ -710,8 +710,8 @@ func writeKGMCPConfigFile(path string, server map[string]any) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return osWriteFile(path, data, 0644)
 }

@@ -179,17 +179,17 @@ func captureProposalRollback(targetPath string) (func() error, error) {
 	if err == nil {
 		original := append([]byte{}, content...)
 		return func() error {
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := osMkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return err
 			}
-			return os.WriteFile(targetPath, original, 0644)
+			return osWriteFile(targetPath, original, 0644)
 		}, nil
 	}
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
 	return func() error {
-		if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(targetPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil

@@ -98,7 +98,7 @@ func ensureSkillMarkdown(skillMD, name string) error {
 		if err != nil {
 			return fmt.Errorf("rendering SKILL.md: %w", err)
 		}
-		if err := os.WriteFile(skillMD, []byte(content), 0644); err != nil {
+		if err := osWriteFile(skillMD, []byte(content), 0644); err != nil {
 			return fmt.Errorf("creating SKILL.md: %w", err)
 		}
 	}
@@ -145,7 +145,7 @@ func createSkill(name, scope string) error {
 	agentsHome := config.AgentsHome()
 	skillDir := filepath.Join(agentsHome, "skills", scope, name)
 
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := osMkdirAll(skillDir, 0755); err != nil {
 		return fmt.Errorf("creating skill directory: %w", err)
 	}
 

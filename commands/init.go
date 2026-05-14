@@ -84,7 +84,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		dirs = append(dirs, platform.CanonicalBucketScopeRoot(agentsHome, bucket.Name, "global"))
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
+		if err := osMkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
 	}
@@ -190,7 +190,7 @@ func scaffoldStarterHomeAssets(agentsHome string) error {
 }
 
 func scaffoldWorkflowAssets(agentsHome string) error {
-	if err := os.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
+	if err := osMkdirAll(config.AgentsContextDir(), 0755); err != nil {
 		return err
 	}
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))

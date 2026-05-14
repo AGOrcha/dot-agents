@@ -718,8 +718,8 @@ func importMissingContentCandidate(c importCandidate, dest string, content []byt
 	}
 
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	_ = os.MkdirAll(filepath.Dir(dest), 0755)
-	if err := os.WriteFile(dest, content, 0644); err != nil {
+	_ = osMkdirAll(filepath.Dir(dest), 0755)
+	if err := osWriteFile(dest, content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -739,7 +739,7 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := os.WriteFile(dest, content, 0644); err != nil {
+	if err := osWriteFile(dest, content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -759,11 +759,11 @@ func importPreservedConflictCandidate(c importCandidate, agentsHome string, outp
 	}
 
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := os.MkdirAll(filepath.Dir(altDest), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(altDest), 0755); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("Failed to create %s: %v", altRel, err))
 		return importResult{skipped: 1}
 	}
-	if err := os.WriteFile(altDest, output.content, 0644); err != nil {
+	if err := osWriteFile(altDest, output.content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -846,7 +846,7 @@ func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel
 		return nil
 	}
 	dir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := osMkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	id := fmt.Sprintf("ic-%d", time.Now().UnixNano())
@@ -873,7 +873,7 @@ func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel
 		return err
 	}
 	fn := filepath.Join(dir, id+".yaml")
-	return os.WriteFile(fn, append(data, '\n'), 0644)
+	return osWriteFile(fn, append(data, '\n'), 0644)
 }
 
 func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
