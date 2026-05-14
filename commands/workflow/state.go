@@ -370,7 +370,7 @@ func canonicalPlansHaveActive(summaries []workflowCanonicalPlanSummary) bool {
 }
 
 func currentWorkflowProject() (workflowProjectRef, error) {
-	cwd, err := os.Getwd()
+	cwd, err := osGetwd()
 	if err != nil {
 		return workflowProjectRef{}, err
 	}

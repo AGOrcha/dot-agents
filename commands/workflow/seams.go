@@ -20,6 +20,11 @@ var (
 	osWriteFile = os.WriteFile
 	osOpenFile  = os.OpenFile
 	osRemoveAll = os.RemoveAll
+	// osGetwd lets tests inject failures into currentWorkflowProject — the
+	// underlying os.Getwd never fails in TempDir-based tests, but every
+	// handler's `project, err := currentWorkflowProject()` defensive branch
+	// depends on it. Swap this in tests to drive those handler error paths.
+	osGetwd = os.Getwd
 	// osExit lets tests intercept process-terminating calls so the
 	// surrounding render/load logic can be exercised end-to-end. Production
 	// callers terminate as usual.

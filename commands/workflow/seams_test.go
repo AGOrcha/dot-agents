@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // withOsExitStub swaps osExit so process-terminating branches can be
@@ -972,5 +974,66 @@ func TestAppendVerificationLog_FprintfSeamError(t *testing.T) {
 	err := appendVerificationLog("p", VerificationRecord{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected fprintf sentinel, got %v", err)
+	}
+}
+
+// withGetwdError swaps osGetwd to a stub that returns the sentinel error,
+// driving every handler's `currentWorkflowProject() -> err != nil` branch.
+func withGetwdError(t *testing.T, sentinel error) {
+	t.Helper()
+	saved := osGetwd
+	t.Cleanup(func() { osGetwd = saved })
+	osGetwd = func() (string, error) { return "", sentinel }
+}
+
+// TestHandlers_GetwdErrorPropagates fires the osGetwd seam to error and
+// invokes each handler that begins with `project, err := currentWorkflowProject()`.
+// Each handler should return a non-nil error wrapping (or containing) the
+// sentinel via the os.Getwd-failure path. This covers ~25 single-statement
+// error-return branches in one test.
+func TestHandlers_GetwdErrorPropagates(t *testing.T) {
+	sentinel := errors.New("synthetic getwd error")
+	withGetwdError(t, sentinel)
+
+	cmd := &cobra.Command{}
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"runWorkflowAdvance", func() error { return runWorkflowAdvance("p", "t", "completed") }},
+		{"runWorkflowCheckpoint", func() error { return runWorkflowCheckpoint("m", "pass", "s") }},
+		{"runWorkflowCheckpointLogToIter", func() error { return runWorkflowCheckpointLogToIter(1, "impl", "unit") }},
+		{"runWorkflowComplete", func() error { return runWorkflowComplete("p") }},
+		{"runWorkflowDelegationCloseout", func() error { return runWorkflowDelegationCloseout(cmd, nil) }},
+		{"runWorkflowDelegationGate", func() error { return runWorkflowDelegationGate(cmd, nil) }},
+		{"runWorkflowEligible", func() error { return runWorkflowEligible("", 0) }},
+		{"runWorkflowFanout", func() error { return runWorkflowFanout(cmd, nil) }},
+		{"runWorkflowFoldBackList", func() error { return runWorkflowFoldBackList(cmd, nil) }},
+		{"runWorkflowFoldBackUpsert", func() error { return runWorkflowFoldBackUpsert(cmd, false) }},
+		{"runWorkflowLog", func() error { return runWorkflowLog(false) }},
+		{"runWorkflowMergeBack", func() error { return runWorkflowMergeBack(cmd, nil) }},
+		{"runWorkflowNext", func() error { return runWorkflowNext("p") }},
+		{"runWorkflowPlanCheckScope", func() error { return runWorkflowPlanCheckScope("p", "t", nil, false) }},
+		{"runWorkflowPlanCreate", func() error { return runWorkflowPlanCreate("p", "T", "s", "o", "sc", "vs") }},
+		{"runWorkflowPlanDeriveScope", func() error { return runWorkflowPlanDeriveScope("p", "t", nil, nil) }},
+		{"runWorkflowPlanGraph", func() error { return runWorkflowPlanGraph("p") }},
+		{"runWorkflowPlanList", func() error { return runWorkflowPlanList() }},
+		{"runWorkflowPlanSchedule", func() error { return runWorkflowPlanSchedule("p") }},
+		{"runWorkflowPlanShow", func() error { return runWorkflowPlanShow("p") }},
+		{"runWorkflowPlanUpdate", func() error { return runWorkflowPlanUpdate("p", "active", "T", "s", "f", "sc", "vs") }},
+		{"runWorkflowPrefs", func() error { return runWorkflowPrefs() }},
+		{"runWorkflowPrefsSetLocal", func() error { return runWorkflowPrefsSetLocal("planning.dry_run_first", "true") }},
+		{"runWorkflowPrefsSetShared", func() error { return runWorkflowPrefsSetShared("planning.dry_run_first", "true") }},
+		{"runWorkflowSlices", func() error { return runWorkflowSlices("p") }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.fn()
+			if err == nil {
+				t.Fatalf("%s: expected non-nil error from getwd failure", tc.name)
+			}
+		})
 	}
 }
