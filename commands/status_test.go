@@ -1320,22 +1320,9 @@ func TestCountManagedDirEntries_RegularFilePlusBroken(t *testing.T) {
 	}
 }
 
-// TestPrintAgentsHomeGitStatusLine_NotARepo covers the IsRepo=false branch
-// (lines 139-141).
-func TestPrintAgentsHomeGitStatusLine_NotARepo(t *testing.T) {
-	tmp := t.TempDir()
-	// No .git dir → probeAgentsHomeGit reports !IsRepo.
-	printAgentsHomeGitStatusLine(tmp)
-}
-
-// TestPrintAgentsHomeGitStatusLine_RepoNoRemote covers the no-remote branch.
-func TestPrintAgentsHomeGitStatusLine_RepoNoRemote(t *testing.T) {
-	tmp := t.TempDir()
-	// Fake .git directory so probeAgentsHomeGit treats this as a repo.
-	os.MkdirAll(filepath.Join(tmp, ".git"), 0755)
-	// `git remote get-url origin` will fail → no remote branch printed.
-	printAgentsHomeGitStatusLine(tmp)
-}
+// Note: TestPrintAgentsHomeGitStatusLine_NotRepo and _BareGit upstream
+// (lines 575, 580) already cover both no-.git and .git-but-no-remote
+// branches. Duplicates removed per SonarCloud S4144.
 
 // TestRunStatus_CorruptConfigErrors covers the config.Load err branch (326-328).
 func TestRunStatus_CorruptConfigErrors(t *testing.T) {
