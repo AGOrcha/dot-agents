@@ -13,22 +13,29 @@ import (
 
 // rulesDeps carries UX helpers for the rules subcommand tree.
 type rulesDeps struct {
-	Flags              rulesGlobalFlags
+	Flags              canonicalCmdFlags
 	errorWithHints     func(message string, hints ...string) error
 	usageError         func(message string, hints ...string) error
 	maxArgsWithHints   func(n int, hints ...string) cobra.PositionalArgs
 	exactArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 }
 
-type rulesGlobalFlags struct {
+// canonicalCmdFlags captures the global flags relevant to canonical
+// `da <kind>` subcommands (rules, mcp, settings, …). Declared here because
+// rules was the first consumer; reused from mcp.go and settings.go via the
+// shared cmdutil pattern.
+type canonicalCmdFlags struct {
 	DryRun bool
 	Yes    bool
 	Force  bool
 }
 
+// canonicalCmdExampleBlock joins example lines for canonical subcommand
+// `Example:` fields. Shared across rules/mcp/settings command trees.
+
 func rulesCommandDeps() rulesDeps {
 	return rulesDeps{
-		Flags: rulesGlobalFlags{
+		Flags: canonicalCmdFlags{
 			DryRun: Flags.DryRun,
 			Yes:    Flags.Yes,
 			Force:  Flags.Force,
@@ -40,7 +47,7 @@ func rulesCommandDeps() rulesDeps {
 	}
 }
 
-func rulesExampleBlock(lines ...string) string {
+func canonicalCmdExampleBlock(lines ...string) string {
 	return strings.Join(lines, "\n")
 }
 
@@ -59,7 +66,7 @@ These files are what add, import, refresh, install, and remove wire into
 Cursor, Claude Code, Codex, and Copilot projections. Prefer editing canonical
 paths here, then run refresh or install for the project — do not hand-edit
 platform copies unless you know they are unmanaged.`,
-		Example: rulesExampleBlock(
+		Example: canonicalCmdExampleBlock(
 			"  da rules list",
 			"  da rules list my-app",
 			"  da rules show global rules.mdc",
@@ -76,7 +83,7 @@ func newRulesListCmd(deps rulesDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [scope]",
 		Short: "List canonical rule files for a scope",
-		Example: rulesExampleBlock(
+		Example: canonicalCmdExampleBlock(
 			"  da rules list",
 			"  da rules list billing-api",
 		),

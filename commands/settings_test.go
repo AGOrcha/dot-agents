@@ -114,7 +114,7 @@ func writeSettings(t *testing.T, dir, name, body string) {
 
 func makeSettingsDeps(dryRun, yes, force bool) settingsDeps {
 	return settingsDeps{
-		Flags:              rulesGlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		maxArgsWithHints:   MaximumNArgsWithHints,
 		exactArgsWithHints: ExactArgsWithHints,
 	}

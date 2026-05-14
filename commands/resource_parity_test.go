@@ -74,7 +74,7 @@ func resourceParityCases() []resourceParityCase {
 			},
 			runRemove: func(scope, name string, dryRun, yes, force bool) error {
 				deps := settingsDeps{
-					Flags:              rulesGlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+					Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 					maxArgsWithHints:   MaximumNArgsWithHints,
 					exactArgsWithHints: ExactArgsWithHints,
 				}
@@ -189,7 +189,7 @@ func resourceDryRunCases() []resourceDryRunCase {
 			body:   `{}`,
 			runRemove: func(scope, name string, dryRun, yes, force bool) error {
 				deps := settingsDeps{
-					Flags:              rulesGlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+					Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 					maxArgsWithHints:   MaximumNArgsWithHints,
 					exactArgsWithHints: ExactArgsWithHints,
 				}

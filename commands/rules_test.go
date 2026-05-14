@@ -189,7 +189,7 @@ func writeRulesRule(t *testing.T, dir, name, body string) {
 
 func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
 	return rulesDeps{
-		Flags:              rulesGlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		errorWithHints:     ErrorWithHints,
 		usageError:         UsageError,
 		maxArgsWithHints:   MaximumNArgsWithHints,
@@ -300,9 +300,9 @@ func TestNewRulesCmd_Metadata(t *testing.T) {
 	}
 }
 
-func TestRulesExampleBlock_JoinsLines(t *testing.T) {
-	got := rulesExampleBlock("a", "b", "c")
+func TestCanonicalCmdExampleBlock_JoinsLines(t *testing.T) {
+	got := canonicalCmdExampleBlock("a", "b", "c")
 	if got != "a\nb\nc" {
-		t.Errorf("rulesExampleBlock = %q", got)
+		t.Errorf("canonicalCmdExampleBlock = %q", got)
 	}
 }

@@ -115,7 +115,7 @@ func writeMCPConfig(t *testing.T, dir, name, body string) {
 
 func makeMCPDeps(dryRun, yes, force bool) mcpDeps {
 	return mcpDeps{
-		Flags:              rulesGlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		maxArgsWithHints:   MaximumNArgsWithHints,
 		exactArgsWithHints: ExactArgsWithHints,
 	}
