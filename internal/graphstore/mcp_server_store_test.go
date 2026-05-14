@@ -480,6 +480,16 @@ type fakeListCommunitiesBridge struct {
 	err error
 }
 
+// handleEmbedGraph — no-bridge path returns nil error and propagates
+// requireBridge's error.
+func TestHandleEmbedGraph_NoBridge(t *testing.T) {
+	srv := &MCPServer{bridgeErr: errors.New("bridge missing")}
+	_, err := srv.handleEmbedGraph(nil)
+	if err == nil {
+		t.Fatal("expected bridge error")
+	}
+}
+
 func (f *fakeListCommunitiesBridge) ListCommunities(minSize int, sortBy string) (*CommunitiesResult, error) {
 	if f.err != nil {
 		return nil, f.err
