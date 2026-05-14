@@ -748,47 +748,43 @@ func TestPerPlatformEventOverrides(t *testing.T) {
 
 // TestEventNameDefaults exhaustively triggers each switch in the event-name
 // helpers so all cases are covered.
+// assertEventNameMapping runs an event-name resolver across a set of valid
+// `when` values and asserts each resolves; then asserts an unknown sentinel
+// is rejected.
+func assertEventNameMapping(
+	t *testing.T,
+	resolver func(HookSpec) (string, bool),
+	platform string,
+	validWhens []string,
+) {
+	t.Helper()
+	for _, when := range validWhens {
+		if _, ok := resolver(HookSpec{When: when}); !ok {
+			t.Errorf("%sEventName(%q) returned !ok", platform, when)
+		}
+	}
+	if _, ok := resolver(HookSpec{When: "weird"}); ok {
+		t.Errorf("weird should be unrepresentable for %s", platform)
+	}
+}
+
 func TestEventNameDefaults(t *testing.T) {
-	for _, when := range []string{
+	assertEventNameMapping(t, claudeEventName, "claude", []string{
 		"pre_tool_use", "post_tool_use", "post_tool_use_failure",
 		"notification", "user_prompt_submit", "session_start", "session_end",
 		"stop", "subagent_start", "subagent_stop", "pre_compact",
 		"permission_request",
-	} {
-		if _, ok := claudeEventName(HookSpec{When: when}); !ok {
-			t.Errorf("claudeEventName(%q) returned !ok", when)
-		}
-	}
-	if _, ok := claudeEventName(HookSpec{When: "weird"}); ok {
-		t.Error("weird should be unrepresentable for claude")
-	}
-	for _, when := range []string{
+	})
+	assertEventNameMapping(t, codexEventName, "codex", []string{
 		"session_start", "pre_tool_use", "post_tool_use",
 		"user_prompt_submit", "stop",
-	} {
-		if _, ok := codexEventName(HookSpec{When: when}); !ok {
-			t.Errorf("codexEventName(%q) returned !ok", when)
-		}
-	}
-	if _, ok := codexEventName(HookSpec{When: "weird"}); ok {
-		t.Error("weird should be unrepresentable for codex")
-	}
-	for _, when := range []string{"pre_tool_use", "user_prompt_submit", "stop", "session_start"} {
-		if _, ok := cursorEventName(HookSpec{When: when}); !ok {
-			t.Errorf("cursorEventName(%q) returned !ok", when)
-		}
-	}
-	if _, ok := cursorEventName(HookSpec{When: "weird"}); ok {
-		t.Error("weird should be unrepresentable for cursor")
-	}
-	for _, when := range []string{"session_start", "user_prompt_submit", "pre_tool_use"} {
-		if _, ok := copilotEventName(HookSpec{When: when}); !ok {
-			t.Errorf("copilotEventName(%q) returned !ok", when)
-		}
-	}
-	if _, ok := copilotEventName(HookSpec{When: "weird"}); ok {
-		t.Error("weird should be unrepresentable for copilot")
-	}
+	})
+	assertEventNameMapping(t, cursorEventName, "cursor", []string{
+		"pre_tool_use", "user_prompt_submit", "stop", "session_start",
+	})
+	assertEventNameMapping(t, copilotEventName, "copilot", []string{
+		"session_start", "user_prompt_submit", "pre_tool_use",
+	})
 }
 
 // TestMatcherForSpecVariants covers all three branches of matcherForSpec.

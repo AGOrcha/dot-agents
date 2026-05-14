@@ -12,39 +12,71 @@ import (
 // TestSessionReaderAccessors covers the trivial constant-returning methods
 // on every platform's SessionReader / StatsReader surface. These are pure
 // identity functions but count towards coverage gate.
+// checkAIAgentPrefix asserts AIAgentPrefix() (if implemented) is non-empty.
+func checkAIAgentPrefix(t *testing.T, p Platform) {
+	sr, ok := p.(interface{ AIAgentPrefix() string })
+	if !ok {
+		return
+	}
+	if sr.AIAgentPrefix() == "" {
+		t.Errorf("%s: AIAgentPrefix empty", p.ID())
+	}
+}
+
+// exerciseSessionEnvs calls SessionEnvs/EntrypointEnvs accessors if present
+// to ensure they do not panic (values may legitimately be nil).
+func exerciseSessionEnvs(p Platform) {
+	if sr, ok := p.(interface{ SessionEnvs() []string }); ok {
+		_ = sr.SessionEnvs()
+	}
+	if sr, ok := p.(interface{ EntrypointEnvs() []string }); ok {
+		_ = sr.EntrypointEnvs()
+	}
+}
+
+// exerciseResolveModel exercises the optional ResolveModel accessor.
+func exerciseResolveModel(t *testing.T, p Platform) {
+	sr, ok := p.(interface {
+		ResolveModel(string, string, string) string
+	})
+	if !ok {
+		return
+	}
+	_ = sr.ResolveModel(t.TempDir(), "/repo", "no-session")
+}
+
+// exerciseReadUsageStats exercises ReadUsageStats on an empty home; non-nil
+// result is logged but not failed (some platforms may probe non-home paths).
+func exerciseReadUsageStats(t *testing.T, p Platform) {
+	sr, ok := p.(interface {
+		ReadUsageStats(string) *PlatformUsageStats
+	})
+	if !ok {
+		return
+	}
+	if sr.ReadUsageStats(t.TempDir()) != nil {
+		t.Logf("%s: unexpected non-nil stats from empty home", p.ID())
+	}
+}
+
+// exerciseScanSessionTokens exercises the optional ScanSessionTokens accessor.
+func exerciseScanSessionTokens(t *testing.T, p Platform) {
+	sr, ok := p.(interface {
+		ScanSessionTokens(string, string, string, string) SessionTokenMetrics
+	})
+	if !ok {
+		return
+	}
+	_ = sr.ScanSessionTokens(t.TempDir(), "/repo", "sid", "")
+}
+
 func TestSessionReaderAccessors(t *testing.T) {
 	for _, p := range All() {
-		// AIAgentPrefix must be non-empty per cross-cutting contract.
-		if sr, ok := p.(interface{ AIAgentPrefix() string }); ok {
-			if sr.AIAgentPrefix() == "" {
-				t.Errorf("%s: AIAgentPrefix empty", p.ID())
-			}
-		}
-		if sr, ok := p.(interface{ SessionEnvs() []string }); ok {
-			_ = sr.SessionEnvs() // may be nil for Copilot
-		}
-		if sr, ok := p.(interface{ EntrypointEnvs() []string }); ok {
-			_ = sr.EntrypointEnvs()
-		}
-		if sr, ok := p.(interface {
-			ResolveModel(string, string, string) string
-		}); ok {
-			// Should not panic; returns empty when no session
-			_ = sr.ResolveModel(t.TempDir(), "/repo", "no-session")
-		}
-		if sr, ok := p.(interface {
-			ReadUsageStats(string) *PlatformUsageStats
-		}); ok {
-			// Empty home → nil stats
-			if sr.ReadUsageStats(t.TempDir()) != nil {
-				t.Logf("%s: unexpected non-nil stats from empty home", p.ID())
-			}
-		}
-		if sr, ok := p.(interface {
-			ScanSessionTokens(string, string, string, string) SessionTokenMetrics
-		}); ok {
-			_ = sr.ScanSessionTokens(t.TempDir(), "/repo", "sid", "")
-		}
+		checkAIAgentPrefix(t, p)
+		exerciseSessionEnvs(p)
+		exerciseResolveModel(t, p)
+		exerciseReadUsageStats(t, p)
+		exerciseScanSessionTokens(t, p)
 	}
 }
 

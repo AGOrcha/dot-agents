@@ -76,24 +76,25 @@ func seedManagedClaudeLink(t *testing.T) (tmp, agentsHome, projectPath, linkPath
 // → doctor → refresh → doctor cycle without depending on any installed
 // platform CLIs. It exercises doctor.go's link inspection + refresh.go's
 // resource restoration on a synthetic project.
-func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
-	_, agentsHome, projectPath, linkPath, target := seedManagedClaudeLink(t)
-
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
-
-	// Phase 1: baseline doctor → no broken links.
+// assertDoctorStdoutContainsBroken runs doctor and asserts the captured
+// output contains (or does not contain) the literal "broken" token.
+func assertDoctorStdoutContainsBroken(t *testing.T, label string, wantBroken bool) {
+	t.Helper()
 	out := captureDoctorOutput(t, func() {
 		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
-			t.Fatalf("baseline runDoctor: %v", err)
+			t.Fatalf("%s runDoctor: %v", label, err)
 		}
 	})
-	if strings.Contains(out, "broken") {
-		t.Fatalf("expected clean baseline, got broken in output:\n%s", out)
+	hasBroken := strings.Contains(out, "broken")
+	if hasBroken != wantBroken {
+		t.Fatalf("%s: wantBroken=%v gotBroken=%v output:\n%s", label, wantBroken, hasBroken, out)
 	}
+}
 
-	// Phase 2: break the link by deleting its target.
+// breakAndConfirmBrokenLink removes target and asserts collectBrokenLinks
+// reports exactly one claude-owned breakage.
+func breakAndConfirmBrokenLink(t *testing.T, agentsHome, projectPath, target string) {
+	t.Helper()
 	if err := os.Remove(target); err != nil {
 		t.Fatalf("break target: %v", err)
 	}
@@ -101,21 +102,21 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 	if len(broken) != 1 || broken[0].platformID != "claude" {
 		t.Fatalf("expected 1 claude broken link, got %+v", broken)
 	}
+}
 
-	// Phase 3: doctor in dry-run should report the breakage without erroring.
+// runDoctorDryRunReportsBroken flips Flags into dry-run, runs doctor,
+// restores Flags, and asserts the doctor output reports the breakage.
+func runDoctorDryRunReportsBroken(t *testing.T) {
+	t.Helper()
 	Flags.DryRun = true
-	out = captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
-			t.Fatalf("doctor with broken link: %v", err)
-		}
-	})
-	Flags.DryRun = false
-	if !strings.Contains(out, "broken") {
-		t.Fatalf("expected doctor stdout to mention 'broken', got:\n%s", out)
-	}
+	defer func() { Flags.DryRun = false }()
+	assertDoctorStdoutContainsBroken(t, "dry-run-broken", true)
+}
 
-	// Phase 4: seed resources/ so refresh's restoreFromResources can recreate
-	// the deleted target, then re-run.
+// seedResourcesAndRestore seeds agentsHome/resources/proj/AGENTS.md and runs
+// restoreFromResources, asserting the broken target + link are recovered.
+func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, target string) {
+	t.Helper()
 	resources := filepath.Join(agentsHome, "resources", "proj")
 	if err := os.MkdirAll(resources, 0755); err != nil {
 		t.Fatal(err)
@@ -127,20 +128,33 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected restoreFromResources to recreate %s: %v", target, err)
 	}
-	// Symlink should now resolve again.
 	if _, err := os.Stat(linkPath); err != nil {
 		t.Fatalf("expected link to resolve after restore: %v", err)
 	}
+}
+
+func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
+	_, agentsHome, projectPath, linkPath, target := seedManagedClaudeLink(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	// Phase 1: baseline doctor → no broken links.
+	assertDoctorStdoutContainsBroken(t, "baseline", false)
+
+	// Phase 2: break the link by deleting its target.
+	breakAndConfirmBrokenLink(t, agentsHome, projectPath, target)
+
+	// Phase 3: doctor in dry-run should report the breakage without erroring.
+	runDoctorDryRunReportsBroken(t)
+
+	// Phase 4: seed resources/ so refresh's restoreFromResources can recreate
+	// the deleted target, then re-run.
+	seedResourcesAndRestore(t, agentsHome, projectPath, linkPath, target)
 
 	// Phase 5: doctor reports clean again.
-	out = captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
-			t.Fatalf("post-repair runDoctor: %v", err)
-		}
-	})
-	if strings.Contains(out, "broken") {
-		t.Fatalf("expected clean state after repair, got broken in output:\n%s", out)
-	}
+	assertDoctorStdoutContainsBroken(t, "post-repair", false)
 }
 
 // TestDoctorRepairE2E_DryRunDoesNotMutateRepo verifies doctor --dry-run never

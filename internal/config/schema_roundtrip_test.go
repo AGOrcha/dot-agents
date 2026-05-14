@@ -229,9 +229,42 @@ func TestSchemaRoundTrip_AgentsRCFile(t *testing.T) {
 // TestSchemaRoundTrip_DiscoverableSchemas asserts every schema we ship is
 // parseable JSON with at least a top-level type or $defs section — guards
 // against accidental commits of malformed schema files.
+// schemaHasTopLevelShape returns true when a parsed schema doc has at least
+// one of the expected top-level signposts: type, $defs, or properties.
+func schemaHasTopLevelShape(doc map[string]json.RawMessage) bool {
+	if _, ok := doc["type"]; ok {
+		return true
+	}
+	if _, ok := doc["$defs"]; ok {
+		return true
+	}
+	_, ok := doc["properties"]
+	return ok
+}
+
+// validateSchemaFile reads + parses a single *.schema.json and asserts it has
+// a recognizable top-level shape.
+func validateSchemaFile(t *testing.T, path, name string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Errorf("read %s: %v", name, err)
+		return
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Errorf("parse %s: %v", name, err)
+		return
+	}
+	if !schemaHasTopLevelShape(doc) {
+		t.Errorf("%s has no top-level type / $defs / properties", name)
+	}
+}
+
 func TestSchemaRoundTrip_DiscoverableSchemas(t *testing.T) {
 	root := repoRoot(t)
-	entries, err := os.ReadDir(filepath.Join(root, "schemas"))
+	schemasDir := filepath.Join(root, "schemas")
+	entries, err := os.ReadDir(schemasDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,23 +274,7 @@ func TestSchemaRoundTrip_DiscoverableSchemas(t *testing.T) {
 			continue
 		}
 		count++
-		data, err := os.ReadFile(filepath.Join(root, "schemas", entry.Name()))
-		if err != nil {
-			t.Errorf("read %s: %v", entry.Name(), err)
-			continue
-		}
-		var doc map[string]json.RawMessage
-		if err := json.Unmarshal(data, &doc); err != nil {
-			t.Errorf("parse %s: %v", entry.Name(), err)
-			continue
-		}
-		if _, hasType := doc["type"]; !hasType {
-			if _, hasDefs := doc["$defs"]; !hasDefs {
-				if _, hasProps := doc["properties"]; !hasProps {
-					t.Errorf("%s has no top-level type / $defs / properties", entry.Name())
-				}
-			}
-		}
+		validateSchemaFile(t, filepath.Join(schemasDir, entry.Name()), entry.Name())
 	}
 	if count == 0 {
 		t.Fatal("no *.schema.json files discovered")

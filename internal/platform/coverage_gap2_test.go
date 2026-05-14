@@ -338,65 +338,55 @@ func TestCodexCreateLinks_FullRulesAndSettings(t *testing.T) {
 // TestClaudeCreateLinks_LegacyHooksAndAgents drives more branches of
 // (*claude).CreateLinks via populated fixtures (legacy hook file + project
 // settings + project rules).
+// mustMkdirAllT calls os.MkdirAll, fatalling via the testing.T helper.
+func mustMkdirAllT(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mustWriteFileT writes a file, fatalling via the testing.T helper.
+func mustWriteFileT(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeAgentsHomeFile is a convenience helper that ensures the parent dir
+// exists then writes a file under agentsHome/<rel>.
+func writeAgentsHomeFile(t *testing.T, agentsHome, rel, content string) {
+	t.Helper()
+	full := filepath.Join(agentsHome, rel)
+	mustMkdirAllT(t, filepath.Dir(full))
+	mustWriteFileT(t, full, content)
+}
+
+// setupClaudeFullFixture provisions the full fixture used by the Claude
+// CreateLinks test: rules, mcp, legacy hook, agent dir, skill dir, global rule.
+func setupClaudeFullFixture(t *testing.T, agentsHome string) {
+	t.Helper()
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "proj", "rule.md"), "# rule\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("mcp", "proj", "claude.json"), "{}")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("hooks", "proj", "claude-code.json"), `{"hooks":{}}`)
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("agents", "proj", "reviewer", "AGENT.md"), "---\nname: reviewer\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("skills", "global", "tidy", "SKILL.md"), "---\nname: tidy\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "global", "claude-code.md"), "# global\n")
+}
+
 func TestClaudeCreateLinks_FullFixture(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	home := filepath.Join(tmp, "home")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(home, 0755); err != nil {
-		t.Fatal(err)
-	}
+	mustMkdirAllT(t, home)
 
-	// Project rule.
-	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "rules", "proj", "rule.md"), []byte("# rule\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// MCP file.
-	if err := os.MkdirAll(filepath.Join(agentsHome, "mcp", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "mcp", "proj", "claude.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Legacy settings hook source (under hooks bucket so emitPreferredHookFile uses it).
-	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "hooks", "proj", "claude-code.json"), []byte(`{"hooks":{}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Agent dir with marker.
-	agentDir := filepath.Join(agentsHome, "agents", "proj", "reviewer")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("---\nname: reviewer\n---\nbody\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Skills dir with marker.
-	skillDir := filepath.Join(agentsHome, "skills", "global", "tidy")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: tidy\n---\nbody\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Global claude-code rule.
-	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", "global"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "rules", "global", "claude-code.md"), []byte("# global\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	setupClaudeFullFixture(t, agentsHome)
 
 	repo := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repo, 0755); err != nil {
-		t.Fatal(err)
-	}
+	mustMkdirAllT(t, repo)
 	if err := NewClaude().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("CreateLinks: %v", err)
 	}
@@ -416,52 +406,30 @@ func TestClaudeCreateLinks_FullFixture(t *testing.T) {
 
 // TestCursorCreateLinks_FullFixture drives all branches of cursor CreateLinks
 // (rules, settings, mcp, cursorignore, hooks, agents).
+// setupCursorFullFixture provisions the full fixture for the cursor
+// CreateLinks test: rules for both scopes, settings, cursorignore, mcp, hooks.
+func setupCursorFullFixture(t *testing.T, agentsHome string) {
+	t.Helper()
+	for _, scope := range []string{"global", "proj"} {
+		writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", scope, "x.md"), "# rule\n")
+	}
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("settings", "proj", "cursor.json"), "{}")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("settings", "proj", "cursorignore"), "node_modules\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("mcp", "proj", "cursor.json"), "{}")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("hooks", "proj", "cursor.json"), "{}")
+}
+
 func TestCursorCreateLinks_FullFixture(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Setenv("HOME", filepath.Join(tmp, "home"))
-	if err := os.MkdirAll(filepath.Join(tmp, "home"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	for _, scope := range []string{"global", "proj"} {
-		dir := filepath.Join(agentsHome, "rules", scope)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "x.md"), []byte("# rule\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// settings/cursor.json
-	if err := os.MkdirAll(filepath.Join(agentsHome, "settings", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "settings", "proj", "cursor.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "settings", "proj", "cursorignore"), []byte("node_modules\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// mcp/cursor.json
-	if err := os.MkdirAll(filepath.Join(agentsHome, "mcp", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "mcp", "proj", "cursor.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// hooks legacy file
-	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks", "proj"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsHome, "hooks", "proj", "cursor.json"), []byte("{}"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	mustMkdirAllT(t, filepath.Join(tmp, "home"))
+
+	setupCursorFullFixture(t, agentsHome)
 
 	repo := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repo, 0755); err != nil {
-		t.Fatal(err)
-	}
+	mustMkdirAllT(t, repo)
 	if err := NewCursor().CreateLinks("proj", repo); err != nil {
 		t.Fatalf("CreateLinks: %v", err)
 	}

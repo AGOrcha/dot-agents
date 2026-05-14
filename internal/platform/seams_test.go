@@ -179,37 +179,47 @@ func TestCursorCreateLinks_ChainEarlyReturns(t *testing.T) {
 
 // TestCopilotCreateLinks_ChainEarlyReturns drives the per-child early-return
 // branches in copilot.CreateLinks.
+// seedCopilotChainSources writes the instructions + mcp source files the
+// copilot CreateLinks chain requires before its MkdirAll branches fire.
+func seedCopilotChainSources(t *testing.T, agentsHome string) {
+	t.Helper()
+	instructions := filepath.Join(agentsHome, "rules", "global", "copilot-instructions.md")
+	if err := os.MkdirAll(filepath.Dir(instructions), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(instructions, []byte("# c"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mcp := filepath.Join(agentsHome, "mcp", "global", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcp), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcp, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runCopilotChainEarlyReturn(t *testing.T, failAt int) {
+	agentsHome, repo := setupAgentsHome(t)
+	seedCopilotChainSources(t, agentsHome)
+	// Fail the Nth MkdirAll. Targets: .github (instructions), .vscode (mcp),
+	// .claude (compat). Use empty pattern so any MkdirAll counts; cleanup
+	// helpers in setupAgentsHome already created repo + agentsHome before
+	// the seam is installed.
+	withMkdirAllErrorAfter(t, "", failAt)
+
+	c := NewCopilot().(*copilot)
+	err := c.CreateLinks("proj", repo)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
+	}
+}
+
 func TestCopilotCreateLinks_ChainEarlyReturns(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3} {
 		failAt := failAt
 		t.Run(fmt.Sprintf("fail-%d", failAt), func(t *testing.T) {
-			agentsHome, repo := setupAgentsHome(t)
-			// Seed sources so MkdirAll branches are reached for instructions/MCP/claude-compat.
-			instructions := filepath.Join(agentsHome, "rules", "global", "copilot-instructions.md")
-			if err := os.MkdirAll(filepath.Dir(instructions), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(instructions, []byte("# c"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			mcp := filepath.Join(agentsHome, "mcp", "global", "mcp.json")
-			if err := os.MkdirAll(filepath.Dir(mcp), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(mcp, []byte("{}"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			// Fail the Nth MkdirAll. Targets: .github (instructions), .vscode (mcp),
-			// .claude (compat). Use empty pattern so any MkdirAll counts; cleanup
-			// helpers in setupAgentsHome already created repo + agentsHome before
-			// the seam is installed.
-			withMkdirAllErrorAfter(t, "", failAt)
-
-			c := NewCopilot().(*copilot)
-			err := c.CreateLinks("proj", repo)
-			if !errors.Is(err, errSeamSynthetic) {
-				t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
-			}
+			runCopilotChainEarlyReturn(t, failAt)
 		})
 	}
 }
