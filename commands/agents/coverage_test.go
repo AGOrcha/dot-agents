@@ -731,3 +731,27 @@ func TestEnsureImportRepoAgentsSlot_DanglingSymlink(t *testing.T) {
 		t.Error("expected mispointed-symlink error for dangling link")
 	}
 }
+
+// TestRefreshAgentMirror_BuildIntentsErrorWarns covers the now-reachable
+// error branch in refreshAgentMirror that fires when
+// platform.BuildSharedAgentMirrorIntents propagates a non-ENOENT error
+// from listScopedResourceDirs. Previously the underlying helper swallowed
+// that error and returned an empty slice, leaving the branch dead.
+// Triggered by making the canonical agents/<project>/ path a regular
+// file so os.ReadDir errors with ENOTDIR (not ENOENT).
+func TestRefreshAgentMirror_BuildIntentsErrorWarns(t *testing.T) {
+	agentsHome, projectPath := testutil.NewTempProject(t, "agtproj")
+
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "agtproj"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// refreshAgentMirror warns and returns nil so caller flow continues.
+	if err := refreshAgentMirror("agtproj", projectPath); err != nil {
+		t.Fatalf("refreshAgentMirror must absorb build-intents error, got: %v", err)
+	}
+}

@@ -1,7 +1,9 @@
 package platform
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -260,7 +262,11 @@ func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]Res
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedSkillMirrorIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedSkillMirrorIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
@@ -280,11 +286,20 @@ type sharedMirrorIntentSpec struct {
 // spec.ManifestName, projecting them into targetRoot via symlink.
 // All three per-bucket helpers (skill / plugin / agent) delegate
 // here.
-func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) []ResourceIntent {
+//
+// A missing canonical bucket dir (ENOENT) is treated as an empty
+// resource set — projects without any skills/plugins/agents yet are
+// legitimate and should yield no intents, not a hard failure. Other
+// errors (permission denied, IO) propagate so callers can surface
+// them instead of silently producing an empty plan.
+func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, project, spec.ManifestName)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical %s for project %q under %s: %w", spec.Bucket, project, targetRoot, err)
 	}
 
 	intents := make([]ResourceIntent, 0, len(entries))
@@ -312,10 +327,10 @@ func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirr
 			MarkerFiles:   []string{spec.ManifestName},
 		})
 	}
-	return intents
+	return intents, nil
 }
 
-func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "skills",
 		ManifestName: skillManifestName,
@@ -338,12 +353,16 @@ func BuildSharedPluginBundleIntents(project string, targetRoots ...string) ([]Re
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedPluginBundleIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedPluginBundleIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
 
-func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "plugins",
 		ManifestName: PluginManifestName,
@@ -367,7 +386,11 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedAgentMirrorIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedAgentMirrorIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
@@ -442,7 +465,7 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 	return intents, nil
 }
 
-func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "agents",
 		ManifestName: agentManifestName,
