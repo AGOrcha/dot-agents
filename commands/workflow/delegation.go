@@ -1318,7 +1318,28 @@ func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan 
 		return "", nil, err
 	}
 	if appType != "" && len(sequence) == 0 {
-		return "", nil, fmt.Errorf("app_type %q is not defined in %s app_type_verifier_map; run `da workflow app-types` to list valid values for this repo", appType, config.AgentsRCFile)
+		recommendedHint := ""
+		if d, derr := loadAgentsrcFanoutDispatch(projectPath); derr == nil && d != nil && len(d.AppTypeVerifierMap) > 0 {
+			projectName := filepath.Base(projectPath)
+			if rc, rcErr := config.LoadAgentsRC(projectPath); rcErr == nil && strings.TrimSpace(rc.Project) != "" {
+				projectName = strings.TrimSpace(rc.Project)
+			}
+			entries := make([]workflowAppTypeEntry, 0, len(d.AppTypeVerifierMap))
+			for name, seq := range d.AppTypeVerifierMap {
+				entries = append(entries, workflowAppTypeEntry{
+					Name:             name,
+					VerifierSequence: append([]string(nil), seq...),
+				})
+			}
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Name < entries[j].Name
+			})
+			markRecommendedAppTypes(entries, projectName)
+			if recommended, ok := singleRecommendedAppType(entries); ok {
+				recommendedHint = fmt.Sprintf("; recommended value for this repo: %q", recommended.Name)
+			}
+		}
+		return "", nil, fmt.Errorf("app_type %q is not defined in %s app_type_verifier_map; run `da workflow app-types` to list valid values for this repo%s", appType, config.AgentsRCFile, recommendedHint)
 	}
 	return appType, sequence, nil
 }

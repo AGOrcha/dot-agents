@@ -440,7 +440,7 @@ func TestFanout_VerifierSequenceRejectsUnknownAppType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown app_type")
 	}
-	for _, want := range []string{"unknown-app", "da workflow app-types"} {
+	for _, want := range []string{"unknown-app", "da workflow app-types", `recommended value for this repo: "api"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("unexpected err: %v", err)
 		}

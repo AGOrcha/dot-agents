@@ -74,8 +74,10 @@ These decisions are fixed for the MVP and should not be reopened during implemen
   - `da workflow ...` commands are escape hatches and debugging tools, not the main human workflow.
 - Proposal queue:
   - One YAML file per proposal.
-  - Pending proposals live in `~/.agents/proposals/`.
-  - Reviewed proposals move to `~/.agents/proposals/archived/`.
+  - Proposal scope follows the intended durable write scope.
+  - Project-scoped proposals live in `.agents/proposals/` and archive under `.agents/proposals/archived/`.
+  - User-scoped proposals live in `~/.agents/proposals/` and archive under `~/.agents/proposals/archived/`.
+  - Team and org proposals route to their respective configured scope stores, per `.agents/rules/dot-agents/proposal-routing.md`.
 - Concurrency:
   - MVP assumes one active agent writer per repo at a time.
   - If multiple agents write concurrently, last write wins for `checkpoint.yaml`; append-only logs remain append-only.
@@ -106,6 +108,8 @@ These are committed or project-scoped artifacts owned by the repo:
 | `.agents/workflow/specs/<topic>/` | Canonical repo-local design notes, decisions, and supporting specs referenced by workflow plans |
 | `.agents/active/` | Transient coordination state and legacy artifacts that may still exist during migration, but are not the canonical place for new plan bundles |
 | `.agents/active/handoffs/*.md` | Pending handoff docs |
+| `.agents/proposals/<id>.yaml` | Pending project-scoped proposals awaiting human review |
+| `.agents/proposals/archived/<id>.yaml` | Reviewed project-scoped proposals after approval or rejection |
 | `.agents/lessons/index.md` or `.agents/lessons.md` | Human-readable lesson index |
 
 Current repo inventory for legacy `.agents/active/*.plan.md` artifacts: [docs/ACTIVE_LEGACY_PLAN_MIGRATION.md](ACTIVE_LEGACY_PLAN_MIGRATION.md).
@@ -118,9 +122,11 @@ These are local operational artifacts owned by `~/.agents`:
 |------|---------|
 | `~/.agents/context/<project>/checkpoint.yaml` | Latest structured checkpoint for a project |
 | `~/.agents/context/<project>/session-log.md` | Append-only session history derived from checkpoints |
-| `~/.agents/proposals/<id>.yaml` | Pending proposals awaiting human review |
-| `~/.agents/proposals/archived/<id>.yaml` | Approved or rejected proposals after review |
+| `~/.agents/proposals/<id>.yaml` | Pending user-scoped proposals awaiting human review |
+| `~/.agents/proposals/archived/<id>.yaml` | Reviewed user-scoped proposals after approval or rejection |
 | `~/.agents/hooks/global/<hook-name>/...` | Canonical global hook bundles |
+
+Team and org scopes use their configured canonical stores rather than fixed local filesystem paths.
 
 ### Path rules
 
@@ -265,11 +271,17 @@ next_action: Implement proposal review command
 
 ### Scope
 
-The proposal queue is the only MVP path for agent-authored changes to shared rules, skills, hooks, or workflow config that require human review.
+The proposal queue is the only MVP path for agent-authored changes that require human review before they become durable in project, user, team, or org scope.
 
 ### Proposal schema
 
-Pending proposals are YAML files at `~/.agents/proposals/<id>.yaml`:
+Pending proposals are YAML files in the queue selected by `.agents/rules/dot-agents/proposal-routing.md`.
+
+- Project scope: `.agents/proposals/<id>.yaml`
+- User scope: `~/.agents/proposals/<id>.yaml`
+- Team/org scope: the configured proposal store for that scope
+
+Example:
 
 ```yaml
 schema_version: 1
@@ -296,7 +308,10 @@ review_reason: ""
 - `status` is required and must be `pending`, `approved`, or `rejected`.
 - `type` is required and must be `rule`, `skill`, `hook`, or `setting`.
 - `action` is required and must be `add`, `modify`, or `remove`.
-- `target` is required and must be a path relative to `~/.agents/`.
+- `target` is required and must be a path relative to the proposal scope root.
+- Project-scoped proposals resolve `target` relative to the repo root.
+- User-scoped proposals resolve `target` relative to `~/.agents/`.
+- Team/org proposals resolve `target` relative to that scope's canonical store.
 - Absolute paths and parent-directory traversal in `target` are invalid.
 - `rationale` is required.
 - `content` is required for `add` and `modify`, and must be empty for `remove`.
@@ -308,26 +323,26 @@ review_reason: ""
 Required commands:
 
 - `da review`
-  - lists pending proposals only
+  - lists pending proposals in the visible scope queues
 - `da review show <id>`
   - shows full proposal content and metadata
 - `da review approve <id>`
   - validates the target
-  - applies the change under `~/.agents/`
+  - applies the change under the proposal scope root
   - runs `da refresh`
   - updates `status` to `approved`
   - sets `reviewed_at`
-  - moves the proposal to `~/.agents/proposals/archived/<id>.yaml`
+  - moves the proposal to that scope's archived proposal queue
 - `da review reject <id> [--reason "..."]`
   - updates `status` to `rejected`
   - sets `reviewed_at`
   - sets `review_reason` when provided
-  - moves the proposal to `~/.agents/proposals/archived/<id>.yaml`
+  - moves the proposal to that scope's archived proposal queue
 
 ### Review behavior rules
 
 - Approve is transactional: if apply or refresh fails, the proposal remains pending.
-- Review commands are the only MVP path that may apply proposal content to `~/.agents/`.
+- Review commands are the only MVP path that may apply proposal content to the routed scope root.
 - Proposal creation itself is file-based; no separate `da propose` CLI is required in the MVP.
 
 ## Safety And Quality Hook Bundles

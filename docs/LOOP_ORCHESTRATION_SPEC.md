@@ -296,7 +296,7 @@ Bigger or shared-behavior changes:
 - repo-wide workflow defaults
 - cross-repo conventions
 
-Those should become review proposals under `~/.agents/proposals/`.
+Those should become review proposals in the queue selected by `.agents/rules/dot-agents/proposal-routing.md`.
 
 ## KG / CRG Direction
 

@@ -88,10 +88,11 @@ history → history/<id>/                       — permanent record
 - A **lesson** that has matured into an organizational design choice
   (rather than a one-off correction) is a candidate for graduation
   to an ADR.
-- An **ADR** does NOT replace the proposal/review system in
-  `~/.agents/proposals/` — proposals propose changes to shared resources
-  (rules, skills); ADRs document architectural decisions for the engineer
-  reading source.
+- An **ADR** does NOT replace the proposal/review system — proposals live in
+  the queue selected by write scope (`.agents/proposals/` for repo scope,
+  `~/.agents/proposals/` for user scope, analogous team/org stores for higher
+  scopes). Proposals request durable behavior changes; ADRs document
+  architectural decisions for the engineer reading source.
 
 ---
 

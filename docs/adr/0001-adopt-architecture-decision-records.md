@@ -63,8 +63,7 @@ ADRs do **not** replace:
 
 - Specs (`workflow/specs/<id>/design.md`) — multi-page contracts.
 - Plans (`workflow/plans/<id>/`) — how and in what order.
-- Proposals (`~/.agents/proposals/<id>.yaml`) — change requests for
-  shared resources, processed by `da review approve`.
+- Proposals (`.agents/proposals/<id>.yaml` for repo scope, `~/.agents/proposals/<id>.yaml` for user scope, analogous team/org stores for higher scopes) — change requests routed by write scope and processed by `da review approve`.
 - Lessons (`.agents/lessons/<name>/LESSON.md`) — corrections from
   mistakes.
 
