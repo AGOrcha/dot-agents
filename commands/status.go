@@ -322,7 +322,7 @@ func printStatusProjectManifestSummary(path string) {
 }
 
 func runStatus(audit bool, agentFilter string) error {
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

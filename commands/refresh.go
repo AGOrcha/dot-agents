@@ -48,7 +48,7 @@ func runRefresh(projectFilter string) error {
 		return fmt.Errorf("import before refresh: %w", err)
 	}
 
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

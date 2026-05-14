@@ -179,7 +179,7 @@ func ensureInstallProjectDirs(projectName string) error {
 }
 
 func registerInstallProject(projectName, projectPath string) error {
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -549,7 +549,7 @@ func shouldSkipLinkDestination(destDir string) bool {
 
 // findProjectByPath looks up the registered project name for a given path.
 func findProjectByPath(projectPath string) string {
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return ""
 	}

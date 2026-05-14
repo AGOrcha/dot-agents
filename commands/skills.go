@@ -73,7 +73,7 @@ func newSkillsNewCmd() *cobra.Command {
 // appendSkillToAgentsRC adds name to the .agentsrc.json Skills list for the
 // project registered under scope. Returns a status message on success, "" otherwise.
 func appendSkillToAgentsRC(name, scope string) string {
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return ""
 	}

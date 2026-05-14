@@ -135,16 +135,16 @@ func runReviewApprove(id string) error {
 		return err
 	}
 
-	if err := config.ApplyProposal(proposal); err != nil {
+	if err := applyProposalFn(proposal); err != nil {
 		return err
 	}
-	if err := runRefresh(""); err != nil {
+	if err := runRefreshFn(""); err != nil {
 		_ = restore()
 		return fmt.Errorf("refresh after apply: %w", err)
 	}
 
 	config.MarkProposalReviewed(proposal, "approved", "")
-	if err := config.ArchiveProposal(proposal); err != nil {
+	if err := archiveProposalFn(proposal); err != nil {
 		_ = restore()
 		return err
 	}
@@ -166,7 +166,7 @@ func runReviewReject(id, reason string) error {
 		return fmt.Errorf("proposal %q is %s, not pending", proposal.ID, proposal.Status)
 	}
 	config.MarkProposalReviewed(proposal, "rejected", reason)
-	if err := config.ArchiveProposal(proposal); err != nil {
+	if err := archiveProposalFn(proposal); err != nil {
 		return err
 	}
 	ui.Success("Proposal rejected")

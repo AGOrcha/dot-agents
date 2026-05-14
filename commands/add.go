@@ -260,7 +260,7 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("none", "Not a git repository (optional)")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

@@ -1,6 +1,10 @@
 package commands
 
-import "os"
+import (
+	"os"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
+)
 
 // IO seams. Tests in this package swap these to error-injecting stubs to
 // cover the error-return branches that cannot be triggered via filesystem
@@ -16,4 +20,15 @@ var (
 	osExecutable = os.Executable
 	osGetwd      = os.Getwd
 	osSymlink    = os.Symlink
+)
+
+// Downstream-library seams. These wrap calls into internal/config and
+// adjacent commands so error-return branches can be exercised in tests
+// without corrupting the on-disk store. Each seam mirrors a real call site
+// and may be swapped with a stub in `*_test.go`.
+var (
+	configLoad        = config.Load
+	applyProposalFn   = config.ApplyProposal
+	archiveProposalFn = config.ArchiveProposal
+	runRefreshFn      = runRefresh
 )

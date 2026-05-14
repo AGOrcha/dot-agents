@@ -296,7 +296,7 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 		return err
 	}
 
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

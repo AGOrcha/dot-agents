@@ -87,7 +87,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check projects
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		ui.Bullet("warn", "Could not load config: "+err.Error())
 		return nil

@@ -35,7 +35,7 @@ With --clean, also removes project directories from ~/.agents/.`,
 }
 
 func runRemove(projectName string, cleanDirs bool) error {
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
