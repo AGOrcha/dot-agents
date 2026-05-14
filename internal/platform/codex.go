@@ -172,7 +172,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, codexDir, "agents")
-		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		if err := osMkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
 		if err := c.writeCodexAgents(agentsHome, "global", userAgentsDir); err != nil {

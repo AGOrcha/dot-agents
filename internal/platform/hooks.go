@@ -294,7 +294,7 @@ func emitHookFanout(specs []HookSpec, dstRoot string, mode HookEmissionMode, map
 	if mode.Shape != HookShapeRenderFanout {
 		return fmt.Errorf("hook fanout requires %q shape, got %q", HookShapeRenderFanout, mode.Shape)
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -422,7 +422,7 @@ func emitRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSp
 	if len(specs) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {

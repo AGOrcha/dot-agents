@@ -392,7 +392,7 @@ func (c *claude) ensureUserAgents(agentsHome string) error {
 
 func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries []os.DirEntry) error {
 	userAgentsDir := filepath.Join(homeRoot, claudeDir, "agents")
-	if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+	if err := osMkdirAll(userAgentsDir, 0755); err != nil {
 		return err
 	}
 	for _, entry := range entries {

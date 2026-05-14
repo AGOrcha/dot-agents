@@ -355,6 +355,75 @@ func TestCopilotCreateClaudeCompatLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCodexCreateLinks_ChainEarlyReturns drives the per-child early-return
+// branches in codex.CreateLinks by failing the Nth MkdirAll call.
+func TestCodexCreateLinks_ChainEarlyReturns(t *testing.T) {
+	// CreateLinks MkdirAll order: 0..N user agents (via ensureUserAgents),
+	// then `.codex` for repo config, then `.codex` for writeRepoHooks. With
+	// the global agents bucket empty, ensureUserAgents does NOT call MkdirAll,
+	// so we can target call 1 (codex config) and call 2 (writeRepoHooks).
+	for _, failAt := range []int{1, 2} {
+		failAt := failAt
+		t.Run(fmt.Sprintf("fail-%d", failAt), func(t *testing.T) {
+			agentsHome, repo := setupAgentsHome(t)
+			withMkdirAllErrorAfter(t, filepath.Join(repo, ".codex"), failAt)
+
+			c := NewCodex().(*codex)
+			err := c.CreateLinks("proj", repo)
+			if !errors.Is(err, errSeamSynthetic) {
+				t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
+			}
+			_ = agentsHome
+		})
+	}
+}
+
+// TestClaudeEnsureUserAgentsInHome_MkdirAllErrorSurfaces drives the
+// userAgentsDir MkdirAll error branch.
+func TestClaudeEnsureUserAgentsInHome_MkdirAllErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	withMkdirAllError(t, ".claude")
+
+	c := NewClaude().(*claude)
+	err := c.ensureUserAgentsInHome(tmp, "ignored", nil)
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("ensureUserAgentsInHome err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestEmitHookFanout_MkdirAllErrorSurfaces covers the MkdirAll(dstRoot) error
+// branch in emitHookFanout.
+func TestEmitHookFanout_MkdirAllErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "fanout")
+	withMkdirAllError(t, "fanout")
+	specs := []HookSpec{{Name: "a", SourcePath: filepath.Join(tmp, "missing.json")}}
+
+	err := emitHookFanout(specs, dstRoot, HookEmissionMode{
+		Shape:     HookShapeRenderFanout,
+		Transport: HookTransportSymlink,
+	}, func(s HookSpec) (string, bool) { return s.Name + ".json", true })
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("emitHookFanout err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestEmitRenderedHookFanout_MkdirAllErrorSurfaces covers the MkdirAll error
+// branch in emitRenderedHookFanout.
+func TestEmitRenderedHookFanout_MkdirAllErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "fanout")
+	withMkdirAllError(t, "fanout")
+	specs := []HookSpec{{Name: "a"}}
+
+	err := emitRenderedHookFanout(specs, dstRoot, func(HookSpec) (string, []byte, bool, error) {
+		return "a.json", []byte("{}"), true, nil
+	})
+	if !errors.Is(err, errSeamSynthetic) {
+		t.Fatalf("emitRenderedHookFanout err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
 // --- hooks.go seams -----------------------------------------------------
 
 func TestWriteManagedFile_RemoveErrorSurfaces(t *testing.T) {
