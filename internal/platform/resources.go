@@ -71,18 +71,31 @@ func listScopedResourceDirs(agentsHome, bucket, scope, marker string) ([]resourc
 	return out, nil
 }
 
+// syncScopedDirSymlinks creates per-entry symlinks under dstRoot for every
+// directory under <agentsHome>/<bucket>/<scope>/ that owns the marker file.
+// A missing bucket (ENOENT) is a legitimate no-op — there is simply nothing
+// to sync. Other errors (ENOTDIR, EACCES, EIO) propagate.
 func syncScopedDirSymlinks(agentsHome, bucket, scope, marker, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, bucket, scope, marker)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	return syncResourceDirEntries(entries, dstRoot)
 }
 
+// syncScopedDirSymlinksTargets mirrors syncScopedDirSymlinks for multiple
+// destination roots. ENOENT on the source bucket is a no-op; other errors
+// propagate.
 func syncScopedDirSymlinksTargets(agentsHome, bucket, scope, marker string, dstRoots ...string) error {
 	entries, err := listScopedResourceDirs(agentsHome, bucket, scope, marker)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	for _, dstRoot := range dstRoots {
 		if err := syncResourceDirEntries(entries, dstRoot); err != nil {
@@ -104,10 +117,16 @@ func syncResourceDirEntries(entries []resourceDir, dstRoot string) error {
 	return nil
 }
 
+// syncScopedFileSymlinks creates per-entry file symlinks (with suffix) under
+// dstRoot for every entry under <agentsHome>/<bucket>/<scope>/. ENOENT on the
+// bucket is a no-op; other errors propagate.
 func syncScopedFileSymlinks(agentsHome, bucket, scope, marker, dstRoot, suffix string) error {
 	entries, err := listScopedResourceDirs(agentsHome, bucket, scope, marker)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	if err := os.MkdirAll(dstRoot, 0755); err != nil {
 		return err

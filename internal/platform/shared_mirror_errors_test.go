@@ -104,6 +104,82 @@ func TestBuildSharedPluginBundleIntents_NonENOENTErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestSyncScopedDirSymlinks_MissingBucketIsNoop asserts ENOENT on the source
+// bucket is a clean no-op (no error, no destination touched). Mirrors the
+// "no resources yet" semantics for the sync-side helpers.
+func TestSyncScopedDirSymlinks_MissingBucketIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "dst")
+	if err := syncScopedDirSymlinks(filepath.Join(tmp, "agents-home-missing"), "skills", "global", "SKILL.md", dst); err != nil {
+		t.Fatalf("ENOENT bucket must be a no-op: %v", err)
+	}
+}
+
+// TestSyncScopedDirSymlinks_NonENOENTErrorPropagates asserts a real
+// listScopedResourceDirs failure (bucket path is a regular file → ENOTDIR)
+// now propagates. Regression for the previous `return nil` swallow.
+func TestSyncScopedDirSymlinks_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "skills")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "global"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", filepath.Join(tmp, "dst")); err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestSyncScopedDirSymlinksTargets_NonENOENTErrorPropagates same regression
+// for the multi-target variant.
+func TestSyncScopedDirSymlinksTargets_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "proj"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := syncScopedDirSymlinksTargets(agentsHome, "agents", "proj", "AGENT.md", filepath.Join(tmp, "dst-a"), filepath.Join(tmp, "dst-b"))
+	if err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestSyncScopedFileSymlinks_NonENOENTErrorPropagates same regression for the
+// file-symlink variant (used by opencode user-home agents).
+func TestSyncScopedFileSymlinks_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "global"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md")
+	if err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestSyncScopedFileSymlinks_MissingBucketIsNoop asserts ENOENT no-ops cleanly.
+func TestSyncScopedFileSymlinks_MissingBucketIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	if err := syncScopedFileSymlinks(filepath.Join(tmp, "no-home"), "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md"); err != nil {
+		t.Fatalf("ENOENT bucket must be a no-op: %v", err)
+	}
+}
+
 // TestBuildSharedAgentFileSymlinkIntents_MissingBucketIsEmpty asserts ENOENT
 // surfaces as empty intents (no error) — projects without agents yet.
 func TestBuildSharedAgentFileSymlinkIntents_MissingBucketIsEmpty(t *testing.T) {
