@@ -615,3 +615,62 @@ func TestRunWorkflowSweep_DryRunGeneratesPlan(t *testing.T) {
 		t.Errorf("expected 'Sweep Plan' header in output, got: %s", out)
 	}
 }
+
+// ─── runWorkflowSweepWithLister: injectable project source error paths ─────
+
+// TestRunWorkflowSweepWithLister_ListerError drives the previously
+// unreachable load-projects failure branch by passing a stub lister that
+// returns a non-nil error.
+func TestRunWorkflowSweepWithLister_ListerError(t *testing.T) {
+	cmd := newSweepTestCommand(false, 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return nil, errSentinelDriftLister
+	}
+	err := runWorkflowSweepWithLister(cmd, stub, nil)
+	if err == nil {
+		t.Fatal("expected lister error to propagate")
+	}
+	if !strings.Contains(err.Error(), "load managed projects") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+// TestRunWorkflowSweepWithLister_EmptySlice triggers the no-projects notice
+// path without touching the global config tree.
+func TestRunWorkflowSweepWithLister_EmptySlice(t *testing.T) {
+	cmd := newSweepTestCommand(false, 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return []ManagedProject{}, nil
+	}
+	out, _ := captureCovStdout(t, func() error {
+		return runWorkflowSweepWithLister(cmd, stub, nil)
+	})
+	if !strings.Contains(out, "No managed projects") {
+		t.Errorf("expected no-projects notice, got %s", out)
+	}
+}
+
+// TestRunWorkflowSweepWithLister_ApplyWithConfirmer drives apply-mode end
+// to end against a synthetic project, declining the scaffold-dir prompt via
+// an injected reader so the apply branch and its loop body are both
+// exercised without seam swap.
+func TestRunWorkflowSweepWithLister_ApplyWithConfirmer(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+	target := t.TempDir()
+	cmd := newSweepTestCommand(true, 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return []ManagedProject{{Name: "synth-apply", Path: target}}, nil
+	}
+	// Decline the scaffold-dir confirmation.
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+	out, _ := captureCovStdout(t, func() error {
+		return runWorkflowSweepWithLister(cmd, stub, strings.NewReader("n\n"))
+	})
+	if !strings.Contains(out, "Sweep complete") {
+		t.Errorf("expected 'Sweep complete' summary, got %s", out)
+	}
+}

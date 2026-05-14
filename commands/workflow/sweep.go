@@ -245,12 +245,22 @@ func confirmSweepActionFromReader(action SweepActionItem, reader *bufio.Reader) 
 
 // runWorkflowSweep runs drift detection and optionally applies fixes.
 func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
+	return runWorkflowSweepWithLister(cmd, loadManagedProjects, workflowStdin)
+}
+
+// runWorkflowSweepWithLister is the test-friendly inner form that accepts
+// an injectable project source and confirmer reader. Production code calls
+// runWorkflowSweep, which forwards loadManagedProjects + workflowStdin.
+// Tests pass stubs to drive previously-untestable error branches
+// (load-projects failure) and to drive apply-mode confirmations without
+// requiring the package-level workflowStdin seam.
+func runWorkflowSweepWithLister(cmd *cobra.Command, lister func() ([]ManagedProject, error), confirmer io.Reader) error {
 	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
 	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
 	applyFlag, _ := cmd.Flags().GetBool("apply")
 	dryRun := !applyFlag
 
-	projects, err := loadManagedProjects()
+	projects, err := lister()
 	if err != nil {
 		return fmt.Errorf("load managed projects: %w", err)
 	}
@@ -278,6 +288,6 @@ func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	runSweepApply(plan, workflowStdin)
+	runSweepApply(plan, confirmer)
 	return nil
 }
