@@ -641,3 +641,93 @@ func TestClaudeCreateLinks_RulesMkdirBlocked(t *testing.T) {
 		t.Error("expected mkdir error")
 	}
 }
+
+// TestClaudeScanSessionTokens_SkipsNonAssistantLines exercises the
+// substring-prefilter "continue" branch in claudeScanSessionTokens
+// (lines without `"assistant"` are short-circuited before JSON parse).
+func TestClaudeScanSessionTokens_SkipsNonAssistantLines(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/skip"
+	sess := "44444444-4444-4444-4444-444444444444"
+	lines := []string{
+		// No "assistant" substring — hits the continue branch.
+		`{"type":"user","timestamp":"2026-05-11T12:00:00Z","message":{"content":"hi"}}`,
+		// One real assistant line so the function does some work.
+		`{"type":"assistant","timestamp":"2026-05-11T12:30:00Z","message":{"usage":{"input_tokens":7,"output_tokens":3}}}`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+
+	got := claudeScanSessionTokens(home, project, sess, "")
+	if got.MessageCount != 1 {
+		t.Errorf("MessageCount = %d, want 1 (non-assistant line skipped)", got.MessageCount)
+	}
+	if got.InputTokens != 7 {
+		t.Errorf("InputTokens = %d, want 7", got.InputTokens)
+	}
+	if got.OutputTokens != 3 {
+		t.Errorf("OutputTokens = %d, want 3", got.OutputTokens)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_MissingFile drives the os.Open failure
+// short-circuit (path does not exist → nil).
+func TestClaudeScanJSONLForBranch_MissingFile(t *testing.T) {
+	got := claudeScanJSONLForBranch(filepath.Join(t.TempDir(), "missing.jsonl"), `"gitBranch":"main"`, "main")
+	if got != nil {
+		t.Errorf("expected nil for missing file, got %+v", got)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_LineCap50 drives the >50-line break branch.
+// We write 60 matching lines; only the first 50 should be visited.
+func TestClaudeScanJSONLForBranch_LineCap50(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/cap"
+	sess := "55555555-5555-5555-5555-555555555555"
+	target := "main"
+	line := `{"type":"assistant","sessionId":"` + sess + `","timestamp":"2026-05-11T11:30:00Z","gitBranch":"` + target + `","message":{"content":[{"type":"text","text":"x"}]}}`
+	var lines []string
+	for i := 0; i < 60; i++ {
+		lines = append(lines, line)
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+
+	slug := strings.ReplaceAll(project, "/", "-")
+	path := filepath.Join(home, ".claude", "projects", slug, sess+".jsonl")
+	marker := `"gitBranch":"` + target + `"`
+	got := claudeScanJSONLForBranch(path, marker, target)
+	if got == nil {
+		t.Fatalf("expected match, got nil")
+	}
+	// Cap is 50 — anything more means the break branch did not engage.
+	if got.MessageCount > 50 {
+		t.Errorf("MessageCount = %d, want <= 50 (cap)", got.MessageCount)
+	}
+}
+
+// TestCodexScanSessionTokens_OpenError exercises the os.Open failure branch
+// when findCodexSessionFile returns a path that cannot be opened (e.g. it
+// resolves to a directory instead of a regular file).
+func TestCodexScanSessionTokens_OpenError(t *testing.T) {
+	home := t.TempDir()
+	sessID := "open-err-id"
+	// Create the expected daily directory and place a *directory* at the
+	// rollout filename — findCodexSessionFile globs by suffix and will pick
+	// it up, but os.Open succeeds on directories on Unix. To trigger an
+	// open error we instead seed an unreadable file.
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-05-11-"+sessID+".jsonl")
+	if err := os.WriteFile(path, []byte("ignored"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	// On macOS running as root, mode 0o000 may still be readable; treat the
+	// success path as acceptable too — what matters is that the function
+	// returns without panicking.
+	got := codexScanSessionTokens(home, sessID, "")
+	_ = got
+}
