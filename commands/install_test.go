@@ -227,12 +227,66 @@ func TestResolveSources_MixedAndCustomDirs(t *testing.T) {
 
 func TestGitCloneDryRunCommand(t *testing.T) {
 	got := gitCloneDryRunCommand("https://example.com/repo.git", "", "/cache/x")
-	if got != "git clone --depth 1 https://example.com/repo.git /cache/x" {
+	if got != "git clone --depth 1 -- https://example.com/repo.git /cache/x" {
 		t.Errorf("no ref: %q", got)
 	}
 	got = gitCloneDryRunCommand("https://example.com/repo.git", "main", "/cache/x")
-	if got != "git clone --depth 1 --branch main https://example.com/repo.git /cache/x" {
+	if got != "git clone --depth 1 --branch main -- https://example.com/repo.git /cache/x" {
 		t.Errorf("with ref: %q", got)
+	}
+}
+
+// TestCloneGitSource_MaliciousURLNotParsedAsFlag verifies that a URL beginning
+// with "--upload-pack=" (CVE-2017-1000117 class) is passed as a positional
+// argument because cloneGitSource inserts "--" before url/cacheDir. We use a
+// fake "git" binary that prints its argv; we then assert the URL appears
+// after "--" in the recorded argv.
+func TestCloneGitSource_MaliciousURLNotParsedAsFlag(t *testing.T) {
+	tmp := t.TempDir()
+	argvFile := filepath.Join(tmp, "argv.txt")
+
+	// Fake git that writes its argv to a file then exits non-zero (so
+	// cloneGitSource's failure path runs and cleans up cacheDir).
+	fakeBin := filepath.Join(tmp, "fakegit.sh")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >" + argvFile + "\nexit 1\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	maliciousURL := "--upload-pack=/bin/sh -c touch /tmp/pwned"
+	cacheDir := filepath.Join(tmp, "cache")
+	_, err := cloneGitSource(fakeBin, maliciousURL, "", cacheDir)
+	if err == nil {
+		t.Fatal("expected clone to fail (fake git exits 1)")
+	}
+	data, readErr := os.ReadFile(argvFile)
+	if readErr != nil {
+		t.Fatalf("fake git did not record argv: %v", readErr)
+	}
+	argv := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	// Expected: clone --depth 1 -- <url> <cacheDir>
+	var sepIdx = -1
+	for i, a := range argv {
+		if a == "--" {
+			sepIdx = i
+			break
+		}
+	}
+	if sepIdx < 0 {
+		t.Fatalf("missing -- separator in argv: %v", argv)
+	}
+	if sepIdx+1 >= len(argv) || argv[sepIdx+1] != maliciousURL {
+		t.Errorf("expected URL immediately after --; argv=%v", argv)
+	}
+	// Sanity: no element BEFORE -- equals or starts with the malicious URL.
+	for i := 0; i < sepIdx; i++ {
+		if argv[i] == maliciousURL {
+			t.Errorf("URL leaked into flag position at argv[%d]: %v", i, argv)
+		}
 	}
 }
 

@@ -426,7 +426,10 @@ func updateCachedGitSource(gitBin, cacheDir, url string) {
 	if Flags.Verbose {
 		ui.Info("Updating cached source: " + url)
 	}
-	cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q")
+	// "--" separator prevents an attacker-controlled remote/branch from being
+	// parsed as a git flag (CVE-2017-1000117 class). git pull treats subsequent
+	// positional args as <repository> <refspec>...
+	cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q", "--")
 	if err := cmd.Run(); err != nil {
 		ui.Bullet("warn", "Could not update cached source — using existing copy")
 		return
@@ -439,7 +442,9 @@ func gitCloneDryRunCommand(url, ref, cacheDir string) string {
 	if ref != "" {
 		args += " --branch " + ref
 	}
-	return args + " " + url + " " + cacheDir
+	// "--" mirrors the real argv built by cloneGitSource so the dry-run
+	// preview matches what would actually execute.
+	return args + " -- " + url + " " + cacheDir
 }
 
 func cloneGitSource(gitBin, url, ref, cacheDir string) (string, error) {
@@ -453,7 +458,9 @@ func cloneGitSource(gitBin, url, ref, cacheDir string) (string, error) {
 	if ref != "" {
 		args = append(args, "--branch", ref)
 	}
-	args = append(args, url, cacheDir)
+	// "--" separator forces git to treat url/cacheDir as positionals, even if
+	// url starts with "-" or "--upload-pack=…" (CVE-2017-1000117 class).
+	args = append(args, "--", url, cacheDir)
 	cmd := exec.Command(gitBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(cacheDir)
