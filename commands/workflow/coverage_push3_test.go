@@ -1449,6 +1449,99 @@ func TestValidateGraphBridgeIntent_Unknown(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// iter_log helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestLoadIterLogDocument_InvalidYAML(t *testing.T) {
+	if _, err := loadIterLogDocument([]byte("not: : valid")); err == nil {
+		t.Error("expected parse error for invalid YAML")
+	}
+}
+
+func TestLoadIterLogDocument_V1Migration(t *testing.T) {
+	v1 := []byte(`schema_version: 1
+iteration: 5
+date: "2026-04-30"
+wave: w
+task_id: t1
+commit: abc
+files_changed: 3
+lines_added: 10
+lines_removed: 2
+first_commit: true
+item: thing
+summary: did it
+scope_note: ok
+feedback_goal: cover
+retries: 0
+tests_added: 1
+tests_total_pass: 1
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  aligned_with_canonical_tasks: true
+  persisted_via_workflow_commands: true
+  stayed_under_10_files: true
+  no_destructive_commands: true
+`)
+	got, err := loadIterLogDocument(v1)
+	if err != nil {
+		t.Fatalf("loadIterLogDocument(v1): %v", err)
+	}
+	if got.SchemaVersion != 2 {
+		t.Errorf("expected migration to schema_version=2, got %d", got.SchemaVersion)
+	}
+	if got.Iteration != 5 {
+		t.Errorf("expected iteration=5, got %d", got.Iteration)
+	}
+}
+
+func TestLoadIterLogDocument_V2(t *testing.T) {
+	v2 := []byte(`schema_version: 2
+iteration: 7
+date: "2026-04-30"
+wave: w
+task_id: t1
+commit: abc
+impl:
+  feedback_goal: cover
+`)
+	got, err := loadIterLogDocument(v2)
+	if err != nil {
+		t.Fatalf("loadIterLogDocument(v2): %v", err)
+	}
+	if got.SchemaVersion != 2 || got.Iteration != 7 {
+		t.Errorf("unexpected entry: %+v", got)
+	}
+	if got.Verifiers == nil {
+		t.Error("expected non-nil verifiers slice")
+	}
+}
+
+func TestMigrateIterLogV1Legacy_BasicFields(t *testing.T) {
+	v1 := &iterLogV1Legacy{
+		SchemaVersion: 1,
+		Iteration:     3,
+		Date:          "2026-04-30",
+		Wave:          "w",
+		TaskID:        "t1",
+		Item:          "item",
+		Summary:       "did it",
+	}
+	got := migrateIterLogV1Legacy(v1)
+	if got.SchemaVersion != 2 {
+		t.Errorf("schema=%d, want 2", got.SchemaVersion)
+	}
+	if got.Impl.Item != "item" || got.Impl.Summary != "did it" {
+		t.Errorf("expected fields migrated to Impl block, got %+v", got.Impl)
+	}
+	if got.Verifiers == nil {
+		t.Error("verifiers should be initialized")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // loadCheckScopeSidecar — happy path with valid sidecar
 // ─────────────────────────────────────────────────────────────────────────────
 
