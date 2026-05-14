@@ -273,34 +273,31 @@ func TestMapResourceRelToDest_RootLevelFallback(t *testing.T) {
 
 // mapResourceRelToDest: exact-match command-dir cases.
 func TestMapResourceRelToDest_CommandsBuckets(t *testing.T) {
-	if got := mapResourceRelToDest("proj", ".cursor/commands/"); got == "" {
+	if mapResourceRelToDest("proj", ".cursor/commands/") == "" {
 		t.Error("expected non-empty mapping for cursor commands dir literal")
 	}
-	if got := mapResourceRelToDest("proj", ".claude/commands/"); got == "" {
+	if mapResourceRelToDest("proj", ".claude/commands/") == "" {
 		t.Error("expected non-empty mapping for claude commands dir literal")
 	}
-	if got := mapResourceRelToDest("proj", ".opencode/commands/"); got == "" {
+	if mapResourceRelToDest("proj", ".opencode/commands/") == "" {
 		t.Error("expected non-empty mapping for opencode commands dir literal")
 	}
-	// Other exact bucket inputs.
-	if got := mapResourceRelToDest("proj", ".cursor/indexing.cursorindexingignore"); got != "" {
-		// not exact constant; just exercises code path
-		_ = got
-	}
+	// Other exact bucket inputs — just exercise the code path.
+	_ = mapResourceRelToDest("proj", ".cursor/indexing.cursorindexingignore")
 }
 
 func TestMapResourceRelToDest_OutputStylesAndModes(t *testing.T) {
 	// Exercise the additional switch-case branches.
-	if got := mapResourceRelToDest("proj", ".claude/output-styles/"); got == "" {
+	if mapResourceRelToDest("proj", ".claude/output-styles/") == "" {
 		t.Error("expected mapping for claude output-styles dir literal")
 	}
-	if got := mapResourceRelToDest("proj", ".opencode/modes/"); got == "" {
+	if mapResourceRelToDest("proj", ".opencode/modes/") == "" {
 		t.Error("expected mapping for opencode modes dir literal")
 	}
-	if got := mapResourceRelToDest("proj", ".opencode/themes/"); got == "" {
+	if mapResourceRelToDest("proj", ".opencode/themes/") == "" {
 		t.Error("expected mapping for opencode themes dir literal")
 	}
-	if got := mapResourceRelToDest("proj", ".github/prompts/"); got == "" {
+	if mapResourceRelToDest("proj", ".github/prompts/") == "" {
 		t.Error("expected mapping for github prompts dir literal")
 	}
 }

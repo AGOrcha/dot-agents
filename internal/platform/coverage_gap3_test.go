@@ -190,7 +190,7 @@ func TestHasDeprecatedFormat_Detected(t *testing.T) {
 	if !cp.HasDeprecatedFormat(repoC) {
 		t.Error("expected claude deprecated detection")
 	}
-	if got := cp.DeprecatedDetails(repoC); got == "" {
+	if cp.DeprecatedDetails(repoC) == "" {
 		t.Error("expected non-empty deprecated details")
 	}
 
@@ -206,7 +206,7 @@ func TestHasDeprecatedFormat_Detected(t *testing.T) {
 	if !curp.HasDeprecatedFormat(repoCur) {
 		t.Error("expected cursor deprecated detection")
 	}
-	if got := curp.DeprecatedDetails(repoCur); got == "" {
+	if curp.DeprecatedDetails(repoCur) == "" {
 		t.Error("expected non-empty deprecated details")
 	}
 }

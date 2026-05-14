@@ -36,7 +36,7 @@ func TestSessionReaderAccessors(t *testing.T) {
 			ReadUsageStats(string) *PlatformUsageStats
 		}); ok {
 			// Empty home → nil stats
-			if got := sr.ReadUsageStats(t.TempDir()); got != nil {
+			if sr.ReadUsageStats(t.TempDir()) != nil {
 				t.Logf("%s: unexpected non-nil stats from empty home", p.ID())
 			}
 		}
@@ -328,7 +328,7 @@ func TestClaudeUsageStatsBadJSON(t *testing.T) {
 }
 
 func TestClaudeUsageStatsMissing(t *testing.T) {
-	if got := claudeReadUsageStats(t.TempDir()); got != nil {
+	if claudeReadUsageStats(t.TempDir()) != nil {
 		t.Error("missing cache should return nil")
 	}
 }
@@ -359,7 +359,7 @@ func TestCodexUsageStats(t *testing.T) {
 }
 
 func TestCodexUsageStatsMissing(t *testing.T) {
-	if got := codexReadUsageStats(t.TempDir()); got != nil {
+	if codexReadUsageStats(t.TempDir()) != nil {
 		t.Error("missing index should return nil")
 	}
 }

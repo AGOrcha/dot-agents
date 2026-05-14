@@ -32,7 +32,7 @@ func TestNewRootCommand_Metadata(t *testing.T) {
 	}
 
 	for _, name := range []string{"dry-run", "force", "verbose", "yes", "json"} {
-		if f := root.PersistentFlags().Lookup(name); f == nil {
+		if root.PersistentFlags().Lookup(name) == nil {
 			t.Errorf("persistent flag %q missing", name)
 		}
 	}
