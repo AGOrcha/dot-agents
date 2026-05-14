@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -278,6 +279,50 @@ func TestValidatePromoteSymlink_Mismatch(t *testing.T) {
 	err := validatePromoteSymlink(src, filepath.Join(tmp, "canonical"), "alpha", spec)
 	if err == nil || !strings.Contains(err.Error(), "already a symlink but points to") {
 		t.Errorf("expected mispoint error, got %v", err)
+	}
+}
+
+// TestMaterializePromoteSource_RollbackCrossFsFallback verifies that an EXDEV
+// error from os.Rename triggers the CopyTree fallback path. The repo-local
+// source must be restored from canonical, and canonical removed afterward.
+func TestMaterializePromoteSource_RollbackCrossFsFallback(t *testing.T) {
+	agentsHome, projectPath := atomicEnv(t, "exdev")
+	writeWidget(t, projectPath, "alpha")
+
+	swapSymlink(t, func(string, string) error {
+		return errors.New("synthetic symlink failure")
+	})
+	swapRename(t, func(string, string) error {
+		// Wrap EXDEV in the same shape Go's os package produces so errors.Is
+		// finds it.
+		return &os.LinkError{Op: "rename", Old: "x", New: "y", Err: syscall.EXDEV}
+	})
+
+	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
+	if err == nil {
+		t.Fatal("expected error from PromoteResource on symlink failure")
+	}
+	if !strings.Contains(err.Error(), "via cross-fs copy") {
+		t.Errorf("expected 'via cross-fs copy' in error message, got: %v", err)
+	}
+
+	// Source must be restored as a real directory from the canonical copy.
+	sourcePath := filepath.Join(projectPath, ".agents", "widgets", "alpha")
+	info, err := os.Lstat(sourcePath)
+	if err != nil {
+		t.Fatalf("source path should be restored: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("source should be a real directory after rollback, got symlink")
+	}
+	if _, err := os.Stat(filepath.Join(sourcePath, "WIDGET.md")); err != nil {
+		t.Errorf("manifest missing after cross-fs rollback: %v", err)
+	}
+
+	// Canonical must be removed.
+	canonicalPath := filepath.Join(agentsHome, "widgets", "exdev", "alpha")
+	if _, err := os.Stat(canonicalPath); !os.IsNotExist(err) {
+		t.Errorf("canonical should be removed after cross-fs rollback, got err=%v", err)
 	}
 }
 

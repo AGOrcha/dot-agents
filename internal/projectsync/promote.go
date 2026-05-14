@@ -1,10 +1,12 @@
 package projectsync
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
@@ -131,6 +133,21 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 		// Rollback: restore the repo-local directory from the canonical copy so
 		// we never leave the source path missing if symlink creation fails.
 		if rerr := osRename(canonicalPath, sourcePath); rerr != nil {
+			// Cross-filesystem rename fails with EXDEV (e.g. NFS home + local
+			// repo, Docker bind-mount over tmpfs). Fall back to CopyTree + remove
+			// so rollback still succeeds across mount boundaries.
+			if errors.Is(rerr, syscall.EXDEV) {
+				if cerr := CopyTree(canonicalPath, sourcePath); cerr != nil {
+					return fmt.Errorf("creating managed symlink failed and rollback failed (canonical=%s, source=%s now missing): symlink=%w; rename=%w; copy=%w",
+						canonicalPath, sourcePath, err, rerr, cerr)
+				}
+				if rmerr := os.RemoveAll(canonicalPath); rmerr != nil {
+					// Source restored but canonical still present — partial recovery.
+					return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q but canonical still present at %s (manual cleanup needed): symlink=%w; canonical-remove=%w",
+						spec.Singular, name, canonicalPath, err, rmerr)
+				}
+				return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q (via cross-fs copy): %w", spec.Singular, name, err)
+			}
 			return fmt.Errorf("creating managed symlink failed and rollback also failed; canonical=%s, source=%s now missing: symlink=%w; rollback=%w",
 				canonicalPath, sourcePath, err, rerr)
 		}
