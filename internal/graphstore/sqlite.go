@@ -24,22 +24,22 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("graphstore: create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlOpen("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("graphstore: open db: %w", err)
 	}
 
 	db.SetMaxOpenConns(1) // SQLite doesn't benefit from a pool
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := dbExec(db, "PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set WAL mode: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+	if _, err := dbExec(db, "PRAGMA busy_timeout=5000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set busy_timeout: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+	if _, err := dbExec(db, "PRAGMA foreign_keys=ON"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: enable foreign_keys: %w", err)
 	}
@@ -53,7 +53,7 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) initSchema() error {
-	if _, err := s.db.Exec(schemaSQL); err != nil {
+	if _, err := dbExec(s.db, schemaSQL); err != nil {
 		return fmt.Errorf("graphstore: init schema: %w", err)
 	}
 	return nil

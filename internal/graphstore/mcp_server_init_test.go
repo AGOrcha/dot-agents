@@ -6,14 +6,12 @@ import (
 	"testing"
 )
 
-// TestNewMCPServer_BridgeErrorPath uses a workDir with no .venv and no CRG
-// on PATH (best effort) to trigger the bridgeErr branch. If CRG is on PATH
-// we skip — the path is hard to exercise then.
+// TestNewMCPServer_BridgeErrorPath uses a workDir with no .venv and an
+// empty PATH to deterministically trigger the bridgeErr branch even on
+// machines where CRG happens to be installed.
 func TestNewMCPServer_BridgeErrorPath(t *testing.T) {
+	t.Setenv("PATH", "")
 	workDir := t.TempDir()
-	if _, err := DiscoverCRGBin(workDir); err == nil {
-		t.Skip("code-review-graph available on PATH; cannot test bridgeErr path")
-	}
 	srv := NewMCPServer(workDir)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
