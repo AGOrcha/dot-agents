@@ -266,33 +266,49 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	return nil
 }
 
+// pruneCodexRepoAgentTomls deletes stale `.codex/agents/*.toml` files in the
+// repo whose canonical AGENT.md no longer exists. ENOENT on the canonical
+// agents bucket OR the codex dst dir is a no-op — nothing to prune. Other
+// errors propagate.
 func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	wanted := map[string]bool{}
 	for _, entry := range entries {
 		wanted[entry.Name+".toml"] = true
 	}
 	dstRoot := filepath.Join(repoPath, codexDir, "agents")
-	if existing, err := os.ReadDir(dstRoot); err != nil {
-		return nil
-	} else {
-		for _, e := range existing {
-			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
-				continue
-			}
-			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+	existing, err := os.ReadDir(dstRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
+		return err
+	}
+	for _, e := range existing {
+		if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dstRoot, e.Name()))
 	}
 	return nil
 }
 
+// writeCodexAgents renders each canonical AGENT.md as a `.toml` under dstRoot
+// and prunes stale tomls. ENOENT on the canonical agents bucket is a no-op;
+// other errors propagate.
 func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	wanted := map[string]bool{}
 	for _, entry := range entries {
@@ -313,10 +329,16 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 	return nil
 }
 
+// pruneManagedCodexAgentTomls removes the per-entry `.toml` files that map to
+// canonical AGENT.md entries. ENOENT on the canonical agents bucket is a
+// no-op; other errors propagate.
 func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	for _, entry := range entries {
 		if err := os.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {

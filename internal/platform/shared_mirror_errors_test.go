@@ -104,6 +104,88 @@ func TestBuildSharedPluginBundleIntents_NonENOENTErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestPruneCodexRepoAgentTomls_NonENOENTErrorPropagates exercises the
+// previously-dead non-ENOENT error path. Regression for `return nil` on
+// listScopedResourceDirs failures.
+func TestPruneCodexRepoAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "proj"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestPruneCodexRepoAgentTomls_DstReadErrorPropagates exercises the
+// previously-dead non-ENOENT path of the inner os.ReadDir(dstRoot) error.
+func TestPruneCodexRepoAgentTomls_DstReadErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	// Make a valid agents bucket so listScopedResourceDirs succeeds with no
+	// entries, then make .codex/agents a file (not a dir) → ReadDir ENOTDIR.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	codexDirAgents := filepath.Join(repo, ".codex")
+	if err := os.MkdirAll(codexDirAgents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDirAgents, "agents"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected ENOTDIR-style error from ReadDir(dstRoot) to propagate")
+	}
+}
+
+// TestWriteCodexAgents_NonENOENTErrorPropagates exercises the dead branch in
+// writeCodexAgents on listScopedResourceDirs failure.
+func TestWriteCodexAgents_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "scope-x"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCodex().(*codex)
+	if err := c.writeCodexAgents(agentsHome, "scope-x", filepath.Join(tmp, "dst")); err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
+// TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates exercises the dead
+// branch in pruneManagedCodexAgentTomls.
+func TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	bucketParent := filepath.Join(agentsHome, "agents")
+	if err := os.MkdirAll(bucketParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bucketParent, "scope-y"), []byte("masquerade"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCodex().(*codex)
+	if err := c.pruneManagedCodexAgentTomls(agentsHome, "scope-y", filepath.Join(tmp, "dst")); err == nil {
+		t.Fatal("expected ENOTDIR-style error to propagate")
+	}
+}
+
 // TestSyncScopedDirSymlinks_MissingBucketIsNoop asserts ENOENT on the source
 // bucket is a clean no-op (no error, no destination touched). Mirrors the
 // "no resources yet" semantics for the sync-side helpers.
