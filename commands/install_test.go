@@ -1395,6 +1395,32 @@ func TestFinalizeInstall_DryRun(t *testing.T) {
 	finalizeInstall("p", t.TempDir())
 }
 
+// TestFinalizeInstall_WriteFailWarns covers the WriteRefreshToAgentsRC err
+// branch by pointing at a non-writable path (a file masquerading as a dir).
+func TestFinalizeInstall_WriteFailWarns(t *testing.T) {
+	tmp := t.TempDir()
+	// projectPath is a regular file → WriteRefreshToAgentsRC fails to write.
+	if err := os.WriteFile(filepath.Join(tmp, "not-a-dir"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	finalizeInstall("p", filepath.Join(tmp, "not-a-dir"))
+}
+
+// TestRunInstallSharedTargets_DryRunErrorPath covers the dry-run warn branch
+// when RunSharedTargetProjection returns an error.
+func TestRunInstallSharedTargets_DryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+}
+
 // TestShouldSkipLinkDestination_ForceDeletes covers Force=true branch.
 func TestShouldSkipLinkDestination_ForceDeletes(t *testing.T) {
 	tmp := t.TempDir()

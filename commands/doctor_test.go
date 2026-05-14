@@ -567,6 +567,89 @@ func TestRunDoctor_GitSourceNotFetched(t *testing.T) {
 	}
 }
 
+// TestRunDoctor_GitSourceCachePresent covers the presentGit append + ok
+// manifest branch (lines 218-220 + 227-229).
+func TestRunDoctor_GitSourceCachePresent(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Force XDG_CACHE_HOME so GitSourceCacheDir resolves there.
+	cacheRoot := filepath.Join(tmp, ".cache")
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	url := "https://example.invalid/cached.git"
+	rc := &config.AgentsRC{Version: 1, Project: "p", Sources: []config.Source{{Type: "git", URL: url}}}
+	if err := rc.Save(projPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create the cache dir so doctor reports it as present.
+	cacheDir := config.GitSourceCacheDir(url)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor with cached git source: %v", err)
+	}
+}
+
+// TestRunDoctor_NoAgentsHome covers the early "~/.agents/ not found" branch
+// and the absent-config warning branch.
+func TestRunDoctor_NoAgentsHomeAndNoConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Point AGENTS_HOME at a non-existent dir.
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, "absent-agents-home"))
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor with absent home: %v", err)
+	}
+}
+
+// TestRunDoctor_BrokenUserLinksReportedNonVerbose covers the non-verbose
+// broken-user-link rendering loop (lines 83-86).
+func TestRunDoctor_BrokenUserLinksReportedNonVerbose(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Broken user-level Claude rule symlink so collectBrokenUserLinks returns > 0.
+	claudeHome := filepath.Join(tmp, ".claude")
+	os.MkdirAll(claudeHome, 0755)
+	os.Symlink(filepath.Join(agentsHome, "ghost.md"), filepath.Join(claudeHome, "CLAUDE.md"))
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor with broken user links: %v", err)
+	}
+}
+
 // TestRunDoctor_PluginUnsupportedPlatform covers the warn branch when a
 // plugin spec lists a non-opencode platform.
 func TestRunDoctor_PluginUnsupportedPlatform(t *testing.T) {

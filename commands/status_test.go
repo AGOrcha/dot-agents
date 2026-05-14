@@ -153,6 +153,18 @@ func TestReadLegacyRefreshTimestamp_NoFile(t *testing.T) {
 	}
 }
 
+// TestReadLegacyRefreshTimestamp_NoRefreshedAtLine covers the case where the
+// marker file exists but contains no `refreshed_at=` prefix — the scanner
+// loop falls through and returns "".
+func TestReadLegacyRefreshTimestamp_NoRefreshedAtLine(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, ".agents-refresh")
+	os.WriteFile(marker, []byte("# unrelated\nother=value\n"), 0644)
+	if got := readLegacyRefreshTimestamp(tmp); got != "" {
+		t.Errorf("expected empty when no refreshed_at line, got %q", got)
+	}
+}
+
 // ---------- summarizeCanonicalBucket ----------
 
 func TestSummarizeCanonicalBucket_Empty(t *testing.T) {
@@ -658,6 +670,22 @@ func TestPrintStatusProjectManifestSummary_PresentWithSkills(t *testing.T) {
 	printStatusProjectManifestSummary(tmp)
 }
 
+// TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled covers the
+// rc.Hooks.IsEnabled() + rc.MCP.IsEnabled() append branches.
+func TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "demo",
+		Hooks:   config.StringsOrBool{All: true},
+		MCP:     config.StringsOrBool{All: true},
+	}
+	if err := rc.Save(tmp); err != nil {
+		t.Fatal(err)
+	}
+	printStatusProjectManifestSummary(tmp)
+}
+
 // printUserConfigSection: empty home → exercises the "no managed user-level config" branch.
 func TestPrintUserConfigSection_NoConfig(t *testing.T) {
 	tmp := t.TempDir()
@@ -679,12 +707,51 @@ func TestPrintUserConfigSection_WithClaudeMD(t *testing.T) {
 	printUserConfigSection(agentsHome, true, "")
 }
 
+// TestPrintUserConfigSection_AllPlatformsSeeded covers the codex and opencode
+// badge-append branches (906-908, 925-927) plus opencode audit-mode dir walk.
+func TestPrintUserConfigSection_AllPlatformsSeeded(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	// Claude
+	claudeHome := filepath.Join(tmp, ".claude")
+	os.MkdirAll(claudeHome, 0755)
+	os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("# c"), 0644)
+
+	// Codex: ~/.codex/hooks.json + ~/.codex/agents/ + ~/.agents/skills/.
+	codexHome := filepath.Join(tmp, ".codex")
+	os.MkdirAll(filepath.Join(codexHome, "agents"), 0755)
+	os.WriteFile(filepath.Join(codexHome, "hooks.json"), []byte("{}"), 0644)
+	os.MkdirAll(filepath.Join(tmp, ".agents", "skills"), 0755)
+	// One skill symlink so the dir count > 0.
+	target := filepath.Join(agentsHome, "skills", "global", "demo")
+	os.MkdirAll(target, 0755)
+	os.Symlink(target, filepath.Join(tmp, ".agents", "skills", "demo"))
+
+	// OpenCode: ~/.opencode/agent/<symlink>.
+	opAgent := filepath.Join(tmp, ".opencode", "agent")
+	os.MkdirAll(opAgent, 0755)
+	opTarget := filepath.Join(agentsHome, "agents", "global", "demo")
+	os.MkdirAll(opTarget, 0755)
+	os.Symlink(opTarget, filepath.Join(opAgent, "demo"))
+
+	// Audit mode also exercises the audit-detail prints across all platforms.
+	printUserConfigSection(agentsHome, true, "")
+}
+
 // printSharedTargetRegistry: empty platforms hits the early-return branch.
+// All platforms explicitly disabled in cfg so the early-return fires regardless
+// of host environment.
 func TestPrintSharedTargetRegistry_NoPlatforms(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	for _, pid := range []string{"cursor", "claude", "codex", "opencode", "copilot"} {
+		cfg.SetPlatformState(pid, false, "")
+	}
 	printSharedTargetRegistry("proj", tmp, cfg)
 }
 
@@ -1087,6 +1154,8 @@ func TestPrintClaudeAudit_BrokenAndHealthy(t *testing.T) {
 
 	// Broken symlink.
 	os.Symlink(filepath.Join(agentsHome, "rules", "p", "missing.md"), filepath.Join(claudeRules, "p--broken.md"))
+	// Non-symlink regular file in rules dir → triggers the Readlink-err continue branch.
+	os.WriteFile(filepath.Join(claudeRules, "raw-file.md"), []byte("not-a-link"), 0644)
 
 	// Broken .mcp.json symlink at project root.
 	os.Symlink(filepath.Join(agentsHome, "mcp", "p", "missing.json"), filepath.Join(proj, ".mcp.json"))
@@ -1103,7 +1172,7 @@ func TestPrintCodexAudit_AllBranches(t *testing.T) {
 	os.MkdirAll(agentsHome, 0755)
 
 	// Project 1: AGENTS.md is a healthy symlink, codex config.toml linked,
-	// hooks.json not linked, skills dir has healthy+broken entries,
+	// hooks.json not linked, skills dir has healthy+broken+non-symlink entries,
 	// agents dir has readable + unreadable file.
 	proj := filepath.Join(tmp, "p1")
 	os.MkdirAll(filepath.Join(proj, ".codex", "agents"), 0755)
@@ -1121,14 +1190,16 @@ func TestPrintCodexAudit_AllBranches(t *testing.T) {
 	os.WriteFile(cfgT, []byte("# toml"), 0644)
 	os.Symlink(cfgT, filepath.Join(proj, ".codex", "config.toml"))
 
-	// Skill: one healthy symlink + one broken.
+	// Skill: one healthy symlink + one broken + one non-symlink file (skipped).
 	skillTarget := filepath.Join(agentsHome, "skills", "p1", "x")
 	os.MkdirAll(skillTarget, 0755)
 	os.Symlink(skillTarget, filepath.Join(proj, ".agents", "skills", "x"))
 	os.Symlink(filepath.Join(agentsHome, "skills", "p1", "missing"), filepath.Join(proj, ".agents", "skills", "broken"))
+	os.WriteFile(filepath.Join(proj, ".agents", "skills", "regular.md"), []byte("not-a-symlink"), 0644)
 
-	// Codex agent file (readable) + simulate unreadable via a dir without execute… but Stat error needs ENOENT.
+	// Codex agent file (readable) + a broken symlink → printCodexAgentsAudit ✗.
 	os.WriteFile(filepath.Join(proj, ".codex", "agents", "ok.toml"), []byte("name=ok"), 0644)
+	os.Symlink(filepath.Join(agentsHome, "missing-agent.toml"), filepath.Join(proj, ".codex", "agents", "broken.toml"))
 
 	printCodexAudit("p1", proj, agentsHome)
 

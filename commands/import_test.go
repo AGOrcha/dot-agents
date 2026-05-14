@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -29,6 +30,8 @@ func TestMapGlobalRelToDest(t *testing.T) {
 		{".codex/config.toml", "settings/global/codex.toml"},
 		{".codex/hooks.json", "hooks/global/codex.json"},
 		{".cursor/hooks.json", "hooks/global/cursor.json"},
+		{relCursorIgnore, "settings/global/cursorignore"},
+		{relCursorIndexingIgnore, platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, "global", "cursorindexingignore")},
 		{".unknown", ""},
 	}
 
@@ -2057,6 +2060,76 @@ func TestReplaceImportCandidate_DeclineSkips(t *testing.T) {
 	}
 }
 
+// TestProcessImportOutput_StatNonIsNotExistError covers the err != nil branch
+// when Stat on the dest returns a non-IsNotExist error (dest path traverses a
+// non-directory). Symlink chain pointing through a file → Stat returns ENOTDIR.
+func TestProcessImportOutput_StatNonIsNotExistError(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+
+	// Make agentsHome/notdir a regular file, then attempt to write to
+	// agentsHome/notdir/below which forces Stat to return ENOTDIR.
+	if err := os.WriteFile(filepath.Join(agentsHome, "notdir"), []byte("blob"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcInfo, _ := os.Stat(src)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	output := importOutput{destRel: "notdir/sub.txt", content: []byte("hi")}
+	res := processImportOutput(c, output, agentsHome, "", srcInfo)
+	if res.skipped != 1 {
+		t.Errorf("expected skipped=1 from Stat error, got %+v", res)
+	}
+}
+
+// TestFilesDifferent_BothMissingReturnsErr covers the second ReadFile err path
+// (file b missing).
+func TestFilesDifferent_BMissingReturnsError(t *testing.T) {
+	tmp := t.TempDir()
+	a := filepath.Join(tmp, "a")
+	os.WriteFile(a, []byte("a"), 0644)
+	_, err := filesDifferent(a, filepath.Join(tmp, "missing"))
+	if err == nil {
+		t.Error("expected err when b is missing")
+	}
+}
+
+// TestIsManagedSymlink_RelativeDestResolves covers the relative-dest branch
+// where dest is not absolute and gets joined to the link's dir.
+func TestIsManagedSymlink_RelativeDestInsideAgentsHome(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	os.MkdirAll(agentsHome, 0755)
+	target := filepath.Join(agentsHome, "file.md")
+	os.WriteFile(target, []byte("t"), 0644)
+	link := filepath.Join(tmp, "link.md")
+	// Relative symlink pointing into agentsHome.
+	if err := os.Symlink("agents/file.md", link); err != nil {
+		t.Fatal(err)
+	}
+	if !isManagedSymlink(link, agentsHome) {
+		t.Errorf("relative symlink into agentsHome should be detected as managed")
+	}
+}
+
+// TestIsManagedSymlink_NonSymlinkReturnsFalse covers the non-symlink early
+// return (info.Mode()&ModeSymlink == 0).
+func TestIsManagedSymlink_NonSymlinkReturnsFalse(t *testing.T) {
+	tmp := t.TempDir()
+	regular := filepath.Join(tmp, "file.md")
+	os.WriteFile(regular, []byte("x"), 0644)
+	if isManagedSymlink(regular, tmp) {
+		t.Error("regular file should not be reported as managed symlink")
+	}
+}
+
+// TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms tests the
+// existing relink flow (kept as-is).
 func TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

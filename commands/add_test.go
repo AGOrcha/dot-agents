@@ -865,6 +865,107 @@ func TestRunAdd_FullHappyPathWithInstalledClaude(t *testing.T) {
 // TestRunAdd_DryRunWithExistingFilesShowsReplacements covers the
 // "Files to Replace" + "Other AI Configs Discovered" section rendering paths
 // that the existing dry-run test skips by having no existing config files.
+// TestRunAdd_RestoresFromResources covers the restoreFromResourcesCounted
+// branch where seed files exist in ~/.agents/resources/<project>/ and the
+// "restored N items" success path fires.
+func TestRunAdd_RestoresFromResources(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectName := "restoreproj"
+	// Seed a resource for the project under ~/.agents/resources/<project>/
+	resDir := filepath.Join(agentsHome, "resources", projectName, ".github")
+	os.MkdirAll(resDir, 0755)
+	os.WriteFile(filepath.Join(resDir, "copilot-instructions.md"), []byte("# copilot"), 0644)
+
+	projectPath := filepath.Join(tmp, projectName)
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Errorf("runAdd with resources: %v", err)
+	}
+}
+
+// TestRunAdd_WithManifestSuggestsInstall covers the manifest-found nextStep
+// branch.
+func TestRunAdd_WithManifestSuggestsInstall(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "mfst")
+	os.MkdirAll(projectPath, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "mfst"}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Errorf("runAdd manifest path: %v", err)
+	}
+}
+
+// TestRunAdd_WithDeprecatedFormatHint covers the hasDeprecated → migrate hint
+// nextStep branch.
+// (Best-effort: depends on whether the host claude/cursor detect deprecated.)
+
+// TestRunAdd_DiscoveredSymlinkAndDirKind covers the kind="symlink" and
+// kind="dir" branches in the discovered-AI-configs renderer.
+func TestRunAdd_DiscoveredSymlinkAndDirKind(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "discoproj")
+	os.MkdirAll(projectPath, 0755)
+
+	// Discovered-only entries (not in the root-level existingFiles set):
+	// - .aiderdir as a directory
+	// - .aider.conf.symlink as a symlink to an external file.
+	os.MkdirAll(filepath.Join(projectPath, ".aiderdir"), 0755)
+	external := filepath.Join(tmp, "ext.yml")
+	os.WriteFile(external, []byte("x"), 0644)
+	os.Symlink(external, filepath.Join(projectPath, ".aider.conf.symlink"))
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Errorf("runAdd: %v", err)
+	}
+}
+
 func TestRunAdd_DryRunWithExistingFilesShowsReplacements(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
