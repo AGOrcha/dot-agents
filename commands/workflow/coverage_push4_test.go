@@ -478,6 +478,103 @@ func TestUpdateTaskFoldBackNote_LoadError(t *testing.T) {
 	}
 }
 
+// ─── mergePlanDirFile branches ───────────────────────────────────────────────
+
+func TestMergePlanDirFile_DMASkipped(t *testing.T) {
+	// Delegation/merge-back/closeout artifacts are unconditionally skipped.
+	for _, rel := range []string{"delegation.yaml", "merge-back.md", "closeout.yaml"} {
+		if err := mergePlanDirFile("p1", "src", "dst", rel, false); err != nil {
+			t.Errorf("DMA file %q should be skipped, got %v", rel, err)
+		}
+	}
+}
+
+func TestMergePlanDirFile_DMADryRun(t *testing.T) {
+	for _, rel := range []string{"delegation.yaml", "merge-back.md"} {
+		if err := mergePlanDirFile("p1", "src", "dst", rel, true); err != nil {
+			t.Errorf("DMA file %q dry-run should be no-op, got %v", rel, err)
+		}
+	}
+}
+
+func TestMergePlanDirFile_CanonicalDryRun(t *testing.T) {
+	// PLAN.yaml is canonical; dry-run should be a no-op without touching disk.
+	if err := mergePlanDirFile("plan-x", "src", "dst", "plan-x.plan.md", true); err != nil {
+		t.Errorf("canonical dry-run should be no-op: %v", err)
+	}
+}
+
+// ─── shouldSkipPlanDirCopy: identical-hash dry-run logging ───────────────────
+
+func TestShouldSkipPlanDirCopy_IdenticalHashDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	body := []byte("same body")
+	if err := os.WriteFile(src, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstStat, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := shouldSkipPlanDirCopy(src, dst, "rel.txt", true, srcHash, dstStat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Error("expected skip=true for identical hashes")
+	}
+}
+
+func TestShouldSkipPlanDirCopy_HistoryNewerDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(src, []byte("source"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Older src mtime by setting it back via touch.
+	older := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(src, older, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("destination"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstStat, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := shouldSkipPlanDirCopy(src, dst, "rel.txt", true, srcHash, dstStat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Error("expected skip=true because history (dst) is newer")
+	}
+}
+
+// ─── mergePlanDirCompareAndCopy hash-error path ──────────────────────────────
+
+func TestMergePlanDirCompareAndCopy_SrcHashError(t *testing.T) {
+	err := mergePlanDirCompareAndCopy("/nonexistent/src", "/nonexistent/dst", "rel", false)
+	if err == nil || !strings.Contains(err.Error(), "hash rel") {
+		t.Fatalf("expected hash error, got %v", err)
+	}
+}
+
 func TestWorkflowDelegationGate_TextOutput_MissingDecision(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	saveTestDelegationContract(t, repo, "t1", "p1", "del-t1")
