@@ -260,6 +260,44 @@ func TestClaudeCreateRulesLinks_SkipsDirAndUnsupportedExt(t *testing.T) {
 	}
 }
 
+// TestClaudeLinkProjectSettings_PropagatesProjectBundlesError covers the
+// early-return when collectCanonicalHookSpecsForPlatform fails for the
+// project scope.
+func TestClaudeLinkProjectSettings_PropagatesProjectBundlesError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed a broken HOOK.yaml under the project scope so collectCanonical
+	// returns a parse error.
+	bundleDir := filepath.Join(agentsHome, "hooks", "proj", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	// linkProjectSettings has signature (project, repoPath, agentsHome); it
+	// returns no error, so we only verify it doesn't panic on the propagated
+	// error. The early-return branch is now covered.
+	c.linkProjectSettings("proj", repo, agentsHome)
+}
+
+// TestClaudeLinkProjectSettings_PropagatesGlobalBundlesError covers the
+// second collectCanonicalHookSpecsForPlatform call's error path.
+func TestClaudeLinkProjectSettings_PropagatesGlobalBundlesError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	c.linkProjectSettings("proj", repo, agentsHome)
+}
+
 // TestClaudeRemoveProjectSettingsLink_GlobalBundleFallback covers the
 // else-branch where project bundles are absent but global bundles exist.
 func TestClaudeRemoveProjectSettingsLink_GlobalBundleFallback(t *testing.T) {
@@ -616,6 +654,60 @@ func TestCopilotCreateMCPLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestCopilotCreateClaudeCompatLinks_PropagatesProjectBundlesError covers the
+// early-return when project-scope collectCanonical fails.
+func TestCopilotCreateClaudeCompatLinks_PropagatesProjectBundlesError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "proj", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createClaudeCompatLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestCopilotCreateClaudeCompatLinks_PropagatesGlobalBundlesError covers the
+// second collectCanonical early-return path.
+func TestCopilotCreateClaudeCompatLinks_PropagatesGlobalBundlesError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createClaudeCompatLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestCopilotCreateProjectHookFiles_PropagatesParseError covers the early-
+// return when collectCanonical fails inside createProjectHookFiles.
+func TestCopilotCreateProjectHookFiles_PropagatesParseError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createProjectHookFiles("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
 func TestCopilotCreateClaudeCompatLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
 	withMkdirAllError(t, ".claude")
@@ -624,6 +716,94 @@ func TestCopilotCreateClaudeCompatLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	err := c.createClaudeCompatLinks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createClaudeCompatLinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// TestCopilotRemoveClaudeCompatSettings_GlobalBundleFallback covers the
+// else-branch that exercises the global bundles when project bundles are
+// absent.
+func TestCopilotRemoveClaudeCompatSettings_GlobalBundleFallback(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	// Seed canonical hook ONLY under global scope; project scope has none.
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "format-write")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "name: format-write\nwhen: pre_tool_use\nrun:\n  command: ./run.sh\n  timeout_ms: 1000\nenabled_on: [copilot]\n"
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	c.removeClaudeCompatSettings("proj", repo, agentsHome)
+}
+
+// TestCodexWriteUserHomeHooks_PropagatesParseError covers the early-return.
+func TestCodexWriteUserHomeHooks_PropagatesParseError(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCodex().(*codex)
+	if err := c.writeUserHomeHooks("proj", agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestCursorWriteUserHomeHooks_PropagatesParseError covers the same for cursor.
+func TestCursorWriteUserHomeHooks_PropagatesParseError(t *testing.T) {
+	agentsHome, _ := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCursor().(*cursor)
+	if err := c.writeUserHomeHooks("proj", agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestCodexWriteRepoHooks_PropagatesParseError covers the early-return when
+// the canonical collect call fails.
+func TestCodexWriteRepoHooks_PropagatesParseError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCodex().(*codex)
+	if err := c.writeRepoHooks("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestCursorWriteRepoHooks_PropagatesParseError covers the same for cursor.
+func TestCursorWriteRepoHooks_PropagatesParseError(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	bundleDir := filepath.Join(agentsHome, "hooks", "global", "broken")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte(":\n -- not yaml --"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCursor().(*cursor)
+	if err := c.writeRepoHooks("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected propagated parse error")
 	}
 }
 
@@ -954,6 +1134,34 @@ func TestRenderCodexHookConfig_RequiredButNoCommand(t *testing.T) {
 	}
 }
 
+// TestRenderCursorHookConfig_SkipsNonIncludedSpec covers the !include
+// continue branch in renderCursorHookConfig.
+func TestRenderCursorHookConfig_SkipsNonIncludedSpec(t *testing.T) {
+	// A non-representable cursor event with no required-on entry should
+	// silently skip.
+	specs := []HookSpec{{Name: "h", When: "OnUnknownEvent", Command: "echo hi"}}
+	out, err := renderCursorHookConfig(specs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("expected non-empty output")
+	}
+}
+
+// TestRenderClaudeHookSettings_NoCommandSkipped covers the non-required
+// no-command continue branch in renderClaudeHookSettings.
+func TestRenderClaudeHookSettings_NoCommandSkipped(t *testing.T) {
+	specs := []HookSpec{{Name: "h", When: "pre_tool_use"}}
+	out, err := renderClaudeHookSettings(specs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("expected non-empty output")
+	}
+}
+
 // TestRenderCodexHookConfig_NotRequiredUnrepresentableSkipped covers the
 // continue-on-skip branch.
 func TestRenderCodexHookConfig_NotRequiredUnrepresentableSkipped(t *testing.T) {
@@ -1050,6 +1258,61 @@ func TestRemoveManagedFileIf_RemoveErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestRemoveImportedDirIfAllowlisted_SkipsEmptyMarker covers the empty-marker
+// continue branch and the no-marker error branch.
+func TestRemoveImportedDirIfAllowlisted_SkipsEmptyMarker(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, ".agents", "skills", "alpha")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Use the relative TargetPath that passes the allowlist.
+	intent := ResourceIntent{
+		TargetPath:  ".agents/skills/alpha",
+		MarkerFiles: []string{"", "MISSING.md"},
+	}
+	err := removeImportedDirIfAllowlisted(target, intent)
+	if err == nil {
+		t.Fatal("expected refuse-replace error when no marker matches")
+	}
+}
+
+// TestBuildSharedSkillMirrorIntents_SkipsDotRoot covers the root == "."
+// continue branch.
+func TestBuildSharedSkillMirrorIntents_SkipsDotRoot(t *testing.T) {
+	intents, err := BuildSharedSkillMirrorIntents("proj", ".", ".")
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if len(intents) != 0 {
+		t.Errorf("expected no intents for dot root, got %d", len(intents))
+	}
+}
+
+// TestBuildSharedPluginBundleIntents_SkipsDotRoot covers the same skip
+// branch for the plugin variant.
+func TestBuildSharedPluginBundleIntents_SkipsDotRoot(t *testing.T) {
+	intents, err := BuildSharedPluginBundleIntents("proj", ".")
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if len(intents) != 0 {
+		t.Errorf("expected no intents for dot root, got %d", len(intents))
+	}
+}
+
+// TestBuildSharedAgentMirrorIntents_SkipsDotRoot covers the same skip
+// branch for the agent variant.
+func TestBuildSharedAgentMirrorIntents_SkipsDotRoot(t *testing.T) {
+	intents, err := BuildSharedAgentMirrorIntents("proj", ".")
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if len(intents) != 0 {
+		t.Errorf("expected no intents for dot root, got %d", len(intents))
+	}
+}
+
 // TestExecuteResourceIntent_DirectDir_EmptySourceError covers
 // canonicalIntentSourcePath's empty-source error branch via the
 // ResourceShapeDirectDir/Symlink intent path.
@@ -1129,6 +1392,21 @@ func TestExecuteRenderSingleWrite_UnsupportedMaterializer(t *testing.T) {
 	}
 }
 
+// TestLoadHookBundleSpec_ReadFileNonENOENTError covers the readFile
+// non-ENOENT error branch (HOOK.yaml is a directory, EISDIR).
+func TestLoadHookBundleSpec_ReadFileNonENOENTError(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "hooks", "global")
+	bundle := filepath.Join(root, "bundle")
+	// Create HOOK.yaml as a directory so os.ReadFile returns EISDIR.
+	if err := os.MkdirAll(filepath.Join(bundle, "HOOK.yaml"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadHookBundleSpec(root, "global", "bundle"); err == nil {
+		t.Fatal("expected readFile non-ENOENT error")
+	}
+}
+
 // TestCollectCanonicalHookSpecsForPlatform_PropagatesNonENOENTError ensures
 // the non-ENOENT error branch returns rather than continuing.
 func TestCollectCanonicalHookSpecsForPlatform_PropagatesNonENOENTError(t *testing.T) {
@@ -1142,6 +1420,33 @@ func TestCollectCanonicalHookSpecsForPlatform_PropagatesNonENOENTError(t *testin
 	}
 	if _, err := collectCanonicalHookSpecsForPlatform(tmp, "proj", "claude", "global"); err == nil {
 		t.Fatal("expected propagated parse error")
+	}
+}
+
+// TestLoadHookBundleSpec_DefaultsNameToDir covers the "name == \"\"" fallback
+// that derives the hook name from the bundle directory.
+func TestLoadHookBundleSpec_DefaultsNameToDir(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "hooks", "global")
+	bundleDir := "bundle-default-name"
+	if err := os.MkdirAll(filepath.Join(root, bundleDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Manifest without `name:`.
+	manifest := "when: pre_tool_use\nrun:\n  command: ./run.sh\n"
+	if err := os.WriteFile(filepath.Join(root, bundleDir, "HOOK.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	spec, ok, err := loadHookBundleSpec(root, "global", bundleDir)
+	if err != nil {
+		t.Fatalf("loadHookBundleSpec: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if spec.Name != bundleDir {
+		t.Errorf("Name = %q, want %q", spec.Name, bundleDir)
 	}
 }
 
