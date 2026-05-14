@@ -842,6 +842,13 @@ func TestSearchKGNotes_LimitAndArchivedFilter(t *testing.T) {
 
 // Ensure the test binary itself can be compiled without leaving temp files
 // under the source tree.
+//
+// Also reaps the shared Postgres testcontainer (if one was started by
+// postgres_container_test.go::lazyPostgresDSN) before exit, so local docker
+// state stays tidy.  CI runners discard the host after the job so this is a
+// best-effort hygiene step.
 func TestMain(m *testing.M) {
-	os.Exit(m.Run())
+	code := m.Run()
+	pgTerminateAll()
+	os.Exit(code)
 }

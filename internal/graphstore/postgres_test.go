@@ -2,7 +2,6 @@ package graphstore_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
@@ -12,22 +11,12 @@ import (
 // openPGTestStoreInterface adapts openPGTestStore to storetest.OpenStore.
 func openPGTestStoreInterface(t *testing.T) graphstore.Store { return openPGTestStore(t) }
 
-// openPGTestStore opens a PostgresStore using the TEST_PG_URL environment variable.
-// If the variable is not set the test is skipped.
+// openPGTestStore opens a PostgresStore against the shared testcontainers
+// Postgres instance (see postgres_container_test.go). If Docker is not
+// available the entire test is skipped via lazyPostgresDSN.
 func openPGTestStore(t *testing.T) *graphstore.PostgresStore {
 	t.Helper()
-	dsn := os.Getenv("TEST_PG_URL")
-	if dsn == "" {
-		t.Skip("TEST_PG_URL not set — skipping Postgres tests")
-	}
-
-	ctx := context.Background()
-	s, err := graphstore.OpenPostgres(ctx, dsn)
-	if err != nil {
-		t.Fatalf("OpenPostgres: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	return openPGContainerStore(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -45,10 +34,7 @@ func TestOpenPostgres_CreatesSchema(t *testing.T) {
 }
 
 func TestOpenPostgres_Idempotent(t *testing.T) {
-	dsn := os.Getenv("TEST_PG_URL")
-	if dsn == "" {
-		t.Skip("TEST_PG_URL not set — skipping Postgres tests")
-	}
+	dsn := lazyPostgresDSN(t)
 	ctx := context.Background()
 
 	s1, err := graphstore.OpenPostgres(ctx, dsn)
@@ -286,12 +272,14 @@ func TestPG_SearchNodes(t *testing.T) {
 		_, _ = s.UpsertNode(makeNode(name, graphstore.NodeKindFunction, "pg_server.go"), "")
 	}
 
-	results, err := s.SearchNodes("pgRequest", 10)
+	// "Request" matches both pgHandleRequest and pgParseRequest as a
+	// case-insensitive substring; pgBuildResponse does not.
+	results, err := s.SearchNodes("Request", 10)
 	if err != nil {
 		t.Fatalf("SearchNodes: %v", err)
 	}
 	if len(results) < 2 {
-		t.Errorf("want at least 2 results for 'pgRequest', got %d", len(results))
+		t.Errorf("want at least 2 results for 'Request', got %d", len(results))
 	}
 }
 
