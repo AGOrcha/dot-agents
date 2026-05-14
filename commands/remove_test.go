@@ -297,6 +297,37 @@ func TestRunRemove_WithGitSourceManifestWarns(t *testing.T) {
 	}
 }
 
+// TestRunRemove_ConfirmDecline covers the "Removal cancelled" branch when
+// neither --yes nor --force is set and the user declines.
+func TestRunRemove_ConfirmDecline(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{} // no Yes, no Force → Confirm prompts (defaults false)
+	defer func() { Flags = saved }()
+
+	if err := runRemove("p", false); err != nil {
+		t.Errorf("runRemove decline: %v", err)
+	}
+	// Project should still be registered (cancellation).
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("p") == "" {
+		t.Error("project should remain registered after declined remove")
+	}
+}
+
 // TestRunRemove_DryRunCleansFlagShowsDestructiveWarn covers the
 // destructive-warn branch with cleanDirs=true under dry-run (no actual delete).
 func TestRunRemove_DryRunCleansFlagShowsDestructiveWarn(t *testing.T) {

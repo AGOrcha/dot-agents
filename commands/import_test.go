@@ -2128,6 +2128,54 @@ func TestIsManagedSymlink_NonSymlinkReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestImportMissingCandidate_CopyFail covers the CopyFile-error warn branch
+// by pointing dest at a path that traverses a regular file (ENOTDIR).
+func TestImportMissingCandidate_CopyFail(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("payload"))
+
+	// Make `notdir` a file so dest=`notdir/out.txt` fails.
+	if err := os.WriteFile(filepath.Join(agentsHome, "notdir"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "notdir/out.txt"}
+	res := importMissingCandidate(c, filepath.Join(agentsHome, "notdir", "out.txt"), "")
+	if res.skipped != 1 {
+		t.Errorf("expected skipped=1 from CopyFile failure, got %+v", res)
+	}
+}
+
+// TestReplaceImportCandidate_CopyFail covers the CopyFile-error warn branch in
+// replaceImportCandidate.
+func TestReplaceImportCandidate_CopyFail(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.txt")
+	writeFile(t, src, []byte("new"))
+	srcInfo, _ := os.Stat(src)
+	dest := filepath.Join(agentsHome, "notdir", "out.txt")
+	if err := os.WriteFile(filepath.Join(agentsHome, "notdir"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// destInfo is fictional but mirrorBackup tolerates it.
+	destInfo := srcInfo
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "notdir/out.txt"}
+	res := replaceImportCandidate(c, agentsHome, dest, "", srcInfo, destInfo)
+	if res.skipped != 1 {
+		t.Errorf("expected skipped=1 from CopyFile failure, got %+v", res)
+	}
+}
+
 // TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms tests the
 // existing relink flow (kept as-is).
 func TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms(t *testing.T) {

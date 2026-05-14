@@ -389,6 +389,46 @@ func TestRunRefresh_SkipsProjectWithoutPath(t *testing.T) {
 	}
 }
 
+// TestRunRefresh_DryRunWithCommit covers the dry-run message path with a
+// non-empty refreshCommit (lines 184-186).
+func TestRunRefresh_DryRunWithCommit(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject a fake commit through the package-level Commit variable.
+	savedCommit := Commit
+	Commit = "abcdef1234567890"
+	defer func() { Commit = savedCommit }()
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh dry-run with commit: %v", err)
+	}
+}
+
+// TestMapResourceRelToDest_CursorRuleWithoutSuffix covers the empty-return
+// branch in the .cursor/rules/ case when the file lacks .mdc/.md suffix and no
+// global/project prefix.
+func TestMapResourceRelToDest_CursorRuleNoSuffixReturnsEmpty(t *testing.T) {
+	got := mapResourceRelToDest("proj", ".cursor/rules/notes.txt")
+	if got != "" {
+		t.Errorf("expected empty for non-mdc/md rule, got %q", got)
+	}
+}
+
 // TestRunRefresh_MultiProjectStepNRender covers the total>1 branch that uses
 // ui.StepN to render per-project headings.
 func TestRunRefresh_MultiProjectStepNRender(t *testing.T) {

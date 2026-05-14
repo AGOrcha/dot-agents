@@ -1315,6 +1315,105 @@ func TestPrintAgentsHomeGitStatusLine_RepoNoRemote(t *testing.T) {
 	printAgentsHomeGitStatusLine(tmp)
 }
 
+// TestRunStatus_CorruptConfigErrors covers the config.Load err branch (326-328).
+func TestRunStatus_CorruptConfigErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Corrupt config.json → Load returns parse error.
+	os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte("not-json"), 0644)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	err := runStatus(false, "")
+	if err == nil {
+		t.Error("expected config.Load error from corrupt config.json")
+	}
+}
+
+// TestRunStatus_JSONMode covers the JSON path (lines 332-341) which we haven't
+// exercised much.
+func TestRunStatus_JSONMode(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{JSON: true}
+	defer func() { Flags = saved }()
+	if err := runStatus(false, ""); err != nil {
+		t.Errorf("runStatus JSON: %v", err)
+	}
+}
+
+// TestRunStatus_LastRefreshedRender covers the "last refreshed" print branch
+// (389-391) by registering a project whose .agentsrc.json has a refresh
+// timestamp.
+func TestRunStatus_LastRefreshedRender(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "p",
+		Refresh: &config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"},
+	}
+	if err := rc.Save(projPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	cmd := NewStatusCmd()
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("runStatus with refresh ts: %v", err)
+	}
+}
+
+// TestRunStatus_DirectoryMissing covers the "Directory not found" continue
+// branch for a registered-but-missing project (line 380-382).
+func TestRunStatus_DirectoryMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("ghost", filepath.Join(tmp, "ghost-path"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := runStatus(false, ""); err != nil {
+		t.Errorf("runStatus missing dir: %v", err)
+	}
+}
+
 // TestRunStatus_AuditModeWithRegisteredProject covers runStatus audit-mode with
 // a registered project and an installed claude platform — exercises the
 // per-project printAudit + printSharedTargetRegistry full path.
