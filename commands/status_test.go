@@ -1036,6 +1036,214 @@ func TestBuildStatusJSONReport_WithPluginAndProjects(t *testing.T) {
 	}
 }
 
+// TestPrintCursorAudit_BrokenSymlinkAndLocalFile exercises the .cursor/mcp.json
+// branches: broken-symlink, hard-link-or-local-file, and (not linked).
+func TestPrintCursorAudit_BrokenSymlinkAndLocalFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	// Project A: broken .cursor/mcp.json symlink + a local .mdc rule with no prefix.
+	projA := filepath.Join(tmp, "projA")
+	cursorDirA := filepath.Join(projA, ".cursor")
+	os.MkdirAll(filepath.Join(cursorDirA, "rules"), 0755)
+	// Local-file rule (no prefix → "local" branch).
+	os.WriteFile(filepath.Join(cursorDirA, "rules", "ad-hoc.mdc"), []byte("# local"), 0644)
+	// Broken symlink for .cursor/mcp.json.
+	os.Symlink(filepath.Join(agentsHome, "nonexistent"), filepath.Join(cursorDirA, "mcp.json"))
+
+	// Project B: regular file (not symlink) at .cursor/mcp.json → "hard link or local file".
+	projB := filepath.Join(tmp, "projB")
+	cursorDirB := filepath.Join(projB, ".cursor")
+	os.MkdirAll(filepath.Join(cursorDirB, "rules"), 0755)
+	os.WriteFile(filepath.Join(cursorDirB, "mcp.json"), []byte("{}"), 0644)
+
+	// Project C: no .cursor at all → "not linked" early-return branch.
+	projC := filepath.Join(tmp, "projC")
+	os.MkdirAll(projC, 0755)
+
+	printCursorAudit("projA", projA, agentsHome)
+	printCursorAudit("projB", projB, agentsHome)
+	printCursorAudit("projC", projC, agentsHome)
+}
+
+// TestPrintClaudeAudit_BrokenAndHealthy exercises printSymlinkDirAudit broken
+// branch and printSymlinkAudit broken branch via printClaudeAudit.
+func TestPrintClaudeAudit_BrokenAndHealthy(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	proj := filepath.Join(tmp, "p")
+	claudeRules := filepath.Join(proj, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+
+	// Healthy symlink.
+	healthyTarget := filepath.Join(agentsHome, "rules", "p", "ok.md")
+	os.MkdirAll(filepath.Dir(healthyTarget), 0755)
+	os.WriteFile(healthyTarget, []byte("ok"), 0644)
+	os.Symlink(healthyTarget, filepath.Join(claudeRules, "p--ok.md"))
+
+	// Broken symlink.
+	os.Symlink(filepath.Join(agentsHome, "rules", "p", "missing.md"), filepath.Join(claudeRules, "p--broken.md"))
+
+	// Broken .mcp.json symlink at project root.
+	os.Symlink(filepath.Join(agentsHome, "mcp", "p", "missing.json"), filepath.Join(proj, ".mcp.json"))
+
+	printClaudeAudit("p", proj, agentsHome)
+}
+
+// TestPrintCodexAudit_AllBranches covers printCodexAgentsMD (symlink, local, missing),
+// printCodexSymlinkAudit (linked + not linked), printCodexSkillsAudit and
+// printCodexAgentsAudit (healthy + broken).
+func TestPrintCodexAudit_AllBranches(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	// Project 1: AGENTS.md is a healthy symlink, codex config.toml linked,
+	// hooks.json not linked, skills dir has healthy+broken entries,
+	// agents dir has readable + unreadable file.
+	proj := filepath.Join(tmp, "p1")
+	os.MkdirAll(filepath.Join(proj, ".codex", "agents"), 0755)
+	os.MkdirAll(filepath.Join(proj, ".agents", "skills"), 0755)
+
+	// AGENTS.md symlink → healthy target.
+	target := filepath.Join(agentsHome, "rules", "p1", "agents.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("# a"), 0644)
+	os.Symlink(target, filepath.Join(proj, "AGENTS.md"))
+
+	// codex config.toml linked.
+	cfgT := filepath.Join(agentsHome, "settings", "p1", "codex.toml")
+	os.MkdirAll(filepath.Dir(cfgT), 0755)
+	os.WriteFile(cfgT, []byte("# toml"), 0644)
+	os.Symlink(cfgT, filepath.Join(proj, ".codex", "config.toml"))
+
+	// Skill: one healthy symlink + one broken.
+	skillTarget := filepath.Join(agentsHome, "skills", "p1", "x")
+	os.MkdirAll(skillTarget, 0755)
+	os.Symlink(skillTarget, filepath.Join(proj, ".agents", "skills", "x"))
+	os.Symlink(filepath.Join(agentsHome, "skills", "p1", "missing"), filepath.Join(proj, ".agents", "skills", "broken"))
+
+	// Codex agent file (readable) + simulate unreadable via a dir without execute… but Stat error needs ENOENT.
+	os.WriteFile(filepath.Join(proj, ".codex", "agents", "ok.toml"), []byte("name=ok"), 0644)
+
+	printCodexAudit("p1", proj, agentsHome)
+
+	// Project 2: AGENTS.md is a regular file (local branch), no other dirs.
+	proj2 := filepath.Join(tmp, "p2")
+	os.MkdirAll(filepath.Join(proj2, ".codex"), 0755)
+	os.MkdirAll(filepath.Join(proj2, ".agents", "skills"), 0755)
+	os.WriteFile(filepath.Join(proj2, "AGENTS.md"), []byte("# local"), 0644)
+	printCodexAudit("p2", proj2, agentsHome)
+
+	// Project 3: no AGENTS.md at all → "(no AGENTS.md)" branch.
+	proj3 := filepath.Join(tmp, "p3")
+	os.MkdirAll(proj3, 0755)
+	printCodexAudit("p3", proj3, agentsHome)
+}
+
+// TestPrintOpenCodeAudit_LocalAndBroken covers opencode.json local-file +
+// broken-symlink branches and the missing-.opencode/ branch.
+func TestPrintOpenCodeAudit_LocalAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+
+	// Local-file opencode.json (not symlink).
+	projLocal := filepath.Join(tmp, "local")
+	os.MkdirAll(projLocal, 0755)
+	os.WriteFile(filepath.Join(projLocal, "opencode.json"), []byte("{}"), 0644)
+	printOpenCodeAudit("local", projLocal, agentsHome)
+
+	// Broken-symlink opencode.json + missing .opencode/agent dir.
+	projBroken := filepath.Join(tmp, "broken")
+	os.MkdirAll(projBroken, 0755)
+	os.Symlink(filepath.Join(agentsHome, "missing.json"), filepath.Join(projBroken, "opencode.json"))
+	printOpenCodeAudit("broken", projBroken, agentsHome)
+}
+
+// TestPrintCopilotAudit_BrokenAndNotLinked covers .github/copilot-instructions.md
+// broken-symlink and not-linked branches.
+func TestPrintCopilotAudit_BrokenAndNotLinked(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Broken symlink.
+	projBroken := filepath.Join(tmp, "broken")
+	os.MkdirAll(filepath.Join(projBroken, ".github"), 0755)
+	os.Symlink(filepath.Join(tmp, "missing.md"), filepath.Join(projBroken, ".github", "copilot-instructions.md"))
+	printCopilotAudit("broken", projBroken)
+
+	// Not linked at all.
+	projEmpty := filepath.Join(tmp, "empty")
+	os.MkdirAll(projEmpty, 0755)
+	printCopilotAudit("empty", projEmpty)
+}
+
+// TestPrintSymlinkDirAudit_EmptyDir covers the empty-label branch.
+func TestPrintSymlinkDirAudit_EmptyDir(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "empty")
+	os.MkdirAll(dir, 0755)
+	ok, broken := printSymlinkDirAudit(dir, ".some/path/", "%s")
+	if ok != 0 || broken != 0 {
+		t.Errorf("expected (0,0), got (%d,%d)", ok, broken)
+	}
+}
+
+// TestPrintCanonicalStoreSection_PopulatedBuckets exercises printManagedAuditPath
+// broken-symlink branch via canonical store and several countManagedDirEntries
+// edge cases (symlink with broken Readlink dest).
+func TestPrintManagedAuditPath_BrokenSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.md")
+	link := filepath.Join(tmp, "link.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	// Target doesn't exist → broken-symlink output branch.
+	printManagedAuditPath(link, func(p string) string { return p })
+
+	// Regular file (not symlink) → final fmt.Fprintf branch.
+	regular := filepath.Join(tmp, "reg.md")
+	os.WriteFile(regular, []byte("x"), 0644)
+	printManagedAuditPath(regular, func(p string) string { return p })
+
+	// Non-existent path → early return.
+	printManagedAuditPath(filepath.Join(tmp, "ghost"), func(p string) string { return p })
+}
+
+// TestCountManagedDirEntries_RegularFilePlusBroken covers regular-file ok++
+// alongside a broken symlink warn++ in the same dir.
+func TestCountManagedDirEntries_RegularFilePlusBroken(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "d")
+	os.MkdirAll(dir, 0755)
+	// Healthy regular file (non-symlink) → ok++.
+	os.WriteFile(filepath.Join(dir, "a"), []byte("a"), 0644)
+	// Broken symlink → warn++.
+	os.Symlink(filepath.Join(tmp, "missing"), filepath.Join(dir, "bad"))
+	warn := 0
+	got := countManagedDirEntries(dir, &warn)
+	if got < 1 {
+		t.Errorf("expected at least one ok entry, got %d", got)
+	}
+	if warn < 1 {
+		t.Errorf("expected at least one warn for broken symlink, got %d", warn)
+	}
+}
+
+// TestPrintAgentsHomeGitStatusLine_RepoNoRemote covers the no-remote branch.
+func TestPrintAgentsHomeGitStatusLine_RepoNoRemote(t *testing.T) {
+	tmp := t.TempDir()
+	// Fake .git directory so probeAgentsHomeGit treats this as a repo.
+	os.MkdirAll(filepath.Join(tmp, ".git"), 0755)
+	// `git remote get-url origin` will fail → no remote branch printed.
+	printAgentsHomeGitStatusLine(tmp)
+}
+
 // TestRunStatus_AuditModeWithRegisteredProject covers runStatus audit-mode with
 // a registered project and an installed claude platform — exercises the
 // per-project printAudit + printSharedTargetRegistry full path.

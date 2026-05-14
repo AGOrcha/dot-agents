@@ -260,6 +260,74 @@ func TestRunReviewApprove_NotFound(t *testing.T) {
 	}
 }
 
+// TestRunReviewShow_InvalidYAML covers the parse error from LoadProposal that
+// short-circuits before ValidateProposal — but with valid YAML missing required
+// fields, the ValidateProposal error is the one we want.
+func TestRunReviewShow_InvalidProposalReturnsValidationError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Proposal missing required `rationale` so ValidateProposal fails.
+	writeProposal(t, agentsHome, "bad", `schema_version: 1
+id: bad
+status: pending
+type: rule
+action: add
+target: rules/global/bad.md
+content: "# bad"
+created_at: "2025-01-01T00:00:00Z"
+created_by: t
+`)
+	if err := runReviewShow("bad"); err == nil {
+		t.Fatal("expected ValidateProposal error from runReviewShow")
+	}
+}
+
+// TestRunReviewReject_ValidationError covers the err branch from
+// ValidateProposal inside runReviewReject (line 162-164).
+func TestRunReviewReject_ValidationError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "needs-rationale", `schema_version: 1
+id: needs-rationale
+status: pending
+type: rule
+action: add
+target: rules/global/x.md
+content: "# x"
+created_at: "2025-01-01T00:00:00Z"
+created_by: t
+`)
+	if err := runReviewReject("needs-rationale", "reason"); err == nil {
+		t.Fatal("expected ValidateProposal error from runReviewReject")
+	}
+}
+
+// TestOneLine_EmptyAfterTrim covers the len(lines)==0 guard. strings.Split
+// always returns at least one element for an empty input, so this primarily
+// validates the "TrimSpace gives empty string → trimmed first-line empty" path.
+func TestOneLine_AllWhitespace(t *testing.T) {
+	if got := oneLine("   \n\n  \t  "); got != "" {
+		t.Errorf("oneLine(whitespace) = %q, want empty", got)
+	}
+}
+
+// TestCaptureProposalRollback_ReadErrorPropagates: when targetPath is a
+// directory, os.ReadFile returns a non-IsNotExist error, exercising the
+// `return nil, err` branch (line 188-189).
+func TestCaptureProposalRollback_ReadErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "iam-a-dir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restore, err := captureProposalRollback(dir)
+	if err == nil {
+		t.Errorf("expected non-IsNotExist read error, got restore=%T", restore)
+	}
+}
+
 func TestCaptureProposalRollback_RestoresExistingFile(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "rule.md")

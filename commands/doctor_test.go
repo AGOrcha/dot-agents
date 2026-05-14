@@ -567,6 +567,107 @@ func TestRunDoctor_GitSourceNotFetched(t *testing.T) {
 	}
 }
 
+// TestRunDoctor_PluginUnsupportedPlatform covers the warn branch when a
+// plugin spec lists a non-opencode platform.
+func TestRunDoctor_PluginUnsupportedPlatform(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Seed a plugin spec listing claude (unsupported emitter).
+	pluginDir := filepath.Join(agentsHome, "plugins", "global", "demo")
+	os.MkdirAll(pluginDir, 0755)
+	os.WriteFile(filepath.Join(pluginDir, "PLUGIN.yaml"),
+		[]byte("schema_version: 1\nkind: native\nname: demo\nplatforms: [claude, opencode]\n"), 0644)
+
+	// Register a project so the for-each-project loop runs for the opencode plugin.
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a broken opencode plugin symlink inside the project.
+	pluginLink := filepath.Join(projPath, ".opencode", "plugins", "demo")
+	os.MkdirAll(filepath.Dir(pluginLink), 0755)
+	if err := os.Symlink(filepath.Join(agentsHome, "missing-target"), pluginLink); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor with plugins: %v", err)
+	}
+}
+
+// TestRunDoctor_OrphanCanonicalReported covers the orphan canonical resource
+// warn branch.
+func TestRunDoctor_OrphanCanonicalReported(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+
+	// Canonical skill exists but no back-link in project → orphan.
+	skillCanonical := filepath.Join(agentsHome, "skills", "p", "abandoned")
+	os.MkdirAll(skillCanonical, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor orphan: %v", err)
+	}
+}
+
+// TestRunDoctor_RepairBrokenLinksFlow exercises the broken-link repair branch:
+// project has a broken Claude rule symlink and an installed Claude binary.
+func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Pretend Claude is installed.
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	claudeRules := filepath.Join(projPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	// Broken symlink → collectBrokenLinks returns it.
+	os.Symlink(filepath.Join(agentsHome, "rules", "p", "missing.md"), filepath.Join(claudeRules, "p--ghost.md"))
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		t.Errorf("runDoctor repair dry-run: %v", err)
+	}
+}
+
 // runDoctor when project directory is missing should still complete.
 func TestRunDoctor_MissingProjectDirectory(t *testing.T) {
 	tmp := t.TempDir()

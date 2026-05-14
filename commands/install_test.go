@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
 // ---------- NewInstallCmd metadata ----------
@@ -1252,5 +1253,173 @@ func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	// finalizeInstall should have updated the manifest with refresh metadata.
 	if _, err := os.Stat(filepath.Join(projDir, ".agentsrc.json")); err != nil {
 		t.Errorf("expected manifest to remain: %v", err)
+	}
+}
+
+// TestResolveInstallSources_StrictErrorPropagates covers the strict-mode
+// resolveSources error branch.
+func TestResolveInstallSources_StrictErrorPropagates(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	// A git source with an invalid url + no git binary cache → resolveSources
+	// returns an error which strict mode surfaces.
+	tmp := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", tmp)
+	_, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, true)
+	if err == nil {
+		t.Error("expected strict-mode error")
+	}
+}
+
+// TestResolveInstallSources_NonStrictIgnoresError covers the non-strict branch
+// where err != nil but strict=false swallows the error.
+func TestResolveInstallSources_NonStrictIgnoresError(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	tmp := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", tmp)
+	got, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, false)
+	if err != nil {
+		t.Errorf("non-strict should swallow err, got %v / %v", got, err)
+	}
+}
+
+// TestRegisterInstallProject_AlreadyRegistered covers the skip branch when the
+// project is already in config.
+func TestRegisterInstallProject_AlreadyRegistered(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projPath, 0755)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if err := registerInstallProject("p", projPath); err != nil {
+		t.Errorf("registerInstallProject: %v", err)
+	}
+}
+
+// TestLinkInstallResources_NoSourcesFallsBackToAgentsHome covers the fallback
+// when resolvedSources is empty: sources becomes ~/.agents/.
+func TestLinkInstallResources_NoSourcesFallsBackToAgentsHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Seed a skill in the canonical home that linkInstallResources can find.
+	skill := filepath.Join(agentsHome, "skills", "proj", "x")
+	os.MkdirAll(skill, 0755)
+	os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# x"), 0644)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	rc := &config.AgentsRC{Version: 1, Project: "proj", Skills: []string{"x"}}
+	if err := linkInstallResources("proj", rc, nil, false); err != nil {
+		t.Errorf("linkInstallResources: %v", err)
+	}
+	// Linked dir should exist.
+	dest := filepath.Join(agentsHome, "skills", "proj", "x")
+	if _, err := os.Stat(dest); err != nil {
+		t.Errorf("expected linked dest: %v", err)
+	}
+}
+
+// TestLinkInstallResourceList_StrictMissing covers strict-mode error from
+// linkResourceFromSources when the resource doesn't exist anywhere.
+func TestLinkInstallResourceList_StrictMissing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	err := linkInstallResourceList("skills", "skill", []string{"missing-skill"}, "proj", []string{agentsHome}, true)
+	if err == nil {
+		t.Error("expected strict mode error for missing skill")
+	}
+}
+
+// TestLinkInstallResourceList_NonStrictWarnings covers the non-strict warn path.
+func TestLinkInstallResourceList_NonStrictWarnings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	if err := linkInstallResourceList("skills", "skill", []string{"missing"}, "proj", []string{agentsHome}, false); err != nil {
+		t.Errorf("non-strict should not error: %v", err)
+	}
+}
+
+// TestCreateInstallPlatformLink_DryRun covers the dry-run branch.
+func TestCreateInstallPlatformLink_DryRun(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	for _, p := range platform.All() {
+		createInstallPlatformLink(p, "p", filepath.Join(tmp, "p"))
+	}
+}
+
+// TestFinalizeInstall_DryRun covers the early return.
+func TestFinalizeInstall_DryRun(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+	finalizeInstall("p", t.TempDir())
+}
+
+// TestShouldSkipLinkDestination_ForceDeletes covers Force=true branch.
+func TestShouldSkipLinkDestination_ForceDeletes(t *testing.T) {
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "target")
+	os.MkdirAll(dest, 0755)
+	saved := Flags
+	Flags = GlobalFlags{Force: true}
+	defer func() { Flags = saved }()
+	if shouldSkipLinkDestination(dest) {
+		t.Error("expected force to clear dest, not skip")
+	}
+	if _, err := os.Stat(dest); err == nil {
+		t.Error("expected dest to be removed under --force")
+	}
+}
+
+// TestShouldSkipLinkDestination_ExistsNoForce covers the skip-existing branch.
+func TestShouldSkipLinkDestination_ExistsNoForce(t *testing.T) {
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "target")
+	os.MkdirAll(dest, 0755)
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	if !shouldSkipLinkDestination(dest) {
+		t.Error("expected skip when destination exists and !Force")
 	}
 }

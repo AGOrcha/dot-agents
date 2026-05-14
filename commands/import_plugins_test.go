@@ -821,3 +821,141 @@ func TestSupportsCanonicalImportPathNonPlugin(t *testing.T) {
 		}
 	}
 }
+
+// TestDirectPackagePluginRefs_GitHubManifest exercises the .github/plugin/plugin.json
+// manifest branch (relGitHubPluginManifest) which is not covered by the copilot
+// plugin.json tests.
+func TestDirectPackagePluginRefs_GitHubManifest(t *testing.T) {
+	projectPath := t.TempDir()
+	manifest := []byte(`{
+  "name": "ghplugin",
+  "agents": "external-agents",
+  "hooks": "external/hooks.json"
+}`)
+	manifestPath := filepath.Join(projectPath, relGitHubPluginManifest)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, manifest, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Backing files so candidate paths can resolve.
+	agentDir := filepath.Join(projectPath, "external-agents")
+	os.MkdirAll(agentDir, 0755)
+	os.WriteFile(filepath.Join(agentDir, "a.md"), []byte("# a"), 0644)
+	os.MkdirAll(filepath.Join(projectPath, "external"), 0755)
+	os.WriteFile(filepath.Join(projectPath, "external", "hooks.json"), []byte("{}"), 0644)
+
+	refs, err := directPackagePluginRefs(projectPath)
+	if err != nil {
+		t.Fatalf("directPackagePluginRefs: %v", err)
+	}
+	if len(refs) == 0 {
+		t.Errorf("expected refs from github plugin manifest, got 0")
+	}
+}
+
+// TestDirectPackagePluginRefs_CodexManifest covers the relCodexPluginDir branch
+// (.codex-plugin/plugin.json).
+func TestDirectPackagePluginRefs_CodexManifest(t *testing.T) {
+	projectPath := t.TempDir()
+	codexManifestDir := filepath.Join(projectPath, ".codex-plugin")
+	os.MkdirAll(codexManifestDir, 0755)
+	manifest := []byte(`{
+  "name": "codexplug",
+  "skills": "external/skills",
+  "hooks": "external/hooks.json",
+  "mcpServers": "external/mcp.json",
+  "apps": "external/app.json"
+}`)
+	if err := os.WriteFile(filepath.Join(codexManifestDir, "plugin.json"), manifest, 0644); err != nil {
+		t.Fatal(err)
+	}
+	skillDir := filepath.Join(projectPath, "external", "skills")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "s.md"), []byte("# s"), 0644)
+	os.MkdirAll(filepath.Join(projectPath, "external"), 0755)
+	os.WriteFile(filepath.Join(projectPath, "external", "hooks.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(projectPath, "external", "mcp.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(projectPath, "external", "app.json"), []byte("{}"), 0644)
+
+	refs, err := directPackagePluginRefs(projectPath)
+	if err != nil {
+		t.Fatalf("directPackagePluginRefs: %v", err)
+	}
+	if len(refs) == 0 {
+		t.Errorf("expected refs from codex plugin manifest, got 0")
+	}
+}
+
+// TestDirectPackagePluginRefsForManifest_LoadError forces a manifest-load error
+// (manifest path is a directory → ReadFile returns non-IsNotExist error) to
+// cover the err != nil branch (line 227-229).
+func TestDirectPackagePluginRefsForManifest_LoadError(t *testing.T) {
+	projectPath := t.TempDir()
+	// Directory at the manifest path → ReadFile returns EISDIR.
+	manifestPath := filepath.Join(projectPath, "plugin.json")
+	if err := os.MkdirAll(manifestPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := directPackagePluginRefsForManifest(projectPath, "copilot", manifestPath, func(importedPackagePluginManifest, string) []directPackagePluginRef {
+		return nil
+	})
+	if err == nil {
+		t.Errorf("expected error from non-readable manifest, got refs=%v", refs)
+	}
+}
+
+// TestDirectPackagePluginRefsForManifest_NoManifest covers the !ok branch.
+func TestDirectPackagePluginRefsForManifest_NoManifest(t *testing.T) {
+	projectPath := t.TempDir()
+	manifestPath := filepath.Join(projectPath, "does-not-exist.json")
+	refs, err := directPackagePluginRefsForManifest(projectPath, "copilot", manifestPath, func(importedPackagePluginManifest, string) []directPackagePluginRef {
+		return nil
+	})
+	if err != nil || refs != nil {
+		t.Errorf("expected (nil, nil) for missing manifest, got (%v, %v)", refs, err)
+	}
+}
+
+// TestDirectPackagePluginRefsForManifest_NameFromMarketplace covers the path
+// where manifest.Name is empty and we fall back to marketplace lookup. When the
+// marketplace also doesn't resolve a name → returns (nil, nil).
+func TestDirectPackagePluginRefsForManifest_NoName(t *testing.T) {
+	projectPath := t.TempDir()
+	// Manifest with no Name field and no marketplace neighbor.
+	manifestPath := filepath.Join(projectPath, relCopilotPluginManifest)
+	if err := os.WriteFile(manifestPath, []byte(`{"agents": "x"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := directPackagePluginRefsForManifest(projectPath, "copilot", manifestPath, func(importedPackagePluginManifest, string) []directPackagePluginRef {
+		t.Errorf("build should not be called when name is empty")
+		return nil
+	})
+	if err != nil || refs != nil {
+		t.Errorf("expected (nil, nil) when name resolution fails, got (%v, %v)", refs, err)
+	}
+}
+
+// TestCanonicalPluginOutputs_ManifestLoadError covers err return from
+// loadImportedPackagePluginManifest inside canonicalPluginOutputs.
+func TestCanonicalPluginOutputs_ManifestLoadError(t *testing.T) {
+	tmp := t.TempDir()
+	// Make plugin.json a directory → ReadFile returns non-IsNotExist error.
+	if err := os.MkdirAll(filepath.Join(tmp, "plugin.json"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	agentsDir := filepath.Join(tmp, "agents")
+	os.MkdirAll(agentsDir, 0755)
+	source := filepath.Join(agentsDir, "foo.md")
+	os.WriteFile(source, []byte("# foo"), 0644)
+	c := importCandidate{
+		project:    "test",
+		sourceRoot: tmp,
+		sourcePath: source,
+	}
+	outputs, ok, err := canonicalPluginOutputs(c, "agents/foo.md")
+	if err == nil {
+		t.Errorf("expected manifest-load error, got outputs=%v ok=%v", outputs, ok)
+	}
+}

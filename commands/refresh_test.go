@@ -389,6 +389,94 @@ func TestRunRefresh_SkipsProjectWithoutPath(t *testing.T) {
 	}
 }
 
+// TestRunRefresh_MultiProjectStepNRender covers the total>1 branch that uses
+// ui.StepN to render per-project headings.
+func TestRunRefresh_MultiProjectStepNRender(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	for _, name := range []string{"a", "b"} {
+		p := filepath.Join(tmp, name)
+		os.MkdirAll(p, 0755)
+	}
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("a", filepath.Join(tmp, "a"))
+	cfg.AddProject("b", filepath.Join(tmp, "b"))
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh multi-project: %v", err)
+	}
+}
+
+// TestRunRefresh_NoEnabledPlatforms covers the empty-enabledPlatforms early
+// return when every platform is disabled in config.
+func TestRunRefresh_NoEnabledPlatforms(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Register a project so we don't short-circuit on len(projects)==0.
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	// Explicitly disable every known platform.
+	for _, pid := range []string{"cursor", "claude", "codex", "opencode", "copilot"} {
+		cfg.SetPlatformState(pid, false, "")
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh no-enabled-platforms: %v", err)
+	}
+}
+
+// TestRunRefresh_SkipsProjectWithEmptyOrDotPath covers the path=="" or path=="."
+// skip branch (line 113-115). Direct manipulation of config.Project map.
+func TestRunRefresh_SkipsProjectWithEmptyPath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	cfg := &config.Config{
+		Version:  1,
+		Projects: map[string]config.Project{"weird": {Path: "."}},
+		Agents:   map[string]config.Agent{},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh skip-dot-path: %v", err)
+	}
+}
+
 // TestRunRefresh_NewRefreshCmdRunEDispatches invokes the cobra RunE closure
 // directly to cover the NewRefreshCmd RunE wrapper.
 func TestRunRefresh_NewRefreshCmdRunEDispatches(t *testing.T) {
