@@ -250,8 +250,21 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			orphans := collectOrphanCanonicals(name, path, agentsHome, bucket)
 			for _, orphan := range orphans {
 				anyOrphan = true
-				ui.Bullet("warn", fmt.Sprintf("%s — orphan canonical %s %q at %s; hint: Run 'da %s promote --force' or symlink manually to restore.",
-					name, bucket, orphan, filepath.Join(agentsHome, bucket, name, orphan), bucket))
+				// Orphan entries may carry a "  (mis-pointed: …)" annotation;
+				// strip it before composing filesystem paths.
+				orphanName := orphan
+				if idx := strings.Index(orphan, "  ("); idx >= 0 {
+					orphanName = orphan[:idx]
+				}
+				canonicalPath := filepath.Join(agentsHome, bucket, name, orphanName)
+				backLink := filepath.Join(path, ".agents", bucket, orphanName)
+				// `promote --force` requires a real <project>/.agents/<bucket>/<name>
+				// directory to copy from, which an orphan by definition does not have.
+				// Surface the two real recovery options instead.
+				ui.Bullet("warn", fmt.Sprintf("%s — orphan canonical %s %q at %s; hint: restore the back-link with `ln -s %s %s` or purge the orphan with `rm -rf %s`.",
+					name, bucket, orphan, canonicalPath,
+					canonicalPath, backLink,
+					canonicalPath))
 			}
 		}
 	}

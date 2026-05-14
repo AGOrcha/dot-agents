@@ -938,6 +938,17 @@ func TestRunDoctor_DetectsOrphanCanonicalResource(t *testing.T) {
 	if !strings.Contains(out, "ghostskill") {
 		t.Errorf("expected resource name in output, got:\n%s", out)
 	}
+	// Fix 3: hint must surface real recovery paths (ln -s … / rm -rf …),
+	// not the stale `promote --force` advice that errors on orphans.
+	if !strings.Contains(out, "ln -s") {
+		t.Errorf("expected 'ln -s' restore hint, got:\n%s", out)
+	}
+	if !strings.Contains(out, "rm -rf") {
+		t.Errorf("expected 'rm -rf' purge hint, got:\n%s", out)
+	}
+	if strings.Contains(out, "promote --force") {
+		t.Errorf("stale promote --force hint should not appear, got:\n%s", out)
+	}
 }
 
 func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
