@@ -353,7 +353,7 @@ func TestConfirmSweepAction_AutoYesBypassesPrompt(t *testing.T) {
 		Description:          "scaffold",
 		RequiresConfirmation: true,
 	}
-	if !confirmSweepAction(action) {
+	if !confirmSweepAction(action, nil) {
 		t.Error("expected confirmSweepAction to return true when Yes flag set")
 	}
 }
@@ -372,7 +372,7 @@ func TestConfirmSweepAction_NoConfirmReturnsTrue(t *testing.T) {
 		Description:          "informational",
 		RequiresConfirmation: false,
 	}
-	if !confirmSweepAction(action) {
+	if !confirmSweepAction(action, nil) {
 		t.Error("expected confirmSweepAction to return true when no confirmation required")
 	}
 }

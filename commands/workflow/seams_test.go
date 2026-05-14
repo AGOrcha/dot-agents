@@ -607,7 +607,7 @@ func TestConfirmSweepAction_DeclineBranch(t *testing.T) {
 		RequiresConfirmation: true,
 		Description:          "test reminder",
 	}
-	if confirmSweepAction(action) {
+	if confirmSweepAction(action, nil) {
 		t.Error("expected decline (n) to return false")
 	}
 }
@@ -627,7 +627,7 @@ func TestConfirmSweepAction_AcceptBranch(t *testing.T) {
 		RequiresConfirmation: true,
 		Description:          "test reminder",
 	}
-	if !confirmSweepAction(action) {
+	if !confirmSweepAction(action, nil) {
 		t.Error("expected accept (y) to return true")
 	}
 }
@@ -647,7 +647,7 @@ func TestConfirmSweepAction_EmptyInputDeclines(t *testing.T) {
 		RequiresConfirmation: true,
 		Description:          "test reminder",
 	}
-	if confirmSweepAction(action) {
+	if confirmSweepAction(action, nil) {
 		t.Error("expected empty input to decline (default N)")
 	}
 }
@@ -1035,5 +1035,80 @@ func TestHandlers_GetwdErrorPropagates(t *testing.T) {
 				t.Fatalf("%s: expected non-nil error from getwd failure", tc.name)
 			}
 		})
+	}
+}
+
+// ─── confirmSweepAction: parameterized confirmer reader ─────────────────────
+
+// TestConfirmSweepAction_ParamConfirmerDecline exercises the new
+// confirmer-parameter path with a strings.Reader passed directly so the
+// test does not rely on the package-level workflowStdin seam.
+func TestConfirmSweepAction_ParamConfirmerDecline(t *testing.T) {
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+	t.Setenv("HOME", t.TempDir())
+
+	action := SweepActionItem{
+		Project:              ManagedProject{Name: "p"},
+		Action:               SweepActionCreateCheckpointReminder,
+		RequiresConfirmation: true,
+		Description:          "param-decline",
+	}
+	if confirmSweepAction(action, strings.NewReader("n\n")) {
+		t.Error("expected decline (n) via param confirmer to return false")
+	}
+}
+
+func TestConfirmSweepAction_ParamConfirmerAccept(t *testing.T) {
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+	t.Setenv("HOME", t.TempDir())
+
+	action := SweepActionItem{
+		Project:              ManagedProject{Name: "p"},
+		Action:               SweepActionCreateCheckpointReminder,
+		RequiresConfirmation: true,
+		Description:          "param-accept",
+	}
+	if !confirmSweepAction(action, strings.NewReader("y\n")) {
+		t.Error("expected accept (y) via param confirmer to return true")
+	}
+}
+
+// TestRunSweepApply_ParamConfirmerDeclineAndAccept exercises runSweepApply
+// driving both decline + accept branches in one pass via the new confirmer
+// parameter.
+func TestRunSweepApply_ParamConfirmerMixed(t *testing.T) {
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+
+	target := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+
+	plan := SweepPlan{Actions: []SweepActionItem{
+		{
+			Project:              ManagedProject{Name: "p", Path: target},
+			Action:               SweepActionScaffoldWorkflowDir,
+			Description:          "scaffold-1",
+			RequiresConfirmation: true,
+		},
+		{
+			Project:              ManagedProject{Name: "p", Path: target},
+			Action:               SweepActionCreatePlanStructure,
+			Description:          "plans-2",
+			RequiresConfirmation: true,
+		},
+	}}
+	// Decline first, accept second.
+	confirmer := strings.NewReader("n\ny\n")
+	out, _ := captureCovStdout(t, func() error {
+		runSweepApply(plan, confirmer)
+		return nil
+	})
+	if !strings.Contains(out, "Sweep complete: 1/2") {
+		t.Errorf("expected 1/2 applied summary, got %s", out)
 	}
 }

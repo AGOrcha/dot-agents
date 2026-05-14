@@ -424,7 +424,7 @@ func TestRunSweepApply(t *testing.T) {
 		},
 	}}
 	out, _ := captureCovStdout(t, func() error {
-		runSweepApply(plan)
+		runSweepApply(plan, nil)
 		return nil
 	})
 	if !strings.Contains(out, "Sweep complete") {
@@ -440,7 +440,7 @@ func TestConfirmSweepAction_NoConfirmationNeeded(t *testing.T) {
 		Project: ManagedProject{Name: "p"}, Action: SweepActionCreateCheckpointReminder,
 		RequiresConfirmation: false,
 	}
-	if !confirmSweepAction(action) {
+	if !confirmSweepAction(action, nil) {
 		t.Error("expected confirmSweepAction to return true when no confirmation needed")
 	}
 }

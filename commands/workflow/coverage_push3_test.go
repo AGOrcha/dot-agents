@@ -667,7 +667,7 @@ func TestConfirmSweepAction_YesFlagBypasses(t *testing.T) {
 		Project: ManagedProject{Name: "p"}, Action: SweepActionCreateCheckpointReminder,
 		RequiresConfirmation: true, Description: "test reminder",
 	}
-	if !confirmSweepAction(action) {
+	if !confirmSweepAction(action, nil) {
 		t.Error("expected confirm with --yes to return true even when confirmation required")
 	}
 }

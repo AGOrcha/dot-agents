@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,13 +174,24 @@ func runSweepDryRun(plan SweepPlan) {
 }
 
 // confirmSweepAction returns true if the action should be applied. It also
-// records a skip log entry when the user declines.
-func confirmSweepAction(action SweepActionItem) bool {
+// records a skip log entry when the user declines. The confirmer reader is
+// the input source for the interactive y/N prompt; production callers pass
+// os.Stdin (via workflowStdin), tests inject a strings.Reader directly.
+//
+// A nil confirmer falls back to the package-level workflowStdin seam so the
+// helper can still be invoked without a reader in legacy call sites. The
+// reader is wrapped in a fresh bufio.Reader per call so the entire input
+// stream is not preemptively buffered between successive prompts when the
+// same underlying io.Reader is shared.
+func confirmSweepAction(action SweepActionItem, confirmer io.Reader) bool {
 	if !action.RequiresConfirmation || deps.Flags.Yes() {
 		return true
 	}
+	if confirmer == nil {
+		confirmer = workflowStdin
+	}
 	fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
-	reader := bufio.NewReader(workflowStdin)
+	reader := bufio.NewReader(confirmer)
 	line, _ := reader.ReadString('\n')
 	if strings.ToLower(strings.TrimSpace(line)) == "y" {
 		return true
@@ -189,10 +201,18 @@ func confirmSweepAction(action SweepActionItem) bool {
 	return false
 }
 
-func runSweepApply(plan SweepPlan) {
+// runSweepApply executes confirmed actions sequentially. To avoid the
+// bufio-buffering edge case where a per-action bufio.Reader would gobble
+// the rest of the underlying io.Reader on the first call, the confirmer is
+// wrapped once here and reused across actions.
+func runSweepApply(plan SweepPlan, confirmer io.Reader) {
+	if confirmer == nil {
+		confirmer = workflowStdin
+	}
+	shared := bufio.NewReader(confirmer)
 	applied := 0
 	for _, action := range plan.Actions {
-		if !confirmSweepAction(action) {
+		if !confirmSweepActionFromReader(action, shared) {
 			continue
 		}
 		if err := applySweepAction(action); err != nil {
@@ -205,6 +225,22 @@ func runSweepApply(plan SweepPlan) {
 	}
 	fmt.Fprintln(os.Stdout)
 	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", applied, len(plan.Actions)))
+}
+
+// confirmSweepActionFromReader is the inner form used by runSweepApply with
+// a pre-wrapped bufio.Reader so successive prompts can share buffer state.
+func confirmSweepActionFromReader(action SweepActionItem, reader *bufio.Reader) bool {
+	if !action.RequiresConfirmation || deps.Flags.Yes() {
+		return true
+	}
+	fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
+	line, _ := reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(line)) == "y" {
+		return true
+	}
+	ui.Info(fmt.Sprintf("  Skipped: %s", action.Description))
+	appendSweepLog(sweepLogEntry(action, false, false))
+	return false
 }
 
 // runWorkflowSweep runs drift detection and optionally applies fixes.
@@ -242,6 +278,6 @@ func runWorkflowSweep(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	runSweepApply(plan)
+	runSweepApply(plan, workflowStdin)
 	return nil
 }
