@@ -512,6 +512,64 @@ func TestCreateSkill_MkdirError(t *testing.T) {
 	}
 }
 
+// ─── ensureUserSkillLinks MkdirAll branch (continue path) ────────────────────
+
+// When MkdirAll fails for both targets, ensureUserSkillLinks silently moves on.
+// Verify by also installing a fatal osSymlink stub — it must not be reached.
+func TestEnsureUserSkillLinks_MkdirAllFailsContinue(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	withMkdirAllStub(t, func(string, os.FileMode) error { return errors.New("mkdir boom") })
+	withSymlinkStub(t, func(string, string) error {
+		t.Fatal("osSymlink must not be called when osMkdirAll returns an error")
+		return nil
+	})
+
+	ensureUserSkillLinks(filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
+}
+
+// When the link already exists, symlink must not be re-attempted.
+func TestEnsureUserSkillLinks_SkipsExisting(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Pre-create the targets so Lstat finds something.
+	for _, dir := range []string{".agents/skills", ".claude/skills"} {
+		full := filepath.Join(tmp, dir, "demo")
+		if err := os.MkdirAll(full, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withSymlinkStub(t, func(string, string) error {
+		t.Fatal("osSymlink must not be called when target already exists")
+		return nil
+	})
+
+	ensureUserSkillLinks(filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
+}
+
+// ─── backupExistingConfigsList: Remove failure skips count ───────────────────
+
+func TestBackupExistingConfigsList_RemoveError(t *testing.T) {
+	tmp := t.TempDir()
+	// A managed-looking regular file
+	target := filepath.Join(tmp, "config.txt")
+	if err := os.WriteFile(target, []byte("v"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	withRemoveStub(t, func(string) error { return errors.New("remove boom") })
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	got := backupExistingConfigsList([]string{target}, tmp, t.TempDir(), "p", "20240101-000000")
+	if got != 0 {
+		t.Errorf("expected count=0 when Remove fails, got %d", got)
+	}
+}
+
 // ─── runInit early MkdirAll error ────────────────────────────────────────────
 
 func TestRunInit_MkdirError(t *testing.T) {

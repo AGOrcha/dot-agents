@@ -131,13 +131,13 @@ func ensureUserSkillLinks(agentsHome, name, skillDir string) {
 		filepath.Join(homeDir, ".claude", "skills", name),
 	}
 	for _, target := range targets {
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		if err := osMkdirAll(filepath.Dir(target), 0755); err != nil {
 			continue
 		}
 		if _, err := os.Lstat(target); err == nil {
 			continue // already exists
 		}
-		_ = os.Symlink(skillDir, target)
+		_ = osSymlink(skillDir, target)
 	}
 }
 

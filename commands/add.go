@@ -543,7 +543,7 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 		}
 		// Regular file: copy into resources, then delete from project
 		mirrorBackup(project, projectPath, f, timestamp)
-		if err := os.Remove(f); err != nil {
+		if err := osRemove(f); err != nil {
 			continue
 		}
 		count++
@@ -603,8 +603,8 @@ func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string
 	count := 0
 	for _, output := range outputs {
 		destPath := filepath.Join(agentsHome, output.destRel)
-		_ = os.MkdirAll(filepath.Dir(destPath), 0755)
-		if err := os.WriteFile(destPath, output.content, 0644); err == nil {
+		_ = osMkdirAll(filepath.Dir(destPath), 0755)
+		if err := osWriteFile(destPath, output.content, 0644); err == nil {
 			count++
 		}
 	}
