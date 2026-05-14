@@ -2,10 +2,41 @@ package workflow
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// withOsExitStub swaps osExit so process-terminating branches can be
+// exercised without killing the test binary. The captured codes are
+// appended to the returned slice in call order.
+func withOsExitStub(t *testing.T) *[]int {
+	t.Helper()
+	codes := make([]int, 0, 2)
+	prev := osExit
+	osExit = func(code int) { codes = append(codes, code) }
+	t.Cleanup(func() { osExit = prev })
+	return &codes
+}
+
+// withWorkflowStdin swaps workflowStdin to the provided input for the
+// lifetime of the test.
+func withWorkflowStdin(t *testing.T, input string) {
+	t.Helper()
+	prev := workflowStdin
+	workflowStdin = strings.NewReader(input)
+	t.Cleanup(func() { workflowStdin = prev })
+}
+
+// withWorkflowStdinReader swaps workflowStdin to a custom reader.
+func withWorkflowStdinReader(t *testing.T, r io.Reader) {
+	t.Helper()
+	prev := workflowStdin
+	workflowStdin = r
+	t.Cleanup(func() { workflowStdin = prev })
+}
 
 // withMkdirAllStub swaps osMkdirAll for the duration of the test.
 func withMkdirAllStub(t *testing.T, stub func(string, os.FileMode) error) {
@@ -497,5 +528,123 @@ func TestRunWorkflowCheckpoint_WriteError(t *testing.T) {
 	err := runWorkflowCheckpoint("msg", "pass", "ok")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected write sentinel, got %v", err)
+	}
+}
+
+// ─── loadCheckScopeSidecar: missing-sidecar branch invokes osExit(2) ────────
+
+func TestLoadCheckScopeSidecar_MissingTriggersExit(t *testing.T) {
+	codes := withOsExitStub(t)
+
+	proj := t.TempDir()
+	// No sidecar file written: ReadFile must hit os.IsNotExist.
+	path, ev, err := loadCheckScopeSidecar(proj, "missing-plan", "missing-task")
+	if !errors.Is(err, errCheckScopeSidecarMissing) {
+		t.Fatalf("expected errCheckScopeSidecarMissing, got %v", err)
+	}
+	if path != "" || ev != nil {
+		t.Errorf("expected empty/nil returns when sidecar is missing, got path=%q ev=%v", path, ev)
+	}
+	if len(*codes) != 1 || (*codes)[0] != 2 {
+		t.Errorf("expected one osExit(2) call, got %v", *codes)
+	}
+}
+
+// ─── renderCheckScopeResult: warning branch invokes osExit(1) ───────────────
+
+func TestRenderCheckScopeResult_WarningBranchExits(t *testing.T) {
+	codes := withOsExitStub(t)
+
+	renderCheckScopeResult("p1", "t1", "/tmp/sidecar.yaml", checkScopeResult{
+		PlanID:       "p1",
+		TaskID:       "t1",
+		SidecarPath:  "/tmp/sidecar.yaml",
+		OutsideScope: []string{"src/forbidden.go"},
+		Clean:        false,
+	})
+
+	if len(*codes) != 1 || (*codes)[0] != 1 {
+		t.Errorf("expected one osExit(1) call, got %v", *codes)
+	}
+}
+
+func TestRenderCheckScopeResult_CleanBranchNoExit(t *testing.T) {
+	codes := withOsExitStub(t)
+
+	renderCheckScopeResult("p1", "t1", "/tmp/sidecar.yaml", checkScopeResult{
+		PlanID:      "p1",
+		TaskID:      "t1",
+		SidecarPath: "/tmp/sidecar.yaml",
+		InsideScope: []string{"commands/foo.go"},
+		Clean:       true,
+	})
+
+	if len(*codes) != 0 {
+		t.Errorf("expected no osExit calls on clean result, got %v", *codes)
+	}
+}
+
+// ─── confirmSweepAction: user-decline branch via workflowStdin ──────────────
+
+func TestConfirmSweepAction_DeclineBranch(t *testing.T) {
+	// Ensure Yes flag is off so the prompt branch is taken.
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+
+	// Redirect the sweep log to a temp dir so the test does not pollute
+	// the real .agents/ tree.
+	t.Setenv("HOME", t.TempDir())
+
+	withWorkflowStdin(t, "n\n")
+
+	action := SweepActionItem{
+		Project:              ManagedProject{Name: "p"},
+		Action:               SweepActionCreateCheckpointReminder,
+		RequiresConfirmation: true,
+		Description:          "test reminder",
+	}
+	if confirmSweepAction(action) {
+		t.Error("expected decline (n) to return false")
+	}
+}
+
+func TestConfirmSweepAction_AcceptBranch(t *testing.T) {
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+
+	t.Setenv("HOME", t.TempDir())
+
+	withWorkflowStdin(t, "y\n")
+
+	action := SweepActionItem{
+		Project:              ManagedProject{Name: "p"},
+		Action:               SweepActionCreateCheckpointReminder,
+		RequiresConfirmation: true,
+		Description:          "test reminder",
+	}
+	if !confirmSweepAction(action) {
+		t.Error("expected accept (y) to return true")
+	}
+}
+
+func TestConfirmSweepAction_EmptyInputDeclines(t *testing.T) {
+	oldYes := deps.Flags.Yes
+	deps.Flags.Yes = func() bool { return false }
+	t.Cleanup(func() { deps.Flags.Yes = oldYes })
+
+	t.Setenv("HOME", t.TempDir())
+
+	withWorkflowStdin(t, "\n")
+
+	action := SweepActionItem{
+		Project:              ManagedProject{Name: "p"},
+		Action:               SweepActionCreateCheckpointReminder,
+		RequiresConfirmation: true,
+		Description:          "test reminder",
+	}
+	if confirmSweepAction(action) {
+		t.Error("expected empty input to decline (default N)")
 	}
 }

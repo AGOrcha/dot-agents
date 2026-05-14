@@ -2427,6 +2427,12 @@ func computePlanSchedule(tf *CanonicalTaskFile) (*PlanScheduleResult, error) {
 	}, nil
 }
 
+// errCheckScopeSidecarMissing is returned by loadCheckScopeSidecar when the
+// .scope.yaml sidecar is absent. In production, the function calls
+// osExit(2) before returning, so this error is observed only when tests
+// stub osExit to a no-op.
+var errCheckScopeSidecarMissing = fmt.Errorf("scope sidecar missing")
+
 // checkScopeResult holds the output of a check-scope run.
 type checkScopeResult struct {
 	PlanID            string   `json:"plan_id"`
@@ -2452,7 +2458,10 @@ func loadCheckScopeSidecar(projectPath, planID, taskID string) (string, *ScopeEv
 		if os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "no scope sidecar found at %s\n", config.DisplayPath(sidecarPath))
 			fmt.Fprintln(os.Stderr, "Run 'da workflow plan derive-scope' to generate one.")
-			os.Exit(2)
+			osExit(2)
+			// Unreachable in production (osExit terminates). Tests swap osExit
+			// to a no-op, so we return an explicit error to keep callers safe.
+			return "", nil, errCheckScopeSidecarMissing
 		}
 		return "", nil, fmt.Errorf("read sidecar: %w", err)
 	}
@@ -2546,7 +2555,7 @@ func renderCheckScopeResult(planID, taskID, sidecarPath string, result checkScop
 	} else {
 		ui.Warn("scope warnings present (outside-scope or excluded paths touched)")
 		fmt.Fprintln(os.Stdout)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
@@ -2583,7 +2592,7 @@ func runWorkflowPlanCheckScope(planID, taskID string, changedFiles []string, fro
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(result)
 		if !clean {
-			os.Exit(1)
+			osExit(1)
 		}
 		return nil
 	}

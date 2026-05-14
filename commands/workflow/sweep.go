@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -178,9 +179,9 @@ func confirmSweepAction(action SweepActionItem) bool {
 		return true
 	}
 	fmt.Fprintf(os.Stdout, "  Apply: %s? [y/N] ", action.Description)
-	var resp string
-	fmt.Scanln(&resp)
-	if strings.ToLower(strings.TrimSpace(resp)) == "y" {
+	reader := bufio.NewReader(workflowStdin)
+	line, _ := reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(line)) == "y" {
 		return true
 	}
 	ui.Info(fmt.Sprintf("  Skipped: %s", action.Description))
