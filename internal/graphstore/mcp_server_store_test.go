@@ -437,8 +437,8 @@ type errOnNthStatusBridge struct {
 	idx        int
 }
 
-func (b *errOnNthStatusBridge) Build(opts BuildOptions) error            { return nil }
-func (b *errOnNthStatusBridge) Update(opts UpdateOptions) error          { return nil }
+func (b *errOnNthStatusBridge) Build(opts BuildOptions) error             { return nil }
+func (b *errOnNthStatusBridge) Update(opts UpdateOptions) error           { return nil }
 func (b *errOnNthStatusBridge) Postprocess(opts PostprocessOptions) error { return nil }
 func (b *errOnNthStatusBridge) Status() (*CRGStatus, error) {
 	if b.idx == b.errOnIndex {
