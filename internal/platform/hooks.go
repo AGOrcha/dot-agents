@@ -837,14 +837,14 @@ func writeManagedFile(dst string, content []byte) error {
 		return nil
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
+		if err := osRemove(dst); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, content, 0644)
+	return osWriteFile(dst, content, 0644)
 }
 
 func removeManagedFile(dst string, content []byte) error {

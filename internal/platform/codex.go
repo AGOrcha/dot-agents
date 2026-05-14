@@ -140,7 +140,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 
 	// .codex/config.toml
-	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
@@ -215,7 +215,7 @@ func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
@@ -353,15 +353,15 @@ func writeCodexAgentTomlFile(dst, agentMD string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
+		if err := osRemove(dst); err != nil {
 			return err
 		}
 	}
-	return os.WriteFile(dst, content, 0644)
+	return osWriteFile(dst, content, 0644)
 }
 
 func (c *codex) writeCodexAgentToml(dst, agentMD string) error {

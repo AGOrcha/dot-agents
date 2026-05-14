@@ -271,7 +271,7 @@ func (c *cursor) CreateLinks(project, repoPath string) error {
 
 func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+	if err := osMkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 	desired := map[string]string{}
@@ -323,7 +323,7 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 		if _, ok := desired[name]; ok {
 			continue
 		}
-		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -331,7 +331,7 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 }
 
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
@@ -342,7 +342,7 @@ func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error
 }
 
 func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
@@ -373,7 +373,7 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(

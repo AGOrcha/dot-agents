@@ -106,7 +106,7 @@ func syncScopedDirSymlinksTargets(agentsHome, bucket, scope, marker string, dstR
 }
 
 func syncResourceDirEntries(entries []resourceDir, dstRoot string) error {
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, entry := range entries {
@@ -128,7 +128,7 @@ func syncScopedFileSymlinks(agentsHome, bucket, scope, marker, dstRoot, suffix s
 		}
 		return err
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, entry := range entries {
