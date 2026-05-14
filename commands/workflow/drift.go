@@ -304,11 +304,20 @@ func renderDriftReport(reports []RepoDriftReport, agg AggregateDriftReport) {
 
 // runWorkflowDrift is the read-only cross-repo drift detection command.
 func runWorkflowDrift(cmd *cobra.Command, _ []string) error {
+	return runWorkflowDriftWithLister(cmd, loadManagedProjects)
+}
+
+// runWorkflowDriftWithLister is the test-friendly inner form that accepts
+// an injectable project source. Production code calls runWorkflowDrift,
+// which forwards loadManagedProjects. Tests pass a stub returning a
+// synthetic slice or an error to drive the previously-untestable
+// load-projects failure branch without touching ~/.agents/projects/.
+func runWorkflowDriftWithLister(cmd *cobra.Command, lister func() ([]ManagedProject, error)) error {
 	checkpointDays, _ := cmd.Flags().GetInt("stale-days")
 	proposalDays, _ := cmd.Flags().GetInt("proposal-days")
 	projectFilter, _ := cmd.Flags().GetString("project")
 
-	projects, err := loadManagedProjects()
+	projects, err := lister()
 	if err != nil {
 		return fmt.Errorf("load managed projects: %w", err)
 	}

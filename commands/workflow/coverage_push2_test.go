@@ -474,6 +474,68 @@ func TestRunWorkflowDrift_JSON(t *testing.T) {
 	}
 }
 
+// ─── runWorkflowDriftWithLister: injectable project source error paths ─────
+
+// TestRunWorkflowDriftWithLister_ListerError drives the previously
+// unreachable load-projects failure branch by passing a stub lister that
+// returns a non-nil error.
+func TestRunWorkflowDriftWithLister_ListerError(t *testing.T) {
+	cmd := newDriftTestCommand("", 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return nil, errSentinelDriftLister
+	}
+	err := runWorkflowDriftWithLister(cmd, stub)
+	if err == nil {
+		t.Fatal("expected error from lister to propagate")
+	}
+	if !strings.Contains(err.Error(), "load managed projects") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
+// TestRunWorkflowDriftWithLister_EmptySlice exercises the no-projects
+// notice branch independently of the global config tree.
+func TestRunWorkflowDriftWithLister_EmptySlice(t *testing.T) {
+	cmd := newDriftTestCommand("", 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return []ManagedProject{}, nil
+	}
+	out, _ := captureCovStdout(t, func() error {
+		return runWorkflowDriftWithLister(cmd, stub)
+	})
+	if !strings.Contains(out, "No managed projects") {
+		t.Errorf("expected no-projects notice, got %s", out)
+	}
+}
+
+// TestRunWorkflowDriftWithLister_SyntheticProject feeds a single synthetic
+// project pointing at a temp dir so drift detection runs end-to-end without
+// requiring real ~/.agents/projects/ state.
+func TestRunWorkflowDriftWithLister_SyntheticProject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+	target := t.TempDir()
+	cmd := newDriftTestCommand("", 7, 30)
+	stub := func() ([]ManagedProject, error) {
+		return []ManagedProject{{Name: "synth", Path: target}}, nil
+	}
+	out, _ := captureCovStdout(t, func() error {
+		return runWorkflowDriftWithLister(cmd, stub)
+	})
+	if !strings.Contains(out, "Workflow Drift Report") {
+		t.Errorf("expected drift report header from synthetic project, got %s", out)
+	}
+}
+
+// errSentinelDriftLister is a fixed sentinel for the lister stub above so
+// tests can assert error chain identity without string matching everywhere.
+var errSentinelDriftLister = errorString("synthetic lister failure")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
 // newDriftTestCommand builds a cobra.Command with flags runWorkflowDrift reads.
 func newDriftTestCommand(project string, staleDays, proposalDays int) *cobra.Command {
 	c := &cobra.Command{}
