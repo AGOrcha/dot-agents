@@ -1830,6 +1830,15 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_UnknownEvent(t *testing.T) {
 	}
 }
 
+func TestCanonicalHookBundleOutputsFromCopilotFile_EmptyHooks(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte(`{"hooks":{}}`), 0644)
+	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	if ok {
+		t.Error("empty hooks should return ok=false")
+	}
+}
+
 func TestCanonicalHookBundleOutputsFromCopilotFile_NonCommandAction(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"sessionStart":[{"type":"notcommand","bash":"echo hi"}]}}`), 0644)
@@ -2125,6 +2134,98 @@ func TestIsManagedSymlink_NonSymlinkReturnsFalse(t *testing.T) {
 	os.WriteFile(regular, []byte("x"), 0644)
 	if isManagedSymlink(regular, tmp) {
 		t.Error("regular file should not be reported as managed symlink")
+	}
+}
+
+// TestImportedHookNameWithoutHint_MatcherFallback covers the cmdPart==""
+// + matcherPart!="" branch at line 1185-1187.
+func TestImportedHookNameWithoutHint_MatcherFallback(t *testing.T) {
+	used := map[string]int{}
+	// cmdPart empty (commandStem strips), eventPart="pre-tool", matcherPart="bash".
+	got := importedHookNameWithoutHint("pre-tool", "", "bash", used)
+	if got == "" {
+		t.Errorf("expected non-empty hook name, got %q", got)
+	}
+}
+
+// TestImportedHookNameWithoutHint_AllEmpty covers the base=="" → "hook"
+// fallback at line 1192-1194.
+func TestImportedHookNameWithoutHint_AllEmpty(t *testing.T) {
+	used := map[string]int{}
+	got := importedHookNameWithoutHint("", "", "", used)
+	if got != "hook" {
+		t.Errorf("expected fallback 'hook', got %q", got)
+	}
+}
+
+// TestImportedHookNameWithHint_TrimmedToMatcher covers line 1171-1173 in
+// importedHookNameWithHint when cmdPart trims to "" and matcher fills in.
+func TestImportedHookNameWithHint_MatcherFallback(t *testing.T) {
+	used := map[string]int{}
+	// hintPart="my-hook", cmdPart=same prefix → trims to "", matcher fills.
+	got := importedHookNameWithHint("my-hook", 2, "my-hook", "bash", used)
+	if got == "" {
+		t.Errorf("expected non-empty name")
+	}
+}
+
+// TestCanonicalHookBundleOutputsFromCodexFile_UnknownEvent covers the !ok
+// branch from collectImportedCommandHookSpecs when an event is unrecognized.
+func TestCanonicalHookBundleOutputsFromCodexFile_UnknownEvent(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "hooks.json")
+	os.WriteFile(path, []byte(`{"hooks":{"NotARealEvent":[{"hooks":[{"type":"command","command":"x"}]}]}}`), 0644)
+	outputs, ok, err := canonicalHookBundleOutputsFromCodexFile("p", path)
+	if outputs != nil || ok || err != nil {
+		t.Errorf("expected (nil, false, nil) for unknown event, got (%v, %v, %v)", outputs, ok, err)
+	}
+}
+
+// TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooks covers the
+// len(payload.Hooks)==0 branch in cursor variant.
+func TestCanonicalHookBundleOutputsFromCursorFile_EmptyHooks(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "hooks.json")
+	os.WriteFile(path, []byte(`{"hooks":{}, "version":1}`), 0644)
+	outputs, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", path)
+	if outputs != nil || ok {
+		t.Errorf("expected (nil, false) for empty cursor hooks")
+	}
+}
+
+// TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSON covers cursor
+// Unmarshal-error branch.
+func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "hooks.json")
+	os.WriteFile(path, []byte("not-json"), 0644)
+	outputs, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", path)
+	if outputs != nil || ok {
+		t.Errorf("expected (nil, false) for invalid cursor json")
+	}
+}
+
+// TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonHookKey covers the
+// hasOnlyClaudeCompatKeys=false branch (top-level key besides hooks/$schema).
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_NonHookKey(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "settings.json")
+	os.WriteFile(path, []byte(`{"hooks":{}, "other": 1}`), 0644)
+	outputs, ok, _ := canonicalHookBundleOutputsFromClaudeCompatFile("p", path)
+	if outputs != nil || ok {
+		t.Errorf("expected (nil, false), got (%v, %v)", outputs, ok)
+	}
+}
+
+// TestCanonicalHookBundleOutputsFromCursorFile_ReadError covers the ReadFile
+// error branch by passing a directory path.
+func TestCanonicalHookBundleOutputsFromCursorFile_ReadError(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "iam-a-dir")
+	os.MkdirAll(dir, 0755)
+	_, _, err := canonicalHookBundleOutputsFromCursorFile("p", dir)
+	if err == nil {
+		t.Error("expected read error from directory path")
 	}
 }
 

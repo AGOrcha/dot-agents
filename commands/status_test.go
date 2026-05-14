@@ -1130,9 +1130,23 @@ func TestPrintCursorAudit_BrokenSymlinkAndLocalFile(t *testing.T) {
 	projC := filepath.Join(tmp, "projC")
 	os.MkdirAll(projC, 0755)
 
+	// Project D: rules dir present, no mcp.json → not-linked branch (1005-1007).
+	projD := filepath.Join(tmp, "projD")
+	os.MkdirAll(filepath.Join(projD, ".cursor", "rules"), 0755)
+
+	// Project E: rules dir present with global--*.mdc that's NOT hardlinked
+	// (warning branch 983).
+	projE := filepath.Join(tmp, "projE")
+	rulesE := filepath.Join(projE, ".cursor", "rules")
+	os.MkdirAll(rulesE, 0755)
+	os.WriteFile(filepath.Join(rulesE, "global--orphan.mdc"), []byte("not linked"), 0644)
+	os.WriteFile(filepath.Join(rulesE, "projE--also.mdc"), []byte("not linked"), 0644)
+
 	printCursorAudit("projA", projA, agentsHome)
 	printCursorAudit("projB", projB, agentsHome)
 	printCursorAudit("projC", projC, agentsHome)
+	printCursorAudit("projD", projD, agentsHome)
+	printCursorAudit("projE", projE, agentsHome)
 }
 
 // TestPrintClaudeAudit_BrokenAndHealthy exercises printSymlinkDirAudit broken
@@ -1304,6 +1318,14 @@ func TestCountManagedDirEntries_RegularFilePlusBroken(t *testing.T) {
 	if warn < 1 {
 		t.Errorf("expected at least one warn for broken symlink, got %d", warn)
 	}
+}
+
+// TestPrintAgentsHomeGitStatusLine_NotARepo covers the IsRepo=false branch
+// (lines 139-141).
+func TestPrintAgentsHomeGitStatusLine_NotARepo(t *testing.T) {
+	tmp := t.TempDir()
+	// No .git dir → probeAgentsHomeGit reports !IsRepo.
+	printAgentsHomeGitStatusLine(tmp)
 }
 
 // TestPrintAgentsHomeGitStatusLine_RepoNoRemote covers the no-remote branch.

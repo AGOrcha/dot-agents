@@ -313,6 +313,31 @@ func TestOneLine_AllWhitespace(t *testing.T) {
 	}
 }
 
+// TestRunReviewApprove_RefreshFailsRollsBack covers the runRefresh err branch
+// (lines 141-144) by corrupting config.json after the proposal is loaded.
+func TestRunReviewApprove_RefreshFailsRollsBack(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt config.json so runRefresh's Load returns an error.
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte("{not"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeProposal(t, agentsHome, "rollme", validProposalYAML("rollme", "pending"))
+
+	err := runReviewApprove("rollme")
+	if err == nil {
+		t.Fatal("expected refresh-after-apply error")
+	}
+	if !strings.Contains(err.Error(), "refresh") {
+		t.Errorf("expected refresh wrap, got %v", err)
+	}
+}
+
 // TestCaptureProposalRollback_ReadErrorPropagates: when targetPath is a
 // directory, os.ReadFile returns a non-IsNotExist error, exercising the
 // `return nil, err` branch (line 188-189).
