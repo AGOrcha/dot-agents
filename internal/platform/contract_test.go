@@ -12,6 +12,82 @@ import (
 // non-empty + unique, RemoveLinks tolerates an empty repo, and
 // SharedTargetIntents reports a deterministic shape. Platform CLI presence is
 // orthogonal — we never invoke version probes from the test.
+// assertPlatformIdentity validates ID() and DisplayName() uniqueness and
+// non-emptiness for a single platform implementation.
+func assertPlatformIdentity(t *testing.T, p Platform, seenIDs, seenNames map[string]bool) string {
+	t.Helper()
+	id := p.ID()
+	if id == "" {
+		t.Fatal("ID() must be non-empty")
+	}
+	if strings.TrimSpace(id) != id {
+		t.Errorf("ID() %q has surrounding whitespace", id)
+	}
+	if seenIDs[id] {
+		t.Errorf("duplicate platform ID: %q", id)
+	}
+	seenIDs[id] = true
+
+	name := p.DisplayName()
+	if name == "" {
+		t.Error("DisplayName() must be non-empty")
+	}
+	if seenNames[name] {
+		t.Errorf("duplicate DisplayName: %q", name)
+	}
+	seenNames[name] = true
+	return id
+}
+
+// assertDeprecatedDetailsPaired confirms that when HasDeprecatedFormat returns
+// false, DeprecatedDetails returns an empty string.
+func assertDeprecatedDetailsPaired(t *testing.T, p Platform, repo string) {
+	t.Helper()
+	if p.HasDeprecatedFormat(repo) {
+		return
+	}
+	if details := p.DeprecatedDetails(repo); details != "" {
+		t.Errorf("DeprecatedDetails non-empty when HasDeprecatedFormat=false: %q", details)
+	}
+}
+
+// assertSharedTargetIntentsShape verifies SharedTargetIntents returns valid
+// intents (non-empty TargetPath, correct Project) without error.
+func assertSharedTargetIntentsShape(t *testing.T, p Platform) {
+	t.Helper()
+	intents, err := p.SharedTargetIntents("contract-proj")
+	if err != nil {
+		t.Errorf("SharedTargetIntents returned error: %v", err)
+	}
+	for i, intent := range intents {
+		if intent.TargetPath == "" {
+			t.Errorf("intent[%d] has empty TargetPath", i)
+		}
+		if intent.Project != "contract-proj" {
+			t.Errorf("intent[%d].Project = %q, want contract-proj", i, intent.Project)
+		}
+	}
+}
+
+// assertPlatformContract runs the per-platform contract suite: identity,
+// deprecation pairing, intents shape, and RemoveLinks safety.
+func assertPlatformContract(t *testing.T, p Platform, tmp string, seenIDs, seenNames map[string]bool) {
+	id := assertPlatformIdentity(t, p, seenIDs, seenNames)
+
+	repo := filepath.Join(tmp, "repo-"+id)
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	assertDeprecatedDetailsPaired(t, p, repo)
+	assertSharedTargetIntentsShape(t, p)
+
+	// RemoveLinks must be a no-op-safe call on an empty repo. Any returned
+	// error indicates the platform is mishandling the missing-state base case.
+	if err := p.RemoveLinks("contract-proj", repo); err != nil {
+		t.Errorf("RemoveLinks on empty repo errored: %v", err)
+	}
+}
+
 func TestPlatformContract_AllImplementorsHonorInterface(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
@@ -27,60 +103,7 @@ func TestPlatformContract_AllImplementorsHonorInterface(t *testing.T) {
 	for _, p := range platforms {
 		p := p
 		t.Run(p.ID(), func(t *testing.T) {
-			id := p.ID()
-			if id == "" {
-				t.Fatal("ID() must be non-empty")
-			}
-			if strings.TrimSpace(id) != id {
-				t.Errorf("ID() %q has surrounding whitespace", id)
-			}
-			if seenIDs[id] {
-				t.Errorf("duplicate platform ID: %q", id)
-			}
-			seenIDs[id] = true
-
-			name := p.DisplayName()
-			if name == "" {
-				t.Error("DisplayName() must be non-empty")
-			}
-			if seenNames[name] {
-				t.Errorf("duplicate DisplayName: %q", name)
-			}
-			seenNames[name] = true
-
-			// HasDeprecatedFormat / DeprecatedDetails are paired: when the
-			// detector returns false, the details string must be empty.
-			repo := filepath.Join(tmp, "repo-"+id)
-			if err := os.MkdirAll(repo, 0755); err != nil {
-				t.Fatal(err)
-			}
-			if !p.HasDeprecatedFormat(repo) {
-				if details := p.DeprecatedDetails(repo); details != "" {
-					t.Errorf("DeprecatedDetails non-empty when HasDeprecatedFormat=false: %q", details)
-				}
-			}
-
-			// SharedTargetIntents must return a slice (possibly empty) without
-			// erroring on a synthetic project name.
-			intents, err := p.SharedTargetIntents("contract-proj")
-			if err != nil {
-				t.Errorf("SharedTargetIntents returned error: %v", err)
-			}
-			for i, intent := range intents {
-				if intent.TargetPath == "" {
-					t.Errorf("intent[%d] has empty TargetPath", i)
-				}
-				if intent.Project != "contract-proj" {
-					t.Errorf("intent[%d].Project = %q, want contract-proj", i, intent.Project)
-				}
-			}
-
-			// RemoveLinks must be a no-op-safe call on an empty repo. Any
-			// returned error indicates the platform is mishandling the
-			// missing-state base case.
-			if err := p.RemoveLinks("contract-proj", repo); err != nil {
-				t.Errorf("RemoveLinks on empty repo errored: %v", err)
-			}
+			assertPlatformContract(t, p, tmp, seenIDs, seenNames)
 		})
 	}
 }

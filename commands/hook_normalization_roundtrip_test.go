@@ -15,22 +15,22 @@ import (
 // input semantics: event mapping, matcher list, command text, and bundle
 // name. Whitespace and ordering inside the HOOK.yaml are tolerated by
 // unmarshaling to a generic map before comparison.
-func TestHookNormalizationRoundTrip(t *testing.T) {
-	type expected struct {
-		bundleName string
-		when       string
-		command    string
-		tools      []string // matcher list after normalization; nil means do not assert
-	}
+type hookRoundTripExpected struct {
+	bundleName string
+	when       string
+	command    string
+	tools      []string // matcher list after normalization; nil means do not assert
+}
 
-	type variant struct {
-		name        string
-		rel         string
-		sourceJSON  string
-		expectation expected
-	}
+type hookRoundTripVariant struct {
+	name        string
+	rel         string
+	sourceJSON  string
+	expectation hookRoundTripExpected
+}
 
-	variants := []variant{
+func hookRoundTripVariants() []hookRoundTripVariant {
+	return []hookRoundTripVariant{
 		{
 			name: "cursor_pre_tool_use_bash",
 			rel:  relCursorHooksJSON,
@@ -45,7 +45,7 @@ func TestHookNormalizationRoundTrip(t *testing.T) {
     ]
   }
 }`,
-			expectation: expected{
+			expectation: hookRoundTripExpected{
 				// When the command stem is distinct (not a generic name like
 				// "run"), the canonicalizer drops the matcher-derived suffix
 				// from the bundle name; the matcher is still recorded in the
@@ -74,7 +74,7 @@ func TestHookNormalizationRoundTrip(t *testing.T) {
     ]
   }
 }`,
-			expectation: expected{
+			expectation: hookRoundTripExpected{
 				bundleName: "session-start-codex-banner",
 				when:       "session_start",
 				command:    "./codex-banner.sh",
@@ -99,7 +99,7 @@ func TestHookNormalizationRoundTrip(t *testing.T) {
     ]
   }
 }`,
-			expectation: expected{
+			expectation: hookRoundTripExpected{
 				// Same naming rule as the cursor variant — the distinct
 				// command stem suppresses the matcher suffix; tools are still
 				// recorded under `match.tools`.
@@ -110,73 +110,105 @@ func TestHookNormalizationRoundTrip(t *testing.T) {
 			},
 		},
 	}
+}
 
-	for _, v := range variants {
+// writeHookSource writes JSON source for a hook variant into a fresh temp
+// directory and returns the source root + absolute source path.
+func writeHookSource(t *testing.T, rel, body string) (sourceRoot, sourcePath string) {
+	t.Helper()
+	sourceRoot = t.TempDir()
+	sourcePath = filepath.Join(sourceRoot, rel)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(body), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	return sourceRoot, sourcePath
+}
+
+// runCanonicalImportSingle drives canonicalImportOutputs and asserts exactly
+// one output was produced. Returns the single output for further inspection.
+func runCanonicalImportSingle(t *testing.T, sourceRoot, sourcePath string) importOutput {
+	t.Helper()
+	outputs, ok, err := canonicalImportOutputs(importCandidate{
+		project:    canonicalImportProject,
+		sourceRoot: sourceRoot,
+		sourcePath: sourcePath,
+	})
+	if err != nil {
+		t.Fatalf("canonicalImportOutputs: %v", err)
+	}
+	if !ok || len(outputs) != 1 {
+		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
+	}
+	return outputs[0]
+}
+
+func unmarshalHookManifest(t *testing.T, content []byte) map[string]any {
+	t.Helper()
+	var manifest map[string]any
+	if err := yaml.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v\n%s", err, string(content))
+	}
+	return manifest
+}
+
+func assertHookManifestTools(t *testing.T, manifest map[string]any, want []string) {
+	t.Helper()
+	match, ok := manifest["match"].(map[string]any)
+	if !ok {
+		t.Fatalf("match section missing in manifest: %#v", manifest)
+	}
+	toolsAny, ok := match["tools"].([]any)
+	if !ok {
+		t.Fatalf("match.tools missing or wrong type: %#v", match["tools"])
+	}
+	if len(toolsAny) != len(want) {
+		t.Fatalf("match.tools length = %d, want %d (%v)", len(toolsAny), len(want), toolsAny)
+	}
+	for i, w := range want {
+		if toolsAny[i] != w {
+			t.Fatalf("match.tools[%d] = %#v, want %q", i, toolsAny[i], w)
+		}
+	}
+}
+
+func runHookRoundTripVariant(t *testing.T, v hookRoundTripVariant) {
+	sourceRoot, sourcePath := writeHookSource(t, v.rel, v.sourceJSON)
+	out := runCanonicalImportSingle(t, sourceRoot, sourcePath)
+
+	wantDest := "hooks/" + canonicalImportProject + "/" + v.expectation.bundleName + "/HOOK.yaml"
+	if out.destRel != wantDest {
+		t.Fatalf("destRel = %q, want %q", out.destRel, wantDest)
+	}
+
+	manifest := unmarshalHookManifest(t, out.content)
+	if got := manifest["when"]; got != v.expectation.when {
+		t.Fatalf("when = %#v, want %q", got, v.expectation.when)
+	}
+	if got := manifest["name"]; got != v.expectation.bundleName {
+		t.Fatalf("name = %#v, want %q", got, v.expectation.bundleName)
+	}
+
+	run, ok := manifest["run"].(map[string]any)
+	if !ok {
+		t.Fatalf("run section missing in manifest: %#v", manifest)
+	}
+	if got := run["command"]; got != v.expectation.command {
+		t.Fatalf("run.command = %#v, want %q", got, v.expectation.command)
+	}
+
+	if v.expectation.tools != nil {
+		assertHookManifestTools(t, manifest, v.expectation.tools)
+	}
+}
+
+func TestHookNormalizationRoundTrip(t *testing.T) {
+	for _, v := range hookRoundTripVariants() {
+		v := v
 		t.Run(v.name, func(t *testing.T) {
-			sourceRoot := t.TempDir()
-			sourcePath := filepath.Join(sourceRoot, v.rel)
-			if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
-				t.Fatalf("mkdir: %v", err)
-			}
-			if err := os.WriteFile(sourcePath, []byte(v.sourceJSON), 0o644); err != nil {
-				t.Fatalf("write source: %v", err)
-			}
-
-			outputs, ok, err := canonicalImportOutputs(importCandidate{
-				project:    canonicalImportProject,
-				sourceRoot: sourceRoot,
-				sourcePath: sourcePath,
-			})
-			if err != nil {
-				t.Fatalf("canonicalImportOutputs: %v", err)
-			}
-			if !ok || len(outputs) != 1 {
-				t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-			}
-
-			wantDest := "hooks/" + canonicalImportProject + "/" + v.expectation.bundleName + "/HOOK.yaml"
-			if outputs[0].destRel != wantDest {
-				t.Fatalf("destRel = %q, want %q", outputs[0].destRel, wantDest)
-			}
-
-			var manifest map[string]any
-			if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-				t.Fatalf("yaml.Unmarshal: %v\n%s", err, string(outputs[0].content))
-			}
-
-			if got := manifest["when"]; got != v.expectation.when {
-				t.Fatalf("when = %#v, want %q", got, v.expectation.when)
-			}
-			if got := manifest["name"]; got != v.expectation.bundleName {
-				t.Fatalf("name = %#v, want %q", got, v.expectation.bundleName)
-			}
-
-			run, ok := manifest["run"].(map[string]any)
-			if !ok {
-				t.Fatalf("run section missing in manifest: %#v", manifest)
-			}
-			if got := run["command"]; got != v.expectation.command {
-				t.Fatalf("run.command = %#v, want %q", got, v.expectation.command)
-			}
-
-			if v.expectation.tools != nil {
-				match, ok := manifest["match"].(map[string]any)
-				if !ok {
-					t.Fatalf("match section missing in manifest: %#v", manifest)
-				}
-				toolsAny, ok := match["tools"].([]any)
-				if !ok {
-					t.Fatalf("match.tools missing or wrong type: %#v", match["tools"])
-				}
-				if len(toolsAny) != len(v.expectation.tools) {
-					t.Fatalf("match.tools length = %d, want %d (%v)", len(toolsAny), len(v.expectation.tools), toolsAny)
-				}
-				for i, want := range v.expectation.tools {
-					if toolsAny[i] != want {
-						t.Fatalf("match.tools[%d] = %#v, want %q", i, toolsAny[i], want)
-					}
-				}
-			}
+			runHookRoundTripVariant(t, v)
 		})
 	}
 }
@@ -185,11 +217,6 @@ func TestHookNormalizationRoundTrip(t *testing.T) {
 // shape, which derives the bundle name from the source filename instead of
 // the event+command/matcher combination used by the other variants.
 func TestHookNormalizationRoundTrip_Copilot(t *testing.T) {
-	sourceRoot := t.TempDir()
-	sourcePath := filepath.Join(sourceRoot, relGitHubHooksDir, "prompt-log.json")
-	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 	body := `{
   "version": 1,
   "hooks": {
@@ -202,31 +229,15 @@ func TestHookNormalizationRoundTrip_Copilot(t *testing.T) {
     ]
   }
 }`
-	if err := os.WriteFile(sourcePath, []byte(body), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    canonicalImportProject,
-		sourceRoot: sourceRoot,
-		sourcePath: sourcePath,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
+	sourceRoot, sourcePath := writeHookSource(t, filepath.Join(relGitHubHooksDir, "prompt-log.json"), body)
+	out := runCanonicalImportSingle(t, sourceRoot, sourcePath)
 
 	wantDest := "hooks/" + canonicalImportProject + "/prompt-log/HOOK.yaml"
-	if outputs[0].destRel != wantDest {
-		t.Fatalf("destRel = %q, want %q", outputs[0].destRel, wantDest)
+	if out.destRel != wantDest {
+		t.Fatalf("destRel = %q, want %q", out.destRel, wantDest)
 	}
 
-	var manifest map[string]any
-	if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v\n%s", err, string(outputs[0].content))
-	}
+	manifest := unmarshalHookManifest(t, out.content)
 	if got := manifest["when"]; got != "user_prompt_submit" {
 		t.Fatalf("when = %#v, want user_prompt_submit", got)
 	}
@@ -251,11 +262,6 @@ func TestHookNormalizationRoundTrip_Copilot(t *testing.T) {
 // addition to the parsed tools list — the round-trip must not silently drop
 // non-canonical input semantics.
 func TestHookNormalizationRoundTrip_PreservesExpressionForNonCanonicalMatcher(t *testing.T) {
-	sourceRoot := t.TempDir()
-	sourcePath := filepath.Join(sourceRoot, relClaudeSettingsLocal)
-	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 	body := `{
   "hooks": {
     "PreToolUse": [
@@ -271,26 +277,10 @@ func TestHookNormalizationRoundTrip_PreservesExpressionForNonCanonicalMatcher(t 
     ]
   }
 }`
-	if err := os.WriteFile(sourcePath, []byte(body), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
+	sourceRoot, sourcePath := writeHookSource(t, relClaudeSettingsLocal, body)
+	out := runCanonicalImportSingle(t, sourceRoot, sourcePath)
 
-	outputs, ok, err := canonicalImportOutputs(importCandidate{
-		project:    canonicalImportProject,
-		sourceRoot: sourceRoot,
-		sourcePath: sourcePath,
-	})
-	if err != nil {
-		t.Fatalf("canonicalImportOutputs: %v", err)
-	}
-	if !ok || len(outputs) != 1 {
-		t.Fatalf("expected one canonical output, ok=%v len=%d", ok, len(outputs))
-	}
-
-	var manifest map[string]any
-	if err := yaml.Unmarshal(outputs[0].content, &manifest); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v\n%s", err, string(outputs[0].content))
-	}
+	manifest := unmarshalHookManifest(t, out.content)
 	match, ok := manifest["match"].(map[string]any)
 	if !ok {
 		t.Fatalf("match section missing: %#v", manifest)
