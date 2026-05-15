@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -19,14 +18,7 @@ func TestAgentsHomeDefault(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "")
 	home, _ := os.UserHomeDir()
 	got := AgentsHome()
-	if runtime.GOOS == "windows" {
-		if appData := os.Getenv("APPDATA"); appData != "" {
-			if got != filepath.Join(appData, ".agents") {
-				t.Errorf("AgentsHome windows: got %q", got)
-			}
-			return
-		}
-	}
+	// Uniform ~/.agents on every OS, including Windows (no %APPDATA% split).
 	if got != filepath.Join(home, ".agents") {
 		t.Errorf("AgentsHome default: got %q, want %q", got, filepath.Join(home, ".agents"))
 	}

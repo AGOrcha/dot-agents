@@ -177,19 +177,25 @@ func TestAreHardlinkedMissingFiles(t *testing.T) {
 	}
 }
 
-func TestSymlinkRemoveExistingDir(t *testing.T) {
+func TestSymlinkReplacesExistingNonEmptyDir(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "t.txt")
 	os.WriteFile(target, []byte("x"), 0644)
 
-	// linkPath is a non-empty regular directory — Readlink fails (not IsNotExist),
-	// Lstat succeeds, Remove fails (non-empty dir), exercising the error branch.
+	// linkPath is occupied by a non-empty directory (stale managed state).
+	// The link contract treats this as replaceable: Symlink clears it via
+	// fsops.RemoveAll and installs the managed link. The old os.Remove path
+	// errored on a non-empty dir; that over-conservative behavior also
+	// blocked idempotent `da init`/`refresh` and Windows dir replacement.
 	linkPath := filepath.Join(tmp, "linkdir")
 	os.MkdirAll(linkPath, 0755)
 	os.WriteFile(filepath.Join(linkPath, "child"), []byte("y"), 0644)
 
-	if err := Symlink(target, linkPath); err == nil {
-		t.Error("expected error when linkPath is a non-empty dir that cannot be Remove()d")
+	if err := Symlink(target, linkPath); err != nil {
+		t.Fatalf("expected Symlink to replace squatting non-empty dir, got: %v", err)
+	}
+	if !IsSymlinkTo(linkPath, target) {
+		t.Errorf("expected %s to be a managed link to %s after replacing the dir", linkPath, target)
 	}
 }
 
