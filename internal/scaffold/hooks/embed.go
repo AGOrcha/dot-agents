@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 )
@@ -29,7 +30,7 @@ func CopyMissingGlobalBundles(dstRoot string) error {
 		if _, err := os.Stat(dstBundle); err == nil {
 			continue
 		}
-		if err := copyEmbeddedTree(filepath.Join("global", name), dstBundle); err != nil {
+		if err := copyEmbeddedTree(pathpkg.Join("global", name), dstBundle); err != nil {
 			return err
 		}
 	}
@@ -41,12 +42,10 @@ func copyEmbeddedTree(srcRoot, dstRoot string) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
-		}
+		rel := strings.TrimPrefix(path, srcRoot)
+		rel = strings.TrimPrefix(rel, "/")
 		dstPath := dstRoot
-		if rel != "." {
+		if rel != "" {
 			dstPath = filepath.Join(dstRoot, rel)
 		}
 		if d.IsDir() {

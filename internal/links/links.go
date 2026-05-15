@@ -4,33 +4,51 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
 
 // Symlink creates or updates a symlink at linkPath pointing to target.
 // It is idempotent: if the correct symlink already exists, it is a no-op.
 func Symlink(target, linkPath string) error {
+	if sameTarget, err := pathsResolveToSameFile(target, linkPath); err == nil && sameTarget {
+		return nil
+	}
+
 	existing, err := os.Readlink(linkPath)
 	if err == nil {
 		if existing == target {
 			return nil // already correct
 		}
 		// points elsewhere - remove and recreate
-		if err := os.Remove(linkPath); err != nil {
+		if err := fsops.RemoveAll(linkPath); err != nil {
 			return fmt.Errorf("removing old symlink %s: %w", linkPath, err)
 		}
 	} else if !os.IsNotExist(err) {
 		// Not a symlink - check if regular file/dir
 		if _, statErr := os.Lstat(linkPath); statErr == nil {
-			if err := os.Remove(linkPath); err != nil {
+			if err := fsops.RemoveAll(linkPath); err != nil {
 				return fmt.Errorf("removing existing file %s: %w", linkPath, err)
 			}
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(linkPath), 0755); err != nil {
+	if err := fsops.MkdirAll(filepath.Dir(linkPath), 0755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", linkPath, err)
 	}
-	return os.Symlink(target, linkPath)
+	return createLink(target, linkPath)
+}
+
+func pathsResolveToSameFile(target, linkPath string) (bool, error) {
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		return false, err
+	}
+	linkInfo, err := os.Stat(linkPath)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(targetInfo, linkInfo), nil
 }
 
 // Hardlink creates a hard link at dstPath pointing to the same inode as srcPath.
@@ -42,7 +60,7 @@ func Hardlink(srcPath, dstPath string) error {
 
 	// Remove existing dst if present
 	if _, err := os.Lstat(dstPath); err == nil {
-		if err := os.Remove(dstPath); err != nil {
+		if err := fsops.RemoveAll(dstPath); err != nil {
 			return fmt.Errorf("removing existing %s: %w", dstPath, err)
 		}
 	}

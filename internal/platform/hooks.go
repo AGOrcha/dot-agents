@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"go.yaml.in/yaml/v3"
 )
@@ -294,7 +295,7 @@ func emitHookFanout(specs []HookSpec, dstRoot string, mode HookEmissionMode, map
 	if mode.Shape != HookShapeRenderFanout {
 		return fmt.Errorf("hook fanout requires %q shape, got %q", HookShapeRenderFanout, mode.Shape)
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := fsops.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -422,7 +423,7 @@ func emitRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSp
 	if len(specs) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := fsops.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -837,14 +838,14 @@ func writeManagedFile(dst string, content []byte) error {
 		return nil
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
+		if err := fsops.Remove(dst); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := fsops.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, content, 0644)
+	return fsops.WriteFile(dst, content, 0644)
 }
 
 func removeManagedFile(dst string, content []byte) error {
@@ -865,7 +866,7 @@ func removeManagedFile(dst string, content []byte) error {
 	if !bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := fsops.Remove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))
@@ -885,7 +886,7 @@ func removeDirIfEmpty(path string) error {
 	if len(entries) > 0 {
 		return nil
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := fsops.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -909,7 +910,7 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if !matches(content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := fsops.Remove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))

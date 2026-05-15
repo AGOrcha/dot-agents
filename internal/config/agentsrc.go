@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
 
 // isDirEntry reports whether the path is a directory, following symlinks.
@@ -281,7 +283,7 @@ func (a *AgentsRC) Save(projectPath string) error {
 		return fmt.Errorf("marshaling %s: %w", AgentsRCFile, err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0644)
+	return fsops.WriteFile(path, data, 0644)
 }
 
 // AgentsCacheDir returns the root directory for cached remote sources.
@@ -294,9 +296,10 @@ func AgentsCacheDir() string {
 	return filepath.Join(cacheHome, "dot-agents")
 }
 
-// GitSourceCacheDir returns the cache directory for a given git URL.
-func GitSourceCacheDir(url string) string {
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))[:12]
+// GitSourceCacheDir returns the cache directory for a given git URL and ref.
+// Different refs for the same URL must not share a cache tree.
+func GitSourceCacheDir(url, ref string) string {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(url+"\n"+ref)))[:12]
 	return filepath.Join(AgentsCacheDir(), "sources", hash)
 }
 

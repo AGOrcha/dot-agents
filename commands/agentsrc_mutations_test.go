@@ -205,11 +205,15 @@ func manifestGitSourcesStatus(t *testing.T, manifestPath string) (missing, prese
 		if src.Type != testSourceTypeGit || src.URL == "" {
 			continue
 		}
-		cacheDir := config.GitSourceCacheDir(src.URL)
+		label := src.URL
+		if src.Ref != "" {
+			label += "@" + src.Ref
+		}
+		cacheDir := config.GitSourceCacheDir(src.URL, src.Ref)
 		if _, err := os.Stat(cacheDir); err != nil {
-			missing = append(missing, src.URL)
+			missing = append(missing, label)
 		} else {
-			present = append(present, src.URL)
+			present = append(present, label)
 		}
 	}
 	return missing, present
@@ -224,7 +228,7 @@ func TestDoctorManifestAllSourcesPresent(t *testing.T) {
 
 	// Pre-create both cache directories so they look fetched.
 	for _, url := range []string{url1, url2} {
-		if err := os.MkdirAll(config.GitSourceCacheDir(url), 0755); err != nil {
+		if err := os.MkdirAll(config.GitSourceCacheDir(url, ""), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -253,7 +257,7 @@ func TestDoctorManifestFirstPresentSecondMissing(t *testing.T) {
 	url2 := "https://github.com/example/missing.git"
 
 	// Only create the first cache.
-	if err := os.MkdirAll(config.GitSourceCacheDir(url1), 0755); err != nil {
+	if err := os.MkdirAll(config.GitSourceCacheDir(url1, ""), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,6 +272,28 @@ func TestDoctorManifestFirstPresentSecondMissing(t *testing.T) {
 	}
 	if len(present) != 1 || present[0] != url1 {
 		t.Errorf("expected [%s] present, got %v", url1, present)
+	}
+}
+
+func TestDoctorManifestSameURLDifferentRefs(t *testing.T) {
+	tmp := t.TempDir()
+	url := "https://github.com/example/shared.git"
+
+	if err := os.MkdirAll(config.GitSourceCacheDir(url, "develop"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mf := buildManifestWithSources(t, tmp, []config.Source{
+		{Type: testSourceTypeGit, URL: url, Ref: "develop"},
+		{Type: testSourceTypeGit, URL: url, Ref: "release"},
+	})
+
+	missing, present := manifestGitSourcesStatus(t, mf)
+	if len(missing) != 1 || missing[0] != url+"@release" {
+		t.Errorf("expected [%s] missing, got %v", url+"@release", missing)
+	}
+	if len(present) != 1 || present[0] != url+"@develop" {
+		t.Errorf("expected [%s] present, got %v", url+"@develop", present)
 	}
 }
 

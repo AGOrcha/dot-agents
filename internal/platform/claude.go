@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
@@ -282,7 +283,7 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	if err := c.ensureUserSettings(agentsHome); err != nil {
 		return err
 	}
-	return os.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
+	return fsops.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {

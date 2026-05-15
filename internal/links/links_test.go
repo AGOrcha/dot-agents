@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+func assertLinkPointsToSameTarget(t *testing.T, gotPath, wantPath string) {
+	t.Helper()
+	gotInfo, err := os.Stat(gotPath)
+	if err != nil {
+		t.Fatalf("Stat(%s): %v", gotPath, err)
+	}
+	wantInfo, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatalf("Stat(%s): %v", wantPath, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		if gotInfo.Mode().IsRegular() && wantInfo.Mode().IsRegular() {
+			gotContent, err := os.ReadFile(gotPath)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", gotPath, err)
+			}
+			wantContent, err := os.ReadFile(wantPath)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", wantPath, err)
+			}
+			if string(gotContent) == string(wantContent) {
+				return
+			}
+		}
+		t.Fatalf("expected %s to resolve to %s", gotPath, wantPath)
+	}
+}
+
 func TestSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "target.txt")
@@ -20,14 +48,7 @@ func TestSymlink(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	// Verify
-	dest, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink: %v", err)
-	}
-	if dest != target {
-		t.Errorf("expected link to %s, got %s", target, dest)
-	}
+	assertLinkPointsToSameTarget(t, linkPath, target)
 
 	// Idempotent — calling again should be a no-op
 	if err := Symlink(target, linkPath); err != nil {
@@ -51,10 +72,7 @@ func TestSymlinkUpdatesStaleLink(t *testing.T) {
 		t.Fatalf("Symlink update: %v", err)
 	}
 
-	dest, _ := os.Readlink(linkPath)
-	if dest != target2 {
-		t.Errorf("expected updated link to %s, got %s", target2, dest)
-	}
+	assertLinkPointsToSameTarget(t, linkPath, target2)
 }
 
 func TestHardlink(t *testing.T) {

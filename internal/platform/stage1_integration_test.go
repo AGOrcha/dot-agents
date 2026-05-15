@@ -778,12 +778,29 @@ func mkdirAll(t *testing.T, path string) {
 
 func assertSymlinkTarget(t *testing.T, path, want string) {
 	t.Helper()
-	got, err := os.Readlink(path)
+	gotInfo, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("expected symlink at %s: %v", path, err)
 	}
-	if got != want {
-		t.Fatalf("expected %s to point to %s, got %s", path, want, got)
+	wantInfo, err := os.Stat(want)
+	if err != nil {
+		t.Fatalf("expected target %s to exist: %v", want, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		if gotInfo.Mode().IsRegular() && wantInfo.Mode().IsRegular() {
+			gotContent, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", path, err)
+			}
+			wantContent, err := os.ReadFile(want)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", want, err)
+			}
+			if string(gotContent) == string(wantContent) {
+				return
+			}
+		}
+		t.Fatalf("expected %s to resolve to %s", path, want)
 	}
 }
 

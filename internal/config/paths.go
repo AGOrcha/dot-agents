@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -14,12 +13,6 @@ func AgentsHome() string {
 		return override
 	}
 	home, _ := os.UserHomeDir()
-	// On Windows use %APPDATA%\.agents if home detection is ambiguous
-	if runtime.GOOS == "windows" {
-		if appData := os.Getenv("APPDATA"); appData != "" {
-			return filepath.Join(appData, ".agents")
-		}
-	}
 	return filepath.Join(home, ".agents")
 }
 

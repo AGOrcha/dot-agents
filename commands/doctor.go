@@ -15,6 +15,13 @@ import (
 
 const doctorOpenCodeDir = ".opencode"
 
+func gitSourceLabel(url, ref string) string {
+	if ref == "" {
+		return url
+	}
+	return fmt.Sprintf("%s@%s", url, ref)
+}
+
 func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -212,11 +219,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			if src.Type != "git" || src.URL == "" {
 				continue
 			}
-			cacheDir := config.GitSourceCacheDir(src.URL)
+			label := gitSourceLabel(src.URL, src.Ref)
+			cacheDir := config.GitSourceCacheDir(src.URL, src.Ref)
 			if _, err := os.Stat(cacheDir); err != nil {
-				missingGit = append(missingGit, src.URL)
+				missingGit = append(missingGit, label)
 			} else {
-				presentGit = append(presentGit, src.URL)
+				presentGit = append(presentGit, label)
 			}
 		}
 		if len(missingGit) > 0 {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
@@ -209,9 +210,9 @@ func prepareIntentTargetForReplacement(target string, intent ResourceIntent) err
 			if !isAllowlistedSharedMirrorTarget(intent.TargetPath) {
 				return fmt.Errorf("refusing to replace unmanaged file %s", target)
 			}
-			return os.Remove(target)
+			return fsops.RemoveAll(target)
 		default:
-			return os.Remove(target)
+			return fsops.RemoveAll(target)
 		}
 	}
 
@@ -236,7 +237,7 @@ func removeImportedDirIfAllowlisted(target string, intent ResourceIntent) error 
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(target, marker)); err == nil {
-			return os.RemoveAll(target)
+			return fsops.RemoveAll(target)
 		}
 	}
 	return fmt.Errorf("refusing to replace unmanaged directory %s without imported markers", target)
@@ -534,7 +535,7 @@ func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome strin
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
 		switch intent.Materializer {
 		case codexAgentTomlMaterializer:
-			_ = os.Remove(target)
+			_ = fsops.Remove(target)
 			return nil
 		default:
 			return fmt.Errorf("unsupported materializer %q for remove", intent.Materializer)

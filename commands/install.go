@@ -1,17 +1,32 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
+)
+
+var gitCommitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+var errInstallResourceNotFound = errors.New("resource not found in any source")
+
+type gitSourceRefKind int
+
+const (
+	gitSourceRefBranch gitSourceRefKind = iota
+	gitSourceRefTag
+	gitSourceRefCommit
 )
 
 func NewInstallCmd() *cobra.Command {
@@ -156,11 +171,17 @@ func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSourc
 func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool) error {
 	for _, name := range names {
 		if err := linkResourceFromSources(resourceType, name, projectName, sources); err != nil {
-			msg := fmt.Sprintf("%s '%s' not found in any source", label, name)
 			if strict {
-				return fmt.Errorf("%s (--strict mode)", msg)
+				if errors.Is(err, errInstallResourceNotFound) {
+					return fmt.Errorf("%s '%s' not found in any source (--strict mode)", label, name)
+				}
+				return fmt.Errorf("%s '%s' install failed (--strict mode): %w", label, name, err)
 			}
-			ui.Bullet("warn", msg+" — skipping")
+			if errors.Is(err, errInstallResourceNotFound) {
+				ui.Bullet("warn", fmt.Sprintf("%s '%s' not found in any source — skipping", label, name))
+				continue
+			}
+			ui.Bullet("warn", fmt.Sprintf("%s '%s' install failed: %v — skipping", label, name, err))
 		}
 	}
 	return nil
@@ -382,17 +403,44 @@ func fetchGitSource(url, ref string) (string, error) {
 		return "", fmt.Errorf("git not installed")
 	}
 
-	cacheDir := config.GitSourceCacheDir(url)
+	cacheDir := config.GitSourceCacheDir(url, ref)
 	if hasCachedGitSource(cacheDir) {
-		if shouldUseCachedGitSource(cacheDir, url) {
+		if Flags.Force {
+			if Flags.DryRun {
+				ui.DryRun("refresh git source " + gitSourceLabel(url, ref))
+				return cacheDir, nil
+			}
+			return refreshCachedGitSource(gitBin, url, ref, cacheDir)
+		}
+
+		refKind, branchRef, err := resolveGitSourceRefKind(gitBin, url, ref)
+		if err != nil {
+			ui.Bullet("warn", "Could not verify cached source against remote — using existing copy")
+			return cacheDir, nil
+		}
+		if refKind != gitSourceRefBranch {
+			if Flags.Verbose {
+				ui.Info("Using pinned cached source: " + gitSourceLabel(url, ref))
+			}
+			return cacheDir, nil
+		}
+
+		upToDate, err := cachedGitSourceMatchesRemoteTip(gitBin, cacheDir, url, branchRef)
+		if err != nil {
+			ui.Bullet("warn", "Could not compare cached source to remote branch tip — using existing copy")
+			return cacheDir, nil
+		}
+		if upToDate {
+			if Flags.Verbose {
+				ui.Info("Using cached source at branch tip: " + gitSourceLabel(url, branchRef))
+			}
 			return cacheDir, nil
 		}
 		if Flags.DryRun {
-			ui.DryRun("git -C " + cacheDir + " pull")
+			ui.DryRun("refresh git source " + gitSourceLabel(url, branchRef))
 			return cacheDir, nil
 		}
-		updateCachedGitSource(gitBin, cacheDir, url)
-		return cacheDir, nil
+		return refreshCachedGitSource(gitBin, url, ref, cacheDir)
 	}
 
 	if Flags.DryRun {
@@ -407,31 +455,115 @@ func hasCachedGitSource(cacheDir string) bool {
 	return err == nil
 }
 
-func shouldUseCachedGitSource(cacheDir, url string) bool {
-	if Flags.Force {
-		return false
-	}
-	lastFetch := filepath.Join(cacheDir, ".last-fetch")
-	info, err := os.Stat(lastFetch)
-	if err != nil || time.Since(info.ModTime()) >= time.Hour {
-		return false
-	}
+func refreshCachedGitSource(gitBin, url, ref, cacheDir string) (string, error) {
 	if Flags.Verbose {
-		ui.Info("Using cached source (< 1h old): " + url)
+		ui.Info("Refreshing cached source: " + gitSourceLabel(url, ref))
 	}
-	return true
+	if err := os.RemoveAll(cacheDir); err != nil {
+		return "", fmt.Errorf("clearing cached source for %s: %w", gitSourceLabel(url, ref), err)
+	}
+	return cloneGitSource(gitBin, url, ref, cacheDir)
 }
 
-func updateCachedGitSource(gitBin, cacheDir, url string) {
-	if Flags.Verbose {
-		ui.Info("Updating cached source: " + url)
+func resolveGitSourceRefKind(gitBin, url, ref string) (gitSourceRefKind, string, error) {
+	if ref == "" {
+		branch, err := resolveGitDefaultBranch(gitBin, url)
+		if err != nil {
+			return gitSourceRefBranch, "", err
+		}
+		return gitSourceRefBranch, branch, nil
 	}
-	cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q")
-	if err := cmd.Run(); err != nil {
-		ui.Bullet("warn", "Could not update cached source — using existing copy")
-		return
+	if gitCommitRefPattern.MatchString(ref) {
+		return gitSourceRefCommit, ref, nil
 	}
-	touchLastFetch(cacheDir)
+	branchExists, err := gitRemoteRefExists(gitBin, url, "heads", ref)
+	if err != nil {
+		return gitSourceRefBranch, "", err
+	}
+	if branchExists {
+		return gitSourceRefBranch, ref, nil
+	}
+	tagExists, err := gitRemoteRefExists(gitBin, url, "tags", ref)
+	if err != nil {
+		return gitSourceRefBranch, "", err
+	}
+	if tagExists {
+		return gitSourceRefTag, ref, nil
+	}
+	return gitSourceRefBranch, "", fmt.Errorf("git ref %q not found in %s", ref, url)
+}
+
+func gitRemoteRefExists(gitBin, url, scope, ref string) (bool, error) {
+	args := []string{"ls-remote", "--quiet"}
+	switch scope {
+	case "heads":
+		args = append(args, "--heads")
+	case "tags":
+		args = append(args, "--tags", "--refs")
+	default:
+		return false, fmt.Errorf("unknown git ref scope %q", scope)
+	}
+	args = append(args, url, ref)
+	cmd := exec.Command(gitBin, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git ls-remote failed: %s", strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+func resolveGitDefaultBranch(gitBin, url string) (string, error) {
+	cmd := exec.Command(gitBin, "ls-remote", "--symref", url, "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote --symref failed: %s", strings.TrimSpace(string(out)))
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(line, "ref: refs/heads/") {
+			continue
+		}
+		branch := strings.TrimPrefix(line, "ref: refs/heads/")
+		branch = strings.TrimSuffix(branch, "\tHEAD")
+		branch = strings.TrimSpace(branch)
+		if branch != "" {
+			return branch, nil
+		}
+	}
+	return "", fmt.Errorf("could not resolve default branch for %s", url)
+}
+
+func cachedGitSourceMatchesRemoteTip(gitBin, cacheDir, url, branch string) (bool, error) {
+	localSHA, err := gitHEADSHA(gitBin, cacheDir)
+	if err != nil {
+		return false, err
+	}
+	remoteSHA, err := gitRemoteBranchSHA(gitBin, url, branch)
+	if err != nil {
+		return false, err
+	}
+	return localSHA == remoteSHA, nil
+}
+
+func gitHEADSHA(gitBin, repo string) (string, error) {
+	cmd := exec.Command(gitBin, "-C", repo, "rev-parse", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD failed: %s", strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitRemoteBranchSHA(gitBin, url, branch string) (string, error) {
+	cmd := exec.Command(gitBin, "ls-remote", "--heads", url, branch)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote branch failed: %s", strings.TrimSpace(string(out)))
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("remote branch %q not found in %s", branch, url)
+	}
+	return fields[0], nil
 }
 
 func gitCloneDryRunCommand(url, ref, cacheDir string) string {
@@ -475,7 +607,7 @@ func linkResourceFromSources(resourceType, name, project string, sources []strin
 	markerFile := resourceMarkerFile(resourceType)
 	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, project, sources)
 	if !found {
-		return fmt.Errorf("not found in any source")
+		return errInstallResourceNotFound
 	}
 
 	if Flags.DryRun {
@@ -488,7 +620,7 @@ func linkResourceFromSources(resourceType, name, project string, sources []strin
 	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return err
 	}
-	if err := os.Symlink(candidate, destDir); err != nil {
+	if err := links.Symlink(candidate, destDir); err != nil {
 		return fmt.Errorf("symlinking %s: %w", name, err)
 	}
 	if Flags.Verbose {

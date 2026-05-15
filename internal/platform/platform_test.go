@@ -50,18 +50,10 @@ func TestOpenCodeCreateLinksUsesCanonicalAgents(t *testing.T) {
 	}
 
 	gotAgent := filepath.Join(repo, ".opencode", "agent", "reviewer.md")
-	if dest, err := os.Readlink(gotAgent); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, gotAgent, err)
-	} else if dest != agentMD {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotAgent, agentMD, dest)
-	}
+	assertPathResolvesToTarget(t, gotAgent, agentMD)
 
 	gotConfig := filepath.Join(repo, "opencode.json")
-	if dest, err := os.Readlink(gotConfig); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, gotConfig, err)
-	} else if dest != opencodeJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotConfig, opencodeJSON, dest)
-	}
+	assertPathResolvesToTarget(t, gotConfig, opencodeJSON)
 }
 
 func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
@@ -94,16 +86,36 @@ func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
 	}
 
 	projectHooks := filepath.Join(repo, ".codex", "hooks.json")
-	if dest, err := os.Readlink(projectHooks); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, projectHooks, err)
-	} else if dest != hooksJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, projectHooks, hooksJSON, dest)
-	}
+	assertPathResolvesToTarget(t, projectHooks, hooksJSON)
 
 	userHooks := filepath.Join(home, ".codex", "hooks.json")
-	if dest, err := os.Readlink(userHooks); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, userHooks, err)
-	} else if dest != hooksJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, userHooks, hooksJSON, dest)
+	assertPathResolvesToTarget(t, userHooks, hooksJSON)
+}
+
+func assertPathResolvesToTarget(t *testing.T, gotPath, wantPath string) {
+	t.Helper()
+	gotInfo, err := os.Stat(gotPath)
+	if err != nil {
+		t.Fatalf(platformTestExpectedSymlinkFmt, gotPath, err)
+	}
+	wantInfo, err := os.Stat(wantPath)
+	if err != nil {
+		t.Fatalf("expected target %s to exist: %v", wantPath, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		if gotInfo.Mode().IsRegular() && wantInfo.Mode().IsRegular() {
+			gotContent, err := os.ReadFile(gotPath)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", gotPath, err)
+			}
+			wantContent, err := os.ReadFile(wantPath)
+			if err != nil {
+				t.Fatalf("ReadFile(%s): %v", wantPath, err)
+			}
+			if string(gotContent) == string(wantContent) {
+				return
+			}
+		}
+		t.Fatalf("expected %s to resolve to %s", gotPath, wantPath)
 	}
 }

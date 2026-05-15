@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
@@ -241,7 +242,7 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	if src == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
+	if err := fsops.MkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
 		return err
 	}
 	links.Symlink(src, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
@@ -259,7 +260,7 @@ func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error 
 
 func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "mcp", project, "copilot.json", copilotMCPJSON); src != "" {
-		if err := os.MkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
+		if err := fsops.MkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
 			return err
 		}
 		links.Symlink(src, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON))
@@ -277,7 +278,7 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
+	if err := fsops.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(

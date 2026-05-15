@@ -18,3 +18,11 @@ coverage:
 
 coverage-html: coverage
 	go tool cover -html=coverage.out -o coverage.html
+
+dist-local:
+	$(MAKE) build-prod
+	if go env GOBIN; then \
+		cp ./bin/da $(go env GOBIN); \
+	else \
+		cp ./bin/da $(go env GOPATH)/bin; \
+	fi

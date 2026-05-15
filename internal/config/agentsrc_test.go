@@ -223,13 +223,17 @@ func TestAppendUnique(t *testing.T) {
 
 func TestGitSourceCacheDir(t *testing.T) {
 	url := "https://github.com/example/repo.git"
-	dir1 := GitSourceCacheDir(url)
-	dir2 := GitSourceCacheDir(url)
+	dir1 := GitSourceCacheDir(url, "develop")
+	dir2 := GitSourceCacheDir(url, "develop")
 	if dir1 != dir2 {
-		t.Error("same URL must produce same cache dir")
+		t.Error("same URL+ref must produce same cache dir")
+	}
+	otherRef := GitSourceCacheDir(url, "release")
+	if dir1 == otherRef {
+		t.Error("same URL with different refs should produce different cache dirs")
 	}
 	// Different URLs → different dirs
-	other := GitSourceCacheDir("https://github.com/other/repo.git")
+	other := GitSourceCacheDir("https://github.com/other/repo.git", "develop")
 	if dir1 == other {
 		t.Error("different URLs should produce different cache dirs")
 	}
