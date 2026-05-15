@@ -24,6 +24,38 @@ func TestNewMCPServer_BridgeErrorPath(t *testing.T) {
 	}
 }
 
+// TestNewMCPServer_BridgeSuccessPath shims a .venv/bin/code-review-graph so
+// NewCRGBridge succeeds, exercising the bridge-assigned branch
+// (mcp_server.go:75-77). On CI runners with no CRG installed, only the
+// bridgeErr branch is reached; this test seeds a synthetic binary to cover
+// the success path deterministically.
+func TestNewMCPServer_BridgeSuccessPath(t *testing.T) {
+	workDir := t.TempDir()
+	venvBin := filepath.Join(workDir, ".venv", "bin")
+	if err := os.MkdirAll(venvBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(venvBin, "code-review-graph")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Independently force the store error path so we exercise only the bridge
+	// success branch without depending on a working SQLite path.
+	t.Setenv("KG_HOME", workDir)
+
+	srv := NewMCPServer(workDir)
+	if srv == nil {
+		t.Fatal("expected non-nil server")
+	}
+	if srv.bridge == nil {
+		t.Error("expected non-nil bridge when CRG is discoverable")
+	}
+	if srv.bridgeErr != nil {
+		t.Errorf("expected nil bridgeErr on success; got %v", srv.bridgeErr)
+	}
+}
+
 // TestNewMCPServer_StoreErrorPath forces OpenSQLite to fail by pointing
 // KG_HOME at a regular file so the parent of the db path cannot be a directory.
 func TestNewMCPServer_StoreErrorPath(t *testing.T) {
