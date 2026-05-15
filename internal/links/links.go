@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
@@ -91,32 +92,102 @@ func FindFile(basePath string, exts []string) string {
 	return ""
 }
 
-// IsSymlinkTo returns true if linkPath is a symlink that resolves to target.
-func IsSymlinkTo(linkPath, target string) bool {
+// ManagedLinkTarget returns the path linkPath references, and true, when
+// linkPath is a *resolvable* managed link — a POSIX symlink or a Windows
+// junction (Go's os.Readlink resolves IO_REPARSE_TAG_MOUNT_POINT). A hard
+// link has no reparse point and therefore no resolvable target; use
+// IsManagedLink with a known target for the hard-link case.
+func ManagedLinkTarget(linkPath string) (string, bool) {
 	dest, err := os.Readlink(linkPath)
 	if err != nil {
-		return false
+		return "", false
 	}
-	return dest == target
+	return dest, true
 }
 
-// IsSymlinkUnder returns true if linkPath is a symlink whose target starts with prefix.
-func IsSymlinkUnder(linkPath, prefix string) bool {
-	dest, err := os.Readlink(linkPath)
-	if err != nil {
-		return false
+// IsManagedLink reports whether linkPath is a managed reference to target.
+// This is the single cross-platform predicate the link contract is built
+// on:
+//
+//   - POSIX:   a symlink whose target == target.
+//   - Windows: a symlink or junction resolving to target (junction targets
+//     are absolute, so an absolute/clean-normalized compare is also tried),
+//     OR a hard link to the same canonical file (os.SameFile).
+//
+// On POSIX the hard-link branch is still honored (a hardlinked managed file
+// is a valid managed reference there too), so behavior is uniform.
+func IsManagedLink(linkPath, target string) bool {
+	if dest, ok := ManagedLinkTarget(linkPath); ok {
+		if dest == target {
+			return true
+		}
+		// Junctions store an absolute, cleaned target; tolerate that.
+		if absTarget, err := filepath.Abs(target); err == nil {
+			if dest == absTarget || filepath.Clean(dest) == filepath.Clean(absTarget) {
+				return true
+			}
+		}
 	}
-	// Compare with both raw value and expanded
-	if len(dest) >= len(prefix) && dest[:len(prefix)] == prefix {
-		return true
+	// Hard link: no reparse point, identity is a shared inode / file index
+	// across two *distinct* directory entries. The degenerate case where
+	// linkPath and target are the same path is a plain file, not a link.
+	if !samePath(linkPath, target) {
+		if same, err := pathsResolveToSameFile(target, linkPath); err == nil && same {
+			return true
+		}
 	}
 	return false
 }
 
-// RemoveIfSymlinkUnder removes linkPath if it is a symlink whose target starts with prefix.
+// samePath reports whether two paths denote the same location after
+// absolute+clean normalization (so a/./b and a/b compare equal).
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return filepath.Clean(absA) == filepath.Clean(absB)
+}
+
+// IsManagedLinkUnder reports whether linkPath is a managed link whose
+// resolved target lies under prefix. Only resolvable links (symlink /
+// junction) can answer this; a hard link has no target path to test
+// against prefix, so it is reported false (parity with the prior
+// symlink-only behavior on POSIX).
+func IsManagedLinkUnder(linkPath, prefix string) bool {
+	dest, ok := ManagedLinkTarget(linkPath)
+	if !ok {
+		return false
+	}
+	if strings.HasPrefix(dest, prefix) {
+		return true
+	}
+	// Junction targets are absolute; also test the absolute prefix form.
+	if absPrefix, err := filepath.Abs(prefix); err == nil {
+		if strings.HasPrefix(dest, absPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsSymlinkTo is retained for callers/tests that specifically assert the
+// POSIX-symlink contract; it now delegates to the OS-aware predicate.
+func IsSymlinkTo(linkPath, target string) bool {
+	return IsManagedLink(linkPath, target)
+}
+
+// IsSymlinkUnder delegates to the OS-aware predicate.
+func IsSymlinkUnder(linkPath, prefix string) bool {
+	return IsManagedLinkUnder(linkPath, prefix)
+}
+
+// RemoveIfSymlinkUnder removes linkPath if it is a managed link whose
+// resolved target starts with prefix.
 func RemoveIfSymlinkUnder(linkPath, prefix string) error {
-	if IsSymlinkUnder(linkPath, prefix) {
-		return os.Remove(linkPath)
+	if IsManagedLinkUnder(linkPath, prefix) {
+		return fsops.RemoveAll(linkPath)
 	}
 	return nil
 }
