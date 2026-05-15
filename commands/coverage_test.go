@@ -49,45 +49,6 @@ func TestNewSyncPullCmd_ReturnsPullSubcommand(t *testing.T) {
 	}
 }
 
-// ── skills.go RunE coverage ─────────────────────────────────────────────────
-
-func TestNewSkillsListCmd_RunE(t *testing.T) {
-	setupAgentsHomeAndHome(t)
-	cmd := newSkillsListCmd()
-	if err := cmd.RunE(cmd, nil); err != nil {
-		t.Errorf("skills list RunE: %v", err)
-	}
-	if err := cmd.RunE(cmd, []string{"some-project"}); err != nil {
-		t.Errorf("skills list with scope RunE: %v", err)
-	}
-}
-
-func TestNewSkillsNewCmd_RunE(t *testing.T) {
-	agentsHome := setupAgentsHomeAndHome(t)
-	cmd := newSkillsNewCmd()
-	if err := cmd.RunE(cmd, []string{"runE-skill"}); err != nil {
-		t.Fatalf("skills new RunE: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(agentsHome, "skills", "global", "runE-skill", "SKILL.md")); err != nil {
-		t.Errorf("expected SKILL.md: %v", err)
-	}
-}
-
-func TestNewSkillsPromoteCmd_RunEErrorWhenNoSkill(t *testing.T) {
-	setupAgentsHomeAndHome(t)
-	// Set CWD to a path without .agents/skills/<name> so PromoteSkillIn errors.
-	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
-	tmp := t.TempDir()
-	if err := os.Chdir(tmp); err != nil {
-		t.Fatal(err)
-	}
-	cmd := newSkillsPromoteCmd()
-	if err := cmd.RunE(cmd, []string{"missing"}); err == nil {
-		t.Error("expected error for missing skill")
-	}
-}
-
 // ── mcp.go RunE coverage ────────────────────────────────────────────────────
 
 func TestNewMCPListCmd_RunE(t *testing.T) {

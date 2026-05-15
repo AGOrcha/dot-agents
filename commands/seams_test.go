@@ -255,43 +255,6 @@ func TestScaffoldWorkflowAssets_MkdirError(t *testing.T) {
 	_ = config.AgentsContextDir
 }
 
-// ─── ensureSkillMarkdown WriteFile branch ────────────────────────────────────
-
-func TestEnsureSkillMarkdown_WriteError(t *testing.T) {
-	dir := t.TempDir()
-	skillMD := filepath.Join(dir, "SKILL.md")
-
-	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
-
-	err := ensureSkillMarkdown(skillMD, "demo")
-	if err == nil || !strings.Contains(err.Error(), "creating SKILL.md") {
-		t.Fatalf("expected creating SKILL.md error, got %v", err)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected wrapped sentinel, got %v", err)
-	}
-}
-
-// When SKILL.md already exists, ensureSkillMarkdown is a no-op and never
-// touches osWriteFile. Verify this by installing a fatal stub.
-func TestEnsureSkillMarkdown_NoopWhenPresent(t *testing.T) {
-	dir := t.TempDir()
-	skillMD := filepath.Join(dir, "SKILL.md")
-	if err := os.WriteFile(skillMD, []byte("# existing\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error {
-		t.Fatal("osWriteFile must not be called when SKILL.md already exists")
-		return nil
-	})
-
-	if err := ensureSkillMarkdown(skillMD, "demo"); err != nil {
-		t.Fatalf("ensureSkillMarkdown: %v", err)
-	}
-}
-
 // ─── runInstall / runInstallGenerate Getwd failure ───────────────────────────
 
 func TestRunInstall_GetwdError(t *testing.T) {
@@ -491,61 +454,6 @@ func TestWriteImportConflictReviewNote_WriteError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected write sentinel, got %v", err)
 	}
-}
-
-// ─── createSkill MkdirAll branch ─────────────────────────────────────────────
-
-func TestCreateSkill_MkdirError(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
-
-	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
-
-	err := createSkill("demo", "global")
-	if err == nil || !strings.Contains(err.Error(), "creating skill directory") {
-		t.Fatalf("expected wrapped mkdir error, got %v", err)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected sentinel to wrap, got %v", err)
-	}
-}
-
-// ─── ensureUserSkillLinks MkdirAll branch (continue path) ────────────────────
-
-// When MkdirAll fails for both targets, ensureUserSkillLinks silently moves on.
-// Verify by also installing a fatal osSymlink stub — it must not be reached.
-func TestEnsureUserSkillLinks_MkdirAllFailsContinue(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	withMkdirAllStub(t, func(string, os.FileMode) error { return errors.New("mkdir boom") })
-	withSymlinkStub(t, func(string, string) error {
-		t.Fatal("osSymlink must not be called when osMkdirAll returns an error")
-		return nil
-	})
-
-	ensureUserSkillLinks(filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
-}
-
-// When the link already exists, symlink must not be re-attempted.
-func TestEnsureUserSkillLinks_SkipsExisting(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	// Pre-create the targets so Lstat finds something.
-	for _, dir := range []string{".agents/skills", ".claude/skills"} {
-		full := filepath.Join(tmp, dir, "demo")
-		if err := os.MkdirAll(full, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	withSymlinkStub(t, func(string, string) error {
-		t.Fatal("osSymlink must not be called when target already exists")
-		return nil
-	})
-
-	ensureUserSkillLinks(filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
 }
 
 // ─── backupExistingConfigsList: Remove failure skips count ───────────────────
@@ -897,13 +805,6 @@ func TestRegisterInstallProject_ConfigLoadError(t *testing.T) {
 func TestFindProjectByPath_ConfigLoadError(t *testing.T) {
 	withConfigLoadStub(t, func() (*config.Config, error) { return nil, errors.New("load boom") })
 	if got := findProjectByPath("/whatever"); got != "" {
-		t.Errorf("expected empty string on load error, got %q", got)
-	}
-}
-
-func TestAppendSkillToAgentsRC_ConfigLoadError(t *testing.T) {
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, errors.New("load boom") })
-	if got := appendSkillToAgentsRC("demo", "missing-proj"); got != "" {
 		t.Errorf("expected empty string on load error, got %q", got)
 	}
 }
