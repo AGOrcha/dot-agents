@@ -1406,14 +1406,15 @@ func filesDifferent(a, b string) (bool, error) {
 }
 
 func isManagedSymlink(path, agentsHome string) bool {
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+	// Resolvable managed link (POSIX symlink / Windows junction) whose
+	// resolved target lies under agentsHome. A Windows hard-linked managed
+	// *file* has no reparse point to test against a prefix and is reported
+	// false here, matching the prior symlink-only behavior on POSIX.
+	raw, ok := links.ManagedLinkTarget(path)
+	if !ok {
 		return false
 	}
-	dest, err := os.Readlink(path)
-	if err != nil {
-		return false
-	}
+	dest := raw
 	if !filepath.IsAbs(dest) {
 		dest = filepath.Clean(filepath.Join(filepath.Dir(path), dest))
 	}

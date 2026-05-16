@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -246,12 +248,10 @@ func TestCloneGitSource_MaliciousURLNotParsedAsFlag(t *testing.T) {
 	argvFile := filepath.Join(tmp, "argv.txt")
 
 	// Fake git that writes its argv to a file then exits non-zero (so
-	// cloneGitSource's failure path runs and cleans up cacheDir).
-	fakeBin := filepath.Join(tmp, "fakegit.sh")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >" + argvFile + "\nexit 1\n"
-	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
+	// cloneGitSource's failure path runs and cleans up cacheDir). Built as a
+	// real Go binary rather than a shell script so it runs on Windows too
+	// (no #!/bin/sh interpreter, correct .exe suffix).
+	fakeBin := buildFakeGit(t, tmp, argvFile)
 
 	saved := Flags
 	Flags = GlobalFlags{}
@@ -288,6 +288,40 @@ func TestCloneGitSource_MaliciousURLNotParsedAsFlag(t *testing.T) {
 			t.Errorf("URL leaked into flag position at argv[%d]: %v", i, argv)
 		}
 	}
+}
+
+// buildFakeGit compiles a tiny cross-platform Go program that records its
+// argv (one per line) to argvFile and exits 1. Returns the binary path
+// (with the platform-correct extension). Replaces the previous #!/bin/sh
+// fixture, which could not execute on Windows.
+func buildFakeGit(t *testing.T, dir, argvFile string) string {
+	t.Helper()
+	srcDir := filepath.Join(dir, "fakegit-src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "package main\n\nimport (\n\t\"os\"\n\t\"strings\"\n)\n\n" +
+		"func main() {\n" +
+		"\tdata := strings.Join(os.Args[1:], \"\\n\") + \"\\n\"\n" +
+		"\t_ = os.WriteFile(" + strconv.Quote(argvFile) + ", []byte(data), 0o644)\n" +
+		"\tos.Exit(1)\n}\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Standalone module so `go build` does not climb to the repo go.mod.
+	if err := os.WriteFile(filepath.Join(srcDir, "go.mod"), []byte("module fakegit\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "fakegit")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = srcDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building fake git: %v\n%s", err, out)
+	}
+	return bin
 }
 
 // ---------- hasCachedGitSource / shouldUseCachedGitSource ----------

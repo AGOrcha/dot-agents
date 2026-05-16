@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 // stubPlatform implements Platform with fixed SharedTargetIntents for testing
@@ -330,12 +332,8 @@ func TestCollectAndExecuteSharedTargetPlanDedupesClaudeCursorAgents(t *testing.T
 	}
 
 	target := filepath.Join(repo, ".claude", "agents", "reviewer")
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat(%s): %v", target, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
+	if !links.IsManagedLink(target, agentDir) {
+		t.Fatalf("expected managed link at %s -> %s", target, agentDir)
 	}
 }
 
@@ -605,12 +603,8 @@ func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPr
 	if err := executeSkillPlan(t, repo, agentsHome); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s after imported-dir replacement", target)
+	if !links.IsManagedLink(target, filepath.Join(agentsHome, "skills", "proj", "review")) {
+		t.Fatalf("expected managed link at %s after imported-dir replacement", target)
 	}
 }
 
@@ -627,14 +621,10 @@ func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
 	}
 
-	// All three platforms target .agents/skills/review; it should be a single symlink
+	// All three platforms target .agents/skills/review; it should be a single managed link
 	target := filepath.Join(repo, ".agents", "skills", "review")
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat(%s): %v", target, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
+	if !links.IsManagedLink(target, filepath.Join(agentsHome, "skills", "proj", "review")) {
+		t.Fatalf("expected managed link at %s", target)
 	}
 }
 

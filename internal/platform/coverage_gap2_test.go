@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 // TestListPluginSpecs_WithMultipleScopes drives the no-scope-walk branch which
@@ -325,10 +327,8 @@ func TestCodexCreateLinks_FullRulesAndSettings(t *testing.T) {
 	}
 
 	// AGENTS.md should be linked (project override wins).
-	if info, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); err != nil {
-		t.Errorf("AGENTS.md missing: %v", err)
-	} else if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("AGENTS.md should be a symlink")
+	if !links.IsManagedLink(filepath.Join(repo, "AGENTS.md"), filepath.Join(agentsHome, "rules", "proj", "agents.md")) {
+		t.Error("AGENTS.md should be a managed link to the project override")
 	}
 	if _, err := os.Lstat(filepath.Join(repo, ".codex", "config.toml")); err != nil {
 		t.Errorf("config.toml missing: %v", err)

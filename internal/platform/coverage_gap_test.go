@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
@@ -537,12 +538,8 @@ func TestExecuteSharedSkillMirrorPlan(t *testing.T) {
 	}
 
 	link := filepath.Join(repo, ".agents/skills", "my-skill")
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("lstat link: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected symlink at %s", link)
+	if !links.IsManagedLink(link, skillDir) {
+		t.Errorf("expected managed link at %s -> %s", link, skillDir)
 	}
 
 	// Empty target roots → no-op.
@@ -2012,10 +2009,8 @@ func TestSyncScopedFileSymlinks(t *testing.T) {
 		t.Fatalf("syncScopedFileSymlinks: %v", err)
 	}
 	link := filepath.Join(dstRoot, "reviewer.md")
-	if info, err := os.Lstat(link); err != nil {
-		t.Errorf("expected link at %s: %v", link, err)
-	} else if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("expected symlink")
+	if !links.IsManagedLink(link, filepath.Join(agentDir, "AGENT.md")) {
+		t.Errorf("expected managed link at %s", link)
 	}
 
 	// Missing source → no-op (no error).

@@ -4,11 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 const (
-	platformTestExpectedSymlinkFmt       = "expected %s to be a symlink: %v"
-	platformTestExpectedSymlinkTargetFmt = "expected %s to point to %s, got %s"
+	platformTestExpectedSymlinkTargetFmt = "expected %s to be a managed link to %s"
 )
 
 func TestOpenCodeCreateLinksUsesCanonicalAgents(t *testing.T) {
@@ -50,17 +51,13 @@ func TestOpenCodeCreateLinksUsesCanonicalAgents(t *testing.T) {
 	}
 
 	gotAgent := filepath.Join(repo, ".opencode", "agent", "reviewer.md")
-	if dest, err := os.Readlink(gotAgent); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, gotAgent, err)
-	} else if dest != agentMD {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotAgent, agentMD, dest)
+	if !links.IsManagedLink(gotAgent, agentMD) {
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotAgent, agentMD)
 	}
 
 	gotConfig := filepath.Join(repo, "opencode.json")
-	if dest, err := os.Readlink(gotConfig); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, gotConfig, err)
-	} else if dest != opencodeJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotConfig, opencodeJSON, dest)
+	if !links.IsManagedLink(gotConfig, opencodeJSON) {
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, gotConfig, opencodeJSON)
 	}
 }
 
@@ -94,16 +91,12 @@ func TestCodexCreateLinksEmitsProjectAndUserHooks(t *testing.T) {
 	}
 
 	projectHooks := filepath.Join(repo, ".codex", "hooks.json")
-	if dest, err := os.Readlink(projectHooks); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, projectHooks, err)
-	} else if dest != hooksJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, projectHooks, hooksJSON, dest)
+	if !links.IsManagedLink(projectHooks, hooksJSON) {
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, projectHooks, hooksJSON)
 	}
 
 	userHooks := filepath.Join(home, ".codex", "hooks.json")
-	if dest, err := os.Readlink(userHooks); err != nil {
-		t.Fatalf(platformTestExpectedSymlinkFmt, userHooks, err)
-	} else if dest != hooksJSON {
-		t.Fatalf(platformTestExpectedSymlinkTargetFmt, userHooks, hooksJSON, dest)
+	if !links.IsManagedLink(userHooks, hooksJSON) {
+		t.Fatalf(platformTestExpectedSymlinkTargetFmt, userHooks, hooksJSON)
 	}
 }

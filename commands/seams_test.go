@@ -226,14 +226,18 @@ func TestCaptureProposalRollback_RemoveENOENTSwallowed(t *testing.T) {
 // non-ENOENT error. Trigger via ENOTDIR (target lives "under" a regular file).
 func TestCaptureProposalRollback_ReadFileError(t *testing.T) {
 	tmp := t.TempDir()
-	blocker := filepath.Join(tmp, "blocker")
-	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+	// A directory path causes os.ReadFile to fail with a non-ENOENT error on
+	// both POSIX (EISDIR) and Windows (ERROR_ACCESS_DENIED / handle is a
+	// directory). The previous "file as a path component" fixture produced
+	// ENOTDIR on POSIX but ERROR_PATH_NOT_FOUND (→ fs.ErrNotExist) on
+	// Windows, so it could not exercise the non-ENOENT branch there.
+	target := filepath.Join(tmp, "adir")
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(blocker, "child.txt")
 
 	if _, err := captureProposalRollback(target); err == nil {
-		t.Fatal("expected non-nil error from ENOTDIR read")
+		t.Fatal("expected non-nil error reading a directory")
 	} else if errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("expected non-ENOENT error, got %v", err)
 	}

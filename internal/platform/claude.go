@@ -407,7 +407,7 @@ func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirE
 		return
 	}
 	target := filepath.Join(userAgentsDir, entry.Name())
-	if isSymlink(target) {
+	if isPreExistingManagedLink(target, agentDir) {
 		return
 	}
 	links.Symlink(agentDir, target)
@@ -436,8 +436,8 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 
 	for _, homeRoot := range config.UserHomeRoots() {
 		target := filepath.Join(homeRoot, claudeDir, "CLAUDE.md")
-		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			continue // already a symlink
+		if isPreExistingManagedLink(target, src) {
+			continue // already a managed link, leave it
 		}
 		os.MkdirAll(filepath.Join(homeRoot, claudeDir), 0755)
 		links.Symlink(src, target)
@@ -463,8 +463,8 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		target := filepath.Join(homeRoot, claudeDir, claudeSettingsJSON)
-		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			continue // already a symlink, leave it
+		if isPreExistingManagedLink(target, spec.SourcePath) {
+			continue // already a managed link, leave it
 		}
 		_ = emitHookSpec(spec, target, HookEmissionMode{
 			Shape:     HookShapeDirect,
@@ -548,17 +548,24 @@ func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
 	}
 }
 
+// isPreExistingManagedLink reports whether path is a managed link we should
+// not clobber. It ports the historical "skip if already a symlink" guard to
+// the cross-platform link model: a resolvable POSIX symlink / Windows
+// junction (any target) is preserved, as is a Windows hard link whose inode
+// matches the canonical source we would otherwise (re)create.
+func isPreExistingManagedLink(path, source string) bool {
+	if _, ok := links.ManagedLinkTarget(path); ok {
+		return true
+	}
+	return links.IsManagedLink(path, source)
+}
+
 func isClaudeAgentDir(path string) bool {
 	if !links.IsDirEntry(path) {
 		return false
 	}
 	_, err := os.Stat(filepath.Join(path, "AGENT.md"))
 	return err == nil
-}
-
-func isSymlink(path string) bool {
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {

@@ -176,15 +176,11 @@ func checkExistingConfigFiles(project, projectPath, agentsHome string) []string 
 		if isBackupArtifact(filepath.Base(f)) {
 			continue
 		}
-		info, err := os.Lstat(f)
-		if err != nil {
+		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			dest, _ := os.Readlink(f)
-			if strings.HasPrefix(dest, agentsHome) {
-				continue // already managed
-			}
+		if links.IsManagedLinkUnder(f, agentsHome) {
+			continue // already managed (resolvable symlink/junction)
 		}
 		if isManagedProjectOutput(project, projectPath, f, agentsHome) {
 			continue
@@ -388,7 +384,7 @@ func runAdd(pathArg, nameArg string) error {
 		for _, f := range existingFiles {
 			rel := strings.TrimPrefix(f, projectPath+"/")
 			fileType := "file"
-			if info, err := os.Lstat(f); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, isLink := links.ManagedLinkTarget(f); isLink {
 				fileType = "symlink"
 			}
 			fmt.Fprintf(os.Stdout, "  %s!%s %s %s(%s)%s\n", ui.Yellow, ui.Reset, rel, ui.Dim, fileType, ui.Reset)
@@ -418,13 +414,10 @@ func runAdd(pathArg, nameArg string) error {
 			}
 			rel := strings.TrimPrefix(f, projectPath+"/")
 			kind := "file"
-			if info, err := os.Lstat(f); err == nil {
-				switch {
-				case info.Mode()&os.ModeSymlink != 0:
-					kind = "symlink"
-				case info.IsDir():
-					kind = "dir"
-				}
+			if _, isLink := links.ManagedLinkTarget(f); isLink {
+				kind = "symlink"
+			} else if info, err := os.Lstat(f); err == nil && info.IsDir() {
+				kind = "dir"
 			}
 			fmt.Fprintf(os.Stdout, "  %s○%s %s %s(%s)%s\n", ui.Dim, ui.Reset, rel, ui.Dim, kind, ui.Reset)
 			shown++
@@ -531,12 +524,13 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 		if isBackupArtifact(filepath.Base(f)) {
 			continue
 		}
-		info, err := os.Lstat(f)
-		if err != nil {
+		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			// Unmanaged symlinks: remove without backup (no content to preserve)
+		// A link entry (POSIX symlink / Windows junction, or a hard link
+		// sharing its inode with another entry) has no standalone content to
+		// preserve — remove it without a backup.
+		if _, isLink := links.ManagedLinkTarget(f); isLink || hasMultipleHardLinks(f) {
 			os.Remove(f)
 			count++
 			continue

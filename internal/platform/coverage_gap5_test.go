@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
@@ -46,13 +47,9 @@ func TestClaudeEnsureUserRules_PreExistingSymlinkSkipped(t *testing.T) {
 	if err := c.ensureUserRules(agentsHome); err != nil {
 		t.Fatalf("ensureUserRules: %v", err)
 	}
-	// Symlink should not have been changed.
-	got, err := os.Readlink(filepath.Join(home, ".claude", "CLAUDE.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != pretend {
-		t.Errorf("symlink target = %q, want preserved %q", got, pretend)
+	// Managed link should not have been changed.
+	if !links.IsManagedLink(filepath.Join(home, ".claude", "CLAUDE.md"), pretend) {
+		t.Errorf("managed link to %q was not preserved", pretend)
 	}
 }
 
@@ -147,13 +144,9 @@ func TestClaudeLinkUserAgent_SymlinkSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.linkUserAgent(filepath.Join(tmp, "agents", "global"), userAgentsDir, entries[0])
-	// Symlink should remain pointing at pretend.
-	got, err := os.Readlink(filepath.Join(userAgentsDir, "reviewer"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != pretend {
-		t.Errorf("link changed to %q, expected preserved %q", got, pretend)
+	// Managed link should remain pointing at pretend.
+	if !links.IsManagedLink(filepath.Join(userAgentsDir, "reviewer"), pretend) {
+		t.Errorf("link changed, expected preserved link to %q", pretend)
 	}
 }
 
@@ -305,8 +298,8 @@ func TestEmitHookFile_SymlinkBranch(t *testing.T) {
 	if err := emitHookFile(src, dst, HookTransportSymlink); err != nil {
 		t.Errorf("symlink branch: %v", err)
 	}
-	if info, err := os.Lstat(dst); err != nil || info.Mode()&os.ModeSymlink == 0 {
-		t.Error("expected symlink")
+	if !links.IsManagedLink(dst, src) {
+		t.Error("expected managed link to src")
 	}
 }
 

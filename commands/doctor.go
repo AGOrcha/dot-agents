@@ -293,19 +293,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 						continue
 					}
 					linkPath := filepath.Join(projectPath, doctorOpenCodeDir, "plugins", spec.Name)
-					info, err := os.Lstat(linkPath)
-					if err != nil || info.Mode()&os.ModeSymlink == 0 {
+					raw, ok := links.ManagedLinkTarget(linkPath)
+					if !ok {
 						continue
 					}
-					dest, err := os.Readlink(linkPath)
-					if err != nil {
-						ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
-						continue
-					}
-					if !filepath.IsAbs(dest) {
-						dest = filepath.Clean(filepath.Join(filepath.Dir(linkPath), dest))
-					}
-					if _, err := os.Stat(dest); err != nil {
+					if _, err := os.Stat(resolveLinkDest(linkPath, raw)); err != nil {
 						ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
 					}
 				}
@@ -347,21 +339,20 @@ func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string
 			continue
 		}
 		backLink := filepath.Join(projectPath, ".agents", bucket, e.Name())
-		info, err := os.Lstat(backLink)
-		if err != nil {
+		if _, err := os.Lstat(backLink); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				orphans = append(orphans, e.Name())
 			}
 			continue
 		}
-		// If the back-link is a symlink, verify it points at THIS canonical.
-		// A symlink that resolves to a different canonical (or anywhere else)
-		// is still an orphan — the canonical here has no live reference.
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(backLink)
-			if err != nil {
-				continue // unreadable symlink — other audits will surface it
-			}
+		// If the back-link is a resolvable managed link (POSIX symlink /
+		// Windows junction), verify it points at THIS canonical. A link that
+		// resolves to a different canonical (or anywhere else) is still an
+		// orphan — the canonical here has no live reference. A non-resolvable
+		// entry (real dir, or a hard-linked file with no reparse point) is a
+		// live back-reference and not an orphan.
+		if raw, ok := links.ManagedLinkTarget(backLink); ok {
+			target := raw
 			if !filepath.IsAbs(target) {
 				target = filepath.Join(filepath.Dir(backLink), target)
 			}
@@ -388,6 +379,76 @@ type brokenLink struct {
 	platformID string
 	linkPath   string // relative display path
 	dest       string // symlink/hardlink target
+}
+
+// resolveLinkDest normalizes a managed-link target to an absolute path so it
+// can be stat'd. Junction targets are already absolute; POSIX symlinks may be
+// relative to the link's directory.
+func resolveLinkDest(linkPath, dest string) string {
+	if dest == "" || filepath.IsAbs(dest) {
+		return dest
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(linkPath), dest))
+}
+
+// managedLinkBroken reports, for a single managed link path, whether it is a
+// resolvable managed link (POSIX symlink / Windows junction), its resolved
+// target for display, and whether that target is missing (the link is
+// broken).
+//
+// A Windows hard-linked managed *file* has no reparse point and therefore no
+// resolvable target — ManagedLinkTarget returns ("", false). Such a file
+// cannot dangle (its target inode must exist), so it is reported isLink=false
+// and broken=false here; the OK-count path handles healthy hard links via
+// links.AreHardlinked instead. This keeps POSIX behavior identical (symlinks
+// still resolve via ManagedLinkTarget) while not misreporting Windows hard
+// links as broken.
+func managedLinkBroken(linkPath string) (dest string, isLink, broken bool) {
+	raw, ok := links.ManagedLinkTarget(linkPath)
+	if !ok {
+		return "", false, false
+	}
+	resolved := resolveLinkDest(linkPath, raw)
+	if _, err := os.Stat(resolved); err != nil {
+		return raw, true, true
+	}
+	return raw, true, false
+}
+
+// managedLinkHealthy reports whether linkPath is a resolvable managed link
+// whose target exists. Used by OK-count paths for symlink/junction links.
+func managedLinkHealthy(linkPath string) bool {
+	raw, ok := links.ManagedLinkTarget(linkPath)
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(resolveLinkDest(linkPath, raw))
+	return err == nil
+}
+
+// claudeRuleHardlinked reports whether a .claude/rules entry is a Windows
+// managed *file* hard link to its canonical rule source. The entry name is
+// "<scope>--<rest>" where scope is "global" or the project name; the source
+// lives at <agentsHome>/rules/<scope>/<rest> with a .mdc→.md fallback. On
+// POSIX these are symlinks (handled by managedLinkHealthy) so this is a
+// no-op there.
+func claudeRuleHardlinked(linkPath, entryName, projectName, agentsHome string) bool {
+	scope, rest := "", ""
+	switch {
+	case strings.HasPrefix(entryName, "global--"):
+		scope, rest = "global", strings.TrimPrefix(entryName, "global--")
+	case strings.HasPrefix(entryName, projectName+"--"):
+		scope, rest = projectName, strings.TrimPrefix(entryName, projectName+"--")
+	default:
+		return false
+	}
+	src := filepath.Join(agentsHome, "rules", scope, rest)
+	if linked, _ := links.AreHardlinked(linkPath, src); linked {
+		return true
+	}
+	src2 := filepath.Join(agentsHome, "rules", scope, strings.TrimSuffix(rest, ".mdc")+".md")
+	linked, _ := links.AreHardlinked(linkPath, src2)
+	return linked
 }
 
 // collectBrokenLinks returns all broken managed links for a project.
@@ -452,11 +513,7 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	if entries, err := os.ReadDir(claudeRulesDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(claudeRulesDir, e.Name())
-			dest, err := os.Readlink(linkPath)
-			if err != nil {
-				continue
-			}
-			if _, err := os.Stat(dest); err != nil {
+			if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink && isBroken {
 				broken = append(broken, brokenLink{
 					platformID: "claude",
 					linkPath:   rel(linkPath),
@@ -466,61 +523,21 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 		}
 	}
 
-	// Codex AGENTS.md
-	agentsMD := filepath.Join(path, "AGENTS.md")
-	if dest, err := os.Readlink(agentsMD); err == nil {
-		if _, err := os.Stat(dest); err != nil {
-			broken = append(broken, brokenLink{
-				platformID: "codex",
-				linkPath:   rel(agentsMD),
-				dest:       config.DisplayPath(dest),
-			})
-		}
+	singleFiles := []struct {
+		platformID string
+		path       string
+	}{
+		{"codex", filepath.Join(path, "AGENTS.md")},
+		{"copilot", filepath.Join(path, ".github", "copilot-instructions.md")},
+		{"copilot", filepath.Join(path, ".vscode", "mcp.json")},
+		{"claude", filepath.Join(path, ".mcp.json")},
+		{"opencode", filepath.Join(path, "opencode.json")},
 	}
-
-	// Copilot instructions
-	copilotPath := filepath.Join(path, ".github", "copilot-instructions.md")
-	if dest, err := os.Readlink(copilotPath); err == nil {
-		if _, err := os.Stat(dest); err != nil {
+	for _, sf := range singleFiles {
+		if dest, isLink, isBroken := managedLinkBroken(sf.path); isLink && isBroken {
 			broken = append(broken, brokenLink{
-				platformID: "copilot",
-				linkPath:   rel(copilotPath),
-				dest:       config.DisplayPath(dest),
-			})
-		}
-	}
-
-	// Copilot MCP (.vscode/mcp.json)
-	vscodeMCP := filepath.Join(path, ".vscode", "mcp.json")
-	if dest, err := os.Readlink(vscodeMCP); err == nil {
-		if _, err := os.Stat(dest); err != nil {
-			broken = append(broken, brokenLink{
-				platformID: "copilot",
-				linkPath:   rel(vscodeMCP),
-				dest:       config.DisplayPath(dest),
-			})
-		}
-	}
-
-	// Claude MCP (.mcp.json)
-	claudeMCP := filepath.Join(path, ".mcp.json")
-	if dest, err := os.Readlink(claudeMCP); err == nil {
-		if _, err := os.Stat(dest); err != nil {
-			broken = append(broken, brokenLink{
-				platformID: "claude",
-				linkPath:   rel(claudeMCP),
-				dest:       config.DisplayPath(dest),
-			})
-		}
-	}
-
-	// OpenCode
-	opencodeJSON := filepath.Join(path, "opencode.json")
-	if dest, err := os.Readlink(opencodeJSON); err == nil {
-		if _, err := os.Stat(dest); err != nil {
-			broken = append(broken, brokenLink{
-				platformID: "opencode",
-				linkPath:   rel(opencodeJSON),
+				platformID: sf.platformID,
+				linkPath:   rel(sf.path),
 				dest:       config.DisplayPath(dest),
 			})
 		}
@@ -542,110 +559,37 @@ func collectBrokenUserLinks(agentsHome string) []brokenLink {
 		return strings.TrimPrefix(p, displayBase)
 	}
 
-	// Claude: ~/.claude/CLAUDE.md
+	addBrokenSingle := func(platformID, linkPath string) {
+		if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink && isBroken {
+			broken = append(broken, brokenLink{
+				platformID: platformID,
+				linkPath:   rel(linkPath),
+				dest:       config.DisplayPath(dest),
+			})
+		}
+	}
+	addBrokenDir := func(platformID, dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			addBrokenSingle(platformID, filepath.Join(dir, e.Name()))
+		}
+	}
+
+	// Claude: ~/.claude/CLAUDE.md, settings.json, agents/*, skills/*
 	claudeHome := filepath.Join(homeDir, ".claude")
-	claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
-	if info, err := os.Lstat(claudeMD); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if dest, err := os.Readlink(claudeMD); err == nil {
-			if _, err := os.Stat(dest); err != nil {
-				broken = append(broken, brokenLink{
-					platformID: "claude",
-					linkPath:   rel(claudeMD),
-					dest:       config.DisplayPath(dest),
-				})
-			}
-		}
-	}
-
-	// Claude: ~/.claude/settings.json
-	claudeSettings := filepath.Join(claudeHome, "settings.json")
-	if info, err := os.Lstat(claudeSettings); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if dest, err := os.Readlink(claudeSettings); err == nil {
-			if _, err := os.Stat(dest); err != nil {
-				broken = append(broken, brokenLink{
-					platformID: "claude",
-					linkPath:   rel(claudeSettings),
-					dest:       config.DisplayPath(dest),
-				})
-			}
-		}
-	}
-
-	// Claude: ~/.claude/agents/*
-	claudeAgentsDir := filepath.Join(claudeHome, "agents")
-	if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(claudeAgentsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					if _, err := os.Stat(dest); err != nil {
-						broken = append(broken, brokenLink{
-							platformID: "claude",
-							linkPath:   rel(linkPath),
-							dest:       config.DisplayPath(dest),
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// Claude: ~/.claude/skills/*
-	claudeSkillsDir := filepath.Join(claudeHome, "skills")
-	if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(claudeSkillsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					if _, err := os.Stat(dest); err != nil {
-						broken = append(broken, brokenLink{
-							platformID: "claude",
-							linkPath:   rel(linkPath),
-							dest:       config.DisplayPath(dest),
-						})
-					}
-				}
-			}
-		}
-	}
+	addBrokenSingle("claude", filepath.Join(claudeHome, "CLAUDE.md"))
+	addBrokenSingle("claude", filepath.Join(claudeHome, "settings.json"))
+	addBrokenDir("claude", filepath.Join(claudeHome, "agents"))
+	addBrokenDir("claude", filepath.Join(claudeHome, "skills"))
 
 	// Codex: ~/.codex/agents/*
-	codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
-	if entries, err := os.ReadDir(codexAgentsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(codexAgentsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					if _, err := os.Stat(dest); err != nil {
-						broken = append(broken, brokenLink{
-							platformID: "codex",
-							linkPath:   rel(linkPath),
-							dest:       config.DisplayPath(dest),
-						})
-					}
-				}
-			}
-		}
-	}
+	addBrokenDir("codex", filepath.Join(homeDir, ".codex", "agents"))
 
 	// OpenCode: ~/.opencode/agent/*
-	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
-	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(opencodeAgentDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					if _, err := os.Stat(dest); err != nil {
-						broken = append(broken, brokenLink{
-							platformID: "opencode",
-							linkPath:   rel(linkPath),
-							dest:       config.DisplayPath(dest),
-						})
-					}
-				}
-			}
-		}
-	}
+	addBrokenDir("opencode", filepath.Join(homeDir, doctorOpenCodeDir, "agent"))
 
 	return broken
 }
@@ -679,19 +623,23 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 			}
 		}
 	}
-	// Claude symlinks
+	// Claude rules: a managed reference is a resolvable symlink/junction whose
+	// target exists, or (Windows files) a hard link to the canonical rule
+	// source reconstructed from the "<scope>--<name>" entry name.
 	claudeRulesDir := filepath.Join(path, ".claude", "rules")
 	if entries, err := os.ReadDir(claudeRulesDir); err == nil {
 		for _, e := range entries {
 			linkPath := filepath.Join(claudeRulesDir, e.Name())
-			if dest, err := os.Readlink(linkPath); err == nil {
-				if _, err := os.Stat(dest); err == nil {
-					ok++
-				}
+			if managedLinkHealthy(linkPath) {
+				ok++
+				continue
+			}
+			if claudeRuleHardlinked(linkPath, e.Name(), name, agentsHome) {
+				ok++
 			}
 		}
 	}
-	// Single-file symlinks
+	// Single-file managed links (symlink/junction or hard link).
 	for _, f := range []string{
 		filepath.Join(path, "AGENTS.md"),
 		filepath.Join(path, ".github", "copilot-instructions.md"),
@@ -699,10 +647,8 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 		filepath.Join(path, ".mcp.json"),
 		filepath.Join(path, ".vscode", "mcp.json"),
 	} {
-		if dest, err := os.Readlink(f); err == nil {
-			if _, err := os.Stat(dest); err == nil {
-				ok++
-			}
+		if managedLinkHealthy(f) {
+			ok++
 		}
 	}
 	return ok, brokenCount
@@ -719,107 +665,47 @@ func printUserConfigStatus(agentsHome string) {
 		return strings.TrimPrefix(p, displayBase)
 	}
 
+	// printOne renders a single managed reference path. A resolvable managed
+	// link (POSIX symlink / Windows junction) prints ✓/✗ by target health; a
+	// present non-link path (regular file or Windows hard-linked file, which
+	// has no reparse point to resolve) prints "(local file)".
+	printOne := func(linkPath string) {
+		if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
+			displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
+			if isBroken {
+				fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+			} else {
+				fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
+			}
+			return
+		}
+		if _, err := os.Lstat(linkPath); err == nil {
+			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(linkPath), ui.Dim, ui.Reset)
+		}
+	}
+	printDir := func(dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			linkPath := filepath.Join(dir, e.Name())
+			if _, isLink, _ := managedLinkBroken(linkPath); isLink {
+				printOne(linkPath)
+			}
+		}
+	}
+
 	// Claude
 	claudeHome := filepath.Join(homeDir, ".claude")
-	claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
-	if info, err := os.Lstat(claudeMD); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			if dest, err := os.Readlink(claudeMD); err == nil {
-				displayDest := config.DisplayPath(dest)
-				if _, err := os.Stat(dest); err == nil {
-					fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
-				} else {
-					fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeMD), ui.Dim, displayDest, ui.Reset)
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeMD), ui.Dim, ui.Reset)
-		}
-	}
-
-	claudeSettings := filepath.Join(claudeHome, "settings.json")
-	if info, err := os.Lstat(claudeSettings); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			if dest, err := os.Readlink(claudeSettings); err == nil {
-				displayDest := config.DisplayPath(dest)
-				if _, err := os.Stat(dest); err == nil {
-					fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
-				} else {
-					fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(claudeSettings), ui.Dim, displayDest, ui.Reset)
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(claudeSettings), ui.Dim, ui.Reset)
-		}
-	}
-
-	claudeAgentsDir := filepath.Join(claudeHome, "agents")
-	if entries, err := os.ReadDir(claudeAgentsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(claudeAgentsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					displayDest := config.DisplayPath(dest)
-					if _, err := os.Stat(dest); err == nil {
-						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					} else {
-						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					}
-				}
-			}
-		}
-	}
-
-	claudeSkillsDir := filepath.Join(claudeHome, "skills")
-	if entries, err := os.ReadDir(claudeSkillsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(claudeSkillsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					displayDest := config.DisplayPath(dest)
-					if _, err := os.Stat(dest); err == nil {
-						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					} else {
-						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					}
-				}
-			}
-		}
-	}
+	printOne(filepath.Join(claudeHome, "CLAUDE.md"))
+	printOne(filepath.Join(claudeHome, "settings.json"))
+	printDir(filepath.Join(claudeHome, "agents"))
+	printDir(filepath.Join(claudeHome, "skills"))
 
 	// Codex
-	codexAgentsDir := filepath.Join(homeDir, ".codex", "agents")
-	if entries, err := os.ReadDir(codexAgentsDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(codexAgentsDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					displayDest := config.DisplayPath(dest)
-					if _, err := os.Stat(dest); err == nil {
-						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					} else {
-						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					}
-				}
-			}
-		}
-	}
+	printDir(filepath.Join(homeDir, ".codex", "agents"))
 
 	// OpenCode
-	opencodeAgentDir := filepath.Join(homeDir, doctorOpenCodeDir, "agent")
-	if entries, err := os.ReadDir(opencodeAgentDir); err == nil {
-		for _, e := range entries {
-			linkPath := filepath.Join(opencodeAgentDir, e.Name())
-			if info, err := os.Lstat(linkPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				if dest, err := os.Readlink(linkPath); err == nil {
-					displayDest := config.DisplayPath(dest)
-					if _, err := os.Stat(dest); err == nil {
-						fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					} else {
-						fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-					}
-				}
-			}
-		}
-	}
+	printDir(filepath.Join(homeDir, doctorOpenCodeDir, "agent"))
 }
