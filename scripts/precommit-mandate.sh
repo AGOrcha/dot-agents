@@ -62,13 +62,36 @@ cmd_sonar() {
     printf '  Install Docker + set SONAR_TOKEN to enable the Sonar mandate.\033[0m\n'
     return 0
   fi
+  # Token resolution: explicit $SONAR_TOKEN wins; otherwise reuse the
+  # SonarQube MCP server credentials already configured in .mcp.json
+  # (gitignored — never committed). Looked up in the current worktree
+  # then the main worktree (.mcp.json is gitignored so it only exists in
+  # the primary checkout). The token value is never printed.
+  if [ -z "${SONAR_TOKEN:-}" ]; then
+    mcp_json=""
+    for cand in \
+      "$repo_root/.mcp.json" \
+      "$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')/.mcp.json"
+    do
+      [ -f "$cand" ] && { mcp_json="$cand"; break; }
+    done
+    if [ -n "$mcp_json" ]; then
+      if command -v jq >/dev/null 2>&1; then
+        SONAR_TOKEN="$(jq -r '.mcpServers.sonarqube.env.SONARQUBE_TOKEN // empty' "$mcp_json" 2>/dev/null)"
+        : "${SONAR_HOST_URL:=$(jq -r '.mcpServers.sonarqube.env.SONARQUBE_CLOUD_URL // empty' "$mcp_json" 2>/dev/null)}"
+      else
+        SONAR_TOKEN="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("mcpServers",{}).get("sonarqube",{}).get("env",{}).get("SONARQUBE_TOKEN",""))' "$mcp_json" 2>/dev/null)"
+        : "${SONAR_HOST_URL:=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("mcpServers",{}).get("sonarqube",{}).get("env",{}).get("SONARQUBE_CLOUD_URL",""))' "$mcp_json" 2>/dev/null)}"
+      fi
+      export SONAR_TOKEN SONAR_HOST_URL
+      [ -n "$SONAR_TOKEN" ] && printf '[mandate:sonar] using SonarQube MCP credentials from .mcp.json\n'
+    fi
+  fi
   if [ -z "${SONAR_TOKEN:-}" ]; then
     printf '\033[33m================ SONAR NOT ENFORCED ================\n'
-    printf '[mandate:sonar] SKIPPED: SONAR_TOKEN not set — the SonarCloud\n'
-    printf 'quality gate (incl. new security hotspots) was NOT checked\n'
-    printf 'locally; CI is your only gate. To enforce it here:\n'
-    printf '  export SONAR_TOKEN=<token>  (SonarCloud > Account > Security)\n'
-    printf '===================================================\033[0m\n'
+    printf '[mandate:sonar] SKIPPED: no SONAR_TOKEN and no sonarqube token\n'
+    printf 'in .mcp.json — the SonarCloud quality gate (incl. new security\n'
+    printf 'hotspots) was NOT checked locally; CI is your only gate.\033[0m\n'
     return 0
   fi
   # -Dsonar.qualitygate.wait=true makes the scanner block until SonarCloud
