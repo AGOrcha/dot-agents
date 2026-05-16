@@ -216,3 +216,17 @@ tasks:
         4. Delete feature/workflow-auto-operator branch
         5. Delete pr3/command-decomp branch (superseded by pr3a/pr3b/pr3c)
         6. Verify master CI green
+    - id: workflow-commit-state-coupling
+      title: Workflow state/git commit coupling (da workflow commit + iteration-close auto-stage)
+      status: pending
+      depends_on:
+        - pr3b-workflow
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow
+        - internal/workflow
+        - commands/workflow_commit.go
+      verification_required: true
+      notes: Folds global proposal obs-workflow-state-commit-coupling Part 2. Implement da workflow commit subcommand staging only derived workflow-state paths (no -A, skip submodule/pre-existing-untracked), plus iteration-close auto-stage. Headless-safe (no Claude hook dependency), per-project opt-out via workflow prefs, --dry-run prints exact git add set. Part 1 (global operator rule) handled separately at approval. Source proposal ~/.agents/proposals/obs-workflow-state-commit-coupling.md
+      app_type: go-cli
