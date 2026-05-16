@@ -677,6 +677,7 @@ func TestRunKGPostprocess_NoCRGBinary(t *testing.T) {
 // skip. Simpler: write a fake python that ignores args and prints the JSON.
 func fakeCRGEmittingJSON(t *testing.T, repo, body string) {
 	t.Helper()
+	crgShellShimSkip(t)
 	binDir := filepath.Join(repo, ".venv", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)

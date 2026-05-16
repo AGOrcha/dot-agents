@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ func kgHome() string {
 	if v := os.Getenv("KG_HOME"); v != "" {
 		return v
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	return filepath.Join(home, "knowledge-graph")
 }
 

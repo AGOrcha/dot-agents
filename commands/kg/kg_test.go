@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -73,8 +74,24 @@ func writeCRGStatusFixture(t *testing.T, repo string, nodes []crgNodeFixture) {
 	}
 }
 
+// crgShellShimSkip skips a test that relies on a fake POSIX shell-script CRG
+// binary. Such shims carry a `#!/bin/sh` shebang and no .exe suffix, so Windows
+// cannot execute them — the failure is in the test scaffold, not in kg
+// behavior. The Windows CRG discovery/execution path (Scripts\, .exe suffix,
+// python.exe) is covered by the build-tagged tests in internal/graphstore
+// (crg_venv_windows.go via crg_venv_discovery_test.go / discoverbin_test.go),
+// matching the precedent set by internal/graphstore/crg_wrappers_test.go's
+// makeFakeCRGEnv and crg_buildreport_test.go.
+func crgShellShimSkip(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake POSIX shell CRG shim is non-executable on Windows; Windows CRG path covered by internal/graphstore crg_venv_windows.go discovery tests")
+	}
+}
+
 func writeFakeCRGBinary(t *testing.T, repo, body string) string {
 	t.Helper()
+	crgShellShimSkip(t)
 	binDir := filepath.Join(repo, ".venv", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
@@ -89,6 +106,7 @@ func writeFakeCRGBinary(t *testing.T, repo, body string) string {
 
 func writeFakeCRGPythonEntrypoint(t *testing.T, repo, body string) string {
 	t.Helper()
+	crgShellShimSkip(t)
 	binDir := filepath.Join(repo, ".venv", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
@@ -103,6 +121,7 @@ func writeFakeCRGPythonEntrypoint(t *testing.T, repo, body string) string {
 
 func symlinkPythonIntoFakeVenv(t *testing.T, repo string) {
 	t.Helper()
+	crgShellShimSkip(t)
 	binDir := filepath.Join(repo, ".venv", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)

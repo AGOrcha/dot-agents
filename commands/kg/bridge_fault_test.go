@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -262,6 +263,18 @@ func TestAppendReviewPriorityMatches_LimitEarlyReturn(t *testing.T) {
 // TestCollectCodeBridgeResults_OpenStoreError uses a kg home pointed at a
 // non-directory path so OpenSQLite (called by openKGStore) returns an error.
 func TestCollectCodeBridgeResults_OpenStoreError(t *testing.T) {
+	// This relies on /dev/null being a non-directory file so that
+	// os.MkdirAll(filepath.Dir(dbPath)) inside OpenSQLite hits ENOTDIR on a
+	// path component. Windows has no /dev/null, so MkdirAll would happily
+	// create \dev\null\not-a-dir\ops and the open would succeed — the
+	// POSIX-only assumption is in the fixture path, not in kg prod (prod
+	// correctly wraps the failure as "open graph store" on any OS when a
+	// path component is a real file). Equivalent open-store error wrapping
+	// on non-POSIX paths is exercised by the warm-store fault tests in this
+	// file that close the handle / corrupt the DB.
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only)")
+	}
 	// A file path whose parent component is itself a regular file makes
 	// sqlite's CREATE TABLE Exec fail under the OpenSQLite codepath.
 	bogus := "/dev/null/not-a-dir"
