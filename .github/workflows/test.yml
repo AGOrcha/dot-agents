@@ -334,19 +334,10 @@ jobs:
         run: |
           "${DA_BIN}" skills list
 
-      - name: Test workflow orient (no project context)
-        env:
-          HOME: ${{ env.SMOKE_HOME }}
-          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
-        run: |
-          "${DA_BIN}" workflow orient 2>&1 || true
-
-      - name: Test workflow help
-        env:
-          HOME: ${{ env.SMOKE_HOME }}
-          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
-        run: |
-          "${DA_BIN}" workflow --help
+      # NOTE: `da workflow ...` smoke steps live on pr3b, which extracts the
+      # workflow subcommand. pr3a/base-commands has no `workflow` command,
+      # so those steps would fail here ("unknown command"). pr3b re-adds
+      # them after rebasing onto this test.yml.
 
       - name: Cleanup
         env:
