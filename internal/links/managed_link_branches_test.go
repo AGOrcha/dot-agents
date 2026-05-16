@@ -3,6 +3,7 @@ package links
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -32,6 +33,9 @@ func TestSymlink_SameFileIsNoop(t *testing.T) {
 // existing symlink points somewhere else and is removed via fsops.RemoveAll
 // then recreated.
 func TestSymlink_ReplacesStalePointingElsewhere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "real.txt")
 	stale := filepath.Join(tmp, "stale.txt")
@@ -73,6 +77,9 @@ func TestPathsResolveToSameFile_ErrorBranches(t *testing.T) {
 // compare branch: the stored symlink dest is absolute while the caller
 // passes a relative target that resolves to the same absolute path.
 func TestIsManagedLink_AbsoluteTargetMatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	absTarget := filepath.Join(tmp, "abs-target.txt")
 	if err := os.WriteFile(absTarget, []byte("a"), 0o644); err != nil {
@@ -92,6 +99,9 @@ func TestIsManagedLink_AbsoluteTargetMatch(t *testing.T) {
 // TestIsManagedLinkUnder_AbsolutePrefixBranch covers the branch where the
 // raw prefix does not match but the absolute prefix does.
 func TestIsManagedLinkUnder_AbsolutePrefixBranch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {

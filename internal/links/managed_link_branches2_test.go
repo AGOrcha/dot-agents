@@ -3,12 +3,16 @@ package links
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 // TestSymlink_AlreadyCorrectIsNoop covers the existing==target early
 // return (the link already points exactly where requested).
 func TestSymlink_AlreadyCorrectIsNoop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "t.txt")
 	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
@@ -52,6 +56,9 @@ func TestSymlink_ReplacesRegularFileNonSymlink(t *testing.T) {
 // absolute symlink dest and querying with a relative target/prefix from a
 // known working directory.
 func TestIsManagedLink_And_Under_AbsoluteBranches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {

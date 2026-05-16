@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -11,6 +12,9 @@ import (
 // when the SameFile fast-path cannot fire because the target does not
 // exist (a dangling symlink whose stored text already equals target).
 func TestSymlink_DanglingButCorrectIsNoop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	missingTarget := filepath.Join(tmp, "not-created.txt")
 	link := filepath.Join(tmp, "lnk")
@@ -28,6 +32,9 @@ func TestSymlink_DanglingButCorrectIsNoop(t *testing.T) {
 // the two "failed to remove" error returns: (a) an existing symlink that
 // points elsewhere, (b) an existing regular file occupying linkPath.
 func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "target.txt")
 	if err := os.WriteFile(target, []byte("t"), 0o644); err != nil {
