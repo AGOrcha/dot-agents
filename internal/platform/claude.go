@@ -507,7 +507,9 @@ func (c *claude) RemoveLinks(project, repoPath string) error {
 
 	c.removeProjectRuleLinks(project, repoPath, agentsHome)
 	c.removeProjectSettingsLink(project, repoPath, agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, ".mcp.json"), agentsHome)
+	mcpPath := filepath.Join(repoPath, ".mcp.json")
+	links.RemoveIfSymlinkUnder(mcpPath, agentsHome)
+	links.RemoveIfHardlinkedToAny(mcpPath, claudeMCPSources(agentsHome, project))
 	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome)
 	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome)
 	c.removeScopedDirLinks(filepath.Join(repoPath, claudeAgentsBucketDir, "skills"), agentsHome)
@@ -522,6 +524,8 @@ func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
 			if strings.HasPrefix(e.Name(), prefix) {
 				linkPath := filepath.Join(rulesDir, e.Name())
 				links.RemoveIfSymlinkUnder(linkPath, agentsHome)
+				stem := strings.TrimSuffix(strings.TrimPrefix(e.Name(), prefix), ".md")
+				links.RemoveIfHardlinkedToAny(linkPath, claudeRuleSources(agentsHome, project, stem))
 			}
 		}
 	}
@@ -558,6 +562,28 @@ func isPreExistingManagedLink(path, source string) bool {
 		return true
 	}
 	return links.IsManagedLink(path, source)
+}
+
+// claudeMCPSources enumerates every canonical .mcp.json source path
+// linkProjectMCP could have linked, so RemoveLinks can drop a Windows hard
+// link (no reparse point) the same way RemoveIfSymlinkUnder drops a symlink.
+func claudeMCPSources(agentsHome, project string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		for _, name := range []string{"claude.json", "mcp.json"} {
+			srcs = append(srcs, filepath.Join(agentsHome, "mcp", scope, name))
+		}
+	}
+	return srcs
+}
+
+// claudeRuleSources enumerates the canonical project-rule source paths
+// createRulesLinks could have linked for a given link stem. The repo link is
+// always named "<project>--<stem>.md" but the source keeps its original
+// .md/.mdc/.txt extension.
+func claudeRuleSources(agentsHome, project, stem string) []string {
+	base := filepath.Join(agentsHome, "rules", project, stem)
+	return []string{base + ".md", base + ".mdc", base + ".txt"}
 }
 
 func isClaudeAgentDir(path string) bool {

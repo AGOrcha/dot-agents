@@ -610,16 +610,22 @@ func formatSharedTargetPlanForDryRun(plan ResourcePlan, repoPath string) []strin
 			src = "(unknown source)"
 		}
 		dest := resolveIntentTargetPath(intent.TargetPath, repoPath)
+		// Normalize to forward slashes so dry-run output is byte-identical
+		// across OSes (Windows filepath.Join yields backslashes, which would
+		// otherwise make this preview non-reproducible and break exact-line
+		// assertions / cross-platform dedup display).
+		srcDisp := filepath.ToSlash(config.DisplayPath(src))
+		destDisp := filepath.ToSlash(config.DisplayPath(dest))
 		var line string
 		switch {
 		case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
-			line = fmt.Sprintf("shared target: symlink %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+			line = fmt.Sprintf("shared target: symlink %s -> %s", destDisp, srcDisp)
 		case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
-			line = fmt.Sprintf("shared target: symlink file %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+			line = fmt.Sprintf("shared target: symlink file %s -> %s", destDisp, srcDisp)
 		case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
-			line = fmt.Sprintf("shared target: write %s <- %s (%s)", config.DisplayPath(dest), config.DisplayPath(src), intent.Materializer)
+			line = fmt.Sprintf("shared target: write %s <- %s (%s)", destDisp, srcDisp, intent.Materializer)
 		default:
-			line = fmt.Sprintf("shared target: preview %s/%s %s", intent.Shape, intent.Transport, config.DisplayPath(dest))
+			line = fmt.Sprintf("shared target: preview %s/%s %s", intent.Shape, intent.Transport, destDisp)
 		}
 		if n := len(res.Duplicates); n > 0 {
 			line += fmt.Sprintf(" (%d duplicate intent(s) merged)", n)

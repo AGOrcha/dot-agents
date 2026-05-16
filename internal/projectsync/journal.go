@@ -135,6 +135,18 @@ func ListPendingPromoteJournals(agentsHome string) ([]PromoteJournalEntry, error
 	dir := promoteJournalDirPath(agentsHome)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		// Distinguish "journal dir simply absent" (legitimate no-op) from "a
+		// path component is not a directory" (e.g. agents-home is a regular
+		// file, so the .promote-journal subpath cannot exist). On Windows,
+		// os.ReadDir under a regular file maps to a NotExist-class error, so
+		// os.IsNotExist alone would silently hide the fault. The parent
+		// (agents-home) must be an existing *directory* for an absent journal
+		// dir to be benign; if the parent exists but is not a directory, the
+		// failure is real and must propagate. The %v (not %w) deliberately
+		// breaks the fs.ErrNotExist chain so callers cannot re-swallow it.
+		if pi, statErr := os.Lstat(agentsHome); statErr == nil && !pi.IsDir() {
+			return nil, fmt.Errorf("reading promote-journal dir %s (%v)", dir, err)
+		}
 		if os.IsNotExist(err) {
 			return nil, nil
 		}

@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
@@ -147,7 +148,13 @@ func preparePromoteDest(name, projectName string, spec PromoteSpec) (string, err
 // missing journal only degrades downstream recovery quality, never the promote
 // itself.
 func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec, journalPath string) error {
-	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+	// "Already a managed link" is OS-specific: a POSIX symlink, or on Windows
+	// a directory junction / hard link (neither of which sets os.ModeSymlink
+	// on a hard link, and a junction is only a symlink to recent Go). Route
+	// the decision through the links abstraction so an already-promoted
+	// repo-local link is recognized as idempotent on every OS instead of
+	// being mistaken for a real foreign directory.
+	if isManagedSource(sourcePath, sourceInfo) {
 		return validatePromoteSymlink(sourcePath, canonicalPath, name, spec)
 	}
 	if _, err := os.Stat(filepath.Join(sourcePath, spec.ManifestName)); err != nil {
@@ -198,17 +205,44 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 	return nil
 }
 
-// validatePromoteSymlink confirms that an existing repo-local symlink points
-// at the canonical path; mismatches and read errors surface as fatal errors.
-func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
-	existing, err := os.Readlink(sourcePath)
-	if err != nil {
-		return fmt.Errorf("reading existing symlink for %s %q: %w", spec.Singular, name, err)
+// isManagedSource reports whether the repo-local source path is an
+// already-materialized managed link (POSIX symlink, or Windows junction /
+// hard link) rather than a real directory tree awaiting promotion. The
+// POSIX-symlink fast path preserves the prior behavior exactly; the
+// resolvable-target / hard-link branches add Windows correctness, where a
+// junction or hard link does not set os.ModeSymlink.
+func isManagedSource(sourcePath string, sourceInfo os.FileInfo) bool {
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return true
 	}
-	if existing != canonicalPath {
+	if _, ok := links.ManagedLinkTarget(sourcePath); ok {
+		return true
+	}
+	// Hard link (no reparse point): identity is a shared inode with the
+	// canonical store. Without a known target here we treat any resolvable
+	// reparse point as managed (above); a plain real dir falls through to
+	// the copy path, and validatePromoteSymlink does the canonical compare.
+	return false
+}
+
+// validatePromoteSymlink confirms that an existing repo-local managed link
+// references the canonical path; a mispointed link and unreadable links
+// surface as fatal errors. Detection is OS-aware: a POSIX symlink or Windows
+// junction resolves via links.ManagedLinkTarget, while a Windows hard link
+// (no reparse point) is recognized by links.IsManagedLink against the known
+// canonical target.
+func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
+	if links.IsManagedLink(sourcePath, canonicalPath) {
+		return nil // already promoted → idempotent success
+	}
+	if existing, ok := links.ManagedLinkTarget(sourcePath); ok {
 		return fmt.Errorf("%s %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, existing, canonicalPath)
 	}
-	return nil
+	// Reached only for a managed entry with no resolvable target that is not
+	// the canonical file: a dangling link, or (Windows) a hard link to some
+	// other file. There is no target to name, so report the mispointing
+	// generically. Preserves the prior fatal-on-mismatch contract.
+	return fmt.Errorf("%s %q is already a symlink but does not point to the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, canonicalPath)
 }
 
 // clearExistingCanonical removes a stale symlink or, when Force is set, a real
@@ -219,8 +253,13 @@ func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error 
 	if err != nil {
 		return nil
 	}
+	// A stale managed link occupying the canonical slot is removable on every
+	// OS. ModeSymlink covers POSIX symlinks; ManagedLinkTarget additionally
+	// recognizes a Windows directory junction (which carries no ModeSymlink
+	// bit on older Go and would otherwise be misread as a real directory).
+	_, isResolvableLink := links.ManagedLinkTarget(canonicalPath)
 	switch {
-	case fi.Mode()&os.ModeSymlink != 0:
+	case fi.Mode()&os.ModeSymlink != 0 || isResolvableLink:
 		if err := os.Remove(canonicalPath); err != nil {
 			return fmt.Errorf("removing stale canonical symlink for %s %q: %w", spec.Singular, name, err)
 		}

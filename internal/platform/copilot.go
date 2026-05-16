@@ -363,7 +363,7 @@ func legacyCopilotHookNames(specs []HookSpec) map[string]bool {
 func (c *copilot) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	c.removeTopLevelLinks(repoPath, agentsHome)
+	c.removeTopLevelLinks(project, repoPath, agentsHome)
 	c.removeClaudeCompatSettings(project, repoPath, agentsHome)
 	c.removeSkillsLinks(repoPath, agentsHome)
 	c.removeAgentLinks(repoPath, agentsHome)
@@ -371,9 +371,41 @@ func (c *copilot) RemoveLinks(project, repoPath string) error {
 	return nil
 }
 
-func (c *copilot) removeTopLevelLinks(repoPath, agentsHome string) {
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD), agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON), agentsHome)
+func (c *copilot) removeTopLevelLinks(project, repoPath, agentsHome string) {
+	instr := filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD)
+	links.RemoveIfSymlinkUnder(instr, agentsHome)
+	links.RemoveIfHardlinkedToAny(instr, copilotInstructionsSources(agentsHome, project))
+
+	mcp := filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON)
+	links.RemoveIfSymlinkUnder(mcp, agentsHome)
+	links.RemoveIfHardlinkedToAny(mcp, copilotMCPSources(agentsHome, project))
+}
+
+// copilotInstructionsSources mirrors resolveInstructionsSrc: every canonical
+// path createInstructionsLink could have linked, so a Windows hard-linked
+// managed instructions file is cleaned up alongside the symlink case.
+func copilotInstructionsSources(agentsHome, project string) []string {
+	srcs := []string{
+		filepath.Join(agentsHome, "rules", project, copilotInstructionsMD),
+		filepath.Join(agentsHome, "rules", "global", copilotInstructionsMD),
+	}
+	for _, scope := range []string{project, "global"} {
+		for _, ext := range []string{"md", "mdc", "txt"} {
+			srcs = append(srcs, filepath.Join(agentsHome, "rules", scope, "rules."+ext))
+		}
+	}
+	return srcs
+}
+
+// copilotMCPSources mirrors createMCPLinks' resolveScopedFile call.
+func copilotMCPSources(agentsHome, project string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		for _, name := range []string{"copilot.json", copilotMCPJSON} {
+			srcs = append(srcs, filepath.Join(agentsHome, "mcp", scope, name))
+		}
+	}
+	return srcs
 }
 
 func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome string) {

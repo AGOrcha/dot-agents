@@ -122,6 +122,17 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 	return nil
 }
 
+// opencodeConfigSources mirrors CreateLinks' resolveScopedFile call so a
+// Windows hard-linked managed opencode.json (no reparse point) is cleaned up
+// the same way RemoveIfSymlinkUnder drops a POSIX symlink.
+func opencodeConfigSources(agentsHome, project string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		srcs = append(srcs, filepath.Join(agentsHome, "settings", scope, opencodeJSON))
+	}
+	return srcs
+}
+
 func (o *opencode) ensureUserAgents(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, opencodeDir, "agent")
@@ -135,7 +146,9 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, opencodeJSON), agentsHome)
+	cfg := filepath.Join(repoPath, opencodeJSON)
+	links.RemoveIfSymlinkUnder(cfg, agentsHome)
+	links.RemoveIfHardlinkedToAny(cfg, opencodeConfigSources(agentsHome, project))
 
 	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {

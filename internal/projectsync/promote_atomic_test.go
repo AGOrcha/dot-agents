@@ -251,14 +251,18 @@ func TestMaterializePromoteSource_CopyTreeError(t *testing.T) {
 	}
 }
 
-// TestValidatePromoteSymlink_ReadlinkError exercises the os.Readlink-fail
-// branch by passing a non-existent path.
-func TestValidatePromoteSymlink_ReadlinkError(t *testing.T) {
+// TestValidatePromoteSymlink_UnresolvableSource exercises the final
+// generic-mismatch branch: a source that is neither the canonical managed
+// link nor a resolvable foreign link (here, a non-existent path — the
+// OS-aware analogue of a Windows hard link to some other file, which has no
+// reparse point to resolve). It must still be fatal, matching the prior
+// fatal-on-mismatch contract.
+func TestValidatePromoteSymlink_UnresolvableSource(t *testing.T) {
 	spec := atomicWidgetSpec()
 	err := validatePromoteSymlink(filepath.Join(t.TempDir(), "ghost"),
 		filepath.Join(t.TempDir(), "canon"), "alpha", spec)
-	if err == nil || !strings.Contains(err.Error(), "reading existing symlink") {
-		t.Errorf("expected readlink error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "does not point to the canonical path") {
+		t.Errorf("expected unresolvable-source mismatch error, got %v", err)
 	}
 }
 
