@@ -16,6 +16,18 @@ type resourceDir struct {
 	File string
 }
 
+// removeHardlinkedManaged is the error-propagating adapter every RemoveLinks
+// path uses for links.RemoveIfHardlinkedToAny. The matched/not-matched bool
+// is informational for removal; only the error matters here — a non-nil err
+// means a still-present managed hard link could NOT be removed, which must
+// surface so `da remove` / doctor do not report success while an active
+// managed file is left behind. Discarding the (bool,err) pair (the prior
+// behavior at 11 call sites) silently hid that failure.
+func removeHardlinkedManaged(path string, sources []string) error {
+	_, err := links.RemoveIfHardlinkedToAny(path, sources)
+	return err
+}
+
 func scopedNames(project string) []string {
 	return []string{project, "global"}
 }

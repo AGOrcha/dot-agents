@@ -3,6 +3,7 @@ package platform
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -126,7 +127,9 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 	for _, src := range globalCandidates {
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
+			if err := links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown)); err != nil {
+				return err
+			}
 			break
 		}
 	}
@@ -134,7 +137,9 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	for _, name := range []string{"agents.md", "agents.mdc"} {
 		src := filepath.Join(agentsHome, "rules", project, name)
 		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
+			if err := links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown)); err != nil {
+				return err
+			}
 			break
 		}
 	}
@@ -144,7 +149,9 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
+		if err := links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml")); err != nil {
+			return err
+		}
 	}
 
 	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
@@ -246,24 +253,27 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 func (c *codex) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome)
+	var errs []error
+	errs = append(errs,
+		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome),
+		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome),
+	)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
 		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome)
+	errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome))
 
-	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents"))
+	errs = append(errs, c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents")))
 
 	skillsDir := filepath.Join(repoPath, codexAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
+			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // pruneCodexRepoAgentTomls deletes stale `.codex/agents/*.toml` files in the

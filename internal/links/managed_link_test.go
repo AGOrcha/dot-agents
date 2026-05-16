@@ -137,20 +137,20 @@ func TestRemoveIfHardlinkedToAny(t *testing.T) {
 	if err := os.WriteFile(plain, []byte("p"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if links.RemoveIfHardlinkedToAny(plain, []string{canonical, other}) {
-		t.Error("unrelated file should not be reported hardlinked")
+	if ok, err := links.RemoveIfHardlinkedToAny(plain, []string{canonical, other}); ok || err != nil {
+		t.Errorf("unrelated file: want (false,nil), got (%v,%v)", ok, err)
 	}
 	if _, err := os.Stat(plain); err != nil {
 		t.Error("unrelated file must remain")
 	}
 
-	// Hardlinked to a source → removed, returns true.
+	// Hardlinked to a source → removed, returns (true, nil).
 	managed := filepath.Join(tmp, "managed")
 	if err := os.Link(canonical, managed); err != nil {
 		t.Fatal(err)
 	}
-	if !links.RemoveIfHardlinkedToAny(managed, []string{other, canonical}) {
-		t.Error("hard link to a candidate source should be detected and removed")
+	if ok, err := links.RemoveIfHardlinkedToAny(managed, []string{other, canonical}); !ok || err != nil {
+		t.Errorf("managed hard link: want (true,nil), got (%v,%v)", ok, err)
 	}
 	if _, err := os.Stat(managed); !os.IsNotExist(err) {
 		t.Errorf("managed hard link should be removed, stat err=%v", err)

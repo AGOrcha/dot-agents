@@ -960,10 +960,11 @@ func TestCodexEnsureUserSkills_ErrorSurfaces(t *testing.T) {
 	}
 }
 
-// TestClaudeEnsureUserAgents_ContinueOnInHomeError covers the continue
-// branch in the outer ensureUserAgents loop when ensureUserAgentsInHome
-// fails.
-func TestClaudeEnsureUserAgents_ContinueOnInHomeError(t *testing.T) {
+// TestClaudeEnsureUserAgents_InHomeErrorSurfaces verifies the outer
+// ensureUserAgents loop no longer swallows a per-home-root failure: a real
+// link/mkdir error must propagate so add/refresh/doctor cannot report
+// success while a managed user-agent link was never created (HIGH-3).
+func TestClaudeEnsureUserAgents_InHomeErrorSurfaces(t *testing.T) {
 	agentsHome, _ := setupAgentsHome(t)
 	globalAgents := filepath.Join(agentsHome, "agents", "global", "reviewer")
 	if err := os.MkdirAll(globalAgents, 0755); err != nil {
@@ -975,8 +976,8 @@ func TestClaudeEnsureUserAgents_ContinueOnInHomeError(t *testing.T) {
 	withMkdirAllError(t, filepath.Join(".claude", "agents"))
 
 	c := NewClaude().(*claude)
-	if err := c.ensureUserAgents(agentsHome); err != nil {
-		t.Fatalf("ensureUserAgents should swallow inner err, got %v", err)
+	if err := c.ensureUserAgents(agentsHome); err == nil {
+		t.Fatal("ensureUserAgents must propagate the inner per-home error, got nil")
 	}
 }
 
@@ -1611,5 +1612,328 @@ func TestSyncScopedFileSymlinks_MkdirAllErrorSurfaces(t *testing.T) {
 	err := syncScopedFileSymlinks(agentsHome, "skills", "global", "SKILL.md", dstRoot, ".md")
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("syncScopedFileSymlinks err = %v, want %v", err, errSeamSynthetic)
+	}
+}
+
+// --- HIGH-3: CreateLinks-family must propagate link-creation failures -----
+//
+// links.Symlink now refuses to replace an unmanaged non-empty directory at
+// the link path (it would otherwise recursively delete user data). Before
+// HIGH-3, callers ignored links.Symlink's error, so the refusal silently
+// no-oped and add/refresh/doctor reported success with config missing.
+// Each test stages a non-empty unmanaged dir at a managed link path and
+// asserts the platform CreateLinks-family surfaces the refusal.
+
+func stageBlockingDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "local-user-work.txt"), []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCopilotCreateInstructionsLink_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "rules", "global", "copilot-instructions.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# instr"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, ".github", "copilot-instructions.md"))
+
+	c := NewCopilot().(*copilot)
+	if err := c.createInstructionsLink("proj", repo, agentsHome); err == nil {
+		t.Fatal("createInstructionsLink must propagate links.Symlink refusal, got nil")
+	}
+}
+
+func TestOpenCodeCreateLinks_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "settings", "proj", "opencode.json")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, "opencode.json"))
+
+	o := NewOpenCode().(*opencode)
+	if err := o.CreateLinks("proj", repo); err == nil {
+		t.Fatal("opencode CreateLinks must propagate links.Symlink refusal, got nil")
+	}
+}
+
+func TestClaudeLinkProjectMCP_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, ".mcp.json"))
+
+	c := NewClaude().(*claude)
+	if err := c.linkProjectMCP("proj", repo, agentsHome); err == nil {
+		t.Fatal("linkProjectMCP must propagate links.Symlink refusal, got nil")
+	}
+}
+
+func TestCodexCreateLinks_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "rules", "global", "agents.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, codexAgentsMarkdown))
+
+	c := NewCodex().(*codex)
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("codex CreateLinks must propagate links.Symlink refusal, got nil")
+	}
+}
+
+// --- MED-2: RemoveLinks must surface a failed managed-hardlink removal ----
+//
+// removeHardlinkedManaged adapts links.RemoveIfHardlinkedToAny's (bool,err);
+// when a still-present managed hard link cannot be removed the error must
+// thread out of RemoveLinks so `da remove` / doctor do not report success.
+func TestCursorRemoveLinks_SurfacesManagedHardlinkRemovalFailure(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "rules", "global", "style.mdc")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rulesDir := filepath.Join(repo, cursorDir, "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(rulesDir, "global--style.mdc")
+	if err := os.Link(src, managed); err != nil {
+		t.Skipf("hard link unsupported: %v", err)
+	}
+	// Make the parent unwritable so fsops.RemoveAll(managed) fails while the
+	// managed hard link is still present and matched. On platforms/filesystems
+	// where this does not actually block removal (e.g. Windows), skip — the
+	// (bool,err) threading is also covered by internal/links unit tests.
+	if err := os.Chmod(rulesDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(rulesDir, 0755) })
+	if os.Remove(managed) == nil {
+		t.Skip("read-only parent does not block removal on this platform")
+	}
+
+	c := NewCursor().(*cursor)
+	if err := c.RemoveLinks("proj", repo); err == nil {
+		t.Fatal("cursor RemoveLinks must surface the failed managed-hardlink removal, got nil")
+	}
+}
+
+// Cursor createRuleLinks must propagate links.Hardlink's refusal to replace
+// an unmanaged non-empty directory at the rule link path (previously the
+// error was discarded as "best-effort").
+func TestCursorCreateRuleLinks_PropagatesHardlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "rules", "global", "style.mdc")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, cursorDir, "rules", "global--style.mdc"))
+
+	c := NewCursor().(*cursor)
+	if err := c.createRuleLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("createRuleLinks must propagate links.Hardlink refusal, got nil")
+	}
+}
+
+// Cursor settings/mcp/ignore hardlink helpers must propagate the refusal too.
+func TestCursorCreateSettingsMCPIgnore_PropagateHardlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	mk := func(rel, name string) {
+		p := filepath.Join(agentsHome, rel, "proj", name)
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("settings", "cursor.json")
+	mk("mcp", "cursor.json")
+	mk("settings", "cursorignore")
+
+	c := NewCursor().(*cursor)
+
+	stageBlockingDir(t, filepath.Join(repo, cursorDir, "settings.json"))
+	if err := c.createSettingsLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("createSettingsLinks must propagate hardlink refusal")
+	}
+	stageBlockingDir(t, filepath.Join(repo, cursorDir, "mcp.json"))
+	if err := c.createMCPLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("createMCPLinks must propagate hardlink refusal")
+	}
+	stageBlockingDir(t, filepath.Join(repo, ".cursorignore"))
+	if err := c.createIgnoreLink("proj", repo, agentsHome); err == nil {
+		t.Fatal("createIgnoreLink must propagate hardlink refusal")
+	}
+}
+
+// Claude createRulesLinks must propagate the per-rule links.Symlink error
+// (new return inside the rule emit loop).
+func TestClaudeCreateRulesLinks_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	ruleSrcDir := filepath.Join(agentsHome, "rules", "proj")
+	if err := os.MkdirAll(ruleSrcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleSrcDir, "style.md"), []byte("r"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, claudeDir, "rules", "proj--style.md"))
+
+	c := NewClaude().(*claude)
+	if err := c.createRulesLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("createRulesLinks must propagate links.Symlink refusal, got nil")
+	}
+}
+
+// Claude linkUserAgent → ensureUserAgentsInHome must propagate a per-agent
+// links.Symlink refusal (blocking dir at the user-home agent link path).
+func TestClaudeLinkUserAgent_PropagatesSymlinkRefusal(t *testing.T) {
+	tmp := t.TempDir()
+	globalAgents := filepath.Join(tmp, "agents", "global")
+	agentDir := filepath.Join(globalAgents, "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# r"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	userAgentsDir := filepath.Join(tmp, "home", ".claude", "agents")
+	stageBlockingDir(t, filepath.Join(userAgentsDir, "reviewer"))
+
+	c := NewClaude().(*claude)
+	entries, err := os.ReadDir(globalAgents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ensureUserAgentsInHome(filepath.Join(tmp, "home"), globalAgents, entries); err == nil {
+		t.Fatal("ensureUserAgentsInHome must propagate linkUserAgent refusal, got nil")
+	}
+}
+
+// Claude ensureUserRules must surface a links.Symlink refusal at the
+// per-home CLAUDE.md link path (collected via errors.Join).
+func TestClaudeEnsureUserRules_PropagatesSymlinkRefusal(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	src := filepath.Join(agentsHome, "rules", "global", "rules.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# r"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(tmp, "home", ".claude", "CLAUDE.md"))
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err == nil {
+		t.Fatal("ensureUserRules must propagate links.Symlink refusal, got nil")
+	}
+}
+
+// Codex project-override AGENTS.md symlink refusal must propagate (second
+// links.Symlink call in codex CreateLinks).
+func TestCodexCreateLinks_PropagatesProjectOverrideRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	proj := filepath.Join(agentsHome, "rules", "proj")
+	if err := os.MkdirAll(proj, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "agents.md"), []byte("# a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, codexAgentsMarkdown))
+
+	c := NewCodex().(*codex)
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("codex CreateLinks must propagate project-override symlink refusal, got nil")
+	}
+}
+
+// Codex config.toml symlink refusal must propagate.
+func TestCodexCreateLinks_PropagatesConfigTomlRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "settings", "proj", "codex.toml")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, codexDir, "config.toml"))
+
+	c := NewCodex().(*codex)
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("codex CreateLinks must propagate config.toml symlink refusal, got nil")
+	}
+}
+
+// Copilot createMCPLinks symlink refusal must propagate.
+func TestCopilotCreateMCPLinks_PropagatesSymlinkRefusal(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	src := filepath.Join(agentsHome, "mcp", "proj", "copilot.json")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageBlockingDir(t, filepath.Join(repo, copilotVSCodeDir, copilotMCPJSON))
+
+	c := NewCopilot().(*copilot)
+	if err := c.createMCPLinks("proj", repo, agentsHome); err == nil {
+		t.Fatal("createMCPLinks must propagate links.Symlink refusal, got nil")
+	}
+}
+
+// Cursor removeRuleEntry returns nil for a directory entry and for a name
+// matching no managed prefix (the new explicit nil returns).
+func TestCursorRemoveRuleEntry_NonManagedAndDirReturnNil(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	rulesDir := filepath.Join(repo, cursorDir, "rules")
+	if err := os.MkdirAll(filepath.Join(rulesDir, "adir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "unrelated.mdc"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCursor().(*cursor)
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := c.removeRuleEntry(e, rulesDir, "proj", agentsHome); err != nil {
+			t.Fatalf("removeRuleEntry(%s) = %v, want nil", e.Name(), err)
+		}
 	}
 }

@@ -98,9 +98,15 @@ cmd_sonar() {
   # computes the gate and exit non-zero if it fails — without this the CLI
   # exits 0 on a successful *upload* regardless of the gate verdict, so a
   # local scan would NOT have caught e.g. unreviewed new security hotspots.
+  #
+  # Pass secrets by env-var NAME only (`-e SONAR_TOKEN`, no inline value):
+  # `-e VAR=value` puts the token in docker's argv where `ps`/runner
+  # diagnostics can read it. Export so the child docker inherits it.
+  export SONAR_TOKEN
+  export SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}"
   docker run --rm \
-    -e SONAR_TOKEN="$SONAR_TOKEN" \
-    -e SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}" \
+    -e SONAR_TOKEN \
+    -e SONAR_HOST_URL \
     -v "$repo_root:/usr/src" \
     sonarsource/sonar-scanner-cli:latest \
     -Dsonar.qualitygate.wait=true \

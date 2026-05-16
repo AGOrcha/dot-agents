@@ -2,6 +2,7 @@ package platform
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,7 +114,9 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 
 	// opencode.json config
 	if src := resolveScopedFile(agentsHome, "settings", project, opencodeJSON); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, opencodeJSON))
+		if err := links.Symlink(src, filepath.Join(repoPath, opencodeJSON)); err != nil {
+			return err
+		}
 	}
 
 	// .opencode/agent/*.md and .agents/skills/ — emitted by CollectAndExecuteSharedTargetPlan
@@ -146,28 +149,34 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
+	var errs []error
+
 	cfg := filepath.Join(repoPath, opencodeJSON)
-	links.RemoveIfSymlinkUnder(cfg, agentsHome)
-	links.RemoveIfHardlinkedToAny(cfg, opencodeConfigSources(agentsHome, project))
+	errs = append(errs,
+		links.RemoveIfSymlinkUnder(cfg, agentsHome),
+		removeHardlinkedManaged(cfg, opencodeConfigSources(agentsHome, project)),
+	)
 
 	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
 			dst := filepath.Join(agentDir, e.Name())
-			links.RemoveIfSymlinkUnder(dst, agentsHome)
 			name := strings.TrimSuffix(e.Name(), ".md")
-			links.RemoveIfHardlinkedToAny(dst, scopedAgentFileSources(agentsHome, project, name, ".md"))
+			errs = append(errs,
+				links.RemoveIfSymlinkUnder(dst, agentsHome),
+				removeHardlinkedManaged(dst, scopedAgentFileSources(agentsHome, project, name, ".md")),
+			)
 		}
 	}
 
 	skillsDir := filepath.Join(repoPath, ".agents", "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
+			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {

@@ -3,6 +3,7 @@ package platform
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -263,7 +264,9 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 		return err
 	}
 	c.linkProjectSettings(project, repoPath, agentsHome)
-	c.linkProjectMCP(project, repoPath, agentsHome)
+	if err := c.linkProjectMCP(project, repoPath, agentsHome); err != nil {
+		return err
+	}
 
 	if err := c.createAgentsLinks(project, repoPath, agentsHome); err != nil {
 		return err
@@ -306,10 +309,11 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 	)
 }
 
-func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) {
+func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "mcp", project, "claude.json", "mcp.json"); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
+		return links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
 	}
+	return nil
 }
 
 func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
@@ -342,7 +346,9 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	for name, src := range wanted {
-		links.Symlink(src, filepath.Join(rulesDir, name))
+		if err := links.Symlink(src, filepath.Join(rulesDir, name)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -382,12 +388,11 @@ func (c *claude) ensureUserAgents(agentsHome string) error {
 		return nil
 	}
 
+	var errs []error
 	for _, homeRoot := range config.UserHomeRoots() {
-		if err := c.ensureUserAgentsInHome(homeRoot, globalAgents, entries); err != nil {
-			continue
-		}
+		errs = append(errs, c.ensureUserAgentsInHome(homeRoot, globalAgents, entries))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries []os.DirEntry) error {
@@ -396,21 +401,23 @@ func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries [
 		return err
 	}
 	for _, entry := range entries {
-		c.linkUserAgent(globalAgents, userAgentsDir, entry)
+		if err := c.linkUserAgent(globalAgents, userAgentsDir, entry); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirEntry) {
+func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirEntry) error {
 	agentDir := filepath.Join(globalAgents, entry.Name())
 	if !isClaudeAgentDir(agentDir) {
-		return
+		return nil
 	}
 	target := filepath.Join(userAgentsDir, entry.Name())
 	if isPreExistingManagedLink(target, agentDir) {
-		return
+		return nil
 	}
-	links.Symlink(agentDir, target)
+	return links.Symlink(agentDir, target)
 }
 
 func (c *claude) ensureUserRules(agentsHome string) error {
@@ -434,15 +441,19 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 		return nil
 	}
 
+	var errs []error
 	for _, homeRoot := range config.UserHomeRoots() {
 		target := filepath.Join(homeRoot, claudeDir, "CLAUDE.md")
 		if isPreExistingManagedLink(target, src) {
 			continue // already a managed link, leave it
 		}
-		os.MkdirAll(filepath.Join(homeRoot, claudeDir), 0755)
-		links.Symlink(src, target)
+		if err := os.MkdirAll(filepath.Join(homeRoot, claudeDir), 0755); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, links.Symlink(src, target))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (c *claude) ensureUserSettings(agentsHome string) error {
@@ -505,33 +516,41 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 func (c *claude) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	c.removeProjectRuleLinks(project, repoPath, agentsHome)
-	c.removeProjectSettingsLink(project, repoPath, agentsHome)
 	mcpPath := filepath.Join(repoPath, ".mcp.json")
-	links.RemoveIfSymlinkUnder(mcpPath, agentsHome)
-	links.RemoveIfHardlinkedToAny(mcpPath, claudeMCPSources(agentsHome, project))
-	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome)
-	c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome)
-	c.removeScopedDirLinks(filepath.Join(repoPath, claudeAgentsBucketDir, "skills"), agentsHome)
-	return nil
+	return errors.Join(
+		c.removeProjectRuleLinks(project, repoPath, agentsHome),
+		c.removeProjectSettingsLink(project, repoPath, agentsHome),
+		links.RemoveIfSymlinkUnder(mcpPath, agentsHome),
+		removeHardlinkedManaged(mcpPath, claudeMCPSources(agentsHome, project)),
+		c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "agents"), agentsHome),
+		c.removeScopedDirLinks(filepath.Join(repoPath, claudeDir, "skills"), agentsHome),
+		c.removeScopedDirLinks(filepath.Join(repoPath, claudeAgentsBucketDir, "skills"), agentsHome),
+	)
 }
 
-func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) {
+func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
-	if entries, err := os.ReadDir(rulesDir); err == nil {
-		prefix := project + "--"
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), prefix) {
-				linkPath := filepath.Join(rulesDir, e.Name())
-				links.RemoveIfSymlinkUnder(linkPath, agentsHome)
-				stem := strings.TrimSuffix(strings.TrimPrefix(e.Name(), prefix), ".md")
-				links.RemoveIfHardlinkedToAny(linkPath, claudeRuleSources(agentsHome, project, stem))
-			}
-		}
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return nil
 	}
+	prefix := project + "--"
+	var errs []error
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		linkPath := filepath.Join(rulesDir, e.Name())
+		stem := strings.TrimSuffix(strings.TrimPrefix(e.Name(), prefix), ".md")
+		errs = append(errs,
+			links.RemoveIfSymlinkUnder(linkPath, agentsHome),
+			removeHardlinkedManaged(linkPath, claudeRuleSources(agentsHome, project, stem)),
+		)
+	}
+	return errors.Join(errs...)
 }
 
-func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) {
+func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) error {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
 		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
@@ -541,15 +560,19 @@ func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string)
 			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), agentsHome)
+	return links.RemoveIfSymlinkUnder(filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), agentsHome)
 }
 
-func (c *claude) removeScopedDirLinks(dir, agentsHome string) {
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(dir, e.Name()), agentsHome)
-		}
+func (c *claude) removeScopedDirLinks(dir, agentsHome string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
 	}
+	var errs []error
+	for _, e := range entries {
+		errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(dir, e.Name()), agentsHome))
+	}
+	return errors.Join(errs...)
 }
 
 // isPreExistingManagedLink reports whether path is a managed link we should

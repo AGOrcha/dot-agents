@@ -42,9 +42,11 @@ func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
 	}
 
 	sentinel := errors.New("injected remove failure")
-	orig := fsopsRemoveAll
-	fsopsRemoveAll = func(string) error { return sentinel }
-	t.Cleanup(func() { fsopsRemoveAll = orig })
+	origAll := fsopsRemoveAll
+	origOne := fsopsRemove
+	fsopsRemoveAll = func(string) error { return sentinel } // stale-symlink branch
+	fsopsRemove = func(string) error { return sentinel }    // occupying-entry branch
+	t.Cleanup(func() { fsopsRemoveAll = origAll; fsopsRemove = origOne })
 
 	// (a) symlink pointing elsewhere → RemoveAll path → injected error.
 	elsewhere := filepath.Join(tmp, "elsewhere.txt")

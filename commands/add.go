@@ -161,6 +161,26 @@ func isManagedProjectOutput(project, projectPath, filePath, agentsHome string) b
 	return err == nil && linked
 }
 
+// isManagedHardlinkToCanonicalSource reports whether filePath is hard linked
+// to the canonical source under agentsHome that this candidate's repo-relative
+// path maps to for project. This is the target-identity proof
+// backupExistingConfigsList needs before dropping a multi-link file without a
+// mirror backup: a bare nlink>1 only means "shares an inode with something",
+// not "managed by da".
+func isManagedHardlinkToCanonicalSource(project, projectPath, filePath, agentsHome string) bool {
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil {
+		return false
+	}
+	destRel := mapResourceRelToDest(project, filepath.ToSlash(rel))
+	if destRel == "" {
+		return false
+	}
+	canonical := filepath.Join(agentsHome, destRel)
+	linked, err := links.AreHardlinked(filePath, canonical)
+	return err == nil && linked
+}
+
 // checkExistingConfigFiles returns root-level AI config files/entries that dot-agents would replace.
 // Excludes files already managed by dot-agents and backup artifacts.
 func checkExistingConfigFiles(project, projectPath, agentsHome string) []string {
@@ -527,10 +547,22 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		// A link entry (POSIX symlink / Windows junction, or a hard link
-		// sharing its inode with another entry) has no standalone content to
-		// preserve — remove it without a backup.
-		if _, isLink := links.ManagedLinkTarget(f); isLink || hasMultipleHardLinks(f) {
+		// A resolvable managed link (POSIX symlink / Windows junction) has no
+		// standalone content to preserve — remove it without a backup.
+		if _, isLink := links.ManagedLinkTarget(f); isLink {
+			os.Remove(f)
+			count++
+			continue
+		}
+		// A hard link is only safe to drop without a backup when it is PROVEN
+		// managed: its inode is shared with the canonical source this candidate
+		// maps to under agentsHome. A bare nlink>1 is NOT proof — an
+		// UNMANAGED hard-linked AGENTS.md/.mcp.json (e.g. the project hard
+		// links its real config elsewhere) also has nlink>1, and dropping it
+		// without a mirror backup destroys the project's real config while
+		// claiming it was backed up. Unknown/unmanaged hard links fall through
+		// to the normal backup/mirror path below.
+		if hasMultipleHardLinks(f) && isManagedHardlinkToCanonicalSource(project, projectPath, f, agentsHome) {
 			os.Remove(f)
 			count++
 			continue

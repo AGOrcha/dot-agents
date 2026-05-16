@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -174,25 +175,51 @@ func TestAreHardlinkedMissingFiles(t *testing.T) {
 	}
 }
 
-func TestSymlinkReplacesExistingNonEmptyDir(t *testing.T) {
+func TestSymlinkRefusesUnmanagedNonEmptyDir(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "t.txt")
 	os.WriteFile(target, []byte("x"), 0644)
 
-	// linkPath is occupied by a non-empty directory (stale managed state).
-	// The link contract treats this as replaceable: Symlink clears it via
-	// fsops.RemoveAll and installs the managed link. The old os.Remove path
-	// errored on a non-empty dir; that over-conservative behavior also
-	// blocked idempotent `da init`/`refresh` and Windows dir replacement.
+	// linkPath is an UNMANAGED non-empty directory holding local work.
+	// Symlink must NOT recursively delete it (the prior fsops.RemoveAll
+	// behavior was an irreversible-data-loss path flagged by adversarial
+	// review). It must refuse with an actionable error and leave the
+	// directory and its contents intact. (Managed junctions are
+	// symlink-class and replaced via the Readlink branch; a file or an
+	// empty squat is still replaced — covered elsewhere.)
 	linkPath := filepath.Join(tmp, "linkdir")
 	os.MkdirAll(linkPath, 0755)
-	os.WriteFile(filepath.Join(linkPath, "child"), []byte("y"), 0644)
+	child := filepath.Join(linkPath, "child")
+	os.WriteFile(child, []byte("y"), 0644)
 
+	err := links.Symlink(target, linkPath)
+	if err == nil {
+		t.Fatal("expected Symlink to refuse replacing an unmanaged non-empty dir")
+	}
+	if !strings.Contains(err.Error(), "non-empty directory") {
+		t.Errorf("error should explain the refusal, got: %v", err)
+	}
+	if b, rerr := os.ReadFile(child); rerr != nil || string(b) != "y" {
+		t.Errorf("user data must be preserved; child read=%q err=%v", string(b), rerr)
+	}
+	if links.IsSymlinkTo(linkPath, target) {
+		t.Error("linkPath must NOT have been converted to a managed link")
+	}
+}
+
+func TestSymlinkReplacesEmptyDir(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "t.txt")
+	os.WriteFile(target, []byte("x"), 0644)
+	// An EMPTY squatting dir (e.g. left by a prior aborted run) is safe to
+	// replace — no data loss — so idempotent re-link still works.
+	linkPath := filepath.Join(tmp, "emptydir")
+	os.MkdirAll(linkPath, 0755)
 	if err := links.Symlink(target, linkPath); err != nil {
-		t.Fatalf("expected Symlink to replace squatting non-empty dir, got: %v", err)
+		t.Fatalf("expected Symlink to replace an empty squat dir, got: %v", err)
 	}
 	if !links.IsSymlinkTo(linkPath, target) {
-		t.Errorf("expected %s to be a managed link to %s after replacing the dir", linkPath, target)
+		t.Errorf("expected %s to be a managed link to %s", linkPath, target)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,8 +245,7 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	if err := osMkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
 		return err
 	}
-	links.Symlink(src, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
-	return nil
+	return links.Symlink(src, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
 }
 
 func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
@@ -262,7 +262,7 @@ func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
 		if err := osMkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
 			return err
 		}
-		links.Symlink(src, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON))
+		return links.Symlink(src, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON))
 	}
 	return nil
 }
@@ -363,22 +363,24 @@ func legacyCopilotHookNames(specs []HookSpec) map[string]bool {
 func (c *copilot) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	c.removeTopLevelLinks(project, repoPath, agentsHome)
-	c.removeClaudeCompatSettings(project, repoPath, agentsHome)
-	c.removeSkillsLinks(repoPath, agentsHome)
-	c.removeAgentLinks(project, repoPath, agentsHome)
-	c.removeHookLinks(project, repoPath, agentsHome)
-	return nil
+	var errs []error
+	errs = append(errs, c.removeTopLevelLinks(project, repoPath, agentsHome))
+	errs = append(errs, c.removeClaudeCompatSettings(project, repoPath, agentsHome))
+	errs = append(errs, c.removeSkillsLinks(repoPath, agentsHome))
+	errs = append(errs, c.removeAgentLinks(project, repoPath, agentsHome))
+	errs = append(errs, c.removeHookLinks(project, repoPath, agentsHome))
+	return errors.Join(errs...)
 }
 
-func (c *copilot) removeTopLevelLinks(project, repoPath, agentsHome string) {
+func (c *copilot) removeTopLevelLinks(project, repoPath, agentsHome string) error {
 	instr := filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD)
-	links.RemoveIfSymlinkUnder(instr, agentsHome)
-	links.RemoveIfHardlinkedToAny(instr, copilotInstructionsSources(agentsHome, project))
-
 	mcp := filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON)
-	links.RemoveIfSymlinkUnder(mcp, agentsHome)
-	links.RemoveIfHardlinkedToAny(mcp, copilotMCPSources(agentsHome, project))
+	return errors.Join(
+		links.RemoveIfSymlinkUnder(instr, agentsHome),
+		removeHardlinkedManaged(instr, copilotInstructionsSources(agentsHome, project)),
+		links.RemoveIfSymlinkUnder(mcp, agentsHome),
+		removeHardlinkedManaged(mcp, copilotMCPSources(agentsHome, project)),
+	)
 }
 
 // copilotInstructionsSources mirrors resolveInstructionsSrc: every canonical
@@ -408,7 +410,7 @@ func copilotMCPSources(agentsHome, project string) []string {
 	return srcs
 }
 
-func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome string) {
+func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome string) error {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
 		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
@@ -418,50 +420,66 @@ func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome strin
 			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), agentsHome)
+	return links.RemoveIfSymlinkUnder(filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), agentsHome)
 }
 
-func (c *copilot) removeSkillsLinks(repoPath, agentsHome string) {
+func (c *copilot) removeSkillsLinks(repoPath, agentsHome string) error {
 	skillsDir := filepath.Join(repoPath, ".agents", "skills")
-	if entries, err := os.ReadDir(skillsDir); err == nil {
-		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
-		}
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil
 	}
+	var errs []error
+	for _, e := range entries {
+		errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
+	}
+	return errors.Join(errs...)
 }
 
-func (c *copilot) removeAgentLinks(project, repoPath, agentsHome string) {
+func (c *copilot) removeAgentLinks(project, repoPath, agentsHome string) error {
 	const suffix = ".agent.md"
 	agentsDir := filepath.Join(repoPath, copilotGitHubDir, "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), suffix) {
-				continue
-			}
-			dst := filepath.Join(agentsDir, e.Name())
-			links.RemoveIfSymlinkUnder(dst, agentsHome)
-			name := strings.TrimSuffix(e.Name(), suffix)
-			links.RemoveIfHardlinkedToAny(dst, scopedAgentFileSources(agentsHome, project, name, suffix))
-		}
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil
 	}
+	var errs []error
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), suffix) {
+			continue
+		}
+		dst := filepath.Join(agentsDir, e.Name())
+		name := strings.TrimSuffix(e.Name(), suffix)
+		errs = append(errs,
+			links.RemoveIfSymlinkUnder(dst, agentsHome),
+			removeHardlinkedManaged(dst, scopedAgentFileSources(agentsHome, project, name, suffix)),
+		)
+	}
+	return errors.Join(errs...)
 }
 
-func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) {
+func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) error {
 	hooksDir := filepath.Join(repoPath, copilotGitHubDir, "hooks")
 	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(canonicalSpecs) > 0 {
 		_ = removeManagedRenderedHookFanout(canonicalSpecs, hooksDir, renderCopilotHookFile)
 	}
-	if entries, err := os.ReadDir(hooksDir); err == nil {
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			dst := filepath.Join(hooksDir, e.Name())
-			links.RemoveIfSymlinkUnder(dst, agentsHome)
-			links.RemoveIfHardlinkedToAny(dst, scopedBucketFileSources(agentsHome, "hooks", project, e.Name()))
-		}
+	entries, rdErr := os.ReadDir(hooksDir)
+	if rdErr != nil {
+		return nil
 	}
+	var errs []error
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		dst := filepath.Join(hooksDir, e.Name())
+		errs = append(errs,
+			links.RemoveIfSymlinkUnder(dst, agentsHome),
+			removeHardlinkedManaged(dst, scopedBucketFileSources(agentsHome, "hooks", project, e.Name())),
+		)
+	}
+	return errors.Join(errs...)
 }
 
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {

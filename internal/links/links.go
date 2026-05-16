@@ -31,10 +31,23 @@ func Symlink(target, linkPath string) error {
 			return fmt.Errorf("removing old symlink %s: %w", linkPath, err)
 		}
 	} else if !os.IsNotExist(err) {
-		// Not a symlink - check if regular file/dir
-		if _, statErr := os.Lstat(linkPath); statErr == nil {
-			if err := fsopsRemoveAll(linkPath); err != nil {
-				return fmt.Errorf("removing existing file %s: %w", linkPath, err)
+		// Not a symlink/junction. NEVER recursively delete here: an
+		// unmanaged real directory at linkPath may hold local user work,
+		// and refresh/doctor reaching this path must not destroy it.
+		// (A managed junction is symlink-class and handled by the
+		// Readlink branch above; the same-canonical-file fast path is
+		// handled at the top.) Single-entry removal only — os.Remove
+		// deletes a regular file or an EMPTY dir and refuses a non-empty
+		// dir, which is exactly the safe policy: idempotent re-link over
+		// a file/empty squat, hard error (no data loss) over real data.
+		if info, statErr := os.Lstat(linkPath); statErr == nil {
+			if info.IsDir() {
+				if entries, derr := os.ReadDir(linkPath); derr == nil && len(entries) > 0 {
+					return fmt.Errorf("refusing to replace non-empty directory %s with a managed link: it is not a managed link and may contain local work — remove or back it up first", linkPath)
+				}
+			}
+			if rmErr := fsopsRemove(linkPath); rmErr != nil {
+				return fmt.Errorf("removing existing entry %s: %w", linkPath, rmErr)
 			}
 		}
 	}
@@ -49,6 +62,10 @@ func Symlink(target, linkPath string) error {
 // the otherwise-unreachable "failed to remove a stale/occupying entry"
 // error returns in Symlink. Production always uses the real implementation.
 var fsopsRemoveAll = fsops.RemoveAll
+
+// fsopsRemove is the single-entry removal seam (regular file or EMPTY
+// dir; never recursive) used by Symlink's non-symlink replace branch.
+var fsopsRemove = fsops.Remove
 
 // pathsResolveToSameFile reports whether target and linkPath are the same
 // underlying file (same inode / file index). True when linkPath is a hard
@@ -208,14 +225,22 @@ func RemoveIfSymlinkUnder(linkPath, prefix string) error {
 // to resolve against a prefix — the caller supplies the canonical sources
 // it manages. Promoted from the cursor platform, which has used this
 // pattern in production since .mdc rule files cannot be symlinks.
-func RemoveIfHardlinkedToAny(path string, sources []string) bool {
+// Returns (matched, err): matched=true once a hard-linked source is
+// found; err is non-nil only when removal of a matched managed link
+// failed. Callers MUST distinguish (false,nil)=not-managed,
+// (true,nil)=removed, (true,err)=managed-but-removal-failed — silently
+// dropping the error makes da remove/doctor report success while an
+// active managed file is left behind.
+func RemoveIfHardlinkedToAny(path string, sources []string) (bool, error) {
 	for _, src := range sources {
 		if linked, _ := AreHardlinked(path, src); linked {
-			_ = fsops.RemoveAll(path)
-			return true
+			if err := fsops.RemoveAll(path); err != nil {
+				return true, fmt.Errorf("removing managed hard link %s: %w", path, err)
+			}
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // IsManagedFileLink reports whether the entry at path is a managed link to a

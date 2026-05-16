@@ -239,6 +239,80 @@ func TestBackupExistingConfigsList_RemovesSymlinkNoBackup(t *testing.T) {
 	}
 }
 
+// An UNMANAGED hard-linked AGENTS.md (nlink>1, but NOT hard linked to the
+// canonical source da would create) is the project's real config. It must be
+// backed up through the mirror path, not silently dropped because nlink>1.
+func TestBackupExistingConfigsList_UnmanagedHardlinkIsBackedUp(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// The project hard links its real AGENTS.md to another file it owns —
+	// nlink>1 but unrelated to anything under agentsHome.
+	realConfig := filepath.Join(tmp, "shared", "instructions.md")
+	if err := os.MkdirAll(filepath.Dir(realConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(realConfig, []byte("# the real project config"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentsMD := filepath.Join(tmp, "AGENTS.md")
+	if err := os.Link(realConfig, agentsMD); err != nil {
+		t.Skipf("hard link unsupported on this fs: %v", err)
+	}
+
+	count := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
+	if count != 1 {
+		t.Errorf("expected count=1, got %d", count)
+	}
+
+	// The real config content MUST have been mirrored before removal.
+	activeTarget := filepath.Join(agentsHome, "resources", "myproject", "AGENTS.md")
+	data, err := os.ReadFile(activeTarget)
+	if err != nil {
+		t.Fatalf("unmanaged hard link was dropped without a mirror backup: %v", err)
+	}
+	if string(data) != "# the real project config" {
+		t.Errorf("mirror backup content mismatch: %q", string(data))
+	}
+}
+
+// A hard link PROVEN managed (shares its inode with the canonical source da
+// created under agentsHome) has no standalone content — it is removed without
+// a mirror backup.
+func TestBackupExistingConfigsList_ManagedHardlinkNoBackup(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	canonical := filepath.Join(agentsHome, "rules", "myproject", "agents.md")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("# canonical"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	agentsMD := filepath.Join(tmp, "AGENTS.md")
+	if err := os.Link(canonical, agentsMD); err != nil {
+		t.Skipf("hard link unsupported on this fs: %v", err)
+	}
+
+	count := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "ts")
+	if count != 1 {
+		t.Errorf("expected count=1, got %d", count)
+	}
+	if _, err := os.Lstat(agentsMD); !os.IsNotExist(err) {
+		t.Error("managed hard link should have been removed")
+	}
+	// No mirror backup for a proven-managed link (canonical still holds it).
+	if _, err := os.Stat(filepath.Join(agentsHome, "resources", "myproject", "AGENTS.md")); !os.IsNotExist(err) {
+		t.Error("proven-managed hard link should not produce a resources backup")
+	}
+}
+
 // ---------- idempotence: second add sees no files to backup ----------
 
 func TestCheckExistingConfigFiles_IdempotentAfterAdd(t *testing.T) {
