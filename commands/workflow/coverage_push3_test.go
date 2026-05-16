@@ -1303,7 +1303,13 @@ func TestRunWorkflowGraphQuery_SuccessLocalAdapter(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := []byte("schema_version: 1\nenabled: true\ngraph_home: \"" + kgHome + "\"\n")
+	// Marshal via yaml: a hand-built `graph_home: "<path>"` breaks on Windows
+	// because tmpdir paths contain backslashes that a double-quoted YAML
+	// scalar interprets as escape sequences.
+	cfg, err := yaml.Marshal(GraphBridgeConfig{SchemaVersion: 1, Enabled: true, GraphHome: kgHome})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), cfg, 0644); err != nil {
 		t.Fatal(err)
 	}

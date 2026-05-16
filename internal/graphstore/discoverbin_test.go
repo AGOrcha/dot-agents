@@ -4,6 +4,8 @@ package graphstore
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,12 +34,21 @@ func TestNewCRGBridge_DiscoverError(t *testing.T) {
 // TestDiscoverCRGBin_PATHFallback covers the exec.LookPath success branch
 // when the binary lives only on PATH (no .venv anywhere).
 func TestDiscoverCRGBin_PATHFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// exec.LookPath on Windows only resolves files whose extension is in
+		// PATHEXT (.exe/.bat/...). A shimmed extension-less shell script named
+		// "code-review-graph" is not an executable on Windows, so this POSIX
+		// fixture cannot exercise the PATH branch there. The .venv discovery
+		// path (bin/ + Scripts/, with/without .exe) is covered cross-platform
+		// by venvExeCandidates and TestDiscoverCRGBin_NotFound.
+		t.Skip("PATH-shim fixture is POSIX-only; .venv discovery covered cross-platform")
+	}
 	dir := t.TempDir()
-	binDir := dir + "/bin"
+	binDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bin := binDir + "/code-review-graph"
+	bin := filepath.Join(binDir, "code-review-graph")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

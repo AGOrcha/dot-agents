@@ -87,7 +87,7 @@ func defaultGraphHome(projectPath string) string {
 	if rc, err := config.LoadAgentsRC(projectPath); err == nil && rc != nil && rc.KG != nil && rc.KG.GraphHome != "" {
 		return rc.KG.GraphHome
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	return filepath.Join(home, "knowledge-graph")
 }
 
@@ -484,7 +484,7 @@ func runWorkflowGraphQuery(cmd *cobra.Command, args []string) error {
 	query := strings.Join(args, " ")
 	graphHome := cfg.GraphHome
 	if graphHome == "" {
-		home, _ := os.UserHomeDir()
+		home, _ := config.UserHomeDir()
 		graphHome = filepath.Join(home, "knowledge-graph")
 	}
 	adapter := NewLocalGraphAdapter(graphHome)

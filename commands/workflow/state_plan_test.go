@@ -19,26 +19,15 @@ func seedWorkflowStateContext(t *testing.T, repo, agentsHome string) {
 	if err := os.MkdirAll(contextDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := `schema_version: 1
-timestamp: "2026-04-10T10:00:00Z"
-project:
-  name: "workflow-proj"
-  path: "` + repo + `"
-git:
-  branch: "main"
-  sha: "abc1234"
-  dirty_file_count: 1
-files:
-  modified:
-    - "README.md"
-message: ""
-verification:
-  status: "pass"
-  summary: "go test ./... passed"
-next_action: "Resume implementation"
-blockers: []
-`
-	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte(checkpoint), 0644); err != nil {
+	var cp workflowCheckpoint
+	cp.Timestamp = "2026-04-10T10:00:00Z"
+	cp.Project = workflowProjectRef{Name: "workflow-proj", Path: repo}
+	cp.Git = workflowGitSummary{Branch: "main", SHA: "abc1234", DirtyFileCount: 1}
+	cp.Files.Modified = []string{"README.md"}
+	cp.Verification.Status = "pass"
+	cp.Verification.Summary = "go test ./... passed"
+	cp.NextAction = "Resume implementation"
+	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), marshalCheckpointFixture(t, cp), 0644); err != nil {
 		t.Fatal(err)
 	}
 	proposalsDir := filepath.Join(agentsHome, "proposals")

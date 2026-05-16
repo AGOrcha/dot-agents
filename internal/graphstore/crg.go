@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,32 @@ import (
 const crgReadOnlyPragma = "?_pragma=query_only(true)"
 const crgBinName = "code-review-graph"
 const crgFlagRepo = "--repo"
+
+// venvBinSubdirs returns the executable subdirectory names used by Python
+// virtualenvs, most-specific first. POSIX venvs put executables under bin/;
+// Windows venvs put them under Scripts/. Probing both keeps CRG discovery
+// correct regardless of host (CI installs CRG only on Linux/macOS, but the
+// Windows layout must still resolve when a developer has a local .venv).
+func venvBinSubdirs() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"Scripts", "bin"}
+	}
+	return []string{"bin", "Scripts"}
+}
+
+// venvExeCandidates returns possible absolute paths for executable `name`
+// inside the venv rooted at venvDir, covering both POSIX (no extension) and
+// Windows (.exe) naming across bin/ and Scripts/.
+func venvExeCandidates(venvDir, name string) []string {
+	var out []string
+	for _, sub := range venvBinSubdirs() {
+		out = append(out, filepath.Join(venvDir, sub, name))
+		if runtime.GOOS == "windows" {
+			out = append(out, filepath.Join(venvDir, sub, name+".exe"))
+		}
+	}
+	return out
+}
 
 // CRGBridge shells out to the code-review-graph Python CLI.
 type CRGBridge struct {
@@ -52,17 +79,15 @@ func NewCRGBridge(repoRoot string) (*CRGBridge, error) {
 }
 
 // DiscoverCRGBin looks for the code-review-graph executable in this order:
-//  1. VENV_PATH/.venv/bin/code-review-graph relative to repoRoot
-//  2. .venv/bin/code-review-graph relative to repoRoot
-//  3. code-review-graph on PATH
+//  1. .venv/{bin,Scripts}/code-review-graph[.exe] relative to repoRoot
+//  2. the same under repoRoot's parent .venv
+//  3. code-review-graph on PATH (exec.LookPath applies PATHEXT on Windows)
 func DiscoverCRGBin(repoRoot string) (string, error) {
-	candidates := []string{
-		filepath.Join(repoRoot, ".venv", "bin", crgBinName),
-	}
-	// also check parent dirs up to 2 levels for .venv
+	candidates := venvExeCandidates(filepath.Join(repoRoot, ".venv"), crgBinName)
+	// also check parent dir for .venv
 	parent := filepath.Dir(repoRoot)
 	candidates = append(candidates,
-		filepath.Join(parent, ".venv", "bin", crgBinName),
+		venvExeCandidates(filepath.Join(parent, ".venv"), crgBinName)...,
 	)
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -106,17 +131,23 @@ func (b *CRGBridge) run(args ...string) ([]byte, error) {
 // pythonBin returns the path to the Python interpreter in the same .venv as
 // the CRG binary.
 func (b *CRGBridge) pythonBin() string {
-	// b.Bin is e.g. /path/to/.venv/bin/code-review-graph
-	// Python is in the same bin/ directory.
+	// b.Bin is e.g. /path/to/.venv/bin/code-review-graph (POSIX) or
+	// ...\.venv\Scripts\code-review-graph.exe (Windows). Python lives in
+	// the same executable directory.
 	binDir := filepath.Dir(b.Bin)
-	candidates := []string{
-		filepath.Join(binDir, "python3"),
-		filepath.Join(binDir, "python"),
+	names := []string{"python3", "python"}
+	if runtime.GOOS == "windows" {
+		// Windows venvs ship python.exe (no python3.exe); prefer it.
+		names = []string{"python.exe", "python3.exe", "python", "python3"}
 	}
-	for _, c := range candidates {
+	for _, n := range names {
+		c := filepath.Join(binDir, n)
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
+	}
+	if runtime.GOOS == "windows" {
+		return "python"
 	}
 	return "python3"
 }

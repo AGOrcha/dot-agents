@@ -391,7 +391,7 @@ func probeSessionReader() (platform.SessionReader, string, string) {
 // Platform session env vars and model resolvers are maintained in internal/platform/;
 // no changes to this function are needed when adding a new platform.
 func resolveAgentBlock(projectPath string) *iterLogAgentBlock {
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 
 	// AI_AGENT=<harness>_<version>_agent is the cross-platform harness identifier.
 	// When present it pins the platform and version without probing session env vars.
@@ -625,7 +625,7 @@ func populateIterLogSessionTokens(entry *iterLogEntry, projectPath, iterDir stri
 		return
 	}
 	prevAt := loadPrevCheckpointAt(iterDir, n)
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	for _, p := range platform.All() {
 		sr, isReader := p.(platform.SessionReader)
 		scanner, isScanner := p.(platform.SessionTokenScanner)

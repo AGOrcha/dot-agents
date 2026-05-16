@@ -49,6 +49,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowHealthCmd(),
 		newWorkflowVerifyCmd(),
 		newWorkflowPrefsCmd(),
+		newWorkflowAppTypesCmd(),
 		newWorkflowGraphCmd(),
 		newWorkflowFanoutCmd(),
 		newWorkflowMergeBackCmd(),
@@ -995,6 +996,28 @@ func newWorkflowBundleCmd() *cobra.Command {
 	}
 	bundleCmd.AddCommand(bundleStagesCmd)
 	return bundleCmd
+}
+
+func newWorkflowAppTypesCmd() *cobra.Command {
+	var format string
+	var verbose bool
+	cmd := &cobra.Command{
+		Use:   "app-types",
+		Short: "List available app_type values for the current repo",
+		Example: deps.ExampleBlock(
+			"  da workflow app-types",
+			"  da --json workflow app-types",
+			"  da workflow app-types --verbose",
+			"  da workflow app-types --format flag",
+		),
+		Args: deps.NoArgsWithHints("Run workflow app-types from inside the project repository."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowAppTypes(format, verbose)
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "", "Print only the recommended authoring snippet: flag, task, plan, or doc")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show source and recommendation details for each app_type")
+	return cmd
 }
 
 // NewCmd builds the `da workflow` command tree. Callers must supply Deps from package commands to avoid an import cycle.

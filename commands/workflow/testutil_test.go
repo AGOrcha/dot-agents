@@ -318,6 +318,27 @@ slices:
 `)
 }
 
+// marshalCheckpointFixture serialises a workflowCheckpoint via yaml exactly
+// like prod's checkpoint writer. Hand-built YAML string concatenation breaks
+// on Windows because t.TempDir() paths contain backslashes that a double-
+// quoted YAML scalar interprets as escape sequences (\U, \a, …), so the
+// fixture must round-trip through the same marshaller prod uses.
+func marshalCheckpointFixture(t *testing.T, cp workflowCheckpoint) []byte {
+	t.Helper()
+	cp.SchemaVersion = 1
+	if cp.Files.Modified == nil {
+		cp.Files.Modified = []string{}
+	}
+	if cp.Blockers == nil {
+		cp.Blockers = []string{}
+	}
+	data, err := yaml.Marshal(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 // writeCheckpointFixture writes a checkpoint.yaml into the AGENTS_HOME context dir for the given project.
 func writeCheckpointFixture(t *testing.T, agentsHome, projectName, repo string, nextAction, verStatus, timestamp string) {
 	t.Helper()
@@ -327,25 +348,14 @@ func writeCheckpointFixture(t *testing.T, agentsHome, projectName, repo string, 
 	}
 	branch := strings.TrimSpace(gitOutput(repo, "rev-parse", "--abbrev-ref", "HEAD"))
 	sha := strings.TrimSpace(gitOutput(repo, "rev-parse", "--short", "HEAD"))
-	checkpoint := `schema_version: 1
-timestamp: "` + timestamp + `"
-project:
-  name: "` + projectName + `"
-  path: "` + repo + `"
-git:
-  branch: "` + branch + `"
-  sha: "` + sha + `"
-  dirty_file_count: 0
-files:
-  modified: []
-message: ""
-verification:
-  status: "` + verStatus + `"
-  summary: "tests passed"
-next_action: "` + nextAction + `"
-blockers: []
-`
-	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte(checkpoint), 0644); err != nil {
+	var cp workflowCheckpoint
+	cp.Timestamp = timestamp
+	cp.Project = workflowProjectRef{Name: projectName, Path: repo}
+	cp.Git = workflowGitSummary{Branch: branch, SHA: sha}
+	cp.Verification.Status = verStatus
+	cp.Verification.Summary = "tests passed"
+	cp.NextAction = nextAction
+	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), marshalCheckpointFixture(t, cp), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -370,25 +380,14 @@ func writeCheckpointFixtureWithGitOverride(t *testing.T, in checkpointFixtureGit
 	if err := os.MkdirAll(contextDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	checkpoint := `schema_version: 1
-timestamp: "` + in.Timestamp + `"
-project:
-  name: "` + in.ProjectName + `"
-  path: "` + in.Repo + `"
-git:
-  branch: "` + in.Branch + `"
-  sha: "` + in.SHA + `"
-  dirty_file_count: 0
-files:
-  modified: []
-message: ""
-verification:
-  status: "` + in.VerStatus + `"
-  summary: "tests passed"
-next_action: "` + in.NextAction + `"
-blockers: []
-`
-	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), []byte(checkpoint), 0644); err != nil {
+	var cp workflowCheckpoint
+	cp.Timestamp = in.Timestamp
+	cp.Project = workflowProjectRef{Name: in.ProjectName, Path: in.Repo}
+	cp.Git = workflowGitSummary{Branch: in.Branch, SHA: in.SHA}
+	cp.Verification.Status = in.VerStatus
+	cp.Verification.Summary = "tests passed"
+	cp.NextAction = in.NextAction
+	if err := os.WriteFile(filepath.Join(contextDir, "checkpoint.yaml"), marshalCheckpointFixture(t, cp), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
