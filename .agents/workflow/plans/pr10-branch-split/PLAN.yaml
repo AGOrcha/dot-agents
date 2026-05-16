@@ -4,8 +4,8 @@ title: PR#10 branch split into reviewable feature PRs
 status: active
 summary: Split 423-commit mega-branch into 7 dependency-ordered PRs targeting master. Retire workflow-auto-operator integration branch.
 created_at: "2026-05-12T05:07:09Z"
-updated_at: "2026-05-16T13:38:10Z"
+updated_at: "2026-05-16T16:40:48Z"
 owner: dot-agents
 success_criteria: All 7 PRs created, each compiles and passes CI independently. PR#10 and workflow-auto-operator closed/retired.
 verification_strategy: 'Each PR branch: go build, go test, gofmt check, CI green. Final: git diff between merged master and original branch tip shows no missing changes.'
-current_focus_task: 'PR 3b: Workflow subpackage + graphstore extraction'
+current_focus_task: 'PR 5: Scaffold re-home + legacy shell retirement'

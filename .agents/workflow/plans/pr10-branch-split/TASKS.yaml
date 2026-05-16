@@ -93,7 +93,7 @@ tasks:
         SonarCloud new_coverage: 23.2% (target 80%).
     - id: pr3b-workflow
       title: 'PR 3b: Workflow subpackage + graphstore extraction'
-      status: in_progress
+      status: completed
       depends_on:
         - pr3a-base-commands
       blocks:
@@ -229,4 +229,19 @@ tasks:
         - commands/workflow_commit.go
       verification_required: true
       notes: Folds global proposal obs-workflow-state-commit-coupling Part 2. Implement da workflow commit subcommand staging only derived workflow-state paths (no -A, skip submodule/pre-existing-untracked), plus iteration-close auto-stage. Headless-safe (no Claude hook dependency), per-project opt-out via workflow prefs, --dry-run prints exact git add set. Part 1 (global operator rule) handled separately at approval. Source proposal ~/.agents/proposals/obs-workflow-state-commit-coupling.md
+      app_type: go-cli
+    - id: mid-flight-proposal-awareness
+      title: Mid-flight proposal awareness for the orchestrator loop
+      status: pending
+      depends_on:
+        - pr3b-workflow
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow
+        - internal/workflow
+        - internal/config
+        - schemas
+      verification_required: true
+      notes: 'Folds global proposal obs-mid-flight-proposal-pickup. Global ~/.agents/proposals is boundary-polled (orchestrator-session-start preflight per turn) not event-pushed, so proposals added mid-iteration are invisible until the next orchestrator-turn boundary. Recommended: option 1 (loop runner re-runs proposal scan at every iteration boundary, pr3b-only) or option 4 (document boundary-only as the stated contract) now; options 2 (severity-tagged proposals + interrupt budget, proposal-schema change in pr3a/base + loop gating pr3b) and 3 (TASKS.yaml note injection) as follow-up. First step confirm actual cadence in the loop runner. Must hold for headless da loop runs (not a Claude-Code-only hook). Related task workflow-commit-state-coupling. Source ~/.agents/proposals/obs-mid-flight-proposal-pickup.md'
       app_type: go-cli
