@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+// winCmd is cmd.exe resolved to its absolute path under %SystemRoot% (a
+// fixed, unwriteable directory) rather than via a PATH lookup a poisoned
+// PATH could hijack (SonarCloud go:S4036).
+var winCmd = func() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(root, `System32\cmd.exe`)
+}()
+
 // createLink creates a managed link at linkPath pointing to target using a
 // Windows-native mechanism that needs no SeCreateSymbolicLinkPrivilege
 // (works without Developer Mode or admin): a directory junction for
@@ -44,7 +55,7 @@ func createJunction(linkPath, target string) error {
 	if err != nil {
 		return fmt.Errorf("resolve junction target %s: %w", target, err)
 	}
-	cmd := exec.Command("cmd", "/c", "mklink", "/J", linkPath, absTarget)
+	cmd := exec.Command(winCmd, "/c", "mklink", "/J", linkPath, absTarget)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mklink /J %s -> %s: %s", linkPath, absTarget, strings.TrimSpace(string(out)))
 	}

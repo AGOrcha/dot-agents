@@ -63,16 +63,25 @@ cmd_sonar() {
     return 0
   fi
   if [ -z "${SONAR_TOKEN:-}" ]; then
-    printf '\033[33m[mandate:sonar] SKIPPED: SONAR_TOKEN not set.\n'
-    printf '  export SONAR_TOKEN=<token> (SonarCloud > Account > Security).\033[0m\n'
+    printf '\033[33m================ SONAR NOT ENFORCED ================\n'
+    printf '[mandate:sonar] SKIPPED: SONAR_TOKEN not set — the SonarCloud\n'
+    printf 'quality gate (incl. new security hotspots) was NOT checked\n'
+    printf 'locally; CI is your only gate. To enforce it here:\n'
+    printf '  export SONAR_TOKEN=<token>  (SonarCloud > Account > Security)\n'
+    printf '===================================================\033[0m\n'
     return 0
   fi
+  # -Dsonar.qualitygate.wait=true makes the scanner block until SonarCloud
+  # computes the gate and exit non-zero if it fails — without this the CLI
+  # exits 0 on a successful *upload* regardless of the gate verdict, so a
+  # local scan would NOT have caught e.g. unreviewed new security hotspots.
   docker run --rm \
     -e SONAR_TOKEN="$SONAR_TOKEN" \
     -e SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}" \
     -v "$repo_root:/usr/src" \
     sonarsource/sonar-scanner-cli:latest \
-    || fail "sonar-scanner analysis failed"
+    -Dsonar.qualitygate.wait=true \
+    || fail "sonar-scanner: SonarCloud quality gate failed (or analysis errored)"
 }
 
 case "${1:-}" in

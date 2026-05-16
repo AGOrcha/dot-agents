@@ -16,6 +16,22 @@ import (
 	"strings"
 )
 
+// systemExe resolves a Windows system executable to its absolute path under
+// %SystemRoot% (a fixed, unwriteable directory) instead of relying on a
+// PATH lookup, which a poisoned PATH could hijack (SonarCloud go:S4036).
+func systemExe(rel string) string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(root, rel)
+}
+
+var (
+	winCmd        = systemExe(`System32\cmd.exe`)
+	winPowerShell = systemExe(`System32\WindowsPowerShell\v1.0\powershell.exe`)
+)
+
 // MkdirAll creates a directory path and all missing parents, falling back
 // to `cmd /c mkdir` (which also creates intermediate directories) when the
 // Go runtime call fails.
@@ -23,7 +39,7 @@ func MkdirAll(path string, perm os.FileMode) error {
 	if err := os.MkdirAll(path, perm); err == nil {
 		return nil
 	}
-	cmd := exec.Command("cmd", "/c", "mkdir", path)
+	cmd := exec.Command(winCmd, "/c", "mkdir", path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mkdir %s: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
@@ -42,7 +58,7 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	cmd := exec.Command(
-		"powershell.exe",
+		winPowerShell,
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 		"-Command",
 		"[IO.File]::WriteAllBytes($env:FSOPS_TARGET,[Convert]::FromBase64String($env:FSOPS_B64))",
@@ -61,7 +77,7 @@ func Remove(path string) error {
 		return nil
 	}
 	cmd := exec.Command(
-		"powershell.exe",
+		winPowerShell,
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 		"-Command",
 		"if (Test-Path -LiteralPath $env:FSOPS_TARGET) { Remove-Item -LiteralPath $env:FSOPS_TARGET -Force }",
@@ -79,7 +95,7 @@ func RemoveAll(path string) error {
 	if err := os.RemoveAll(path); err == nil || os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("cmd", "/c", "rmdir", "/s", "/q", path)
+	cmd := exec.Command(winCmd, "/c", "rmdir", "/s", "/q", path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("remove tree %s: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
