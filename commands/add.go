@@ -564,7 +564,11 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 	if walkErr != nil || d.IsDir() {
 		return 0
 	}
-	relPath := strings.TrimPrefix(path, resourcesDir+"/")
+	relPath, err := filepath.Rel(resourcesDir, path)
+	if err != nil {
+		return 0
+	}
+	relPath = filepath.ToSlash(relPath)
 	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
 		return 0
 	}
@@ -622,8 +626,8 @@ func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
 // No *.dot-agents-backup suffix is added anywhere.
 func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 	agentsHome := config.AgentsHome()
-	relPath := strings.TrimPrefix(srcFile, projectPath+"/")
-	if relPath == srcFile {
+	relPath, err := filepath.Rel(projectPath, srcFile)
+	if err != nil || relPath == "." || strings.HasPrefix(relPath, "..") {
 		relPath = filepath.Base(srcFile)
 	}
 

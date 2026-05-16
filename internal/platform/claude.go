@@ -561,7 +561,15 @@ func isPreExistingManagedLink(path, source string) bool {
 	if _, ok := links.ManagedLinkTarget(path); ok {
 		return true
 	}
-	return links.IsManagedLink(path, source)
+	if links.IsManagedLink(path, source) {
+		return true
+	}
+	// Windows: a managed file link is a hard link with no reparse point, so
+	// ManagedLinkTarget cannot resolve it and IsManagedLink only matches when
+	// it points at this exact source. A pre-existing managed link pointing at
+	// a *different* canonical file must still be left alone — detect it by
+	// its multi-link identity rather than a resolvable/known target.
+	return links.IsManagedFileLink(path)
 }
 
 // claudeMCPSources enumerates every canonical .mcp.json source path

@@ -1046,6 +1046,9 @@ func TestMatcherNameHint(t *testing.T) {
 // ---------- isManagedSymlink ----------
 
 func TestIsManagedSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: the 'symlink into agentsHome → managed' case links to a *file*, which on Windows is a hard link with no reparse point. Prod isManagedSymlink calls links.ManagedLinkTarget (os.Readlink), which fails on a hard link and intentionally returns false (its doc comment: the hard-linked-file case 'is reported false here, matching the prior symlink-only behavior on POSIX'). Prod is correct; there is no managed-link analogue to assert here on Windows. Windows hard-link / junction recognition is covered by internal/linktest/linktest_test.go.")
+	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -1867,6 +1870,9 @@ func TestCanonicalHookBundleContentFromCopilotFile_InvalidContent(t *testing.T) 
 // ---------- processImportCandidate ----------
 
 func TestProcessImportCandidate_ManagedSourceIsNoop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: the no-op decision relies on isManagedSymlink resolving the source's os.Readlink target and prefix-matching it against agentsHome. The fixture links to agentsHome/managed/x, which is NOT the candidate's mapped dest, so the hard-link identity check (links.AreHardlinked vs the mapped dest) cannot match. On Windows a file managed link is a hard link with no reparse point and no recoverable target, so 'source is a managed link pointing anywhere under agentsHome' is unanswerable without scanning agentsHome. The resolvable-target managed-source path is covered on POSIX here; the Windows hard-link identity contract is covered by internal/links AreHardlinked/IsManagedLink tests.")
+	}
 	agentsHome, projRoot := setupImportHomeAndProject(t)
 	// Create a managed symlink (a path under agentsHome) as the source.
 	managed := filepath.Join(agentsHome, "managed", "x")

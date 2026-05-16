@@ -3,6 +3,7 @@ package links_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -123,6 +124,9 @@ func TestFindFile(t *testing.T) {
 }
 
 func TestIsSymlinkUnder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("IsSymlinkUnder resolves a managed link's target and tests it against a prefix; on Windows a file managed link is a hard link with no reparse point, so there is no resolvable target to compare (parity with the documented IsManagedLinkUnder behavior). Windows managed-link shape is covered by internal/linktest/linktest_test.go")
+	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)

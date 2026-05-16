@@ -3,6 +3,7 @@ package projectsync_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -229,6 +230,9 @@ func TestPromoteResource_ErrorNoProjectName(t *testing.T) {
 }
 
 func TestCopyTree_CopiesFilesAndDirsSkipsSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CopyTree skips symlinks via os.ModeSymlink; this fixture's managed link to a *file* is a Windows hard link with no reparse point and no mode bit, so it is indistinguishable from a.txt by the OS. Production promote sources are real trees with no internal hard links; the file symlink-skip contract is exercised on POSIX here, and the directory-junction skip path is covered by linktest.Link's junction fixture across internal/links and internal/linktest tests.")
+	}
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "out")
 

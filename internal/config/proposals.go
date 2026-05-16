@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -65,9 +66,18 @@ func LoadProposal(id string) (*Proposal, error) {
 }
 
 func ListPendingProposals() ([]Proposal, error) {
-	entries, err := os.ReadDir(ProposalsDir())
+	dir := ProposalsDir()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// On Windows, ReadDir of a path that exists but is a regular
+			// file returns a NotExist-class error that os.IsNotExist would
+			// wrongly swallow (POSIX returns ENOTDIR, which does not).
+			// Only a genuinely-absent dir means "no pending proposals".
+			// %v (not %w) keeps this off the fs.ErrNotExist chain.
+			if _, statErr := os.Lstat(dir); statErr == nil {
+				return nil, fmt.Errorf("read proposals dir %s: %v", dir, err)
+			}
 			return nil, nil
 		}
 		return nil, err
@@ -149,14 +159,19 @@ func ValidateProposalTarget(target string) error {
 	if target == "" {
 		return fmt.Errorf("%w: target is required", ErrInvalidProposalTarget)
 	}
-	if filepath.IsAbs(target) {
+	// Proposal targets are logical, forward-slash, repo-relative paths.
+	// filepath.IsAbs is OS-dependent (a leading "/" is not "absolute" on
+	// Windows, and "\foo" / "C:foo" only matter there), so check rootedness
+	// with slash semantics on every OS instead of relying on it.
+	slashed := strings.ReplaceAll(target, `\`, "/")
+	if filepath.IsAbs(target) || filepath.VolumeName(target) != "" || strings.HasPrefix(slashed, "/") {
 		return fmt.Errorf("%w: absolute paths are not allowed", ErrInvalidProposalTarget)
 	}
-	clean := filepath.Clean(target)
+	clean := path.Clean(slashed)
 	if clean == "." || clean == "" {
 		return fmt.Errorf("%w: target is required", ErrInvalidProposalTarget)
 	}
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return fmt.Errorf("%w: parent-directory traversal is not allowed", ErrInvalidProposalTarget)
 	}
 	return nil

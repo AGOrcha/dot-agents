@@ -32,6 +32,38 @@ func resolveScopedFile(agentsHome, bucket, project string, names ...string) stri
 	return ""
 }
 
+// scopedAgentFileSources returns every canonical AGENT.md path a repo-local
+// shared agent file (`<name><destSuffix>`) could have been linked from, across
+// the project and global scopes. createAgentsLinks materializes these as a
+// POSIX symlink or, on Windows, a hard link with no reparse point — so
+// RemoveIfSymlinkUnder alone cannot clean the Windows case. Callers pair this
+// with links.RemoveIfHardlinkedToAny, mirroring removeTopLevelLinks.
+//
+// The flat `<scope>/<name><destSuffix>` form is also included so simplified
+// test fixtures and any legacy non-manifest layout are cleaned too.
+func scopedAgentFileSources(agentsHome, project, name, destSuffix string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		srcs = append(srcs,
+			filepath.Join(agentsHome, "agents", scope, name, agentManifestName),
+			filepath.Join(agentsHome, "agents", scope, name+destSuffix),
+		)
+	}
+	return srcs
+}
+
+// scopedBucketFileSources returns every canonical path under a single bucket a
+// repo-local managed file named `name` could have been linked from, across the
+// project and global scopes. Used for buckets whose canonical layout is a flat
+// file (e.g. hooks), as the hard-link companion to RemoveIfSymlinkUnder.
+func scopedBucketFileSources(agentsHome, bucket, project, name string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		srcs = append(srcs, filepath.Join(agentsHome, bucket, scope, name))
+	}
+	return srcs
+}
+
 func resolveScopedFileFromBuckets(agentsHome string, buckets []string, project string, names ...string) string {
 	for _, scope := range scopedNames(project) {
 		for _, bucket := range buckets {

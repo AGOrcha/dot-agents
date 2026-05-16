@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,7 +37,12 @@ func TestCopyMissingGlobalBundlesCopiesGraphHooks(t *testing.T) {
 	sh := filepath.Join(tmp, "graph-precommit", "graph-precommit.sh")
 	if fi, err := os.Stat(sh); err != nil {
 		t.Fatalf("graph-precommit.sh: %v", err)
-	} else if fi.Mode()&0111 == 0 {
+	} else if runtime.GOOS != "windows" && fi.Mode()&0111 == 0 {
+		// NTFS has no Unix executable bit; Go reports regular files as
+		// mode 0666 on Windows regardless of the os.WriteFile perm arg,
+		// so the exec-bit contract is only meaningful on POSIX. The
+		// embedded-tree copy still runs on Windows (HOOK.yaml assertions
+		// above cover it); only the perm bit is POSIX-specific.
 		t.Fatalf("graph-precommit.sh should be executable, got %v", fi.Mode())
 	}
 }

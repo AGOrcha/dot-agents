@@ -3,6 +3,7 @@ package projectsync_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
@@ -67,6 +68,9 @@ func TestCreateProjectDirs(t *testing.T) {
 }
 
 func TestCopyTree(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CopyTree skips symlinks via os.ModeSymlink; this fixture's managed link to a *file* is a Windows hard link with no reparse point and no mode bit, so it is indistinguishable from real.txt by the OS and there is no filesystem signal of which entry is 'the link'. Production promote sources are real trees with no internal hard links; the symlink-skip contract for files is exercised on POSIX here, and the directory-junction skip path is covered by linktest.Link's junction fixture used across internal/links and internal/linktest tests.")
+	}
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "src")
 	dst := filepath.Join(tmp, "dst")

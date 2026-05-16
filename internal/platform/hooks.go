@@ -855,7 +855,11 @@ func removeManagedFile(dst string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// Never delete a managed link (POSIX symlink / Windows junction or
+	// hard link) or a non-regular entry — only a plain file we rendered.
+	// A Windows managed file link is a hard link with no reparse point, so
+	// a raw ModeSymlink check would miss it and wrongly delete the link.
+	if links.IsManagedFileLink(dst) || !info.Mode().IsRegular() {
 		return nil
 	}
 	existing, err := os.ReadFile(dst)
@@ -899,7 +903,10 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// See removeManagedFile: preserve any managed link (incl. a Windows
+	// hard-linked managed file with no reparse point); only a plain
+	// rendered file is eligible for removal.
+	if links.IsManagedFileLink(dst) || !info.Mode().IsRegular() {
 		return nil
 	}
 	content, err := os.ReadFile(dst)

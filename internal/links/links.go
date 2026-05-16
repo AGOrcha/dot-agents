@@ -218,6 +218,34 @@ func RemoveIfHardlinkedToAny(path string, sources []string) bool {
 	return false
 }
 
+// IsManagedFileLink reports whether the entry at path is a managed link to a
+// file when the canonical target is unknown to the caller. It is the
+// target-free companion to IsManagedLink for code paths (e.g. removal of
+// rendered managed files) that must distinguish "a managed link we must
+// preserve" from "a plain regular file we wrote and may delete".
+//
+//   - POSIX:   the entry is a symlink (os.Lstat reports os.ModeSymlink).
+//   - Windows: the entry is a hard link — no reparse point, but a managed
+//     file link always shares its inode with the canonical source, so its
+//     link count is >= 2. A file dot-agents rendered itself has a link
+//     count of 1.
+//
+// A directory junction is reported by the symlink branch on Windows (Go's
+// os.Lstat sets os.ModeSymlink for IO_REPARSE_TAG_MOUNT_POINT).
+func IsManagedFileLink(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	return hasMultipleHardLinks(path)
+}
+
 // IsDirEntry reports whether the entry at path is a directory, following symlinks.
 // Use this instead of e.IsDir() when entries may be symlinks to directories.
 func IsDirEntry(path string) bool {

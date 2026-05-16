@@ -530,9 +530,9 @@ func TestIsCanonicalResourceBackupRel(t *testing.T) {
 // ---------- KG MCP config writers ----------
 
 func TestKGConfigPath_UsesKGHomeEnv(t *testing.T) {
-	t.Setenv("KG_HOME", "/custom/kg")
+	t.Setenv("KG_HOME", filepath.FromSlash("/custom/kg"))
 	got := kgConfigPath()
-	want := "/custom/kg/self/config.yaml"
+	want := filepath.FromSlash("/custom/kg/self/config.yaml")
 	if got != want {
 		t.Errorf("kgConfigPath() = %q, want %q", got, want)
 	}

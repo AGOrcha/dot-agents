@@ -70,13 +70,17 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 		}
 		return err
 	}
+	// Idempotency must use the managed-link abstraction, not raw string
+	// equality on os.Readlink: a directory managed link is a junction on
+	// Windows whose stored target is cleaned/absolute/extended-length and
+	// never byte-equal to canonicalPath. POSIX behavior is unchanged.
+	if links.IsManagedLink(repoLocal, canonicalPath) {
+		return nil
+	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		existing, err := osReadlink(repoLocal)
 		if err != nil {
 			return fmt.Errorf("reading symlink for agent %q: %w", name, err)
-		}
-		if existing == canonicalPath {
-			return nil
 		}
 		return fmt.Errorf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s; remove the stale link and retry", name, name, existing, canonicalPath)
 	}

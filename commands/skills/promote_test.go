@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
@@ -268,20 +269,16 @@ func TestPromoteSkillIn_MirrorSucceedsWhenClaudeSkillsDirAlreadyExists(t *testin
 		t.Fatalf("canonical path should be a real directory: err=%v", err)
 	}
 
-	// ~/.claude/skills/<name> must now be a managed symlink → canonical.
+	// ~/.claude/skills/<name> must now be a managed link → canonical. Assert
+	// via the OS-aware links contract rather than raw os.Readlink ==: on
+	// Windows this managed link to a directory is a junction whose stored
+	// target is an absolute, cleaned (and possibly extended-length) path that
+	// is never byte-identical to canonicalPath even though it resolves there.
 	claudeLink := filepath.Join(fakeHome, ".claude", "skills", skillName)
-	fi, err := os.Lstat(claudeLink)
-	if err != nil {
+	if _, err := os.Lstat(claudeLink); err != nil {
 		t.Fatalf("~/.claude/skills/%s missing after promote: %v", skillName, err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("~/.claude/skills/%s should be a symlink, got %v", skillName, fi.Mode())
-	}
-	target, err := os.Readlink(claudeLink)
-	if err != nil {
-		t.Fatalf("readlink: %v", err)
-	}
-	if target != canonicalPath {
-		t.Errorf("~/.claude/skills/%s → %q, want %q", skillName, target, canonicalPath)
+	if !links.IsManagedLink(claudeLink, canonicalPath) {
+		t.Errorf("~/.claude/skills/%s should be a managed link to %q", skillName, canonicalPath)
 	}
 }

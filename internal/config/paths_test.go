@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -62,8 +63,12 @@ func TestProjectContextDir(t *testing.T) {
 }
 
 func TestExpandPath_AbsolutePassThrough(t *testing.T) {
-	if got := ExpandPath("/already/abs"); got != "/already/abs" {
-		t.Errorf("absolute path should pass through, got %q", got)
+	abs := "/already/abs"
+	if runtime.GOOS == "windows" {
+		abs = `C:\already\abs`
+	}
+	if got := ExpandPath(abs); got != filepath.Clean(abs) {
+		t.Errorf("absolute path should pass through, got %q want %q", got, filepath.Clean(abs))
 	}
 }
 

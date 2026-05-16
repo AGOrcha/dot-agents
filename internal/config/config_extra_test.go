@@ -109,11 +109,12 @@ func TestGetProjectPath_Missing(t *testing.T) {
 
 func TestAddProject_NilMap(t *testing.T) {
 	cfg := &Config{Projects: nil}
-	cfg.AddProject("a", "/path/a")
+	in := filepath.FromSlash("/path/a")
+	cfg.AddProject("a", in)
 	if cfg.Projects == nil {
 		t.Fatal("Projects nil after add")
 	}
-	if cfg.Projects["a"].Path != "/path/a" {
-		t.Errorf("path: %q", cfg.Projects["a"].Path)
+	if want := filepath.Clean(in); cfg.Projects["a"].Path != want {
+		t.Errorf("path: got %q want %q", cfg.Projects["a"].Path, want)
 	}
 }

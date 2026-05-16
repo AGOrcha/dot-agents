@@ -153,7 +153,10 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentDir, e.Name()), agentsHome)
+			dst := filepath.Join(agentDir, e.Name())
+			links.RemoveIfSymlinkUnder(dst, agentsHome)
+			name := strings.TrimSuffix(e.Name(), ".md")
+			links.RemoveIfHardlinkedToAny(dst, scopedAgentFileSources(agentsHome, project, name, ".md"))
 		}
 	}
 

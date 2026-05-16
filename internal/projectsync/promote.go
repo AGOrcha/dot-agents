@@ -279,7 +279,12 @@ func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error 
 
 // CopyTree recursively copies the directory tree at src to dst, preserving
 // file modes. Symlinks in the source tree are skipped — the canonical store
-// holds only real files.
+// holds only real files. On Windows a directory junction also carries
+// os.ModeSymlink (Go 1.23+) and is skipped by the same check; a file hard
+// link carries no reparse point and is indistinguishable from a real file
+// by the OS, but production promote sources are real skill/agent trees with
+// no internal hard links, so the symlink mode check is the complete and
+// correct production contract on every OS.
 func CopyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
@@ -657,13 +658,27 @@ func TestRunInit_MkdirOnClaudeBranchSucceedsOnEmptyDir(t *testing.T) {
 		t.Fatalf("runInit IsNotExist branch: %v", err)
 	}
 
-	// settings.json should now be a symlink created via links.Symlink in the
-	// IsNotExist branch.
-	info, err := os.Lstat(filepath.Join(tmp, ".claude", "settings.json"))
-	if err != nil {
+	// settings.json should now be a managed link created via links.Symlink in
+	// the IsNotExist branch. On POSIX this is a symlink; on Windows a managed
+	// link to a file is a hard link (no reparse point), so assert via the
+	// links contract rather than raw os.ModeSymlink.
+	settingsLink := filepath.Join(tmp, ".claude", "settings.json")
+	if _, err := os.Lstat(settingsLink); err != nil {
 		t.Fatalf("expected ~/.claude/settings.json: %v", err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("expected settings.json to be a symlink after init")
+	// init links to hooks/global/claude-code.json if present, else
+	// settings/global/claude-code.json. Resolve the same way so the
+	// managed-link assertion works on Windows too, where a file managed
+	// link is a hard link with no resolvable target (IsManagedLink's
+	// os.SameFile branch covers that; raw ModeSymlink would not).
+	target := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	if hooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json"); func() bool {
+		_, err := os.Stat(hooksSrc)
+		return err == nil
+	}() {
+		target = hooksSrc
+	}
+	if !links.IsManagedLink(settingsLink, target) {
+		t.Errorf("expected settings.json to be a managed link to %s after init", target)
 	}
 }

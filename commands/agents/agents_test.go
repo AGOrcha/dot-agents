@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
@@ -33,36 +34,18 @@ func TestImportAgentIn_CreatesSymlinksAndRegisters(t *testing.T) {
 		t.Fatalf("ImportAgentIn: %v", err)
 	}
 
+	// Managed links to a directory are symlinks on POSIX and junctions on
+	// Windows; assert via the managed-link abstraction rather than raw
+	// os.Readlink string equality (a Windows junction target is
+	// cleaned/absolute/extended-length, never byte-equal to canonical).
 	repoAgents := filepath.Join(projectPath, ".agents", "agents", "imported-agent")
-	fi, err := os.Lstat(repoAgents)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected .agents/agents symlink, got %v", fi.Mode())
-	}
-	target, err := os.Readlink(repoAgents)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if target != canonical {
-		t.Errorf(".agents/agents target = %q, want %q", target, canonical)
+	if !links.IsManagedLink(repoAgents, canonical) {
+		t.Errorf(".agents/agents/%s should be a managed link to %s", "imported-agent", canonical)
 	}
 
 	claudePath := filepath.Join(projectPath, ".claude", "agents", "imported-agent")
-	cfi, err := os.Lstat(claudePath)
-	if err != nil {
-		t.Fatalf(".claude/agents symlink: %v", err)
-	}
-	if cfi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected .claude/agents symlink")
-	}
-	clTarget, err := os.Readlink(claudePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if clTarget != canonical {
-		t.Errorf(".claude/agents target = %q, want %q", clTarget, canonical)
+	if !links.IsManagedLink(claudePath, canonical) {
+		t.Errorf(".claude/agents/%s should be a managed link to %s", "imported-agent", canonical)
 	}
 
 	rc, err := config.LoadAgentsRC(projectPath)
@@ -209,37 +192,21 @@ func assertCanonicalDirAfterPromote(t *testing.T, canonicalPath string) {
 
 func assertRepoLocalSymlinkAfterPromote(t *testing.T, repoLocalPath, canonicalPath string) {
 	t.Helper()
-	rfi, err := os.Lstat(repoLocalPath)
-	if err != nil {
+	if _, err := os.Lstat(repoLocalPath); err != nil {
 		t.Fatalf("repo-local path missing after promote: %v", err)
 	}
-	if rfi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("repo-local path %s should be a symlink after promote, got %v", repoLocalPath, rfi.Mode())
-	}
-	target, err := os.Readlink(repoLocalPath)
-	if err != nil {
-		t.Fatalf("readlink repo-local: %v", err)
-	}
-	if target != canonicalPath {
-		t.Errorf("repo-local symlink target = %q, want %q", target, canonicalPath)
+	if !links.IsManagedLink(repoLocalPath, canonicalPath) {
+		t.Errorf("repo-local path %s should be a managed link to %s after promote", repoLocalPath, canonicalPath)
 	}
 }
 
 func assertClaudeSymlinkAfterPromote(t *testing.T, claudePath, canonicalPath string) {
 	t.Helper()
-	cfi2, err := os.Lstat(claudePath)
-	if err != nil {
+	if _, err := os.Lstat(claudePath); err != nil {
 		t.Fatalf(".claude/agents symlink missing: %v", err)
 	}
-	if cfi2.Mode()&os.ModeSymlink == 0 {
-		t.Errorf(".claude/agents/%s should be a symlink, got %v", "my-agent", cfi2.Mode())
-	}
-	clTarget, err := os.Readlink(claudePath)
-	if err != nil {
-		t.Fatalf("readlink .claude/agents: %v", err)
-	}
-	if clTarget != canonicalPath {
-		t.Errorf(".claude/agents symlink target = %q, want %q", clTarget, canonicalPath)
+	if !links.IsManagedLink(claudePath, canonicalPath) {
+		t.Errorf(".claude/agents/%s should be a managed link to %s", "my-agent", canonicalPath)
 	}
 }
 

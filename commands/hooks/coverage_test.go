@@ -341,13 +341,15 @@ func TestPrintLegacyHookCommand_DefaultLabel(t *testing.T) {
 
 // TestHookRemovalTarget_BundleAndLegacyAndUnknown covers all switch arms.
 func TestHookRemovalTarget_BundleAndLegacyAndUnknown(t *testing.T) {
-	bundle := &platform.HookSpec{SourceKind: platform.HookSourceCanonicalBundle, SourcePath: "/x/HOOK.yaml"}
-	if got, _ := hookRemovalTarget(bundle); got != "/x" {
-		t.Errorf("bundle target = %q; want /x", got)
+	bundleSrc := filepath.FromSlash("/x/HOOK.yaml")
+	bundle := &platform.HookSpec{SourceKind: platform.HookSourceCanonicalBundle, SourcePath: bundleSrc}
+	if got, _ := hookRemovalTarget(bundle); got != filepath.Dir(bundleSrc) {
+		t.Errorf("bundle target = %q; want %q", got, filepath.Dir(bundleSrc))
 	}
-	legacy := &platform.HookSpec{SourceKind: platform.HookSourceLegacyFile, SourcePath: "/x/h.json"}
-	if got, _ := hookRemovalTarget(legacy); got != "/x/h.json" {
-		t.Errorf("legacy target = %q; want /x/h.json", got)
+	legacySrc := filepath.FromSlash("/x/h.json")
+	legacy := &platform.HookSpec{SourceKind: platform.HookSourceLegacyFile, SourcePath: legacySrc}
+	if got, _ := hookRemovalTarget(legacy); got != legacySrc {
+		t.Errorf("legacy target = %q; want %q", got, legacySrc)
 	}
 	unknown := &platform.HookSpec{SourceKind: "weird-thing", SourcePath: "/q"}
 	if _, err := hookRemovalTarget(unknown); err == nil {

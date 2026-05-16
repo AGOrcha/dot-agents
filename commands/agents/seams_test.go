@@ -22,13 +22,15 @@ func TestEnsureImportRepoAgentsSlot_ReadlinkErrorSeam(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "seamproj")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "seamproj", "seam-agent")
 
-	// Set up a real symlink so Lstat reports a symlink, then force Readlink
-	// to fail through the seam.
+	// Symlink to a path OTHER than canonical so links.IsManagedLink is
+	// false (the happy-path short-circuit does not fire) and control
+	// reaches the mispoint branch, where osReadlink is invoked to build
+	// the error message — the seam under test.
 	repoLocal := filepath.Join(projectPath, ".agents", "agents", "seam-agent")
 	if err := os.MkdirAll(filepath.Dir(repoLocal), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(canonical, repoLocal); err != nil {
+	if err := os.Symlink(filepath.Join(projectPath, "elsewhere"), repoLocal); err != nil {
 		t.Fatal(err)
 	}
 

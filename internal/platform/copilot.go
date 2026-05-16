@@ -366,7 +366,7 @@ func (c *copilot) RemoveLinks(project, repoPath string) error {
 	c.removeTopLevelLinks(project, repoPath, agentsHome)
 	c.removeClaudeCompatSettings(project, repoPath, agentsHome)
 	c.removeSkillsLinks(repoPath, agentsHome)
-	c.removeAgentLinks(repoPath, agentsHome)
+	c.removeAgentLinks(project, repoPath, agentsHome)
 	c.removeHookLinks(project, repoPath, agentsHome)
 	return nil
 }
@@ -430,13 +430,18 @@ func (c *copilot) removeSkillsLinks(repoPath, agentsHome string) {
 	}
 }
 
-func (c *copilot) removeAgentLinks(repoPath, agentsHome string) {
+func (c *copilot) removeAgentLinks(project, repoPath, agentsHome string) {
+	const suffix = ".agent.md"
 	agentsDir := filepath.Join(repoPath, copilotGitHubDir, "agents")
 	if entries, err := os.ReadDir(agentsDir); err == nil {
 		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".agent.md") {
-				links.RemoveIfSymlinkUnder(filepath.Join(agentsDir, e.Name()), agentsHome)
+			if !strings.HasSuffix(e.Name(), suffix) {
+				continue
 			}
+			dst := filepath.Join(agentsDir, e.Name())
+			links.RemoveIfSymlinkUnder(dst, agentsHome)
+			name := strings.TrimSuffix(e.Name(), suffix)
+			links.RemoveIfHardlinkedToAny(dst, scopedAgentFileSources(agentsHome, project, name, suffix))
 		}
 	}
 }
@@ -449,9 +454,12 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) {
 	}
 	if entries, err := os.ReadDir(hooksDir); err == nil {
 		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".json") {
-				links.RemoveIfSymlinkUnder(filepath.Join(hooksDir, e.Name()), agentsHome)
+			if !strings.HasSuffix(e.Name(), ".json") {
+				continue
 			}
+			dst := filepath.Join(hooksDir, e.Name())
+			links.RemoveIfSymlinkUnder(dst, agentsHome)
+			links.RemoveIfHardlinkedToAny(dst, scopedBucketFileSources(agentsHome, "hooks", project, e.Name()))
 		}
 	}
 }
