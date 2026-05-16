@@ -16,14 +16,14 @@ var embedded embed.FS
 // copyStarterEntry copies a single embedded starter entry to dstRoot.
 // Directories are created; files are only written if they do not already exist.
 func copyStarterEntry(dstRoot, path string, d fs.DirEntry) error {
-	rel, err := filepath.Rel("starter", path)
-	if err != nil {
-		return err
-	}
-	if rel == "." {
+	// path is a forward-slash embed.FS path; filepath.Rel would mishandle
+	// the separators on Windows. Trim the forward-slash root, then convert
+	// to an OS path for the real destination.
+	rel := strings.TrimPrefix(strings.TrimPrefix(path, "starter"), "/")
+	if rel == "" {
 		return nil
 	}
-	dstPath := filepath.Join(dstRoot, rel)
+	dstPath := filepath.Join(dstRoot, filepath.FromSlash(rel))
 	if d.IsDir() {
 		return os.MkdirAll(dstPath, 0755)
 	}

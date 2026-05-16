@@ -29,7 +29,9 @@ func CopyMissingGlobalBundles(dstRoot string) error {
 		if _, err := os.Stat(dstBundle); err == nil {
 			continue
 		}
-		if err := copyEmbeddedTree(filepath.Join("global", name), dstBundle); err != nil {
+		// embed.FS/io.FS paths are always forward-slash on every OS;
+		// filepath.Join would yield "global\name" on Windows and fail.
+		if err := copyEmbeddedTree("global/"+name, dstBundle); err != nil {
 			return err
 		}
 	}
@@ -41,13 +43,13 @@ func copyEmbeddedTree(srcRoot, dstRoot string) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
-		}
+		// path is a forward-slash embed.FS path; derive the relative
+		// segment by trimming the (forward-slash) srcRoot, then convert
+		// to an OS path for the real destination.
+		rel := strings.TrimPrefix(strings.TrimPrefix(path, srcRoot), "/")
 		dstPath := dstRoot
-		if rel != "." {
-			dstPath = filepath.Join(dstRoot, rel)
+		if rel != "" {
+			dstPath = filepath.Join(dstRoot, filepath.FromSlash(rel))
 		}
 		if d.IsDir() {
 			return os.MkdirAll(dstPath, 0755)
