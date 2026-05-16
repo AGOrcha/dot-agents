@@ -639,15 +639,22 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 			}
 		}
 	}
-	// Single-file managed links (symlink/junction or hard link).
-	for _, f := range []string{
-		filepath.Join(path, "AGENTS.md"),
-		filepath.Join(path, ".github", "copilot-instructions.md"),
-		filepath.Join(path, "opencode.json"),
-		filepath.Join(path, ".mcp.json"),
-		filepath.Join(path, ".vscode", "mcp.json"),
+	// Single-file managed links: a resolvable symlink/junction whose target
+	// exists, or (Windows files) a hard link to the canonical source. The
+	// canonical source is reconstructed from the project scope, mirroring
+	// the cursor/claude paths above and collectBrokenLinks' singleFiles.
+	for _, sf := range []struct{ dst, src string }{
+		{filepath.Join(path, "AGENTS.md"), filepath.Join(agentsHome, "rules", name, "AGENTS.md")},
+		{filepath.Join(path, ".github", "copilot-instructions.md"), filepath.Join(agentsHome, "rules", name, "copilot-instructions.md")},
+		{filepath.Join(path, "opencode.json"), filepath.Join(agentsHome, "settings", name, "opencode.json")},
+		{filepath.Join(path, ".mcp.json"), filepath.Join(agentsHome, "mcp", name, "mcp.json")},
+		{filepath.Join(path, ".vscode", "mcp.json"), filepath.Join(agentsHome, "mcp", name, "mcp.json.vscode")},
 	} {
-		if managedLinkHealthy(f) {
+		if managedLinkHealthy(sf.dst) {
+			ok++
+			continue
+		}
+		if linked, _ := links.AreHardlinked(sf.dst, sf.src); linked {
 			ok++
 		}
 	}

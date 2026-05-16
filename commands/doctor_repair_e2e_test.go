@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,6 +134,9 @@ func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, ta
 }
 
 func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: this E2E breaks a managed link by deleting its target and asserts it dangles. A Windows managed *file* link is a hard link with no reparse point — removing the canonical source only decrements nlink, the content persists, so it cannot dangle and managedLinkBroken correctly reports it non-broken by design (see doctor.go managedLinkBroken doc). Windows healthy hard-link counting is covered by TestCountProjectLinks_AllHealthyVariants and internal/linktest/linktest_test.go.")
+	}
 	_, agentsHome, projectPath, linkPath, target := seedManagedClaudeLink(t)
 
 	saved := Flags
