@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,17 @@ func listScopedResourceDirs(agentsHome, bucket, scope, marker string) ([]resourc
 	root := filepath.Join(agentsHome, bucket, scope)
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		// Distinguish "bucket absent" (legitimate no-op, callers swallow
+		// via errors.Is(fs.ErrNotExist)) from "bucket exists but is not a
+		// listable directory" (a regular file masquerading as the bucket,
+		// EACCES, EIO — real corruption that must surface). This must be
+		// OS-independent: Windows os.ReadDir on a regular-file path maps
+		// to a NotExist-class error, which would otherwise silently hide
+		// the corruption. The %v (not %w) deliberately breaks the
+		// fs.ErrNotExist chain so the fault propagates on every OS.
+		if _, statErr := os.Lstat(root); statErr == nil {
+			return nil, fmt.Errorf("resource bucket %s exists but is not a listable directory (%v)", root, err)
+		}
 		return nil, err
 	}
 

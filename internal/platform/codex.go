@@ -285,6 +285,13 @@ func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
 	dstRoot := filepath.Join(repoPath, codexDir, "agents")
 	existing, err := os.ReadDir(dstRoot)
 	if err != nil {
+		// Genuine absence is a no-op; a path that exists but is not a
+		// listable directory is a real fault that must propagate on every
+		// OS (Windows os.ReadDir on a regular-file path maps to a
+		// NotExist-class error — %v breaks the fs.ErrNotExist chain).
+		if _, statErr := os.Lstat(dstRoot); statErr == nil {
+			return fmt.Errorf("listing codex agents dir %s: not a listable directory (%v)", dstRoot, err)
+		}
 		if os.IsNotExist(err) {
 			return nil
 		}
