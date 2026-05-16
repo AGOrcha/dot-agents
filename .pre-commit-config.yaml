@@ -1,0 +1,49 @@
+# dot-agents pre-commit mandate, managed by prek (https://prek.j178.dev).
+#
+# Install once (idempotent):   prek install
+#   → installs the pre-commit AND pre-push git hooks.
+# Update hook versions:        prek autoupdate
+# Run manually:                prek run --all-files
+#                              prek run --all-files --hook-stage pre-push
+#
+# Design: the pre-commit stage is fast (formatting only) so every commit
+# stays cheap. The heavy mandate — build, vet, the 95%-per-package
+# coverage gate (full test suite), and containerized sonar-scanner — runs
+# at the pre-push stage. (Running the suite per commit also previously
+# corrupted the shared git config via leaked GIT_DIR; scripts/
+# precommit-mandate.sh now strips that env and prek isolates hook exec.)
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: local
+    hooks:
+      # ---- fast, every commit -------------------------------------
+      - id: gofmt
+        name: gofmt
+        entry: bash scripts/precommit-mandate.sh fmt
+        language: system
+        types: [go]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # ---- heavy, on push -----------------------------------------
+      - id: go-build-vet
+        name: go build + vet (POSIX + windows)
+        entry: bash scripts/precommit-mandate.sh build-vet
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: coverage-gate
+        name: coverage gate (>=95% per package)
+        entry: bash scripts/precommit-mandate.sh coverage
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: sonar-scanner
+        name: sonar-scanner (containerized)
+        entry: bash scripts/precommit-mandate.sh sonar
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
