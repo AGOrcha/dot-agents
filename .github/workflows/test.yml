@@ -170,7 +170,18 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+      # The 95%-per-package contract is measured on Linux and macOS. Windows
+      # deliberately t.Skip()s POSIX-symlink-semantics tests (a managed file
+      # link is a hard link with no reparse point, so there is no resolvable
+      # target / no dangling state to assert) and ships OS-build-tagged files
+      # (fsops_windows.go, inode_windows.go) whose branches the POSIX-oriented
+      # suite cannot exercise. Each skip carries a precise pointer to where
+      # the Windows path IS covered (internal/linktest). Windows still runs
+      # build + GOOS build + vet + full `go test ./...` + the smoke harness,
+      # so correctness is enforced everywhere; coverage % is not a
+      # Windows-measurable metric here and would force artificial scaffolding.
       - name: Coverage gate (95% per package)
+        if: runner.os != 'Windows'
         env:
           COVERAGE_FILE: ${{ env.GO_COVERAGE_FILE }}
           COVERAGE_THRESHOLD: '95'
