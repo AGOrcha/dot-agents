@@ -27,13 +27,13 @@ func Symlink(target, linkPath string) error {
 			return nil // already correct
 		}
 		// points elsewhere - remove and recreate
-		if err := fsops.RemoveAll(linkPath); err != nil {
+		if err := fsopsRemoveAll(linkPath); err != nil {
 			return fmt.Errorf("removing old symlink %s: %w", linkPath, err)
 		}
 	} else if !os.IsNotExist(err) {
 		// Not a symlink - check if regular file/dir
 		if _, statErr := os.Lstat(linkPath); statErr == nil {
-			if err := fsops.RemoveAll(linkPath); err != nil {
+			if err := fsopsRemoveAll(linkPath); err != nil {
 				return fmt.Errorf("removing existing file %s: %w", linkPath, err)
 			}
 		}
@@ -44,6 +44,11 @@ func Symlink(target, linkPath string) error {
 	}
 	return createLink(target, linkPath)
 }
+
+// fsopsRemoveAll is a seam over fsops.RemoveAll so tests can fault-inject
+// the otherwise-unreachable "failed to remove a stale/occupying entry"
+// error returns in Symlink. Production always uses the real implementation.
+var fsopsRemoveAll = fsops.RemoveAll
 
 // pathsResolveToSameFile reports whether target and linkPath are the same
 // underlying file (same inode / file index). True when linkPath is a hard
