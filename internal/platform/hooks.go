@@ -833,8 +833,21 @@ func marshalJSON(v any) ([]byte, error) {
 }
 
 func writeManagedFile(dst string, content []byte) error {
-	if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, content) {
-		return nil
+	newHash := renderContentHash(content)
+	if existing, err := os.ReadFile(dst); err == nil {
+		if bytes.Equal(existing, content) {
+			recordRenderHash(dst, newHash) // heal/ensure provenance
+			return nil
+		}
+		// Divergent existing file. It is ONLY safe to clobber if it is
+		// provably what we last rendered (hash matches the manifest).
+		// Otherwise it is a user edit (or unknown provenance) and must
+		// be preserved before we overwrite — never silently lost.
+		if renderManifestHash(dst) != renderContentHash(existing) {
+			if bErr := BackupBeforeOverwrite(dst); bErr != nil {
+				return fmt.Errorf("preserving user-modified managed file %s before refresh: %w", dst, bErr)
+			}
+		}
 	}
 	if _, err := os.Lstat(dst); err == nil {
 		if err := osRemove(dst); err != nil {
@@ -844,7 +857,11 @@ func writeManagedFile(dst string, content []byte) error {
 	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return osWriteFile(dst, content, 0644)
+	if err := osWriteFile(dst, content, 0644); err != nil {
+		return err
+	}
+	recordRenderHash(dst, newHash)
+	return nil
 }
 
 func removeManagedFile(dst string, content []byte) error {

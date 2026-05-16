@@ -28,9 +28,13 @@ func TestSymlink_DanglingButCorrectIsNoop(t *testing.T) {
 	}
 }
 
-// TestSymlink_RemoveAllErrorBranches fault-injects fsopsRemoveAll to cover
-// the two "failed to remove" error returns: (a) an existing symlink that
-// points elsewhere, (b) an existing regular file occupying linkPath.
+// TestSymlink_RemoveAllErrorBranches fault-injects the removal seams to
+// cover the reachable "failed to remove" returns: (a) a stale managed
+// symlink pointing elsewhere (fsopsRemoveAll), (b) an empty squat dir
+// (fsopsRemove single-entry), (c) SymlinkReplacing over an unmanaged
+// regular file after a successful backup (fsopsRemoveAll). An unmanaged
+// regular file via plain Symlink is now refused with ErrUnmanagedTarget
+// BEFORE any removal, so that is no longer a removal-error branch.
 func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
@@ -61,12 +65,23 @@ func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
 		t.Errorf("expected injected remove error for stale symlink, got %v", err)
 	}
 
-	// (b) regular file occupying linkPath → Lstat ok → RemoveAll → error.
+	// (b) empty squat dir → single-entry fsopsRemove → injected error.
+	emptyDir := filepath.Join(tmp, "emptydir")
+	if err := os.Mkdir(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Symlink(target, emptyDir); !errors.Is(err, sentinel) {
+		t.Errorf("expected injected remove error for empty squat dir, got %v", err)
+	}
+
+	// (c) SymlinkReplacing over an unmanaged regular file: backup ok →
+	//     fsopsRemoveAll injected error (entry left for the caller).
 	occupied := filepath.Join(tmp, "occupied")
 	if err := os.WriteFile(occupied, []byte("o"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Symlink(target, occupied); !errors.Is(err, sentinel) {
-		t.Errorf("expected injected remove error for occupying file, got %v", err)
+	bkErr := SymlinkReplacing(target, occupied, func(string) error { return nil })
+	if !errors.Is(bkErr, sentinel) {
+		t.Errorf("expected injected remove error after backup, got %v", bkErr)
 	}
 }

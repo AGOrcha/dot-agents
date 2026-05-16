@@ -108,6 +108,7 @@ func runRefresh(projectFilter string) error {
 
 	total := len(projects)
 	count := 0
+	var failed []string
 	for i, name := range projects {
 		path := cfg.GetProjectPath(name)
 		if path == "" || path == "." {
@@ -146,12 +147,14 @@ func runRefresh(projectFilter string) error {
 
 		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
 		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
+		projectFailed := false
 		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
 		if err != nil {
 			if Flags.DryRun {
 				ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
 			} else {
 				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+				projectFailed = true
 			}
 		} else if lines != nil {
 			for _, line := range lines {
@@ -170,31 +173,50 @@ func runRefresh(projectFilter string) error {
 			}
 			if err := p.CreateLinks(name, path); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+				projectFailed = true
 			} else {
 				ui.Bullet("ok", p.DisplayName()+" links refreshed")
 			}
 		}
 
-		if !Flags.DryRun {
-			if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
-				ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
-			}
-		} else {
+		if Flags.DryRun {
 			msg := "Update .agentsrc.json refresh details"
 			if refreshCommit != "" {
 				msg += " (commit=" + refreshCommit[:8] + ")"
 			}
 			ui.DryRun(msg)
+			count++
+			continue
 		}
 
+		// Do NOT stamp fresh refresh metadata onto a project whose
+		// projection or platform links failed: a manifest claiming
+		// success for a partial application makes retries and
+		// doctor/refresh recovery ambiguous. Surface it instead.
+		if projectFailed {
+			failed = append(failed, name)
+			ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
+			continue
+		}
+		if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+			failed = append(failed, name)
+			continue
+		}
 		count++
 	}
 
 	fmt.Fprintln(os.Stdout)
-	if count == 0 {
+	if count == 0 && len(failed) == 0 {
 		ui.Info("Nothing to refresh.")
-	} else {
+	} else if count > 0 {
 		ui.Success(fmt.Sprintf("Refreshed %d project(s).", count))
+	}
+	if len(failed) > 0 {
+		return ErrorWithHints(
+			fmt.Sprintf("refresh incomplete for %d project(s): %s", len(failed), strings.Join(failed, ", ")),
+			"The listed projects were NOT marked refreshed (partial application). Re-run after resolving the warnings above; unmanaged files in the way must be imported, backed up, or removed.",
+		)
 	}
 	return nil
 }

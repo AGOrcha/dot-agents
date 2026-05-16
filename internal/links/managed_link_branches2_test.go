@@ -1,6 +1,7 @@
 package links
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,11 +44,19 @@ func TestSymlink_ReplacesRegularFileNonSymlink(t *testing.T) {
 	if err := os.WriteFile(link, []byte("squatter"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Symlink(target, link); err != nil {
-		t.Fatalf("Symlink replacing regular file: %v", err)
+	// Contract: plain Symlink refuses an unmanaged regular file.
+	if err := Symlink(target, link); !errors.Is(err, ErrUnmanagedTarget) {
+		t.Fatalf("want ErrUnmanagedTarget, got %v", err)
+	}
+	if b, _ := os.ReadFile(link); string(b) != "squatter" {
+		t.Errorf("unmanaged file must be preserved, got %q", string(b))
+	}
+	// The explicit replace path (with backup) does replace it.
+	if err := SymlinkReplacing(target, link, func(string) error { return nil }); err != nil {
+		t.Fatalf("SymlinkReplacing: %v", err)
 	}
 	if !IsManagedLink(link, target) {
-		t.Error("link should resolve to target after replacing the regular file")
+		t.Error("link should resolve to target after explicit backed-up replace")
 	}
 }
 

@@ -1,6 +1,7 @@
 package links
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,14 +10,42 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
 
+// ErrUnmanagedTarget is returned by Symlink when linkPath is occupied by an
+// entry dot-agents does not own (a regular file, or a non-empty directory)
+// rather than a managed link or an idempotent re-link of the same canonical
+// file. Callers can errors.Is() this to distinguish "user data is in the
+// way" from an I/O failure, and decide to surface a conflict or route
+// through SymlinkReplacing with an explicit backup.
+var ErrUnmanagedTarget = errors.New("link path occupied by an unmanaged entry")
+
 // Symlink creates or updates a managed link at linkPath pointing to target.
-// It is idempotent: if the correct link already exists, it is a no-op.
+// It is idempotent for managed state (correct link / same canonical inode /
+// stale managed link / empty squat dir) but, by contract, NEVER destroys
+// unmanaged user data: an existing regular file or non-empty directory that
+// is not a managed link yields ErrUnmanagedTarget and is left intact. A
+// caller that legitimately intends to replace such an entry must go through
+// SymlinkReplacing with an explicit backup.
 //
 // "Managed link" is OS-specific: a POSIX symlink, or on Windows a directory
 // junction (dirs) / hard link (files). The hard-link case has no reparse
 // point, so idempotency for it is detected by inode identity (os.SameFile)
 // rather than os.Readlink.
 func Symlink(target, linkPath string) error {
+	return symlinkWithPolicy(target, linkPath, nil)
+}
+
+// SymlinkReplacing behaves like Symlink but, when linkPath holds an
+// unmanaged regular file or non-empty directory, first invokes backup(path)
+// (a caller-supplied preservation step — e.g. mirror/backup at the commands
+// layer; links must not depend on it) and only then removes the entry and
+// installs the managed link. If backup returns an error the original entry
+// is left untouched and the error is propagated (no data loss). A nil
+// backup is identical to Symlink (refuse).
+func SymlinkReplacing(target, linkPath string, backup func(path string) error) error {
+	return symlinkWithPolicy(target, linkPath, backup)
+}
+
+func symlinkWithPolicy(target, linkPath string, backup func(path string) error) error {
 	if same, err := pathsResolveToSameFile(target, linkPath); err == nil && same {
 		return nil // already a hard link / junction to the same canonical file
 	}
@@ -26,27 +55,32 @@ func Symlink(target, linkPath string) error {
 		if existing == target {
 			return nil // already correct
 		}
-		// points elsewhere - remove and recreate
+		// Stale MANAGED link (symlink/junction) pointing elsewhere:
+		// removing it deletes only the link, never a target's contents.
 		if err := fsopsRemoveAll(linkPath); err != nil {
 			return fmt.Errorf("removing old symlink %s: %w", linkPath, err)
 		}
 	} else if !os.IsNotExist(err) {
-		// Not a symlink/junction. NEVER recursively delete here: an
-		// unmanaged real directory at linkPath may hold local user work,
-		// and refresh/doctor reaching this path must not destroy it.
-		// (A managed junction is symlink-class and handled by the
-		// Readlink branch above; the same-canonical-file fast path is
-		// handled at the top.) Single-entry removal only — os.Remove
-		// deletes a regular file or an EMPTY dir and refuses a non-empty
-		// dir, which is exactly the safe policy: idempotent re-link over
-		// a file/empty squat, hard error (no data loss) over real data.
+		// Not a symlink/junction: a regular file or a real directory.
 		if info, statErr := os.Lstat(linkPath); statErr == nil {
+			unmanaged := !info.IsDir() // any non-managed regular file
 			if info.IsDir() {
 				if entries, derr := os.ReadDir(linkPath); derr == nil && len(entries) > 0 {
-					return fmt.Errorf("refusing to replace non-empty directory %s with a managed link: it is not a managed link and may contain local work — remove or back it up first", linkPath)
+					unmanaged = true // non-empty dir may hold local work
 				}
 			}
-			if rmErr := fsopsRemove(linkPath); rmErr != nil {
+			if unmanaged {
+				if backup == nil {
+					return fmt.Errorf("%w: %s is a regular file or non-empty directory, not a managed link — back it up/import or use the explicit replace path", ErrUnmanagedTarget, linkPath)
+				}
+				if bErr := backup(linkPath); bErr != nil {
+					return fmt.Errorf("backing up unmanaged entry %s before replace: %w", linkPath, bErr)
+				}
+				if rmErr := fsopsRemoveAll(linkPath); rmErr != nil {
+					return fmt.Errorf("removing backed-up entry %s: %w", linkPath, rmErr)
+				}
+			} else if rmErr := fsopsRemove(linkPath); rmErr != nil {
+				// Empty dir: single-entry removal, no data, idempotent.
 				return fmt.Errorf("removing existing entry %s: %w", linkPath, rmErr)
 			}
 		}

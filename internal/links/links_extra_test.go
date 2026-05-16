@@ -1,17 +1,17 @@
 package links_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
-func TestSymlinkReplacesRegularFile(t *testing.T) {
+func TestSymlinkRefusesUnmanagedRegularFile(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "target.txt")
 	if err := os.WriteFile(target, []byte("t"), 0644); err != nil {
@@ -21,13 +21,56 @@ func TestSymlinkReplacesRegularFile(t *testing.T) {
 	if err := os.WriteFile(linkPath, []byte("preexisting regular"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := links.Symlink(target, linkPath); err != nil {
-		t.Fatalf("Symlink should replace regular file, got %v", err)
+	// Contract: a non-managed regular file is user data — Symlink must
+	// refuse with ErrUnmanagedTarget and leave it byte-intact.
+	err := links.Symlink(target, linkPath)
+	if !errors.Is(err, links.ErrUnmanagedTarget) {
+		t.Fatalf("want ErrUnmanagedTarget for unmanaged regular file, got %v", err)
 	}
-	if !links.IsManagedLink(linkPath, target) {
-		t.Errorf("expected %s to be a managed link to %s after replacing regular file", linkPath, target)
+	if b, _ := os.ReadFile(linkPath); string(b) != "preexisting regular" {
+		t.Errorf("user file must be preserved, got %q", string(b))
+	}
+	if links.IsManagedLink(linkPath, target) {
+		t.Error("linkPath must NOT have been converted to a managed link")
 	}
 }
+
+func TestSymlinkReplacingBacksUpThenReplaces(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "target.txt")
+	os.WriteFile(target, []byte("t"), 0644)
+	linkPath := filepath.Join(tmp, "link.txt")
+	os.WriteFile(linkPath, []byte("user content"), 0644)
+
+	var backedUp string
+	err := links.SymlinkReplacing(target, linkPath, func(p string) error {
+		b, _ := os.ReadFile(p)
+		backedUp = string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SymlinkReplacing: %v", err)
+	}
+	if backedUp != "user content" {
+		t.Errorf("backup must see the original content, got %q", backedUp)
+	}
+	if !links.IsManagedLink(linkPath, target) {
+		t.Error("linkPath should be a managed link after backup+replace")
+	}
+
+	// backup failure → original entry preserved, error propagated.
+	other := filepath.Join(tmp, "other.txt")
+	os.WriteFile(other, []byte("keep me"), 0644)
+	bErr := links.SymlinkReplacing(target, other, func(string) error { return errFakeBackup })
+	if !errors.Is(bErr, errFakeBackup) {
+		t.Errorf("backup failure must propagate, got %v", bErr)
+	}
+	if b, _ := os.ReadFile(other); string(b) != "keep me" {
+		t.Errorf("entry must be untouched when backup fails, got %q", string(b))
+	}
+}
+
+var errFakeBackup = errors.New("backup boom")
 
 func TestSymlinkParentDirCreation(t *testing.T) {
 	tmp := t.TempDir()
@@ -193,11 +236,8 @@ func TestSymlinkRefusesUnmanagedNonEmptyDir(t *testing.T) {
 	os.WriteFile(child, []byte("y"), 0644)
 
 	err := links.Symlink(target, linkPath)
-	if err == nil {
-		t.Fatal("expected Symlink to refuse replacing an unmanaged non-empty dir")
-	}
-	if !strings.Contains(err.Error(), "non-empty directory") {
-		t.Errorf("error should explain the refusal, got: %v", err)
+	if !errors.Is(err, links.ErrUnmanagedTarget) {
+		t.Fatalf("want ErrUnmanagedTarget refusing unmanaged non-empty dir, got %v", err)
 	}
 	if b, rerr := os.ReadFile(child); rerr != nil || string(b) != "y" {
 		t.Errorf("user data must be preserved; child read=%q err=%v", string(b), rerr)
