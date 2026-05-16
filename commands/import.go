@@ -590,7 +590,7 @@ func walkedImportCandidate(project, projectPath, path string, d os.DirEntry, err
 }
 
 func scanGlobalImportCandidates() []importCandidate {
-	home, err := os.UserHomeDir()
+	home, err := config.UserHomeDir()
 	if err != nil {
 		return nil
 	}

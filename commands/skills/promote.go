@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -36,7 +35,7 @@ func PromoteSkillIn(name, projectPath string) error {
 // target roots so allowlist prefix checks pass even when an existing
 // .claude/skills directory needs to be replaced.
 func refreshSkillMirror(projectName, _ string) error {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		ui.Bullet("warn", "could not determine home directory; skipping platform mirrors: "+err.Error())
 		return nil

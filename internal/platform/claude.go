@@ -227,7 +227,7 @@ func (c *claude) IsInstalled() bool {
 	if _, err := exec.LookPath("claude"); err == nil {
 		return true
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	_, err := os.Stat(filepath.Join(home, claudeDir))
 	return err == nil
 }

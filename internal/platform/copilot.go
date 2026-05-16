@@ -128,7 +128,7 @@ func copilotAccumulateShutdownTokens(path string, m *SessionTokenMetrics) {
 }
 
 func (c *copilot) IsInstalled() bool {
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	for _, dir := range []string{
 		filepath.Join(home, copilotVSCodeDir, "extensions"),
 		filepath.Join(home, ".vscode-insiders", "extensions"),
@@ -147,7 +147,7 @@ func (c *copilot) IsInstalled() bool {
 }
 
 func (c *copilot) Version() string {
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	for _, dir := range []string{
 		filepath.Join(home, copilotVSCodeDir, "extensions"),
 		filepath.Join(home, ".vscode-insiders", "extensions"),

@@ -382,7 +382,7 @@ func runStatus(audit bool, agentFilter string) error {
 		fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Bold, name, ui.Reset)
 
 		// Suppress path display if it's just ~/name
-		homeDir, _ := os.UserHomeDir()
+		homeDir, _ := config.UserHomeDir()
 		expectedSimplePath := "~/" + name
 		actualDisplayPath := strings.Replace(path, homeDir, "~", 1)
 		if actualDisplayPath != expectedSimplePath {
@@ -464,7 +464,7 @@ func statusGitInfo(agentsHome string) statusJSONGit {
 }
 
 func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		return nil
 	}
@@ -856,7 +856,7 @@ func printSharedTargetRegistry(project, repo string, cfg *config.Config) {
 
 // printUserConfigSection reports on user-level (home directory) config links.
 func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		return
 	}

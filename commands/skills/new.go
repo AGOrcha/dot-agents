@@ -70,7 +70,7 @@ func SkillCreationNextSteps(name, scope, skillMD string) []string {
 //   - ~/.agents/skills/<name>  → agentsHome/skills/global/<name>   (Codex)
 //   - ~/.claude/skills/<name>  → agentsHome/skills/global/<name>   (Claude Code)
 func EnsureUserSkillLinks(agentsHome, name, skillDir string) {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		return
 	}

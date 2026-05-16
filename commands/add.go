@@ -655,7 +655,7 @@ func kgConfigPath() string {
 	if v := os.Getenv("KG_HOME"); v != "" {
 		return filepath.Join(v, "self", "config.yaml")
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := config.UserHomeDir()
 	return filepath.Join(home, "knowledge-graph", "self", "config.yaml")
 }
 

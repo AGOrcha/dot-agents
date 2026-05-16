@@ -2,11 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +30,7 @@ func newSessionStatsCmd() *cobra.Command {
 }
 
 func runSessionStats(_ *cobra.Command, _ []string) error {
-	home, err := os.UserHomeDir()
+	home, err := config.UserHomeDir()
 	if err != nil {
 		return err
 	}
