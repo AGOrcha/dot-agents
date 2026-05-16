@@ -41,8 +41,17 @@ func TestNewMCPServer_BridgeSuccessPath(t *testing.T) {
 	}
 
 	// Independently force the store error path so we exercise only the bridge
-	// success branch without depending on a working SQLite path.
-	t.Setenv("KG_HOME", workDir)
+	// success branch without depending on a working SQLite path. Pointing
+	// KG_HOME at a regular file makes defaultGraphstoreDBPath's parent
+	// (<file>/ops) impossible to create, so OpenSQLite fails fast and leaves
+	// no open DB handle. (Setting KG_HOME=workDir instead would *succeed* and
+	// leak an unclosed sqlite handle that blocks t.TempDir RemoveAll on
+	// Windows.)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KG_HOME", blocker)
 
 	srv := NewMCPServer(workDir)
 	if srv == nil {

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1077,21 +1078,22 @@ func TestRunWorkflowLog_AllShowsEverything(t *testing.T) {
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	oldwd, _ := os.Getwd()
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(repo); err != nil {
-		t.Fatal(err)
-	}
-
-	// Write 12 checkpoints so the default (last-10) truncates and --all does not.
-	for i := 0; i < 12; i++ {
-		msg := "iter-" + strconv.Itoa(i)
-		if err := runWorkflowCheckpoint(msg, "pass", ""); err != nil {
-			t.Fatalf("checkpoint %d: %v", i, err)
+	// Write 12 checkpoints so the default (last-10) truncates and --all does
+	// not, then read them back — all inside captureStdoutWhileRunning so the
+	// only chdir into the temp repo is the helper's, whose t.Cleanup restores
+	// the original cwd before t.TempDir's RemoveAll runs. Doing a manual
+	// os.Chdir + defer here would leave the helper's cleanup chdir'ing back
+	// into the temp dir, which makes RemoveAll fail on Windows (a process
+	// cannot have its cwd inside a directory being deleted).
+	captureStdoutWhileRunning(t, repo, func() error {
+		for i := 0; i < 12; i++ {
+			msg := "iter-" + strconv.Itoa(i)
+			if err := runWorkflowCheckpoint(msg, "pass", ""); err != nil {
+				return fmt.Errorf("checkpoint %d: %w", i, err)
+			}
 		}
-	}
-
-	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowLog(true) },
+		return runWorkflowLog(true)
+	},
 		"iter-0",
 		"iter-11",
 	)

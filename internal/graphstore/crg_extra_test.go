@@ -14,6 +14,14 @@ import (
 )
 
 func TestCRGBridge_pythonBin_FallbackToPath(t *testing.T) {
+	// "python3" is the POSIX-only fallback name. On Windows venvs ship
+	// python.exe (no python3), so the fallback is "python" — that path is
+	// asserted by TestPythonBin_ResolvesSiblingThenFallback in
+	// crg_venv_discovery_test.go. Skip here rather than encode a POSIX-only
+	// expectation as a cross-OS invariant.
+	if runtime.GOOS == "windows" {
+		t.Skip("python3 fallback is POSIX-only; Windows 'python' fallback covered by TestPythonBin_ResolvesSiblingThenFallback")
+	}
 	// Bin in a dir with no python3/python — fall back to "python3".
 	b := &CRGBridge{Bin: filepath.Join(t.TempDir(), "fake")}
 	got := b.pythonBin()

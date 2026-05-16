@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -31,31 +30,11 @@ const crgReadOnlyPragma = "?_pragma=query_only(true)"
 const crgBinName = "code-review-graph"
 const crgFlagRepo = "--repo"
 
-// venvBinSubdirs returns the executable subdirectory names used by Python
-// virtualenvs, most-specific first. POSIX venvs put executables under bin/;
-// Windows venvs put them under Scripts/. Probing both keeps CRG discovery
-// correct regardless of host (CI installs CRG only on Linux/macOS, but the
-// Windows layout must still resolve when a developer has a local .venv).
-func venvBinSubdirs() []string {
-	if runtime.GOOS == "windows" {
-		return []string{"Scripts", "bin"}
-	}
-	return []string{"bin", "Scripts"}
-}
-
-// venvExeCandidates returns possible absolute paths for executable `name`
-// inside the venv rooted at venvDir, covering both POSIX (no extension) and
-// Windows (.exe) naming across bin/ and Scripts/.
-func venvExeCandidates(venvDir, name string) []string {
-	var out []string
-	for _, sub := range venvBinSubdirs() {
-		out = append(out, filepath.Join(venvDir, sub, name))
-		if runtime.GOOS == "windows" {
-			out = append(out, filepath.Join(venvDir, sub, name+".exe"))
-		}
-	}
-	return out
-}
+// venvBinSubdirs and venvExeCandidates are OS-specific and live in
+// crg_venv_unix.go / crg_venv_windows.go so coverage is measured only against
+// the implementation actually compiled for the host (no dead runtime.GOOS
+// branch dragging the package below the per-package coverage gate). The shared
+// discovery orchestration below calls them unconditionally.
 
 // CRGBridge shells out to the code-review-graph Python CLI.
 type CRGBridge struct {
@@ -135,21 +114,13 @@ func (b *CRGBridge) pythonBin() string {
 	// ...\.venv\Scripts\code-review-graph.exe (Windows). Python lives in
 	// the same executable directory.
 	binDir := filepath.Dir(b.Bin)
-	names := []string{"python3", "python"}
-	if runtime.GOOS == "windows" {
-		// Windows venvs ship python.exe (no python3.exe); prefer it.
-		names = []string{"python.exe", "python3.exe", "python", "python3"}
-	}
-	for _, n := range names {
+	for _, n := range venvPythonNames() {
 		c := filepath.Join(binDir, n)
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
-	if runtime.GOOS == "windows" {
-		return "python"
-	}
-	return "python3"
+	return venvPythonFallback()
 }
 
 // runPyQuery executes a Python expression via the venv interpreter and returns
