@@ -151,6 +151,21 @@ jobs:
       - name: Verify jq installed
         run: jq --version
 
+      # Install the real code-review-graph Python CLI into a repo-root
+      # .venv so internal/graphstore TestCRGBridgeFreshBuildRealCRG
+      # actually runs (DiscoverCRGBin finds .venv/bin/code-review-graph
+      # and pythonBin() resolves .venv/bin/python3 for site-packages).
+      # Interim coverage until the in-process CRG graph adaptor lands.
+      # Windows venv layout is .venv/Scripts/ (not .venv/bin/), which
+      # DiscoverCRGBin does not probe, so the test skips there as before.
+      - name: Set up code-review-graph (.venv)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet code-review-graph
+          .venv/bin/code-review-graph --help >/dev/null
+
       - name: Check gofmt
         run: |
           unformatted=$(gofmt -l ./cmd ./commands ./internal)
