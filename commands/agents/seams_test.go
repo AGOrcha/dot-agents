@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,6 +16,9 @@ import (
 // a successful os.Lstat that already confirmed the path is a symlink, so the
 // only way to exercise it is to swap the package-level osReadlink seam.
 func TestEnsureImportRepoAgentsSlot_ReadlinkErrorSeam(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: needs a real symlink so os.Lstat reports os.ModeSymlink, no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "seamproj")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "seamproj", "seam-agent")
 
@@ -49,6 +53,9 @@ func TestEnsureImportRepoAgentsSlot_ReadlinkErrorSeam(t *testing.T) {
 // has just confirmed the path is a symlink, so the branch is otherwise
 // unreachable without a TOCTOU race.
 func TestCleanupManagedAgentRepoPath_ReadlinkErrorSeam(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: needs a real symlink so os.Lstat reports os.ModeSymlink, no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "rmseamproj")
 
 	// Create an unmanaged symlink pointing outside agentsHome so the

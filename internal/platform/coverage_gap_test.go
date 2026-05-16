@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // installFakeCLI writes an executable shell script that prints `out` and exits
@@ -1816,9 +1818,7 @@ func TestOpencodeRemoveLinksFullPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(src, dst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, dst)
 	// Skills symlink.
 	skillSrc := filepath.Join(agentsHome, "skills", "proj", "x")
 	if err := os.MkdirAll(skillSrc, 0755); err != nil {
@@ -1828,9 +1828,7 @@ func TestOpencodeRemoveLinksFullPath(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(skillDst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(skillSrc, skillDst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, skillSrc, skillDst)
 
 	if err := NewOpenCode().RemoveLinks("proj", repo); err != nil {
 		t.Fatalf("RemoveLinks: %v", err)
@@ -1866,9 +1864,7 @@ func TestCopilotRemoveLinksFullSweep(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(src, dst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, dst)
 	// Hooks dir with a stale entry.
 	hookSrc := filepath.Join(agentsHome, "hooks", "proj", "abc.json")
 	if err := os.MkdirAll(filepath.Dir(hookSrc), 0755); err != nil {
@@ -1881,9 +1877,7 @@ func TestCopilotRemoveLinksFullSweep(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(hookDst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(hookSrc, hookDst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, hookSrc, hookDst)
 
 	if err := NewCopilot().RemoveLinks("proj", repo); err != nil {
 		t.Fatalf("RemoveLinks: %v", err)
@@ -1915,9 +1909,7 @@ func TestCursorRemoveLinksWithExistingAgentLinks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(src, dst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, dst)
 	if err := NewCursor().RemoveLinks("proj", repo); err != nil {
 		t.Fatalf("RemoveLinks: %v", err)
 	}
@@ -1945,9 +1937,7 @@ func TestClaudeRemoveLinksFullSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	mcpDst := filepath.Join(repo, ".mcp.json")
-	if err := os.Symlink(mcpSrc, mcpDst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, mcpSrc, mcpDst)
 	// Seed a stale rule symlink.
 	ruleSrc := filepath.Join(agentsHome, "rules", "proj", "x.md")
 	if err := os.MkdirAll(filepath.Dir(ruleSrc), 0755); err != nil {
@@ -1960,9 +1950,7 @@ func TestClaudeRemoveLinksFullSweep(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(ruleDst), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(ruleSrc, ruleDst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, ruleSrc, ruleDst)
 
 	if err := NewClaude().RemoveLinks("proj", repo); err != nil {
 		t.Fatalf("RemoveLinks: %v", err)

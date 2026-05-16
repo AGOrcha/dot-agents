@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
 
@@ -63,9 +64,7 @@ func TestPromoteResource_StaleCanonicalSymlinkReplaced(t *testing.T) {
 	os.MkdirAll(canonicalDir, 0755)
 	elsewhere := filepath.Join(agentsHome, "elsewhere")
 	os.MkdirAll(elsewhere, 0755)
-	if err := os.Symlink(elsewhere, filepath.Join(canonicalDir, "alpha")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, elsewhere, filepath.Join(canonicalDir, "alpha"))
 
 	if err := projectsync.PromoteResource("alpha", projectPath, widgetSpecX(t)); err != nil {
 		t.Fatalf("PromoteResource: %v", err)

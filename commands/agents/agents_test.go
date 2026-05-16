@@ -146,6 +146,9 @@ func TestImportAgentIn_ErrorRepoLocalRealDir(t *testing.T) {
 }
 
 func TestImportAgentIn_ErrorRepoLocalMispointedSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: os.ModeSymlink + os.Readlink mispoint detection has no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "importproj4")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "importproj4", "mis-import")
 
@@ -369,6 +372,9 @@ func TestPromoteAgentIn_ErrorNoProjectName(t *testing.T) {
 }
 
 func TestPromoteAgentIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: os.ModeSymlink + os.Readlink mispoint detection has no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest5")
 	testutil.WriteAgentManifest(t, projectPath, "mis-agent")
 
@@ -459,6 +465,9 @@ func TestRemoveAgentIn_UnlinksSymlinksAndManifest(t *testing.T) {
 }
 
 func TestRemoveAgentIn_DriftSymlinkWithoutManifestEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: drift-symlink removal path keys off os.ModeSymlink, no managed-link analogue")
+	}
 	d := stubDeps(false)
 	agentsHome, projectPath := testutil.NewTempProject(t, "driftproj")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "driftproj", "drift-agent")
@@ -536,6 +545,9 @@ func TestRemoveAgentIn_PurgeDeletesCanonical(t *testing.T) {
 }
 
 func TestRemoveAgentIn_ErrorPurgeCanonicalSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: canonical-symlink purge keys off os.ModeSymlink + os.Readlink, no managed-link analogue")
+	}
 	d := stubDeps(true)
 	agentsHome, projectPath := testutil.NewTempProject(t, "symproj")
 	other := filepath.Join(agentsHome, "agents", "symproj", "other")

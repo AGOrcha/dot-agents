@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // atomicEnv mirrors promote_test.go's promoteEnv but lives inside the
@@ -187,9 +188,7 @@ func TestMaterializePromoteSource_ExistingSymlinkBranch(t *testing.T) {
 	if err := os.MkdirAll(repoBucket, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(canonical, filepath.Join(repoBucket, "alpha")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, canonical, filepath.Join(repoBucket, "alpha"))
 	if err := PromoteResource("alpha", projectPath, atomicWidgetSpec()); err != nil {
 		t.Fatalf("expected idempotent success: %v", err)
 	}
@@ -272,9 +271,7 @@ func TestValidatePromoteSymlink_Mismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := filepath.Join(tmp, "src")
-	if err := os.Symlink(wrong, src); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, wrong, src)
 	spec := atomicWidgetSpec()
 	err := validatePromoteSymlink(src, filepath.Join(tmp, "canonical"), "alpha", spec)
 	if err == nil || !strings.Contains(err.Error(), "already a symlink but points to") {
@@ -334,9 +331,7 @@ func TestValidatePromoteSymlink_HappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := filepath.Join(tmp, "src")
-	if err := os.Symlink(canon, src); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, canon, src)
 	if err := validatePromoteSymlink(src, canon, "alpha", atomicWidgetSpec()); err != nil {
 		t.Errorf("happy path: %v", err)
 	}

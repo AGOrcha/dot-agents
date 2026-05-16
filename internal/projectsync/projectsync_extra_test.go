@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
 
@@ -74,7 +75,7 @@ func TestCopyTree(t *testing.T) {
 	os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("b"), 0644)
 	// Symlink should be skipped
 	os.WriteFile(filepath.Join(src, "real.txt"), []byte("real"), 0644)
-	os.Symlink(filepath.Join(src, "real.txt"), filepath.Join(src, "link.txt"))
+	linktest.Link(t, filepath.Join(src, "real.txt"), filepath.Join(src, "link.txt"))
 
 	if err := projectsync.CopyTree(src, dst); err != nil {
 		t.Fatalf("CopyTree: %v", err)

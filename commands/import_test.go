@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"go.yaml.in/yaml/v3"
 )
@@ -1059,9 +1061,7 @@ func TestIsManagedSymlink(t *testing.T) {
 	target := filepath.Join(agentsHome, "managed.txt")
 	os.WriteFile(target, []byte("x"), 0644)
 	managed := filepath.Join(tmp, "managed-link")
-	if err := os.Symlink(target, managed); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, managed)
 	if !isManagedSymlink(managed, agentsHome) {
 		t.Error("expected managed symlink")
 	}
@@ -1070,9 +1070,7 @@ func TestIsManagedSymlink(t *testing.T) {
 	other := filepath.Join(tmp, "other.txt")
 	os.WriteFile(other, []byte("x"), 0644)
 	unmanaged := filepath.Join(tmp, "unmanaged-link")
-	if err := os.Symlink(other, unmanaged); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, other, unmanaged)
 	if isManagedSymlink(unmanaged, agentsHome) {
 		t.Error("unmanaged symlink should not be reported as managed")
 	}
@@ -1874,9 +1872,7 @@ func TestProcessImportCandidate_ManagedSourceIsNoop(t *testing.T) {
 	managed := filepath.Join(agentsHome, "managed", "x")
 	writeFile(t, managed, []byte("inside"))
 	link := filepath.Join(projRoot, "linked.txt")
-	if err := os.Symlink(managed, link); err != nil {
-		t.Skipf("symlink: %v", err)
-	}
+	linktest.Link(t, managed, link)
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
@@ -2111,6 +2107,9 @@ func TestFilesDifferent_BMissingReturnsError(t *testing.T) {
 // TestIsManagedSymlink_RelativeDestResolves covers the relative-dest branch
 // where dest is not absolute and gets joined to the link's dir.
 func TestIsManagedSymlink_RelativeDestInsideAgentsHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: exercises isManagedSymlink's relative-dest os.Readlink branch, which the managed-link model (junction/hardlink) cannot express")
+	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, "agents")
 	os.MkdirAll(agentsHome, 0755)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
 
@@ -104,9 +105,7 @@ func TestPromoteResource_IdempotentOnExistingSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoLocal := filepath.Join(repoBucket, "alpha")
-	if err := os.Symlink(canonical, repoLocal); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, canonical, repoLocal)
 
 	if err := projectsync.PromoteResource("alpha", projectPath, widgetSpec(t)); err != nil {
 		t.Fatalf("expected idempotent success, got: %v", err)
@@ -194,9 +193,7 @@ func TestPromoteResource_ErrorMispointedSymlink(t *testing.T) {
 	if err := os.MkdirAll(wrong, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(wrong, filepath.Join(repoBucket, "alpha")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, wrong, filepath.Join(repoBucket, "alpha"))
 
 	err := projectsync.PromoteResource("alpha", projectPath, widgetSpec(t))
 	if err == nil {
@@ -245,9 +242,7 @@ func TestCopyTree_CopiesFilesAndDirsSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(src, "nested", "skipme")
-	if err := os.Symlink(filepath.Join(src, "a.txt"), link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, filepath.Join(src, "a.txt"), link)
 
 	if err := projectsync.CopyTree(src, dst); err != nil {
 		t.Fatalf("CopyTree: %v", err)

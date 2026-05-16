@@ -3,6 +3,7 @@ package agents
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -232,6 +233,9 @@ func TestEnsureImportRepoAgentsSlot_UnknownFileTypeReturnsError(t *testing.T) {
 // TestEnsureImportRepoAgentsSlot_AlreadyCorrectSymlink covers the
 // `existing == canonicalPath` early-return branch.
 func TestEnsureImportRepoAgentsSlot_AlreadyCorrectSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: exercises os.ModeSymlink + os.Readlink early-return branch, no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "good")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "good", "agent-correct")
 
@@ -310,6 +314,9 @@ func TestRemoveAgentIn_NoProjectName(t *testing.T) {
 // TestCleanupManagedAgentRepoPath_MispointedSymlinkErrors creates a symlink
 // pointing outside agentsHome so the unmanaged-symlink branch fires.
 func TestCleanupManagedAgentRepoPath_MispointedSymlinkErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: unmanaged-symlink branch keys off os.ModeSymlink + os.Readlink, no managed-link analogue")
+	}
 	d := stubDeps(false)
 	agentsHome, projectPath := testutil.NewTempProject(t, "p")
 	// Create a symlink pointing outside agentsHome.
@@ -717,6 +724,9 @@ func TestAppendAgentsRCStep_UnknownProjectSkipsAppend(t *testing.T) {
 // canonical path (already covered by mispointed test, but this exercises
 // dangling links).
 func TestEnsureImportRepoAgentsSlot_DanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: dangling-symlink mispoint detection via os.Readlink has no managed-link analogue")
+	}
 	_, projectPath := testutil.NewTempProject(t, "p")
 	repoLocal := filepath.Join(projectPath, ".agents", "agents", "dangling")
 	if err := os.MkdirAll(filepath.Dir(repoLocal), 0o755); err != nil {

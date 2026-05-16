@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 func TestHasPluginPlatform(t *testing.T) {
@@ -56,9 +57,7 @@ func TestCollectBrokenLinks_HealthyClaudeSymlink(t *testing.T) {
 
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	if err := os.Symlink(target, filepath.Join(claudeRules, "proj--agents.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, filepath.Join(claudeRules, "proj--agents.md"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 0 {
@@ -73,10 +72,7 @@ func TestCollectBrokenLinks_BrokenClaudeSymlink(t *testing.T) {
 
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	dangling := filepath.Join(agentsHome, "rules", "proj", "ghost.md")
-	if err := os.Symlink(dangling, filepath.Join(claudeRules, "proj--ghost.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "proj--ghost.md"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 {
@@ -93,10 +89,7 @@ func TestCollectBrokenLinks_BrokenAgentsMD(t *testing.T) {
 	projectPath := filepath.Join(tmp, "proj")
 	os.MkdirAll(projectPath, 0755)
 
-	dangling := filepath.Join(agentsHome, "rules", "proj", "agents.md")
-	if err := os.Symlink(dangling, filepath.Join(projectPath, "AGENTS.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, "AGENTS.md"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 || got[0].platformID != "codex" {
@@ -111,10 +104,7 @@ func TestCollectBrokenLinks_BrokenCopilotInstructions(t *testing.T) {
 	ghDir := filepath.Join(projectPath, ".github")
 	os.MkdirAll(ghDir, 0755)
 
-	dangling := filepath.Join(agentsHome, "missing.md")
-	if err := os.Symlink(dangling, filepath.Join(ghDir, "copilot-instructions.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(ghDir, "copilot-instructions.md"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 || got[0].platformID != "copilot" {
@@ -129,10 +119,7 @@ func TestCollectBrokenLinks_BrokenVSCodeMCP(t *testing.T) {
 	vsDir := filepath.Join(projectPath, ".vscode")
 	os.MkdirAll(vsDir, 0755)
 
-	dangling := filepath.Join(agentsHome, "missing.json")
-	if err := os.Symlink(dangling, filepath.Join(vsDir, "mcp.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(vsDir, "mcp.json"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 || got[0].platformID != "copilot" {
@@ -146,10 +133,7 @@ func TestCollectBrokenLinks_BrokenClaudeMCP(t *testing.T) {
 	projectPath := filepath.Join(tmp, "proj")
 	os.MkdirAll(projectPath, 0755)
 
-	dangling := filepath.Join(agentsHome, "missing.json")
-	if err := os.Symlink(dangling, filepath.Join(projectPath, ".mcp.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, ".mcp.json"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 || got[0].platformID != "claude" {
@@ -163,10 +147,7 @@ func TestCollectBrokenLinks_BrokenOpenCodeJSON(t *testing.T) {
 	projectPath := filepath.Join(tmp, "proj")
 	os.MkdirAll(projectPath, 0755)
 
-	dangling := filepath.Join(agentsHome, "missing.json")
-	if err := os.Symlink(dangling, filepath.Join(projectPath, "opencode.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, "opencode.json"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 1 || got[0].platformID != "opencode" {
@@ -201,15 +182,10 @@ func TestCountProjectLinks_HealthyAndBroken(t *testing.T) {
 	os.WriteFile(target, []byte("ok"), 0644)
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	if err := os.Symlink(target, filepath.Join(claudeRules, "proj--agents.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, filepath.Join(claudeRules, "proj--agents.md"))
 
 	// Broken AGENTS.md
-	dangling := filepath.Join(agentsHome, "missing.md")
-	if err := os.Symlink(dangling, filepath.Join(projectPath, "AGENTS.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, "AGENTS.md"))
 
 	ok, broken := countProjectLinks("proj", projectPath, agentsHome)
 	if ok != 1 {
@@ -242,10 +218,7 @@ func TestCollectBrokenUserLinks_BrokenClaudeMD(t *testing.T) {
 
 	claudeHome := filepath.Join(tmp, ".claude")
 	os.MkdirAll(claudeHome, 0755)
-	dangling := filepath.Join(agentsHome, "missing-claude.md")
-	if err := os.Symlink(dangling, filepath.Join(claudeHome, "CLAUDE.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "CLAUDE.md"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "claude" {
@@ -261,10 +234,7 @@ func TestCollectBrokenUserLinks_BrokenClaudeAgentsDir(t *testing.T) {
 
 	agentsSubDir := filepath.Join(tmp, ".claude", "agents")
 	os.MkdirAll(agentsSubDir, 0755)
-	dangling := filepath.Join(agentsHome, "agents", "global", "ghost.md")
-	if err := os.Symlink(dangling, filepath.Join(agentsSubDir, "ghost.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(agentsSubDir, "ghost.md"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "claude" {
@@ -280,10 +250,7 @@ func TestCollectBrokenUserLinks_BrokenCodexAgent(t *testing.T) {
 
 	codexAgentsDir := filepath.Join(tmp, ".codex", "agents")
 	os.MkdirAll(codexAgentsDir, 0755)
-	dangling := filepath.Join(agentsHome, "agents", "global", "missing")
-	if err := os.Symlink(dangling, filepath.Join(codexAgentsDir, "missing")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(codexAgentsDir, "missing"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "codex" {
@@ -299,10 +266,7 @@ func TestCollectBrokenUserLinks_BrokenOpenCodeAgent(t *testing.T) {
 
 	ocDir := filepath.Join(tmp, ".opencode", "agent")
 	os.MkdirAll(ocDir, 0755)
-	dangling := filepath.Join(agentsHome, "agents", "global", "missing.md")
-	if err := os.Symlink(dangling, filepath.Join(ocDir, "missing.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(ocDir, "missing.md"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "opencode" {
@@ -345,10 +309,7 @@ func TestCollectBrokenUserLinks_BrokenClaudeSettings(t *testing.T) {
 
 	claudeHome := filepath.Join(tmp, ".claude")
 	os.MkdirAll(claudeHome, 0755)
-	dangling := filepath.Join(agentsHome, "missing-settings.json")
-	if err := os.Symlink(dangling, filepath.Join(claudeHome, "settings.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "settings.json"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "claude" {
@@ -364,10 +325,7 @@ func TestCollectBrokenUserLinks_BrokenClaudeSkill(t *testing.T) {
 
 	skillsDir := filepath.Join(tmp, ".claude", "skills")
 	os.MkdirAll(skillsDir, 0755)
-	dangling := filepath.Join(agentsHome, "skills", "ghost", "SKILL.md")
-	if err := os.Symlink(dangling, filepath.Join(skillsDir, "ghost")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(skillsDir, "ghost"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	if len(got) != 1 || got[0].platformID != "claude" {
@@ -384,9 +342,7 @@ func TestCollectBrokenLinks_HealthyAGENTSMD(t *testing.T) {
 	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("ok"), 0644)
-	if err := os.Symlink(target, filepath.Join(projectPath, "AGENTS.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, filepath.Join(projectPath, "AGENTS.md"))
 
 	got := collectBrokenLinks("proj", projectPath, agentsHome)
 	if len(got) != 0 {
@@ -450,7 +406,7 @@ func TestPrintUserConfigStatus_PopulatedHome(t *testing.T) {
 	os.WriteFile(target, []byte("# claude"), 0644)
 	claudeHome := filepath.Join(tmp, ".claude")
 	os.MkdirAll(claudeHome, 0755)
-	os.Symlink(target, filepath.Join(claudeHome, "CLAUDE.md"))
+	linktest.Link(t, target, filepath.Join(claudeHome, "CLAUDE.md"))
 
 	// Settings as local file (not symlink)
 	os.WriteFile(filepath.Join(claudeHome, "settings.json"), []byte("{}"), 0644)
@@ -458,7 +414,7 @@ func TestPrintUserConfigStatus_PopulatedHome(t *testing.T) {
 	// Broken agent symlink under ~/.claude/agents/
 	agentsDir := filepath.Join(claudeHome, "agents")
 	os.MkdirAll(agentsDir, 0755)
-	os.Symlink(filepath.Join(agentsHome, "ghost.md"), filepath.Join(agentsDir, "ghost.md"))
+	linktest.DanglingLink(t, filepath.Join(agentsDir, "ghost.md"))
 
 	// Healthy skill symlink
 	skillTarget := filepath.Join(agentsHome, "skills", "global", "demo", "SKILL.md")
@@ -466,12 +422,12 @@ func TestPrintUserConfigStatus_PopulatedHome(t *testing.T) {
 	os.WriteFile(skillTarget, []byte("ok"), 0644)
 	skillsDir := filepath.Join(claudeHome, "skills")
 	os.MkdirAll(skillsDir, 0755)
-	os.Symlink(skillTarget, filepath.Join(skillsDir, "demo"))
+	linktest.Link(t, skillTarget, filepath.Join(skillsDir, "demo"))
 
 	// Codex agents broken link
 	codexDir := filepath.Join(tmp, ".codex", "agents")
 	os.MkdirAll(codexDir, 0755)
-	os.Symlink(filepath.Join(agentsHome, "ghost-codex"), filepath.Join(codexDir, "ghost"))
+	linktest.DanglingLink(t, filepath.Join(codexDir, "ghost"))
 
 	// OpenCode agent healthy
 	opencodeDir := filepath.Join(tmp, ".opencode", "agent")
@@ -479,7 +435,7 @@ func TestPrintUserConfigStatus_PopulatedHome(t *testing.T) {
 	ocTarget := filepath.Join(agentsHome, "agents", "global", "demo", "AGENT.md")
 	os.MkdirAll(filepath.Dir(ocTarget), 0755)
 	os.WriteFile(ocTarget, []byte("ok"), 0644)
-	os.Symlink(ocTarget, filepath.Join(opencodeDir, "demo.md"))
+	linktest.Link(t, ocTarget, filepath.Join(opencodeDir, "demo.md"))
 
 	printUserConfigStatus(agentsHome)
 }
@@ -635,7 +591,7 @@ func TestRunDoctor_BrokenUserLinksReportedNonVerbose(t *testing.T) {
 	// Broken user-level Claude rule symlink so collectBrokenUserLinks returns > 0.
 	claudeHome := filepath.Join(tmp, ".claude")
 	os.MkdirAll(claudeHome, 0755)
-	os.Symlink(filepath.Join(agentsHome, "ghost.md"), filepath.Join(claudeHome, "CLAUDE.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "CLAUDE.md"))
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	if err := cfg.Save(); err != nil {
@@ -677,9 +633,7 @@ func TestRunDoctor_PluginUnsupportedPlatform(t *testing.T) {
 	// Add a broken opencode plugin symlink inside the project.
 	pluginLink := filepath.Join(projPath, ".opencode", "plugins", "demo")
 	os.MkdirAll(filepath.Dir(pluginLink), 0755)
-	if err := os.Symlink(filepath.Join(agentsHome, "missing-target"), pluginLink); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, pluginLink)
 
 	saved := Flags
 	Flags = GlobalFlags{}
@@ -733,8 +687,8 @@ func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
 	projPath := filepath.Join(tmp, "p")
 	claudeRules := filepath.Join(projPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	// Broken symlink → collectBrokenLinks returns it.
-	os.Symlink(filepath.Join(agentsHome, "rules", "p", "missing.md"), filepath.Join(claudeRules, "p--ghost.md"))
+	// Broken managed link → collectBrokenLinks returns it.
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "p--ghost.md"))
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	cfg.AddProject("p", projPath)
@@ -802,9 +756,7 @@ func TestCollectOrphanCanonicals(t *testing.T) {
 	// Back-link only for beta.
 	repoLocal := filepath.Join(projectPath, ".agents", "skills")
 	os.MkdirAll(repoLocal, 0755)
-	if err := os.Symlink(filepath.Join(canonicalBase, "beta"), filepath.Join(repoLocal, "beta")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, filepath.Join(canonicalBase, "beta"), filepath.Join(repoLocal, "beta"))
 
 	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
 	if len(got) != 1 || got[0] != "alpha" {
@@ -841,9 +793,7 @@ func TestCollectOrphanCanonicals_DetectsMispointedSymlink(t *testing.T) {
 	repoLocal := filepath.Join(projectPath, ".agents", "skills")
 	os.MkdirAll(repoLocal, 0755)
 	// gamma's back-link points at the WRONG canonical.
-	if err := os.Symlink(otherCanonical, filepath.Join(repoLocal, "gamma")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, otherCanonical, filepath.Join(repoLocal, "gamma"))
 
 	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
 	if len(got) != 1 {
@@ -877,9 +827,7 @@ func TestCollectOrphanCanonicals_CorrectlyLinkedSymlinkNotOrphan(t *testing.T) {
 
 	repoLocal := filepath.Join(projectPath, ".agents", "skills")
 	os.MkdirAll(repoLocal, 0755)
-	if err := os.Symlink(canonical, filepath.Join(repoLocal, "epsilon")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, canonical, filepath.Join(repoLocal, "epsilon"))
 
 	got := collectOrphanCanonicals("proj", projectPath, agentsHome, "skills")
 	if len(got) != 0 {
@@ -969,10 +917,7 @@ func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
 	}
 
 	// Introduce a broken AGENTS.md symlink
-	dangling := filepath.Join(agentsHome, "rules", "myproj", "agents.md")
-	if err := os.Symlink(dangling, filepath.Join(projectPath, "AGENTS.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, "AGENTS.md"))
 
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
@@ -1020,9 +965,7 @@ func TestCountProjectLinks_AllHealthyVariants(t *testing.T) {
 	os.WriteFile(claudeTarget, []byte("ok"), 0644)
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	if err := os.Symlink(claudeTarget, filepath.Join(claudeRules, "proj--agents.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, claudeTarget, filepath.Join(claudeRules, "proj--agents.md"))
 
 	// Single-file healthy symlinks for all five paths
 	type linkPair struct {
@@ -1039,9 +982,7 @@ func TestCountProjectLinks_AllHealthyVariants(t *testing.T) {
 		os.MkdirAll(filepath.Dir(lp.src), 0755)
 		os.WriteFile(lp.src, []byte("ok"), 0644)
 		os.MkdirAll(filepath.Dir(lp.dst), 0755)
-		if err := os.Symlink(lp.src, lp.dst); err != nil {
-			t.Fatal(err)
-		}
+		linktest.Link(t, lp.src, lp.dst)
 	}
 
 	ok, broken := countProjectLinks("proj", projectPath, agentsHome)
@@ -1118,9 +1059,7 @@ func TestRunDoctor_WithInstalledClaudePlatformAndPlugins(t *testing.T) {
 		[]byte("schema_version: 1\nkind: native\nname: demo\nplatforms: [opencode]\n"), 0644)
 	pluginLink := filepath.Join(projectPath, ".opencode", "plugins", "demo")
 	os.MkdirAll(filepath.Dir(pluginLink), 0755)
-	if err := os.Symlink(opencodePluginDir, pluginLink); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, opencodePluginDir, pluginLink)
 
 	// Plugin: unsupported platform (triggers the "no emitter implemented yet" warn)
 	unsupportedDir := filepath.Join(agentsHome, "plugins", "global", "alien")
@@ -1134,21 +1073,18 @@ func TestRunDoctor_WithInstalledClaudePlatformAndPlugins(t *testing.T) {
 	os.WriteFile(filepath.Join(brokenPluginDir, "PLUGIN.yaml"),
 		[]byte("schema_version: 1\nkind: native\nname: ghost\nplatforms: [opencode]\n"), 0644)
 	brokenLink := filepath.Join(projectPath, ".opencode", "plugins", "ghost")
-	if err := os.Symlink(filepath.Join(agentsHome, "missing"), brokenLink); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, brokenLink)
 
 	// Add a healthy AGENTS.md symlink + a broken claude symlink so we exercise
 	// the link-health repair path with installed platform.
 	target := filepath.Join(agentsHome, "rules", "myproj", "agents.md")
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("# rules"), 0644)
-	os.Symlink(target, filepath.Join(projectPath, "AGENTS.md"))
+	linktest.Link(t, target, filepath.Join(projectPath, "AGENTS.md"))
 
-	dangling := filepath.Join(agentsHome, "rules", "myproj", "missing.md")
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	os.Symlink(dangling, filepath.Join(claudeRules, "myproj--missing.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "myproj--missing.md"))
 
 	saved := Flags
 	Flags = GlobalFlags{}
@@ -1215,24 +1151,22 @@ func TestPrintUserConfigStatus_BrokenSymlinks(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
 
-	// Build broken symlinks across all five tracked user-config locations.
-	dangling := filepath.Join(agentsHome, "no-such-target")
-
+	// Build broken managed links across all five tracked user-config locations.
 	claudeHome := filepath.Join(tmp, ".claude")
 	os.MkdirAll(filepath.Join(claudeHome, "agents"), 0755)
 	os.MkdirAll(filepath.Join(claudeHome, "skills"), 0755)
-	os.Symlink(dangling, filepath.Join(claudeHome, "CLAUDE.md"))
-	os.Symlink(dangling, filepath.Join(claudeHome, "settings.json"))
-	os.Symlink(dangling, filepath.Join(claudeHome, "agents", "a1"))
-	os.Symlink(dangling, filepath.Join(claudeHome, "skills", "s1"))
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "CLAUDE.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "settings.json"))
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "agents", "a1"))
+	linktest.DanglingLink(t, filepath.Join(claudeHome, "skills", "s1"))
 
 	codexAgents := filepath.Join(tmp, ".codex", "agents")
 	os.MkdirAll(codexAgents, 0755)
-	os.Symlink(dangling, filepath.Join(codexAgents, "c1"))
+	linktest.DanglingLink(t, filepath.Join(codexAgents, "c1"))
 
 	opencodeAgents := filepath.Join(tmp, ".opencode", "agent")
 	os.MkdirAll(opencodeAgents, 0755)
-	os.Symlink(dangling, filepath.Join(opencodeAgents, "o1"))
+	linktest.DanglingLink(t, filepath.Join(opencodeAgents, "o1"))
 
 	// Should print without panicking even with all broken
 	printUserConfigStatus(agentsHome)
@@ -1277,10 +1211,9 @@ func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
 	}
 
 	// Introduce a broken claude rule symlink — repair should re-run CreateLinks.
-	dangling := filepath.Join(agentsHome, "rules", "myproj", "missing.md")
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	os.Symlink(dangling, filepath.Join(claudeRules, "myproj--missing.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "myproj--missing.md"))
 
 	saved := Flags
 	Flags = GlobalFlags{}

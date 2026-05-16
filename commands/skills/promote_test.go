@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -165,6 +166,9 @@ func TestPromoteSkillIn_ErrorNoProjectName(t *testing.T) {
 }
 
 func TestPromoteSkillIn_ErrorRepoLocalSymlinkMispoints(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics: os.ModeSymlink + os.Readlink mispoint detection has no managed-link analogue")
+	}
 	agentsHome, projectPath := testutil.NewTempProject(t, "myprojtest5")
 	testutil.WriteSkillManifest(t, projectPath, "mis-skill")
 

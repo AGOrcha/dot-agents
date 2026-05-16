@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestPromoteResource_JournalWriteFailureDegradesGracefully exercises the
@@ -138,9 +140,7 @@ func TestClearExistingCanonical_StaleSymlinkRemoveError(t *testing.T) {
 	if err := os.MkdirAll(target, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, link)
 	if err := os.Chmod(parent, 0o500); err != nil {
 		t.Fatal(err)
 	}

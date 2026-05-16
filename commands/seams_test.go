@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // withMkdirAllStub swaps osMkdirAll for the duration of the test.
@@ -913,18 +914,14 @@ func TestCountClaudeRules_ReadlinkFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "regular.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Broken symlink.
-	if err := os.Symlink(filepath.Join(tmp, "absent"), filepath.Join(dir, "broken")); err != nil {
-		t.Fatal(err)
-	}
-	// Healthy symlink.
+	// Broken managed link.
+	linktest.DanglingLink(t, filepath.Join(dir, "broken"))
+	// Healthy managed link.
 	healthy := filepath.Join(tmp, "real.md")
 	if err := os.WriteFile(healthy, []byte("y"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(healthy, filepath.Join(dir, "good")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, healthy, filepath.Join(dir, "good"))
 
 	ok, warn := countClaudeRules(tmp)
 	if ok != 1 || warn != 1 {
@@ -954,9 +951,7 @@ func TestBackupExistingConfigsList_SymlinkBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(tmp, "link")
-	if err := os.Symlink(dst, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, dst, link)
 	got := backupExistingConfigsList([]string{link}, tmp, t.TempDir(), "p", "ts")
 	if got != 1 {
 		t.Errorf("expected 1 for removed symlink, got %d", got)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // ---------- isBackupArtifact ----------
@@ -61,7 +62,7 @@ func TestCheckExistingConfigFiles_SkipsAlreadyManagedSymlinks(t *testing.T) {
 	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
 	os.WriteFile(target, []byte("rules"), 0644)
 	linkPath := filepath.Join(tmp, "AGENTS.md")
-	os.Symlink(target, linkPath)
+	linktest.Link(t, target, linkPath)
 
 	found := checkExistingConfigFiles("proj", tmp, agentsHome)
 	for _, f := range found {
@@ -218,7 +219,7 @@ func TestBackupExistingConfigsList_RemovesSymlinkNoBackup(t *testing.T) {
 	target := filepath.Join(tmp, "external.md")
 	os.WriteFile(target, []byte("x"), 0644)
 	linkPath := filepath.Join(tmp, "AGENTS.md")
-	os.Symlink(target, linkPath)
+	linktest.Link(t, target, linkPath)
 
 	count := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
 
@@ -249,7 +250,7 @@ func TestCheckExistingConfigFiles_IdempotentAfterAdd(t *testing.T) {
 	// Simulate post-add state: AGENTS.md is a symlink into agentsHome
 	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
 	os.WriteFile(target, []byte("# rules"), 0644)
-	os.Symlink(target, filepath.Join(tmp, "AGENTS.md"))
+	linktest.Link(t, target, filepath.Join(tmp, "AGENTS.md"))
 
 	// No stale backup artifacts either
 	found := checkExistingConfigFiles("proj", tmp, agentsHome)
@@ -950,7 +951,7 @@ func TestRunAdd_DiscoveredSymlinkAndDirKind(t *testing.T) {
 	os.MkdirAll(filepath.Join(projectPath, ".aiderdir"), 0755)
 	external := filepath.Join(tmp, "ext.yml")
 	os.WriteFile(external, []byte("x"), 0644)
-	os.Symlink(external, filepath.Join(projectPath, ".aider.conf.symlink"))
+	linktest.Link(t, external, filepath.Join(projectPath, ".aider.conf.symlink"))
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	if err := cfg.Save(); err != nil {
@@ -982,7 +983,7 @@ func TestRunAdd_DryRunWithExistingFilesShowsReplacements(t *testing.T) {
 	// Unmanaged symlink for the file-type=symlink display branch
 	external := filepath.Join(tmp, "external.md")
 	os.WriteFile(external, []byte("x"), 0644)
-	os.Symlink(external, filepath.Join(projectPath, ".mcp.json"))
+	linktest.Link(t, external, filepath.Join(projectPath, ".mcp.json"))
 
 	// Many .aider* files to trigger the "and N more" truncation in the
 	// discovered-configs section.

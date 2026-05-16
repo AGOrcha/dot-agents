@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 func TestNewStatusCmd_FlagsAndArgs(t *testing.T) {
@@ -79,10 +80,7 @@ func TestCountPlatformHealth_ReportsHealthyFile(t *testing.T) {
 func TestCountPlatformHealth_BrokenSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	link := filepath.Join(tmp, "broken.txt")
-	dangling := filepath.Join(tmp, "nope.txt")
-	if err := os.Symlink(dangling, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, link)
 	badge := countPlatformHealth([]string{link}, nil)
 	if !badge.broken {
 		t.Errorf("expected broken=true, got %+v", badge)
@@ -211,7 +209,7 @@ func TestAddManagedCounts_ReportsOKAndWarn(t *testing.T) {
 	regular := filepath.Join(tmp, "reg.txt")
 	os.WriteFile(regular, []byte("x"), 0644)
 	broken := filepath.Join(tmp, "broken.txt")
-	os.Symlink(filepath.Join(tmp, "nope"), broken)
+	linktest.DanglingLink(t, broken)
 
 	ok, warn := 0, 0
 	addManagedCounts(&ok, &warn, []string{regular, broken, filepath.Join(tmp, "missing")}, nil)
@@ -227,7 +225,7 @@ func TestCountManagedDirEntries_BrokenSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "agents")
 	os.MkdirAll(dir, 0755)
-	os.Symlink(filepath.Join(tmp, "ghost"), filepath.Join(dir, "ghost.md"))
+	linktest.DanglingLink(t, filepath.Join(dir, "ghost.md"))
 
 	warn := 0
 	got := countManagedDirEntries(dir, &warn)
@@ -341,10 +339,10 @@ func TestCollectUserConfigPlatforms_FilterIsolation(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	// With no managed configs, collectUserConfigPlatforms returns nothing.
-	if got := collectUserConfigPlatforms("claude"); got != nil && len(got) != 0 {
+	if got := collectUserConfigPlatforms("claude"); len(got) != 0 {
 		t.Errorf("expected empty list, got %+v", got)
 	}
-	if got := collectUserConfigPlatforms("codex"); got != nil && len(got) != 0 {
+	if got := collectUserConfigPlatforms("codex"); len(got) != 0 {
 		t.Errorf("expected empty list, got %+v", got)
 	}
 }
@@ -372,7 +370,7 @@ func TestCountClaudeRules_ReportsBrokenSymlinks(t *testing.T) {
 	tmp := t.TempDir()
 	rulesDir := filepath.Join(tmp, ".claude", "rules")
 	os.MkdirAll(rulesDir, 0755)
-	os.Symlink(filepath.Join(tmp, "ghost.md"), filepath.Join(rulesDir, "missing.md"))
+	linktest.DanglingLink(t, filepath.Join(rulesDir, "missing.md"))
 
 	ok, warn := countClaudeRules(tmp)
 	if ok != 0 || warn != 1 {
@@ -505,9 +503,7 @@ func TestCountManagedFileOK_HealthySymlink(t *testing.T) {
 	target := filepath.Join(tmp, "target")
 	os.WriteFile(target, []byte("x"), 0644)
 	link := filepath.Join(tmp, "link")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, link)
 	warn := 0
 	if got := countManagedFileOK(link, &warn); got != 1 || warn != 0 {
 		t.Errorf("healthy symlink: got=%d warn=%d", got, warn)
@@ -517,7 +513,7 @@ func TestCountManagedFileOK_HealthySymlink(t *testing.T) {
 func TestCountManagedFileOK_BrokenSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	link := filepath.Join(tmp, "link")
-	os.Symlink(filepath.Join(tmp, "ghost"), link)
+	linktest.DanglingLink(t, link)
 	warn := 0
 	if got := countManagedFileOK(link, &warn); got != 0 || warn != 1 {
 		t.Errorf("broken symlink: got=%d warn=%d", got, warn)
@@ -600,12 +596,12 @@ func TestPrintManagedAuditPath_AllBranches(t *testing.T) {
 	target := filepath.Join(tmp, "t")
 	os.WriteFile(target, []byte("x"), 0644)
 	link := filepath.Join(tmp, "l")
-	os.Symlink(target, link)
+	linktest.Link(t, target, link)
 	printManagedAuditPath(link, rel)
 
 	// broken symlink
 	broken := filepath.Join(tmp, "b")
-	os.Symlink(filepath.Join(tmp, "ghost"), broken)
+	linktest.DanglingLink(t, broken)
 	printManagedAuditPath(broken, rel)
 }
 
@@ -728,14 +724,14 @@ func TestPrintUserConfigSection_AllPlatformsSeeded(t *testing.T) {
 	// One skill symlink so the dir count > 0.
 	target := filepath.Join(agentsHome, "skills", "global", "demo")
 	os.MkdirAll(target, 0755)
-	os.Symlink(target, filepath.Join(tmp, ".agents", "skills", "demo"))
+	linktest.Link(t, target, filepath.Join(tmp, ".agents", "skills", "demo"))
 
 	// OpenCode: ~/.opencode/agent/<symlink>.
 	opAgent := filepath.Join(tmp, ".opencode", "agent")
 	os.MkdirAll(opAgent, 0755)
 	opTarget := filepath.Join(agentsHome, "agents", "global", "demo")
 	os.MkdirAll(opTarget, 0755)
-	os.Symlink(opTarget, filepath.Join(opAgent, "demo"))
+	linktest.Link(t, opTarget, filepath.Join(opAgent, "demo"))
 
 	// Audit mode also exercises the audit-detail prints across all platforms.
 	printUserConfigSection(agentsHome, true, "")
@@ -768,13 +764,13 @@ func TestPrintLinkedStatusLine_HealthyAndBroken(t *testing.T) {
 	target := filepath.Join(tmp, "t")
 	os.WriteFile(target, []byte("x"), 0644)
 	link := filepath.Join(tmp, "l")
-	os.Symlink(target, link)
+	linktest.Link(t, target, link)
 	if !printLinkedStatusLine("label", link) {
 		t.Error("expected healthy symlink to return true")
 	}
 
 	broken := filepath.Join(tmp, "b")
-	os.Symlink(filepath.Join(tmp, "ghost"), broken)
+	linktest.DanglingLink(t, broken)
 	if printLinkedStatusLine("label", broken) {
 		t.Error("expected broken symlink to return false")
 	}
@@ -790,7 +786,7 @@ func TestPrintCodexAgentsMD_Variants(t *testing.T) {
 	printCodexAgentsMD(plain) // regular file
 
 	link := filepath.Join(tmp, "AGENTS-link.md")
-	os.Symlink(plain, link)
+	linktest.Link(t, plain, link)
 	printCodexAgentsMD(link) // symlink
 }
 
@@ -803,7 +799,7 @@ func TestPrintCodexSymlinkAudit_Variants(t *testing.T) {
 	target := filepath.Join(tmp, "target")
 	os.WriteFile(target, []byte("x"), 0644)
 	link := filepath.Join(tmp, "link")
-	os.Symlink(target, link)
+	linktest.Link(t, target, link)
 	printCodexSymlinkAudit(link, "label")
 }
 
@@ -822,8 +818,8 @@ func TestPrintCodexSkillsAudit_EmptyAndPopulated(t *testing.T) {
 	os.MkdirAll(d, 0755)
 	target := filepath.Join(tmp, "skill-target")
 	os.WriteFile(target, []byte("x"), 0644)
-	os.Symlink(target, filepath.Join(d, "ok"))
-	os.Symlink(filepath.Join(tmp, "ghost"), filepath.Join(d, "broken"))
+	linktest.Link(t, target, filepath.Join(d, "ok"))
+	linktest.DanglingLink(t, filepath.Join(d, "broken"))
 	printCodexSkillsAudit(d)
 }
 
@@ -875,7 +871,7 @@ func TestPrintCursorAudit_HealthyAndUnlinkedRule(t *testing.T) {
 	os.WriteFile(filepath.Join(rulesDir, "junk.txt"), []byte("x"), 0644)
 
 	// cursor mcp.json broken symlink
-	os.Symlink(filepath.Join(agentsHome, "ghost.json"), filepath.Join(tmp, ".cursor", "mcp.json"))
+	linktest.DanglingLink(t, filepath.Join(tmp, ".cursor", "mcp.json"))
 
 	printCursorAudit("proj", tmp, agentsHome)
 }
@@ -890,13 +886,13 @@ func TestPrintClaudeAudit_HealthyAndBroken(t *testing.T) {
 
 	rulesDir := filepath.Join(tmp, ".claude", "rules")
 	os.MkdirAll(rulesDir, 0755)
-	os.Symlink(target, filepath.Join(rulesDir, "ok.md"))
-	os.Symlink(filepath.Join(agentsHome, "ghost.md"), filepath.Join(rulesDir, "broken.md"))
+	linktest.Link(t, target, filepath.Join(rulesDir, "ok.md"))
+	linktest.DanglingLink(t, filepath.Join(rulesDir, "broken.md"))
 
 	// .mcp.json healthy
 	mcpTarget := filepath.Join(agentsHome, "mcp.json")
 	os.WriteFile(mcpTarget, []byte("{}"), 0644)
-	os.Symlink(mcpTarget, filepath.Join(tmp, ".mcp.json"))
+	linktest.Link(t, mcpTarget, filepath.Join(tmp, ".mcp.json"))
 
 	printClaudeAudit("proj", tmp, agentsHome)
 }
@@ -910,15 +906,15 @@ func TestPrintOpenCodeAudit_HealthyAndBroken(t *testing.T) {
 	target := filepath.Join(agentsHome, "settings", "proj", "opencode.json")
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("{}"), 0644)
-	os.Symlink(target, filepath.Join(tmp, "opencode.json"))
+	linktest.Link(t, target, filepath.Join(tmp, "opencode.json"))
 
 	agentDir := filepath.Join(tmp, ".opencode", "agent")
 	os.MkdirAll(agentDir, 0755)
 	agentTarget := filepath.Join(agentsHome, "agents", "proj", "ok", "AGENT.md")
 	os.MkdirAll(filepath.Dir(agentTarget), 0755)
 	os.WriteFile(agentTarget, []byte("ok"), 0644)
-	os.Symlink(agentTarget, filepath.Join(agentDir, "ok.md"))
-	os.Symlink(filepath.Join(agentsHome, "ghost"), filepath.Join(agentDir, "broken.md"))
+	linktest.Link(t, agentTarget, filepath.Join(agentDir, "ok.md"))
+	linktest.DanglingLink(t, filepath.Join(agentDir, "broken.md"))
 
 	printOpenCodeAudit("proj", tmp, agentsHome)
 }
@@ -933,13 +929,13 @@ func TestPrintCopilotAudit_HealthyAndBroken(t *testing.T) {
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("# instructions"), 0644)
 	os.MkdirAll(filepath.Join(tmp, ".github"), 0755)
-	os.Symlink(target, filepath.Join(tmp, ".github", "copilot-instructions.md"))
+	linktest.Link(t, target, filepath.Join(tmp, ".github", "copilot-instructions.md"))
 
 	mcpTarget := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
 	os.MkdirAll(filepath.Dir(mcpTarget), 0755)
 	os.WriteFile(mcpTarget, []byte("{}"), 0644)
 	os.MkdirAll(filepath.Join(tmp, ".vscode"), 0755)
-	os.Symlink(mcpTarget, filepath.Join(tmp, ".vscode", "mcp.json"))
+	linktest.Link(t, mcpTarget, filepath.Join(tmp, ".vscode", "mcp.json"))
 
 	printCopilotAudit("proj", tmp)
 }
@@ -1118,7 +1114,7 @@ func TestPrintCursorAudit_BrokenSymlinkAndLocalFile(t *testing.T) {
 	// Local-file rule (no prefix → "local" branch).
 	os.WriteFile(filepath.Join(cursorDirA, "rules", "ad-hoc.mdc"), []byte("# local"), 0644)
 	// Broken symlink for .cursor/mcp.json.
-	os.Symlink(filepath.Join(agentsHome, "nonexistent"), filepath.Join(cursorDirA, "mcp.json"))
+	linktest.DanglingLink(t, filepath.Join(cursorDirA, "mcp.json"))
 
 	// Project B: regular file (not symlink) at .cursor/mcp.json → "hard link or local file".
 	projB := filepath.Join(tmp, "projB")
@@ -1164,15 +1160,15 @@ func TestPrintClaudeAudit_BrokenAndHealthy(t *testing.T) {
 	healthyTarget := filepath.Join(agentsHome, "rules", "p", "ok.md")
 	os.MkdirAll(filepath.Dir(healthyTarget), 0755)
 	os.WriteFile(healthyTarget, []byte("ok"), 0644)
-	os.Symlink(healthyTarget, filepath.Join(claudeRules, "p--ok.md"))
+	linktest.Link(t, healthyTarget, filepath.Join(claudeRules, "p--ok.md"))
 
 	// Broken symlink.
-	os.Symlink(filepath.Join(agentsHome, "rules", "p", "missing.md"), filepath.Join(claudeRules, "p--broken.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "p--broken.md"))
 	// Non-symlink regular file in rules dir → triggers the Readlink-err continue branch.
 	os.WriteFile(filepath.Join(claudeRules, "raw-file.md"), []byte("not-a-link"), 0644)
 
 	// Broken .mcp.json symlink at project root.
-	os.Symlink(filepath.Join(agentsHome, "mcp", "p", "missing.json"), filepath.Join(proj, ".mcp.json"))
+	linktest.DanglingLink(t, filepath.Join(proj, ".mcp.json"))
 
 	printClaudeAudit("p", proj, agentsHome)
 }
@@ -1196,24 +1192,24 @@ func TestPrintCodexAudit_AllBranches(t *testing.T) {
 	target := filepath.Join(agentsHome, "rules", "p1", "agents.md")
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("# a"), 0644)
-	os.Symlink(target, filepath.Join(proj, "AGENTS.md"))
+	linktest.Link(t, target, filepath.Join(proj, "AGENTS.md"))
 
 	// codex config.toml linked.
 	cfgT := filepath.Join(agentsHome, "settings", "p1", "codex.toml")
 	os.MkdirAll(filepath.Dir(cfgT), 0755)
 	os.WriteFile(cfgT, []byte("# toml"), 0644)
-	os.Symlink(cfgT, filepath.Join(proj, ".codex", "config.toml"))
+	linktest.Link(t, cfgT, filepath.Join(proj, ".codex", "config.toml"))
 
 	// Skill: one healthy symlink + one broken + one non-symlink file (skipped).
 	skillTarget := filepath.Join(agentsHome, "skills", "p1", "x")
 	os.MkdirAll(skillTarget, 0755)
-	os.Symlink(skillTarget, filepath.Join(proj, ".agents", "skills", "x"))
-	os.Symlink(filepath.Join(agentsHome, "skills", "p1", "missing"), filepath.Join(proj, ".agents", "skills", "broken"))
+	linktest.Link(t, skillTarget, filepath.Join(proj, ".agents", "skills", "x"))
+	linktest.DanglingLink(t, filepath.Join(proj, ".agents", "skills", "broken"))
 	os.WriteFile(filepath.Join(proj, ".agents", "skills", "regular.md"), []byte("not-a-symlink"), 0644)
 
 	// Codex agent file (readable) + a broken symlink → printCodexAgentsAudit ✗.
 	os.WriteFile(filepath.Join(proj, ".codex", "agents", "ok.toml"), []byte("name=ok"), 0644)
-	os.Symlink(filepath.Join(agentsHome, "missing-agent.toml"), filepath.Join(proj, ".codex", "agents", "broken.toml"))
+	linktest.DanglingLink(t, filepath.Join(proj, ".codex", "agents", "broken.toml"))
 
 	printCodexAudit("p1", proj, agentsHome)
 
@@ -1246,7 +1242,7 @@ func TestPrintOpenCodeAudit_LocalAndBroken(t *testing.T) {
 	// Broken-symlink opencode.json + missing .opencode/agent dir.
 	projBroken := filepath.Join(tmp, "broken")
 	os.MkdirAll(projBroken, 0755)
-	os.Symlink(filepath.Join(agentsHome, "missing.json"), filepath.Join(projBroken, "opencode.json"))
+	linktest.DanglingLink(t, filepath.Join(projBroken, "opencode.json"))
 	printOpenCodeAudit("broken", projBroken, agentsHome)
 }
 
@@ -1258,7 +1254,7 @@ func TestPrintCopilotAudit_BrokenAndNotLinked(t *testing.T) {
 	// Broken symlink.
 	projBroken := filepath.Join(tmp, "broken")
 	os.MkdirAll(filepath.Join(projBroken, ".github"), 0755)
-	os.Symlink(filepath.Join(tmp, "missing.md"), filepath.Join(projBroken, ".github", "copilot-instructions.md"))
+	linktest.DanglingLink(t, filepath.Join(projBroken, ".github", "copilot-instructions.md"))
 	printCopilotAudit("broken", projBroken)
 
 	// Not linked at all.
@@ -1283,11 +1279,8 @@ func TestPrintSymlinkDirAudit_EmptyDir(t *testing.T) {
 // edge cases (symlink with broken Readlink dest).
 func TestPrintManagedAuditPath_BrokenSymlink(t *testing.T) {
 	tmp := t.TempDir()
-	target := filepath.Join(tmp, "target.md")
 	link := filepath.Join(tmp, "link.md")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, link)
 	// Target doesn't exist → broken-symlink output branch.
 	printManagedAuditPath(link, func(p string) string { return p })
 
@@ -1309,7 +1302,7 @@ func TestCountManagedDirEntries_RegularFilePlusBroken(t *testing.T) {
 	// Healthy regular file (non-symlink) → ok++.
 	os.WriteFile(filepath.Join(dir, "a"), []byte("a"), 0644)
 	// Broken symlink → warn++.
-	os.Symlink(filepath.Join(tmp, "missing"), filepath.Join(dir, "bad"))
+	linktest.DanglingLink(t, filepath.Join(dir, "bad"))
 	warn := 0
 	got := countManagedDirEntries(dir, &warn)
 	if got < 1 {
@@ -1442,11 +1435,11 @@ func TestRunStatus_AuditModeWithRegisteredProject(t *testing.T) {
 	target := filepath.Join(agentsHome, "rules", "p", "agents.md")
 	os.MkdirAll(filepath.Dir(target), 0755)
 	os.WriteFile(target, []byte("# rules"), 0644)
-	os.Symlink(target, filepath.Join(projectPath, "AGENTS.md"))
+	linktest.Link(t, target, filepath.Join(projectPath, "AGENTS.md"))
 
 	claudeRules := filepath.Join(projectPath, ".claude", "rules")
 	os.MkdirAll(claudeRules, 0755)
-	os.Symlink(filepath.Join(agentsHome, "missing"), filepath.Join(claudeRules, "p--ghost.md"))
+	linktest.DanglingLink(t, filepath.Join(claudeRules, "p--ghost.md"))
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	cfg.AddProject("p", projectPath)

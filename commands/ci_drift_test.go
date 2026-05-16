@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestRunInit_SeededClaudeExercisesClaudeSettingsBranch covers the
@@ -377,9 +378,7 @@ func TestIsManagedProjectOutput_ManagedSymlinkReturnsTrue(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(projectPath, "config.json")
-	if err := os.Symlink(managedDest, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, managedDest, link)
 	if !isManagedProjectOutput("proj", projectPath, link, agentsHome) {
 		t.Error("expected symlink into agentsHome to be reported as managed")
 	}
@@ -454,9 +453,7 @@ func TestCheckExistingConfigFiles_ManagedSymlinkSkipped(t *testing.T) {
 	}
 	// AGENTS.md symlink → managedSrc — the function must skip this as managed.
 	managedLink := filepath.Join(projectPath, "AGENTS.md")
-	if err := os.Symlink(managedSrc, managedLink); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, managedSrc, managedLink)
 
 	found := checkExistingConfigFiles("proj", projectPath, agentsHome)
 	for _, f := range found {
@@ -483,33 +480,25 @@ func TestPrintUserConfigStatus_BrokenSymlinksCIDrift(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(tmp, "missing-settings"), filepath.Join(claudeDir, "settings.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeDir, "settings.json"))
 	// Claude agents/<x> → broken symlink.
 	claudeAgentsDir := filepath.Join(claudeDir, "agents")
 	if err := os.MkdirAll(claudeAgentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(tmp, "missing-agent"), filepath.Join(claudeAgentsDir, "demo")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeAgentsDir, "demo"))
 	// Claude skills/<x> → broken symlink.
 	claudeSkillsDir := filepath.Join(claudeDir, "skills")
 	if err := os.MkdirAll(claudeSkillsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(tmp, "missing-skill"), filepath.Join(claudeSkillsDir, "demo")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeSkillsDir, "demo"))
 	// Codex agents/<x> → broken symlink.
 	codexAgentsDir := filepath.Join(tmp, ".codex", "agents")
 	if err := os.MkdirAll(codexAgentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(tmp, "missing-codex-agent"), filepath.Join(codexAgentsDir, "demo")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(codexAgentsDir, "demo"))
 
 	// Smoke: call the unexported helper directly.
 	printUserConfigStatus(agentsHome)
@@ -531,9 +520,7 @@ func TestCollectBrokenUserLinks_BrokenClaudeMDCIDrift(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(tmp, "missing-claudemd"), filepath.Join(claudeDir, "CLAUDE.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, filepath.Join(claudeDir, "CLAUDE.md"))
 
 	got := collectBrokenUserLinks(agentsHome)
 	// We don't assert specifics — just exercise the broken-link detection.

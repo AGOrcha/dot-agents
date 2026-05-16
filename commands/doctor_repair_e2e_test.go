@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // captureDoctorOutput redirects stdout for the duration of fn and returns the
@@ -55,9 +56,7 @@ func seedManagedClaudeLink(t *testing.T) (tmp, agentsHome, projectPath, linkPath
 		t.Fatal(err)
 	}
 	linkPath = filepath.Join(claudeRules, "proj--agents.md")
-	if err := os.Symlink(target, linkPath); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, target, linkPath)
 
 	// Register project in config.json so doctor includes it in its scan.
 	cfg := &config.Config{
@@ -163,15 +162,12 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 // for unrelated bookkeeping such as windows-mirror flags) keeps the assertion
 // focused on the dry-run repair contract.
 func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
-	_, agentsHome, projectPath, _, _ := seedManagedClaudeLink(t)
+	_, _, projectPath, _, _ := seedManagedClaudeLink(t)
 
 	// Introduce a dangling AGENTS.md symlink — only the doctor repair path
 	// would touch this file.
-	dangling := filepath.Join(agentsHome, "rules", "proj", "ghost.md")
 	agentsMD := filepath.Join(projectPath, "AGENTS.md")
-	if err := os.Symlink(dangling, agentsMD); err != nil {
-		t.Fatal(err)
-	}
+	linktest.DanglingLink(t, agentsMD)
 
 	before := snapshotTree(t, projectPath)
 

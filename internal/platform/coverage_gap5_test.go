@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestClaudeEnsureUserRules_PreExistingSymlinkSkipped drives the "already a
@@ -38,9 +40,7 @@ func TestClaudeEnsureUserRules_PreExistingSymlinkSkipped(t *testing.T) {
 	if err := os.WriteFile(pretend, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(pretend, filepath.Join(home, ".claude", "CLAUDE.md")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, pretend, filepath.Join(home, ".claude", "CLAUDE.md"))
 
 	c := NewClaude().(*claude)
 	if err := c.ensureUserRules(agentsHome); err != nil {
@@ -83,9 +83,7 @@ func TestClaudeEnsureUserSettings_PreExistingSymlinkSkipped(t *testing.T) {
 	if err := os.WriteFile(pretend, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(pretend, filepath.Join(home, ".claude", "settings.json")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, pretend, filepath.Join(home, ".claude", "settings.json"))
 
 	c := NewClaude().(*claude)
 	if err := c.ensureUserSettings(agentsHome); err != nil {
@@ -141,9 +139,7 @@ func TestClaudeLinkUserAgent_SymlinkSkipped(t *testing.T) {
 	if err := os.MkdirAll(pretend, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(pretend, filepath.Join(userAgentsDir, "reviewer")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, pretend, filepath.Join(userAgentsDir, "reviewer"))
 
 	c := NewClaude().(*claude)
 	entries, err := os.ReadDir(filepath.Join(tmp, "agents", "global"))

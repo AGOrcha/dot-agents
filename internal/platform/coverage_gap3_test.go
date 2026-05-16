@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestIsLikelyRendered_BadJSON exercises the unmarshal-error branch of each
@@ -56,9 +58,7 @@ func TestRemoveManagedFile_SymlinkSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(tmp, "link.json")
-	if err := os.Symlink(src, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, link)
 	if err := removeManagedFile(link, []byte("managed")); err != nil {
 		t.Fatalf("removeManagedFile symlink: %v", err)
 	}
@@ -80,9 +80,7 @@ func TestRemoveManagedFileIf_SymlinkSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(tmp, "link.json")
-	if err := os.Symlink(src, link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, link)
 	if err := removeManagedFileIf(link, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("symlink: %v", err)
 	}
@@ -99,9 +97,7 @@ func TestWriteManagedFile_ExistingSymlinkReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "dst")
-	if err := os.Symlink(src, dst); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, src, dst)
 	if err := writeManagedFile(dst, []byte("real")); err != nil {
 		t.Fatalf("writeManagedFile: %v", err)
 	}
