@@ -114,3 +114,41 @@ func TestIsManagedLinkUnder(t *testing.T) {
 		t.Error("a hard link has no resolvable target; under-prefix must be false")
 	}
 }
+
+// TestRemoveIfHardlinkedToAny covers the promoted cursor cleanup helper:
+// removes path only when it is hard-linked to one of the candidate sources.
+func TestRemoveIfHardlinkedToAny(t *testing.T) {
+	tmp := t.TempDir()
+	canonical := filepath.Join(tmp, "canonical.txt")
+	if err := os.WriteFile(canonical, []byte("c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(tmp, "other.txt")
+	if err := os.WriteFile(other, []byte("o"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Not hardlinked to any source → not removed, returns false.
+	plain := filepath.Join(tmp, "plain.txt")
+	if err := os.WriteFile(plain, []byte("p"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if RemoveIfHardlinkedToAny(plain, []string{canonical, other}) {
+		t.Error("unrelated file should not be reported hardlinked")
+	}
+	if _, err := os.Stat(plain); err != nil {
+		t.Error("unrelated file must remain")
+	}
+
+	// Hardlinked to a source → removed, returns true.
+	managed := filepath.Join(tmp, "managed")
+	if err := os.Link(canonical, managed); err != nil {
+		t.Fatal(err)
+	}
+	if !RemoveIfHardlinkedToAny(managed, []string{other, canonical}) {
+		t.Error("hard link to a candidate source should be detected and removed")
+	}
+	if _, err := os.Stat(managed); !os.IsNotExist(err) {
+		t.Errorf("managed hard link should be removed, stat err=%v", err)
+	}
+}

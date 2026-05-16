@@ -189,12 +189,33 @@ func IsSymlinkUnder(linkPath, prefix string) bool {
 }
 
 // RemoveIfSymlinkUnder removes linkPath if it is a managed link whose
-// resolved target starts with prefix.
+// resolved target starts with prefix. Resolvable links (POSIX symlink /
+// Windows junction) are handled here; a Windows hard-linked *file* has no
+// resolvable target, so callers that manage file links and know the
+// candidate canonical sources should additionally use
+// RemoveIfHardlinkedToAny.
 func RemoveIfSymlinkUnder(linkPath, prefix string) error {
 	if IsManagedLinkUnder(linkPath, prefix) {
 		return fsops.RemoveAll(linkPath)
 	}
 	return nil
+}
+
+// RemoveIfHardlinkedToAny removes path and returns true if path is hard
+// linked to any of the given candidate source files (same inode / file
+// index). This is the file-link analogue of RemoveIfSymlinkUnder for the
+// Windows model, where managed files are hard links with no reparse point
+// to resolve against a prefix — the caller supplies the canonical sources
+// it manages. Promoted from the cursor platform, which has used this
+// pattern in production since .mdc rule files cannot be symlinks.
+func RemoveIfHardlinkedToAny(path string, sources []string) bool {
+	for _, src := range sources {
+		if linked, _ := AreHardlinked(path, src); linked {
+			_ = fsops.RemoveAll(path)
+			return true
+		}
+	}
+	return false
 }
 
 // IsDirEntry reports whether the entry at path is a directory, following symlinks.

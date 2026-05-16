@@ -435,9 +435,9 @@ func (c *cursor) removeRuleEntry(entry os.DirEntry, rulesDir, project, agentsHom
 
 	switch {
 	case strings.HasPrefix(name, globalRulesPrefix):
-		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, "global", strings.TrimPrefix(name, globalRulesPrefix)))
+		links.RemoveIfHardlinkedToAny(filePath, cursorRuleSources(agentsHome, "global", strings.TrimPrefix(name, globalRulesPrefix)))
 	case strings.HasPrefix(name, project+"--"):
-		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, project, strings.TrimPrefix(name, project+"--")))
+		links.RemoveIfHardlinkedToAny(filePath, cursorRuleSources(agentsHome, project, strings.TrimPrefix(name, project+"--")))
 	}
 }
 
@@ -447,7 +447,7 @@ func (c *cursor) removeHooksLink(project, repoPath, agentsHome string) {
 	if err == nil && len(repoBundles) > 0 {
 		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
 	}
-	removeHardlinkIfLinkedToAny(hooksFilePath, []string{
+	links.RemoveIfHardlinkedToAny(hooksFilePath, []string{
 		filepath.Join(agentsHome, "hooks", project, cursorJSON),
 		filepath.Join(agentsHome, "hooks", "global", cursorJSON),
 	})
@@ -481,16 +481,6 @@ func cursorRuleSources(agentsHome, scope, name string) []string {
 		filepath.Join(agentsHome, "rules", scope, name),
 		filepath.Join(agentsHome, "rules", scope, strings.TrimSuffix(name, ".mdc")+".md"),
 	}
-}
-
-func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
-	for _, src := range sources {
-		if linked, _ := links.AreHardlinked(path, src); linked {
-			_ = os.Remove(path)
-			return true
-		}
-	}
-	return false
 }
 
 func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
