@@ -96,8 +96,8 @@ func TestProposalTargetPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/tmp/agents/rules/global/x.md" {
-		t.Errorf("ProposalTargetPath: got %q", got)
+	if want := filepath.Join("/tmp/agents", "rules", "global", "x.md"); got != want {
+		t.Errorf("ProposalTargetPath: got %q, want %q", got, want)
 	}
 
 	if _, err := ProposalTargetPath("/absolute"); err == nil {
@@ -320,16 +320,16 @@ func TestSaveProposal_MkdirAllFails(t *testing.T) {
 
 func TestProposalDirHelpers(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "/tmp/h")
-	if ProposalsDir() != "/tmp/h/proposals" {
-		t.Errorf("ProposalsDir: %q", ProposalsDir())
+	if want := filepath.Join("/tmp/h", "proposals"); ProposalsDir() != want {
+		t.Errorf("ProposalsDir: %q, want %q", ProposalsDir(), want)
 	}
-	if ArchivedProposalsDir() != "/tmp/h/proposals/archived" {
-		t.Errorf("ArchivedProposalsDir: %q", ArchivedProposalsDir())
+	if want := filepath.Join("/tmp/h", "proposals", "archived"); ArchivedProposalsDir() != want {
+		t.Errorf("ArchivedProposalsDir: %q, want %q", ArchivedProposalsDir(), want)
 	}
-	if ProposalPath("foo") != "/tmp/h/proposals/foo.yaml" {
-		t.Errorf("ProposalPath: %q", ProposalPath("foo"))
+	if want := filepath.Join("/tmp/h", "proposals", "foo.yaml"); ProposalPath("foo") != want {
+		t.Errorf("ProposalPath: %q, want %q", ProposalPath("foo"), want)
 	}
-	if ArchivedProposalPath("foo") != "/tmp/h/proposals/archived/foo.yaml" {
-		t.Errorf("ArchivedProposalPath: %q", ArchivedProposalPath("foo"))
+	if want := filepath.Join("/tmp/h", "proposals", "archived", "foo.yaml"); ArchivedProposalPath("foo") != want {
+		t.Errorf("ArchivedProposalPath: %q, want %q", ArchivedProposalPath("foo"), want)
 	}
 }

@@ -125,11 +125,11 @@ func TestParseJSONLTimestamp(t *testing.T) {
 // TestCanonicalBucketHelpers covers the small path-join helpers in
 // buckets.go that compose the canonical store layout.
 func TestCanonicalBucketHelpers(t *testing.T) {
-	if got := CanonicalBucketRoot("/h", CanonicalBucketSkills); got != "/h/skills" {
-		t.Errorf("Root: %q", got)
+	if got, want := CanonicalBucketRoot("/h", CanonicalBucketSkills), filepath.Join("/h", "skills"); got != want {
+		t.Errorf("Root: %q, want %q", got, want)
 	}
-	if got := CanonicalBucketScopeRoot("/h", CanonicalBucketAgents, "global"); got != "/h/agents/global" {
-		t.Errorf("ScopeRoot: %q", got)
+	if got, want := CanonicalBucketScopeRoot("/h", CanonicalBucketAgents, "global"), filepath.Join("/h", "agents", "global"); got != want {
+		t.Errorf("ScopeRoot: %q, want %q", got, want)
 	}
 	if got := CanonicalBucketPath(CanonicalBucketRules, "global", "x.md"); got != "rules/global/x.md" {
 		t.Errorf("Path: %q", got)

@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -107,7 +108,7 @@ func TestResourceSourceRefValidateAndCanonicalPath(t *testing.T) {
 	}
 
 	got := ref.CanonicalPath("/tmp/.agents")
-	want := "/tmp/.agents/hooks/proj/lint/HOOK.yaml"
+	want := filepath.Join("/tmp/.agents", "hooks", "proj", "lint", "HOOK.yaml")
 	if got != want {
 		t.Fatalf("CanonicalPath() = %q, want %q", got, want)
 	}

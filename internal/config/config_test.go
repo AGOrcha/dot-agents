@@ -35,8 +35,9 @@ func TestConfigLoadSave(t *testing.T) {
 		t.Fatalf("Load after save: %v", err)
 	}
 	path := cfg2.GetProjectPath("myproject")
-	if path != "/home/user/myproject" {
-		t.Errorf("expected /home/user/myproject, got %q", path)
+	want := filepath.Clean(filepath.FromSlash("/home/user/myproject"))
+	if path != want {
+		t.Errorf("expected %q, got %q", want, path)
 	}
 }
 
@@ -120,12 +121,13 @@ func TestConfigGetProjectPathCleansStoredPath(t *testing.T) {
 		Version: 1,
 		Projects: map[string]Project{
 			"proj": {
-				Path: "/tmp/example/.",
+				Path: filepath.FromSlash("/tmp/example/."),
 			},
 		},
 	}
-	if got := cfg.GetProjectPath("proj"); got != "/tmp/example" {
-		t.Fatalf("GetProjectPath returned %q, want /tmp/example", got)
+	want := filepath.Clean(filepath.FromSlash("/tmp/example"))
+	if got := cfg.GetProjectPath("proj"); got != want {
+		t.Fatalf("GetProjectPath returned %q, want %q", got, want)
 	}
 }
 

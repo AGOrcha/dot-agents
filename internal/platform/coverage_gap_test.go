@@ -1677,9 +1677,13 @@ func TestCanonicalIntentSourcePath_EmptyErrors(t *testing.T) {
 }
 
 func TestResolveIntentTargetPath_Absolute(t *testing.T) {
-	got := resolveIntentTargetPath("/abs", "/repo")
-	if got != "/abs" {
-		t.Errorf("got %q, want /abs", got)
+	abs, err := filepath.Abs(filepath.Join("abs"))
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	got := resolveIntentTargetPath(abs, filepath.FromSlash("/repo"))
+	if got != abs {
+		t.Errorf("got %q, want %q", got, abs)
 	}
 }
 

@@ -35,8 +35,8 @@ func TestUserHome(t *testing.T) {
 func TestAgentsStateDir(t *testing.T) {
 	// With XDG_STATE_HOME
 	t.Setenv("XDG_STATE_HOME", "/tmp/xdg-state")
-	if got := AgentsStateDir(); got != "/tmp/xdg-state/dot-agents" {
-		t.Errorf("AgentsStateDir xdg: got %q", got)
+	if want := filepath.Join("/tmp/xdg-state", "dot-agents"); AgentsStateDir() != want {
+		t.Errorf("AgentsStateDir xdg: got %q, want %q", AgentsStateDir(), want)
 	}
 	// Without XDG_STATE_HOME (falls back to ~/.local/state)
 	t.Setenv("XDG_STATE_HOME", "")
@@ -49,15 +49,15 @@ func TestAgentsStateDir(t *testing.T) {
 
 func TestAgentsContextDir(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "/tmp/myhome")
-	if got := AgentsContextDir(); got != "/tmp/myhome/context" {
-		t.Errorf("AgentsContextDir: got %q", got)
+	if want := filepath.Join("/tmp/myhome", "context"); AgentsContextDir() != want {
+		t.Errorf("AgentsContextDir: got %q, want %q", AgentsContextDir(), want)
 	}
 }
 
 func TestProjectContextDir(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "/tmp/myhome")
-	if got := ProjectContextDir("proj"); got != "/tmp/myhome/context/proj" {
-		t.Errorf("ProjectContextDir: got %q", got)
+	if want := filepath.Join("/tmp/myhome", "context", "proj"); ProjectContextDir("proj") != want {
+		t.Errorf("ProjectContextDir: got %q, want %q", ProjectContextDir("proj"), want)
 	}
 }
 

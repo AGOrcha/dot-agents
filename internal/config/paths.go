@@ -69,7 +69,7 @@ func ExpandPath(path string) string {
 func DisplayPath(path string) string {
 	home, _ := os.UserHomeDir()
 	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
+		return "~" + filepath.ToSlash(path[len(home):])
 	}
 	return path
 }
