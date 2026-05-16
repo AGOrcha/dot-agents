@@ -80,7 +80,14 @@ func TestRunWorkflowGraphQueryAllowsWorkflowBridgeIntent(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := []byte("schema_version: 1\nenabled: true\ngraph_home: \"" + kgHome + "\"\n")
+	// Marshal the real struct rather than string-concat a quoted YAML
+	// scalar: a Windows t.TempDir() path contains backslashes that a
+	// double-quoted YAML scalar interprets as escape sequences, corrupting
+	// graph_home. yaml.Marshal emits a correctly-escaped value on every OS.
+	cfg, err := yaml.Marshal(GraphBridgeConfig{SchemaVersion: 1, Enabled: true, GraphHome: kgHome})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), cfg, 0644); err != nil {
 		t.Fatal(err)
 	}

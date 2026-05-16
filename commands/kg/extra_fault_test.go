@@ -3,6 +3,7 @@ package kg
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -122,6 +123,9 @@ esac`)
 // TestRunKGLinkAdd_OpenStoreError drives the openKGStore-error return path by
 // pointing KG_HOME at a bogus path.
 func TestRunKGLinkAdd_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("kind", "mentions", "")
@@ -133,6 +137,9 @@ func TestRunKGLinkAdd_OpenStoreError(t *testing.T) {
 
 // TestRunKGLinkList_OpenStoreError drives the openKGStore-error return path.
 func TestRunKGLinkList_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	err := runKGLinkList(cmd, []string{"note"})
@@ -143,6 +150,9 @@ func TestRunKGLinkList_OpenStoreError(t *testing.T) {
 
 // TestRunKGLinkRemove_OpenStoreError drives the openKGStore-error return path.
 func TestRunKGLinkRemove_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	err := runKGLinkRemove(cmd, []string{"42"})
@@ -154,6 +164,9 @@ func TestRunKGLinkRemove_OpenStoreError(t *testing.T) {
 // TestRunKGWarm_OpenStoreError drives the openKGStore-error wrapper on
 // runKGWarm.
 func TestRunKGWarm_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("type", "", "")
@@ -165,6 +178,9 @@ func TestRunKGWarm_OpenStoreError(t *testing.T) {
 
 // TestRunKGWarmStats_OpenStoreError drives the openKGStore-error wrapper.
 func TestRunKGWarmStats_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	if err := runKGWarmStats(cmd, nil); err == nil || !strings.Contains(err.Error(), "open warm store") {
