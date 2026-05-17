@@ -270,15 +270,13 @@ func TestPG_GetStats_KindsAndLanguages(t *testing.T) {
 
 // TestPG_GetImpactRadius exercises the BFS path: seed a small graph, then
 // query impact starting from a changed file and assert affected nodes.
-func TestPG_GetImpactRadius(t *testing.T) {
-	s := openPGContainerStore(t)
-
-	// Build a tiny call graph: a SEED in the changed file, plus an external
-	// caller and an external callee. Both directions of BFS should add the
-	// external nodes to ImpactedNodes; the seed itself goes to ChangedNodes.
-	file := "pg_impact_unique.go"
-	callerFile := "pg_impact_caller.go"
-	calleeFile := "pg_impact_callee.go"
+// seedPGImpactGraph builds a tiny call graph (seed + external caller + external
+// callee) used by TestPG_GetImpactRadius and returns the three file names.
+func seedPGImpactGraph(t *testing.T, s *graphstore.PostgresStore) (file, callerFile, calleeFile string) {
+	t.Helper()
+	file = "pg_impact_unique.go"
+	callerFile = "pg_impact_caller.go"
+	calleeFile = "pg_impact_callee.go"
 
 	seedNode := graphstore.NodeInfo{
 		Kind: graphstore.NodeKindFunction, Name: "pgImpactSeed", FilePath: file, Language: "go",
@@ -314,36 +312,39 @@ func TestPG_GetImpactRadius(t *testing.T) {
 	}, ""); err != nil {
 		t.Fatalf("UpsertNode callee: %v", err)
 	}
+	return file, callerFile, calleeFile
+}
+
+// hasQualified reports whether any node in nodes has the given qualified name.
+func hasQualified(nodes []graphstore.GraphNode, qualified string) bool {
+	for _, n := range nodes {
+		if n.QualifiedName == qualified {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPG_GetImpactRadius(t *testing.T) {
+	s := openPGContainerStore(t)
+
+	// Build a tiny call graph: a SEED in the changed file, plus an external
+	// caller and an external callee. Both directions of BFS should add the
+	// external nodes to ImpactedNodes; the seed itself goes to ChangedNodes.
+	file, callerFile, calleeFile := seedPGImpactGraph(t, s)
 
 	res, err := s.GetImpactRadius([]string{file}, 2, 100)
 	if err != nil {
 		t.Fatalf("GetImpactRadius: %v", err)
 	}
 
-	hasCallee, hasCaller := false, false
-	for _, n := range res.ImpactedNodes {
-		if n.QualifiedName == calleeFile+"::pgImpactCallee" {
-			hasCallee = true
-		}
-		if n.QualifiedName == callerFile+"::pgImpactCaller" {
-			hasCaller = true
-		}
-	}
-	if !hasCallee {
+	if !hasQualified(res.ImpactedNodes, calleeFile+"::pgImpactCallee") {
 		t.Errorf("expected forward-reachable callee in impact set, got %+v", res.ImpactedNodes)
 	}
-	if !hasCaller {
+	if !hasQualified(res.ImpactedNodes, callerFile+"::pgImpactCaller") {
 		t.Errorf("expected reverse-reachable caller in impact set, got %+v", res.ImpactedNodes)
 	}
-
-	// ChangedNodes must contain the seed.
-	hasSeed := false
-	for _, n := range res.ChangedNodes {
-		if n.QualifiedName == file+"::pgImpactSeed" {
-			hasSeed = true
-		}
-	}
-	if !hasSeed {
+	if !hasQualified(res.ChangedNodes, file+"::pgImpactSeed") {
 		t.Errorf("expected seed in ChangedNodes, got %+v", res.ChangedNodes)
 	}
 }
@@ -391,74 +392,50 @@ func TestPG_ErrorPathsAfterClose(t *testing.T) {
 	_ = s.Close()
 
 	// Every call below should return an error of some kind; we don't care
-	// what kind, only that the error branch executes.
-	if _, err := s.UpsertNode(graphstore.NodeInfo{Kind: graphstore.NodeKindFunction, Name: "x", FilePath: "x.go"}, ""); err == nil {
-		t.Error("UpsertNode after Close: expected error")
+	// what kind, only that the error branch executes. Each case wraps one
+	// PostgresStore method so the closed-pool error path is driven uniformly.
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{"UpsertNode", func() error {
+			_, err := s.UpsertNode(graphstore.NodeInfo{Kind: graphstore.NodeKindFunction, Name: "x", FilePath: "x.go"}, "")
+			return err
+		}},
+		{"UpsertEdge", func() error {
+			_, err := s.UpsertEdge(graphstore.EdgeInfo{Kind: graphstore.EdgeKindCalls, Source: "x", Target: "y", FilePath: "f"})
+			return err
+		}},
+		{"RemoveFileData", func() error { return s.RemoveFileData("x.go") }},
+		{"StoreFileNodesEdges", func() error { return s.StoreFileNodesEdges("x.go", nil, nil, "") }},
+		{"GetNode", func() error { _, err := s.GetNode("x"); return err }},
+		{"GetNodesByFile", func() error { _, err := s.GetNodesByFile("x.go"); return err }},
+		{"GetEdgesBySource", func() error { _, err := s.GetEdgesBySource("x"); return err }},
+		{"GetEdgesByTarget", func() error { _, err := s.GetEdgesByTarget("x"); return err }},
+		{"GetEdgesAmong", func() error { _, err := s.GetEdgesAmong([]string{"x"}); return err }},
+		{"GetAllFiles", func() error { _, err := s.GetAllFiles(); return err }},
+		{"SearchNodes", func() error { _, err := s.SearchNodes("x", 10); return err }},
+		{"GetStats", func() error { _, err := s.GetStats(); return err }},
+		{"GetImpactRadius", func() error { _, err := s.GetImpactRadius([]string{"x.go"}, 1, 10); return err }},
+		{"SetMetadata", func() error { return s.SetMetadata("k", "v") }},
+		{"GetMetadata", func() error { _, err := s.GetMetadata("k"); return err }},
+		{"UpsertKGNote", func() error {
+			return s.UpsertKGNote(graphstore.KGNote{ID: "x", Title: "x", NoteType: "concept", Status: "active", FilePath: "x.md"})
+		}},
+		{"GetKGNote", func() error { _, err := s.GetKGNote("x"); return err }},
+		{"SearchKGNotes", func() error { _, err := s.SearchKGNotes("x", 10); return err }},
+		{"ListArchivedKGNotes", func() error { _, err := s.ListArchivedKGNotes(); return err }},
+		{"UpsertNoteSymbolLink", func() error {
+			_, err := s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "x", QualifiedName: "y", LinkKind: "mentions"})
+			return err
+		}},
+		{"GetLinksForNote", func() error { _, err := s.GetLinksForNote("x"); return err }},
+		{"GetLinksForSymbol", func() error { _, err := s.GetLinksForSymbol("x"); return err }},
+		{"DeleteNoteSymbolLink", func() error { return s.DeleteNoteSymbolLink(1) }},
 	}
-	if _, err := s.UpsertEdge(graphstore.EdgeInfo{Kind: graphstore.EdgeKindCalls, Source: "x", Target: "y", FilePath: "f"}); err == nil {
-		t.Error("UpsertEdge after Close: expected error")
-	}
-	if err := s.RemoveFileData("x.go"); err == nil {
-		t.Error("RemoveFileData after Close: expected error")
-	}
-	if err := s.StoreFileNodesEdges("x.go", nil, nil, ""); err == nil {
-		t.Error("StoreFileNodesEdges after Close: expected error")
-	}
-	if _, err := s.GetNode("x"); err == nil {
-		t.Error("GetNode after Close: expected error")
-	}
-	if _, err := s.GetNodesByFile("x.go"); err == nil {
-		t.Error("GetNodesByFile after Close: expected error")
-	}
-	if _, err := s.GetEdgesBySource("x"); err == nil {
-		t.Error("GetEdgesBySource after Close: expected error")
-	}
-	if _, err := s.GetEdgesByTarget("x"); err == nil {
-		t.Error("GetEdgesByTarget after Close: expected error")
-	}
-	if _, err := s.GetEdgesAmong([]string{"x"}); err == nil {
-		t.Error("GetEdgesAmong after Close: expected error")
-	}
-	if _, err := s.GetAllFiles(); err == nil {
-		t.Error("GetAllFiles after Close: expected error")
-	}
-	if _, err := s.SearchNodes("x", 10); err == nil {
-		t.Error("SearchNodes after Close: expected error")
-	}
-	if _, err := s.GetStats(); err == nil {
-		t.Error("GetStats after Close: expected error")
-	}
-	if _, err := s.GetImpactRadius([]string{"x.go"}, 1, 10); err == nil {
-		t.Error("GetImpactRadius after Close: expected error")
-	}
-	if err := s.SetMetadata("k", "v"); err == nil {
-		t.Error("SetMetadata after Close: expected error")
-	}
-	if _, err := s.GetMetadata("k"); err == nil {
-		t.Error("GetMetadata after Close: expected error")
-	}
-	if err := s.UpsertKGNote(graphstore.KGNote{ID: "x", Title: "x", NoteType: "concept", Status: "active", FilePath: "x.md"}); err == nil {
-		t.Error("UpsertKGNote after Close: expected error")
-	}
-	if _, err := s.GetKGNote("x"); err == nil {
-		t.Error("GetKGNote after Close: expected error")
-	}
-	if _, err := s.SearchKGNotes("x", 10); err == nil {
-		t.Error("SearchKGNotes after Close: expected error")
-	}
-	if _, err := s.ListArchivedKGNotes(); err == nil {
-		t.Error("ListArchivedKGNotes after Close: expected error")
-	}
-	if _, err := s.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{NoteID: "x", QualifiedName: "y", LinkKind: "mentions"}); err == nil {
-		t.Error("UpsertNoteSymbolLink after Close: expected error")
-	}
-	if _, err := s.GetLinksForNote("x"); err == nil {
-		t.Error("GetLinksForNote after Close: expected error")
-	}
-	if _, err := s.GetLinksForSymbol("x"); err == nil {
-		t.Error("GetLinksForSymbol after Close: expected error")
-	}
-	if err := s.DeleteNoteSymbolLink(1); err == nil {
-		t.Error("DeleteNoteSymbolLink after Close: expected error")
+	for _, tc := range cases {
+		if err := tc.call(); err == nil {
+			t.Errorf("%s after Close: expected error", tc.name)
+		}
 	}
 }

@@ -86,25 +86,13 @@ func funcsInFile(path string) ([]funcRange, error) {
 	var out []funcRange
 	for _, d := range f.Decls {
 		fd, ok := d.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		if fd.Body == nil {
+		if !ok || fd.Body == nil {
 			continue
 		}
 		start := fset.Position(fd.Pos()).Line
 		end := fset.Position(fd.End()).Line
 		name := fd.Name.Name
-		if fd.Recv != nil && len(fd.Recv.List) > 0 {
-			recv := ""
-			switch t := fd.Recv.List[0].Type.(type) {
-			case *ast.StarExpr:
-				if id, ok := t.X.(*ast.Ident); ok {
-					recv = "*" + id.Name
-				}
-			case *ast.Ident:
-				recv = t.Name
-			}
+		if recv := receiverName(fd); recv != "" {
 			name = "(" + recv + ")." + name
 		}
 		out = append(out, funcRange{file: path, name: name, startLine: start, endLine: end})
@@ -112,38 +100,60 @@ func funcsInFile(path string) ([]funcRange, error) {
 	return out, nil
 }
 
-func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: covstat <profile> <module-root>")
-		os.Exit(2)
+// receiverName renders the receiver type of a method declaration (e.g. "*T"
+// or "T"), or "" for free functions.
+func receiverName(fd *ast.FuncDecl) string {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return ""
 	}
-	prof := os.Args[1]
-	root := os.Args[2]
-	blocks, err := parseProfile(prof)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	switch t := fd.Recv.List[0].Type.(type) {
+	case *ast.StarExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return "*" + id.Name
+		}
+	case *ast.Ident:
+		return t.Name
 	}
-	// Resolve module path from root/go.mod
+	return ""
+}
+
+type funcCov struct {
+	file, name         string
+	totalStmts         int
+	coveredStmts       int
+	startLine, endLine int
+}
+
+func parseModulePath(root string) (string, error) {
 	modBytes, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return "", err
 	}
-	var modulePath string
 	for _, ln := range strings.Split(string(modBytes), "\n") {
 		ln = strings.TrimSpace(ln)
 		if strings.HasPrefix(ln, "module ") {
-			modulePath = strings.TrimSpace(strings.TrimPrefix(ln, "module"))
-			break
+			return strings.TrimSpace(strings.TrimPrefix(ln, "module")), nil
 		}
 	}
-	type funcCov struct {
-		file, name         string
-		totalStmts         int
-		coveredStmts       int
-		startLine, endLine int
+	return "", nil
+}
+
+// coverForFunc tallies covered/total statements for a single function range
+// against the coverage blocks of its containing file.
+func coverForFunc(rel string, fr funcRange, bs []block) funcCov {
+	fc := funcCov{file: rel, name: fr.name, startLine: fr.startLine, endLine: fr.endLine}
+	for _, b := range bs {
+		if b.startLine >= fr.startLine && b.endLine <= fr.endLine {
+			fc.totalStmts += b.stmts
+			if b.count > 0 {
+				fc.coveredStmts += b.stmts
+			}
+		}
 	}
+	return fc
+}
+
+func collectFuncCov(blocks fileBlocks, root, modulePath string) []funcCov {
 	var all []funcCov
 	for file, bs := range blocks {
 		rel := strings.TrimPrefix(file, modulePath+"/")
@@ -153,16 +163,7 @@ func main() {
 			continue
 		}
 		for _, fr := range funcs {
-			fc := funcCov{file: rel, name: fr.name, startLine: fr.startLine, endLine: fr.endLine}
-			for _, b := range bs {
-				if b.startLine >= fr.startLine && b.endLine <= fr.endLine {
-					fc.totalStmts += b.stmts
-					if b.count > 0 {
-						fc.coveredStmts += b.stmts
-					}
-				}
-			}
-			all = append(all, fc)
+			all = append(all, coverForFunc(rel, fr, bs))
 		}
 	}
 	sort.Slice(all, func(i, j int) bool {
@@ -174,6 +175,10 @@ func main() {
 		}
 		return all[i].file < all[j].file
 	})
+	return all
+}
+
+func printFuncCov(all []funcCov) {
 	var grandTotal, grandCovered int
 	for _, fc := range all {
 		grandTotal += fc.totalStmts
@@ -188,4 +193,24 @@ func main() {
 	if grandTotal > 0 {
 		fmt.Printf("\nTOTAL: %d/%d = %.2f%%\n", grandCovered, grandTotal, float64(grandCovered)/float64(grandTotal)*100.0)
 	}
+}
+
+func main() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: covstat <profile> <module-root>")
+		os.Exit(2)
+	}
+	prof := os.Args[1]
+	root := os.Args[2]
+	blocks, err := parseProfile(prof)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	modulePath, err := parseModulePath(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	printFuncCov(collectFuncCov(blocks, root, modulePath))
 }

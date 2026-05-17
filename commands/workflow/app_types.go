@@ -37,12 +37,7 @@ func runWorkflowAppTypes(format string, verbose bool) error {
 		return err
 	}
 	if deps.Flags.JSON() {
-		if strings.TrimSpace(format) != "" {
-			return fmt.Errorf("--format cannot be combined with --json")
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(view)
+		return renderWorkflowAppTypesJSON(view, format)
 	}
 	if strings.TrimSpace(format) != "" {
 		snippet, err := renderWorkflowAppTypeFormat(view, format)
@@ -58,12 +53,34 @@ func runWorkflowAppTypes(format string, verbose bool) error {
 		return nil
 	}
 
+	renderWorkflowAppTypesHeader(view)
+	renderWorkflowAppTypeList(view.AppTypes)
+	if verbose {
+		renderWorkflowAppTypeDetails(view)
+	}
+	renderWorkflowAppTypeAuthoring(view.AppTypes)
+	fmt.Fprintln(os.Stdout)
+	return nil
+}
+
+func renderWorkflowAppTypesJSON(view workflowAppTypesView, format string) error {
+	if strings.TrimSpace(format) != "" {
+		return fmt.Errorf("--format cannot be combined with --json")
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(view)
+}
+
+func renderWorkflowAppTypesHeader(view workflowAppTypesView) {
 	ui.Header("Workflow App Types")
 	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Bold, view.Project, ui.Reset)
 	fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, view.Path, ui.Reset)
 	fmt.Fprintln(os.Stdout)
+}
 
-	for _, entry := range view.AppTypes {
+func renderWorkflowAppTypeList(entries []workflowAppTypeEntry) {
+	for _, entry := range entries {
 		suffix := ""
 		switch {
 		case entry.AliasOf != "":
@@ -73,32 +90,34 @@ func runWorkflowAppTypes(format string, verbose bool) error {
 		}
 		fmt.Fprintf(os.Stdout, "  %-24s -> [%s]%s\n", entry.Name, strings.Join(entry.VerifierSequence, ", "), suffix)
 	}
+}
 
-	if verbose {
-		fmt.Fprintln(os.Stdout)
-		ui.Section("Details")
-		fmt.Fprintf(os.Stdout, "  source: %s\n", view.Source)
-		for _, entry := range view.AppTypes {
-			if entry.RecommendationReason == "" && entry.AliasOf == "" {
-				continue
-			}
-			detail := entry.RecommendationReason
-			if detail == "" && entry.AliasOf != "" {
-				detail = "alias of " + entry.AliasOf
-			}
-			fmt.Fprintf(os.Stdout, "  %s: %s\n", entry.Name, detail)
+func renderWorkflowAppTypeDetails(view workflowAppTypesView) {
+	fmt.Fprintln(os.Stdout)
+	ui.Section("Details")
+	fmt.Fprintf(os.Stdout, "  source: %s\n", view.Source)
+	for _, entry := range view.AppTypes {
+		if entry.RecommendationReason == "" && entry.AliasOf == "" {
+			continue
 		}
+		detail := entry.RecommendationReason
+		if detail == "" && entry.AliasOf != "" {
+			detail = "alias of " + entry.AliasOf
+		}
+		fmt.Fprintf(os.Stdout, "  %s: %s\n", entry.Name, detail)
 	}
+}
 
-	if recommended, ok := singleRecommendedAppType(view.AppTypes); ok {
-		fmt.Fprintln(os.Stdout)
-		ui.Section("Authoring Examples")
-		fmt.Fprintf(os.Stdout, "  --app-type %s\n", recommended.Name)
-		fmt.Fprintf(os.Stdout, "  app_type: %s\n", recommended.Name)
-		fmt.Fprintf(os.Stdout, "  default_app_type: %s\n", recommended.Name)
+func renderWorkflowAppTypeAuthoring(entries []workflowAppTypeEntry) {
+	recommended, ok := singleRecommendedAppType(entries)
+	if !ok {
+		return
 	}
 	fmt.Fprintln(os.Stdout)
-	return nil
+	ui.Section("Authoring Examples")
+	fmt.Fprintf(os.Stdout, "  --app-type %s\n", recommended.Name)
+	fmt.Fprintf(os.Stdout, "  app_type: %s\n", recommended.Name)
+	fmt.Fprintf(os.Stdout, "  default_app_type: %s\n", recommended.Name)
 }
 
 func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, error) {
@@ -142,30 +161,37 @@ func markRecommendedAppTypes(entries []workflowAppTypeEntry, projectName string)
 		groups[sequenceKey(entry.VerifierSequence)] = append(groups[sequenceKey(entry.VerifierSequence)], i)
 	}
 	for _, indexes := range groups {
-		if len(indexes) < 2 {
+		markRecommendedAppTypeGroup(entries, indexes, projectName)
+	}
+}
+
+// markRecommendedAppTypeGroup resolves a single group of entries sharing the
+// same verifier sequence: when exactly one non-repo-named alias exists it is
+// marked recommended and the rest become aliases of it.
+func markRecommendedAppTypeGroup(entries []workflowAppTypeEntry, indexes []int, projectName string) {
+	if len(indexes) < 2 {
+		return
+	}
+	nonProject := -1
+	for _, idx := range indexes {
+		if entries[idx].Name != projectName {
+			if nonProject != -1 {
+				nonProject = -2
+				break
+			}
+			nonProject = idx
+		}
+	}
+	if nonProject < 0 {
+		return
+	}
+	entries[nonProject].Recommended = true
+	entries[nonProject].RecommendationReason = "non-repo alias preferred for authoring"
+	for _, idx := range indexes {
+		if idx == nonProject {
 			continue
 		}
-		nonProject := -1
-		for _, idx := range indexes {
-			if entries[idx].Name != projectName {
-				if nonProject != -1 {
-					nonProject = -2
-					break
-				}
-				nonProject = idx
-			}
-		}
-		if nonProject < 0 {
-			continue
-		}
-		entries[nonProject].Recommended = true
-		entries[nonProject].RecommendationReason = "non-repo alias preferred for authoring"
-		for _, idx := range indexes {
-			if idx == nonProject {
-				continue
-			}
-			entries[idx].AliasOf = entries[nonProject].Name
-		}
+		entries[idx].AliasOf = entries[nonProject].Name
 	}
 }
 

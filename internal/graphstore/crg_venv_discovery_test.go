@@ -52,52 +52,60 @@ func TestVenvExeCandidates_CoversLayouts(t *testing.T) {
 	}
 }
 
-func TestDiscoverCRGBin_RepoVenvAndParentAndMissing(t *testing.T) {
-	sub := venvBinSubdirs()[0] // host-correct primary layout
-
-	// (1) repo-root .venv hit
-	repo := t.TempDir()
-	binDir := filepath.Join(repo, ".venv", sub)
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+// crgBinFileName returns the host-correct executable name for the CRG binary.
+func crgBinFileName() string {
 	name := crgBinName
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	exe := filepath.Join(binDir, name)
+	return name
+}
+
+// writeVenvCRGBin creates root/.venv/<sub>/<crgBinFileName> and returns its path.
+func writeVenvCRGBin(t *testing.T, root, sub string) string {
+	t.Helper()
+	binDir := filepath.Join(root, ".venv", sub)
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(binDir, crgBinFileName())
 	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got, err := DiscoverCRGBin(repo)
-	if err != nil || got != exe {
-		t.Fatalf("repo .venv: got %q err %v, want %q", got, err, exe)
-	}
+	return exe
+}
 
-	// (2) parent .venv hit (repo has none)
-	parent := t.TempDir()
-	child := filepath.Join(parent, "child")
-	if err := os.MkdirAll(child, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	pbinDir := filepath.Join(parent, ".venv", sub)
-	if err := os.MkdirAll(pbinDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	pexe := filepath.Join(pbinDir, name)
-	if err := os.WriteFile(pexe, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err = DiscoverCRGBin(child)
-	if err != nil || got != pexe {
-		t.Fatalf("parent .venv: got %q err %v, want %q", got, err, pexe)
-	}
+func TestDiscoverCRGBin_RepoVenvAndParentAndMissing(t *testing.T) {
+	sub := venvBinSubdirs()[0] // host-correct primary layout
 
-	// (3) missing everywhere and not on PATH → error with install hint
-	t.Setenv("PATH", t.TempDir())
-	if _, err := DiscoverCRGBin(t.TempDir()); err == nil {
-		t.Error("expected not-found error when no .venv and not on PATH")
-	}
+	t.Run("repo_root_venv_hit", func(t *testing.T) {
+		repo := t.TempDir()
+		exe := writeVenvCRGBin(t, repo, sub)
+		got, err := DiscoverCRGBin(repo)
+		if err != nil || got != exe {
+			t.Fatalf("repo .venv: got %q err %v, want %q", got, err, exe)
+		}
+	})
+
+	t.Run("parent_venv_hit", func(t *testing.T) {
+		parent := t.TempDir()
+		child := filepath.Join(parent, "child")
+		if err := os.MkdirAll(child, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		pexe := writeVenvCRGBin(t, parent, sub)
+		got, err := DiscoverCRGBin(child)
+		if err != nil || got != pexe {
+			t.Fatalf("parent .venv: got %q err %v, want %q", got, err, pexe)
+		}
+	})
+
+	t.Run("missing_and_not_on_path_errors", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if _, err := DiscoverCRGBin(t.TempDir()); err == nil {
+			t.Error("expected not-found error when no .venv and not on PATH")
+		}
+	})
 }
 
 func TestPythonBin_ResolvesSiblingThenFallback(t *testing.T) {

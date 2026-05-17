@@ -40,196 +40,201 @@ func TestResolveReviewOverallDecision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got, err := resolveReviewOverallDecision(tc.phase1, tc.phase2, tc.overallIn, tc.escalation)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil (result=%q)", got)
-				}
-				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
+			assertReviewOverallDecision(t, got, err, tc.wantErr, tc.errContains, tc.want)
 		})
+	}
+}
+
+// assertReviewOverallDecision validates one resolveReviewOverallDecision
+// outcome against the expected error/value for a test case.
+func assertReviewOverallDecision(t *testing.T, got string, err error, wantErr bool, errContains, want string) {
+	t.Helper()
+	if wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got nil (result=%q)", got)
+		}
+		if errContains != "" && !strings.Contains(err.Error(), errContains) {
+			t.Fatalf("error %q does not contain %q", err.Error(), errContains)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
 // TestRunWorkflowVerifyRecordReview covers the full review-kind path: validates
 // scope/phase decisions, writes review-decision.yaml, appends verification-log.jsonl
 // with `kind=review` and status derived from the overall decision.
+// reviewTestRepoWithContract sets AGENTS_HOME, builds a test project with a
+// saved delegation contract for task-001, and chdirs into the repo (restored
+// on cleanup). Returns the repo path.
+func reviewTestRepoWithContract(t *testing.T) string {
+	t.Helper()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	repo := setupTestProject(t)
+	saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
+	chdirForTest(t, repo)
+	return repo
+}
+
+// chdirForTest changes into dir and restores the prior working directory on
+// test cleanup.
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunWorkflowVerifyRecordReview(t *testing.T) {
-	t.Run("accept_writes_decision_and_log", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-		repo := setupTestProject(t)
-		saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
+	t.Run("accept_writes_decision_and_log", testReviewAcceptWritesDecisionAndLog)
+	t.Run("reject_status_fail", testReviewRejectStatusFail)
+	t.Run("escalate_status_partial_requires_reason", testReviewEscalateRequiresReason)
+	t.Run("rejects_invalid_scope", testReviewRejectsInvalidScope)
+	t.Run("rejects_invalid_phase_decision", testReviewRejectsInvalidPhaseDecision)
+	t.Run("missing_task_with_no_contracts_errors", testReviewMissingTaskErrors)
+}
 
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		if err := os.Chdir(repo); err != nil {
-			t.Fatal(err)
-		}
+func testReviewAcceptWritesDecisionAndLog(t *testing.T) {
+	repo := reviewTestRepoWithContract(t)
 
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Command:  "self-review",
-			Scope:    "repo",
-			Summary:  "phase1+phase2 accept",
-			Phase1In: "accept",
-			Phase2In: "accept",
-			TaskFlag: "task-001",
-		})
-		if err != nil {
-			t.Fatalf("review record: %v", err)
-		}
-
-		// review-decision.yaml exists
-		decisionPath := filepath.Join(repo, ".agents", "active", "verification", "task-001", "review-decision.yaml")
-		if _, err := os.Stat(decisionPath); err != nil {
-			t.Fatalf("expected review-decision.yaml: %v", err)
-		}
-
-		// verification log has 1 entry with kind=review, status=pass, artifact pointing to the decision
-		projectName := filepath.Base(repo)
-		records, err := readVerificationLog(projectName, 0)
-		if err != nil {
-			t.Fatalf("read log: %v", err)
-		}
-		if len(records) != 1 {
-			t.Fatalf("expected 1 record, got %d", len(records))
-		}
-		if records[0].Kind != "review" || records[0].Status != "pass" {
-			t.Fatalf("unexpected record: %+v", records[0])
-		}
-		if len(records[0].Artifacts) != 1 || !strings.Contains(records[0].Artifacts[0], "review-decision.yaml") {
-			t.Fatalf("expected artifact path, got %v", records[0].Artifacts)
-		}
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Command:  "self-review",
+		Scope:    "repo",
+		Summary:  "phase1+phase2 accept",
+		Phase1In: "accept",
+		Phase2In: "accept",
+		TaskFlag: "task-001",
 	})
+	if err != nil {
+		t.Fatalf("review record: %v", err)
+	}
 
-	t.Run("reject_status_fail", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-		repo := setupTestProject(t)
-		saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
+	// review-decision.yaml exists
+	decisionPath := filepath.Join(repo, ".agents", "active", "verification", "task-001", "review-decision.yaml")
+	if _, err := os.Stat(decisionPath); err != nil {
+		t.Fatalf("expected review-decision.yaml: %v", err)
+	}
 
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		if err := os.Chdir(repo); err != nil {
-			t.Fatal(err)
-		}
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Command:     "review",
-			Scope:       "package",
-			Summary:     "failed integration",
-			Phase1In:    "reject",
-			Phase2In:    "accept",
-			FailedGates: []string{"integration"},
-			TaskFlag:    "task-001",
-		})
-		if err != nil {
-			t.Fatalf("review record: %v", err)
-		}
-		records, _ := readVerificationLog(filepath.Base(repo), 0)
-		if len(records) != 1 || records[0].Status != "fail" {
-			t.Fatalf("expected fail record, got %+v", records)
-		}
+	// verification log has 1 entry with kind=review, status=pass, artifact pointing to the decision
+	projectName := filepath.Base(repo)
+	records, err := readVerificationLog(projectName, 0)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Kind != "review" || records[0].Status != "pass" {
+		t.Fatalf("unexpected record: %+v", records[0])
+	}
+	if len(records[0].Artifacts) != 1 || !strings.Contains(records[0].Artifacts[0], "review-decision.yaml") {
+		t.Fatalf("expected artifact path, got %v", records[0].Artifacts)
+	}
+}
+
+func testReviewRejectStatusFail(t *testing.T) {
+	repo := reviewTestRepoWithContract(t)
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Command:     "review",
+		Scope:       "package",
+		Summary:     "failed integration",
+		Phase1In:    "reject",
+		Phase2In:    "accept",
+		FailedGates: []string{"integration"},
+		TaskFlag:    "task-001",
 	})
+	if err != nil {
+		t.Fatalf("review record: %v", err)
+	}
+	records, _ := readVerificationLog(filepath.Base(repo), 0)
+	if len(records) != 1 || records[0].Status != "fail" {
+		t.Fatalf("expected fail record, got %+v", records)
+	}
+}
 
-	t.Run("escalate_status_partial_requires_reason", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-		repo := setupTestProject(t)
-		saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
-
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		if err := os.Chdir(repo); err != nil {
-			t.Fatal(err)
-		}
-		// escalate without reason errors before mutation
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Command:   "review",
-			Scope:     "repo",
-			Summary:   "needs planning",
-			Phase1In:  "escalate",
-			Phase2In:  "accept",
-			OverallIn: "escalate",
-			TaskFlag:  "task-001",
-		})
-		if err == nil || !strings.Contains(err.Error(), "escalation-reason") {
-			t.Fatalf("expected escalation-reason error, got %v", err)
-		}
-
-		err = runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Command:    "review",
-			Scope:      "repo",
-			Summary:    "needs planning",
-			Phase1In:   "escalate",
-			Phase2In:   "accept",
-			OverallIn:  "escalate",
-			Escalation: "spec contradiction",
-			TaskFlag:   "task-001",
-		})
-		if err != nil {
-			t.Fatalf("escalate with reason: %v", err)
-		}
-		records, _ := readVerificationLog(filepath.Base(repo), 0)
-		if len(records) != 1 || records[0].Status != "partial" {
-			t.Fatalf("expected partial status for escalate, got %+v", records)
-		}
+func testReviewEscalateRequiresReason(t *testing.T) {
+	repo := reviewTestRepoWithContract(t)
+	// escalate without reason errors before mutation
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Command:   "review",
+		Scope:     "repo",
+		Summary:   "needs planning",
+		Phase1In:  "escalate",
+		Phase2In:  "accept",
+		OverallIn: "escalate",
+		TaskFlag:  "task-001",
 	})
+	if err == nil || !strings.Contains(err.Error(), "escalation-reason") {
+		t.Fatalf("expected escalation-reason error, got %v", err)
+	}
 
-	t.Run("rejects_invalid_scope", func(t *testing.T) {
-		repo := setupTestProject(t)
-		saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		_ = os.Chdir(repo)
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Scope:    "module", // invalid
-			Phase1In: "accept", Phase2In: "accept",
-			TaskFlag: "task-001",
-		})
-		if err == nil || !strings.Contains(err.Error(), "invalid scope") {
-			t.Fatalf("expected invalid scope error, got %v", err)
-		}
+	err = runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Command:    "review",
+		Scope:      "repo",
+		Summary:    "needs planning",
+		Phase1In:   "escalate",
+		Phase2In:   "accept",
+		OverallIn:  "escalate",
+		Escalation: "spec contradiction",
+		TaskFlag:   "task-001",
 	})
+	if err != nil {
+		t.Fatalf("escalate with reason: %v", err)
+	}
+	records, _ := readVerificationLog(filepath.Base(repo), 0)
+	if len(records) != 1 || records[0].Status != "partial" {
+		t.Fatalf("expected partial status for escalate, got %+v", records)
+	}
+}
 
-	t.Run("rejects_invalid_phase_decision", func(t *testing.T) {
-		repo := setupTestProject(t)
-		saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		_ = os.Chdir(repo)
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Scope:    "repo",
-			Phase1In: "bogus",
-			Phase2In: "accept",
-			TaskFlag: "task-001",
-		})
-		if err == nil || !strings.Contains(err.Error(), "phase1-decision") {
-			t.Fatalf("expected phase1-decision parse error, got %v", err)
-		}
+func testReviewRejectsInvalidScope(t *testing.T) {
+	repo := setupTestProject(t)
+	saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
+	chdirForTest(t, repo)
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "module", // invalid
+		Phase1In: "accept", Phase2In: "accept",
+		TaskFlag: "task-001",
 	})
+	if err == nil || !strings.Contains(err.Error(), "invalid scope") {
+		t.Fatalf("expected invalid scope error, got %v", err)
+	}
+}
 
-	t.Run("missing_task_with_no_contracts_errors", func(t *testing.T) {
-		repo := setupTestProject(t)
-		oldwd, _ := os.Getwd()
-		defer os.Chdir(oldwd)
-		_ = os.Chdir(repo)
-		err := runWorkflowVerifyRecordReview(reviewRecordInputs{
-			Scope:    "repo",
-			Phase1In: "accept",
-			Phase2In: "accept",
-		})
-		if err == nil || !strings.Contains(err.Error(), "delegation task id") {
-			t.Fatalf("expected delegation contract error, got %v", err)
-		}
+func testReviewRejectsInvalidPhaseDecision(t *testing.T) {
+	repo := setupTestProject(t)
+	saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-task-001")
+	chdirForTest(t, repo)
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Phase1In: "bogus",
+		Phase2In: "accept",
+		TaskFlag: "task-001",
 	})
+	if err == nil || !strings.Contains(err.Error(), "phase1-decision") {
+		t.Fatalf("expected phase1-decision parse error, got %v", err)
+	}
+}
+
+func testReviewMissingTaskErrors(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForTest(t, repo)
+	err := runWorkflowVerifyRecordReview(reviewRecordInputs{
+		Scope:    "repo",
+		Phase1In: "accept",
+		Phase2In: "accept",
+	})
+	if err == nil || !strings.Contains(err.Error(), "delegation task id") {
+		t.Fatalf("expected delegation contract error, got %v", err)
+	}
 }
 
 // TestAppendVerificationLog_AppendOnly ensures successive appends preserve
@@ -306,182 +311,195 @@ func TestReadVerificationLog_SkipsMalformedLines(t *testing.T) {
 // readVerificationLog round-trips correctly and that validation rejects
 // invalid inputs.
 func TestRunWorkflowVerify_CoreBehavior(t *testing.T) {
-	t.Run("append_and_read_round_trip", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
+	t.Run("append_and_read_round_trip", testVerifyAppendReadRoundTrip)
+	t.Run("read_empty_log_returns_empty_slice", testVerifyReadEmptyLog)
+	t.Run("read_with_limit", testVerifyReadWithLimit)
+	t.Run("validate_rejects_invalid_kind", testVerifyRejectsInvalidKind)
+	t.Run("validate_rejects_invalid_status", testVerifyRejectsInvalidStatus)
+	t.Run("validate_rejects_invalid_scope", testVerifyRejectsInvalidScope)
+	t.Run("validate_accepts_valid_inputs", testVerifyAcceptsValidInputs)
+	t.Run("validate_rejects_review_kind", testVerifyRejectsReviewKind)
+	t.Run("verification_log_path_uses_context_dir", testVerifyLogPathUsesContextDir)
+	t.Run("valid_verification_kinds", testVerifyValidKinds)
+	t.Run("valid_verification_scopes", testVerifyValidScopes)
+	t.Run("append_creates_context_dir", testVerifyAppendCreatesContextDir)
+}
 
-		project := "verify-test-proj"
+func testVerifyAppendReadRoundTrip(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	project := "verify-test-proj"
+	rec := VerificationRecord{
+		SchemaVersion: 1,
+		Timestamp:     "2026-05-01T10:00:00Z",
+		Kind:          "test",
+		Status:        "pass",
+		Command:       "go test ./...",
+		Scope:         "repo",
+		Summary:       "all tests passed",
+		Artifacts:     []string{},
+		RecordedBy:    "test-harness",
+	}
+	if err := appendVerificationLog(project, rec); err != nil {
+		t.Fatalf("appendVerificationLog: %v", err)
+	}
+
+	records, err := readVerificationLog(project, 0)
+	if err != nil {
+		t.Fatalf("readVerificationLog: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Kind != "test" || records[0].Status != "pass" {
+		t.Errorf("unexpected record: %+v", records[0])
+	}
+	if records[0].Summary != "all tests passed" {
+		t.Errorf("summary = %q, want 'all tests passed'", records[0].Summary)
+	}
+}
+
+func testVerifyReadEmptyLog(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	records, err := readVerificationLog("nonexistent-proj", 0)
+	if err != nil {
+		t.Fatalf("readVerificationLog: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected empty slice, got %d records", len(records))
+	}
+}
+
+func testVerifyReadWithLimit(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	project := "limit-proj"
+	for i := 0; i < 5; i++ {
 		rec := VerificationRecord{
 			SchemaVersion: 1,
 			Timestamp:     "2026-05-01T10:00:00Z",
 			Kind:          "test",
 			Status:        "pass",
-			Command:       "go test ./...",
 			Scope:         "repo",
-			Summary:       "all tests passed",
-			Artifacts:     []string{},
-			RecordedBy:    "test-harness",
+			Summary:       "run",
 		}
 		if err := appendVerificationLog(project, rec); err != nil {
-			t.Fatalf("appendVerificationLog: %v", err)
+			t.Fatalf("append %d: %v", i, err)
 		}
+	}
+	records, err := readVerificationLog(project, 3)
+	if err != nil {
+		t.Fatalf("readVerificationLog: %v", err)
+	}
+	if len(records) != 3 {
+		t.Errorf("expected 3 records with limit=3, got %d", len(records))
+	}
+}
 
-		records, err := readVerificationLog(project, 0)
-		if err != nil {
-			t.Fatalf("readVerificationLog: %v", err)
-		}
-		if len(records) != 1 {
-			t.Fatalf("expected 1 record, got %d", len(records))
-		}
-		if records[0].Kind != "test" || records[0].Status != "pass" {
-			t.Errorf("unexpected record: %+v", records[0])
-		}
-		if records[0].Summary != "all tests passed" {
-			t.Errorf("summary = %q, want 'all tests passed'", records[0].Summary)
-		}
-	})
+func testVerifyRejectsInvalidKind(t *testing.T) {
+	err := validateVerifyRecordInputs("invalid-kind", "pass", "repo")
+	if err == nil {
+		t.Fatal("expected error for invalid kind, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid kind") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
-	t.Run("read_empty_log_returns_empty_slice", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
+func testVerifyRejectsInvalidStatus(t *testing.T) {
+	err := validateVerifyRecordInputs("test", "invalid-status", "repo")
+	if err == nil {
+		t.Fatal("expected error for invalid status, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid status") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
-		records, err := readVerificationLog("nonexistent-proj", 0)
-		if err != nil {
-			t.Fatalf("readVerificationLog: %v", err)
-		}
-		if len(records) != 0 {
-			t.Errorf("expected empty slice, got %d records", len(records))
-		}
-	})
+func testVerifyRejectsInvalidScope(t *testing.T) {
+	err := validateVerifyRecordInputs("test", "pass", "invalid-scope")
+	if err == nil {
+		t.Fatal("expected error for invalid scope, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid scope") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
-	t.Run("read_with_limit", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
+func testVerifyAcceptsValidInputs(t *testing.T) {
+	err := validateVerifyRecordInputs("test", "pass", "repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
-		project := "limit-proj"
-		for i := 0; i < 5; i++ {
-			rec := VerificationRecord{
-				SchemaVersion: 1,
-				Timestamp:     "2026-05-01T10:00:00Z",
-				Kind:          "test",
-				Status:        "pass",
-				Scope:         "repo",
-				Summary:       "run",
-			}
-			if err := appendVerificationLog(project, rec); err != nil {
-				t.Fatalf("append %d: %v", i, err)
-			}
-		}
-		records, err := readVerificationLog(project, 3)
-		if err != nil {
-			t.Fatalf("readVerificationLog: %v", err)
-		}
-		if len(records) != 3 {
-			t.Errorf("expected 3 records with limit=3, got %d", len(records))
-		}
-	})
+func testVerifyRejectsReviewKind(t *testing.T) {
+	err := validateVerifyRecordInputs("review", "pass", "repo")
+	if err == nil {
+		t.Fatal("expected error for review kind via generic path, got nil")
+	}
+	if !strings.Contains(err.Error(), "use runWorkflowVerifyRecordReview") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
 
-	t.Run("validate_rejects_invalid_kind", func(t *testing.T) {
-		err := validateVerifyRecordInputs("invalid-kind", "pass", "repo")
-		if err == nil {
-			t.Fatal("expected error for invalid kind, got nil")
-		}
-		if !strings.Contains(err.Error(), "invalid kind") {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+func testVerifyLogPathUsesContextDir(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
 
-	t.Run("validate_rejects_invalid_status", func(t *testing.T) {
-		err := validateVerifyRecordInputs("test", "invalid-status", "repo")
-		if err == nil {
-			t.Fatal("expected error for invalid status, got nil")
-		}
-		if !strings.Contains(err.Error(), "invalid status") {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+	path := verificationLogPath("my-project")
+	expected := filepath.Join(config.ProjectContextDir("my-project"), "verification-log.jsonl")
+	if path != expected {
+		t.Errorf("path = %q, want %q", path, expected)
+	}
+}
 
-	t.Run("validate_rejects_invalid_scope", func(t *testing.T) {
-		err := validateVerifyRecordInputs("test", "pass", "invalid-scope")
-		if err == nil {
-			t.Fatal("expected error for invalid scope, got nil")
+func testVerifyValidKinds(t *testing.T) {
+	for _, k := range []string{"test", "lint", "build", "format", "custom", "review"} {
+		if !isValidVerificationKind(k) {
+			t.Errorf("expected %q to be valid kind", k)
 		}
-		if !strings.Contains(err.Error(), "invalid scope") {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+	}
+	if isValidVerificationKind("deploy") {
+		t.Error("expected 'deploy' to be invalid kind")
+	}
+}
 
-	t.Run("validate_accepts_valid_inputs", func(t *testing.T) {
-		err := validateVerifyRecordInputs("test", "pass", "repo")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+func testVerifyValidScopes(t *testing.T) {
+	for _, s := range []string{"file", "package", "repo", "custom"} {
+		if !isValidVerificationScope(s) {
+			t.Errorf("expected %q to be valid scope", s)
 		}
-	})
+	}
+	if isValidVerificationScope("module") {
+		t.Error("expected 'module' to be invalid scope")
+	}
+}
 
-	t.Run("validate_rejects_review_kind", func(t *testing.T) {
-		err := validateVerifyRecordInputs("review", "pass", "repo")
-		if err == nil {
-			t.Fatal("expected error for review kind via generic path, got nil")
-		}
-		if !strings.Contains(err.Error(), "use runWorkflowVerifyRecordReview") {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
+func testVerifyAppendCreatesContextDir(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
 
-	t.Run("verification_log_path_uses_context_dir", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
+	project := "fresh-proj"
+	contextDir := config.ProjectContextDir(project)
+	if _, err := os.Stat(contextDir); !os.IsNotExist(err) {
+		t.Fatal("context dir should not exist before append")
+	}
 
-		path := verificationLogPath("my-project")
-		expected := filepath.Join(config.ProjectContextDir("my-project"), "verification-log.jsonl")
-		if path != expected {
-			t.Errorf("path = %q, want %q", path, expected)
-		}
-	})
-
-	t.Run("valid_verification_kinds", func(t *testing.T) {
-		for _, k := range []string{"test", "lint", "build", "format", "custom", "review"} {
-			if !isValidVerificationKind(k) {
-				t.Errorf("expected %q to be valid kind", k)
-			}
-		}
-		if isValidVerificationKind("deploy") {
-			t.Error("expected 'deploy' to be invalid kind")
-		}
-	})
-
-	t.Run("valid_verification_scopes", func(t *testing.T) {
-		for _, s := range []string{"file", "package", "repo", "custom"} {
-			if !isValidVerificationScope(s) {
-				t.Errorf("expected %q to be valid scope", s)
-			}
-		}
-		if isValidVerificationScope("module") {
-			t.Error("expected 'module' to be invalid scope")
-		}
-	})
-
-	t.Run("append_creates_context_dir", func(t *testing.T) {
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-
-		project := "fresh-proj"
-		contextDir := config.ProjectContextDir(project)
-		if _, err := os.Stat(contextDir); !os.IsNotExist(err) {
-			t.Fatal("context dir should not exist before append")
-		}
-
-		rec := VerificationRecord{
-			SchemaVersion: 1,
-			Kind:          "build",
-			Status:        "pass",
-			Scope:         "repo",
-		}
-		if err := appendVerificationLog(project, rec); err != nil {
-			t.Fatalf("appendVerificationLog: %v", err)
-		}
-		if _, err := os.Stat(contextDir); err != nil {
-			t.Errorf("context dir should exist after append: %v", err)
-		}
-	})
+	rec := VerificationRecord{
+		SchemaVersion: 1,
+		Kind:          "build",
+		Status:        "pass",
+		Scope:         "repo",
+	}
+	if err := appendVerificationLog(project, rec); err != nil {
+		t.Fatalf("appendVerificationLog: %v", err)
+	}
+	if _, err := os.Stat(contextDir); err != nil {
+		t.Errorf("context dir should exist after append: %v", err)
+	}
 }
