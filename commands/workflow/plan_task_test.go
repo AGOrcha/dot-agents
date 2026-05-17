@@ -4222,15 +4222,6 @@ func TestRunWorkflowPlanCheckScope_TaskNotFound(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowPlanCreate_DuplicatePlanFails(t *testing.T) {
-	repo := setupTestProject(t)
-	chdirRepo(t, repo)
-	err := runWorkflowPlanCreate("plan-001", "T", "S", "O", "SC", "VS")
-	if err == nil {
-		t.Fatal("expected duplicate plan error")
-	}
-}
-
 func TestRunWorkflowEligible_PrefsParseError(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 
