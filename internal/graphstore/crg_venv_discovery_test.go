@@ -21,34 +21,31 @@ func TestVenvBinSubdirs_OrderByOS(t *testing.T) {
 	}
 }
 
+// anyCandidate reports whether pred holds for at least one candidate path.
+func anyCandidate(cands []string, pred func(string) bool) bool {
+	for _, c := range cands {
+		if pred(c) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestVenvExeCandidates_CoversLayouts(t *testing.T) {
 	cands := venvExeCandidates("/venv", "code-review-graph")
 	if len(cands) == 0 {
 		t.Fatal("no candidates")
 	}
-	// bin/ and Scripts/ both represented regardless of host.
-	var hasBin, hasScripts bool
-	for _, c := range cands {
-		if filepath.Base(filepath.Dir(c)) == "bin" {
-			hasBin = true
-		}
-		if filepath.Base(filepath.Dir(c)) == "Scripts" {
-			hasScripts = true
-		}
+	parentBaseIs := func(want string) func(string) bool {
+		return func(c string) bool { return filepath.Base(filepath.Dir(c)) == want }
 	}
-	if !hasBin || !hasScripts {
+	// bin/ and Scripts/ both represented regardless of host.
+	if !anyCandidate(cands, parentBaseIs("bin")) || !anyCandidate(cands, parentBaseIs("Scripts")) {
 		t.Errorf("candidates must cover bin+Scripts: %v", cands)
 	}
-	if runtime.GOOS == "windows" {
-		var hasExe bool
-		for _, c := range cands {
-			if filepath.Ext(c) == ".exe" {
-				hasExe = true
-			}
-		}
-		if !hasExe {
-			t.Errorf("windows candidates must include .exe: %v", cands)
-		}
+	if runtime.GOOS == "windows" &&
+		!anyCandidate(cands, func(c string) bool { return filepath.Ext(c) == ".exe" }) {
+		t.Errorf("windows candidates must include .exe: %v", cands)
 	}
 }
 

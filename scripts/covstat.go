@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,18 +12,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
+
+	"github.com/NikashPrakash/dot-agents/scripts/internal/covprofile"
 )
 
-type block struct {
-	startLine, startCol int
-	endLine, endCol     int
-	stmts               int
-	count               int
-}
+// block / fileBlocks alias the shared covprofile types so the
+// profile-line parser lives in exactly one place (covprofile.Parse).
+type block = covprofile.Block
 
-type fileBlocks map[string][]block
+type fileBlocks = map[string][]block
 
 type funcRange struct {
 	file      string
@@ -33,48 +30,9 @@ type funcRange struct {
 	endLine   int
 }
 
+// parseProfile delegates to the shared covprofile parser.
 func parseProfile(path string) (fileBlocks, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	out := fileBlocks{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 1<<22)
-	first := true
-	for sc.Scan() {
-		line := sc.Text()
-		if first {
-			first = false
-			continue
-		}
-		// path:sLine.sCol,eLine.eCol nstmts count
-		colon := strings.LastIndex(line, ":")
-		if colon < 0 {
-			continue
-		}
-		file := line[:colon]
-		rest := line[colon+1:]
-		parts := strings.Fields(rest)
-		if len(parts) != 3 {
-			continue
-		}
-		// parts[0] = sLine.sCol,eLine.eCol
-		comma := strings.Index(parts[0], ",")
-		left := parts[0][:comma]
-		right := parts[0][comma+1:]
-		ll := strings.Split(left, ".")
-		rr := strings.Split(right, ".")
-		sLine, _ := strconv.Atoi(ll[0])
-		sCol, _ := strconv.Atoi(ll[1])
-		eLine, _ := strconv.Atoi(rr[0])
-		eCol, _ := strconv.Atoi(rr[1])
-		stmts, _ := strconv.Atoi(parts[1])
-		count, _ := strconv.Atoi(parts[2])
-		out[file] = append(out[file], block{sLine, sCol, eLine, eCol, stmts, count})
-	}
-	return out, sc.Err()
+	return covprofile.Parse(path)
 }
 
 func funcsInFile(path string) ([]funcRange, error) {
@@ -143,10 +101,10 @@ func parseModulePath(root string) (string, error) {
 func coverForFunc(rel string, fr funcRange, bs []block) funcCov {
 	fc := funcCov{file: rel, name: fr.name, startLine: fr.startLine, endLine: fr.endLine}
 	for _, b := range bs {
-		if b.startLine >= fr.startLine && b.endLine <= fr.endLine {
-			fc.totalStmts += b.stmts
-			if b.count > 0 {
-				fc.coveredStmts += b.stmts
+		if b.StartLine >= fr.startLine && b.EndLine <= fr.endLine {
+			fc.totalStmts += b.Stmts
+			if b.Count > 0 {
+				fc.coveredStmts += b.Stmts
 			}
 		}
 	}

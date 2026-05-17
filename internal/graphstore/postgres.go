@@ -578,19 +578,9 @@ func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNode
 	if err != nil {
 		return ImpactResult{}, err
 	}
-	fwd := map[string][]string{}
-	rev := map[string][]string{}
-	for rows.Next() {
-		var src, tgt string
-		if err := rows.Scan(&src, &tgt); err != nil {
-			rows.Close()
-			return ImpactResult{}, err
-		}
-		fwd[src] = append(fwd[src], tgt)
-		rev[tgt] = append(rev[tgt], src)
-	}
+	fwd, rev, err := buildEdgeAdjacency(rows)
 	rows.Close()
-	if err := rows.Err(); err != nil {
+	if err != nil {
 		return ImpactResult{}, err
 	}
 

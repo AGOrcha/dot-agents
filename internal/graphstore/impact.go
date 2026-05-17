@@ -118,6 +118,34 @@ func uniqueImpactFiles(nodes []GraphNode) []string {
 	return files
 }
 
+// edgeRowIterator is the minimal row-iterator both backends' edge query
+// returns: database/sql's *sql.Rows and pgx v5's pgx.Rows each satisfy it
+// (Next/Scan/Err). It lets the edge-adjacency build have one
+// implementation instead of being copied per backend.
+type edgeRowIterator interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+// buildEdgeAdjacency consumes the rows of
+// "SELECT source_qualified, target_qualified FROM edges" into forward and
+// reverse adjacency maps used as input to computeImpactRadius. The caller
+// owns closing rows; this only iterates and surfaces any iteration error.
+func buildEdgeAdjacency(rows edgeRowIterator) (fwd, rev map[string][]string, err error) {
+	fwd = map[string][]string{}
+	rev = map[string][]string{}
+	for rows.Next() {
+		var src, tgt string
+		if err = rows.Scan(&src, &tgt); err != nil {
+			return nil, nil, err
+		}
+		fwd[src] = append(fwd[src], tgt)
+		rev[tgt] = append(rev[tgt], src)
+	}
+	return fwd, rev, rows.Err()
+}
+
 // allQualifiedNames returns the union of seed and impacted qualified names.
 func allQualifiedNames(seeds, impacted map[string]bool) []string {
 	all := make([]string, 0, len(seeds)+len(impacted))

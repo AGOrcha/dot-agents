@@ -451,18 +451,11 @@ func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes 
 	if err != nil {
 		return ImpactResult{}, err
 	}
-	fwd := map[string][]string{}
-	rev := map[string][]string{}
-	for rows.Next() {
-		var src, tgt string
-		if err := rows.Scan(&src, &tgt); err != nil {
-			rows.Close()
-			return ImpactResult{}, err
-		}
-		fwd[src] = append(fwd[src], tgt)
-		rev[tgt] = append(rev[tgt], src)
-	}
+	fwd, rev, err := buildEdgeAdjacency(rows)
 	rows.Close()
+	if err != nil {
+		return ImpactResult{}, err
+	}
 
 	return computeImpactRadius(seeds, fwd, rev, maxDepth, maxNodes, s)
 }
