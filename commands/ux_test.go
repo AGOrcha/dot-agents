@@ -293,7 +293,7 @@ func TestEnrichCLIError_MessageBasedBranches(t *testing.T) {
 		{"agents_not_initialized", errors.New("~/.agents/ not initialized"), "da init"},
 		{"project_not_found", errors.New("project not found: foo"), "da status"},
 		{"invalid_scope", errors.New("invalid scope: nope"), "Supported scopes"},
-		{"unknown_pref", errors.New("unknown preference key bar"), "da workflow prefs"},
+		{"unknown_pref", errors.New("unknown preference key bar"), "documented configuration keys"},
 		{"invalid_task_status", errors.New("invalid task status"), "pending"},
 		{"invalid_plan_status", errors.New("invalid plan status"), "draft"},
 		{"invalid_verify_status", errors.New("invalid verification status"), "partial"},
