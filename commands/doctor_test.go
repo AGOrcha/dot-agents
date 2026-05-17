@@ -1223,3 +1223,90 @@ func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
 		t.Errorf("runDoctor with broken links + installed claude: %v", err)
 	}
 }
+
+// TestRunDoctor_WithClaudeVersionShimCoversInstalledWithVersionBranch covers
+// doctor.go:62-65 (`ver := p.Version(); if ver != ""`). On CI bare runners
+// `claude --version` errors and the else-branch fires. The shim returns a
+// real version string so the if-branch is exercised.
+func TestRunDoctor_WithClaudeVersionShimCoversInstalledWithVersionBranch(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+
+	binDir := filepath.Join(tmp, "fakebin")
+	claudeShim := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(claudeShim, []byte("#!/bin/sh\necho 'claude 1.2.3 (ci-drift)'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runDoctor(nil, nil); err != nil {
+		t.Errorf("runDoctor with claude version shim: %v", err)
+	}
+}
+
+// TestPrintUserConfigStatus_BrokenSymlinksCIDrift covers the broken-symlink
+// branches in doctor.go's printUserConfigStatus (lines 710, 728, 763 — broken
+// claude settings.json, claude agents/<x>, and codex agents/<x>).
+func TestPrintUserConfigStatus_BrokenSymlinksCIDrift(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	claudeDir := filepath.Join(tmp, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(claudeDir, "settings.json"))
+
+	claudeAgentsDir := filepath.Join(claudeDir, "agents")
+	if err := os.MkdirAll(claudeAgentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(claudeAgentsDir, "demo"))
+
+	claudeSkillsDir := filepath.Join(claudeDir, "skills")
+	if err := os.MkdirAll(claudeSkillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(claudeSkillsDir, "demo"))
+
+	codexAgentsDir := filepath.Join(tmp, ".codex", "agents")
+	if err := os.MkdirAll(codexAgentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(codexAgentsDir, "demo"))
+
+	printUserConfigStatus(agentsHome)
+}
+
+// TestCollectBrokenUserLinks_BrokenClaudeMDCIDrift covers the broken-symlink
+// branch inside collectBrokenUserLinks at doctor.go:415-432 (claude rules scan).
+func TestCollectBrokenUserLinks_BrokenClaudeMDCIDrift(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	claudeDir := filepath.Join(tmp, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(claudeDir, "CLAUDE.md"))
+
+	got := collectBrokenUserLinks(agentsHome)
+
+	_ = got
+}

@@ -427,3 +427,24 @@ func TestNewReviewCmd_Metadata(t *testing.T) {
 		}
 	}
 }
+
+// TestRunReviewList_ListPendingProposalsError covers review.go:82-84 by
+// placing a regular FILE at $AGENTS_HOME/proposals so os.ReadDir inside
+// config.ListPendingProposals returns ENOTDIR.
+func TestRunReviewList_ListPendingProposalsError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.WriteFile(filepath.Join(agentsHome, "proposals"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runReviewList(); err == nil {
+		t.Error("expected runReviewList to propagate ReadDir error")
+	}
+}

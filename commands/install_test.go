@@ -1537,3 +1537,47 @@ func TestShouldSkipLinkDestination_ExistsNoForce(t *testing.T) {
 		t.Error("expected skip when destination exists and !Force")
 	}
 }
+
+// TestRunInstall_StrictWithBadGitSourceErrors covers install.go:78-80, the
+// `resolveInstallSources err && strict` propagation, by feeding a manifest
+// with a malformed git source under --strict.
+func TestRunInstall_StrictWithBadGitSourceErrors(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projDir := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := &config.AgentsRC{
+		Version: 1,
+		Project: "proj",
+		Sources: []config.Source{{Type: "git", URL: "https://invalid.localhost.test/missing.git", Ref: "main"}},
+	}
+	if err := rc.Save(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInstall(true); err == nil {
+		t.Error("expected --strict runInstall to propagate git resolve error")
+	}
+}
