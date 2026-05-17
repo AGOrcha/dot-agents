@@ -1,78 +1,81 @@
 schema_version: 1
 plan_id: test-file-structure-wave2
 tasks:
-  - id: w2-harden-migrator
-    title: 'Harden the AST migrator: //go:build + internal/external test pkg'
-    status: pending
-    depends_on: []
-    blocks:
-      - w2-graphstore
-      - w2-master-owned
-    owner: dot-agents
-    write_scope:
-      - .agents/workflow/plans/test-file-structure/migrate_ast.go
-    verification_required: true
-    notes: |-
-      The wave-1 migrator strips the file header (where //go:build lives)
-      and assumes a single package clause. Two gaps to close before any
-      further folds:
-      1. Preserve build constraints — a moved decl must land in a file
-         whose //go:build matches its origin; refuse/segregate otherwise.
-      2. Internal vs external test packages — some _extra files are
-         `package <p>_test` while the mirror is `package <p>` (or vice
-         versa). Moving across that boundary changes symbol visibility;
-         the mover must match the destination's package clause or skip.
-      Add a dry-run conformance check that aborts on mismatch.
-  - id: w2-graphstore
-    title: 'Fold pr3b internal/graphstore _extra into mirrors (PR#16)'
-    status: pending
-    depends_on:
-      - w2-harden-migrator
-    owner: dot-agents
-    write_scope:
-      - internal/graphstore/
-    verification_required: true
-    notes: |-
-      pr3b-owned (PR#16). crg_extra_test.go (31), impact_extra_test.go
-      (1), crg_status_extra_test.go (2) -> crg_test.go / impact_test.go /
-      crg_status_test.go. BUILD-TAG SENSITIVE: crg has //go:build !windows
-      / windows split (crg_venv_unix.go etc.); wave-1 fold failed here
-      with undefined CRGBridge/DiscoverCRGBin because the header
-      (constraint) was stripped. Needs w2-harden-migrator first.
-  - id: w2-master-owned
-    title: 'Fold master-owned _extra into mirrors (PR#19 branch)'
-    status: pending
-    depends_on:
-      - w2-harden-migrator
-    owner: dot-agents
-    write_scope:
-      - commands/skills/
-      - internal/projectsync/
-      - internal/config/
-      - internal/links/
-    verification_required: true
-    notes: |-
-      Already-merged code, routed onto the master-direct PR#19 branch
-      (cidrift-test-hygiene) per the wave-1 scope decision. 8 files:
-      skills/cmd_extra(8) -> cmd_test.go;
-      projectsync/{projectsync_extra(12),journal_extra(12),
-      promote_extra(9)} -> mirrors;
-      config/{proposals_extra(19),config_extra(9),agentsrc_extra(21)}
-      -> mirrors; links/links_extra(16) -> links_test.go.
-      No build tags, but MIXED test-package clauses
-      (package projectsync vs projectsync_test; links_test) — blocked on
-      w2-harden-migrator's package-match guard.
-  - id: w2-verify-close
-    title: 'Per-branch verify + close (build, test, coverage gate)'
-    status: pending
-    depends_on:
-      - w2-graphstore
-      - w2-master-owned
-    owner: dot-agents
-    write_scope: []
-    verification_required: true
-    notes: |-
-      Per touched branch (PR#16, PR#19): go build ./..., go test,
-      scripts/coverage-gate.sh green (statement-neutral relocation),
-      gofmt, go vet; assert no foldable _extra/_coverage remain. Update
-      PR bodies.
+    - id: w2-harden-migrator
+      title: 'Harden the AST migrator: //go:build + internal/external test pkg'
+      status: completed
+      depends_on: []
+      blocks:
+        - w2-graphstore
+        - w2-master-owned
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/test-file-structure/migrate_ast.go
+      verification_required: true
+      notes: |-
+        The wave-1 migrator strips the file header (where //go:build lives)
+        and assumes a single package clause. Two gaps to close before any
+        further folds:
+        1. Preserve build constraints — a moved decl must land in a file
+           whose //go:build matches its origin; refuse/segregate otherwise.
+        2. Internal vs external test packages — some _extra files are
+           `package <p>_test` while the mirror is `package <p>` (or vice
+           versa). Moving across that boundary changes symbol visibility;
+           the mover must match the destination's package clause or skip.
+        Add a dry-run conformance check that aborts on mismatch.
+    - id: w2-graphstore
+      title: Fold pr3b internal/graphstore _extra into mirrors (PR#16)
+      status: completed
+      depends_on:
+        - w2-harden-migrator
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+      verification_required: true
+      notes: |-
+        pr3b-owned (PR#16). crg_extra_test.go (31), impact_extra_test.go
+        (1), crg_status_extra_test.go (2) -> crg_test.go / impact_test.go /
+        crg_status_test.go. BUILD-TAG SENSITIVE: crg has //go:build !windows
+        / windows split (crg_venv_unix.go etc.); wave-1 fold failed here
+        with undefined CRGBridge/DiscoverCRGBin because the header
+        (constraint) was stripped. Needs w2-harden-migrator first.
+    - id: w2-master-owned
+      title: Fold master-owned _extra into mirrors (PR#19 branch)
+      status: completed
+      depends_on:
+        - w2-harden-migrator
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/skills/
+        - internal/projectsync/
+        - internal/config/
+        - internal/links/
+      verification_required: true
+      notes: |-
+        Already-merged code, routed onto the master-direct PR#19 branch
+        (cidrift-test-hygiene) per the wave-1 scope decision. 8 files:
+        skills/cmd_extra(8) -> cmd_test.go;
+        projectsync/{projectsync_extra(12),journal_extra(12),
+        promote_extra(9)} -> mirrors;
+        config/{proposals_extra(19),config_extra(9),agentsrc_extra(21)}
+        -> mirrors; links/links_extra(16) -> links_test.go.
+        No build tags, but MIXED test-package clauses
+        (package projectsync vs projectsync_test; links_test) — blocked on
+        w2-harden-migrator's package-match guard.
+    - id: w2-verify-close
+      title: Per-branch verify + close (build, test, coverage gate)
+      status: completed
+      depends_on:
+        - w2-graphstore
+        - w2-master-owned
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        Per touched branch (PR#16, PR#19): go build ./..., go test,
+        scripts/coverage-gate.sh green (statement-neutral relocation),
+        gofmt, go vet; assert no foldable _extra/_coverage remain. Update
+        PR bodies.
