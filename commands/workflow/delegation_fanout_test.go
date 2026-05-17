@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1241,5 +1242,161 @@ func TestListDelegationContracts_EmptyDirReturnsNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty slice, got %d", len(got))
+	}
+}
+
+func TestFanout_SkipEvidenceCheck(t *testing.T) {
+	repo := setupTestProject(t)
+	setupGraphHome(t, repo)
+	chdirRepo(t, repo)
+
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w", "--skip-evidence-check"); err != nil {
+		t.Fatalf("expected fanout to succeed with --skip-evidence-check: %v", err)
+	}
+}
+
+func TestFanout_BundleMarshalError(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirRepo(t, repo)
+
+	prev := yamlMarshal
+	calls := 0
+	yamlMarshal = func(v any) ([]byte, error) {
+		calls++
+
+		if calls >= 2 {
+			return nil, errors.New("marshal bundle boom")
+		}
+		return prev(v)
+	}
+	t.Cleanup(func() { yamlMarshal = prev })
+
+	err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil {
+		t.Fatal("expected marshal failure")
+	}
+}
+
+func TestFanout_TasksMissingAfterPlanFound(t *testing.T) {
+	repo := setupTestProject(t)
+
+	if err := os.Remove(filepath.Join(repo, ".agents", "workflow", "plans", "plan-001", "TASKS.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil || !strings.Contains(err.Error(), "tasks for plan plan-001") {
+		t.Fatalf("expected tasks-not-found, got %v", err)
+	}
+}
+
+func TestFanout_SelectionReasonPropagatedToBundle(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--selection-reason", "for tests",
+	); err != nil {
+		t.Fatal(err)
+	}
+	bundle := loadFanoutBundle(t, repo, "task-001")
+	if bundle.Selection == nil || bundle.Selection.Reason != "for tests" {
+		t.Fatalf("selection reason missing: %+v", bundle.Selection)
+	}
+}
+
+func TestFanout_VerifierRetryMax(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--verifier-retry-max", "5",
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFanout_SelectionReasonFromFlag(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--selection-reason", "smoke",
+	); err != nil {
+		t.Fatal(err)
+	}
+	b := loadFanoutBundle(t, repo, "task-001")
+	if b.Selection == nil || b.Selection.Reason != "smoke" {
+		t.Fatalf("expected selection reason 'smoke': %+v", b.Selection)
+	}
+}
+
+func TestFanout_PlanNotFound(t *testing.T) {
+	repo := setupTestProject(t)
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "no-such-plan", "--task", "task-001", "--owner", "w")
+	if err == nil || !strings.Contains(err.Error(), "plan no-such-plan not found") {
+		t.Fatalf("expected plan-not-found, got %v", err)
+	}
+}
+
+func TestFanout_ExistingDelegationRejected(t *testing.T) {
+	repo := setupTestProject(t)
+
+	saveTestDelegationContract(t, repo, "task-001", "plan-001", "del-existing")
+
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil || !strings.Contains(err.Error(), "already has an active delegation") {
+		t.Fatalf("expected already-delegated error, got %v", err)
+	}
+}
+
+func TestFanout_TaskNotFoundInPlan(t *testing.T) {
+	repo := setupTestProject(t)
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "ghost-task", "--owner", "w")
+	if err == nil {
+		t.Fatal("expected task-not-found error")
+	}
+}
+
+func TestFanout_WriteScopeConflictRejected(t *testing.T) {
+	repo := setupFanoutTwoTaskProject(t)
+
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--task", "t1", "--owner", "a", "--write-scope", "commands/"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "p1", "--task", "t2", "--owner", "b", "--write-scope", "commands/")
+	if err == nil {
+		t.Fatal("expected write-scope conflict error")
+	}
+}
+
+func TestFanout_PromptBundleAcceptsRelativePath(t *testing.T) {
+	repo := setupTestProject(t)
+	promptPath := filepath.Join(repo, ".agents", "prompts")
+	if err := os.MkdirAll(promptPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptPath, "p.md"), []byte("# p\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--prompt-file", ".agents/prompts/p.md",
+	); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+}
+
+func TestFanout_MkdirVerifyDirError(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirRepo(t, repo)
+
+	sentinel := errors.New("mkdir boom")
+	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+
+	err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil {
+		t.Fatal("expected mkdir fault")
 	}
 }

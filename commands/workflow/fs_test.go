@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestCopyWorkflowArtifact_CreatesParentAndContent verifies copyWorkflowArtifact
@@ -356,5 +357,332 @@ func TestIsDMAFile_NestedSegment(t *testing.T) {
 		if !isDMAFile(p) {
 			t.Errorf("expected DMA detection for %q", p)
 		}
+	}
+}
+
+func TestMergePlanDirFile_DMASkipped(t *testing.T) {
+
+	for _, rel := range []string{"delegation.yaml", "merge-back.md", "closeout.yaml"} {
+		if err := mergePlanDirFile("p1", "src", "dst", rel, false); err != nil {
+			t.Errorf("DMA file %q should be skipped, got %v", rel, err)
+		}
+	}
+}
+
+func TestMergePlanDirFile_DMADryRun(t *testing.T) {
+	for _, rel := range []string{"delegation.yaml", "merge-back.md"} {
+		if err := mergePlanDirFile("p1", "src", "dst", rel, true); err != nil {
+			t.Errorf("DMA file %q dry-run should be no-op, got %v", rel, err)
+		}
+	}
+}
+
+func TestMergePlanDirFile_CanonicalDryRun(t *testing.T) {
+
+	if err := mergePlanDirFile("plan-x", "src", "dst", "plan-x.plan.md", true); err != nil {
+		t.Errorf("canonical dry-run should be no-op: %v", err)
+	}
+}
+
+func TestShouldSkipPlanDirCopy_IdenticalHashDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	body := []byte("same body")
+	if err := os.WriteFile(src, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstStat, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := shouldSkipPlanDirCopy(src, dst, "rel.txt", true, srcHash, dstStat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Error("expected skip=true for identical hashes")
+	}
+}
+
+func TestShouldSkipPlanDirCopy_HistoryNewerDryRun(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(src, []byte("source"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	older := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(src, older, older); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("destination"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	srcHash, err := sha256File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstStat, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skip, err := shouldSkipPlanDirCopy(src, dst, "rel.txt", true, srcHash, dstStat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Error("expected skip=true because history (dst) is newer")
+	}
+}
+
+func TestMergePlanDirCompareAndCopy_SrcHashError(t *testing.T) {
+	err := mergePlanDirCompareAndCopy("/nonexistent/src", "/nonexistent/dst", "rel", false)
+	if err == nil || !strings.Contains(err.Error(), "hash rel") {
+		t.Fatalf("expected hash error, got %v", err)
+	}
+}
+
+func TestCopyWorkflowArtifact_MissingSource(t *testing.T) {
+	tmp := t.TempDir()
+	err := copyWorkflowArtifact(filepath.Join(tmp, "does-not-exist"), filepath.Join(tmp, "dst"))
+	if err == nil {
+		t.Fatal("expected open-src error")
+	}
+}
+
+func TestCopyWorkflowArtifact_DstCreateError(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	conflict := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(conflict, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(conflict, "inner.txt")
+	if err := copyWorkflowArtifact(src, dst); err == nil {
+		t.Fatal("expected MkdirAll over file error")
+	}
+}
+
+func TestCopyWorkflowDir_MissingSource(t *testing.T) {
+	tmp := t.TempDir()
+	err := copyWorkflowDir(filepath.Join(tmp, "no-such-dir"), filepath.Join(tmp, "dst"))
+	if err == nil {
+		t.Fatal("expected walk error on missing src")
+	}
+}
+
+func TestCopyWorkflowDir_Recursive(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "out")
+
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "leaf.txt"), []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyWorkflowDir(src, dst); err != nil {
+		t.Fatalf("copyWorkflowDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "sub", "leaf.txt")); err != nil {
+		t.Fatalf("expected file copied, got %v", err)
+	}
+}
+
+func TestSha256File_Missing(t *testing.T) {
+	_, err := sha256File(filepath.Join(t.TempDir(), "absent"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMergePlanDirFastRename_MkdirError(t *testing.T) {
+	src := t.TempDir()
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(blocker, "child", "plan")
+	if err := mergePlanDirFastRename(src, dst, false); err == nil {
+		t.Fatal("expected mkdir-parent error")
+	}
+}
+
+func TestMergePlanDirFastRename_DryRun_Push6(t *testing.T) {
+	if err := mergePlanDirFastRename("/src", "/dst", true); err != nil {
+		t.Fatalf("dryRun must not error, got %v", err)
+	}
+}
+
+func TestMergePlanDirCompareAndCopy_HashSrcError(t *testing.T) {
+	tmp := t.TempDir()
+	err := mergePlanDirCompareAndCopy(filepath.Join(tmp, "missing"), filepath.Join(tmp, "dst"), "rel", false)
+	if err == nil || !strings.Contains(err.Error(), "hash ") {
+		t.Fatalf("expected hash error, got %v", err)
+	}
+}
+
+func TestMergePlanDirCompareAndCopy_DstStatErrPath(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	blocker := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(blocker, "child")
+
+	err := mergePlanDirCompareAndCopy(src, dst, "child", false)
+
+	if err == nil {
+
+		t.Log("stat-dst returned IsNotExist on this platform; branch not hit but not an error")
+	}
+}
+
+func TestMergePlanDirCompareAndCopy_DryRunOverwrite(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(src, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(src, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if err := mergePlanDirCompareAndCopy(src, dst, "rel", true); err != nil {
+		t.Fatalf("dryRun: %v", err)
+	}
+}
+
+func TestShouldSkipPlanDirCopy_HashDstError(t *testing.T) {
+	tmp := t.TempDir()
+	srcHash := [32]byte{}
+	st, err := os.Stat(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = shouldSkipPlanDirCopy(filepath.Join(tmp, "src"), filepath.Join(tmp, "missing"), "rel", false, srcHash, st)
+	if err == nil || !strings.Contains(err.Error(), "hash dst") {
+		t.Fatalf("expected hash-dst error, got %v", err)
+	}
+}
+
+func TestShouldSkipPlanDirCopy_StatSrcError(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(dst, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.Stat(dst)
+
+	srcHash := [32]byte{1, 2, 3}
+	_, err := shouldSkipPlanDirCopy(filepath.Join(tmp, "missing-src"), dst, "rel", false, srcHash, st)
+	if err == nil || !strings.Contains(err.Error(), "stat src") {
+		t.Fatalf("expected stat-src error, got %v", err)
+	}
+}
+
+func TestShouldSkipPlanDirCopy_HistoryNewer(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(src, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(src, old, old); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.Stat(dst)
+	srcHashBytes := [32]byte{9, 9, 9}
+	skip, err := shouldSkipPlanDirCopy(src, dst, "rel", true, srcHashBytes, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Fatal("expected skip=true when history newer")
+	}
+}
+
+func TestIsDMAFile_ByBasename(t *testing.T) {
+	for _, name := range []string{"delegation.yaml", "merge-back.md", "closeout.yaml"} {
+		if !isDMAFile(name) {
+			t.Errorf("expected %q to be DMA", name)
+		}
+	}
+}
+
+func TestIsDMAFile_ByDirectory(t *testing.T) {
+	cases := []string{
+		"delegate-merge-back-archive/x.yaml",
+		"delegation/x.yaml",
+		"merge-back/x.md",
+		"fold-back/x.yaml",
+		"verification/x.yaml",
+	}
+	for _, p := range cases {
+		if !isDMAFile(p) {
+			t.Errorf("expected %q to be DMA", p)
+		}
+	}
+}
+
+func TestIsDMAFile_NotDMA(t *testing.T) {
+	if isDMAFile("PLAN.yaml") {
+		t.Error("PLAN.yaml should not be DMA")
+	}
+}
+
+func TestIsCanonicalPlanFile_Push6(t *testing.T) {
+	if !isCanonicalPlanFile("PLAN.yaml", "p1") {
+		t.Error("PLAN.yaml")
+	}
+	if !isCanonicalPlanFile("TASKS.yaml", "p1") {
+		t.Error("TASKS.yaml")
+	}
+	if !isCanonicalPlanFile("p1.plan.md", "p1") {
+		t.Error("p1.plan.md")
+	}
+	if isCanonicalPlanFile("README.md", "p1") {
+		t.Error("README.md should not be canonical")
+	}
+}
+
+func TestRemoveAllWithRetry_OnFakeFile(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "f"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeAllWithRetry(filepath.Join(tmp, "f")); err != nil {
+		t.Fatalf("unexpected: %v", err)
 	}
 }

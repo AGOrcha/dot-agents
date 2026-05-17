@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
@@ -215,4 +216,101 @@ func TestRunWorkflowHealth_PersistsSnapshotAndRenders(t *testing.T) {
 	if snap.SchemaVersion != 1 {
 		t.Fatalf("snapshot SchemaVersion = %d, want 1", snap.SchemaVersion)
 	}
+}
+
+func TestWriteHealthSnapshot_RoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	t.Setenv("HOME", tmp)
+	h := WorkflowHealthSnapshot{
+		SchemaVersion: 1,
+		Status:        "healthy",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Warnings:      []string{},
+	}
+	if err := writeHealthSnapshot("proj-x", h); err != nil {
+		t.Fatalf("writeHealthSnapshot: %v", err)
+	}
+	got, err := readHealthSnapshot("proj-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Status != "healthy" {
+		t.Errorf("readHealthSnapshot mismatch: %+v", got)
+	}
+}
+
+func TestRunWorkflowHealth_JSON(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	chdirForCov(t, repo)
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+	out, err := captureCovStdout(t, func() error { return runWorkflowHealth() })
+	if err != nil {
+		t.Fatalf("runWorkflowHealth: %v", err)
+	}
+	if !strings.Contains(out, "\"status\":") {
+		t.Errorf("expected JSON status field, got: %s", out)
+	}
+}
+
+func TestReadHealthSnapshot_Missing(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	h, err := readHealthSnapshot("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h != nil {
+		t.Fatalf("expected nil snapshot, got %+v", h)
+	}
+}
+
+func TestReadHealthSnapshot_MalformedJSON(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	ctx := filepath.Join(agentsHome, "context", "p")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "health.json"), []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readHealthSnapshot("p")
+	if err == nil {
+		t.Fatal("expected json error")
+	}
+}
+
+func TestReadHealthSnapshot_ReadError(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	ctx := filepath.Join(agentsHome, "context", "p")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(ctx, "health.json")
+	if err := os.WriteFile(path, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, path)
+	_, err := readHealthSnapshot("p")
+	if err == nil {
+		t.Fatal("expected read error")
+	}
+}
+
+func TestRunWorkflowHealth_JSON_FromRepo(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	chdirRepo(t, repo)
+
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowHealth() },
+		`"status"`)
 }

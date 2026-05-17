@@ -386,3 +386,202 @@ func TestLoadReviewDecisionYAMLParseError(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+func TestEvaluateDelegationGate_EmptyTaskID_Push7(t *testing.T) {
+	_, err := evaluateDelegationGate(t.TempDir(), "", "")
+	if err == nil || !strings.Contains(err.Error(), "task_id is required") {
+		t.Fatalf("expected task_id required, got %v", err)
+	}
+}
+
+func TestEvaluateDelegationGate_MissingContract(t *testing.T) {
+	_, err := evaluateDelegationGate(t.TempDir(), "no-task", "")
+	if err == nil || !strings.Contains(err.Error(), "load delegation contract") {
+		t.Fatalf("expected load-contract error, got %v", err)
+	}
+}
+
+func TestEvaluateDelegationGate_PlanIDMismatch(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-a", "plan-a", "d-a")
+	_, err := evaluateDelegationGate(repo, "task-a", "plan-other")
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("expected plan-mismatch error, got %v", err)
+	}
+}
+
+func TestEvaluateDelegationGate_MissingMergeback(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-b", "plan-b", "d-b")
+	_, err := evaluateDelegationGate(repo, "task-b", "")
+	if err == nil || !strings.Contains(err.Error(), "merge-back") {
+		t.Fatalf("expected mergeback-required error, got %v", err)
+	}
+}
+
+func TestEvaluateDelegationGate_ReviewDecisionMissing(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-c", "plan-c", "d-c")
+	if err := saveMergeBack(repo, &MergeBackSummary{TaskID: "task-c", SchemaVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := evaluateDelegationGate(repo, "task-c", "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if out.Outcome != "reject" || out.CloseoutAllowed {
+		t.Fatalf("expected reject + no closeout, got %+v", out)
+	}
+	if !strings.Contains(out.Reason, "review-decision.yaml missing") {
+		t.Fatalf("expected missing reason, got %q", out.Reason)
+	}
+}
+
+func TestEvaluateDelegationGate_AcceptDecision(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-d", "plan-d", "d-d")
+	if err := saveMergeBack(repo, &MergeBackSummary{TaskID: "task-d", SchemaVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	doc := newValidReviewDecisionDoc()
+	doc.TaskID = "task-d"
+	doc.ParentPlanID = "plan-d"
+	doc.OverallDecision = "accept"
+	doc.Phase1Decision = "accept"
+	doc.Phase2Decision = "accept"
+	if err := writeReviewDecisionYAML(repo, doc); err != nil {
+		t.Fatal(err)
+	}
+	out, err := evaluateDelegationGate(repo, "task-d", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Outcome != "accept" || !out.CloseoutAllowed {
+		t.Fatalf("expected accept + closeout, got %+v", out)
+	}
+}
+
+func TestEvaluateDelegationGate_RejectDecision(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-r", "plan-r", "d-r")
+	if err := saveMergeBack(repo, &MergeBackSummary{TaskID: "task-r", SchemaVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	doc := newValidReviewDecisionDoc()
+	doc.TaskID = "task-r"
+	doc.ParentPlanID = "plan-r"
+	doc.OverallDecision = "reject"
+	doc.Phase1Decision = "reject"
+	doc.Phase2Decision = "reject"
+	doc.FailedGates = []string{"test-coverage"}
+	if err := writeReviewDecisionYAML(repo, doc); err != nil {
+		t.Fatal(err)
+	}
+	out, err := evaluateDelegationGate(repo, "task-r", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Outcome != "reject" {
+		t.Fatalf("expected reject outcome, got %s", out.Outcome)
+	}
+	if !strings.Contains(out.Reason, "failed_gates") {
+		t.Fatalf("expected failed_gates reason, got %q", out.Reason)
+	}
+}
+
+func TestEvaluateDelegationGate_EscalateDecision(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-e", "plan-e", "d-e")
+	if err := saveMergeBack(repo, &MergeBackSummary{TaskID: "task-e", SchemaVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	doc := newValidReviewDecisionDoc()
+	doc.TaskID = "task-e"
+	doc.ParentPlanID = "plan-e"
+	doc.OverallDecision = "escalate"
+	doc.Phase1Decision = "escalate"
+	doc.Phase2Decision = "escalate"
+	doc.EscalationReason = "needs planning review"
+	if err := writeReviewDecisionYAML(repo, doc); err != nil {
+		t.Fatal(err)
+	}
+	out, err := evaluateDelegationGate(repo, "task-e", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Outcome != "escalate" || !out.PlanningRequired {
+		t.Fatalf("expected escalate + planning_required, got %+v", out)
+	}
+	if !strings.Contains(out.Reason, "needs planning review") {
+		t.Fatalf("expected escalation reason, got %q", out.Reason)
+	}
+}
+
+func TestDecisionReason_AcceptWithReviewerNotes(t *testing.T) {
+	doc := &ReviewDecisionDoc{
+		OverallDecision: "accept",
+		ReviewerNotes:   "looks good",
+	}
+	if got := decisionReason(doc); got != "looks good" {
+		t.Fatalf("expected reviewer notes, got %q", got)
+	}
+}
+
+func TestDecisionReason_RejectWithReviewerNotes(t *testing.T) {
+	doc := &ReviewDecisionDoc{
+		OverallDecision: "reject",
+		ReviewerNotes:   "needs work",
+	}
+	if got := decisionReason(doc); got != "needs work" {
+		t.Fatalf("expected reviewer notes, got %q", got)
+	}
+}
+
+func TestDecisionReason_EscalateFallsBackToNotes(t *testing.T) {
+	doc := &ReviewDecisionDoc{
+		OverallDecision:  "escalate",
+		EscalationReason: "",
+		ReviewerNotes:    "ask the lead",
+	}
+	if got := decisionReason(doc); got != "ask the lead" {
+		t.Fatalf("expected fallback notes, got %q", got)
+	}
+}
+
+func TestDecisionReason_EscalateDefaultMessage(t *testing.T) {
+	doc := &ReviewDecisionDoc{OverallDecision: "escalate"}
+	if got := decisionReason(doc); !strings.Contains(got, "review escalated") {
+		t.Fatalf("expected default escalate text, got %q", got)
+	}
+}
+
+func TestDecisionReason_NilDoc(t *testing.T) {
+	if got := decisionReason(nil); got != "" {
+		t.Fatalf("expected empty for nil doc, got %q", got)
+	}
+}
+
+func TestDecisionReason_UnknownDecision(t *testing.T) {
+	doc := &ReviewDecisionDoc{OverallDecision: "weird"}
+	if got := decisionReason(doc); got != "" {
+		t.Fatalf("expected empty for unknown decision, got %q", got)
+	}
+}
+
+func TestLoadReviewDecisionYAML_MalformedYAML(t *testing.T) {
+	repo := t.TempDir()
+	path, err := reviewDecisionYAMLPath(repo, "task-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = loadReviewDecisionYAML(repo, "task-x")
+	if err == nil || !strings.Contains(err.Error(), "parse review decision") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}

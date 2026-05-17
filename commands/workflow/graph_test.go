@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestLoadGraphBridgeConfig_Absent(t *testing.T) {
@@ -481,4 +484,451 @@ func TestGraphSearchSubdir_CapAndDedup(t *testing.T) {
 			t.Errorf("expected zero results for missing subdir, got %d", len(none))
 		}
 	})
+}
+
+func TestRunWorkflowGraphQuery_UnknownIntent(t *testing.T) {
+	dir := t.TempDir()
+	chdirForCov(t, dir)
+
+	cfgDir := filepath.Join(dir, ".agents", "workflow")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), []byte("schema_version: 1\nenabled: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newGraphQueryTestCommand("totally_bogus_intent", "")
+	err := runWorkflowGraphQuery(cmd, nil)
+	if err == nil {
+		t.Error("expected unknown-intent error")
+	}
+}
+
+func TestGraphSearchSubdir_MissingDir(t *testing.T) {
+	seen := map[string]bool{}
+	var results []GraphBridgeResult
+
+	graphSearchSubdir(t.TempDir(), "nope", "x", seen, &results, 10)
+	if len(results) != 0 {
+		t.Errorf("expected zero results from missing dir, got %d", len(results))
+	}
+}
+
+func TestRunWorkflowGraphQuery_SuccessLocalAdapter(t *testing.T) {
+	project := t.TempDir()
+	kgHome := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("KG_HOME", kgHome)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", t.TempDir())
+
+	if err := os.MkdirAll(filepath.Join(kgHome, "self"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kgHome, "self", "config.yaml"), []byte("version: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	notesDir := filepath.Join(kgHome, "notes", "decisions")
+	if err := os.MkdirAll(notesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	note := "---\nid: dec-1\ntitle: Decision\nsummary: chosen\n---\n\nbody about loops\n"
+	if err := os.WriteFile(filepath.Join(notesDir, "dec-1.md"), []byte(note), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDir := filepath.Join(project, ".agents", "workflow")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := yaml.Marshal(GraphBridgeConfig{SchemaVersion: 1, Enabled: true, GraphHome: kgHome})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "graph-bridge.yaml"), cfg, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	chdirForCov(t, project)
+	cmd := newGraphQueryTestCommand("decision_lookup", "")
+	out, _ := captureCovStdout(t, func() error {
+		return runWorkflowGraphQuery(cmd, []string{"loops"})
+	})
+	if !strings.Contains(out, "Graph Query") {
+		t.Errorf("expected graph query header, got: %s", out)
+	}
+}
+
+func TestValidateGraphBridgeIntent_NoAllowlist(t *testing.T) {
+	if err := validateGraphBridgeIntent("decision_lookup", nil); err != nil {
+		t.Errorf("nil allowlist should be passthrough, got: %v", err)
+	}
+}
+
+func TestValidateGraphBridgeIntent_NotInAllowlist(t *testing.T) {
+	err := validateGraphBridgeIntent("decision_lookup", []string{"plan_context"})
+	if err == nil || !strings.Contains(err.Error(), "not in allowed_intents") {
+		t.Errorf("expected 'not in allowed_intents' error, got: %v", err)
+	}
+}
+
+func TestValidateGraphBridgeIntent_Unknown(t *testing.T) {
+	err := validateGraphBridgeIntent("totally_invalid", nil)
+	if err == nil || !strings.Contains(err.Error(), "unknown intent") {
+		t.Errorf("expected unknown intent error, got: %v", err)
+	}
+}
+
+func TestLoadGraphBridgeConfig_ReadError(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "graph-bridge.yaml")
+	if err := os.WriteFile(cfgPath, []byte("enabled: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, cfgPath)
+
+	_, err := loadGraphBridgeConfig(repo)
+	if err == nil {
+		t.Fatal("expected read error")
+	}
+}
+
+func TestLoadGraphBridgeConfig_MalformedYAML(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "graph-bridge.yaml"), []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadGraphBridgeConfig(repo)
+	if err == nil || !strings.Contains(err.Error(), "parse graph-bridge.yaml") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+func TestDefaultGraphHome_FromAgentsRC(t *testing.T) {
+	repo := t.TempDir()
+	rc := `{"version":1,"project":"p","kg":{"graph_home":"/tmp/custom-kg-home"},"sources":[{"type":"local"}]}`
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(rc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := defaultGraphHome(repo)
+	if got != "/tmp/custom-kg-home" {
+		t.Fatalf("expected /tmp/custom-kg-home, got %s", got)
+	}
+}
+
+func TestGraphSearchNoteEntry_BodyMatchesNoFrontmatter(t *testing.T) {
+	graphHome := t.TempDir()
+	sub := "entities"
+	dir := filepath.Join(graphHome, "notes", sub)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x.md"), []byte("just some lowercase text containing query word"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, id, ok := graphSearchNoteEntry(graphHome, sub, "x.md", "query")
+	if !ok {
+		t.Fatal("expected match")
+	}
+	if id != "x" {
+		t.Fatalf("expected id derived from filename, got %s", id)
+	}
+	if result.ID != "x" {
+		t.Fatalf("expected ID to fallback to filename, got %q", result.ID)
+	}
+}
+
+func TestGraphSearchSubdir_CapStopsEarly(t *testing.T) {
+	graphHome := t.TempDir()
+	sub := "entities"
+	dir := filepath.Join(graphHome, "notes", sub)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("n%d.md", i)), []byte("match content"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	results := []GraphBridgeResult{}
+	graphSearchSubdir(graphHome, sub, "match", seen, &results, 2)
+	if len(results) > 2 {
+		t.Fatalf("cap 2 exceeded, got %d", len(results))
+	}
+}
+
+func TestGraphSearchSubdir_MissingDirNoop(t *testing.T) {
+	graphHome := t.TempDir()
+	seen := map[string]bool{}
+	results := []GraphBridgeResult{}
+	graphSearchSubdir(graphHome, "nonexistent-sub", "q", seen, &results, 10)
+	if len(results) != 0 {
+		t.Fatalf("expected empty results, got %d", len(results))
+	}
+}
+
+func TestLocalGraphAdapter_Query_UnsupportedIntent(t *testing.T) {
+	a := NewLocalGraphAdapter(t.TempDir())
+	_, err := a.Query(GraphBridgeQuery{Intent: "not-a-real-intent"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported bridge intent") {
+		t.Fatalf("expected unsupported-intent error, got %v", err)
+	}
+}
+
+func TestRunWorkflowGraphQuery_MissingIntent_Push8(t *testing.T) {
+	repo := t.TempDir()
+	chdirForCov(t, repo)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "", "")
+	cmd.Flags().String("scope", "", "")
+	err := runWorkflowGraphQuery(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "--intent") {
+		t.Fatalf("expected intent-required, got %v", err)
+	}
+}
+
+func TestRunWorkflowGraphQuery_CodeBridgeIntent(t *testing.T) {
+	repo := t.TempDir()
+	chdirForCov(t, repo)
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "symbol_lookup", "")
+	cmd.Flags().String("scope", "", "")
+
+	saved := workflowDotAgentsExe
+	workflowDotAgentsExe = func() (string, error) { return "", errors.New("synthetic") }
+	t.Cleanup(func() { workflowDotAgentsExe = saved })
+	err := runWorkflowGraphQuery(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "resolve da executable") {
+		t.Fatalf("expected resolve-exe error, got %v", err)
+	}
+}
+
+func TestRunWorkflowGraphHealth_JSON_Push8(t *testing.T) {
+	repo := t.TempDir()
+	chdirForCov(t, repo)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+	out, err := captureCovStdout(t, func() error { return runWorkflowGraphHealth(nil, nil) })
+	if err != nil {
+		t.Fatalf("graph health: %v", err)
+	}
+	if !strings.Contains(out, `"status"`) {
+		t.Fatalf("expected status field in JSON, got: %s", out)
+	}
+}
+
+func TestRenderGraphQueryResults_TextMode(t *testing.T) {
+	resp := GraphBridgeResponse{
+		Results: []GraphBridgeResult{
+			{Type: "decision", Title: "T1", Summary: "S1"},
+		},
+		Warnings: []string{"sparse"},
+	}
+	out, _ := captureCovStdout(t, func() error {
+		renderGraphQueryResults("decision_lookup", "q", resp)
+		return nil
+	})
+	if !strings.Contains(out, "decision") || !strings.Contains(out, "T1") {
+		t.Errorf("expected results in output, got %s", out)
+	}
+}
+
+func TestRenderGraphQueryResults_NoResults(t *testing.T) {
+	out, _ := captureCovStdout(t, func() error {
+		renderGraphQueryResults("plan_context", "q", GraphBridgeResponse{})
+		return nil
+	})
+	if !strings.Contains(out, "No results") {
+		t.Errorf("expected 'No results' in output, got %s", out)
+	}
+}
+
+func TestRenderGraphQueryResults_JSON(t *testing.T) {
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+	resp := GraphBridgeResponse{Intent: "plan_context", Query: "x"}
+	out, _ := captureCovStdout(t, func() error {
+		renderGraphQueryResults("plan_context", "x", resp)
+		return nil
+	})
+	if !strings.Contains(out, "\"intent\"") {
+		t.Errorf("expected JSON, got %s", out)
+	}
+}
+
+func TestRunWorkflowGraphHealth(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	chdirForCov(t, dir)
+	cmd := &cobra.Command{}
+	out, err := captureCovStdout(t, func() error { return runWorkflowGraphHealth(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runWorkflowGraphHealth: %v", err)
+	}
+	if !strings.Contains(out, "Graph Bridge Health") {
+		t.Errorf("expected health header, got %s", out)
+	}
+}
+
+func TestRunWorkflowGraphHealth_JSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	chdirForCov(t, dir)
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+	cmd := &cobra.Command{}
+	out, err := captureCovStdout(t, func() error { return runWorkflowGraphHealth(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runWorkflowGraphHealth json: %v", err)
+	}
+	if !strings.Contains(out, "\"status\"") {
+		t.Errorf("expected JSON status field, got %s", out)
+	}
+}
+
+func TestReadGraphBridgeHealth_Missing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	h, err := readGraphBridgeHealth("nope-project")
+	if err != nil {
+		t.Fatalf("readGraphBridgeHealth: %v", err)
+	}
+	if h != nil {
+		t.Errorf("expected nil for missing file, got %+v", h)
+	}
+}
+
+func TestReadGraphBridgeHealth_Malformed(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+	dir := filepath.Join(tmp, "context", "p")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "graph-bridge-health.json"), []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readGraphBridgeHealth("p")
+	if err == nil {
+		t.Error("expected error for malformed JSON")
+	}
+}
+
+func TestIsWorkflowGraphCodeBridgeIntent(t *testing.T) {
+	for _, i := range []string{"symbol_lookup", "impact_radius", "callers_of", "callees_of",
+		"community_context", "symbol_decisions", "decision_symbols", "change_analysis", "tests_for"} {
+		if !isWorkflowGraphCodeBridgeIntent(i) {
+			t.Errorf("expected %q to be code-bridge intent", i)
+		}
+	}
+	if isWorkflowGraphCodeBridgeIntent("plan_context") {
+		t.Error("plan_context should not be a code-bridge intent")
+	}
+}
+
+func TestRunWorkflowGraphHealth_JSON_FromRepo(t *testing.T) {
+	repo := setupTestProject(t)
+	setupGraphHome(t, repo)
+	chdirRepo(t, repo)
+
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
+
+	captureStdoutWhileRunning(t, repo, func() error {
+		return runWorkflowGraphHealth(nil, nil)
+	}, `"status"`)
+}
+
+func TestRunWorkflowGraphHealth_DegradedHuman(t *testing.T) {
+	repo := setupTestProject(t)
+
+	bridgeDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"),
+		[]byte("schema_version: 1\nenabled: true\ngraph_home: /no/such/path\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdirRepo(t, repo)
+	captureStdoutWhileRunning(t, repo, func() error {
+		return runWorkflowGraphHealth(nil, nil)
+	}, "Graph Bridge Health")
+}
+
+func TestRunWorkflowGraphHealth_BadBridgeConfig(t *testing.T) {
+	repo := setupTestProject(t)
+	bridgeDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"),
+		[]byte("not: valid: yaml:\nfoo bar:"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdirRepo(t, repo)
+	err := runWorkflowGraphHealth(nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "bridge config") {
+		t.Fatalf("expected bridge-config error, got %v", err)
+	}
+}
+
+func TestRunWorkflowGraphHealth_PartialStatusHuman(t *testing.T) {
+	repo := setupTestProject(t)
+
+	bridgeDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"),
+		[]byte("schema_version: 1\nenabled: true\ngraph_home: /no/such\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdirRepo(t, repo)
+	out := captureStdoutToString(t, func() {
+		_ = runWorkflowGraphHealth(nil, nil)
+	})
+	if !strings.Contains(out, "Graph Bridge Health") {
+		t.Fatalf("expected header in output: %s", out)
+	}
+}
+
+func TestRunWorkflowGraphQuery_BadBridgeConfig(t *testing.T) {
+	repo := setupTestProject(t)
+	bridgeDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "graph-bridge.yaml"),
+		[]byte("not: valid: yaml:"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "graph", "query",
+		"--intent", "plan_context", "loop")
+	if err == nil {
+		t.Fatal("expected bridge config error")
+	}
+}
+
+func TestRunWorkflowGraphHealth_GreenStatus(t *testing.T) {
+	repo := setupTestProject(t)
+	setupGraphHome(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowGraphHealth(nil, nil); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
 }

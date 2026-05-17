@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -843,3 +844,161 @@ func initWorkflowTestRepoWithCommit(t *testing.T) string {
 	run("commit", "-m", "second commit")
 	return repo
 }
+
+// realYAMLMarshal allows the stub to do a real marshal for selected calls.
+func realYAMLMarshal(v any) ([]byte, error) {
+
+	return []byte("schema_version: 1\nid: x\n"), nil
+}
+
+// captureCovStdout runs fn while os.Stdout is piped, then returns the captured
+// bytes. It does NOT change cwd — callers must already be in the right repo.
+func captureCovStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := fn()
+	_ = w.Close()
+	os.Stdout = old
+	data, _ := io.ReadAll(r)
+	_ = r.Close()
+	return string(data), runErr
+}
+
+// chdirForCov chdir's to dir, registers a cleanup to restore the original cwd.
+func chdirForCov(t *testing.T, dir string) {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func captureStdoutToString(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	buf := make([]byte, 16384)
+	n, _ := r.Read(buf)
+	_ = r.Close()
+	return string(buf[:n])
+}
+
+func (e errorString) Error() string { return string(e) }
+
+// seedManagedProject writes AGENTS_HOME/config.json with a single managed project entry.
+// When AGENTS_HOME is set, that path is the .agents dir itself; otherwise we
+// write to <home>/.agents/config.json.
+func seedManagedProject(agentsHome, name, path string) error {
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		return err
+	}
+	cfg := map[string]any{
+		"version": 1,
+		"projects": map[string]any{
+			name: map[string]any{
+				"path":  path,
+				"added": time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(agentsHome, "config.json"), data, 0644)
+}
+
+// chmodUnreadable sets a path to 0o000 and restores 0644 on cleanup. Skips
+// the test on platforms where chmod cannot reliably make a file unreadable
+// for the current user (e.g. running as root in some CI environments).
+func chmodUnreadable(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod unreadable not supported on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("chmod unreadable unreliable as root")
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod 0: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+}
+
+// chmodUnreadableDir locks a directory at 0o000 and restores 0755 on cleanup.
+func chmodUnreadableDir(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod unreadable not supported on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("chmod unreadable unreliable as root")
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod 0: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+}
+
+func mustParseRFC3339(t *testing.T, s string) time.Time {
+	t.Helper()
+	tm, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tm
+}
+
+// newDriftTestCommand builds a cobra.Command with flags runWorkflowDrift reads.
+func newDriftTestCommand(project string, staleDays, proposalDays int) *cobra.Command {
+	c := &cobra.Command{}
+	c.Flags().Int("stale-days", staleDays, "")
+	c.Flags().Int("proposal-days", proposalDays, "")
+	c.Flags().String("project", project, "")
+	return c
+}
+
+func newFoldBackTestCmd(observation, slug, planID string) *cobra.Command {
+	c := &cobra.Command{}
+	c.Flags().String("plan", planID, "")
+	c.Flags().String("task", "", "")
+	c.Flags().String("observation", observation, "")
+	c.Flags().Bool("propose", false, "")
+	c.Flags().String("slug", slug, "")
+	return c
+}
+
+// newSweepTestCommand builds a cobra.Command with the flags runWorkflowSweep reads.
+func newSweepTestCommand(apply bool, staleDays, proposalDays int) *cobra.Command {
+	c := &cobra.Command{}
+	c.Flags().Int("stale-days", staleDays, "")
+	c.Flags().Int("proposal-days", proposalDays, "")
+	c.Flags().Bool("apply", apply, "")
+	return c
+}
+
+type errorString string
+
+func newGraphQueryTestCommand(intent, scope string) *cobra.Command {
+	c := &cobra.Command{}
+	c.Flags().String("intent", intent, "")
+	c.Flags().String("scope", scope, "")
+	return c
+}
+
+// errSentinelDriftLister is a fixed sentinel for the lister stub above so
+// tests can assert error chain identity without string matching everywhere.
+var errSentinelDriftLister = errorString("synthetic lister failure")

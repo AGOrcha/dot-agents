@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -507,3 +508,266 @@ func TestPreferences_MergeOverwritesNilDestination(t *testing.T) {
 }
 
 // ── Wave 5: Graph bridge types ────────────────────────────────────────────────
+
+func TestResolvePreferences_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	t.Setenv("HOME", tmp)
+	prefs, err := resolvePreferences(tmp, "workflow-test-empty-proj")
+	if err != nil {
+		t.Fatalf("resolvePreferences: %v", err)
+	}
+
+	if prefs.Verification.TestCommand == nil {
+		t.Error("expected default test_command")
+	}
+}
+
+func TestLoadRepoPreferences_ReadError(t *testing.T) {
+	repo := t.TempDir()
+	prefsDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	prefsPath := filepath.Join(prefsDir, "preferences.yaml")
+	if err := os.WriteFile(prefsPath, []byte("planning:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, prefsPath)
+
+	_, err := loadRepoPreferences(repo)
+	if err == nil {
+		t.Fatal("expected ReadFile error to propagate")
+	}
+}
+
+func TestResolvePreferences_RepoLoadError(t *testing.T) {
+	repo := t.TempDir()
+	prefsDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(prefsDir, "preferences.yaml")
+	if err := os.WriteFile(bad, []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolvePreferences(repo, "p")
+	if err == nil {
+		t.Fatal("expected malformed YAML to surface")
+	}
+}
+
+func TestResolvePreferences_LocalLoadError(t *testing.T) {
+	repo := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	ctx := filepath.Join(agentsHome, "context", "p")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "preferences.local.yaml"), []byte(":\n  - bad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := resolvePreferences(repo, "p")
+	if err == nil {
+		t.Fatal("expected local malformed YAML to surface")
+	}
+}
+
+func TestSetLocalPreference_UnknownKey(t *testing.T) {
+	repo := setupTestProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	chdirForCov(t, repo)
+	err := runWorkflowPrefsSetLocal("unknown.key", "value")
+	if err == nil || !strings.Contains(err.Error(), "unknown preference key") {
+		t.Fatalf("expected unknown-key error, got %v", err)
+	}
+}
+
+func TestSetSharedPreference_UnknownKey(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForCov(t, repo)
+	err := runWorkflowPrefsSetShared("unknown.key", "value")
+	if err == nil || !strings.Contains(err.Error(), "unknown preference key") {
+		t.Fatalf("expected unknown-key error, got %v", err)
+	}
+}
+
+func TestRunWorkflowPrefs_JSON_Push6(t *testing.T) {
+	repo := setupTestProject(t)
+	chdirForCov(t, repo)
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = false })
+	out, err := captureCovStdout(t, runWorkflowPrefs)
+	if err != nil {
+		t.Fatalf("prefs json: %v", err)
+	}
+	if !strings.Contains(out, "verification") {
+		t.Fatalf("expected verification in JSON: %s", out)
+	}
+}
+
+func TestApplyMaxParallelWorkers_OutOfRange(t *testing.T) {
+	p := &WorkflowPreferences{}
+	if err := applyMaxParallelWorkers(p, "100"); err == nil {
+		t.Fatal("expected out-of-range error")
+	}
+	if err := applyMaxParallelWorkers(p, "0"); err == nil {
+		t.Fatal("expected lower-bound error")
+	}
+	if err := applyMaxParallelWorkers(p, "abc"); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestApplyMaxParallelWorkers_Valid(t *testing.T) {
+	p := &WorkflowPreferences{}
+	if err := applyMaxParallelWorkers(p, "4"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Execution.MaxParallelWorkers == nil || *p.Execution.MaxParallelWorkers != 4 {
+		t.Fatalf("expected 4, got %v", p.Execution.MaxParallelWorkers)
+	}
+}
+
+func TestSetLocalPreference_MalformedExisting(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	ctx := filepath.Join(agentsHome, "context", "p")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "preferences.local.yaml"), []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := setLocalPreference("p", "execution.max_parallel_workers", "4")
+	if err == nil || !strings.Contains(err.Error(), "parse local preferences") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+func TestSetLocalPreference_Writes(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := setLocalPreference("p", "execution.max_parallel_workers", "3"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(agentsHome, "context", "p", "preferences.local.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "max_parallel_workers: 3") {
+		t.Fatalf("unexpected file content: %s", string(data))
+	}
+}
+
+func TestRunWorkflowPrefs_OverridesShown(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	chdirRepo(t, repo)
+	if err := runWorkflowPrefsSetLocal("verification.test_command", "make test"); err != nil {
+		t.Fatal(err)
+	}
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPrefs() },
+		"verification", "make test")
+}
+
+func TestRunWorkflowPrefs_JSON(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowPrefs() },
+		`"verification"`)
+}
+
+func TestRunWorkflowPrefsSetShared_PropagatesProposalSaveError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	chdirRepo(t, repo)
+
+	tmp := t.TempDir()
+	blockerFile := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blockerFile, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", blockerFile)
+
+	err := runWorkflowPrefsSetShared("verification.test_command", "go test ./...")
+	if err == nil {
+		t.Fatal("expected save proposal error")
+	}
+}
+
+func TestResolvePreferences_RepoParseError(t *testing.T) {
+	repo := t.TempDir()
+	prefsDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prefsDir, "preferences.yaml"),
+		[]byte("foo: bar\n  - this is not: valid yaml\n\t\tindent: broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolvePreferences(repo, "any-proj"); err == nil {
+		t.Fatal("expected repo parse error")
+	}
+	if _, err := resolvePreferencesWithSources(repo, "any-proj"); err == nil {
+		t.Fatal("expected repo parse error from sources")
+	}
+}
+
+func TestResolvePreferences_LocalParseError(t *testing.T) {
+	repo := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	dir := filepath.Join(agentsHome, "context", "broken-proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "preferences.local.yaml"),
+		[]byte("foo: bar\n  - this is not: valid yaml\n\t\tindent: broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolvePreferences(repo, "broken-proj"); err == nil {
+		t.Fatal("expected local parse error")
+	}
+	if _, err := resolvePreferencesWithSources(repo, "broken-proj"); err == nil {
+		t.Fatal("expected local parse error from sources")
+	}
+}
+
+func TestSetLocalPreference_ParseExistingError(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	dir := filepath.Join(agentsHome, "context", "broken-proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "preferences.local.yaml"),
+		[]byte("foo: bar\n  - this is not: valid yaml\n\t\tindent: broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := setLocalPreference("broken-proj", "verification.test_command", "go test"); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+func TestSetLocalPreference_WriteFails(t *testing.T) {
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	sentinel := errors.New("marshal boom")
+	prev := yamlMarshal
+	yamlMarshal = func(v any) ([]byte, error) { return nil, sentinel }
+	t.Cleanup(func() { yamlMarshal = prev })
+
+	if err := setLocalPreference("p", "verification.test_command", "x"); !errors.Is(err, sentinel) {
+		t.Fatalf("expected marshal sentinel, got %v", err)
+	}
+}

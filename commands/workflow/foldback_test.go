@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,5 +357,156 @@ func TestFoldBackList(t *testing.T) {
 	outP1 := executeWorkflowCommandOutput(t, repo, "fold-back", "list", "--plan", "p1")
 	if !strings.Contains(outP1, `"plan_id": "p1"`) || strings.Contains(outP1, `"plan_id": "p2"`) {
 		t.Fatalf("filtered list: %s", outP1)
+	}
+}
+
+func TestFoldBackCreate_ProposeWritesProposal(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "needs design change", "--propose"); err != nil {
+		t.Fatalf("expected propose flow to succeed: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected one proposal, err=%v matches=%v", err, matches)
+	}
+}
+
+func TestFoldBackCreate_DispatchWriteError(t *testing.T) {
+	repo := setupFoldBackProject(t)
+
+	prev := osWriteFile
+	calls := 0
+	osWriteFile = func(name string, data []byte, perm os.FileMode) error {
+		calls++
+		if calls >= 2 {
+			return errors.New("write boom")
+		}
+		return prev(name, data, perm)
+	}
+	t.Cleanup(func() { osWriteFile = prev })
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "x")
+	if err == nil {
+		t.Fatal("expected write error somewhere in dispatch+writeArtifact")
+	}
+}
+
+func TestFoldBackCreate_MissingObservation(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "   ")
+	if err == nil || !strings.Contains(err.Error(), "observation") {
+		t.Fatalf("expected observation-required, got %v", err)
+	}
+}
+
+func TestFoldBackUpdate_MissingSlug(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	err := executeWorkflowCommand(t, repo, "fold-back", "update",
+		"--plan", "p1", "--observation", "x")
+	if err == nil || !strings.Contains(err.Error(), "slug") {
+		t.Fatalf("expected slug-required-for-update, got %v", err)
+	}
+}
+
+func TestFoldBackUpdate_RejectsCrossPlan(t *testing.T) {
+	repo := setupFoldBackTwoPlanProject(t)
+	slug := "shared-slug"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "fold-back", "update",
+		"--plan", "p2", "--task", "t1", "--slug", slug, "--observation", "v2")
+	if err == nil {
+		t.Fatal("expected cross-plan rejection")
+	}
+}
+
+func TestFoldBackUpdate_ProposeInvalid(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	slug := "small-slug"
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	err := executeWorkflowCommand(t, repo, "fold-back", "update",
+		"--plan", "p1", "--task", "t1", "--slug", slug, "--observation", "v2", "--propose")
+	if err == nil {
+		t.Fatal("expected --propose-not-valid-for-update")
+	}
+}
+
+func TestFoldBackCreate_PlanNotFound(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "no-such", "--observation", "x")
+	if err == nil || !strings.Contains(err.Error(), "no-such") {
+		t.Fatalf("expected plan-not-found, got %v", err)
+	}
+}
+
+func TestFoldBackCreate_JSON(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	workflowTestJSON = true
+	defer func() { workflowTestJSON = false }()
+
+	out := executeWorkflowCommandOutput(t, repo, "fold-back",
+		"create", "--plan", "p1", "--task", "t1", "--observation", "test obs")
+	if !strings.Contains(out, `"plan_id"`) || !strings.Contains(out, `"observation"`) {
+		t.Fatalf("missing JSON fields: %s", out)
+	}
+}
+
+func TestFoldBackList_RendersHuman(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "x"); err != nil {
+		t.Fatal(err)
+	}
+	out := executeWorkflowCommandOutput(t, repo, "fold-back", "list")
+	if !strings.Contains(out, "p1") {
+		t.Fatalf("expected p1 in human render: %s", out)
+	}
+}
+
+func TestFoldBackList_NoArtifactsHuman(t *testing.T) {
+	repo := setupTestProject(t)
+	out := executeWorkflowCommandOutput(t, repo, "fold-back", "list")
+	if !strings.Contains(out, "No fold-back observations") {
+		t.Fatalf("expected empty list message, got %s", out)
+	}
+}
+
+func TestFoldBackCreate_RewritesFromBlocks(t *testing.T) {
+	repo := setupFoldBackProject(t)
+
+	if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--slug", "first-slug", "--observation", "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--slug", "first-slug", "--observation", "v2")
+	if err == nil {
+		t.Fatal("expected prior-validation error for task-scoped slug without --task")
+	}
+}
+
+func TestFoldBackCreate_WriteError(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	chdirRepo(t, repo)
+	sentinel := errors.New("write boom")
+	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "x")
+	if err == nil {
+		t.Fatal("expected write fault")
 	}
 }

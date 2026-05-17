@@ -838,3 +838,590 @@ func TestParseGitDiffStatSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestScanActiveDelegationContract_NoContracts(t *testing.T) {
+	dir := t.TempDir()
+	wave, taskID := scanActiveDelegationContract(dir)
+	if wave != "" || taskID != "" {
+		t.Errorf("expected empty pair for no contracts, got (%q,%q)", wave, taskID)
+	}
+}
+
+func TestScanActiveDelegationContract_ActiveContractReturned(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	c := &DelegationContract{
+		SchemaVersion: 1, ID: "del-a", ParentPlanID: "plan-x", ParentTaskID: "task-y",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, c); err != nil {
+		t.Fatal(err)
+	}
+	wave, taskID := scanActiveDelegationContract(dir)
+	if wave != "plan-x" || taskID != "task-y" {
+		t.Errorf("scanActiveDelegationContract = (%q,%q), want (plan-x,task-y)", wave, taskID)
+	}
+}
+
+func TestScanActiveDelegationContract_ClosedContractsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	closed := &DelegationContract{
+		SchemaVersion: 1, ID: "del-closed", ParentPlanID: "plan-closed", ParentTaskID: "task-closed",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "completed",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, closed); err != nil {
+		t.Fatal(err)
+	}
+	wave, taskID := scanActiveDelegationContract(dir)
+	if wave != "" || taskID != "" {
+		t.Errorf("expected empty for only-closed contracts, got (%q,%q)", wave, taskID)
+	}
+}
+
+func TestMergeImplIterLog_NoBundleFallsBackEmpty(t *testing.T) {
+	dir := t.TempDir()
+	entry := &iterLogEntry{}
+
+	mergeImplIterLog(entry, nil, dir)
+	if entry.Impl.FeedbackGoal != "" {
+		t.Errorf("expected empty feedback goal with nil contract, got %q", entry.Impl.FeedbackGoal)
+	}
+}
+
+func TestMergeImplIterLog_WithBundle(t *testing.T) {
+	dir := t.TempDir()
+	bundlesDir := delegationBundlesDir(dir)
+	if err := os.MkdirAll(bundlesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bundle := delegationBundleYAML{}
+	bundle.Verification.FeedbackGoal = "tests must cover new behavior"
+	data, err := yaml.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundlesDir, "del-id.yaml"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := &DelegationContract{ID: "del-id"}
+	entry := &iterLogEntry{}
+	mergeImplIterLog(entry, c, dir)
+	if entry.Impl.FeedbackGoal != "tests must cover new behavior" {
+		t.Errorf("expected feedback goal merged from bundle, got %q", entry.Impl.FeedbackGoal)
+	}
+}
+
+func TestMergeReviewIterLog_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	entry := &iterLogEntry{}
+	if err := mergeReviewIterLog(entry, dir, "t1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if entry.Review.Phase1Decision != "" {
+		t.Errorf("expected no phase1 decision when file absent, got %q", entry.Review.Phase1Decision)
+	}
+	if entry.Review.DecisionArtifact == "" {
+		t.Errorf("expected decision artifact path populated")
+	}
+}
+
+func TestMergeReviewIterLog_FromFile(t *testing.T) {
+	dir := t.TempDir()
+	taskID := "task-review"
+	rel := iterLogReviewDecisionPath(taskID)
+	full := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatal(err)
+	}
+	doc := []byte(`phase_1_decision: accept
+phase_2_decision: reject
+overall_decision: reject
+failed_gates:
+  - unit
+  - integration
+escalation_reason: needs more work
+reviewer_notes: detailed
+`)
+	if err := os.WriteFile(full, doc, 0644); err != nil {
+		t.Fatal(err)
+	}
+	entry := &iterLogEntry{}
+	if err := mergeReviewIterLog(entry, dir, taskID); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Review.Phase1Decision != "accept" || entry.Review.Phase2Decision != "reject" {
+		t.Errorf("phase decisions = %q/%q, want accept/reject",
+			entry.Review.Phase1Decision, entry.Review.Phase2Decision)
+	}
+	if entry.Review.OverallDecision != "reject" {
+		t.Errorf("overall = %q want reject", entry.Review.OverallDecision)
+	}
+	if len(entry.Review.FailedGates) != 2 {
+		t.Errorf("failed gates = %v, want 2 entries", entry.Review.FailedGates)
+	}
+	if !entry.Review.VerifyRecordAppended {
+		t.Error("expected VerifyRecordAppended = true after parsing file")
+	}
+}
+
+func TestMergeReviewIterLog_EmptyTaskID(t *testing.T) {
+	dir := t.TempDir()
+	entry := &iterLogEntry{}
+	if err := mergeReviewIterLog(entry, dir, ""); err != nil {
+		t.Errorf("empty task id should not error, got: %v", err)
+	}
+}
+
+func TestFirstReadableDelegationContract_PrefersActive(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	closed := &DelegationContract{
+		SchemaVersion: 1, ID: "del-closed", ParentPlanID: "pc", ParentTaskID: "tc",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "completed",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, closed); err != nil {
+		t.Fatal(err)
+	}
+	active := &DelegationContract{
+		SchemaVersion: 1, ID: "del-active", ParentPlanID: "pa", ParentTaskID: "ta",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(dir, active); err != nil {
+		t.Fatal(err)
+	}
+	c := firstReadableDelegationContract(dir)
+	if c == nil || c.Status != "active" {
+		t.Fatalf("expected active contract, got %+v", c)
+	}
+}
+
+func TestLoadIterLogDocument_InvalidYAML(t *testing.T) {
+	if _, err := loadIterLogDocument([]byte("not: : valid")); err == nil {
+		t.Error("expected parse error for invalid YAML")
+	}
+}
+
+func TestLoadIterLogDocument_V1Migration(t *testing.T) {
+	v1 := []byte(`schema_version: 1
+iteration: 5
+date: "2026-04-30"
+wave: w
+task_id: t1
+commit: abc
+files_changed: 3
+lines_added: 10
+lines_removed: 2
+first_commit: true
+item: thing
+summary: did it
+scope_note: ok
+feedback_goal: cover
+retries: 0
+tests_added: 1
+tests_total_pass: 1
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  aligned_with_canonical_tasks: true
+  persisted_via_workflow_commands: true
+  stayed_under_10_files: true
+  no_destructive_commands: true
+`)
+	got, err := loadIterLogDocument(v1)
+	if err != nil {
+		t.Fatalf("loadIterLogDocument(v1): %v", err)
+	}
+	if got.SchemaVersion != 2 {
+		t.Errorf("expected migration to schema_version=2, got %d", got.SchemaVersion)
+	}
+	if got.Iteration != 5 {
+		t.Errorf("expected iteration=5, got %d", got.Iteration)
+	}
+}
+
+func TestLoadIterLogDocument_V2(t *testing.T) {
+	v2 := []byte(`schema_version: 2
+iteration: 7
+date: "2026-04-30"
+wave: w
+task_id: t1
+commit: abc
+impl:
+  feedback_goal: cover
+`)
+	got, err := loadIterLogDocument(v2)
+	if err != nil {
+		t.Fatalf("loadIterLogDocument(v2): %v", err)
+	}
+	if got.SchemaVersion != 2 || got.Iteration != 7 {
+		t.Errorf("unexpected entry: %+v", got)
+	}
+	if got.Verifiers == nil {
+		t.Error("expected non-nil verifiers slice")
+	}
+}
+
+func TestMigrateIterLogV1Legacy_BasicFields(t *testing.T) {
+	v1 := &iterLogV1Legacy{
+		SchemaVersion: 1,
+		Iteration:     3,
+		Date:          "2026-04-30",
+		Wave:          "w",
+		TaskID:        "t1",
+		Item:          "item",
+		Summary:       "did it",
+	}
+	got := migrateIterLogV1Legacy(v1)
+	if got.SchemaVersion != 2 {
+		t.Errorf("schema=%d, want 2", got.SchemaVersion)
+	}
+	if got.Impl.Item != "item" || got.Impl.Summary != "did it" {
+		t.Errorf("expected fields migrated to Impl block, got %+v", got.Impl)
+	}
+	if got.Verifiers == nil {
+		t.Error("verifiers should be initialized")
+	}
+}
+
+// Invalid verifier type stem rejected by verificationResultFilePath.
+func TestUpsertVerifierIterLog_InvalidVerifierType(t *testing.T) {
+	dst := &iterLogEntry{}
+	err := upsertVerifierIterLog(dst, t.TempDir(), "task-1", "BAD-TYPE")
+	if err == nil {
+		t.Fatal("expected error for invalid verifier type")
+	}
+}
+
+// Verifier result YAML missing on disk — ReadFile error path.
+func TestUpsertVerifierIterLog_ResultFileMissing(t *testing.T) {
+	dst := &iterLogEntry{}
+	err := upsertVerifierIterLog(dst, t.TempDir(), "task-1", "merge-back")
+	if err == nil || !strings.Contains(err.Error(), "read verifier result") {
+		t.Fatalf("expected read error, got %v", err)
+	}
+}
+
+// Verifier result YAML present but malformed — YAML parse error path.
+func TestUpsertVerifierIterLog_MalformedYAML(t *testing.T) {
+	repo := t.TempDir()
+	resultDir := filepath.Join(repo, ".agents", "active", "verification", "task-1")
+	if err := osMkdirAll(resultDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := osWriteFile(filepath.Join(resultDir, "merge-back.result.yaml"), []byte(":\n - oops"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := &iterLogEntry{}
+	err := upsertVerifierIterLog(dst, repo, "task-1", "merge-back")
+	if err == nil || !strings.Contains(err.Error(), "parse verifier result") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+// Verifier result fails schema validation (missing required fields).
+func TestUpsertVerifierIterLog_SchemaInvalid(t *testing.T) {
+	repo := t.TempDir()
+	resultDir := filepath.Join(repo, ".agents", "active", "verification", "task-1")
+	if err := osMkdirAll(resultDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := osWriteFile(filepath.Join(resultDir, "merge-back.result.yaml"), []byte("task_id: t1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := &iterLogEntry{}
+	err := upsertVerifierIterLog(dst, repo, "task-1", "merge-back")
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("expected schema invalid error, got %v", err)
+	}
+}
+
+// Happy path: append a new verifier entry into an empty dst.
+func TestUpsertVerifierIterLog_AppendNew(t *testing.T) {
+	repo := t.TempDir()
+	doc := newValidVerificationResultDoc()
+	if err := writeVerificationResultYAML(repo, doc); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := &iterLogEntry{}
+	if err := upsertVerifierIterLog(dst, repo, doc.TaskID, doc.VerifierType); err != nil {
+		t.Fatalf("upsertVerifierIterLog: %v", err)
+	}
+	if len(dst.Verifiers) != 1 || dst.Verifiers[0].Type != "merge-back" {
+		t.Fatalf("verifier not appended: %+v", dst.Verifiers)
+	}
+	if !dst.Verifiers[0].GatePassed {
+		t.Errorf("expected GatePassed=true for status=pass")
+	}
+}
+
+// Replace path: an existing verifier of the same type is overwritten,
+// preserving carried-over fields (TestsAdded, ScenarioTags, etc.).
+func TestUpsertVerifierIterLog_ReplaceExisting(t *testing.T) {
+	repo := t.TempDir()
+	doc := newValidVerificationResultDoc()
+	if err := writeVerificationResultYAML(repo, doc); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := &iterLogEntry{
+		Verifiers: []iterLogVerifierEntry{
+			{
+				Type:           "merge-back",
+				Status:         "fail",
+				TestsAdded:     5,
+				TestsTotalPass: 3,
+				ScenarioTags:   []string{"smoke"},
+				Retries:        1,
+			},
+			{
+				Type:   "lint",
+				Status: "pass",
+			},
+		},
+	}
+	if err := upsertVerifierIterLog(dst, repo, doc.TaskID, doc.VerifierType); err != nil {
+		t.Fatalf("upsertVerifierIterLog: %v", err)
+	}
+	if len(dst.Verifiers) != 2 {
+		t.Fatalf("expected 2 verifiers, got %d", len(dst.Verifiers))
+	}
+	got := dst.Verifiers[0]
+	if got.Status != "pass" {
+		t.Errorf("expected replaced status=pass, got %q", got.Status)
+	}
+	if got.TestsAdded != 5 {
+		t.Errorf("expected TestsAdded preserved as 5, got %d", got.TestsAdded)
+	}
+	if got.Retries != 1 {
+		t.Errorf("expected Retries preserved as 1, got %d", got.Retries)
+	}
+	if len(got.ScenarioTags) != 1 || got.ScenarioTags[0] != "smoke" {
+		t.Errorf("expected ScenarioTags preserved, got %v", got.ScenarioTags)
+	}
+}
+
+func TestLoadPrevCheckpointAt_MissingReturnsEmpty(t *testing.T) {
+	got := loadPrevCheckpointAt(t.TempDir(), 2)
+	if got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+}
+
+func TestLoadPrevCheckpointAt_NLessThanOrEqual1(t *testing.T) {
+	got := loadPrevCheckpointAt(t.TempDir(), 1)
+	if got != "" {
+		t.Fatalf("expected empty for n<=1, got %q", got)
+	}
+}
+
+func TestLoadPrevCheckpointAt_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	prev := filepath.Join(dir, "iter-1.yaml")
+	if err := os.WriteFile(prev, []byte("checkpoint_at: \"2026-05-12T10:00:00Z\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := loadPrevCheckpointAt(dir, 2)
+	if got != "2026-05-12T10:00:00Z" {
+		t.Fatalf("expected timestamp, got %q", got)
+	}
+}
+
+func TestLoadPrevCheckpointAt_MalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "iter-1.yaml"), []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := loadPrevCheckpointAt(dir, 2)
+	if got != "" {
+		t.Fatalf("expected empty on malformed YAML, got %q", got)
+	}
+}
+
+func TestFirstReadableDelegationContract_NoDir(t *testing.T) {
+	got := firstReadableDelegationContract(t.TempDir())
+	if got != nil {
+		t.Fatalf("expected nil for missing delegation dir, got %+v", got)
+	}
+}
+
+func TestFirstReadableDelegationContract_SkipsInactive(t *testing.T) {
+	repo := t.TempDir()
+
+	saveTestDelegationContract(t, repo, "task-c", "plan-c", "deleg-c")
+
+	c, err := loadDelegationContract(repo, "task-c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Status = "completed"
+	if err := saveDelegationContract(repo, c); err != nil {
+		t.Fatal(err)
+	}
+	got := firstReadableDelegationContract(repo)
+	if got != nil {
+		t.Fatalf("expected nil (completed skipped), got %+v", got)
+	}
+}
+
+func TestMergeReviewIterLog_MalformedYAML(t *testing.T) {
+	repo := t.TempDir()
+	taskID := "task-mr"
+	dir := filepath.Join(repo, ".agents", "active", "verification", taskID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "review-decision.yaml"), []byte(":\n  - bad: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	entry := &iterLogEntry{}
+	err := mergeReviewIterLog(entry, repo, taskID)
+	if err == nil || !strings.Contains(err.Error(), "parse review decision") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+func TestMergeReviewIterLog_ReadError(t *testing.T) {
+	repo := t.TempDir()
+	taskID := "task-rr"
+	dir := filepath.Join(repo, ".agents", "active", "verification", taskID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "review-decision.yaml")
+	if err := os.WriteFile(path, []byte("overall_decision: accept\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, path)
+	entry := &iterLogEntry{}
+	err := mergeReviewIterLog(entry, repo, taskID)
+	if err == nil || !strings.Contains(err.Error(), "read review decision") {
+		t.Fatalf("expected read error, got %v", err)
+	}
+}
+
+func TestLoadOrInitIterLogEntry_UnsupportedSchemaVersion(t *testing.T) {
+	tmp := t.TempDir()
+	iterPath := filepath.Join(tmp, "iter-1.yaml")
+
+	if err := os.WriteFile(iterPath, []byte("schema_version: 99\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadOrInitIterLogEntry(iterPath, "goal", "t1")
+	if err == nil || !strings.Contains(err.Error(), "unsupported schema_version") {
+		t.Fatalf("expected schema_version error, got %v", err)
+	}
+}
+
+func TestLoadOrInitIterLogEntry_ReadError(t *testing.T) {
+	tmp := t.TempDir()
+	iterPath := filepath.Join(tmp, "iter-1.yaml")
+	if err := os.WriteFile(iterPath, []byte("schema_version: 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, iterPath)
+	_, err := loadOrInitIterLogEntry(iterPath, "goal", "t1")
+	if err == nil || !strings.Contains(err.Error(), "read existing iteration log") {
+		t.Fatalf("expected read error, got %v", err)
+	}
+}
+
+func TestLoadOrInitIterLogEntry_LoadsV2(t *testing.T) {
+	tmp := t.TempDir()
+	iterPath := filepath.Join(tmp, "iter-1.yaml")
+	if err := os.WriteFile(iterPath, []byte("schema_version: 2\niteration: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := loadOrInitIterLogEntry(iterPath, "goal", "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.SchemaVersion != 2 {
+		t.Fatalf("expected v2, got %d", entry.SchemaVersion)
+	}
+}
+
+func TestLoadOrInitIterLogEntry_InitFromMissing(t *testing.T) {
+	tmp := t.TempDir()
+	entry, err := loadOrInitIterLogEntry(filepath.Join(tmp, "iter-1.yaml"), "goal", "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.SchemaVersion != 2 {
+		t.Fatalf("expected v2 init, got %d", entry.SchemaVersion)
+	}
+	if entry.Impl.FeedbackGoal != "goal" {
+		t.Fatalf("expected feedback goal set, got %q", entry.Impl.FeedbackGoal)
+	}
+}
+
+func TestApplyIterLogRole_EmptyRole(t *testing.T) {
+	entry := &iterLogEntry{SchemaVersion: 2}
+	if err := applyIterLogRole(entry, "", "", "goal", t.TempDir(), "t1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Impl.FeedbackGoal != "goal" {
+		t.Fatalf("expected goal applied for empty role, got %q", entry.Impl.FeedbackGoal)
+	}
+}
+
+func TestApplyIterLogRole_ImplRoleSetsBlock(t *testing.T) {
+	entry := &iterLogEntry{SchemaVersion: 2}
+	c := &DelegationContract{ID: "d1", ParentTaskID: "t1"}
+	if err := applyIterLogRole(entry, "impl", "", "g", t.TempDir(), "t1", c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWriteIterLogEntry_Happy(t *testing.T) {
+	tmp := t.TempDir()
+	iterPath := filepath.Join(tmp, "iter-1.yaml")
+	entry := newValidIterLogEntry()
+	if err := writeIterLogEntry(iterPath, entry); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(iterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "iteration: 1") {
+		t.Fatalf("expected file content, got %s", string(data))
+	}
+}
+
+func TestScanActiveDelegationContract_None(t *testing.T) {
+	wave, tid := scanActiveDelegationContract(t.TempDir())
+	if wave != "" || tid != "" {
+		t.Fatalf("expected empty values, got wave=%q tid=%q", wave, tid)
+	}
+}
+
+func TestScanActiveDelegationContract_Active(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-act", "plan-act", "d-act")
+	wave, tid := scanActiveDelegationContract(repo)
+	if wave != "plan-act" || tid != "task-act" {
+		t.Fatalf("expected plan-act/task-act, got %q/%q", wave, tid)
+	}
+}
+
+func TestRunWorkflowCheckpointLogToIter_NoIter(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowCheckpoint("hello", "pass", "summary"); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+}
