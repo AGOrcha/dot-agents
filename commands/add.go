@@ -498,8 +498,19 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
 	}
 	if restoreErr != nil {
-		// Surface a partial restore instead of silently swallowing it.
+		// A partial restore left some backed-up resource data unrestored.
+		// Continuing to link, write KG configs, register the project, and
+		// print the success box would stamp a partial application as
+		// complete — exactly the false-success runRefresh refuses to emit.
+		// Abort here BEFORE any registration/link work so a re-run can
+		// finish the restore against the still-registered backup data.
 		ui.Bullet("warn", fmt.Sprintf("restore from resources incomplete: %v", restoreErr))
+		return ErrorWithHints(
+			fmt.Sprintf("add incomplete for '%s': could not restore resources: %v", projectName, restoreErr),
+			"The project was NOT registered (partial resource restore). "+
+				"Resolve the errors above (permissions, free space under ~/.agents/resources), "+
+				"then re-run `da add`.",
+		)
 	}
 
 	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {

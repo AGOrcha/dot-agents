@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,86 @@ func TestRemoveProjectDirs_NoopOnMissingDirs(t *testing.T) {
 
 	// Nothing should panic, no error returned.
 	removeProjectDirs("ghost")
+}
+
+// removeProjectDirs must aggregate every RemoveAll failure (not discard them)
+// and swallow only not-exist.
+func TestRemoveProjectDirs_AggregatesRemoveAllFailures(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	sentinel := errors.New("removeall boom")
+	withRemoveAllStub(t, func(string) error { return sentinel })
+
+	err := removeProjectDirs("p")
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected aggregated RemoveAll sentinel, got %v", err)
+	}
+}
+
+func TestRemoveProjectDirs_SwallowsNotExist(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	withRemoveAllStub(t, func(d string) error { return os.ErrNotExist })
+
+	if err := removeProjectDirs("p"); err != nil {
+		t.Fatalf("not-exist must be swallowed, got %v", err)
+	}
+}
+
+// FINDING 1: a fault-injected RemoveAll failure during `da remove --clean`
+// must return a non-zero error, PRESERVE the project registration so cleanup
+// can be retried, and NOT report "removed completely".
+func TestRunRemove_CleanFailurePreservesRegistration(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rulesDir := filepath.Join(agentsHome, "rules", "myproj")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := errors.New("removeall boom")
+	withRemoveAllStub(t, func(string) error { return sentinel })
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runRemove("myproj", true)
+	if err == nil {
+		t.Fatal("expected non-zero error when canonical cleanup fails")
+	}
+	if !strings.Contains(err.Error(), "could not clean project directories") {
+		t.Errorf("expected clean-failure message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "removed completely") {
+		t.Errorf("must not report complete removal on failure: %v", err)
+	}
+
+	// Registration MUST be preserved so cleanup can be retried.
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myproj") == "" {
+		t.Error("project must remain registered when canonical cleanup failed")
+	}
 }
 
 // ---------- runRemove ----------

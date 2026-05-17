@@ -18,6 +18,7 @@ var (
 	osMkdirAll   = os.MkdirAll
 	osWriteFile  = os.WriteFile
 	osRemove     = os.Remove
+	osRemoveAll  = os.RemoveAll
 	osExecutable = os.Executable
 	osGetwd      = os.Getwd
 	osSymlink    = os.Symlink

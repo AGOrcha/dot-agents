@@ -534,6 +534,59 @@ func TestRunAdd_HappyPathRegistersProject(t *testing.T) {
 	}
 }
 
+// FINDING 2: a failed resource restore must be FATAL for runAdd — the project
+// must NOT be registered, no success box, and no link creation attempted after
+// the failure. A non-directory squatting the resources path makes
+// restoreFromResourcesCounted return a non-nil error deterministically.
+func TestRunAdd_RestoreFailureAborts(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myrepo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Block the resources path with a regular file: restoreFromResourcesCounted
+	// stat()s ~/.agents/resources/<project> and returns an error when it is not
+	// a directory.
+	resourcesParent := filepath.Join(agentsHome, "resources")
+	if err := os.MkdirAll(resourcesParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resourcesParent, "myrepo"), []byte("blocker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runAdd(projectPath, "")
+	if err == nil {
+		t.Fatal("expected non-zero error when resource restore fails")
+	}
+	if !strings.Contains(err.Error(), "could not restore resources") {
+		t.Errorf("expected restore-failure message, got: %v", err)
+	}
+
+	// Project must NOT be registered (partial application not stamped).
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myrepo") != "" {
+		t.Error("project must NOT be registered when resource restore failed")
+	}
+}
+
 // runAdd should report "already registered" then succeed with --force.
 func TestRunAdd_ForceUpdatesExisting(t *testing.T) {
 	tmp := t.TempDir()

@@ -44,6 +44,14 @@ func withRemoveStub(t *testing.T, stub func(string) error) {
 	t.Cleanup(func() { osRemove = prev })
 }
 
+// withRemoveAllStub swaps osRemoveAll for the duration of the test.
+func withRemoveAllStub(t *testing.T, stub func(string) error) {
+	t.Helper()
+	prev := osRemoveAll
+	osRemoveAll = stub
+	t.Cleanup(func() { osRemoveAll = prev })
+}
+
 // withExecutableStub swaps osExecutable for the duration of the test.
 func withExecutableStub(t *testing.T, stub func() (string, error)) {
 	t.Helper()

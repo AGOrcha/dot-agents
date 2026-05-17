@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -152,17 +153,28 @@ func runRemove(projectName string, cleanDirs bool) error {
 		)
 	}
 
+	// Canonical-dir cleanup runs BEFORE unregistering: a permission/locked-file
+	// failure here must leave the project registered so a re-run still has a
+	// handle to retry against. Unregistering first would orphan stale canonical
+	// data with no recovery path while falsely reporting "removed completely".
+	if cleanDirs {
+		ui.Step("Cleaning project directories...")
+		if err := removeProjectDirs(projectName); err != nil {
+			return ErrorWithHints(
+				fmt.Sprintf("remove incomplete for '%s': could not clean project directories: %v", projectName, err),
+				"The project registration was PRESERVED so cleanup can be retried. "+
+					"Resolve the errors above (permissions, locked files), then re-run "+
+					"`da remove "+projectName+" --clean`.",
+			)
+		}
+		ui.Bullet("ok", "Removed project directories")
+	}
+
 	cfg.RemoveProject(projectName)
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	ui.Bullet("ok", "Unregistered from config.json")
-
-	if cleanDirs {
-		ui.Step("Cleaning project directories...")
-		removeProjectDirs(projectName)
-		ui.Bullet("ok", "Removed project directories")
-	}
 
 	if cleanDirs {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' removed completely!", projectName),
@@ -177,7 +189,13 @@ func runRemove(projectName string, cleanDirs bool) error {
 	return nil
 }
 
-func removeProjectDirs(project string) {
+// removeProjectDirs deletes the project's canonical directories under
+// ~/.agents/. It aggregates and returns every removal failure (errors.Join)
+// rather than discarding them: a swallowed permission/locked-file error left
+// `da remove --clean` reporting complete removal while stale canonical data
+// remained on disk. A not-exist error is the expected "nothing to clean"
+// case and is the only error swallowed.
+func removeProjectDirs(project string) error {
 	agentsHome := config.AgentsHome()
 	dirs := []string{
 		agentsHome + "/rules/" + project,
@@ -187,7 +205,11 @@ func removeProjectDirs(project string) {
 		agentsHome + "/skills/" + project,
 		agentsHome + "/agents/" + project,
 	}
+	var errs []error
 	for _, d := range dirs {
-		os.RemoveAll(d)
+		if err := osRemoveAll(d); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("%s: %w", d, err))
+		}
 	}
+	return errors.Join(errs...)
 }
