@@ -5,10 +5,6 @@ on:
     branches: [master]
     paths:
       - 'VERSION'
-  # TEMPORARY: manual trigger to recover the failed v0.3.0 release
-  # (GoReleaser dirty-abort on untracked .scannerwork/). Remove this
-  # workflow_dispatch once v0.3.0 is successfully released.
-  workflow_dispatch:
 
 concurrency:
   group: release
