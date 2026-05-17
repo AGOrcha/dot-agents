@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-05-17
 
-Go rewrite line — the CLI is now a Go binary (`da`) replacing the legacy
-shell implementation for the extracted surface. Ships PR1–PR3a of the
-`pr10-branch-split` plan plus test-structure hygiene.
+First Go-binary (`da`) release of the extracted surface; ships PR1–PR3a
+plus test-structure hygiene.
 
 ### Added
 
@@ -36,9 +35,6 @@ shell implementation for the extracted surface. Ships PR1–PR3a of the
 - Windows link model (junction + hardlink, no Developer Mode),
   SIGKILL-safe promote journal, command-layer transactional-integrity
   and platform sweep hardlink-cleanup hardening.
-
-> Note: CHANGELOG entries for 0.1.9–0.2.2 were not recorded at release
-> time; that historical gap is intentionally left as-is.
 
 ## [0.1.8] - 2026-01-11
 
