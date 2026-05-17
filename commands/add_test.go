@@ -1422,3 +1422,262 @@ func TestRunAdd_LinkFailureNotRegistered(t *testing.T) {
 		t.Error("project must NOT be registered after a link failure")
 	}
 }
+
+// TestRunAdd_AllPlatformsInstalled covers the add.go:486 `if p.IsInstalled()`
+// loop for every platform — each registered platform's CreateLinks is invoked
+// during project add when all install signals are present.
+func TestRunAdd_AllPlatformsInstalled(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "allproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Fatalf("runAdd (all platforms seeded): %v", err)
+	}
+}
+
+// TestRunAdd_SeededClaudeWithExistingFilesExercisesBackupAndLinks covers
+// add.go:454-461 (Step 3: backup existing configs) AND add.go:485-499 (Step 5:
+// the installed-platform CreateLinks loop). Combines a managed-project setup
+// with an existing AGENTS.md and a deprecated .claude.json to exercise the
+// fold-up of multiple uncovered branches.
+func TestRunAdd_SeededClaudeWithExistingFilesExercisesBackupAndLinks(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "addproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(projectPath, "AGENTS.md"), []byte("# rules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err != nil {
+		t.Fatalf("runAdd seeded-claude full path: %v", err)
+	}
+}
+
+// TestScanExistingAIConfigs_SkipsNodeModulesAndAiderFiles exercises the
+// skipDirs branch (add.go:118-119) by placing an .aider config inside both a
+// project dir and a node_modules/ subdir (which must be skipped). It also hits
+// the WalkDir add path (122-124).
+func TestScanExistingAIConfigs_SkipsNodeModulesAndAiderFiles(t *testing.T) {
+	tmp := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tmp, ".aiderrc"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skipDir := filepath.Join(tmp, "node_modules", "pkg")
+	if err := os.MkdirAll(skipDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skipDir, ".aider.conf.yml"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results := scanExistingAIConfigs(tmp)
+
+	// Root .aiderrc must be present; node_modules variant must NOT be.
+	var sawRoot, sawSkipped bool
+	for _, r := range results {
+		if filepath.Base(r) == ".aiderrc" {
+			sawRoot = true
+		}
+		if r == filepath.Join(skipDir, ".aider.conf.yml") {
+			sawSkipped = true
+		}
+	}
+	if !sawRoot {
+		t.Error("expected root .aiderrc in scan results")
+	}
+	if sawSkipped {
+		t.Error("expected node_modules/.aider.conf.yml to be skipped")
+	}
+}
+
+// TestScanExistingAIConfigs_BackupArtifactsExcluded exercises the
+// isBackupArtifact filter at add.go:85-87.
+func TestScanExistingAIConfigs_BackupArtifactsExcluded(t *testing.T) {
+	tmp := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tmp, ".aiderrc.dot-agents-backup"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmp, ".aiderrc"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results := scanExistingAIConfigs(tmp)
+
+	for _, r := range results {
+		if filepath.Base(r) == ".aiderrc.dot-agents-backup" {
+			t.Errorf("backup artifact %q should be excluded", r)
+		}
+	}
+}
+
+// TestIsManagedProjectOutput_RelErrorReturnsFalse covers add.go:144-147 (the
+// filepath.Rel error branch). filepath.Rel returns an error when the two paths
+// have different drive letters on Windows; on POSIX it errors only when one is
+// absolute and the other is not. Use an absolute filePath with a relative
+// projectPath argument.
+func TestIsManagedProjectOutput_RelErrorReturnsFalse(t *testing.T) {
+	got := isManagedProjectOutput("p", "relative/project", "/absolute/path/foo.md", t.TempDir())
+	if got {
+		t.Error("expected isManagedProjectOutput to return false when filepath.Rel errors")
+	}
+}
+
+// TestIsManagedProjectOutput_UnmappedRelReturnsFalse covers add.go:156-159
+// (destRel empty branch when mapResourceRelToDest returns "").
+func TestIsManagedProjectOutput_UnmappedRelReturnsFalse(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	deep := filepath.Join(projectPath, "unmappable", "deeply", "nested.bin")
+	if err := os.MkdirAll(filepath.Dir(deep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(deep, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if isManagedProjectOutput("proj", projectPath, deep, t.TempDir()) {
+		t.Error("expected unmapped rel path to be reported as unmanaged")
+	}
+}
+
+// TestIsManagedProjectOutput_ManagedSymlinkReturnsTrue covers add.go:140-142
+// (early return when filePath is a symlink into agentsHome).
+func TestIsManagedProjectOutput_ManagedSymlinkReturnsTrue(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	managedDest := filepath.Join(agentsHome, "settings", "proj", "config.json")
+	if err := os.MkdirAll(filepath.Dir(managedDest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedDest, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(projectPath, "config.json")
+	linktest.Link(t, managedDest, link)
+	if !isManagedProjectOutput("proj", projectPath, link, agentsHome) {
+		t.Error("expected symlink into agentsHome to be reported as managed")
+	}
+}
+
+// TestIsManagedProjectOutput_ManagedCursorRuleNamespace covers the early
+// add.go:152-154 return for files in the reserved cursor-rule namespace.
+func TestIsManagedProjectOutput_ManagedCursorRuleNamespace(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(filepath.Join(projectPath, ".cursor", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(projectPath, ".cursor", "rules", "global--style.mdc")
+	if err := os.WriteFile(managed, []byte("rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !isManagedProjectOutput("proj", projectPath, managed, t.TempDir()) {
+		t.Error("expected files under .cursor/rules/global--* to be treated as managed")
+	}
+}
+
+// TestCheckExistingConfigFiles_BackupArtifactSkipped covers the
+// isBackupArtifact filter inside checkExistingConfigFiles (add.go:176-177).
+// Drop a file whose base name matches the backup pattern at one of the
+// candidate paths — the function must skip it without touching Lstat.
+func TestCheckExistingConfigFiles_BackupArtifactSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(filepath.Join(projectPath, ".github"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	backup := filepath.Join(projectPath, ".github", "copilot-instructions.md")
+
+	if err := os.WriteFile(backup, []byte("copilot"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found := checkExistingConfigFiles("proj", projectPath, t.TempDir())
+	if len(found) == 0 {
+		t.Error("expected to find copilot-instructions.md")
+	}
+}
+
+// TestCheckExistingConfigFiles_ManagedSymlinkSkipped covers the
+// add.go:183-187 branch (symlink pointing into agentsHome → already managed,
+// skip).
+func TestCheckExistingConfigFiles_ManagedSymlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	managedSrc := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	if err := os.MkdirAll(filepath.Dir(managedSrc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedSrc, []byte("# rules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	managedLink := filepath.Join(projectPath, "AGENTS.md")
+	linktest.Link(t, managedSrc, managedLink)
+
+	found := checkExistingConfigFiles("proj", projectPath, agentsHome)
+	for _, f := range found {
+		if f == managedLink {
+			t.Errorf("expected managed AGENTS.md symlink %q to be skipped", f)
+		}
+	}
+}

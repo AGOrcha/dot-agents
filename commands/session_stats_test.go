@@ -3,6 +3,7 @@ package commands
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -221,5 +222,36 @@ func TestNewSessionStatsCmd_Metadata(t *testing.T) {
 	}
 	if cmd.RunE == nil {
 		t.Error("stats subcommand should have RunE")
+	}
+}
+
+// TestRunSessionStats_WithSeededStatsCacheCoversRenderBranch covers
+// session_stats.go:55 (`renderPlatformStats(stats)` when stats != nil). On CI
+// bare runners no ~/.claude/stats-cache.json exists, so claudeReadUsageStats
+// returns nil and the function takes the `(no data available)` branch.
+func TestRunSessionStats_WithSeededStatsCacheCoversRenderBranch(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+
+	cache := `{
+		"totalSessions": 1,
+		"totalMessages": 2,
+		"modelUsage": {
+			"claude-sonnet-4-6": {
+				"inputTokens": 100,
+				"outputTokens": 200,
+				"cacheReadInputTokens": 50,
+				"cacheCreationInputTokens": 25
+			}
+		},
+		"dailyActivity": [
+			{"date": "2026-05-15", "messageCount": 2, "sessionCount": 1, "toolCallCount": 4}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tmp, ".claude", "stats-cache.json"), []byte(cache), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runSessionStats(nil, nil); err != nil {
+		t.Errorf("runSessionStats with seeded stats cache: %v", err)
 	}
 }

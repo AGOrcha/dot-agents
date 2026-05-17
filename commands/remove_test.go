@@ -503,3 +503,99 @@ func TestRunRemove_CleanupFailurePreservesRegistration(t *testing.T) {
 		t.Error("project must remain registered when managed cleanup failed")
 	}
 }
+
+// TestRunRemove_AllPlatformsInstalled covers the remove.go:122 IsInstalled
+// branch for every platform, ensuring RemoveLinks is exercised across the
+// full platform set.
+func TestRunRemove_AllPlatformsInstalled(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "rm-all")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rm-all", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRemove("rm-all", false); err != nil {
+		t.Errorf("runRemove (all platforms seeded): %v", err)
+	}
+}
+
+// TestRunRemove_AllPlatformsInstalledNonDryRun covers remove.go:129-135
+// (RemoveLinks invocation outside dry-run) for every platform.
+func TestRunRemove_AllPlatformsInstalledNonDryRun(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "rm-real")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rm-real", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRemove("rm-real", false); err != nil {
+		t.Errorf("runRemove non-dry-run (all platforms seeded): %v", err)
+	}
+}
+
+// TestRunRemove_SeededClaudeExercisesInstalledPlatformBranch covers
+// remove.go:122 `if p.IsInstalled()` true branch in the dry-run path so
+// platform.RemoveLinks is invoked at least once during the test.
+func TestRunRemove_SeededClaudeExercisesInstalledPlatformBranch(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "rm-target")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rm-target", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRemove("rm-target", false); err != nil {
+		t.Errorf("runRemove dry-run with installed claude: %v", err)
+	}
+}

@@ -2301,3 +2301,119 @@ func TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms(t *testing.T) 
 	// the loop must execute without errors propagating.
 	relinkImportedProjects(cfg, map[string]bool{"p": true})
 }
+
+// TestRunImport_WithSeededGlobalCandidatesExercisesFoldAndRelink covers
+// import.go:316-326 (sort/fold/Success), 332-336 (foldImportCandidates body),
+// and 1434 (relinkImportedProjects → CreateLinks on installed platform). The
+// HOME is seeded with at least one entry from globalImportSingles AND
+// platform install signals so CreateLinks fires for each installed platform.
+func TestRunImport_WithSeededGlobalCandidatesExercisesFoldAndRelink(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := os.WriteFile(filepath.Join(tmp, ".claude", "settings.json"), []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectPath := filepath.Join(tmp, "importproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("importproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runImport("", "all"); err != nil {
+		t.Fatalf("runImport: %v", err)
+	}
+}
+
+// TestRunImport_ProjectScopeWithCandidateExercisesWalkPath covers
+// walkedImportCandidate's success path (import.go:563-565, 584-589). It seeds
+// a managed AGENTS.md inside the project root so filepath.WalkDir surfaces it
+// as a candidate and walkedImportCandidate returns true.
+func TestRunImport_ProjectScopeWithCandidateExercisesWalkPath(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "walkproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(projectPath, "AGENTS.md"), []byte("# rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("walkproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runImport("", "project"); err != nil {
+		t.Fatalf("runImport project scope: %v", err)
+	}
+}
+
+// TestImportConflictStableBundleName_AdvancesPastTakenNames covers the n++
+// path inside importConflictStableBundleName (import.go:790-796) by forcing
+// the taken() callback to claim the base name and one numeric variant before
+// settling on -3.
+func TestImportConflictStableBundleName_AdvancesPastTakenNames(t *testing.T) {
+	calls := 0
+	taken := func(name string) bool {
+		calls++
+
+		return calls <= 3
+	}
+	got := importConflictStableBundleName("hook", "origin", taken)
+	if got == "" {
+		t.Fatal("expected non-empty stable name")
+	}
+
+	if calls < 3 {
+		t.Errorf("expected taken() to be queried at least 3 times, got %d", calls)
+	}
+}
+
+// TestImportConflictFirstFreeAlternateDestRel_RejectsUnknownShape covers the
+// import.go:828 fall-through return when parts is neither 2 nor 3 elements.
+func TestImportConflictFirstFreeAlternateDestRel_RejectsUnknownShape(t *testing.T) {
+	tmp := t.TempDir()
+
+	primary := agentsHooksPrefix + "scope/extra/path/parts.json"
+	got, ok := importConflictFirstFreeAlternateDestRel(tmp, primary, "origin")
+	if ok || got != "" {
+		t.Errorf("expected (\"\", false) for unknown hooks shape, got (%q, %v)", got, ok)
+	}
+}
+
+// TestImportConflictFirstFreeAlternateDestRel_NonHooksPrefixReturnsFalse
+// covers import.go:802-804 fast return when primary does not live under
+// agentsHooksPrefix.
+func TestImportConflictFirstFreeAlternateDestRel_NonHooksPrefixReturnsFalse(t *testing.T) {
+	got, ok := importConflictFirstFreeAlternateDestRel(t.TempDir(), "rules/proj/agents.md", "origin")
+	if ok || got != "" {
+		t.Errorf("expected (\"\", false) for non-hooks prefix, got (%q, %v)", got, ok)
+	}
+}

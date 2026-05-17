@@ -672,3 +672,105 @@ func TestRestoreFromResourcesCounted_RestoresDirectoryBuckets(t *testing.T) {
 		}
 	}
 }
+
+// TestRunRefresh_AllPlatformsInstalled covers the refresh.go:71 and 163
+// `p.IsInstalled()` branches for every enabled platform. Pre-enable all
+// platforms in config so the refresh loop iterates each one.
+func TestRunRefresh_AllPlatformsInstalled(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "rp")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rp", projectPath)
+	for _, id := range []string{"claude", "cursor", "codex", "opencode", "copilot"} {
+		cfg.SetPlatformState(id, true, "")
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh (all platforms seeded): %v", err)
+	}
+}
+
+// TestRunRefresh_AllPlatformsDryRun mirrors the above through the dry-run
+// branch at refresh.go:167-170 ("Refresh ... links" bullet) for each platform.
+func TestRunRefresh_AllPlatformsDryRun(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "rp-dry")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rp-dry", projectPath)
+	for _, id := range []string{"claude", "cursor", "codex", "opencode", "copilot"} {
+		cfg.SetPlatformState(id, true, "")
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh dry-run (all platforms seeded): %v", err)
+	}
+}
+
+// TestRunRefresh_SeededClaudeDryRunExercisesDryRunBranches covers refresh.go
+// dry-run loop branches when an installed platform is present (lines 167-170
+// — `DryRun "Refresh ... links"` bullet).
+func TestRunRefresh_SeededClaudeDryRunExercisesDryRunBranches(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh(""); err != nil {
+		t.Errorf("runRefresh dry-run with installed claude: %v", err)
+	}
+}

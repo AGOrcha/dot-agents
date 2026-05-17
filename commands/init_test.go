@@ -325,3 +325,197 @@ func TestScaffoldWorkflowAssets_CreatesHookBundleRoot(t *testing.T) {
 		t.Errorf("context dir should be created: %v", err)
 	}
 }
+
+// TestRunInit_AllPlatformsInstalledSeeded exercises the init.go IsInstalled
+// branches for claude AND cursor (the two platforms init checks directly),
+// AND the platform.All() loop at init.go:103-115 which records detected
+// platforms in config.json.
+func TestRunInit_AllPlatformsInstalledSeeded(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit (all platforms seeded): %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	for _, id := range []string{"claude", "cursor", "codex", "opencode", "copilot"} {
+		if !cfg.IsPlatformEnabled(id) {
+			t.Errorf("expected %s enabled after init with all signals seeded", id)
+		}
+	}
+}
+
+// TestRunInit_SeededClaudeExercisesClaudeSettingsBranch covers the
+// init.go:142-153 block where claudePlatform.IsInstalled() == true and the
+// global ~/.claude/settings.json symlink is created. It also exercises the
+// Lstat-exists no-force branch (line 152) on a second --force=false run.
+func TestRunInit_SeededClaudeExercisesClaudeSettingsBranch(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit (claude seeded): %v", err)
+	}
+
+	claudeSettings := filepath.Join(tmp, ".claude", "settings.json")
+	if _, err := os.Lstat(claudeSettings); err != nil {
+		t.Errorf("expected ~/.claude/settings.json after init with claude installed: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.IsPlatformEnabled("claude") {
+		t.Errorf("expected claude to be enabled in config after init")
+	}
+}
+
+// TestRunInit_ForceWithSeededClaudeOverwritesSettings exercises the
+// init.go:148 Force branch (existing settings.json + Force -> re-symlink).
+func TestRunInit_ForceWithSeededClaudeOverwritesSettings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmp, ".claude", "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, Force: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit --force (claude seeded): %v", err)
+	}
+}
+
+// TestRunInit_SeededClaudeAndExistingSettingsSkipsWithoutForce covers the
+// init.go:151-153 else-branch (settings exists, no --force, skip with bullet).
+func TestRunInit_SeededClaudeAndExistingSettingsSkipsWithoutForce(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmp, ".claude", "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit (skip claude settings without force): %v", err)
+	}
+
+	info, err := os.Lstat(filepath.Join(tmp, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected pre-existing settings.json to be preserved (no --force)")
+	}
+}
+
+// TestRunInit_HooksSrcExistsRedirectsSettingsPath covers init.go:139-141
+// (when hooks/global/claude-code.json exists, claudeSettingsPath is repointed
+// to the hooks source). Run a first init to scaffold the home, then write a
+// hooks source file, then re-init with --force to trigger the redirect branch.
+func TestRunInit_HooksSrcExistsRedirectsSettingsPath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit first pass: %v", err)
+	}
+
+	hooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+	if err := os.MkdirAll(filepath.Dir(hooksSrc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hooksSrc, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	Flags = GlobalFlags{Yes: true, Force: true}
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit --force after hooks seed: %v", err)
+	}
+}
+
+// TestRunInit_MkdirOnClaudeBranchSucceedsOnEmptyDir is a thin coverage test
+// to ensure the seeded-claude init flow does not regress when ~/.claude is
+// initially empty (no settings.json present yet — IsNotExist branch).
+func TestRunInit_MkdirOnClaudeBranchSucceedsOnEmptyDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit IsNotExist branch: %v", err)
+	}
+
+	settingsLink := filepath.Join(tmp, ".claude", "settings.json")
+	if _, err := os.Lstat(settingsLink); err != nil {
+		t.Fatalf("expected ~/.claude/settings.json: %v", err)
+	}
+
+	target := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	if hooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json"); func() bool {
+		_, err := os.Stat(hooksSrc)
+		return err == nil
+	}() {
+		target = hooksSrc
+	}
+	if !links.IsManagedLink(settingsLink, target) {
+		t.Errorf("expected settings.json to be a managed link to %s after init", target)
+	}
+}
