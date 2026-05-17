@@ -2773,50 +2773,12 @@ func TestNewKGCmd_SubcommandRunEDispatch(t *testing.T) {
 		t.Fatal("NewKGCmd returned nil")
 	}
 
-	// Helper: find a subcommand by name within kgCmd.
-	find := func(name string) *cobra.Command {
-		for _, sub := range kgCmd.Commands() {
-			if sub.Name() == name {
-				return sub
-			}
-		}
-		return nil
-	}
-
-	// Wrap stdout to swallow ui output during the dispatch loop.
-	swallow := func(fn func()) {
-		captureStdout(t, fn)
-	}
-
-	// dispatchTop runs a top-level subcommand's RunE (if present) inside a
-	// stdout-swallowing capture. Returns the RunE error for assertions.
-	dispatchTop := func(name string) error {
-		c := find(name)
-		if c == nil || c.RunE == nil {
-			return nil
-		}
-		var err error
-		swallow(func() { err = c.RunE(c, nil) })
-		return err
-	}
-
-	// dispatchSub runs a named child (or every child when childName == "") of
-	// the given parent command, swallowing stdout for each invocation.
-	dispatchSub := func(parent, childName string) {
-		p := find(parent)
-		if p == nil {
-			return
-		}
-		for _, sub := range p.Commands() {
-			if sub.RunE == nil {
-				continue
-			}
-			if childName != "" && sub.Name() != childName {
-				continue
-			}
-			swallow(func() { _ = sub.RunE(sub, nil) })
-		}
-	}
+	// Thin local aliases over the package-level dispatch helpers so the
+	// per-subtest call sites stay terse while the branching logic (and its
+	// cognitive complexity) lives outside this test function.
+	find := func(name string) *cobra.Command { return findKGSub(kgCmd, name) }
+	dispatchTop := func(name string) error { return dispatchKGTop(t, kgCmd, name) }
+	dispatchSub := func(parent, childName string) { dispatchKGSub(t, kgCmd, parent, childName) }
 
 	t.Run("health", func(t *testing.T) {
 		// invokes runKGHealth via RunE closure; err best-effort.
@@ -2893,6 +2855,46 @@ func TestNewKGCmd_SubcommandRunEDispatch(t *testing.T) {
 			_ = dispatchTop(name)
 		}
 	})
+}
+
+// findKGSub returns the named direct subcommand of root, or nil.
+func findKGSub(root *cobra.Command, name string) *cobra.Command {
+	for _, sub := range root.Commands() {
+		if sub.Name() == name {
+			return sub
+		}
+	}
+	return nil
+}
+
+// dispatchKGTop runs a top-level subcommand's RunE (if present) inside a
+// stdout-swallowing capture and returns the RunE error for assertions.
+func dispatchKGTop(t *testing.T, root *cobra.Command, name string) error {
+	c := findKGSub(root, name)
+	if c == nil || c.RunE == nil {
+		return nil
+	}
+	var err error
+	captureStdout(t, func() { err = c.RunE(c, nil) })
+	return err
+}
+
+// dispatchKGSub runs a named child (or every child when childName == "")
+// of parent, swallowing stdout for each invocation.
+func dispatchKGSub(t *testing.T, root *cobra.Command, parent, childName string) {
+	p := findKGSub(root, parent)
+	if p == nil {
+		return
+	}
+	for _, sub := range p.Commands() {
+		if sub.RunE == nil {
+			continue
+		}
+		if childName != "" && sub.Name() != childName {
+			continue
+		}
+		captureStdout(t, func() { _ = sub.RunE(sub, nil) })
+	}
 }
 
 // TestNewKGCmd_RegistersExpectedSubcommands confirms every published

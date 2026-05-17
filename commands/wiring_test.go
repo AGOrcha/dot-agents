@@ -21,7 +21,7 @@ func TestKGDeps_PopulatesFromGlobalFlagsAndUXHelpers(t *testing.T) {
 		t.Fatal("kgDeps did not forward ExampleBlock")
 	}
 	// Sanity-check the forwarded helper returns a non-empty rendered example.
-	if got := d.ExampleBlock("line-a", "line-b"); got == "" {
+	if d.ExampleBlock("line-a", "line-b") == "" {
 		t.Error("ExampleBlock should produce a non-empty rendering")
 	}
 

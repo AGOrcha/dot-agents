@@ -124,27 +124,14 @@ func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
 		seen := map[string]bool{"p.go::Callee1": true, "p.go::Callee2": true}
 		var collected []GraphQueryResult
 		done, err := appendNeighborMatches(store, edges, graphstore.EdgeKindCalls, false, seen, &collected, 5)
-		if err != nil {
-			t.Fatalf("appendNeighborMatches: %v", err)
-		}
-		if done {
-			t.Errorf("expected done=false when every neighbor is already seen")
-		}
-		if len(collected) != 0 {
-			t.Errorf("expected zero results when every neighbor is already seen, got %d", len(collected))
-		}
+		assertNeighborYieldsNothing(t, "all-seen", done, collected, err)
 	})
 
 	t.Run("edge_kind_filter_mismatch", func(t *testing.T) {
 		// Edge-kind filter mismatch → `continue` branch (line ~245).
 		var collected []GraphQueryResult
 		done, err := appendNeighborMatches(store, edges, "no_such_kind", false, map[string]bool{}, &collected, 5)
-		if err != nil {
-			t.Fatalf("appendNeighborMatches kind-filter: %v", err)
-		}
-		if done || len(collected) != 0 {
-			t.Errorf("kind-filter mismatch should produce no results, got done=%v len=%d", done, len(collected))
-		}
+		assertNeighborYieldsNothing(t, "kind-filter", done, collected, err)
 	})
 
 	t.Run("missing_neighbor_node", func(t *testing.T) {
@@ -152,13 +139,21 @@ func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
 		orphanEdges := []graphstore.GraphEdge{{Kind: graphstore.EdgeKindCalls, SourceQualified: caller.QualifiedName, TargetQualified: "no-such-target"}}
 		var collected []GraphQueryResult
 		done, err := appendNeighborMatches(store, orphanEdges, graphstore.EdgeKindCalls, false, map[string]bool{}, &collected, 5)
-		if err != nil {
-			t.Fatalf("appendNeighborMatches orphan: %v", err)
-		}
-		if done || len(collected) != 0 {
-			t.Errorf("missing neighbor should produce no results, got done=%v len=%d", done, len(collected))
-		}
+		assertNeighborYieldsNothing(t, "orphan", done, collected, err)
 	})
+}
+
+// assertNeighborYieldsNothing asserts an appendNeighborMatches call
+// errored-free and produced no matches and done=false — the shared
+// expectation of the seen / kind-filter / missing-neighbor branches.
+func assertNeighborYieldsNothing(t *testing.T, ctx string, done bool, collected []GraphQueryResult, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("appendNeighborMatches %s: %v", ctx, err)
+	}
+	if done || len(collected) != 0 {
+		t.Errorf("%s should produce no results, got done=%v len=%d", ctx, done, len(collected))
+	}
 }
 
 // ── collectSymbolDecisionResults: closed-store error path ────────────────────
