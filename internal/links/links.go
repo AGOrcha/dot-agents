@@ -121,24 +121,16 @@ func symlinkWithPolicy(target, linkPath string, backup func(path string) error) 
 		// provably ours (resolves under the canonical agents root); a
 		// user-owned symlink/junction at this path must NOT be silently
 		// destroyed.
-		if ownedManagedLink(linkPath) {
-			if err := fsopsRemoveAll(linkPath); err != nil {
-				return fmt.Errorf("removing old managed link %s: %w", linkPath, err)
-			}
-		} else if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
-			return uErr
+		if rErr := replaceManagedOrRefuse(linkPath, ownedManagedLink(linkPath), "link", backup); rErr != nil {
+			return rErr
 		}
 	} else if !os.IsNotExist(err) {
 		// Not a symlink/junction: a regular file, a real directory, or a
 		// Windows managed file hard link (no reparse point). A hard link
 		// we own (shared inode, link count >= 2) is provably ours and is
 		// updated like a stale managed link; a plain user file is refused.
-		if ownedManagedHardlink(linkPath) {
-			if rmErr := fsopsRemoveAll(linkPath); rmErr != nil {
-				return fmt.Errorf("removing old managed hard link %s: %w", linkPath, rmErr)
-			}
-		} else if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
-			return uErr
+		if rErr := replaceManagedOrRefuse(linkPath, ownedManagedHardlink(linkPath), "hard link", backup); rErr != nil {
+			return rErr
 		}
 	}
 
@@ -146,6 +138,21 @@ func symlinkWithPolicy(target, linkPath string, backup func(path string) error) 
 		return fmt.Errorf("creating parent dir for %s: %w", linkPath, err)
 	}
 	return createLink(target, linkPath)
+}
+
+// replaceManagedOrRefuse removes linkPath when it is provably a managed
+// link/hard link we own (owned == true), so a stale one can be re-pointed.
+// Otherwise it applies the unmanaged-occupant contract (caller backup then
+// replace, or refuse) so a user-owned entry is never silently destroyed.
+// kind ("link" / "hard link") only flavors the removal error message.
+func replaceManagedOrRefuse(linkPath string, owned bool, kind string, backup func(path string) error) error {
+	if owned {
+		if err := fsopsRemoveAll(linkPath); err != nil {
+			return fmt.Errorf("removing old managed %s %s: %w", kind, linkPath, err)
+		}
+		return nil
+	}
+	return handleUnmanagedOccupant(linkPath, backup)
 }
 
 // fsopsRemoveAll is a seam over fsops.RemoveAll so tests can fault-inject

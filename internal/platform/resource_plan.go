@@ -575,32 +575,36 @@ func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
 	return errors.Join(errs...)
 }
 
+// removeDirectSymlinkTarget removes the managed output for a DirectDir or
+// DirectFile + symlink-transport intent. A missing entry is a successful
+// no-op; any other failure means a managed link is still live and MUST be
+// surfaced (aggregated, not short-circuited). DirectFile intents also
+// materialize as hard links on Windows (links.createLink has no reparse
+// point for files), so the symlink/junction removal is a no-op there and
+// the canonical-source hard link must be removed too or the managed file
+// is orphaned while remove reports success. Dir intents are always real
+// symlinks/junctions, so the hard-link path only applies to the file shape.
+func removeDirectSymlinkTarget(intent ResourceIntent, target, agentsHome string) error {
+	var errs []error
+	if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("remove managed symlink %s: %w", target, err))
+	}
+	if intent.Shape == ResourceShapeDirectFile {
+		src, err := canonicalIntentSourcePath(intent, agentsHome)
+		if err != nil {
+			errs = append(errs, err)
+		} else if _, err := links.RemoveIfHardlinkedToAny(target, []string{src}); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove managed hard link %s: %w", target, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome string) error {
 	target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 	switch {
 	case (intent.Shape == ResourceShapeDirectDir || intent.Shape == ResourceShapeDirectFile) && intent.Transport == ResourceTransportSymlink:
-		// A missing entry is a successful no-op; any other failure means a
-		// managed link is still live and MUST be surfaced.
-		var errs []error
-		if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("remove managed symlink %s: %w", target, err))
-		}
-		// DirectFile intents materialize as hard links on Windows
-		// (links.createLink has no reparse point for files), so the
-		// symlink/junction removal above is a no-op there and the
-		// managed file would be orphaned while remove reports success.
-		// Also remove a hard link to the canonical source. Dir intents
-		// are always real symlinks/junctions, so this only applies to
-		// the file shape.
-		if intent.Shape == ResourceShapeDirectFile {
-			src, err := canonicalIntentSourcePath(intent, agentsHome)
-			if err != nil {
-				errs = append(errs, err)
-			} else if _, err := links.RemoveIfHardlinkedToAny(target, []string{src}); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("remove managed hard link %s: %w", target, err))
-			}
-		}
-		return errors.Join(errs...)
+		return removeDirectSymlinkTarget(intent, target, agentsHome)
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
 		switch intent.Materializer {
 		case codexAgentTomlMaterializer:

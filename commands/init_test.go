@@ -237,31 +237,34 @@ func TestSidecarBackupFile(t *testing.T) {
 		t.Errorf("backup content mismatch: %q (err=%v)", string(got), err)
 	}
 
-	// Write failure: backup destination directory is unwritable.
-	// On Windows os.Chmod(0555) only sets the read-only attribute on the
-	// directory itself, which does not prevent creating/writing children,
-	// so this fault cannot be injected there. Covered on POSIX.
-	if os.Geteuid() != 0 && runtime.GOOS != "windows" {
-		ro := filepath.Join(tmp, "ro")
-		if err := os.MkdirAll(ro, 0555); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(ro, 0755) })
-		roSrc := filepath.Join(ro, "f")
-		// File exists (created before chmod via a sibling write trick):
-		// write it then drop dir perms.
-		if err := os.Chmod(ro, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(roSrc, []byte("x"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(ro, 0555); err != nil {
-			t.Fatal(err)
-		}
-		if err := sidecarBackupFile(roSrc); err == nil {
-			t.Error("expected error writing backup into a read-only directory")
-		}
+	assertSidecarBackupWriteFailureSurfaces(t, tmp)
+}
+
+// assertSidecarBackupWriteFailureSurfaces verifies sidecarBackupFile
+// propagates a write error when the backup destination directory is
+// unwritable. On Windows os.Chmod(0555) only sets the read-only attribute
+// on the directory itself, which does not prevent creating/writing
+// children, so this fault cannot be injected there (covered on POSIX);
+// likewise root bypasses permission bits.
+func assertSidecarBackupWriteFailureSurfaces(t *testing.T, tmp string) {
+	t.Helper()
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		return
+	}
+	ro := filepath.Join(tmp, "ro")
+	if err := os.MkdirAll(ro, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0755) })
+	roSrc := filepath.Join(ro, "f")
+	if err := os.WriteFile(roSrc, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ro, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := sidecarBackupFile(roSrc); err == nil {
+		t.Error("expected error writing backup into a read-only directory")
 	}
 }
 
