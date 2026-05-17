@@ -984,6 +984,9 @@ func containsLinkID(links []string, refID string) bool {
 // through to updateGraphNote so reweave only rewrites frontmatter (links).
 func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
 	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
+	// Intentional silence: this is a best-effort repair path. If the note
+	// can't be read or parsed there is nothing to preserve — skip rather
+	// than abort the reweave pass (a malformed note is surfaced by lint).
 	existing, readErr := osReadFile(path)
 	if readErr != nil {
 		return
@@ -1068,6 +1071,12 @@ func archiveCompactedNote(kgHomeDir, archiveDir, id string, note *GraphNote) boo
 	}
 	src := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
 	dst := filepath.Join(archiveDir, id+".md")
+	// os.Rename is atomic and preserves the whole file (no truncate-rewrite,
+	// so the body is never lost). Known consistency window: a crash between
+	// this rename and removeIndexEntry leaves the note in _archived/ while
+	// still listed in index.md — stale but recoverable (re-running compact
+	// trims the dangling entry), never data loss. Ordering is deliberate:
+	// move-before-index-trim so the note always exists somewhere.
 	if err := os.Rename(src, dst); err != nil {
 		return false
 	}

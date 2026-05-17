@@ -1064,6 +1064,14 @@ func parseRawSourceFrontmatter(s, sourceID string) (RawSource, string) {
 	if src.ID == "" {
 		src.ID = sourceID
 	}
+	// src.ID comes from untrusted inbox frontmatter and flows into
+	// filesystem paths (notes/<type>/<id>.md, dec-<id>-N, src-<id>). Without
+	// sanitization a crafted `id: ../../../tmp/pwn` escapes KG_HOME. slugify
+	// is the same id sanitizer already applied to entity IDs and `kg add`.
+	src.ID = slugify(src.ID)
+	if src.ID == "" {
+		src.ID = slugify(sourceID)
+	}
 	if src.Title == "" {
 		src.Title = sourceID
 	}
