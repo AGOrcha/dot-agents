@@ -94,19 +94,19 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 └── (your code)
 ```
 
-### Layer 2: Workflow Management (Coming)
+### Layer 2: Workflow Proposals (Shipping)
 
-Agents will manage their own operational infrastructure through three primitives:
+The first slice of workflow management ships today: agents queue rule/skill/config
+changes for human review, and you approve or reject them through `da review`.
 
-| Primitive | What It Does | Who Runs It |
-|-----------|-------------|-------------|
-| **Orient** | Load active plan, last checkpoint, verification state, recent lessons at session start | Agent (via hook) |
-| **Persist** | Save files touched, tests run, blockers, and next action at natural breakpoints | Agent (auto) |
-| **Propose** | Queue rule/skill/config changes for human review when patterns emerge | Agent → Human reviews |
+| Primitive | What It Does | Status |
+|-----------|-------------|--------|
+| **Propose** | Agents queue rule/skill/config changes for human review when patterns emerge | Shipped (`da review`) |
+| **Orient** | Load active plan, last checkpoint, verification state, recent lessons at session start | Roadmap |
+| **Persist** | Save files touched, tests run, blockers, and next action at natural breakpoints | Roadmap |
 
-The design principle: **agents operate, humans steer.** Zero new commands to learn — the agent handles workflow state and surfaces decisions through `da review`.
-
-See [`research/`](research/) for the full analysis behind this direction.
+The design principle: **agents operate, humans steer.** Deeper workflow-state
+management (orient/persist) is on the roadmap; see the Roadmap section below.
 
 ## Installation
 
@@ -123,12 +123,6 @@ brew install dot-agents
 curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
 ```
 
-### Direct Install (TypeScript port subset)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
-```
-
 ### Windows PowerShell (Go CLI)
 
 ```powershell
@@ -143,13 +137,6 @@ cd ~/.dot-agents
 go build -o ./bin/da ./cmd/dot-agents
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
-
-### TypeScript port (optional, Windows-friendly subset)
-
-The primary CLI is the **Go** `da` binary (Homebrew or `scripts/install.sh` above). For machines where **Node.js 20+** is easier than Go, this repo also ships an experimental **TypeScript** implementation under [`ports/typescript/`](ports/typescript/README.md).
-
-- **Same goal:** Stage 1 config, links, skills, agents, and hooks — not a silent replacement for Go.
-- **Different limits:** Knowledge graph commands, workflow **writes**, and loop orchestration stay **Go-only**. Read the boundary once in [`docs/TYPESCRIPT_PORT_BOUNDARY.md`](docs/TYPESCRIPT_PORT_BOUNDARY.md), then run `npm run build` and `node dist/cli.js --help` inside `ports/typescript/` before relying on it.
 
 ## Quick Start
 
@@ -174,18 +161,20 @@ da install
 
 ## Commands
 
-### Core
+`da` exposes 18 top-level commands.
+
+### Project Management
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize `~/.agents/` directory |
-| `add <path>` | Add a project to management |
-| `remove <project>` | Remove a project |
+| `init` | Initialize `~/.agents/` directory structure |
+| `add <path>` | Add a project to da management |
+| `remove <project>` | Remove a project from da management |
+| `refresh [project]` | Refresh managed setup in projects from `~/.agents/` |
+| `import [project]` | Import configs from project/global scope into `~/.agents/` |
 | `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one) |
-| `import [project]` | Import existing configs from a project into `~/.agents/` |
-| `status` | Show all managed projects (use `--audit` for details) |
-| `doctor` | Health check and diagnostics |
-| `refresh [project]` | Re-apply links and config to projects |
+| `status` | Show managed projects and link health (use `--audit` for details) |
+| `doctor` | Check installations, validate links, detect issues |
 
 ### Skills & Agents
 
@@ -193,17 +182,37 @@ da install
 |---------|-------------|
 | `skills list [project]` | List shared or project-scoped skills |
 | `skills new <name> [project]` | Create a new skill |
-| `skills promote <name>` | Promote a repo-local skill into `~/.agents/skills/` |
+| `skills promote <name>` | Promote a repo-local skill to shared storage |
 | `agents list [project]` | List shared or project-scoped agents |
-| `agents new <name> [project]` | Create a new subagent |
-| `agents promote <name>` | Promote a repo-local agent into `~/.agents/agents/` |
-| `agents import <name>` | Link a canonical agent into the current repo |
-| `agents remove <name>` | Remove an imported agent link from the current repo |
-| `hooks list [scope]` | List canonical hook bundles in `~/.agents/hooks/` |
-| `hooks show <scope> <name>` | Show one canonical hook bundle |
-| `hooks remove <scope> <name>` | Remove one canonical hook bundle |
+| `agents new <name> [project]` | Create a new agent |
+| `agents promote <name>` | Promote a repo-local agent to shared storage |
+| `agents import <name>` | Link a canonical agent from `~/.agents/agents/` into this repo |
+| `agents remove <name>` | Unlink agent symlinks from this repo and drop the manifest entry |
+
+### Canonical Resource Inspection
+
+These inspect and manage canonical files under `~/.agents/`. Each supports
+`list [scope]`, `show <scope> <name>`, and `remove <scope> <name>`.
+
+| Command | Description |
+|---------|-------------|
+| `rules` | Inspect and manage canonical `~/.agents/rules` files |
+| `hooks` | Inspect and manage canonical `~/.agents/hooks` bundles |
+| `mcp` | Inspect and manage canonical `~/.agents/mcp` config files |
+| `settings` | Inspect and manage canonical `~/.agents/settings` files |
+
+### Workflow Proposals
+
+| Command | Description |
+|---------|-------------|
+| `review` | Review pending workflow proposals |
+| `review show <id>` | Show a pending proposal |
+| `review approve <id>` | Approve and apply a pending proposal |
+| `review reject <id>` | Reject a pending proposal |
 
 ### Sync
+
+`da sync` wraps git operations on `~/.agents/`.
 
 | Command | Description |
 |---------|-------------|
@@ -212,12 +221,14 @@ da install
 | `sync commit` | Commit all changes |
 | `sync push` | Push to remote |
 | `sync pull` | Pull from remote |
+| `sync log` | Show recent commit log |
 
 ### Utilities
 
 | Command | Description |
 |---------|-------------|
-| `explain [topic]` | Self-documenting system descriptions |
+| `explain [topic]` | Explain da concepts |
+| `session stats` | Show usage statistics from each installed AI platform |
 | `--help` | Show help for any command |
 | `--version` | Show version |
 
@@ -280,7 +291,7 @@ da add ~/Github/myproject  # Re-link your projects
 ## Requirements
 
 - **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install-go.ps1` for the Go CLI, or the **TypeScript** port under `ports/typescript/` when you only need the Stage 1 subset documented there.
+- **Windows:** use `scripts/install-go.ps1` for the Go CLI.
 - **git** (for sync features)
 
 ## Configuration
@@ -393,7 +404,7 @@ Changes follow an **approval gradient**:
 
 ### Workflow State
 
-Based on analysis of real session data across Claude Code, Cursor, and Codex ([research](research/AUTONOMOUS_WORKFLOW_MANAGEMENT_RESEARCH.md)), dot-agents will manage six workflow concerns:
+Based on analysis of real session data across Claude Code, Cursor, and Codex, dot-agents will manage six workflow concerns:
 
 1. **Resume context** — collect active plan, last handoff, and likely next step
 2. **Plan & task state** — canonical plan artifacts with dependency-aware phases
@@ -404,7 +415,7 @@ Based on analysis of real session data across Claude Code, Cursor, and Codex ([r
 
 ### Multi-Agent Coordination
 
-Drawing from [supervisor patterns](research/openclaw-hermes-supervisor-pattern.md) and [swarm orchestration](research/codex-multi-agent-swarms-playbook.md), dot-agents will support:
+Drawing from supervisor and swarm-orchestration patterns, dot-agents will support:
 
 - **Context engineering**: Front-load subagents with structured context bundles so they don't waste tokens rediscovering state
 - **Structured coordination**: Intent marker protocols to prevent infinite loops and drift between cooperating agents
@@ -443,7 +454,7 @@ Yes! `da sync` helps you manage `~/.agents/` as a git repository. Clone it on an
 
 ## Contributing
 
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Contributions welcome! Please open an issue or pull request on GitHub.
 
 ## License
 

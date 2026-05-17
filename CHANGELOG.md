@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-17
+
+First Go-binary (`da`) release of the extracted surface; ships PR1–PR3a
+plus test-structure hygiene.
+
+### Added
+
+- **Go CLI foundation** (PR1): `internal/config`, JSON schemas, CI,
+  Homebrew tap, `da` binary entrypoint.
+- **Platform core** (PR2): resource model, shared target plan, and the
+  `internal/projectsync` extraction.
+- **New command surface** (PR3a): `review`, `mcp`, `settings`, `rules`,
+  `ux`, `session_stats`; `agents`/`hooks`/`sync`/`skills` extracted into
+  cohesive subpackages.
+
+### Changed
+
+- Binary renamed to `da`; numerous lifecycle commands (`add`, `doctor`,
+  `import`, `init`, `install`, `refresh`, `remove`, `status`) re-homed
+  on the Go surface.
+- Test layout normalized to source-mirroring files; iteration-numbered
+  grab-bag test files retired (no behavior change).
+
+### Fixed
+
+- Windows link model (junction + hardlink, no Developer Mode),
+  SIGKILL-safe promote journal, command-layer transactional-integrity
+  and platform sweep hardlink-cleanup hardening.
+
 ## [0.1.8] - 2026-01-11
 
 ### Added
