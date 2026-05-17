@@ -3,10 +3,12 @@ package projectsync_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
 
@@ -104,9 +106,7 @@ func TestPromoteResource_IdempotentOnExistingSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	repoLocal := filepath.Join(repoBucket, "alpha")
-	if err := os.Symlink(canonical, repoLocal); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, canonical, repoLocal)
 
 	if err := projectsync.PromoteResource("alpha", projectPath, widgetSpec(t)); err != nil {
 		t.Fatalf("expected idempotent success, got: %v", err)
@@ -194,9 +194,7 @@ func TestPromoteResource_ErrorMispointedSymlink(t *testing.T) {
 	if err := os.MkdirAll(wrong, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(wrong, filepath.Join(repoBucket, "alpha")); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, wrong, filepath.Join(repoBucket, "alpha"))
 
 	err := projectsync.PromoteResource("alpha", projectPath, widgetSpec(t))
 	if err == nil {
@@ -232,6 +230,9 @@ func TestPromoteResource_ErrorNoProjectName(t *testing.T) {
 }
 
 func TestCopyTree_CopiesFilesAndDirsSkipsSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("CopyTree skips symlinks via os.ModeSymlink; this fixture's managed link to a *file* is a Windows hard link with no reparse point and no mode bit, so it is indistinguishable from a.txt by the OS. Production promote sources are real trees with no internal hard links; the file symlink-skip contract is exercised on POSIX here, and the directory-junction skip path is covered by linktest.Link's junction fixture across internal/links and internal/linktest tests.")
+	}
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "out")
 
@@ -245,9 +246,7 @@ func TestCopyTree_CopiesFilesAndDirsSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(src, "nested", "skipme")
-	if err := os.Symlink(filepath.Join(src, "a.txt"), link); err != nil {
-		t.Fatal(err)
-	}
+	linktest.Link(t, filepath.Join(src, "a.txt"), link)
 
 	if err := projectsync.CopyTree(src, dst); err != nil {
 		t.Fatalf("CopyTree: %v", err)

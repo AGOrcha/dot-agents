@@ -1,0 +1,29 @@
+---
+description: Global rules for all projects
+globs:
+alwaysApply: true
+---
+
+# Global Agent Rules
+
+These rules apply to all projects managed by dot-agents.
+
+## General Guidelines
+
+- Follow existing code style and conventions in each project
+- Prefer editing existing files over creating new ones
+- Run tests before committing changes
+- Keep changes focused and minimal
+
+## Code Quality
+
+- Write clear, self-documenting code
+- Add comments only when the "why" isn't obvious
+- Handle errors appropriately
+- Avoid introducing security vulnerabilities
+
+## Git Practices
+
+- Write concise, descriptive commit messages
+- Never commit secrets, API keys, or credentials
+- Don't commit generated files that should be in .gitignore

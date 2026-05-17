@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 // stubPlatform implements Platform with fixed SharedTargetIntents for testing
@@ -330,12 +333,8 @@ func TestCollectAndExecuteSharedTargetPlanDedupesClaudeCursorAgents(t *testing.T
 	}
 
 	target := filepath.Join(repo, ".claude", "agents", "reviewer")
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat(%s): %v", target, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
+	if !links.IsManagedLink(target, agentDir) {
+		t.Fatalf("expected managed link at %s -> %s", target, agentDir)
 	}
 }
 
@@ -473,6 +472,194 @@ func TestRemoveSharedTargetPlanRemovesCodexAgentToml(t *testing.T) {
 	}
 }
 
+// A failed rendered-file removal must NOT be swallowed: da remove relies on
+// this error to avoid reporting a clean unlink while a managed output is
+// still live on disk. os.Remove of a non-empty directory fails with a
+// non-IsNotExist error, exercising the propagation branch.
+func TestRemoveManagedIntentTarget_RenderedRemoveErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "out.toml")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "child"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+		TargetPath:   "out.toml",
+	}
+	err := removeManagedIntentTarget(intent, tmp, t.TempDir())
+	if err == nil {
+		t.Fatal("non-IsNotExist remove failure must propagate, got nil")
+	}
+	if !strings.Contains(err.Error(), "remove rendered file") {
+		t.Fatalf("error must identify the failing op, got %v", err)
+	}
+}
+
+// A missing rendered target is a successful no-op (IsNotExist swallowed).
+func TestRemoveManagedIntentTarget_MissingRenderedTargetIsNoop(t *testing.T) {
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+		TargetPath:   "does-not-exist.toml",
+	}
+	if err := removeManagedIntentTarget(intent, t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("missing target must be a no-op, got %v", err)
+	}
+}
+
+// RemoveSharedTargets must aggregate per-resource failures (errors.Join)
+// rather than short-circuiting, so one stuck target cannot mask the rest.
+func TestRemoveSharedTargets_AggregatesFailures(t *testing.T) {
+	tmp := t.TempDir()
+	mkBlockedToml := func(name string) string {
+		d := filepath.Join(tmp, name)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "child"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: ResourceIntent{
+			IntentID:     "first",
+			Shape:        ResourceShapeRenderSingle,
+			Transport:    ResourceTransportWrite,
+			Materializer: codexAgentTomlMaterializer,
+			TargetPath:   mkBlockedToml("a.toml"),
+		}},
+		{Intent: ResourceIntent{
+			IntentID:     "second",
+			Shape:        ResourceShapeRenderSingle,
+			Transport:    ResourceTransportWrite,
+			Materializer: codexAgentTomlMaterializer,
+			TargetPath:   mkBlockedToml("b.toml"),
+		}},
+	}}
+	err := plan.RemoveSharedTargets(tmp, t.TempDir())
+	if err == nil {
+		t.Fatal("aggregated removal failures must surface, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "first") || !strings.Contains(msg, "second") {
+		t.Fatalf("both failures must be reported (errors.Join), got %v", err)
+	}
+}
+
+// A DirectFile shared target materialized as a hard link to the canonical
+// source (the Windows file-link model) must be removed. The symlink/junction
+// removal is a no-op for a hard link, so without the hard-link branch da
+// remove would report success while .github/agents/*.agent.md stays live.
+func TestRemoveManagedIntentTarget_DirectFileHardLinkRemoved(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	srcDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "AGENT.md")
+	if err := os.WriteFile(src, []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(repo, ".github", "agents", "x.agent.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Materialize the file-link model: a hard link, not a symlink.
+	if err := os.Link(src, target); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:   "agents.file.proj.x",
+		TargetPath: filepath.Join(".github", "agents", "x.agent.md"),
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:     ResourceShapeDirectFile,
+		Transport: ResourceTransportSymlink,
+	}
+	if err := removeManagedIntentTarget(intent, repo, agentsHome); err != nil {
+		t.Fatalf("hard-linked DirectFile target must be removed cleanly, got %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("managed hard link must be gone, lstat err=%v", err)
+	}
+}
+
+// A removal failure on the hard-link path must surface, not be swallowed
+// (otherwise da remove reports success while the managed file is still live).
+func TestRemoveManagedIntentTarget_DirectFileHardLinkRemovalFailureSurfaces(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Fault injection here relies on a read-only parent directory
+		// denying child deletion. On Windows os.Chmod only toggles the
+		// read-only attribute and does NOT prevent deleting children, so
+		// RemoveAll would succeed and the failure path cannot be
+		// exercised. The error-propagation contract is covered on POSIX.
+		t.Skip("read-only-dir fault injection does not deny deletion on Windows")
+	}
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	srcDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "AGENT.md")
+	if err := os.WriteFile(src, []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(repo, ".github", "agents")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(targetDir, "x.agent.md")
+	if err := os.Link(src, target); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+	// Make the parent dir read-only so the hard-link removal fails.
+	if err := os.Chmod(targetDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(targetDir, 0755) })
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to enforce directory write perms")
+	}
+
+	intent := ResourceIntent{
+		IntentID:   "agents.file.proj.x",
+		TargetPath: filepath.Join(".github", "agents", "x.agent.md"),
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:     ResourceShapeDirectFile,
+		Transport: ResourceTransportSymlink,
+	}
+	err := removeManagedIntentTarget(intent, repo, agentsHome)
+	if err == nil {
+		t.Fatal("hard-link removal failure must surface, got nil")
+	}
+	if !strings.Contains(err.Error(), "remove managed hard link") {
+		t.Fatalf("error must identify the failing op, got %v", err)
+	}
+}
+
 func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
@@ -519,6 +706,69 @@ func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.
 	}
 	if err := plan.Execute(repo, agentsHome); err == nil {
 		t.Fatal("expected error replacing unmanaged file outside allowlist")
+	}
+}
+
+// TestEnsureFileSymlinkIntentPreservesUserFileAtAllowlistedTarget is the
+// regression for task item 2: a user-authored regular file at an ALLOWLISTED
+// DirectFile target (.opencode/agent/*.md) must NOT be silently deleted by
+// prepareIntentTargetForReplacement. The file must survive (links.Symlink
+// refuses an unmanaged file → execute errors), proving no silent data loss.
+func TestEnsureFileSymlinkIntentPreservesUserFileAtAllowlistedTarget(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// User-authored file at an allowlisted DirectFile target.
+	userFile := filepath.Join(repo, ".opencode", "agent", "x.md")
+	if err := os.MkdirAll(filepath.Dir(userFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const userContent = "hand-written by the user"
+	if err := os.WriteFile(userFile, []byte(userContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:    "agents.file.proj.x.opencode",
+		Project:     "proj",
+		Bucket:      "agents",
+		LogicalName: "x",
+		TargetPath:  ".opencode/agent/x.md",
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:         ResourceShapeDirectFile,
+		Transport:     ResourceTransportSymlink,
+		Materializer:  "shared-agent-file-symlink",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Fatal("expected refusal: a user file at an allowlisted DirectFile target must not be replaced")
+	}
+	got, err := os.ReadFile(userFile)
+	if err != nil {
+		t.Fatalf("user file must be preserved, got: %v", err)
+	}
+	if string(got) != userContent {
+		t.Errorf("user file content mutated: got %q want %q", got, userContent)
 	}
 }
 
@@ -605,12 +855,8 @@ func TestExecuteDirSymlinkIntentReplacesAllowlistedDirectoryWhenImportedMarkerPr
 	if err := executeSkillPlan(t, repo, agentsHome); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s after imported-dir replacement", target)
+	if !links.IsManagedLink(target, filepath.Join(agentsHome, "skills", "proj", "review")) {
+		t.Fatalf("expected managed link at %s after imported-dir replacement", target)
 	}
 }
 
@@ -627,14 +873,10 @@ func TestCollectAndExecuteSharedTargetPlanDedupesCrossPlatform(t *testing.T) {
 		t.Fatalf("CollectAndExecuteSharedTargetPlan: %v", err)
 	}
 
-	// All three platforms target .agents/skills/review; it should be a single symlink
+	// All three platforms target .agents/skills/review; it should be a single managed link
 	target := filepath.Join(repo, ".agents", "skills", "review")
-	info, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("Lstat(%s): %v", target, err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected symlink at %s, got mode %v", target, info.Mode())
+	if !links.IsManagedLink(target, filepath.Join(agentsHome, "skills", "proj", "review")) {
+		t.Fatalf("expected managed link at %s", target)
 	}
 }
 

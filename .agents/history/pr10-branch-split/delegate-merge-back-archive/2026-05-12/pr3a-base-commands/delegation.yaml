@@ -1,0 +1,28 @@
+schema_version: 1
+id: del-pr3a-base-commands-1778613728
+parent_plan_id: pr10-branch-split
+parent_task_id: pr3a-base-commands
+title: 'PR 3a: Base subpackage extraction + new command surface'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - commands/root_test.go
+    - commands/sync/init_test.go
+    - commands/sync/commit_test.go
+    - commands/sync/push_test.go
+    - commands/sync/helpers_test.go
+    - commands/skills_test.go
+    - commands/agents/cmd_test.go
+    - commands/hooks/cmd_test.go
+success_criteria: |-
+    PR#15, branch pr3a/base-commands → master.
+    Extracts agents/, hooks/, sync/, skills/ subpackages.
+    New root commands: review, mcp, settings, rules, ux, session_stats.
+    Modified roots: add, doctor, import, init, install, refresh, remove, status.
+    SonarCloud fixes applied. CI + test coverage commits pushed.
+    SonarCloud new_coverage: 23.2% (target 80%).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: pr3a-coverage-worker
+status: completed
+created_at: "2026-05-12T19:22:08Z"
+updated_at: "2026-05-12T19:40:57Z"

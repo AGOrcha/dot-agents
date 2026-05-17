@@ -1,7 +1,9 @@
 package platform
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -206,10 +208,16 @@ func prepareIntentTargetForReplacement(target string, intent ResourceIntent) err
 		case ResourceReplaceNever:
 			return fmt.Errorf("refusing to replace existing file %s", target)
 		case ResourceReplaceAllowlistedImportedDirOnly:
-			if !isAllowlistedSharedMirrorTarget(intent.TargetPath) {
-				return fmt.Errorf("refusing to replace unmanaged file %s", target)
-			}
-			return os.Remove(target)
+			// This policy authorizes replacing only a proven imported/managed
+			// DIRECTORY (handled in the directory branch below). A regular
+			// file at an allowlisted DirectFile target (OpenCode
+			// .opencode/agent/*.md, Copilot .github/agents/*.agent.md) must
+			// NOT be pre-removed here: doing so bypassed the ownership
+			// contract and silently deleted a user-authored file. Leave it in
+			// place and let links.Symlink apply the contract — a managed
+			// symlink is re-pointed idempotently, a genuine user file is
+			// refused (ErrUnmanagedTarget) and preserved.
+			return nil
 		default:
 			return os.Remove(target)
 		}
@@ -260,7 +268,11 @@ func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]Res
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedSkillMirrorIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedSkillMirrorIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
@@ -280,11 +292,20 @@ type sharedMirrorIntentSpec struct {
 // spec.ManifestName, projecting them into targetRoot via symlink.
 // All three per-bucket helpers (skill / plugin / agent) delegate
 // here.
-func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) []ResourceIntent {
+//
+// A missing canonical bucket dir (ENOENT) is treated as an empty
+// resource set — projects without any skills/plugins/agents yet are
+// legitimate and should yield no intents, not a hard failure. Other
+// errors (permission denied, IO) propagate so callers can surface
+// them instead of silently producing an empty plan.
+func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, project, spec.ManifestName)
 	if err != nil {
-		return nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical %s for project %q under %s: %w", spec.Bucket, project, targetRoot, err)
 	}
 
 	intents := make([]ResourceIntent, 0, len(entries))
@@ -312,10 +333,10 @@ func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirr
 			MarkerFiles:   []string{spec.ManifestName},
 		})
 	}
-	return intents
+	return intents, nil
 }
 
-func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "skills",
 		ManifestName: skillManifestName,
@@ -338,12 +359,16 @@ func BuildSharedPluginBundleIntents(project string, targetRoots ...string) ([]Re
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedPluginBundleIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedPluginBundleIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
 
-func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedPluginBundleIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "plugins",
 		ManifestName: PluginManifestName,
@@ -367,18 +392,30 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 		if root == "." {
 			continue
 		}
-		intents = append(intents, buildSharedAgentMirrorIntentsForRoot(project, root)...)
+		rootIntents, err := buildSharedAgentMirrorIntentsForRoot(project, root)
+		if err != nil {
+			return nil, err
+		}
+		intents = append(intents, rootIntents...)
 	}
 	return intents, nil
 }
 
 // BuildSharedAgentFileSymlinkIntents builds symlink intents from each canonical
 // AGENT.md file to a repo-local file path (OpenCode `.md`, Copilot `.agent.md`).
+//
+// A missing canonical agents bucket (ENOENT) is treated as an empty resource
+// set — projects without any agents yet are legitimate and should yield no
+// intents, not a hard failure. Other errors (permission denied, IO) propagate
+// so callers can surface them instead of silently producing an empty plan.
 func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical agents for project %q under %s: %w", project, targetRoot, err)
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {
@@ -409,11 +446,19 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 
 // BuildSharedCodexAgentTomlIntents builds render intents for `.codex/agents/*.toml`
 // from canonical project agent directories.
+//
+// A missing canonical agents bucket (ENOENT) is treated as an empty resource
+// set — projects without any agents yet are legitimate and should yield no
+// intents, not a hard failure. Other errors (permission denied, IO) propagate
+// so callers can surface them instead of silently producing an empty plan.
 func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing canonical agents for project %q (codex toml intents): %w", project, err)
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {
@@ -442,7 +487,7 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 	return intents, nil
 }
 
-func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) []ResourceIntent {
+func buildSharedAgentMirrorIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
 	return buildSharedMirrorIntentsForRoot(project, targetRoot, sharedMirrorIntentSpec{
 		Bucket:       "agents",
 		ManifestName: agentManifestName,
@@ -516,25 +561,56 @@ func RemoveSharedTargetPlan(project, repoPath string, platforms []Platform) erro
 }
 
 // RemoveSharedTargets deletes managed outputs for each resource in the plan.
+// Per-resource removal failures are aggregated (errors.Join) rather than
+// short-circuiting so that one stuck target cannot hide the removal status of
+// the rest, and so the caller (da remove) never reports a clean unlink while a
+// managed output is still live on disk.
 func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
+	var errs []error
 	for _, res := range p.Resources {
 		if err := removeManagedIntentTarget(res.Intent, repoPath, agentsHome); err != nil {
-			return fmt.Errorf("%s: %w", res.Intent.IntentID, err)
+			errs = append(errs, fmt.Errorf("%s: %w", res.Intent.IntentID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// removeDirectSymlinkTarget removes the managed output for a DirectDir or
+// DirectFile + symlink-transport intent. A missing entry is a successful
+// no-op; any other failure means a managed link is still live and MUST be
+// surfaced (aggregated, not short-circuited). DirectFile intents also
+// materialize as hard links on Windows (links.createLink has no reparse
+// point for files), so the symlink/junction removal is a no-op there and
+// the canonical-source hard link must be removed too or the managed file
+// is orphaned while remove reports success. Dir intents are always real
+// symlinks/junctions, so the hard-link path only applies to the file shape.
+func removeDirectSymlinkTarget(intent ResourceIntent, target, agentsHome string) error {
+	var errs []error
+	if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("remove managed symlink %s: %w", target, err))
+	}
+	if intent.Shape == ResourceShapeDirectFile {
+		src, err := canonicalIntentSourcePath(intent, agentsHome)
+		if err != nil {
+			errs = append(errs, err)
+		} else if _, err := links.RemoveIfHardlinkedToAny(target, []string{src}); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove managed hard link %s: %w", target, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome string) error {
 	target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 	switch {
 	case (intent.Shape == ResourceShapeDirectDir || intent.Shape == ResourceShapeDirectFile) && intent.Transport == ResourceTransportSymlink:
-		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
-		return nil
+		return removeDirectSymlinkTarget(intent, target, agentsHome)
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
 		switch intent.Materializer {
 		case codexAgentTomlMaterializer:
-			_ = os.Remove(target)
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove rendered file %s: %w", target, err)
+			}
 			return nil
 		default:
 			return fmt.Errorf("unsupported materializer %q for remove", intent.Materializer)
@@ -571,16 +647,22 @@ func formatSharedTargetPlanForDryRun(plan ResourcePlan, repoPath string) []strin
 			src = "(unknown source)"
 		}
 		dest := resolveIntentTargetPath(intent.TargetPath, repoPath)
+		// Normalize to forward slashes so dry-run output is byte-identical
+		// across OSes (Windows filepath.Join yields backslashes, which would
+		// otherwise make this preview non-reproducible and break exact-line
+		// assertions / cross-platform dedup display).
+		srcDisp := filepath.ToSlash(config.DisplayPath(src))
+		destDisp := filepath.ToSlash(config.DisplayPath(dest))
 		var line string
 		switch {
 		case intent.Shape == ResourceShapeDirectDir && intent.Transport == ResourceTransportSymlink:
-			line = fmt.Sprintf("shared target: symlink %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+			line = fmt.Sprintf("shared target: symlink %s -> %s", destDisp, srcDisp)
 		case intent.Shape == ResourceShapeDirectFile && intent.Transport == ResourceTransportSymlink:
-			line = fmt.Sprintf("shared target: symlink file %s -> %s", config.DisplayPath(dest), config.DisplayPath(src))
+			line = fmt.Sprintf("shared target: symlink file %s -> %s", destDisp, srcDisp)
 		case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
-			line = fmt.Sprintf("shared target: write %s <- %s (%s)", config.DisplayPath(dest), config.DisplayPath(src), intent.Materializer)
+			line = fmt.Sprintf("shared target: write %s <- %s (%s)", destDisp, srcDisp, intent.Materializer)
 		default:
-			line = fmt.Sprintf("shared target: preview %s/%s %s", intent.Shape, intent.Transport, config.DisplayPath(dest))
+			line = fmt.Sprintf("shared target: preview %s/%s %s", intent.Shape, intent.Transport, destDisp)
 		}
 		if n := len(res.Duplicates); n > 0 {
 			line += fmt.Sprintf(" (%d duplicate intent(s) merged)", n)

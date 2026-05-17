@@ -1,12 +1,15 @@
 package projectsync
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
@@ -35,6 +38,13 @@ type PromoteSpec struct {
 	MirrorRefresh func(projectName, projectPath string) error
 }
 
+// Test seams: replaced in tests to drive the symlink/rollback failure paths
+// in materializePromoteSource. Production code never overrides these.
+var (
+	osSymlink = os.Symlink
+	osRename  = os.Rename
+)
+
 // PromoteResource promotes a repo-local resource (.agents/<bucket>/<name>/)
 // into the shared agents store at ~/.agents/<bucket>/<project>/<name>/. The
 // canonical location becomes the real directory and the repo-local path is
@@ -57,13 +67,40 @@ func PromoteResource(name, projectPath string, spec PromoteSpec) error {
 		return err
 	}
 
-	if err := materializePromoteSource(sourcePath, canonicalPath, sourceInfo, name, spec); err != nil {
+	journalPath, jerr := BeginPromoteJournal(config.AgentsHome(), PromoteJournalEntry{
+		Singular:      spec.Singular,
+		Bucket:        spec.Bucket,
+		Name:          name,
+		SourcePath:    sourcePath,
+		CanonicalPath: canonicalPath,
+	})
+	if jerr != nil {
+		// Journal failures are non-fatal: a missing journal degrades recovery
+		// quality but does not block a working promote. We surface a warning
+		// via ui.Bullet and continue.
+		ui.Bullet("warn", fmt.Sprintf("could not open promote journal: %v", jerr))
+		journalPath = ""
+	}
+
+	if err := materializePromoteSource(sourcePath, canonicalPath, sourceInfo, name, spec, journalPath); err != nil {
+		if journalPath != "" {
+			_ = AdvancePromoteJournal(journalPath, PromoteStateRolledBack)
+			_ = RemovePromoteJournal(journalPath)
+		}
 		return err
 	}
 
 	count := spec.RegisterInRC(rc, name)
 	if err := rc.Save(projectPath); err != nil {
+		if journalPath != "" {
+			_ = AdvancePromoteJournal(journalPath, PromoteStateRolledBack)
+			_ = RemovePromoteJournal(journalPath)
+		}
 		return fmt.Errorf("updating .agentsrc.json for %s %q: %w", spec.Singular, name, err)
+	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateRCSaved)
+		_ = RemovePromoteJournal(journalPath)
 	}
 
 	if spec.MirrorRefresh != nil {
@@ -104,8 +141,20 @@ func preparePromoteDest(name, projectName string, spec PromoteSpec) (string, err
 // materializePromoteSource handles the symlink-vs-real-dir branching for the
 // repo-local source path: an existing managed symlink is validated, while a
 // real directory is copied to canonical and replaced with a symlink.
-func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec) error {
-	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+//
+// journalPath, when non-empty, is advanced after each destructive transition
+// so a SIGKILL leaves a recoverable breadcrumb under ~/.agents/.promote-journal/.
+// Journal advance failures are non-fatal — they are silently ignored because a
+// missing journal only degrades downstream recovery quality, never the promote
+// itself.
+func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.FileInfo, name string, spec PromoteSpec, journalPath string) error {
+	// "Already a managed link" is OS-specific: a POSIX symlink, or on Windows
+	// a directory junction / hard link (neither of which sets os.ModeSymlink
+	// on a hard link, and a junction is only a symlink to recent Go). Route
+	// the decision through the links abstraction so an already-promoted
+	// repo-local link is recognized as idempotent on every OS instead of
+	// being mistaken for a real foreign directory.
+	if isManagedSource(sourcePath, sourceInfo) {
 		return validatePromoteSymlink(sourcePath, canonicalPath, name, spec)
 	}
 	if _, err := os.Stat(filepath.Join(sourcePath, spec.ManifestName)); err != nil {
@@ -117,26 +166,105 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 	if err := CopyTree(sourcePath, canonicalPath); err != nil {
 		return fmt.Errorf("copying %s %q to canonical path: %w", spec.Singular, name, err)
 	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateCanonicalCopied)
+	}
 	if err := os.RemoveAll(sourcePath); err != nil {
 		return fmt.Errorf("removing repo-local %s directory for %q: %w", spec.Singular, name, err)
 	}
-	if err := os.Symlink(canonicalPath, sourcePath); err != nil {
-		return fmt.Errorf("creating repo-local managed symlink for %s %q: %w", spec.Singular, name, err)
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateSourceRemoved)
+	}
+	if err := symlinkOrRollback(sourcePath, canonicalPath, name, spec); err != nil {
+		return err
+	}
+	if journalPath != "" {
+		_ = AdvancePromoteJournal(journalPath, PromoteStateSymlinked)
 	}
 	return nil
 }
 
-// validatePromoteSymlink confirms that an existing repo-local symlink points
-// at the canonical path; mismatches and read errors surface as fatal errors.
-func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
-	existing, err := os.Readlink(sourcePath)
-	if err != nil {
-		return fmt.Errorf("reading existing symlink for %s %q: %w", spec.Singular, name, err)
+// symlinkOrRollback creates the managed symlink at sourcePath pointing at
+// canonicalPath. On symlink failure it restores the repo-local directory from
+// the canonical copy so the source path is never left missing, then returns a
+// fully-contextualized error. The error wrapping (every %w / %v) is preserved
+// verbatim from the prior inline implementation: a security remediation relies
+// on these exact chains, do not collapse them.
+func symlinkOrRollback(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
+	err := osSymlink(canonicalPath, sourcePath)
+	if err == nil {
+		return nil
 	}
-	if existing != canonicalPath {
+	// Rollback: restore the repo-local directory from the canonical copy so
+	// we never leave the source path missing if symlink creation fails.
+	rerr := osRename(canonicalPath, sourcePath)
+	if rerr == nil {
+		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q: %w", spec.Singular, name, err)
+	}
+	// Cross-filesystem rename fails with EXDEV (e.g. NFS home + local
+	// repo, Docker bind-mount over tmpfs). Fall back to CopyTree + remove
+	// so rollback still succeeds across mount boundaries.
+	if !errors.Is(rerr, syscall.EXDEV) {
+		return fmt.Errorf("creating managed symlink failed and rollback also failed; canonical=%s, source=%s now missing: symlink=%w; rollback=%w",
+			canonicalPath, sourcePath, err, rerr)
+	}
+	return crossFSRollback(sourcePath, canonicalPath, name, spec, err, rerr)
+}
+
+// crossFSRollback performs the EXDEV rollback path: copy canonical back to the
+// repo-local source, then remove the canonical copy. Error chains preserved
+// verbatim.
+func crossFSRollback(sourcePath, canonicalPath, name string, spec PromoteSpec, err, rerr error) error {
+	if cerr := CopyTree(canonicalPath, sourcePath); cerr != nil {
+		return fmt.Errorf("creating managed symlink failed and rollback failed (canonical=%s, source=%s now missing): symlink=%w; rename=%w; copy=%w",
+			canonicalPath, sourcePath, err, rerr, cerr)
+	}
+	if rmerr := os.RemoveAll(canonicalPath); rmerr != nil {
+		// Source restored but canonical still present — partial recovery.
+		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q but canonical still present at %s (manual cleanup needed): symlink=%w; canonical-remove=%w",
+			spec.Singular, name, canonicalPath, err, rmerr)
+	}
+	return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q (via cross-fs copy): %w", spec.Singular, name, err)
+}
+
+// isManagedSource reports whether the repo-local source path is an
+// already-materialized managed link (POSIX symlink, or Windows junction /
+// hard link) rather than a real directory tree awaiting promotion. The
+// POSIX-symlink fast path preserves the prior behavior exactly; the
+// resolvable-target / hard-link branches add Windows correctness, where a
+// junction or hard link does not set os.ModeSymlink.
+func isManagedSource(sourcePath string, sourceInfo os.FileInfo) bool {
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	if _, ok := links.ManagedLinkTarget(sourcePath); ok {
+		return true
+	}
+	// Hard link (no reparse point): identity is a shared inode with the
+	// canonical store. Without a known target here we treat any resolvable
+	// reparse point as managed (above); a plain real dir falls through to
+	// the copy path, and validatePromoteSymlink does the canonical compare.
+	return false
+}
+
+// validatePromoteSymlink confirms that an existing repo-local managed link
+// references the canonical path; a mispointed link and unreadable links
+// surface as fatal errors. Detection is OS-aware: a POSIX symlink or Windows
+// junction resolves via links.ManagedLinkTarget, while a Windows hard link
+// (no reparse point) is recognized by links.IsManagedLink against the known
+// canonical target.
+func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
+	if links.IsManagedLink(sourcePath, canonicalPath) {
+		return nil // already promoted → idempotent success
+	}
+	if existing, ok := links.ManagedLinkTarget(sourcePath); ok {
 		return fmt.Errorf("%s %q is already a symlink but points to %q, not the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, existing, canonicalPath)
 	}
-	return nil
+	// Reached only for a managed entry with no resolvable target that is not
+	// the canonical file: a dangling link, or (Windows) a hard link to some
+	// other file. There is no target to name, so report the mispointing
+	// generically. Preserves the prior fatal-on-mismatch contract.
+	return fmt.Errorf("%s %q is already a symlink but does not point to the canonical path %q; fix the link or remove it before promoting", spec.Singular, name, canonicalPath)
 }
 
 // clearExistingCanonical removes a stale symlink or, when Force is set, a real
@@ -147,8 +275,13 @@ func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error 
 	if err != nil {
 		return nil
 	}
+	// A stale managed link occupying the canonical slot is removable on every
+	// OS. ModeSymlink covers POSIX symlinks; ManagedLinkTarget additionally
+	// recognizes a Windows directory junction (which carries no ModeSymlink
+	// bit on older Go and would otherwise be misread as a real directory).
+	_, isResolvableLink := links.ManagedLinkTarget(canonicalPath)
 	switch {
-	case fi.Mode()&os.ModeSymlink != 0:
+	case fi.Mode()&os.ModeSymlink != 0 || isResolvableLink:
 		if err := os.Remove(canonicalPath); err != nil {
 			return fmt.Errorf("removing stale canonical symlink for %s %q: %w", spec.Singular, name, err)
 		}
@@ -168,7 +301,12 @@ func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error 
 
 // CopyTree recursively copies the directory tree at src to dst, preserving
 // file modes. Symlinks in the source tree are skipped — the canonical store
-// holds only real files.
+// holds only real files. On Windows a directory junction also carries
+// os.ModeSymlink (Go 1.23+) and is skipped by the same check; a file hard
+// link carries no reparse point and is indistinguishable from a real file
+// by the OS, but production promote sources are real skill/agent trees with
+// no internal hard links, so the symlink mode check is the complete and
+// correct production contract on every OS.
 func CopyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

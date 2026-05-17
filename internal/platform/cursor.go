@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -271,7 +272,7 @@ func (c *cursor) CreateLinks(project, repoPath string) error {
 
 func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+	if err := osMkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 	desired := map[string]string{}
@@ -281,7 +282,16 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	for target, src := range desired {
-		links.Hardlink(src, filepath.Join(rulesDir, target)) // best-effort
+		// Managed-replace: a dot-agents .mdc rule hard link this platform owns
+		// at a fixed path. On a repeat refresh the prior managed hard link is
+		// present and (being a regular file with no reparse point) is not an
+		// ownedManagedLink, so plain Hardlink would refuse. Route through the
+		// Replacing variant with the sidecar backup so a stale managed link is
+		// harmlessly backed up + relinked (idempotent) and a genuine user file
+		// is preserved as <dst>.dot-agents-backup, never silently destroyed.
+		if err := links.HardlinkReplacing(src, filepath.Join(rulesDir, target), backupSidecar); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -323,7 +333,7 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 		if _, ok := desired[name]; ok {
 			continue
 		}
-		if err := os.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -331,23 +341,26 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 }
 
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
 		dst := filepath.Join(repoPath, cursorDir, "settings.json")
-		links.Hardlink(src, dst) // best-effort
+		// Managed-replace at a fixed owned path (.cursor/settings.json); see
+		// createRuleLinks for the Replacing-variant rationale.
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }
 
 func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
 		dst := filepath.Join(repoPath, cursorDir, "mcp.json")
-		links.Hardlink(src, dst) // best-effort
+		// Managed-replace at a fixed owned path (.cursor/mcp.json).
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }
@@ -355,7 +368,8 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "settings", project, "cursorignore"); src != "" {
 		dst := filepath.Join(repoPath, ".cursorignore")
-		links.Hardlink(src, dst) // best-effort
+		// Managed-replace at a fixed owned path (.cursorignore).
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }
@@ -373,7 +387,7 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
@@ -408,60 +422,65 @@ func (c *cursor) createAgentsLinks(_, _, _ string) error {
 
 func (c *cursor) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
-	c.removeRuleLinks(project, repoPath, agentsHome)
-	c.removeHooksLink(project, repoPath, agentsHome)
-	c.removeAgentLinks(repoPath, agentsHome)
-
-	return nil
+	return errors.Join(
+		c.removeRuleLinks(project, repoPath, agentsHome),
+		c.removeHooksLink(project, repoPath, agentsHome),
+		c.removeAgentLinks(repoPath, agentsHome),
+	)
 }
 
-func (c *cursor) removeRuleLinks(project, repoPath, agentsHome string) {
+func (c *cursor) removeRuleLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
 	entries, err := os.ReadDir(rulesDir)
 	if err != nil {
-		return
+		return nil
 	}
+	var errs []error
 	for _, entry := range entries {
-		c.removeRuleEntry(entry, rulesDir, project, agentsHome)
+		errs = append(errs, c.removeRuleEntry(entry, rulesDir, project, agentsHome))
 	}
+	return errors.Join(errs...)
 }
 
-func (c *cursor) removeRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome string) {
+func (c *cursor) removeRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome string) error {
 	if entry.IsDir() {
-		return
+		return nil
 	}
 	name := entry.Name()
 	filePath := filepath.Join(rulesDir, name)
 
 	switch {
 	case strings.HasPrefix(name, globalRulesPrefix):
-		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, "global", strings.TrimPrefix(name, globalRulesPrefix)))
+		return removeHardlinkedManaged(filePath, cursorRuleSources(agentsHome, "global", strings.TrimPrefix(name, globalRulesPrefix)))
 	case strings.HasPrefix(name, project+"--"):
-		removeHardlinkIfLinkedToAny(filePath, cursorRuleSources(agentsHome, project, strings.TrimPrefix(name, project+"--")))
+		return removeHardlinkedManaged(filePath, cursorRuleSources(agentsHome, project, strings.TrimPrefix(name, project+"--")))
 	}
+	return nil
 }
 
-func (c *cursor) removeHooksLink(project, repoPath, agentsHome string) {
+func (c *cursor) removeHooksLink(project, repoPath, agentsHome string) error {
 	hooksFilePath := filepath.Join(repoPath, cursorDir, cursorHooksFile)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
 		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
 	}
-	removeHardlinkIfLinkedToAny(hooksFilePath, []string{
+	return removeHardlinkedManaged(hooksFilePath, []string{
 		filepath.Join(agentsHome, "hooks", project, cursorJSON),
 		filepath.Join(agentsHome, "hooks", "global", cursorJSON),
 	})
 }
 
-func (c *cursor) removeAgentLinks(repoPath, agentsHome string) {
+func (c *cursor) removeAgentLinks(repoPath, agentsHome string) error {
 	agentsTarget := filepath.Join(repoPath, cursorDir, "agents")
 	entries, err := os.ReadDir(agentsTarget)
 	if err != nil {
-		return
+		return nil
 	}
+	var errs []error
 	for _, entry := range entries {
-		links.RemoveIfSymlinkUnder(filepath.Join(agentsTarget, entry.Name()), agentsHome)
+		errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(agentsTarget, entry.Name()), agentsHome))
 	}
+	return errors.Join(errs...)
 }
 
 // toMDC converts .md extension to .mdc; leaves .mdc unchanged.
@@ -481,16 +500,6 @@ func cursorRuleSources(agentsHome, scope, name string) []string {
 		filepath.Join(agentsHome, "rules", scope, name),
 		filepath.Join(agentsHome, "rules", scope, strings.TrimSuffix(name, ".mdc")+".md"),
 	}
-}
-
-func removeHardlinkIfLinkedToAny(path string, sources []string) bool {
-	for _, src := range sources {
-		if linked, _ := links.AreHardlinked(path, src); linked {
-			_ = os.Remove(path)
-			return true
-		}
-	}
-	return false
 }
 
 func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {

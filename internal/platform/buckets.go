@@ -48,14 +48,19 @@ func CanonicalBucketScopeRoot(agentsHome string, bucket CanonicalBucket, scope s
 	return filepath.Join(agentsHome, string(bucket), scope)
 }
 
+// CanonicalBucketPath returns a slash-normalized canonical registry key
+// (not a filesystem path). Keys are stored and compared in POSIX form on
+// every OS, so the join is forced to forward slashes.
 func CanonicalBucketPath(bucket CanonicalBucket, parts ...string) string {
 	elems := append([]string{string(bucket)}, parts...)
-	return filepath.Join(elems...)
+	return filepath.ToSlash(filepath.Join(elems...))
 }
 
+// CanonicalBucketScopePath returns a slash-normalized canonical registry key
+// (not a filesystem path). See CanonicalBucketPath.
 func CanonicalBucketScopePath(bucket CanonicalBucket, scope string, parts ...string) string {
 	elems := append([]string{string(bucket), scope}, parts...)
-	return filepath.Join(elems...)
+	return filepath.ToSlash(filepath.Join(elems...))
 }
 
 func ListScopedResourceDirsForBucket(agentsHome string, bucket CanonicalBucket, scope, marker string) ([]resourceDir, error) {

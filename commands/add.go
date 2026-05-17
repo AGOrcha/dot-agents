@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
@@ -126,9 +128,62 @@ func scanExistingAIConfigs(projectPath string) []string {
 	return results
 }
 
+func isManagedCursorRuleRel(project, rel string) bool {
+	if !strings.HasPrefix(rel, relCursorRulesDir) {
+		return false
+	}
+	name := filepath.Base(rel)
+	return strings.HasPrefix(name, "global--") || strings.HasPrefix(name, project+"--")
+}
+
+func isManagedProjectOutput(project, projectPath, filePath, agentsHome string) bool {
+	if isManagedSymlink(filePath, agentsHome) {
+		return true
+	}
+
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+
+	// Managed Cursor rule names live in a reserved namespace and should never
+	// be re-imported or backed up as user-authored files.
+	if isManagedCursorRuleRel(project, rel) {
+		return true
+	}
+
+	destRel := mapResourceRelToDest(project, rel)
+	if destRel == "" {
+		return false
+	}
+	linked, err := links.AreHardlinked(filePath, filepath.Join(agentsHome, destRel))
+	return err == nil && linked
+}
+
+// isManagedHardlinkToCanonicalSource reports whether filePath is hard linked
+// to the canonical source under agentsHome that this candidate's repo-relative
+// path maps to for project. This is the target-identity proof
+// backupExistingConfigsList needs before dropping a multi-link file without a
+// mirror backup: a bare nlink>1 only means "shares an inode with something",
+// not "managed by da".
+func isManagedHardlinkToCanonicalSource(project, projectPath, filePath, agentsHome string) bool {
+	rel, err := filepath.Rel(projectPath, filePath)
+	if err != nil {
+		return false
+	}
+	destRel := mapResourceRelToDest(project, filepath.ToSlash(rel))
+	if destRel == "" {
+		return false
+	}
+	canonical := filepath.Join(agentsHome, destRel)
+	linked, err := links.AreHardlinked(filePath, canonical)
+	return err == nil && linked
+}
+
 // checkExistingConfigFiles returns root-level AI config files/entries that dot-agents would replace.
 // Excludes files already managed by dot-agents and backup artifacts.
-func checkExistingConfigFiles(projectPath, agentsHome string) []string {
+func checkExistingConfigFiles(project, projectPath, agentsHome string) []string {
 	candidates := []string{
 		filepath.Join(projectPath, ".mcp.json"),
 		filepath.Join(projectPath, "AGENTS.md"),
@@ -141,15 +196,14 @@ func checkExistingConfigFiles(projectPath, agentsHome string) []string {
 		if isBackupArtifact(filepath.Base(f)) {
 			continue
 		}
-		info, err := os.Lstat(f)
-		if err != nil {
+		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			dest, _ := os.Readlink(f)
-			if strings.HasPrefix(dest, agentsHome) {
-				continue // already managed
-			}
+		if links.IsManagedLinkUnder(f, agentsHome) {
+			continue // already managed (resolvable symlink/junction)
+		}
+		if isManagedProjectOutput(project, projectPath, f, agentsHome) {
+			continue
 		}
 		found = append(found, f)
 	}
@@ -161,10 +215,18 @@ func NewAddCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <path>",
-		Short: "Add a project to dot-agents management",
-		Long: `Registers a project with dot-agents and sets up configuration links.
-Existing config files are backed up before being replaced.`,
-		Args: cobra.ExactArgs(1),
+		Short: "Add a project to da management",
+		Long: `Registers a project with da and sets up configuration links.
+Existing config files are backed up before being replaced.
+
+Use this when a project should consume shared configuration from ~/.agents/
+and stay refreshable by both human operators and AI agents.`,
+		Example: ExampleBlock(
+			"  da add .",
+			"  da add ~/src/my-repo --name billing-api",
+			"  da add . --dry-run",
+		),
+		Args: ExactArgsWithHints(1, "Pass a project directory such as `.` or `~/src/my-repo`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdd(args[0], name)
 		},
@@ -196,13 +258,13 @@ func runAdd(pathArg, nameArg string) error {
 	displayPath := config.DisplayPath(projectPath)
 	displayAgentsHome := config.DisplayPath(agentsHome)
 
-	ui.Header("dot-agents add")
+	ui.Header("da add")
 	fmt.Fprintf(os.Stdout, "Adding project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
 
 	// Note if manifest already exists — user may prefer `install` instead
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		ui.Info(".agentsrc.json found — you can also use 'dot-agents install' to apply the manifest directly")
+		ui.Info(".agentsrc.json found — you can also use 'da install' to apply the manifest directly")
 	}
 
 	// Step 1: Scan
@@ -214,7 +276,7 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("none", "Not a git repository (optional)")
 	}
 
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -333,7 +395,7 @@ func runAdd(pathArg, nameArg string) error {
 	)
 
 	// Identify files that will be replaced
-	existingFiles := checkExistingConfigFiles(projectPath, agentsHome)
+	existingFiles := checkExistingConfigFiles(projectName, projectPath, agentsHome)
 
 	// Show files that will be replaced
 	if len(existingFiles) > 0 {
@@ -342,7 +404,7 @@ func runAdd(pathArg, nameArg string) error {
 		for _, f := range existingFiles {
 			rel := strings.TrimPrefix(f, projectPath+"/")
 			fileType := "file"
-			if info, err := os.Lstat(f); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if _, isLink := links.ManagedLinkTarget(f); isLink {
 				fileType = "symlink"
 			}
 			fmt.Fprintf(os.Stdout, "  %s!%s %s %s(%s)%s\n", ui.Yellow, ui.Reset, rel, ui.Dim, fileType, ui.Reset)
@@ -372,13 +434,10 @@ func runAdd(pathArg, nameArg string) error {
 			}
 			rel := strings.TrimPrefix(f, projectPath+"/")
 			kind := "file"
-			if info, err := os.Lstat(f); err == nil {
-				switch {
-				case info.Mode()&os.ModeSymlink != 0:
-					kind = "symlink"
-				case info.IsDir():
-					kind = "dir"
-				}
+			if _, isLink := links.ManagedLinkTarget(f); isLink {
+				kind = "symlink"
+			} else if info, err := os.Lstat(f); err == nil && info.IsDir() {
+				kind = "dir"
 			}
 			fmt.Fprintf(os.Stdout, "  %s○%s %s %s(%s)%s\n", ui.Dim, ui.Reset, rel, ui.Dim, kind, ui.Reset)
 			shown++
@@ -409,7 +468,19 @@ func runAdd(pathArg, nameArg string) error {
 	if len(existingFiles) > 0 {
 		ui.Step("Backing up existing configs...")
 		timestamp := time.Now().Format("20060102-150405")
-		backed := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp)
+		backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp)
+		if backupErr != nil {
+			// A failed backup means the user's only copy of an unmanaged
+			// config was NOT preserved. backupExistingConfigsList already
+			// refused to remove the original, so the repo is untouched —
+			// abort before creating links or registering the project.
+			ui.Bullet("warn", fmt.Sprintf("backup failed: %v", backupErr))
+			return ErrorWithHints(
+				fmt.Sprintf("aborting add for '%s': could not back up existing configs", projectName),
+				"No files were removed and the project was NOT registered. "+
+					"Ensure ~/.agents/resources is writable and has free space, then re-run `da add`.",
+			)
+		}
 		ui.Bullet("ok", fmt.Sprintf("Backed up %d existing file(s)", backed))
 		ui.Bullet("ok", fmt.Sprintf("Stored backups in ~/.agents/resources/%s/backups/%s/", projectName, timestamp))
 	}
@@ -422,28 +493,68 @@ func runAdd(pathArg, nameArg string) error {
 	ui.Bullet("ok", "Created ~/.agents/ directories")
 
 	// Restore from active resources
-	restored := restoreFromResourcesCounted(projectName, projectPath)
+	restored, restoreErr := restoreFromResourcesCounted(projectName, projectPath)
 	if restored > 0 {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
+	}
+	if restoreErr != nil {
+		// A partial restore left some backed-up resource data unrestored.
+		// Continuing to link, write KG configs, register the project, and
+		// print the success box would stamp a partial application as
+		// complete — exactly the false-success runRefresh refuses to emit.
+		// Abort here BEFORE any registration/link work so a re-run can
+		// finish the restore against the still-registered backup data.
+		ui.Bullet("warn", fmt.Sprintf("restore from resources incomplete: %v", restoreErr))
+		return ErrorWithHints(
+			fmt.Sprintf("add incomplete for '%s': could not restore resources: %v", projectName, restoreErr),
+			"The project was NOT registered (partial resource restore). "+
+				"Resolve the errors above (permissions, free space under ~/.agents/resources), "+
+				"then re-run `da add`.",
+		)
+	}
+
+	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {
+		return fmt.Errorf("writing KG MCP configs: %w", err)
 	}
 
 	// Step 5: Create links
 	ui.Step("Creating links...")
 	config.SetWindowsMirrorContext(projectPath)
 
+	var addInstalled []platform.Platform
 	for _, p := range platform.All() {
-		if !p.IsInstalled() {
-			continue
+		if p.IsInstalled() {
+			addInstalled = append(addInstalled, p)
 		}
+	}
+	var linkFailures []string
+	if _, err := platform.RunSharedTargetProjection(projectName, projectPath, addInstalled, false); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		linkFailures = append(linkFailures, fmt.Sprintf("shared targets: %v", err))
+	}
+	for _, p := range addInstalled {
 		if err := p.CreateLinks(projectName, projectPath); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+			linkFailures = append(linkFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
 		} else {
 			ui.Bullet("ok", p.DisplayName()+" links created")
 		}
 	}
 
-	// Add .agents-refresh to .gitignore
-	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
+	// A projection/CreateLinks failure (e.g. an unmanaged file occupying a
+	// managed target now returns links.ErrUnmanagedTarget) means the project
+	// is only partially linked. Registering it + printing a success box would
+	// stamp a partial application as complete, making `da refresh`/doctor
+	// recovery ambiguous. Do NOT save the registration and do NOT print
+	// success — surface the failures with recovery guidance instead.
+	if len(linkFailures) > 0 {
+		return ErrorWithHints(
+			fmt.Sprintf("add incomplete for '%s': %s", projectName, strings.Join(linkFailures, "; ")),
+			"The project was NOT registered (partial link application). "+
+				"Resolve the warnings above — unmanaged files occupying managed targets "+
+				"must be imported (da import), backed up, or removed — then re-run `da add`.",
+		)
+	}
 
 	// Step 6: Register
 	cfg.AddProject(projectName, projectPath)
@@ -454,15 +565,15 @@ func runAdd(pathArg, nameArg string) error {
 
 	nextSteps := []string{
 		"Add project rules: edit ~/.agents/rules/" + projectName + "/rules.md",
-		"Check applied configs: dot-agents status --audit",
+		"Check applied configs: da status --audit",
 	}
 	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		nextSteps = append(nextSteps, "Manifest found — apply it: dot-agents install")
+		nextSteps = append(nextSteps, "Manifest found — apply it: da install")
 	} else {
-		nextSteps = append(nextSteps, "Make it git-portable: dot-agents install --generate")
+		nextSteps = append(nextSteps, "Make it git-portable: da install --generate")
 	}
 	if hasDeprecated {
-		nextSteps = append(nextSteps, "Migrate deprecated formats: dot-agents migrate detect")
+		nextSteps = append(nextSteps, "Migrate deprecated formats: da migrate detect")
 	}
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
 	return nil
@@ -470,125 +581,290 @@ func runAdd(pathArg, nameArg string) error {
 
 // backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
 // and removes the originals from the project tree. No *.dot-agents-backup files are left
-// in the project. Returns count of files processed.
-func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string) int {
+// in the project. Returns count of files processed and a non-nil error if any required
+// backup copy failed. On backup failure the original is NOT removed (the user's only
+// copy is preserved) and the error aborts runAdd before any destructive removal.
+func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string) (int, error) {
 	count := 0
 	for _, f := range files {
 		// Safety: never back up backup artifacts
 		if isBackupArtifact(filepath.Base(f)) {
 			continue
 		}
-		info, err := os.Lstat(f)
-		if err != nil {
+		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			// Unmanaged symlinks: remove without backup (no content to preserve)
+		// A PROVEN managed link (resolvable POSIX symlink / Windows junction
+		// whose target resolves under the canonical agents root) has no
+		// standalone content to preserve — remove it without a backup.
+		// A merely-resolvable link is NOT proof: a project-owned
+		// symlink/junction pointing at a real user file OUTSIDE dot-agents
+		// (the symlink twin of the unmanaged-hard-link case below) carries
+		// the user's only copy of that config. Dropping it without mirroring
+		// the resolved content destroys it while claiming a backup. Such an
+		// unmanaged link falls through to the normal mirror/backup path,
+		// which copies the resolved bytes before removal.
+		if links.IsManagedLinkUnder(f, agentsHome) {
 			os.Remove(f)
 			count++
 			continue
 		}
-		// Regular file: copy into resources, then delete from project
-		mirrorBackup(project, projectPath, f, timestamp)
-		if err := os.Remove(f); err != nil {
+		// A hard link is only safe to drop without a backup when it is PROVEN
+		// managed: its inode is shared with the canonical source this candidate
+		// maps to under agentsHome. A bare nlink>1 is NOT proof — an
+		// UNMANAGED hard-linked AGENTS.md/.mcp.json (e.g. the project hard
+		// links its real config elsewhere) also has nlink>1, and dropping it
+		// without a mirror backup destroys the project's real config while
+		// claiming it was backed up. Unknown/unmanaged hard links fall through
+		// to the normal backup/mirror path below.
+		if hasMultipleHardLinks(f) && isManagedHardlinkToCanonicalSource(project, projectPath, f, agentsHome) {
+			os.Remove(f)
+			count++
+			continue
+		}
+		// Regular file: copy into resources, then delete from project.
+		// The removal below is destructive — it deletes the user's only
+		// copy of an unmanaged config. Only proceed once the required
+		// backup copies have actually landed; otherwise abort so runAdd
+		// returns an error WITHOUT removing the original.
+		if err := mirrorBackupChecked(project, projectPath, f, timestamp); err != nil {
+			return count, fmt.Errorf("backing up %s: %w", f, err)
+		}
+		if err := osRemove(f); err != nil {
 			continue
 		}
 		count++
 	}
-	return count
+	return count, nil
 }
 
-// restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/ and returns the count.
-func restoreFromResourcesCounted(project, projectPath string) int {
+// restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/
+// and returns the number of files restored plus a non-nil error if any
+// directory walk, mkdir, write, or copy failed. Callers that stamp success
+// (e.g. refresh metadata) MUST observe this error: a partially-applied
+// restore that is reported as success makes retries and doctor/refresh
+// recovery ambiguous.
+func restoreFromResourcesCounted(project, projectPath string) (int, error) {
 	agentsHome := config.AgentsHome()
 	resourcesDir := filepath.Join(agentsHome, "resources", project)
-	if _, err := os.Stat(resourcesDir); err != nil {
-		return 0
+	info, err := os.Stat(resourcesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No resources to restore is not a failure.
+			return 0, nil
+		}
+		// A permission-denied / broken-symlink / other non-ENOENT stat
+		// error is NOT "nothing to restore": treating it as success makes
+		// refresh stamp fresh metadata over backed-up resource data that
+		// was never restored. Surface it so refresh.go's projectFailed
+		// path fires.
+		return 0, fmt.Errorf("stat resources dir %s: %w", resourcesDir, err)
+	}
+	if !info.IsDir() {
+		// A non-directory squatting the resources path cannot be walked;
+		// silently skipping it would also mask unrestored data.
+		return 0, fmt.Errorf("resources path %s is not a directory", resourcesDir)
 	}
 	count := 0
-	_ = filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
-		count += restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
+	var restoreErr error
+	walkErr := filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
+		n, ferr := restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
+		count += n
+		if ferr != nil && restoreErr == nil {
+			restoreErr = ferr
+		}
 		return nil
 	})
-	return count
+	if walkErr != nil && restoreErr == nil {
+		restoreErr = fmt.Errorf("walking resources dir %s: %w", resourcesDir, walkErr)
+	}
+	return count, restoreErr
 }
 
-func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) int {
-	if walkErr != nil || d.IsDir() {
-		return 0
+func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) (int, error) {
+	if walkErr != nil {
+		return 0, fmt.Errorf("walking %s: %w", path, walkErr)
 	}
-	relPath := strings.TrimPrefix(path, resourcesDir+"/")
-	if strings.HasPrefix(relPath, "backups/") {
-		return 0
+	if d.IsDir() {
+		return 0, nil
 	}
-	canonicalCount, handled := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
+	relPath, err := filepath.Rel(resourcesDir, path)
+	if err != nil {
+		return 0, fmt.Errorf("resolving relative path for %s: %w", path, err)
+	}
+	relPath = filepath.ToSlash(relPath)
+	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
+		return 0, nil
+	}
+	canonicalCount, handled, canonErr := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
 	if handled {
-		return canonicalCount
+		return canonicalCount, canonErr
 	}
 	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
 }
 
-func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool) {
+func isCanonicalResourceBackupRel(relPath string) bool {
+	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+		if strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool, error) {
 	candidate := importCandidate{
 		project:    project,
 		sourceRoot: resourcesDir,
 		sourcePath: path,
 	}
 	outputs, ok, canonErr := canonicalImportOutputs(candidate)
-	if !ok || canonErr != nil {
-		return 0, ok
+	if !ok {
+		return 0, false, nil
+	}
+	if canonErr != nil {
+		return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
 	}
 	count := 0
 	for _, output := range outputs {
 		destPath := filepath.Join(agentsHome, output.destRel)
-		_ = os.MkdirAll(filepath.Dir(destPath), 0755)
-		if err := os.WriteFile(destPath, output.content, 0644); err == nil {
-			count++
+		if err := osMkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
 		}
+		if err := osWriteFile(destPath, output.content, 0644); err != nil {
+			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
+		}
+		count++
 	}
-	return count, true
+	return count, true, nil
 }
 
-func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
+func restoreLegacyResourceFile(project, relPath, agentsHome, path string) (int, error) {
 	destRel := mapResourceRelToDest(project, relPath)
 	if destRel == "" {
-		return 0
+		return 0, nil
 	}
 	destPath := filepath.Join(agentsHome, destRel)
-	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
-	if err := copyFile(path, destPath); err == nil {
-		return 1
+	if err := copyFile(path, destPath); err != nil {
+		return 0, fmt.Errorf("restoring %s -> %s: %w", path, destPath, err)
 	}
-	return 0
+	return 1, nil
 }
 
 // mirrorBackup copies srcFile (original path, before deletion) into the
 // ~/.agents/resources/<project>/ tree using the file's original relative path.
 // No *.dot-agents-backup suffix is added anywhere.
+//
+// This is the errorless wrapper retained for import.go callers, whose own
+// failure handling keys off the subsequent CopyFile into the destination
+// (a mirror-backup failure there does not destroy the user's only copy
+// because import.go never removes the source after mirrorBackup). Callers
+// that delete the original after backing it up (backupExistingConfigsList)
+// MUST use mirrorBackupChecked so a failed backup aborts before the
+// destructive removal.
 func mirrorBackup(project, projectPath, srcFile, timestamp string) {
+	_ = mirrorBackupChecked(project, projectPath, srcFile, timestamp)
+}
+
+// mirrorBackupChecked performs the same copy as mirrorBackup but propagates
+// the CopyFile errors. backupExistingConfigsList relies on this: it removes
+// the user's only copy of an unmanaged config after backing it up, so a
+// silent backup failure (unwritable ~/.agents/resources, disk full,
+// unreadable source through a symlink) would destroy that config while
+// reporting a successful backup.
+func mirrorBackupChecked(project, projectPath, srcFile, timestamp string) error {
 	agentsHome := config.AgentsHome()
-	relPath := strings.TrimPrefix(srcFile, projectPath+"/")
-	if relPath == srcFile {
+	relPath, err := filepath.Rel(projectPath, srcFile)
+	if err != nil || relPath == "." || strings.HasPrefix(relPath, "..") {
 		relPath = filepath.Base(srcFile)
 	}
 
-	// Active (latest) copy — overwritten on each backup run
+	// Active (latest) copy — overwritten on each backup run. This is the
+	// recoverable copy `da refresh` / restore reads back, so it is required.
 	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	os.MkdirAll(filepath.Dir(activeTarget), 0755)
-	copyFile(srcFile, activeTarget)
+	if cpErr := copyFile(srcFile, activeTarget); cpErr != nil {
+		return fmt.Errorf("backing up %s -> %s: %w", srcFile, activeTarget, cpErr)
+	}
 
-	// Timestamped immutable copy
+	// Timestamped immutable copy — also required when a timestamp is given:
+	// it is the only point-in-time snapshot the user can recover from.
 	if timestamp != "" {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		os.MkdirAll(filepath.Dir(tsTarget), 0755)
-		copyFile(srcFile, tsTarget)
+		if cpErr := copyFile(srcFile, tsTarget); cpErr != nil {
+			return fmt.Errorf("backing up %s -> %s: %w", srcFile, tsTarget, cpErr)
+		}
 	}
+	return nil
 }
 
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) error {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return nil
+	}
+	if rc.KG == nil {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName))
+}
+
+// kgConfigPath returns the path to KG_HOME/self/config.yaml without importing
+// the kg subpackage (deferred to PR3c).
+func kgConfigPath() string {
+	if v := os.Getenv("KG_HOME"); v != "" {
+		return filepath.Join(v, "self", "config.yaml")
+	}
+	home, _ := config.UserHomeDir()
+	return filepath.Join(home, "knowledge-graph", "self", "config.yaml")
+}
+
+func ensureGlobalKGMCPConfigs(agentsHome string) error {
+	if _, err := os.Stat(kgConfigPath()); err != nil {
+		return nil
+	}
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"))
+}
+
+func writeKGMCPConfigs(scopeDir string) error {
+	exe, err := osExecutable()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+		exe = resolved
+	}
+	server := map[string]any{
+		"command": exe,
+		"args":    []string{"kg", "serve"},
+		"type":    "stdio",
+	}
+	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
+		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeKGMCPConfigFile(path string, server map[string]any) error {
+	configMap := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &configMap)
+	}
+	servers, _ := configMap["servers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	servers["dot-agents-kg"] = server
+	configMap["servers"] = servers
+
+	data, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return osWriteFile(path, data, 0644)
 }

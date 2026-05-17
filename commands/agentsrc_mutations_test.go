@@ -14,7 +14,6 @@ const (
 	testSkillName       = "new-skill"
 	testSourceTypeLocal = "local"
 	testSourceTypeGit   = "git"
-	errFmtChdir         = "chdir: %v"
 )
 
 // helpers ────────────────────────────────────────────────────────────────────
@@ -70,9 +69,10 @@ func TestCreateSkillUpdatesRegisteredProjectManifest(t *testing.T) {
 	agentsHome, projectPath := setupEnv(t, testProjectName)
 
 	// CWD is a completely unrelated directory (the agentsHome itself).
-	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf(errFmtChdir, err)
-	}
+	// Use t.Chdir so the original working directory is restored before
+	// t.TempDir cleanup runs; on Windows RemoveAll fails if the temp dir
+	// is still any process's current directory.
+	t.Chdir(agentsHome)
 
 	if err := createSkill(testSkillName, testProjectName); err != nil {
 		t.Fatalf("createSkill: %v", err)
@@ -110,9 +110,7 @@ func TestCreateSkillDoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 	if err := cwdManifest.Save(agentsHome); err != nil {
 		t.Fatalf("save cwd manifest: %v", err)
 	}
-	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf(errFmtChdir, err)
-	}
+	t.Chdir(agentsHome)
 
 	if err := createSkill(testSkillName, testProjectName); err != nil {
 		t.Fatalf("createSkill: %v", err)
@@ -135,9 +133,7 @@ func TestCreateSkillDoesNotMutateUnrelatedCWDManifest(t *testing.T) {
 func TestCreateAgentUpdatesRegisteredProjectManifest(t *testing.T) {
 	agentsHome, projectPath := setupEnv(t, testProjectName)
 
-	if err := os.Chdir(agentsHome); err != nil {
-		t.Fatalf(errFmtChdir, err)
-	}
+	t.Chdir(agentsHome)
 
 	if err := createAgent("new-agent", testProjectName); err != nil {
 		t.Fatalf("createAgent: %v", err)

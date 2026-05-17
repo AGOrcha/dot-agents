@@ -2,13 +2,15 @@ name: Test
 
 on:
   push:
-    branches: 
+    branches:
       - master
       - feature/*
+      - pr*/*
   pull_request:
-    branches: 
+    branches:
       - master
       - feature/*
+      - pr*/*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +22,7 @@ defaults:
 
 env:
   GO_TEST_FLAGS: -race -count=1 -timeout=300s
+  GO_COVERAGE_FILE: coverage.out
 
 jobs:
   lint-workflows:
@@ -36,7 +39,8 @@ jobs:
 
       - name: Install actionlint
         run: |
-          curl --proto "=https" --tlsv1.2 -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          curl --proto "=https" --tlsv1.2 -sSf -o /tmp/download-actionlint.bash https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash
+          bash /tmp/download-actionlint.bash
 
       - name: Run actionlint
         run: |
@@ -51,13 +55,13 @@ jobs:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: lint-workflows  # Only run tests if workflows are valid
-    env:
-      SMOKE_HOME: /tmp/smoke-${{ github.run_id }}
-      SMOKE_AGENTS_HOME: /tmp/smoke-${{ github.run_id }}/.agents
+    # SMOKE_HOME / SMOKE_AGENTS_HOME / DA_BIN are set by the "Configure smoke
+    # environment" step so the paths are bash-normalized (cygpath on Windows)
+    # and the binary name carries the .exe suffix on Windows.
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
 
     steps:
       - name: Checkout
@@ -68,10 +72,77 @@ jobs:
         with:
           go-version: '1.26.x'
 
+      # ── Postgres for graphstore integration tests ───────────────────────
+      # The graphstore postgres suite uses a shared singleton DSN. When
+      # TEST_PG_URL is set, lazyPostgresDSN connects to it directly and never
+      # touches Docker/testcontainers (postgres_container_test.go:48). We
+      # provision a native Postgres per-OS so coverage of postgres.go is
+      # uniform across the whole matrix — no Colima, no Docker-on-macOS.
+      # OpenPostgres self-creates its schema via CREATE TABLE IF NOT EXISTS,
+      # so an empty reachable database is all each runner needs.
+      - name: Start Postgres (Linux — Docker)
+        if: runner.os == 'Linux'
+        run: |
+          docker run -d --name pg \
+            -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test \
+            -e POSTGRES_DB=graphstore -p 5432:5432 postgres:16-alpine
+          for _ in $(seq 1 30); do
+            if docker exec pg pg_isready -U test -d graphstore >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          echo "TEST_PG_URL=postgres://test:test@localhost:5432/graphstore?sslmode=disable" >> "$GITHUB_ENV"
+
+      - name: Start Postgres (macOS — Homebrew)
+        if: runner.os == 'macOS'
+        run: |
+          brew install postgresql@16
+          brew services start postgresql@16
+          pg_prefix="$(brew --prefix postgresql@16)"
+          export PATH="${pg_prefix}/bin:$PATH"
+          for _ in $(seq 1 30); do
+            if pg_isready -h localhost >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          createuser -s test 2>/dev/null || true
+          psql -d postgres -c "ALTER USER test WITH PASSWORD 'test';" 2>/dev/null || true
+          createdb -O test graphstore 2>/dev/null || true
+          echo "TEST_PG_URL=postgres://test:test@localhost:5432/graphstore?sslmode=disable" >> "$GITHUB_ENV"
+
+      - name: Start Postgres (Windows — preinstalled service)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $svc = Get-Service -Name 'postgresql*' | Select-Object -First 1
+          # GitHub windows images ship PostgreSQL with the service set to
+          # Disabled — Start-Service fails on a disabled service, so flip the
+          # startup type to Manual first.
+          Set-Service -Name $svc.Name -StartupType Manual
+          if ($svc.Status -ne 'Running') {
+            Start-Service -Name $svc.Name
+          }
+          # GitHub windows images document PGBIN; fall back to Get-Command.
+          $pgbin = $env:PGBIN
+          if (-not $pgbin) { $pgbin = Split-Path (Get-Command pg_isready).Source }
+          for ($i = 0; $i -lt 30; $i++) {
+            & "$pgbin\pg_isready.exe" -h localhost 2>$null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 1
+          }
+          # GitHub windows runners ship a `postgres` superuser with password `root`.
+          $env:PGPASSWORD = 'root'
+          & "$pgbin\createdb.exe" -U postgres -h localhost graphstore 2>$null
+          "TEST_PG_URL=postgres://postgres:root@localhost:5432/graphstore?sslmode=disable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      # macOS and Windows GitHub-hosted images ship jq preinstalled; install
+      # is only needed on Linux. The verify step below is the cross-OS guard.
       - name: Verify jq installed
         run: jq --version
 
@@ -88,14 +159,64 @@ jobs:
         run: go vet ./...
 
       - name: Go test
-        run: go test $GO_TEST_FLAGS ./...
+        run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="${GO_COVERAGE_FILE}" ./...
+
+      - name: Upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: ${{ env.GO_COVERAGE_FILE }}
+          retention-days: 7
+          if-no-files-found: warn
+
+      # The 95%-per-package contract is measured on Linux and macOS. Windows
+      # deliberately t.Skip()s POSIX-symlink-semantics tests (a managed file
+      # link is a hard link with no reparse point, so there is no resolvable
+      # target / no dangling state to assert) and ships OS-build-tagged files
+      # (fsops_windows.go, inode_windows.go) whose branches the POSIX-oriented
+      # suite cannot exercise. Each skip carries a precise pointer to where
+      # the Windows path IS covered (internal/linktest). Windows still runs
+      # build + GOOS build + vet + full `go test ./...` + the smoke harness,
+      # so correctness is enforced everywhere; coverage % is not a
+      # Windows-measurable metric here and would force artificial scaffolding.
+      - name: Coverage gate (95% per package)
+        if: runner.os != 'Windows'
+        env:
+          COVERAGE_FILE: ${{ env.GO_COVERAGE_FILE }}
+          COVERAGE_THRESHOLD: '95'
+        run: bash scripts/coverage-gate.sh
+
+      # Normalize the smoke env across OSes. RUNNER_TEMP on Windows is a
+      # backslash path that breaks bash; cygpath -u converts it to a POSIX
+      # path Git Bash can use. DA_BIN carries the .exe suffix on Windows so
+      # every smoke step invokes the binary by the same variable.
+      - name: Configure smoke environment
+        run: |
+          if command -v cygpath >/dev/null 2>&1; then
+            base="$(cygpath -u "${RUNNER_TEMP}")"
+          else
+            base="${RUNNER_TEMP}"
+          fi
+          smoke="${base}/smoke-${GITHUB_RUN_ID}"
+          {
+            echo "SMOKE_HOME=${smoke}"
+            echo "SMOKE_AGENTS_HOME=${smoke}/.agents"
+          } >> "$GITHUB_ENV"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            echo "DA_BIN=./bin/da.exe" >> "$GITHUB_ENV"
+          else
+            echo "DA_BIN=./bin/da" >> "$GITHUB_ENV"
+          fi
 
       - name: Build CLI
-        run: go build -o ./bin/da ./cmd/dot-agents
+        run: |
+          mkdir -p ./bin
+          go build -o "${DA_BIN}" ./cmd/dot-agents
 
       - name: Verify built binary is real Go binary (not a shim)
         run: |
-          file ./bin/da | grep -qE "(ELF|Mach-O|PE32)"
+          file "${DA_BIN}" | grep -qE "(ELF|Mach-O|PE32)"
 
       - name: Install GoReleaser (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -131,12 +252,16 @@ jobs:
       # - kg-bridge-surface
       # - managed-resource-listing
       # - release-packaging-parity
+      # Smoke steps run on every OS including Windows (via Git Bash). The
+      # built binary is resolved through the DA_BIN env (set by "Configure
+      # smoke environment" to ./bin/da or ./bin/da.exe) and SMOKE_HOME is a
+      # bash-normalized path (cygpath on Windows), so the harness is portable.
       - name: Test --version
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/da --version)"
+          output="$("${DA_BIN}" --version)"
           printf '%s\n' "$output"
           grep -q "^da " <<<"$output"
 
@@ -145,7 +270,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          output="$(./bin/da --help)"
+          output="$("${DA_BIN}" --help)"
           printf '%s\n' "$output"
           grep -q "Usage:" <<<"$output"
 
@@ -154,7 +279,7 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da init --dry-run
+          "${DA_BIN}" init --dry-run
 
       - name: Test init (creates ~/.agents/)
         env:
@@ -163,7 +288,7 @@ jobs:
         run: |
           # Remove if exists from previous run
           rm -rf "${HOME}/.agents"
-          ./bin/da init --yes
+          "${DA_BIN}" init --yes
           test -d "${HOME}/.agents"
           test -f "${HOME}/.agents/config.json"
 
@@ -172,14 +297,14 @@ jobs:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da status
+          "${DA_BIN}" status
 
       - name: Test doctor
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da doctor
+          "${DA_BIN}" doctor
 
       - name: Test add (with test project)
         env:
@@ -188,37 +313,42 @@ jobs:
         run: |
           TEST_PROJECT="${SMOKE_HOME}/test-project"
           mkdir -p "${TEST_PROJECT}"
-          ./bin/da add "${TEST_PROJECT}" --name ci-test --yes
-          ./bin/da status >/tmp/dot-agents-status.txt
-          grep -q "ci-test" /tmp/dot-agents-status.txt
+          "${DA_BIN}" add "${TEST_PROJECT}" --name ci-test --yes
+          "${DA_BIN}" status > "${SMOKE_HOME}/status.txt"
+          grep -q "ci-test" "${SMOKE_HOME}/status.txt"
 
       - name: Test status --audit
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da status --audit
+          "${DA_BIN}" status --audit
 
       - name: Test remove --dry-run
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da remove ci-test --dry-run
+          "${DA_BIN}" remove ci-test --dry-run
 
       - name: Test sync status
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da sync status
+          "${DA_BIN}" sync status
 
       - name: Test skills list
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
         run: |
-          ./bin/da skills list
+          "${DA_BIN}" skills list
+
+      # NOTE: `da workflow ...` smoke steps live on pr3b, which extracts the
+      # workflow subcommand. pr3a/base-commands has no `workflow` command,
+      # so those steps would fail here ("unknown command"). pr3b re-adds
+      # them after rebasing onto this test.yml.
 
       - name: Cleanup
         env:
@@ -227,3 +357,8 @@ jobs:
         run: |
           rm -rf "${HOME}/.agents"
           rm -rf "${SMOKE_HOME}"
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

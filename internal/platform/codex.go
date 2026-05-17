@@ -3,6 +3,7 @@ package platform
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -118,33 +119,13 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 
 	// AGENTS.md: global then project override
-	globalCandidates := []string{
-		filepath.Join(agentsHome, "rules", "global", "agents.md"),
-		filepath.Join(agentsHome, "rules", "global", "agents.mdc"),
-		filepath.Join(agentsHome, "rules", "global", "rules.md"),
-		filepath.Join(agentsHome, "rules", "global", "rules.mdc"),
-	}
-	for _, src := range globalCandidates {
-		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
-			break
-		}
-	}
-	// Project override
-	for _, name := range []string{"agents.md", "agents.mdc"} {
-		src := filepath.Join(agentsHome, "rules", project, name)
-		if _, err := os.Stat(src); err == nil {
-			links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown))
-			break
-		}
+	if err := c.linkCodexAgentsMD(project, repoPath, agentsHome); err != nil {
+		return err
 	}
 
 	// .codex/config.toml
-	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := c.linkCodexConfigToml(project, repoPath, agentsHome); err != nil {
 		return err
-	}
-	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml"))
 	}
 
 	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
@@ -165,6 +146,61 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	return nil
 }
 
+// linkCodexAgentsMD points the owned repo AGENTS.md at the highest-priority
+// canonical source: the first existing global candidate, then a project
+// override if present (the override symlink-replaces the global). Every
+// links.SymlinkReplacing error propagates unchanged — this is the
+// link-error-propagation contract added by a prior remediation.
+func (c *codex) linkCodexAgentsMD(project, repoPath, agentsHome string) error {
+	dst := filepath.Join(repoPath, codexAgentsMarkdown)
+	globalCandidates := []string{
+		filepath.Join(agentsHome, "rules", "global", "agents.md"),
+		filepath.Join(agentsHome, "rules", "global", "agents.mdc"),
+		filepath.Join(agentsHome, "rules", "global", "rules.md"),
+		filepath.Join(agentsHome, "rules", "global", "rules.mdc"),
+	}
+	for _, src := range globalCandidates {
+		if _, err := os.Stat(src); err == nil {
+			// Managed-replace: AGENTS.md is a dot-agents output at a fixed
+			// owned repo path that refresh re-points (global → project). A
+			// stale managed symlink is idempotently re-pointed; a genuine
+			// user-authored AGENTS.md is preserved as
+			// AGENTS.md.dot-agents-backup, never silently destroyed.
+			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	// Project override
+	for _, name := range []string{"agents.md", "agents.mdc"} {
+		src := filepath.Join(agentsHome, "rules", project, name)
+		if _, err := os.Stat(src); err == nil {
+			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
+}
+
+// linkCodexConfigToml ensures .codex/ exists and symlink-replaces
+// .codex/config.toml with the scoped codex.toml when one resolves. Link
+// errors propagate unchanged.
+func (c *codex) linkCodexConfigToml(project, repoPath, agentsHome string) error {
+	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+		return err
+	}
+	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
+		// Managed-replace at a fixed owned path (.codex/config.toml).
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, "config.toml"), backupSidecar); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *codex) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
 	if _, err := os.Stat(globalAgents); err != nil {
@@ -172,7 +208,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, codexDir, "agents")
-		if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		if err := osMkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
 		if err := c.writeCodexAgents(agentsHome, "global", userAgentsDir); err != nil {
@@ -215,7 +251,7 @@ func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
@@ -246,53 +282,79 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 func (c *codex) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome)
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome)
+	var errs []error
+	errs = append(errs,
+		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome),
+		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome),
+	)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
 		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
 	}
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome)
+	errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome))
 
-	_ = c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents"))
+	errs = append(errs, c.pruneManagedCodexAgentTomls(agentsHome, project, filepath.Join(repoPath, codexDir, "agents")))
 
 	skillsDir := filepath.Join(repoPath, codexAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
+			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
+// pruneCodexRepoAgentTomls deletes stale `.codex/agents/*.toml` files in the
+// repo whose canonical AGENT.md no longer exists. ENOENT on the canonical
+// agents bucket OR the codex dst dir is a no-op — nothing to prune. Other
+// errors propagate.
 func pruneCodexRepoAgentTomls(project, repoPath, agentsHome string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", project, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	wanted := map[string]bool{}
 	for _, entry := range entries {
 		wanted[entry.Name+".toml"] = true
 	}
 	dstRoot := filepath.Join(repoPath, codexDir, "agents")
-	if existing, err := os.ReadDir(dstRoot); err != nil {
-		return nil
-	} else {
-		for _, e := range existing {
-			if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
-				continue
-			}
-			_ = os.Remove(filepath.Join(dstRoot, e.Name()))
+	existing, err := os.ReadDir(dstRoot)
+	if err != nil {
+		// Genuine absence is a no-op; a path that exists but is not a
+		// listable directory is a real fault that must propagate on every
+		// OS (Windows os.ReadDir on a regular-file path maps to a
+		// NotExist-class error — %v breaks the fs.ErrNotExist chain).
+		if _, statErr := os.Lstat(dstRoot); statErr == nil {
+			return fmt.Errorf("listing codex agents dir %s: not a listable directory (%v)", dstRoot, err)
 		}
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range existing {
+		if !strings.HasSuffix(e.Name(), ".toml") || wanted[e.Name()] {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dstRoot, e.Name()))
 	}
 	return nil
 }
 
+// writeCodexAgents renders each canonical AGENT.md as a `.toml` under dstRoot
+// and prunes stale tomls. ENOENT on the canonical agents bucket is a no-op;
+// other errors propagate.
 func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	wanted := map[string]bool{}
 	for _, entry := range entries {
@@ -313,13 +375,19 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 	return nil
 }
 
+// pruneManagedCodexAgentTomls removes the per-entry `.toml` files that map to
+// canonical AGENT.md entries. ENOENT on the canonical agents bucket is a
+// no-op; other errors propagate.
 func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) error {
 	entries, err := listScopedResourceDirs(agentsHome, "agents", scope, codexAgentMDFile)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	for _, entry := range entries {
-		if err := os.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
+		if err := osRemove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -331,15 +399,15 @@ func writeCodexAgentTomlFile(dst, agentMD string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
+		if err := osRemove(dst); err != nil {
 			return err
 		}
 	}
-	return os.WriteFile(dst, content, 0644)
+	return osWriteFile(dst, content, 0644)
 }
 
 func (c *codex) writeCodexAgentToml(dst, agentMD string) error {

@@ -288,7 +288,7 @@ func (a *AgentsRC) Save(projectPath string) error {
 func AgentsCacheDir() string {
 	cacheHome := os.Getenv("XDG_CACHE_HOME")
 	if cacheHome == "" {
-		home, _ := os.UserHomeDir()
+		home, _ := UserHomeDir()
 		cacheHome = filepath.Join(home, ".cache")
 	}
 	return filepath.Join(cacheHome, "dot-agents")

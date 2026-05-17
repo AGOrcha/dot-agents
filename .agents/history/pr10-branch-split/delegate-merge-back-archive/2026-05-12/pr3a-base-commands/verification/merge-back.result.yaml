@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: pr3a-base-commands
+parent_plan_id: pr10-branch-split
+verifier_type: merge-back
+status: pass
+summary: All 4 pr3a slices done. Mark pr3a-subpkg-wiring-sync complete and advance pr3a-base-commands to completed.
+recorded_at: "2026-05-12T19:40:57Z"
+delegation_id: del-pr3a-base-commands-1778613728

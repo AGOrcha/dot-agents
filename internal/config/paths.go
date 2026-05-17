@@ -4,28 +4,41 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 )
+
+// UserHomeDir resolves the user's home directory, honoring $HOME when set
+// before falling back to os.UserHomeDir(). This is the convention for CLI
+// tools (git, gh, …): on Windows os.UserHomeDir() reads %USERPROFILE% and
+// ignores $HOME, which (a) breaks per-test isolation that sets HOME to a
+// temp dir — causing cross-test pollution and writes into the real runner
+// profile — and (b) ignores explicit shell/WSL HOME overrides. Honoring
+// $HOME first fixes both with zero behavior change when $HOME is unset
+// (the normal Windows desktop case). Mirrors the os.UserHomeDir signature
+// for drop-in use.
+func UserHomeDir() (string, error) {
+	if h := os.Getenv("HOME"); h != "" {
+		return h, nil
+	}
+	return os.UserHomeDir()
+}
 
 // AgentsHome returns the path to the ~/.agents directory.
 func AgentsHome() string {
 	if override := os.Getenv("AGENTS_HOME"); override != "" {
 		return override
 	}
-	home, _ := os.UserHomeDir()
-	// On Windows use %APPDATA%\.agents if home detection is ambiguous
-	if runtime.GOOS == "windows" {
-		if appData := os.Getenv("APPDATA"); appData != "" {
-			return filepath.Join(appData, ".agents")
-		}
-	}
+	home, _ := UserHomeDir()
+	// Uniform ~/.agents on every OS (Windows: C:\Users\<user>\.agents).
+	// The prior %APPDATA%\.agents special-case split the managed root from
+	// where the rest of the code resolves user home, which broke link
+	// resolution on restricted Windows hosts.
 	return filepath.Join(home, ".agents")
 }
 
 // UserHome returns the current user's home directory.
 func UserHome() string {
-	home, _ := os.UserHomeDir()
+	home, _ := UserHomeDir()
 	return home
 }
 
@@ -33,7 +46,7 @@ func UserHome() string {
 func AgentsStateDir() string {
 	stateHome := os.Getenv("XDG_STATE_HOME")
 	if stateHome == "" {
-		home, _ := os.UserHomeDir()
+		home, _ := UserHomeDir()
 		stateHome = filepath.Join(home, ".local", "state")
 	}
 	return filepath.Join(stateHome, "dot-agents")
@@ -52,11 +65,11 @@ func ProjectContextDir(project string) string {
 // ExpandPath expands a path with ~ to the full absolute path.
 func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home, _ := UserHomeDir()
 		return filepath.Clean(filepath.Join(home, path[2:]))
 	}
 	if path == "~" {
-		home, _ := os.UserHomeDir()
+		home, _ := UserHomeDir()
 		return filepath.Clean(home)
 	}
 	if !filepath.IsAbs(path) {
@@ -70,9 +83,9 @@ func ExpandPath(path string) string {
 
 // DisplayPath converts an absolute path to a ~ prefixed display path.
 func DisplayPath(path string) string {
-	home, _ := os.UserHomeDir()
+	home, _ := UserHomeDir()
 	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
+		return "~" + filepath.ToSlash(path[len(home):])
 	}
 	return path
 }
@@ -80,7 +93,7 @@ func DisplayPath(path string) string {
 // UserHomeRoots returns the applicable user home directories.
 // When AGENTS_WINDOWS_MIRROR is set for WSL, includes the Windows home too.
 func UserHomeRoots() []string {
-	home, _ := os.UserHomeDir()
+	home, _ := UserHomeDir()
 	roots := []string{home}
 
 	windowsMirror := os.Getenv("DOT_AGENTS_WINDOWS_MIRROR")

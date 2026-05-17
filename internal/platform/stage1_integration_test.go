@@ -776,14 +776,14 @@ func mkdirAll(t *testing.T, path string) {
 	}
 }
 
+// assertSymlinkTarget asserts path is a managed link resolving to want. It
+// uses the OS-aware link contract predicate so it is correct for POSIX
+// symlinks, Windows directory junctions, and Windows file hard links (which
+// have no reparse point for os.Readlink to resolve).
 func assertSymlinkTarget(t *testing.T, path, want string) {
 	t.Helper()
-	got, err := os.Readlink(path)
-	if err != nil {
-		t.Fatalf("expected symlink at %s: %v", path, err)
-	}
-	if got != want {
-		t.Fatalf("expected %s to point to %s, got %s", path, want, got)
+	if !links.IsManagedLink(path, want) {
+		t.Fatalf("expected %s to be a managed link to %s", path, want)
 	}
 }
 

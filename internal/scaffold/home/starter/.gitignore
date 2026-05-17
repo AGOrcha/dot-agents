@@ -1,0 +1,18 @@
+local/
+context/
+*.dot-agents-backup
+
+# Editor/OS files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Secrets (never commit)
+*.secret
+*.key
+**/secrets/
+
+# Temporary files
+*.tmp
+*.temp

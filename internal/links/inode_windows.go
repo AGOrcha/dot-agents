@@ -52,6 +52,25 @@ func AreHardlinked(a, b string) (bool, error) {
 		aInfo.VolumeSerialNumber == bInfo.VolumeSerialNumber, nil
 }
 
+// hasMultipleHardLinks reports whether the file at path has more than one
+// hard link (NumberOfLinks > 1). A Windows managed file link is a hard link
+// with no reparse point, so the canonical source and every managed link to
+// it share a link count >= 2; a standalone file dot-agents wrote itself has
+// a link count of 1. This is how a managed file link is distinguished from
+// our own rendered output when there is no target to resolve.
+func hasMultipleHardLinks(path string) bool {
+	h, err := openFileForStat(path)
+	if err != nil {
+		return false
+	}
+	defer syscall.CloseHandle(h)
+	var info syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(h, &info); err != nil {
+		return false
+	}
+	return info.NumberOfLinks > 1
+}
+
 func openFileForStat(path string) (syscall.Handle, error) {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {

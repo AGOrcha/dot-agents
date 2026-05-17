@@ -1,0 +1,382 @@
+schema_version: 1
+plan_id: pr10-branch-split
+slices:
+  # ── PR3a slices (23.2% → 80%) ──────────────────────────────────────────
+  # Organized by user flow, not by file. Each slice tests a complete
+  # behavioral chain end-to-end, covering the files involved in that flow.
+
+  - id: pr3a-bootstrap-lifecycle
+    parent_task_id: pr3a-base-commands
+    title: "PR3a: bootstrap + project lifecycle chain"
+    summary: |-
+      Test the full project bootstrap and lifecycle flow:
+        init → add → refresh → status (verify linkage)
+        add → status --audit → remove → status (verify cleanup)
+      Covers idempotent re-init (--force), --dry-run for each,
+      --name override on add, --clean flag on remove, platform
+      CreateLinks/RemoveLinks round-trip, config.json project
+      registration/deregistration, and .agentsrc.json creation.
+      Also tests doctor repair flow: doctor detects broken links
+      then re-runs CreateLinks to fix them.
+    status: completed
+    completed_at: "2026-05-12T15:55:00Z"
+    completed_commit: c8b1943
+    depends_on: []
+    write_scope:
+      - commands/init_test.go
+      - commands/add_test.go
+      - commands/remove_test.go
+      - commands/refresh_test.go
+      - commands/status_test.go
+      - commands/doctor_test.go
+    verification_focus: |-
+      go test ./commands/... passes. Round-trip chain verified:
+      init creates ~/.agents/, add registers project + creates links,
+      status shows project, remove unlinks, status shows removal.
+      doctor repairs broken links. Each command respects --dry-run.
+    owner: dot-agents
+
+  - id: pr3a-import-install-pipeline
+    parent_task_id: pr3a-base-commands
+    title: "PR3a: import + install manifest pipeline"
+    summary: |-
+      Test the config ingestion pipelines:
+        import [project] → import plugins → refresh → status
+        install (from .agentsrc.json) → CreateLinks → status
+      Covers import scope filtering (--scope project|global|all),
+      hook normalization (cursor.json/codex.json → HOOK.yaml bundles),
+      plugin manifest discovery, git source resolution + caching,
+      install --generate (reverse: current state → .agentsrc.json),
+      and the mapResourceRelToDest path normalization shared between
+      import and refresh.
+    status: completed
+    completed_at: "2026-05-12T16:35:00Z"
+    completed_commit: 13dbb89
+    depends_on: []
+    write_scope:
+      - commands/import_test.go
+      - commands/import_plugins_test.go
+      - commands/install_test.go
+    verification_focus: |-
+      go test ./commands/... passes. Import round-trip: platform
+      configs imported to ~/.agents/, refresh re-renders them.
+      Install from manifest: .agentsrc.json → resolved links.
+      import --scope filters correctly. install --generate produces
+      valid manifest from current state.
+    owner: dot-agents
+
+  - id: pr3a-resource-review-chain
+    parent_task_id: pr3a-base-commands
+    title: "PR3a: resource inspection + review + explain"
+    summary: |-
+      Test the resource management and review flows:
+        rules/mcp/settings/hooks list → show → remove → refresh
+        review list → show <id> → approve/reject
+        explain [topic] (overview, structure, platforms, links, manifest)
+      Each resource command shares the same three-subcommand pattern
+      (list, show, remove) but scans different canonical dirs.
+      Review reads ~/.agents/proposals/, applies on approve.
+      Also covers session-stats (token usage display) and the
+      shared UX helpers (errNoWorkflowProject, resolveProject,
+      formatTable, renderAuditSection) used across commands.
+    status: completed
+    completed_at: "2026-05-12T18:30:00Z"
+    completed_commits: [b8fe87f, d5fde31]
+    depends_on: []
+    write_scope:
+      - commands/rules_test.go
+      - commands/mcp_test.go
+      - commands/settings_test.go
+      - commands/review_test.go
+      - commands/explain_test.go
+      - commands/session_stats_test.go
+      - commands/ux_test.go
+    verification_focus: |-
+      go test ./commands/... passes. Resource list/show/remove
+      round-trip verified for rules, mcp, settings. Review
+      approve applies proposal. explain renders all topics.
+      UX helpers tested for error formatting and table rendering.
+    owner: dot-agents
+
+  - id: pr3a-subpkg-wiring-sync
+    parent_task_id: pr3a-base-commands
+    title: "PR3a: subpackage wiring + sync + skills/agents promotion"
+    summary: |-
+      Test command registration and the sync/skills/agents flows:
+        Root command wiring: all 17 subcommands registered and reachable
+        sync init → commit → push/pull → status/log (git ops on ~/.agents/)
+        skills new → promote (repo-local → ~/.agents/skills/) → refresh
+        agents new → promote → import → remove
+        hooks list → show → remove (HOOK.yaml bundle management)
+      Covers the agents/cmd.go and hooks/cmd.go subcommand trees,
+      sync helpers (ensureGitRepo, runGitCommand), and the
+      skills/agents promotion pipeline that moves resources
+      from .agents/skills/ to ~/.agents/skills/.
+    status: completed
+    completed_at: "2026-05-12T19:00:00Z"
+    completed_commit: b188e8b
+    depends_on: []
+    write_scope:
+      - commands/root_test.go
+      - commands/sync/init_test.go
+      - commands/sync/commit_test.go
+      - commands/sync/push_test.go
+      - commands/sync/helpers_test.go
+      - commands/skills_test.go
+      - commands/agents/cmd_test.go
+      - commands/hooks/cmd_test.go
+    verification_focus: |-
+      go test ./commands/... ./commands/sync/... ./commands/agents/...
+      ./commands/hooks/... ./commands/skills/... passes. Root command
+      registers all subcommands. Sync round-trip works on temp git repo.
+      Skills/agents promote moves files and updates .agentsrc.json.
+    owner: dot-agents
+
+  # ── PR3b slices (40.4% → 80%) ──────────────────────────────────────────
+
+  - id: pr3b-plan-lifecycle
+    parent_task_id: pr3b-workflow
+    title: "PR3b: plan → task → advance → complete lifecycle"
+    summary: |-
+      Test the full plan lifecycle chain:
+        plan create → task add → tasks list → eligible → next →
+        advance → complete → plan show (verify final state)
+      Covers plan CRUD (create scaffolds PLAN.yaml + TASKS.yaml +
+      SLICES.yaml), task CRUD (add with deps/blocks/write-scope,
+      reject duplicate IDs, validate dep graph), advance transitions
+      (pending → in_progress), complete transitions (in_progress →
+      completed + recompute eligible), eligible conflict detection
+      (write_scope overlap), next suggestion logic, schedule
+      (topological sort), and slices listing.
+    status: completed
+    completed_at: "2026-05-12T15:55:00Z"
+    completed_commit: a4f6cb6
+    depends_on: []
+    write_scope:
+      - commands/workflow/plan_task_test.go
+    verification_focus: |-
+      go test ./commands/workflow/... passes. Full lifecycle chain
+      verified: create → add tasks with deps → eligible shows
+      unblocked → advance → complete → blocked tasks become eligible.
+      Conflict detection rejects overlapping write scopes.
+    owner: dot-agents
+
+  - id: pr3b-state-checkpoint-orient
+    parent_task_id: pr3b-workflow
+    title: "PR3b: state persistence + session resumption chain"
+    summary: |-
+      Test the state persistence and session resumption flow:
+        checkpoint --message "..." → log → orient (full session context)
+        checkpoint --log-to-iter N (iteration log integration)
+        status (read-only snapshot of all workflow state)
+      Covers workflowOrientState assembly (git branch/sha, active plans,
+      checkpoints, handoffs, lessons, proposals, delegations, drift),
+      checkpoint.yaml write + session-log.md append, iteration log
+      stub creation (iter-N.yaml with impl/verifier/review blocks),
+      agent session token recording, and log display (--all flag).
+      Also covers health snapshot (healthy/warn criteria: dirty files,
+      pending proposals, checkpoint age) and prefs get/set/reset.
+    status: completed
+    completed_at: "2026-05-12T16:35:00Z"
+    completed_commit: 81e2dcc
+    depends_on: []
+    write_scope:
+      - commands/workflow/state_plan_test.go
+      - commands/workflow/iter_log_test.go
+      - commands/workflow/health_test.go
+      - commands/workflow/prefs_test.go
+    verification_focus: |-
+      go test ./commands/workflow/... passes. Checkpoint writes state,
+      log shows entries, orient assembles full context. Iteration log
+      records impl/verifier/review blocks. Health computes status
+      correctly. Prefs round-trip set/get works.
+    owner: dot-agents
+
+  - id: pr3b-verification-review-gate
+    parent_task_id: pr3b-workflow
+    title: "PR3b: verification pipeline + review gate + delegation chain"
+    summary: |-
+      Test the verification and delegation orchestration flows:
+        verify record test → verify record review (phase1+phase2 consolidation)
+        delegation create → [worker] → merge-back → fold-back → evaluate-gate
+        bundle stages (expand verifier sequence into ordered stages)
+      Covers verification-log.jsonl append-only recording, kind/status/scope
+      validation, review-kind routing (phase1+phase2 → overall decision),
+      escalation reason enforcement, delegation contract lifecycle
+      (create validates write_scope vs active contracts, evaluate-gate
+      checks closeout readiness), merge-back artifact consolidation,
+      fold-back observation classification (route to delegation/planning/
+      learning), and bundle YAML parsing with stage expansion.
+      Also covers fs.go helpers: copyWorkflowArtifact, isDMAFile,
+      isCanonicalPlanFile, sha256File, mergePlanDirFastRename.
+    status: completed
+    completed_at: "2026-05-12T18:30:00Z"
+    completed_commit: a6be281
+    depends_on: []
+    write_scope:
+      - commands/workflow/verification_test.go
+      - commands/workflow/review_gate_test.go
+      - commands/workflow/delegation_fanout_test.go
+      - commands/workflow/bundle_test.go
+      - commands/workflow/fs_test.go
+    verification_focus: |-
+      go test ./commands/workflow/... passes. Verification records
+      round-trip correctly. Review gate consolidates phase decisions.
+      Delegation contract lifecycle validates write_scope conflicts.
+      Bundle stages expand verifier sequence correctly.
+    owner: dot-agents
+
+  - id: pr3b-drift-sweep-graph
+    parent_task_id: pr3b-workflow
+    title: "PR3b: drift detection + sweep remediation + graph integration"
+    summary: |-
+      Test the drift/sweep and graph query flows:
+        drift scan → sweep plan → sweep apply (detect + fix repo health)
+        graph query --intent <intent> (14 intents via KG bridge dispatch)
+        graph derive-scope (write .scope.yaml sidecars for tasks)
+      Covers drift scanning (stale checkpoints, missing dirs, inconsistent
+      plan status), sweep planning (generate actionable items from drift
+      report), sweep apply (scaffold dirs, archive plans via fast-rename),
+      sweep-log.jsonl recording, graph query dispatch to KG bridge
+      subprocess, and scope derivation with ScopeEvidence output.
+    status: completed
+    completed_at: "2026-05-12T19:00:00Z"
+    completed_commit: 0ec9b81
+    depends_on: []
+    write_scope:
+      - commands/workflow/drift_sweep_test.go
+      - commands/workflow/graph_test.go
+      - commands/workflow/scope_evidence_test.go
+    verification_focus: |-
+      go test ./commands/workflow/... passes. Drift scan detects
+      stale checkpoints and missing dirs. Sweep apply creates dirs
+      and archives plans. Graph query dispatches to bridge correctly.
+    owner: dot-agents
+
+  - id: pr3b-graphstore-backends
+    parent_task_id: pr3b-workflow
+    title: "PR3b: graphstore Store interface + SQLite + CRG bridge + MCP server"
+    summary: |-
+      Test the graphstore layer that backs workflow graph queries:
+        SQLite: UpsertNode/Edge → GetNode/GetEdgesBySource/Target →
+          SearchNodes → GetStats → GetImpactRadius (BFS traversal)
+        CRG bridge: Build → Update → Status → DetectChanges → GetImpactRadius
+          (subprocess discovery, binary detection, output parsing)
+        MCP server: JSON-RPC dispatch → tool routing → error handling
+        Migrations: EnsureSchema creates 5 tables + 12 indexes (idempotent)
+        Impact: BFS with depth/node caps, cycle handling, adjacency maps
+      Also covers KG note operations: UpsertKGNote, GetKGNote,
+      LinkKGNoteToSymbol, GetNotesLinkedTo (warm layer indexing).
+      postgres.go is skipped if no integration DB — document skip reason.
+    status: pending
+    depends_on: []
+    write_scope:
+      - internal/graphstore/sqlite_test.go
+      - internal/graphstore/crg_test.go
+      - internal/graphstore/mcp_server_test.go
+      - internal/graphstore/impact_test.go
+      - internal/graphstore/migrations_test.go
+      - internal/graphstore/postgres_test.go
+    verification_focus: |-
+      go test ./internal/graphstore/... passes. SQLite CRUD round-trips
+      correctly. Impact BFS handles cycles, depth caps, node caps.
+      CRG bridge discovery finds binary. MCP server dispatches all tools.
+      Migrations are idempotent. KG note warm-layer indexing works.
+    owner: dot-agents
+
+  # ── PR3c slices (45.8% → 80%) ──────────────────────────────────────────
+
+  - id: pr3c-kg-bootstrap-query
+    parent_task_id: pr3c-kg
+    title: "PR3c: KG bootstrap → warm → query end-to-end"
+    summary: |-
+      Test the knowledge graph bootstrap and query chain:
+        setup → warm → query (complete KG initialization)
+        setup creates KG_HOME dir tree (self/schema, raw/inbox,
+        notes/{sources,entities,decisions,...}, ops/...), writes
+        config.yaml + index.md + log.md, inits empty warm SQLite.
+        warm walks notes/ and indexes into warm SQLite, optionally
+        loads CRG code nodes/edges, writes last_warm_sync metadata.
+        warm stats queries SQLite for note/link/code counts.
+        query dispatches on intent (source_lookup, entity_context,
+        decision_lookup, synthesis_lookup, concept_lookup, repo_context,
+        related_notes, contradictions, graph_health) via searchNotes
+        (filesystem text search scored by title/summary/body match).
+      Also covers health (walk notes counting stale/orphan/queue,
+      write graph-health.json) and stats/status subcommands.
+    status: completed
+    completed_at: "2026-05-12T15:12:37Z"
+    completed_commit: 09d3e20
+    depends_on: []
+    write_scope:
+      - commands/kg/kg_test.go
+    verification_focus: |-
+      go test ./commands/kg/... passes. Setup → warm → query
+      round-trip verified. Each query intent returns expected results.
+      Health computes stale/orphan counts correctly. Warm stats
+      reflect indexed note count.
+    owner: dot-agents
+
+  - id: pr3c-kg-curation-loop
+    parent_task_id: pr3c-kg
+    title: "PR3c: ingest → lint → maintain curation cycle"
+    summary: |-
+      Test the knowledge curation and maintenance flows:
+        ingest [file] → query (verify ingested content searchable)
+        lint (detect broken_links, orphans, missing_source_refs,
+          stale_pages, index_drift, oversize_pages, contradictions)
+        maintain reweave (fix broken note links, add missing edges)
+        maintain mark-stale (notes older than threshold → status=stale)
+        maintain compact (archive superseded/archived notes)
+      Covers raw source recording in raw/inbox, entity/decision
+      extraction from ingested content, source→imported lifecycle,
+      lint result classification, and the three maintain subcommands
+      as repair operations on detected lint issues.
+      Also covers sync → lint (pull then validate) chain and
+      note archive/stats subcommands.
+      Surfaced and fixed persistReweavedNote body-loss bug (commit de7ebae).
+    status: completed
+    completed_at: "2026-05-12T15:55:00Z"
+    completed_commit: 17d06fd
+    depends_on: []
+    write_scope:
+      - commands/kg/query_lint_maintain_test.go
+    verification_focus: |-
+      go test ./commands/kg/... passes. Ingest creates source +
+      entity + decision notes. Lint detects seeded issues (broken
+      links, stale notes). Maintain reweave fixes broken links.
+      mark-stale transitions old notes. compact archives them.
+    owner: dot-agents
+
+  - id: pr3c-kg-bridge-code-graph
+    parent_task_id: pr3c-kg
+    title: "PR3c: bridge dispatch + code graph + note-code linking"
+    status: completed
+    completed_at: "2026-05-12T16:20:00Z"
+    completed_commit: bd1abfb
+    summary: |-
+      Test the bridge adapter layer and code graph operations:
+        bridge health → bridge query (fan-out intent dispatch)
+        bridge mapping (14 intents → KG intent mappings)
+        build → update → code-status → changes → impact (CRG pipeline)
+        link add → link list (note↔code symbol cross-references)
+      Covers bridge adapter enumeration (LocalFileAdapter availability,
+      note count, last query status), fan-out query dispatch (bridge
+      intent → one+ KG intents → merge deduplicated results),
+      code-specific intents (symbol_lookup, impact_radius, change_analysis,
+      tests_for, callers_of, callees_of, community_context),
+      CRG subprocess invocation chain (build → postprocess → update),
+      and the note-code linking warm layer (add/list/remove).
+      Also covers explain.go (all 5 topics: overview, structure,
+      platforms, links, manifest).
+    depends_on: []
+    write_scope:
+      - commands/kg/bridge_test.go
+      - commands/kg/sync_code_warm_link_test.go
+      - commands/explain_test.go
+    verification_focus: |-
+      go test ./commands/kg/... ./commands/... passes. Bridge health
+      reports adapter availability. Bridge query fans out intents
+      correctly. Code graph chain verified. Link add/list round-trips.
+      Explain renders all topics.
+    owner: dot-agents

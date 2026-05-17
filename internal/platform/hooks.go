@@ -294,7 +294,7 @@ func emitHookFanout(specs []HookSpec, dstRoot string, mode HookEmissionMode, map
 	if mode.Shape != HookShapeRenderFanout {
 		return fmt.Errorf("hook fanout requires %q shape, got %q", HookShapeRenderFanout, mode.Shape)
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -422,7 +422,7 @@ func emitRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSp
 	if len(specs) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(dstRoot, 0755); err != nil {
+	if err := osMkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -462,9 +462,15 @@ func removeManagedRenderedHookFanout(specs []HookSpec, dstRoot string, render fu
 func emitHookFile(src, dst string, transport HookTransport) error {
 	switch transport {
 	case HookTransportSymlink:
-		return links.Symlink(src, dst)
+		// Managed-replace: the hook file is a dot-agents output at a fixed
+		// platform-owned path, re-emitted every refresh. Use the Replacing
+		// variant so a stale managed link is relinked idempotently and a
+		// genuine user file is preserved as <dst>.dot-agents-backup.
+		return links.SymlinkReplacing(src, dst, backupSidecar)
 	case HookTransportHardlink:
-		return links.Hardlink(src, dst)
+		// Managed-replace; the prior managed hard link has no reparse point so
+		// plain Hardlink would refuse it — same rationale as the symlink case.
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	case HookTransportWrite:
 		content, err := os.ReadFile(src)
 		if err != nil {
@@ -833,18 +839,46 @@ func marshalJSON(v any) ([]byte, error) {
 }
 
 func writeManagedFile(dst string, content []byte) error {
-	if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, content) {
-		return nil
+	newHash := renderContentHash(content)
+	existing, readErr := os.ReadFile(dst)
+	switch {
+	case readErr == nil:
+		if bytes.Equal(existing, content) {
+			recordRenderHash(dst, newHash) // heal/ensure provenance
+			return nil
+		}
+		// Divergent existing file. It is ONLY safe to clobber if it is
+		// provably what we last rendered (hash matches the manifest).
+		// Otherwise it is a user edit (or unknown provenance) and must
+		// be preserved before we overwrite — never silently lost.
+		if renderManifestHash(dst) != renderContentHash(existing) {
+			if bErr := BackupBeforeOverwrite(dst); bErr != nil {
+				return fmt.Errorf("preserving user-modified managed file %s before refresh: %w", dst, bErr)
+			}
+		}
+	case os.IsNotExist(readErr):
+		// No existing destination: safe to render fresh.
+	default:
+		// The destination exists but is unreadable (e.g. perms). Its
+		// bytes could be an unsaved user edit we cannot compare or back
+		// up. Removing/overwriting now would destroy it silently while
+		// reporting success, so this MUST block instead of falling
+		// through to the remove/write path.
+		return fmt.Errorf("reading existing managed file %s before refresh: %w", dst, readErr)
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := os.Remove(dst); err != nil {
+		if err := osRemove(dst); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(dst, content, 0644)
+	if err := osWriteFile(dst, content, 0644); err != nil {
+		return err
+	}
+	recordRenderHash(dst, newHash)
+	return nil
 }
 
 func removeManagedFile(dst string, content []byte) error {
@@ -855,7 +889,11 @@ func removeManagedFile(dst string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// Never delete a managed link (POSIX symlink / Windows junction or
+	// hard link) or a non-regular entry — only a plain file we rendered.
+	// A Windows managed file link is a hard link with no reparse point, so
+	// a raw ModeSymlink check would miss it and wrongly delete the link.
+	if links.IsManagedFileLink(dst) || !info.Mode().IsRegular() {
 		return nil
 	}
 	existing, err := os.ReadFile(dst)
@@ -865,7 +903,7 @@ func removeManagedFile(dst string, content []byte) error {
 	if !bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))
@@ -899,7 +937,10 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// See removeManagedFile: preserve any managed link (incl. a Windows
+	// hard-linked managed file with no reparse point); only a plain
+	// rendered file is eligible for removal.
+	if links.IsManagedFileLink(dst) || !info.Mode().IsRegular() {
 		return nil
 	}
 	content, err := os.ReadFile(dst)
@@ -909,7 +950,7 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if !matches(content) {
 		return nil
 	}
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))

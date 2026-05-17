@@ -25,7 +25,12 @@ func NewRefreshCmd() *cobra.Command {
 		Short: "Refresh managed setup in projects from ~/.agents/",
 		Long: `Re-applies links and config from ~/.agents/ into project directories.
 Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
-		Args: cobra.MaximumNArgs(1),
+		Example: ExampleBlock(
+			"  da refresh",
+			"  da refresh billing-api",
+			"  da refresh --import --dry-run",
+		),
+		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filter := ""
 			if len(args) > 0 {
@@ -34,28 +39,26 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			return runRefresh(filter)
 		},
 	}
-	cmd.Flags().BoolVar(&refreshImport, "import", false, "Import project/global configs into ~/.agents before relinking")
+	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
 	return cmd
 }
 
 func runRefresh(projectFilter string) error {
-	if refreshImport {
-		if err := runImportFromRefresh(projectFilter, "all"); err != nil {
-			return fmt.Errorf("import before refresh: %w", err)
-		}
+	if err := runImportFromRefresh(projectFilter, refreshImportScope()); err != nil {
+		return fmt.Errorf("import before refresh: %w", err)
 	}
 
-	cfg, err := config.Load()
+	cfg, err := configLoad()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
 	if len(cfg.Projects) == 0 {
-		ui.Info("No managed projects. Add one with: dot-agents add <path>")
+		ui.Info("No managed projects. Add one with: da add <path>")
 		return nil
 	}
 
-	ui.Header("dot-agents refresh")
+	ui.Header("da refresh")
 
 	// Determine which platforms are enabled
 	ui.Section("Enabled Platforms")
@@ -85,6 +88,8 @@ func runRefresh(projectFilter string) error {
 		return nil
 	}
 
+	installedEnabled := platform.InstalledEnabledPlatforms(cfg)
+
 	// Resolve dot-agents git commit
 	refreshCommit, refreshDescribe := resolveRefreshCommit()
 
@@ -93,13 +98,17 @@ func runRefresh(projectFilter string) error {
 	if projectFilter != "" {
 		path := cfg.GetProjectPath(projectFilter)
 		if path == "" {
-			return fmt.Errorf("project not found: %s", projectFilter)
+			return ErrorWithHints(
+				fmt.Sprintf("project not found: %s", projectFilter),
+				"Run `da status` to see the registered project names.",
+			)
 		}
 		projects = []string{projectFilter}
 	}
 
 	total := len(projects)
 	count := 0
+	var failed []string
 	for i, name := range projects {
 		path := cfg.GetProjectPath(name)
 		if path == "" || path == "." {
@@ -122,19 +131,43 @@ func runRefresh(projectFilter string) error {
 		if rc, err := config.LoadAgentsRC(path); err == nil {
 			for _, src := range rc.Sources {
 				if src.Type == "git" {
-					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'dot-agents install' to re-resolve%s\n", ui.Dim, ui.Reset)
+					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'da install' to re-resolve%s\n", ui.Dim, ui.Reset)
 					break
 				}
 			}
 			_ = rc
 		}
 
+		projectFailed := false
 		if !Flags.DryRun {
 			projectsync.CreateProjectDirs(name)
-			restoreFromResources(name, path)
+			if err := restoreFromResources(name, path); err != nil {
+				// A partial restore must NOT be stamped as a successful
+				// refresh. Treat it exactly like a projection/CreateLinks
+				// failure: surface it and skip refresh metadata.
+				ui.Bullet("warn", fmt.Sprintf("restore from resources: %v", err))
+				projectFailed = true
+			}
 		}
 
 		config.SetWindowsMirrorContext(path)
+
+		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
+		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
+		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
+		if err != nil {
+			if Flags.DryRun {
+				ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
+			} else {
+				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+				projectFailed = true
+			}
+		} else if lines != nil {
+			for _, line := range lines {
+				ui.DryRun(line)
+			}
+		}
+
 		for _, p := range enabledPlatforms {
 			if !p.IsInstalled() {
 				ui.Skip(p.DisplayName() + " (not installed)")
@@ -146,31 +179,59 @@ func runRefresh(projectFilter string) error {
 			}
 			if err := p.CreateLinks(name, path); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+				projectFailed = true
 			} else {
 				ui.Bullet("ok", p.DisplayName()+" links refreshed")
 			}
 		}
 
-		if !Flags.DryRun {
-			writeRefreshMarker(path, refreshCommit, refreshDescribe)
-		} else {
-			msg := "Write .agents-refresh"
+		if Flags.DryRun {
+			msg := "Update .agentsrc.json refresh details"
 			if refreshCommit != "" {
 				msg += " (commit=" + refreshCommit[:8] + ")"
 			}
 			ui.DryRun(msg)
+			count++
+			continue
 		}
 
+		// Do NOT stamp fresh refresh metadata onto a project whose
+		// projection or platform links failed: a manifest claiming
+		// success for a partial application makes retries and
+		// doctor/refresh recovery ambiguous. Surface it instead.
+		if projectFailed {
+			failed = append(failed, name)
+			ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
+			continue
+		}
+		if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+			failed = append(failed, name)
+			continue
+		}
 		count++
 	}
 
 	fmt.Fprintln(os.Stdout)
-	if count == 0 {
+	if count == 0 && len(failed) == 0 {
 		ui.Info("Nothing to refresh.")
-	} else {
+	} else if count > 0 {
 		ui.Success(fmt.Sprintf("Refreshed %d project(s).", count))
 	}
+	if len(failed) > 0 {
+		return ErrorWithHints(
+			fmt.Sprintf("refresh incomplete for %d project(s): %s", len(failed), strings.Join(failed, ", ")),
+			"The listed projects were NOT marked refreshed (partial application). Re-run after resolving the warnings above; unmanaged files in the way must be imported, backed up, or removed.",
+		)
+	}
 	return nil
+}
+
+func refreshImportScope() string {
+	if refreshImport {
+		return importScopeAll
+	}
+	return importScopeProject
 }
 
 // resolveRefreshCommit returns the commit hash and describe string embedded at build time.
@@ -179,15 +240,13 @@ func resolveRefreshCommit() (string, string) {
 	return Commit, Describe
 }
 
-func writeRefreshMarker(projectPath, commit, describe string) {
-	markerPath := filepath.Join(projectPath, ".agents-refresh")
-	content := refreshMarkerContent(Version, commit, describe)
-	os.WriteFile(markerPath, content, 0644)
-	projectsync.EnsureGitignoreEntry(projectPath, ".agents-refresh")
-}
-
-func restoreFromResources(project, projectPath string) {
-	restoreFromResourcesCounted(project, projectPath)
+// restoreFromResources restores files from ~/.agents/resources/<project>/.
+// It returns a non-nil error if any walk/mkdir/write/copy failed so callers
+// that stamp success metadata can treat a partial restore as a failure
+// instead of a silent false-success.
+func restoreFromResources(project, projectPath string) error {
+	_, err := restoreFromResourcesCounted(project, projectPath)
+	return err
 }
 
 func mapResourceRelToDest(project, relPath string) string {
@@ -202,6 +261,8 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/cursor.json"
 	case relCursorIgnore:
 		return "settings/" + project + "/cursorignore"
+	case relCursorIndexingIgnore:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore")
 	case relClaudeSettingsLocal:
 		return "settings/" + project + "/claude-code.json"
 	case relMCPJSON:
@@ -220,6 +281,27 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
+	}
+
+	// Directory-bucket mappings. The relPath is a full walked file path like
+	// ".cursor/commands/foo.md"; the constants are directory prefixes ending
+	// in "/". These MUST be prefix matches (not exact-string switch cases) or
+	// the bucket files silently fall through and are dropped from recovery.
+	for _, m := range []struct {
+		prefix string
+		bucket platform.CanonicalBucket
+	}{
+		{relCursorCommandsDir, platform.CanonicalBucketCommands},
+		{relClaudeCommandsDir, platform.CanonicalBucketCommands},
+		{relOpenCodeCommandsDir, platform.CanonicalBucketCommands},
+		{relClaudeOutputStylesDir, platform.CanonicalBucketOutputStyles},
+		{relOpenCodeModesDir, platform.CanonicalBucketModes},
+		{relOpenCodeThemesDir, platform.CanonicalBucketThemes},
+		{relGitHubPromptsDir, platform.CanonicalBucketPrompts},
+	} {
+		if strings.HasPrefix(relPath, m.prefix) {
+			return platform.CanonicalBucketScopePath(m.bucket, project, strings.TrimPrefix(relPath, m.prefix))
+		}
 	}
 
 	// .cursor/rules/ → rules/
@@ -271,7 +353,21 @@ func mapResourceRelToDest(project, relPath string) string {
 	}
 
 	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
+	for _, prefix := range []string{
+		"rules/",
+		"settings/",
+		"mcp/",
+		"skills/",
+		"agents/",
+		agentsHooksPrefix,
+		string(platform.CanonicalBucketCommands) + "/",
+		string(platform.CanonicalBucketOutputStyles) + "/",
+		string(platform.CanonicalBucketIgnore) + "/",
+		string(platform.CanonicalBucketModes) + "/",
+		string(platform.CanonicalBucketPlugins) + "/",
+		string(platform.CanonicalBucketThemes) + "/",
+		string(platform.CanonicalBucketPrompts) + "/",
+	} {
 		if strings.HasPrefix(relPath, prefix) {
 			return relPath
 		}

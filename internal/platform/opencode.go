@@ -2,6 +2,7 @@ package platform
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,13 +114,27 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 
 	// opencode.json config
 	if src := resolveScopedFile(agentsHome, "settings", project, opencodeJSON); src != "" {
-		links.Symlink(src, filepath.Join(repoPath, opencodeJSON))
+		// Managed-replace at a fixed owned repo path (opencode.json).
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, opencodeJSON), backupSidecar); err != nil {
+			return err
+		}
 	}
 
 	// .opencode/agent/*.md and .agents/skills/ — emitted by CollectAndExecuteSharedTargetPlan
 	// via SharedTargetIntents; no direct action needed here.
 
 	return nil
+}
+
+// opencodeConfigSources mirrors CreateLinks' resolveScopedFile call so a
+// Windows hard-linked managed opencode.json (no reparse point) is cleaned up
+// the same way RemoveIfSymlinkUnder drops a POSIX symlink.
+func opencodeConfigSources(agentsHome, project string) []string {
+	var srcs []string
+	for _, scope := range scopedNames(project) {
+		srcs = append(srcs, filepath.Join(agentsHome, "settings", scope, opencodeJSON))
+	}
+	return srcs
 }
 
 func (o *opencode) ensureUserAgents(agentsHome string) error {
@@ -135,23 +150,34 @@ func (o *opencode) ensureUserAgents(agentsHome string) error {
 func (o *opencode) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	links.RemoveIfSymlinkUnder(filepath.Join(repoPath, opencodeJSON), agentsHome)
+	var errs []error
+
+	cfg := filepath.Join(repoPath, opencodeJSON)
+	errs = append(errs,
+		links.RemoveIfSymlinkUnder(cfg, agentsHome),
+		removeHardlinkedManaged(cfg, opencodeConfigSources(agentsHome, project)),
+	)
 
 	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(agentDir, e.Name()), agentsHome)
+			dst := filepath.Join(agentDir, e.Name())
+			name := strings.TrimSuffix(e.Name(), ".md")
+			errs = append(errs,
+				links.RemoveIfSymlinkUnder(dst, agentsHome),
+				removeHardlinkedManaged(dst, scopedAgentFileSources(agentsHome, project, name, ".md")),
+			)
 		}
 	}
 
 	skillsDir := filepath.Join(repoPath, ".agents", "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
-			links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome)
+			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {

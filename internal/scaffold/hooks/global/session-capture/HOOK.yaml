@@ -1,0 +1,13 @@
+name: session-capture
+description: Persist checkpoint state and append a session log entry when work stops
+when: stop
+match:
+  tools: []
+  expression: ""
+run:
+  command: ./capture.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
+  - cursor
