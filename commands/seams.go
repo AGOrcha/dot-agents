@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
 
 // IO seams. Tests in this package swap these to error-injecting stubs to
@@ -20,6 +21,7 @@ var (
 	osExecutable = os.Executable
 	osGetwd      = os.Getwd
 	osSymlink    = os.Symlink
+	copyFile     = projectsync.CopyFile
 )
 
 // Downstream-library seams. These wrap calls into internal/config and

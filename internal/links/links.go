@@ -7,8 +7,50 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
+
+// ownedManagedLink reports whether linkPath is a resolvable managed link
+// (POSIX symlink / Windows junction) whose target resolves UNDER the
+// canonical dot-agents storage root. Only such an entry is provably ours
+// to replace destructively; a resolvable link pointing anywhere else is a
+// user-owned link and must be treated as unmanaged.
+func ownedManagedLink(linkPath string) bool {
+	return IsManagedLinkUnder(linkPath, config.AgentsHome())
+}
+
+// handleUnmanagedOccupant applies the ownership contract to an existing
+// entry at path that is NOT a managed link we own. An empty directory
+// carries no data and is removed (single-entry) so idempotent re-link
+// still works. Anything else (regular file, non-empty dir, a user-owned
+// symlink/junction/hard link) is refused with ErrUnmanagedTarget unless
+// backup != nil, in which case it is backed up then removed. backup
+// failure leaves the entry intact and propagates the error (no data loss).
+func handleUnmanagedOccupant(path string, backup func(string) error) error {
+	info, statErr := os.Lstat(path)
+	if statErr != nil {
+		return nil // vanished between checks; nothing to protect
+	}
+	if info.IsDir() {
+		if entries, derr := os.ReadDir(path); derr == nil && len(entries) == 0 {
+			if rmErr := fsopsRemove(path); rmErr != nil {
+				return fmt.Errorf("removing empty dir %s: %w", path, rmErr)
+			}
+			return nil
+		}
+	}
+	if backup == nil {
+		return fmt.Errorf("%w: %s is not a dot-agents-managed link — back it up/import or use the explicit replace path", ErrUnmanagedTarget, path)
+	}
+	if bErr := backup(path); bErr != nil {
+		return fmt.Errorf("backing up unmanaged entry %s before replace: %w", path, bErr)
+	}
+	if rmErr := fsopsRemoveAll(path); rmErr != nil {
+		return fmt.Errorf("removing backed-up entry %s: %w", path, rmErr)
+	}
+	return nil
+}
 
 // ErrUnmanagedTarget is returned by Symlink when linkPath is occupied by an
 // entry dot-agents does not own (a regular file, or a non-empty directory)
@@ -55,34 +97,21 @@ func symlinkWithPolicy(target, linkPath string, backup func(path string) error) 
 		if existing == target {
 			return nil // already correct
 		}
-		// Stale MANAGED link (symlink/junction) pointing elsewhere:
-		// removing it deletes only the link, never a target's contents.
-		if err := fsopsRemoveAll(linkPath); err != nil {
-			return fmt.Errorf("removing old symlink %s: %w", linkPath, err)
+		// Resolvable link pointing elsewhere. Only remove it if it is
+		// provably ours (resolves under the canonical agents root); a
+		// user-owned symlink/junction at this path must NOT be silently
+		// destroyed.
+		if ownedManagedLink(linkPath) {
+			if err := fsopsRemoveAll(linkPath); err != nil {
+				return fmt.Errorf("removing old managed link %s: %w", linkPath, err)
+			}
+		} else if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
+			return uErr
 		}
 	} else if !os.IsNotExist(err) {
 		// Not a symlink/junction: a regular file or a real directory.
-		if info, statErr := os.Lstat(linkPath); statErr == nil {
-			unmanaged := !info.IsDir() // any non-managed regular file
-			if info.IsDir() {
-				if entries, derr := os.ReadDir(linkPath); derr == nil && len(entries) > 0 {
-					unmanaged = true // non-empty dir may hold local work
-				}
-			}
-			if unmanaged {
-				if backup == nil {
-					return fmt.Errorf("%w: %s is a regular file or non-empty directory, not a managed link — back it up/import or use the explicit replace path", ErrUnmanagedTarget, linkPath)
-				}
-				if bErr := backup(linkPath); bErr != nil {
-					return fmt.Errorf("backing up unmanaged entry %s before replace: %w", linkPath, bErr)
-				}
-				if rmErr := fsopsRemoveAll(linkPath); rmErr != nil {
-					return fmt.Errorf("removing backed-up entry %s: %w", linkPath, rmErr)
-				}
-			} else if rmErr := fsopsRemove(linkPath); rmErr != nil {
-				// Empty dir: single-entry removal, no data, idempotent.
-				return fmt.Errorf("removing existing entry %s: %w", linkPath, rmErr)
-			}
+		if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
+			return uErr
 		}
 	}
 
@@ -116,20 +145,37 @@ func pathsResolveToSameFile(target, linkPath string) (bool, error) {
 	return os.SameFile(targetInfo, linkInfo), nil
 }
 
-// Hardlink creates a hard link at dstPath pointing to the same inode as srcPath.
-// It is idempotent: if the dst is already hard-linked to src, it is a no-op.
+// Hardlink creates a hard link at dstPath pointing to the same inode as
+// srcPath. Idempotent (already-hard-linked → no-op) and, by the same
+// ownership contract as Symlink, NEVER destroys unmanaged user data: an
+// existing dst that is not a managed link we own (regular file, non-empty
+// dir, user-owned link) yields ErrUnmanagedTarget. A caller that
+// legitimately intends to replace such an entry uses HardlinkReplacing
+// with an explicit backup.
 func Hardlink(srcPath, dstPath string) error {
+	return hardlinkWithPolicy(srcPath, dstPath, nil)
+}
+
+// HardlinkReplacing behaves like Hardlink but backs up an unmanaged
+// occupant (via the caller-supplied backup) before replacing it; a backup
+// failure aborts and preserves the entry.
+func HardlinkReplacing(srcPath, dstPath string, backup func(path string) error) error {
+	return hardlinkWithPolicy(srcPath, dstPath, backup)
+}
+
+func hardlinkWithPolicy(srcPath, dstPath string, backup func(path string) error) error {
 	if already, err := AreHardlinked(srcPath, dstPath); err == nil && already {
 		return nil
 	}
-
-	// Remove existing dst if present
 	if _, err := os.Lstat(dstPath); err == nil {
-		if err := os.Remove(dstPath); err != nil {
-			return fmt.Errorf("removing existing %s: %w", dstPath, err)
+		if ownedManagedLink(dstPath) {
+			if rmErr := fsopsRemoveAll(dstPath); rmErr != nil {
+				return fmt.Errorf("removing old managed link %s: %w", dstPath, rmErr)
+			}
+		} else if uErr := handleUnmanagedOccupant(dstPath, backup); uErr != nil {
+			return uErr
 		}
 	}
-
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", dstPath, err)
 	}

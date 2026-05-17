@@ -481,9 +481,13 @@ func runAdd(pathArg, nameArg string) error {
 	ui.Bullet("ok", "Created ~/.agents/ directories")
 
 	// Restore from active resources
-	restored := restoreFromResourcesCounted(projectName, projectPath)
+	restored, restoreErr := restoreFromResourcesCounted(projectName, projectPath)
 	if restored > 0 {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
+	}
+	if restoreErr != nil {
+		// Surface a partial restore instead of silently swallowing it.
+		ui.Bullet("warn", fmt.Sprintf("restore from resources incomplete: %v", restoreErr))
 	}
 
 	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {
@@ -577,36 +581,53 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 	return count
 }
 
-// restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/ and returns the count.
-func restoreFromResourcesCounted(project, projectPath string) int {
+// restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/
+// and returns the number of files restored plus a non-nil error if any
+// directory walk, mkdir, write, or copy failed. Callers that stamp success
+// (e.g. refresh metadata) MUST observe this error: a partially-applied
+// restore that is reported as success makes retries and doctor/refresh
+// recovery ambiguous.
+func restoreFromResourcesCounted(project, projectPath string) (int, error) {
 	agentsHome := config.AgentsHome()
 	resourcesDir := filepath.Join(agentsHome, "resources", project)
 	if _, err := os.Stat(resourcesDir); err != nil {
-		return 0
+		// No resources to restore is not a failure.
+		return 0, nil
 	}
 	count := 0
-	_ = filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
-		count += restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
+	var restoreErr error
+	walkErr := filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
+		n, ferr := restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
+		count += n
+		if ferr != nil && restoreErr == nil {
+			restoreErr = ferr
+		}
 		return nil
 	})
-	return count
+	if walkErr != nil && restoreErr == nil {
+		restoreErr = fmt.Errorf("walking resources dir %s: %w", resourcesDir, walkErr)
+	}
+	return count, restoreErr
 }
 
-func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) int {
-	if walkErr != nil || d.IsDir() {
-		return 0
+func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) (int, error) {
+	if walkErr != nil {
+		return 0, fmt.Errorf("walking %s: %w", path, walkErr)
+	}
+	if d.IsDir() {
+		return 0, nil
 	}
 	relPath, err := filepath.Rel(resourcesDir, path)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("resolving relative path for %s: %w", path, err)
 	}
 	relPath = filepath.ToSlash(relPath)
 	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
-		return 0
+		return 0, nil
 	}
-	canonicalCount, handled := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
+	canonicalCount, handled, canonErr := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
 	if handled {
-		return canonicalCount
+		return canonicalCount, canonErr
 	}
 	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
 }
@@ -620,37 +641,43 @@ func isCanonicalResourceBackupRel(relPath string) bool {
 	return false
 }
 
-func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool) {
+func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool, error) {
 	candidate := importCandidate{
 		project:    project,
 		sourceRoot: resourcesDir,
 		sourcePath: path,
 	}
 	outputs, ok, canonErr := canonicalImportOutputs(candidate)
-	if !ok || canonErr != nil {
-		return 0, ok
+	if !ok {
+		return 0, false, nil
+	}
+	if canonErr != nil {
+		return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
 	}
 	count := 0
 	for _, output := range outputs {
 		destPath := filepath.Join(agentsHome, output.destRel)
-		_ = osMkdirAll(filepath.Dir(destPath), 0755)
-		if err := osWriteFile(destPath, output.content, 0644); err == nil {
-			count++
+		if err := osMkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
 		}
+		if err := osWriteFile(destPath, output.content, 0644); err != nil {
+			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
+		}
+		count++
 	}
-	return count, true
+	return count, true, nil
 }
 
-func restoreLegacyResourceFile(project, relPath, agentsHome, path string) int {
+func restoreLegacyResourceFile(project, relPath, agentsHome, path string) (int, error) {
 	destRel := mapResourceRelToDest(project, relPath)
 	if destRel == "" {
-		return 0
+		return 0, nil
 	}
 	destPath := filepath.Join(agentsHome, destRel)
-	if err := projectsync.CopyFile(path, destPath); err == nil {
-		return 1
+	if err := copyFile(path, destPath); err != nil {
+		return 0, fmt.Errorf("restoring %s -> %s: %w", path, destPath, err)
 	}
-	return 0
+	return 1, nil
 }
 
 // mirrorBackup copies srcFile (original path, before deletion) into the

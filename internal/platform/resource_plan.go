@@ -208,10 +208,16 @@ func prepareIntentTargetForReplacement(target string, intent ResourceIntent) err
 		case ResourceReplaceNever:
 			return fmt.Errorf("refusing to replace existing file %s", target)
 		case ResourceReplaceAllowlistedImportedDirOnly:
-			if !isAllowlistedSharedMirrorTarget(intent.TargetPath) {
-				return fmt.Errorf("refusing to replace unmanaged file %s", target)
-			}
-			return os.Remove(target)
+			// This policy authorizes replacing only a proven imported/managed
+			// DIRECTORY (handled in the directory branch below). A regular
+			// file at an allowlisted DirectFile target (OpenCode
+			// .opencode/agent/*.md, Copilot .github/agents/*.agent.md) must
+			// NOT be pre-removed here: doing so bypassed the ownership
+			// contract and silently deleted a user-authored file. Leave it in
+			// place and let links.Symlink apply the contract — a managed
+			// symlink is re-pointed idempotently, a genuine user file is
+			// refused (ErrUnmanagedTarget) and preserved.
+			return nil
 		default:
 			return os.Remove(target)
 		}

@@ -245,7 +245,8 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	if err := osMkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
 		return err
 	}
-	return links.Symlink(src, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
+	// Managed-replace at a fixed owned path (.github/copilot-instructions.md).
+	return links.SymlinkReplacing(src, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD), backupSidecar)
 }
 
 func (c *copilot) createSkillsLinks(project, repoPath, _ string) error {
@@ -262,7 +263,8 @@ func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
 		if err := osMkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
 			return err
 		}
-		return links.Symlink(src, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON))
+		// Managed-replace at a fixed owned path (.vscode/mcp.json).
+		return links.SymlinkReplacing(src, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON), backupSidecar)
 	}
 	return nil
 }

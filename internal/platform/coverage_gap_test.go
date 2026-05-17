@@ -1579,7 +1579,10 @@ func TestEnsureFileSymlinkIntent_ExistingSymlinkReplaced(t *testing.T) {
 }
 
 // TestPrepareIntentTargetForReplacement_RefusesUnmanagedFile drives the
-// no-replace branch when a non-allowlisted target collides with a regular file.
+// no-replace branch (ResourceReplaceNever) and asserts the ownership contract
+// for the AllowlistedImportedDirOnly + regular-file case: prepare must NOT
+// remove a regular file (allowlisted or not) — it defers to links.Symlink so
+// user data is never silently deleted here.
 func TestPrepareIntentTargetForReplacement_RefusesUnmanagedFile(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "f")
@@ -1593,19 +1596,27 @@ func TestPrepareIntentTargetForReplacement_RefusesUnmanagedFile(t *testing.T) {
 	if err := prepareIntentTargetForReplacement(target, intent); err == nil {
 		t.Error("expected refusal for never-replace policy")
 	}
-
-	intent.ReplacePolicy = ResourceReplaceAllowlistedImportedDirOnly
-	if err := prepareIntentTargetForReplacement(target, intent); err == nil {
-		t.Error("expected refusal for non-allowlisted target")
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("never-replace must preserve the file, got: %v", err)
 	}
 
-	// Allowlisted path replaces the file.
+	// AllowlistedImportedDirOnly on a regular file: prepare returns nil
+	// without removing the file, regardless of allowlist membership, so
+	// links.Symlink applies the unmanaged-file contract.
+	intent.ReplacePolicy = ResourceReplaceAllowlistedImportedDirOnly
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Errorf("non-allowlisted file prepare must defer (nil), got: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("non-allowlisted file must be preserved, got: %v", err)
+	}
+
 	intent.TargetPath = ".agents/skills/review"
 	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
-		t.Errorf("allowlisted file replace: %v", err)
+		t.Errorf("allowlisted file prepare must defer (nil), got: %v", err)
 	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Error("expected file removed")
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("allowlisted regular file must be preserved (links.Symlink applies the contract), got: %v", err)
 	}
 }
 

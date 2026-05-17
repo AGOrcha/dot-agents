@@ -282,7 +282,14 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	for target, src := range desired {
-		if err := links.Hardlink(src, filepath.Join(rulesDir, target)); err != nil {
+		// Managed-replace: a dot-agents .mdc rule hard link this platform owns
+		// at a fixed path. On a repeat refresh the prior managed hard link is
+		// present and (being a regular file with no reparse point) is not an
+		// ownedManagedLink, so plain Hardlink would refuse. Route through the
+		// Replacing variant with the sidecar backup so a stale managed link is
+		// harmlessly backed up + relinked (idempotent) and a genuine user file
+		// is preserved as <dst>.dot-agents-backup, never silently destroyed.
+		if err := links.HardlinkReplacing(src, filepath.Join(rulesDir, target), backupSidecar); err != nil {
 			return err
 		}
 	}
@@ -339,7 +346,9 @@ func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
 		dst := filepath.Join(repoPath, cursorDir, "settings.json")
-		return links.Hardlink(src, dst)
+		// Managed-replace at a fixed owned path (.cursor/settings.json); see
+		// createRuleLinks for the Replacing-variant rationale.
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }
@@ -350,7 +359,8 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	}
 	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
 		dst := filepath.Join(repoPath, cursorDir, "mcp.json")
-		return links.Hardlink(src, dst)
+		// Managed-replace at a fixed owned path (.cursor/mcp.json).
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }
@@ -358,7 +368,8 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 func (c *cursor) createIgnoreLink(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "settings", project, "cursorignore"); src != "" {
 		dst := filepath.Join(repoPath, ".cursorignore")
-		return links.Hardlink(src, dst)
+		// Managed-replace at a fixed owned path (.cursorignore).
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
 	return nil
 }

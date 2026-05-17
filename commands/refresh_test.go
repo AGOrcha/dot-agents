@@ -1,11 +1,13 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
@@ -542,5 +544,131 @@ func TestRunRefresh_NewRefreshCmdRunEDispatches(t *testing.T) {
 		// Should error because there are no projects so filter check is bypassed
 		// (no projects → early return). Acceptable either way.
 		_ = err
+	}
+}
+
+// ---------- FINDING A: swallowed restore failure must not stamp success ----------
+
+// TestRunRefresh_RestoreFailureDoesNotStampMetadata covers the regression where
+// a partially-failed restore from ~/.agents/resources/<project>/ was swallowed
+// and refresh still wrote success metadata. A restore copy failure must now make
+// runRefresh return a non-zero error AND skip writing .agentsrc.json refresh
+// metadata for that project.
+func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Make claude installed so there is an enabled+installed platform.
+	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	os.MkdirAll(projectPath, 0755)
+
+	// Seed a legacy resource file that maps via restoreLegacyResourceFile and
+	// therefore goes through the copyFile seam.
+	resourceFile := filepath.Join(agentsHome, "resources", "p", "AGENTS.md")
+	os.MkdirAll(filepath.Dir(resourceFile), 0755)
+	if err := os.WriteFile(resourceFile, []byte("# rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	withCopyFileStub(t, func(string, string) error {
+		return errors.New("injected copy failure")
+	})
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runRefresh("")
+	if err == nil {
+		t.Fatal("expected runRefresh to return non-zero error after swallowed restore failure")
+	}
+
+	// .agentsrc.json must NOT carry refresh metadata for the partially-applied project.
+	rc, loadErr := config.LoadAgentsRC(projectPath)
+	if loadErr == nil && rc.Refresh != nil {
+		t.Errorf("expected NO refresh metadata after partial restore, got %+v", rc.Refresh)
+	}
+}
+
+// ---------- FINDING B: directory restore-bucket mappings must fire ----------
+
+// TestMapResourceRelToDest_DirectoryBucketsMatchByPrefix covers the regression
+// where command/output-style/mode/theme/prompt restore buckets used exact-match
+// switch cases against dir-prefix constants ending in "/" and therefore never
+// matched real walked file paths like ".cursor/commands/foo.md".
+func TestMapResourceRelToDest_DirectoryBucketsMatchByPrefix(t *testing.T) {
+	cases := []struct {
+		rel    string
+		bucket platform.CanonicalBucket
+		leaf   string
+	}{
+		{relCursorCommandsDir + "foo.md", platform.CanonicalBucketCommands, "foo.md"},
+		{relClaudeCommandsDir + "bar.md", platform.CanonicalBucketCommands, "bar.md"},
+		{relOpenCodeCommandsDir + "baz.md", platform.CanonicalBucketCommands, "baz.md"},
+		{relClaudeOutputStylesDir + "style.md", platform.CanonicalBucketOutputStyles, "style.md"},
+		{relOpenCodeModesDir + "mode.md", platform.CanonicalBucketModes, "mode.md"},
+		{relOpenCodeThemesDir + "theme.json", platform.CanonicalBucketThemes, "theme.json"},
+		{relGitHubPromptsDir + "prompt.md", platform.CanonicalBucketPrompts, "prompt.md"},
+	}
+	for _, c := range cases {
+		got := mapResourceRelToDest("proj", c.rel)
+		want := platform.CanonicalBucketScopePath(c.bucket, "proj", c.leaf)
+		if got != want {
+			t.Errorf("mapResourceRelToDest(%q) = %q, want %q", c.rel, got, want)
+		}
+	}
+}
+
+// TestRestoreFromResourcesCounted_RestoresDirectoryBuckets ensures at least one
+// file under each new directory bucket is actually restored to the correct
+// canonical destination (end-to-end through restoreFromResourcesCounted).
+func TestRestoreFromResourcesCounted_RestoresDirectoryBuckets(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	type seed struct {
+		rel    string
+		bucket platform.CanonicalBucket
+		leaf   string
+	}
+	seeds := []seed{
+		{relCursorCommandsDir + "c1.md", platform.CanonicalBucketCommands, "c1.md"},
+		{relClaudeOutputStylesDir + "s1.md", platform.CanonicalBucketOutputStyles, "s1.md"},
+		{relOpenCodeModesDir + "m1.md", platform.CanonicalBucketModes, "m1.md"},
+		{relOpenCodeThemesDir + "t1.json", platform.CanonicalBucketThemes, "t1.json"},
+		{relGitHubPromptsDir + "p1.md", platform.CanonicalBucketPrompts, "p1.md"},
+	}
+	for _, s := range seeds {
+		f := filepath.Join(agentsHome, "resources", "proj", filepath.FromSlash(s.rel))
+		os.MkdirAll(filepath.Dir(f), 0755)
+		if err := os.WriteFile(f, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := restoreFromResourcesCounted("proj", tmp)
+	if err != nil {
+		t.Fatalf("restoreFromResourcesCounted error: %v", err)
+	}
+	if n != len(seeds) {
+		t.Errorf("expected %d restores, got %d", len(seeds), n)
+	}
+	for _, s := range seeds {
+		dest := filepath.Join(agentsHome, filepath.FromSlash(platform.CanonicalBucketScopePath(s.bucket, "proj", s.leaf)))
+		if _, statErr := os.Stat(dest); statErr != nil {
+			t.Errorf("expected %s bucket file restored at %s: %v", s.bucket, dest, statErr)
+		}
 	}
 }

@@ -114,7 +114,8 @@ func (o *opencode) CreateLinks(project, repoPath string) error {
 
 	// opencode.json config
 	if src := resolveScopedFile(agentsHome, "settings", project, opencodeJSON); src != "" {
-		if err := links.Symlink(src, filepath.Join(repoPath, opencodeJSON)); err != nil {
+		// Managed-replace at a fixed owned repo path (opencode.json).
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, opencodeJSON), backupSidecar); err != nil {
 			return err
 		}
 	}

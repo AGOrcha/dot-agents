@@ -1,6 +1,7 @@
 package links
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,6 +38,10 @@ func TestSymlink_ReplacesStalePointingElsewhere(t *testing.T) {
 		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
 	}
 	tmp := t.TempDir()
+	// Canonical storage root = tmp, so a link resolving under it is a
+	// dot-agents-OWNED stale managed link (prod: canonical lives under
+	// ~/.agents). Such a link is safe to replace.
+	t.Setenv("AGENTS_HOME", tmp)
 	target := filepath.Join(tmp, "real.txt")
 	stale := filepath.Join(tmp, "stale.txt")
 	if err := os.WriteFile(target, []byte("r"), 0o644); err != nil {
@@ -50,10 +55,28 @@ func TestSymlink_ReplacesStalePointingElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Symlink(target, link); err != nil {
-		t.Fatalf("Symlink replacing stale link: %v", err)
+		t.Fatalf("Symlink replacing OWNED stale link: %v", err)
 	}
 	if !IsManagedLink(link, target) {
 		t.Error("link should now resolve to target after replacement")
+	}
+
+	// A resolvable link pointing OUTSIDE the canonical root is a
+	// user-owned link — refuse, never silently destroy it.
+	outside := t.TempDir()
+	userTgt := filepath.Join(outside, "users-own.txt")
+	if err := os.WriteFile(userTgt, []byte("u"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	userLink := filepath.Join(tmp, "userlnk")
+	if err := os.Symlink(userTgt, userLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := Symlink(target, userLink); !errors.Is(err, ErrUnmanagedTarget) {
+		t.Fatalf("want ErrUnmanagedTarget for a user-owned link, got %v", err)
+	}
+	if got, _ := os.Readlink(userLink); got != userTgt {
+		t.Errorf("user link must be preserved, points to %q", got)
 	}
 }
 

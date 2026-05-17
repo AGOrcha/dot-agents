@@ -422,9 +422,9 @@ func TestRestoreFromResourcesCountedCanonicalizesGitHubHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored := restoreFromResourcesCounted("proj", filepath.Join(tmp, "repo"))
-	if restored != 1 {
-		t.Fatalf("restoreFromResourcesCounted restored %d files, want 1", restored)
+	restored, restoreErr := restoreFromResourcesCounted("proj", filepath.Join(tmp, "repo"))
+	if restored != 1 || restoreErr != nil {
+		t.Fatalf("restoreFromResourcesCounted restored %d files (err=%v), want 1", restored, restoreErr)
 	}
 
 	dest := filepath.Join(agentsHome, "hooks", "proj", "pre-tool", "HOOK.yaml")
@@ -468,9 +468,9 @@ func TestRestoreFromResourcesCountedCanonicalizesCursorHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored := restoreFromResourcesCounted("proj", filepath.Join(tmp, "repo"))
-	if restored != 1 {
-		t.Fatalf("restoreFromResourcesCounted restored %d files, want 1", restored)
+	restored, restoreErr := restoreFromResourcesCounted("proj", filepath.Join(tmp, "repo"))
+	if restored != 1 || restoreErr != nil {
+		t.Fatalf("restoreFromResourcesCounted restored %d files (err=%v), want 1", restored, restoreErr)
 	}
 
 	dest := filepath.Join(agentsHome, "hooks", "proj", "pre-tool-use-guard", "HOOK.yaml")

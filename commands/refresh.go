@@ -138,16 +138,22 @@ func runRefresh(projectFilter string) error {
 			_ = rc
 		}
 
+		projectFailed := false
 		if !Flags.DryRun {
 			projectsync.CreateProjectDirs(name)
-			restoreFromResources(name, path)
+			if err := restoreFromResources(name, path); err != nil {
+				// A partial restore must NOT be stamped as a successful
+				// refresh. Treat it exactly like a projection/CreateLinks
+				// failure: surface it and skip refresh metadata.
+				ui.Bullet("warn", fmt.Sprintf("restore from resources: %v", err))
+				projectFailed = true
+			}
 		}
 
 		config.SetWindowsMirrorContext(path)
 
 		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
 		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
-		projectFailed := false
 		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
 		if err != nil {
 			if Flags.DryRun {
@@ -234,8 +240,13 @@ func resolveRefreshCommit() (string, string) {
 	return Commit, Describe
 }
 
-func restoreFromResources(project, projectPath string) {
-	restoreFromResourcesCounted(project, projectPath)
+// restoreFromResources restores files from ~/.agents/resources/<project>/.
+// It returns a non-nil error if any walk/mkdir/write/copy failed so callers
+// that stamp success metadata can treat a partial restore as a failure
+// instead of a silent false-success.
+func restoreFromResources(project, projectPath string) error {
+	_, err := restoreFromResourcesCounted(project, projectPath)
+	return err
 }
 
 func mapResourceRelToDest(project, relPath string) string {
@@ -270,20 +281,27 @@ func mapResourceRelToDest(project, relPath string) string {
 		return agentsHooksPrefix + project + "/codex.json"
 	case relCopilotInstructionsMD:
 		return "rules/" + project + "/copilot-instructions.md"
-	case relCursorCommandsDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relCursorCommandsDir))
-	case relClaudeCommandsDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relClaudeCommandsDir))
-	case relOpenCodeCommandsDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketCommands, project, strings.TrimPrefix(relPath, relOpenCodeCommandsDir))
-	case relClaudeOutputStylesDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketOutputStyles, project, strings.TrimPrefix(relPath, relClaudeOutputStylesDir))
-	case relOpenCodeModesDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketModes, project, strings.TrimPrefix(relPath, relOpenCodeModesDir))
-	case relOpenCodeThemesDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketThemes, project, strings.TrimPrefix(relPath, relOpenCodeThemesDir))
-	case relGitHubPromptsDir:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketPrompts, project, strings.TrimPrefix(relPath, relGitHubPromptsDir))
+	}
+
+	// Directory-bucket mappings. The relPath is a full walked file path like
+	// ".cursor/commands/foo.md"; the constants are directory prefixes ending
+	// in "/". These MUST be prefix matches (not exact-string switch cases) or
+	// the bucket files silently fall through and are dropped from recovery.
+	for _, m := range []struct {
+		prefix string
+		bucket platform.CanonicalBucket
+	}{
+		{relCursorCommandsDir, platform.CanonicalBucketCommands},
+		{relClaudeCommandsDir, platform.CanonicalBucketCommands},
+		{relOpenCodeCommandsDir, platform.CanonicalBucketCommands},
+		{relClaudeOutputStylesDir, platform.CanonicalBucketOutputStyles},
+		{relOpenCodeModesDir, platform.CanonicalBucketModes},
+		{relOpenCodeThemesDir, platform.CanonicalBucketThemes},
+		{relGitHubPromptsDir, platform.CanonicalBucketPrompts},
+	} {
+		if strings.HasPrefix(relPath, m.prefix) {
+			return platform.CanonicalBucketScopePath(m.bucket, project, strings.TrimPrefix(relPath, m.prefix))
+		}
 	}
 
 	// .cursor/rules/ → rules/

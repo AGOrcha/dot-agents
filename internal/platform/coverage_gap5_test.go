@@ -303,9 +303,13 @@ func TestEmitHookFile_SymlinkBranch(t *testing.T) {
 	}
 }
 
-// TestPrepareIntentTargetForReplacement_AllowlistedFileDeletes drives the
+// TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved drives the
 // AllowlistedImportedDirOnly + regular-file branch when target IS allowlisted.
-func TestPrepareIntentTargetForReplacement_AllowlistedFileDelete(t *testing.T) {
+// The ownership contract authorizes this policy to replace only a proven
+// imported/managed DIRECTORY; a regular file must be left in place (not
+// pre-removed) so links.Symlink can apply the unmanaged-file contract instead
+// of this code silently deleting user data.
+func TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "blocking")
 	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
@@ -316,10 +320,10 @@ func TestPrepareIntentTargetForReplacement_AllowlistedFileDelete(t *testing.T) {
 		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
 	}
 	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
-		t.Fatalf("allowlisted file replace: %v", err)
+		t.Fatalf("allowlisted file prepare: %v", err)
 	}
-	if _, err := os.Stat(target); !os.IsNotExist(err) {
-		t.Error("expected file removed")
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("expected regular file preserved (links.Symlink applies the contract), got: %v", err)
 	}
 }
 

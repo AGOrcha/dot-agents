@@ -114,3 +114,24 @@ func sidecarBackup(dst string) error {
 	}
 	return nil
 }
+
+// backupSidecar is the canonical preservation step passed as the `backup`
+// argument to links.SymlinkReplacing / links.HardlinkReplacing at every
+// internal/platform call site that LEGITIMATELY (re)creates a dot-agents
+// managed link over a path it owns. It preserves a genuine user file as a
+// sibling <path>.dot-agents-backup (the established repo convention) before
+// links removes the entry and installs the managed link.
+//
+// Behaviour by occupant kind (links decides which path is taken):
+//   - our own stale managed hard link / regular file: backed up (a harmless,
+//     idempotent copy of bytes identical to the canonical source) then
+//     relinked — keeps refresh idempotent.
+//   - a real user file: preserved as <path>.dot-agents-backup, then replaced.
+//   - backup failure: links aborts and leaves the original entry intact.
+//
+// It delegates to BackupBeforeOverwrite so the future config-distribution /
+// lock-file model can swap in a richer mirror-backup adapter through the one
+// existing seam without touching call sites.
+func backupSidecar(path string) error {
+	return BackupBeforeOverwrite(path)
+}

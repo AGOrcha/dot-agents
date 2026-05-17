@@ -166,7 +166,11 @@ func syncResourceDirEntries(entries []resourceDir, dstRoot string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if err := links.Symlink(entry.Dir, filepath.Join(dstRoot, entry.Name)); err != nil {
+		// Managed-replace: per-entry resource-dir mirror symlinks re-emitted
+		// every refresh under a dot-agents-managed dstRoot. Stale managed
+		// symlink → idempotent re-point; a genuine user entry → preserved as
+		// <name>.dot-agents-backup.
+		if err := links.SymlinkReplacing(entry.Dir, filepath.Join(dstRoot, entry.Name), backupSidecar); err != nil {
 			return err
 		}
 	}
@@ -188,7 +192,10 @@ func syncScopedFileSymlinks(agentsHome, bucket, scope, marker, dstRoot, suffix s
 		return err
 	}
 	for _, entry := range entries {
-		if err := links.Symlink(entry.File, filepath.Join(dstRoot, entry.Name+suffix)); err != nil {
+		// Managed-replace: per-entry scoped file symlinks re-emitted every
+		// refresh under a dot-agents-managed dstRoot (same rationale as
+		// syncResourceDirEntries).
+		if err := links.SymlinkReplacing(entry.File, filepath.Join(dstRoot, entry.Name+suffix), backupSidecar); err != nil {
 			return err
 		}
 	}

@@ -127,7 +127,12 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 	for _, src := range globalCandidates {
 		if _, err := os.Stat(src); err == nil {
-			if err := links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown)); err != nil {
+			// Managed-replace: AGENTS.md is a dot-agents output at a fixed
+			// owned repo path that refresh re-points (global → project). A
+			// stale managed symlink is idempotently re-pointed; a genuine
+			// user-authored AGENTS.md is preserved as
+			// AGENTS.md.dot-agents-backup, never silently destroyed.
+			if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexAgentsMarkdown), backupSidecar); err != nil {
 				return err
 			}
 			break
@@ -137,7 +142,7 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	for _, name := range []string{"agents.md", "agents.mdc"} {
 		src := filepath.Join(agentsHome, "rules", project, name)
 		if _, err := os.Stat(src); err == nil {
-			if err := links.Symlink(src, filepath.Join(repoPath, codexAgentsMarkdown)); err != nil {
+			if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexAgentsMarkdown), backupSidecar); err != nil {
 				return err
 			}
 			break
@@ -149,7 +154,8 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
-		if err := links.Symlink(src, filepath.Join(repoPath, codexDir, "config.toml")); err != nil {
+		// Managed-replace at a fixed owned path (.codex/config.toml).
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, "config.toml"), backupSidecar); err != nil {
 			return err
 		}
 	}

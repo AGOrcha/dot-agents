@@ -28,6 +28,14 @@ func withWriteFileStub(t *testing.T, stub func(string, []byte, os.FileMode) erro
 	t.Cleanup(func() { osWriteFile = prev })
 }
 
+// withCopyFileStub swaps copyFile for the duration of the test.
+func withCopyFileStub(t *testing.T, stub func(string, string) error) {
+	t.Helper()
+	prev := copyFile
+	copyFile = stub
+	t.Cleanup(func() { copyFile = prev })
+}
+
 // withRemoveStub swaps osRemove for the duration of the test.
 func withRemoveStub(t *testing.T, stub func(string) error) {
 	t.Helper()
@@ -965,8 +973,8 @@ func TestBackupExistingConfigsList_SymlinkBranch(t *testing.T) {
 // restoreLegacyResourceFile dest-empty branch (lines 614-617): when
 // mapResourceRelToDest returns "" the function returns 0.
 func TestRestoreLegacyResourceFile_NoMapping(t *testing.T) {
-	if got := restoreLegacyResourceFile("p", "totally/unknown/path.txt", t.TempDir(), ""); got != 0 {
-		t.Errorf("expected 0 for unmapped rel path, got %d", got)
+	if got, err := restoreLegacyResourceFile("p", "totally/unknown/path.txt", t.TempDir(), ""); got != 0 || err != nil {
+		t.Errorf("expected 0 for unmapped rel path, got %d (err=%v)", got, err)
 	}
 }
 

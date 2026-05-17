@@ -462,9 +462,15 @@ func removeManagedRenderedHookFanout(specs []HookSpec, dstRoot string, render fu
 func emitHookFile(src, dst string, transport HookTransport) error {
 	switch transport {
 	case HookTransportSymlink:
-		return links.Symlink(src, dst)
+		// Managed-replace: the hook file is a dot-agents output at a fixed
+		// platform-owned path, re-emitted every refresh. Use the Replacing
+		// variant so a stale managed link is relinked idempotently and a
+		// genuine user file is preserved as <dst>.dot-agents-backup.
+		return links.SymlinkReplacing(src, dst, backupSidecar)
 	case HookTransportHardlink:
-		return links.Hardlink(src, dst)
+		// Managed-replace; the prior managed hard link has no reparse point so
+		// plain Hardlink would refuse it — same rationale as the symlink case.
+		return links.HardlinkReplacing(src, dst, backupSidecar)
 	case HookTransportWrite:
 		content, err := os.ReadFile(src)
 		if err != nil {

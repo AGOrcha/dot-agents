@@ -577,8 +577,8 @@ func TestRestoreFromResourcesCounted_SkipsCanonicalBackupSubtree(t *testing.T) {
 	os.MkdirAll(filepath.Dir(resourceRules), 0755)
 	os.WriteFile(resourceRules, []byte("# rules"), 0644)
 
-	if n := restoreFromResourcesCounted("proj", tmp); n != 0 {
-		t.Errorf("expected 0 restores for canonical resource backup subtree, got %d", n)
+	if n, err := restoreFromResourcesCounted("proj", tmp); n != 0 || err != nil {
+		t.Errorf("expected 0 restores for canonical resource backup subtree, got %d (err=%v)", n, err)
 	}
 }
 
@@ -838,8 +838,8 @@ func TestRestoreFromResourcesCounted_NoResourcesDir(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	if n := restoreFromResourcesCounted("ghost", tmp); n != 0 {
-		t.Errorf("expected 0 restores for missing resources, got %d", n)
+	if n, err := restoreFromResourcesCounted("ghost", tmp); n != 0 || err != nil {
+		t.Errorf("expected 0 restores for missing resources, got %d (err=%v)", n, err)
 	}
 }
 
@@ -855,9 +855,9 @@ func TestRestoreFromResourcesCounted_RestoresAGENTSMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n := restoreFromResourcesCounted("proj", tmp)
-	if n != 1 {
-		t.Errorf("expected 1 restore, got %d", n)
+	n, err := restoreFromResourcesCounted("proj", tmp)
+	if n != 1 || err != nil {
+		t.Errorf("expected 1 restore, got %d (err=%v)", n, err)
 	}
 	// Should have produced rules/proj/agents.md in agentsHome
 	want := filepath.Join(agentsHome, "rules", "proj", "agents.md")
@@ -875,8 +875,8 @@ func TestRestoreFromResourcesCounted_SkipsBackupsDir(t *testing.T) {
 	os.MkdirAll(filepath.Dir(backupFile), 0755)
 	os.WriteFile(backupFile, []byte("old"), 0644)
 
-	if n := restoreFromResourcesCounted("proj", tmp); n != 0 {
-		t.Errorf("expected 0 restores for backups-only resources dir, got %d", n)
+	if n, err := restoreFromResourcesCounted("proj", tmp); n != 0 || err != nil {
+		t.Errorf("expected 0 restores for backups-only resources dir, got %d (err=%v)", n, err)
 	}
 }
 

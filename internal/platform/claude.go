@@ -311,7 +311,8 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "mcp", project, "claude.json", "mcp.json"); src != "" {
-		return links.Symlink(src, filepath.Join(repoPath, ".mcp.json"))
+		// Managed-replace at a fixed owned repo path (.mcp.json).
+		return links.SymlinkReplacing(src, filepath.Join(repoPath, ".mcp.json"), backupSidecar)
 	}
 	return nil
 }
@@ -346,7 +347,11 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	for name, src := range wanted {
-		if err := links.Symlink(src, filepath.Join(rulesDir, name)); err != nil {
+		// Managed-replace: per-project rule symlinks this platform prunes and
+		// re-emits every refresh under .claude/rules/. Stale managed symlink →
+		// idempotent re-point; a genuine user file → preserved as
+		// <name>.dot-agents-backup.
+		if err := links.SymlinkReplacing(src, filepath.Join(rulesDir, name), backupSidecar); err != nil {
 			return err
 		}
 	}
@@ -417,7 +422,11 @@ func (c *claude) linkUserAgent(globalAgents, userAgentsDir string, entry os.DirE
 	if isPreExistingManagedLink(target, agentDir) {
 		return nil
 	}
-	return links.Symlink(agentDir, target)
+	// Managed-replace: dot-agents emits this agent link into the user home
+	// every refresh. The managed-link case short-circuited above; a genuine
+	// user entry here is preserved as <name>.dot-agents-backup rather than
+	// hard-failing refresh.
+	return links.SymlinkReplacing(agentDir, target, backupSidecar)
 }
 
 func (c *claude) ensureUserRules(agentsHome string) error {
@@ -451,7 +460,10 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 			errs = append(errs, err)
 			continue
 		}
-		errs = append(errs, links.Symlink(src, target))
+		// Managed-replace: ~/.claude/CLAUDE.md is a dot-agents output. The
+		// managed-link case short-circuited above; a genuine user CLAUDE.md is
+		// preserved as CLAUDE.md.dot-agents-backup, never silently destroyed.
+		errs = append(errs, links.SymlinkReplacing(src, target, backupSidecar))
 	}
 	return errors.Join(errs...)
 }

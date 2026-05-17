@@ -85,22 +85,36 @@ func TestSymlinkParentDirCreation(t *testing.T) {
 	}
 }
 
-func TestHardlinkReplacesExisting(t *testing.T) {
+func TestHardlinkRefusesUnmanagedThenReplacingBacksUp(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "src.txt")
 	dst := filepath.Join(tmp, "dst.txt")
 	os.WriteFile(src, []byte("src"), 0644)
-	os.WriteFile(dst, []byte("preexisting"), 0644)
+	os.WriteFile(dst, []byte("preexisting user content"), 0644)
 
-	if err := links.Hardlink(src, dst); err != nil {
-		t.Fatalf("Hardlink replace: %v", err)
+	// Contract: Hardlink refuses an unmanaged regular file (no clobber).
+	if err := links.Hardlink(src, dst); !errors.Is(err, links.ErrUnmanagedTarget) {
+		t.Fatalf("want ErrUnmanagedTarget, got %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "preexisting user content" {
+		t.Errorf("unmanaged file must be preserved, got %q", string(b))
+	}
+
+	// Explicit replace path backs up then hard-links.
+	var saved string
+	if err := links.HardlinkReplacing(src, dst, func(p string) error {
+		b, _ := os.ReadFile(p)
+		saved = string(b)
+		return nil
+	}); err != nil {
+		t.Fatalf("HardlinkReplacing: %v", err)
+	}
+	if saved != "preexisting user content" {
+		t.Errorf("backup must capture the original, got %q", saved)
 	}
 	linked, err := links.AreHardlinked(src, dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !linked {
-		t.Error("expected linked after replace")
+	if err != nil || !linked {
+		t.Errorf("expected hard-linked after explicit replace, linked=%v err=%v", linked, err)
 	}
 }
 

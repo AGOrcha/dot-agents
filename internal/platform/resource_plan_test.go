@@ -520,6 +520,69 @@ func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.
 	}
 }
 
+// TestEnsureFileSymlinkIntentPreservesUserFileAtAllowlistedTarget is the
+// regression for task item 2: a user-authored regular file at an ALLOWLISTED
+// DirectFile target (.opencode/agent/*.md) must NOT be silently deleted by
+// prepareIntentTargetForReplacement. The file must survive (links.Symlink
+// refuses an unmanaged file → execute errors), proving no silent data loss.
+func TestEnsureFileSymlinkIntentPreservesUserFileAtAllowlistedTarget(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	agentDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// User-authored file at an allowlisted DirectFile target.
+	userFile := filepath.Join(repo, ".opencode", "agent", "x.md")
+	if err := os.MkdirAll(filepath.Dir(userFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const userContent = "hand-written by the user"
+	if err := os.WriteFile(userFile, []byte(userContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:    "agents.file.proj.x.opencode",
+		Project:     "proj",
+		Bucket:      "agents",
+		LogicalName: "x",
+		TargetPath:  ".opencode/agent/x.md",
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:         ResourceShapeDirectFile,
+		Transport:     ResourceTransportSymlink,
+		Materializer:  "shared-agent-file-symlink",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Fatal("expected refusal: a user file at an allowlisted DirectFile target must not be replaced")
+	}
+	got, err := os.ReadFile(userFile)
+	if err != nil {
+		t.Fatalf("user file must be preserved, got: %v", err)
+	}
+	if string(got) != userContent {
+		t.Errorf("user file content mutated: got %q want %q", got, userContent)
+	}
+}
+
 func TestExecuteDirSymlinkIntentRejectsNonAllowlistedImportedDirectory(t *testing.T) {
 	repo, agentsHome := setupRepoAgentsHome(t)
 	writeFixtureSkill(t, agentsHome, "proj", "review")

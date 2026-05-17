@@ -37,6 +37,10 @@ func TestSymlink(t *testing.T) {
 
 func TestSymlinkUpdatesStaleLink(t *testing.T) {
 	tmp := t.TempDir()
+	// Canonical root = tmp so the managed link we create resolves under
+	// it and is OWNED — updating it to a new canonical is allowed
+	// (prod: canonical sources live under ~/.agents).
+	t.Setenv("AGENTS_HOME", tmp)
 	target1 := filepath.Join(tmp, "t1.txt")
 	target2 := filepath.Join(tmp, "t2.txt")
 	linkPath := filepath.Join(tmp, "link.txt")

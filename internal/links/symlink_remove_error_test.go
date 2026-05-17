@@ -40,6 +40,9 @@ func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
 		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
 	}
 	tmp := t.TempDir()
+	// Canonical root = tmp so a link resolving under it is OWNED and the
+	// stale-managed-link removal branch (fsopsRemoveAll) is reachable.
+	t.Setenv("AGENTS_HOME", tmp)
 	target := filepath.Join(tmp, "target.txt")
 	if err := os.WriteFile(target, []byte("t"), 0o644); err != nil {
 		t.Fatal(err)
