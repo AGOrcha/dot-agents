@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -115,6 +116,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	ui.Step("Removing project...")
 
+	var cleanupFailures []string
 	if _, err := os.Stat(projectPath); err == nil {
 		config.SetWindowsMirrorContext(projectPath)
 		var installed []platform.Platform
@@ -125,16 +127,29 @@ func runRemove(projectName string, cleanDirs bool) error {
 		}
 		if err := platform.RemoveSharedTargetPlan(projectName, projectPath, installed); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+			cleanupFailures = append(cleanupFailures, fmt.Sprintf("shared targets: %v", err))
 		}
 		for _, p := range platform.All() {
 			if err := p.RemoveLinks(projectName, projectPath); err != nil {
 				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+				cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
 			} else {
 				ui.Bullet("ok", p.DisplayName()+" links removed")
 			}
 		}
 	} else {
 		ui.Bullet("skip", "Skipped link removal (directory not found)")
+	}
+
+	// Managed cleanup failed: removing the registration now would orphan the
+	// still-present managed outputs with no record to retry against. Preserve
+	// the registration and fail so a re-run can finish the cleanup.
+	if len(cleanupFailures) > 0 {
+		return ErrorWithHints(
+			fmt.Sprintf("remove incomplete for '%s': %s", projectName, strings.Join(cleanupFailures, "; ")),
+			"The project registration was PRESERVED so cleanup can be retried. "+
+				"Resolve the warnings above, then re-run `da remove "+projectName+"`.",
+		)
 	}
 
 	cfg.RemoveProject(projectName)

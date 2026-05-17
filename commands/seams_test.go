@@ -485,7 +485,10 @@ func TestBackupExistingConfigsList_RemoveError(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	got := backupExistingConfigsList([]string{target}, tmp, t.TempDir(), "p", "20240101-000000")
+	got, err := backupExistingConfigsList([]string{target}, tmp, t.TempDir(), "p", "20240101-000000")
+	if err != nil {
+		t.Fatalf("backup itself should succeed (only Remove fails): %v", err)
+	}
 	if got != 0 {
 		t.Errorf("expected count=0 when Remove fails, got %d", got)
 	}
@@ -945,10 +948,13 @@ func TestCountClaudeRules_ReadlinkFails(t *testing.T) {
 // non-existent file path and verify the loop skips it.
 func TestBackupExistingConfigsList_LstatFails(t *testing.T) {
 	tmp := t.TempDir()
-	got := backupExistingConfigsList(
+	got, err := backupExistingConfigsList(
 		[]string{filepath.Join(tmp, "absent.txt")},
 		tmp, t.TempDir(), "p", "ts",
 	)
+	if err != nil {
+		t.Fatalf("absent file should be skipped, not error: %v", err)
+	}
 	if got != 0 {
 		t.Errorf("expected 0 when Lstat fails, got %d", got)
 	}
@@ -964,7 +970,10 @@ func TestBackupExistingConfigsList_SymlinkBranch(t *testing.T) {
 	}
 	link := filepath.Join(tmp, "link")
 	linktest.Link(t, dst, link)
-	got := backupExistingConfigsList([]string{link}, tmp, t.TempDir(), "p", "ts")
+	got, err := backupExistingConfigsList([]string{link}, tmp, t.TempDir(), "p", "ts")
+	if err != nil {
+		t.Fatalf("managed symlink removal should not error: %v", err)
+	}
 	if got != 1 {
 		t.Errorf("expected 1 for removed symlink, got %d", got)
 	}

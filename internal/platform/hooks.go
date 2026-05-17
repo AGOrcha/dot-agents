@@ -840,7 +840,9 @@ func marshalJSON(v any) ([]byte, error) {
 
 func writeManagedFile(dst string, content []byte) error {
 	newHash := renderContentHash(content)
-	if existing, err := os.ReadFile(dst); err == nil {
+	existing, readErr := os.ReadFile(dst)
+	switch {
+	case readErr == nil:
 		if bytes.Equal(existing, content) {
 			recordRenderHash(dst, newHash) // heal/ensure provenance
 			return nil
@@ -854,6 +856,15 @@ func writeManagedFile(dst string, content []byte) error {
 				return fmt.Errorf("preserving user-modified managed file %s before refresh: %w", dst, bErr)
 			}
 		}
+	case os.IsNotExist(readErr):
+		// No existing destination: safe to render fresh.
+	default:
+		// The destination exists but is unreadable (e.g. perms). Its
+		// bytes could be an unsaved user edit we cannot compare or back
+		// up. Removing/overwriting now would destroy it silently while
+		// reporting success, so this MUST block instead of falling
+		// through to the remove/write path.
+		return fmt.Errorf("reading existing managed file %s before refresh: %w", dst, readErr)
 	}
 	if _, err := os.Lstat(dst); err == nil {
 		if err := osRemove(dst); err != nil {

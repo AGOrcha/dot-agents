@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,7 +152,7 @@ func TestBackupExistingConfigsList_CopyDeleteNoArtifactInProject(t *testing.T) {
 	agentsMD := filepath.Join(tmp, "AGENTS.md")
 	os.WriteFile(agentsMD, []byte("# instructions"), 0644)
 
-	count := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
 
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
@@ -191,7 +192,7 @@ func TestBackupExistingConfigsList_SkipsBackupArtifacts(t *testing.T) {
 	artifact := filepath.Join(tmp, "AGENTS.md.dot-agents-backup")
 	os.WriteFile(artifact, []byte("old"), 0644)
 
-	count := backupExistingConfigsList([]string{artifact}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{artifact}, tmp, agentsHome, "myproject", "20260101-120000")
 
 	// Artifact should be skipped — count stays 0
 	if count != 0 {
@@ -227,7 +228,7 @@ func TestBackupExistingConfigsList_UnmanagedSymlinkIsBackedUp(t *testing.T) {
 	linkPath := filepath.Join(tmp, "AGENTS.md")
 	linktest.Link(t, target, linkPath)
 
-	count := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
 
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
@@ -283,7 +284,7 @@ func TestBackupExistingConfigsList_ManagedSymlinkNoBackup(t *testing.T) {
 		t.Skip("link not resolvable under agentsHome on this platform")
 	}
 
-	count := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -322,7 +323,7 @@ func TestBackupExistingConfigsList_UnmanagedHardlinkIsBackedUp(t *testing.T) {
 		t.Skipf("hard link unsupported on this fs: %v", err)
 	}
 
-	count := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -358,7 +359,7 @@ func TestBackupExistingConfigsList_ManagedHardlinkNoBackup(t *testing.T) {
 		t.Skipf("hard link unsupported on this fs: %v", err)
 	}
 
-	count := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "ts")
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -1198,5 +1199,165 @@ func TestRunAdd_DryRunWithExistingFilesShowsReplacements(t *testing.T) {
 	reloaded, _ := config.Load()
 	if reloaded.GetProjectPath("replproj") != "" {
 		t.Error("dry-run should not register project")
+	}
+}
+
+// ---------- FINDING 1: backup failure must not delete the user's only copy ----------
+
+// mirrorBackupChecked propagates the CopyFile error so backupExistingConfigsList
+// can abort before the destructive removal.
+func TestMirrorBackupChecked_PropagatesCopyError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	src := filepath.Join(tmp, "AGENTS.md")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withCopyFileStub(t, func(string, string) error { return errors.New("disk full") })
+
+	if err := mirrorBackupChecked("p", tmp, src, "20260101-000000"); err == nil {
+		t.Fatal("expected error when the backup copy fails")
+	}
+}
+
+// The errorless mirrorBackup wrapper retained for import.go callers must still
+// swallow the error (its callers handle failure via the subsequent CopyFile).
+func TestMirrorBackup_WrapperSwallowsCopyError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	src := filepath.Join(tmp, "AGENTS.md")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withCopyFileStub(t, func(string, string) error { return errors.New("boom") })
+	// Must not panic and has no return value to assert — exercising the
+	// wrapper keeps import.go's contract (errorless) covered.
+	mirrorBackup("p", tmp, src, "ts")
+}
+
+// backupExistingConfigsList must NOT remove the original (and must return an
+// error) when the required backup copy fails — otherwise da add would destroy
+// the user's only copy of an unmanaged config while reporting success.
+func TestBackupExistingConfigsList_BackupFailurePreservesOriginal(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	agentsMD := filepath.Join(tmp, "AGENTS.md")
+	if err := os.WriteFile(agentsMD, []byte("# the user's only config"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withCopyFileStub(t, func(string, string) error { return errors.New("resources unwritable") })
+
+	count, err := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "p", "20260101-120000")
+	if err == nil {
+		t.Fatal("expected an error when the backup copy fails")
+	}
+	if count != 0 {
+		t.Errorf("failed backup must not be counted, got count=%d", count)
+	}
+	// The original MUST still exist — destroying it is the CRITICAL bug.
+	data, statErr := os.ReadFile(agentsMD)
+	if statErr != nil {
+		t.Fatalf("original config was deleted despite backup failure: %v", statErr)
+	}
+	if string(data) != "# the user's only config" {
+		t.Errorf("original content altered: %q", string(data))
+	}
+}
+
+// runAdd must abort (non-zero) and NOT register the project when backing up an
+// existing unmanaged config fails.
+func TestRunAdd_BackupFailureAbortsWithoutRegistering(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myrepo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An unmanaged root config that runAdd would back up + replace.
+	agentsMD := filepath.Join(projectPath, "AGENTS.md")
+	if err := os.WriteFile(agentsMD, []byte("# only copy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	withCopyFileStub(t, func(string, string) error { return errors.New("disk full") })
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runAdd(projectPath, ""); err == nil {
+		t.Fatal("expected runAdd to fail when backup fails")
+	}
+	// Project must NOT be registered.
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myrepo") != "" {
+		t.Error("project must NOT be registered after a backup failure")
+	}
+	// The user's only copy must survive untouched.
+	if data, err := os.ReadFile(agentsMD); err != nil || string(data) != "# only copy" {
+		t.Errorf("original config must survive a backup failure: data=%q err=%v", string(data), err)
+	}
+}
+
+// ---------- FINDING 2: runAdd must not report success after link failures ----------
+
+// With Claude detected as installed (~/.claude) but the project's .claude
+// occupied by a regular file, claude.CreateLinks fails. runAdd must surface a
+// non-zero error and NOT register the project nor print success.
+func TestRunAdd_LinkFailureNotRegistered(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Detect Claude as installed.
+	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myrepo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// .claude as a regular file makes claude.prepareLinks' MkdirAll
+	// (.claude/rules) fail, so claude.CreateLinks returns an error.
+	if err := os.WriteFile(filepath.Join(projectPath, ".claude"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runAdd(projectPath, "")
+	if err == nil {
+		t.Fatal("expected runAdd to fail when CreateLinks fails")
+	}
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myrepo") != "" {
+		t.Error("project must NOT be registered after a link failure")
 	}
 }

@@ -552,6 +552,105 @@ func TestRemoveSharedTargets_AggregatesFailures(t *testing.T) {
 	}
 }
 
+// A DirectFile shared target materialized as a hard link to the canonical
+// source (the Windows file-link model) must be removed. The symlink/junction
+// removal is a no-op for a hard link, so without the hard-link branch da
+// remove would report success while .github/agents/*.agent.md stays live.
+func TestRemoveManagedIntentTarget_DirectFileHardLinkRemoved(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	srcDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "AGENT.md")
+	if err := os.WriteFile(src, []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(repo, ".github", "agents", "x.agent.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Materialize the file-link model: a hard link, not a symlink.
+	if err := os.Link(src, target); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+
+	intent := ResourceIntent{
+		IntentID:   "agents.file.proj.x",
+		TargetPath: filepath.Join(".github", "agents", "x.agent.md"),
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:     ResourceShapeDirectFile,
+		Transport: ResourceTransportSymlink,
+	}
+	if err := removeManagedIntentTarget(intent, repo, agentsHome); err != nil {
+		t.Fatalf("hard-linked DirectFile target must be removed cleanly, got %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("managed hard link must be gone, lstat err=%v", err)
+	}
+}
+
+// A removal failure on the hard-link path must surface, not be swallowed
+// (otherwise da remove reports success while the managed file is still live).
+func TestRemoveManagedIntentTarget_DirectFileHardLinkRemovalFailureSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	agentsHome := filepath.Join(tmp, ".agents")
+
+	srcDir := filepath.Join(agentsHome, "agents", "proj", "x")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "AGENT.md")
+	if err := os.WriteFile(src, []byte("# X\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(repo, ".github", "agents")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(targetDir, "x.agent.md")
+	if err := os.Link(src, target); err != nil {
+		t.Fatalf("hard link: %v", err)
+	}
+	// Make the parent dir read-only so the hard-link removal fails.
+	if err := os.Chmod(targetDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(targetDir, 0755) })
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to enforce directory write perms")
+	}
+
+	intent := ResourceIntent{
+		IntentID:   "agents.file.proj.x",
+		TargetPath: filepath.Join(".github", "agents", "x.agent.md"),
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: filepath.Join("x", "AGENT.md"),
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:     ResourceShapeDirectFile,
+		Transport: ResourceTransportSymlink,
+	}
+	err := removeManagedIntentTarget(intent, repo, agentsHome)
+	if err == nil {
+		t.Fatal("hard-link removal failure must surface, got nil")
+	}
+	if !strings.Contains(err.Error(), "remove managed hard link") {
+		t.Fatalf("error must identify the failing op, got %v", err)
+	}
+}
+
 func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

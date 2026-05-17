@@ -468,7 +468,19 @@ func runAdd(pathArg, nameArg string) error {
 	if len(existingFiles) > 0 {
 		ui.Step("Backing up existing configs...")
 		timestamp := time.Now().Format("20060102-150405")
-		backed := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp)
+		backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp)
+		if backupErr != nil {
+			// A failed backup means the user's only copy of an unmanaged
+			// config was NOT preserved. backupExistingConfigsList already
+			// refused to remove the original, so the repo is untouched —
+			// abort before creating links or registering the project.
+			ui.Bullet("warn", fmt.Sprintf("backup failed: %v", backupErr))
+			return ErrorWithHints(
+				fmt.Sprintf("aborting add for '%s': could not back up existing configs", projectName),
+				"No files were removed and the project was NOT registered. "+
+					"Ensure ~/.agents/resources is writable and has free space, then re-run `da add`.",
+			)
+		}
 		ui.Bullet("ok", fmt.Sprintf("Backed up %d existing file(s)", backed))
 		ui.Bullet("ok", fmt.Sprintf("Stored backups in ~/.agents/resources/%s/backups/%s/", projectName, timestamp))
 	}
@@ -504,15 +516,33 @@ func runAdd(pathArg, nameArg string) error {
 			addInstalled = append(addInstalled, p)
 		}
 	}
+	var linkFailures []string
 	if _, err := platform.RunSharedTargetProjection(projectName, projectPath, addInstalled, false); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		linkFailures = append(linkFailures, fmt.Sprintf("shared targets: %v", err))
 	}
 	for _, p := range addInstalled {
 		if err := p.CreateLinks(projectName, projectPath); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+			linkFailures = append(linkFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
 		} else {
 			ui.Bullet("ok", p.DisplayName()+" links created")
 		}
+	}
+
+	// A projection/CreateLinks failure (e.g. an unmanaged file occupying a
+	// managed target now returns links.ErrUnmanagedTarget) means the project
+	// is only partially linked. Registering it + printing a success box would
+	// stamp a partial application as complete, making `da refresh`/doctor
+	// recovery ambiguous. Do NOT save the registration and do NOT print
+	// success — surface the failures with recovery guidance instead.
+	if len(linkFailures) > 0 {
+		return ErrorWithHints(
+			fmt.Sprintf("add incomplete for '%s': %s", projectName, strings.Join(linkFailures, "; ")),
+			"The project was NOT registered (partial link application). "+
+				"Resolve the warnings above — unmanaged files occupying managed targets "+
+				"must be imported (da import), backed up, or removed — then re-run `da add`.",
+		)
 	}
 
 	// Step 6: Register
@@ -540,8 +570,10 @@ func runAdd(pathArg, nameArg string) error {
 
 // backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
 // and removes the originals from the project tree. No *.dot-agents-backup files are left
-// in the project. Returns count of files processed.
-func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string) int {
+// in the project. Returns count of files processed and a non-nil error if any required
+// backup copy failed. On backup failure the original is NOT removed (the user's only
+// copy is preserved) and the error aborts runAdd before any destructive removal.
+func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string) (int, error) {
 	count := 0
 	for _, f := range files {
 		// Safety: never back up backup artifacts
@@ -579,14 +611,20 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 			count++
 			continue
 		}
-		// Regular file: copy into resources, then delete from project
-		mirrorBackup(project, projectPath, f, timestamp)
+		// Regular file: copy into resources, then delete from project.
+		// The removal below is destructive — it deletes the user's only
+		// copy of an unmanaged config. Only proceed once the required
+		// backup copies have actually landed; otherwise abort so runAdd
+		// returns an error WITHOUT removing the original.
+		if err := mirrorBackupChecked(project, projectPath, f, timestamp); err != nil {
+			return count, fmt.Errorf("backing up %s: %w", f, err)
+		}
 		if err := osRemove(f); err != nil {
 			continue
 		}
 		count++
 	}
-	return count
+	return count, nil
 }
 
 // restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/
@@ -705,22 +743,47 @@ func restoreLegacyResourceFile(project, relPath, agentsHome, path string) (int, 
 // mirrorBackup copies srcFile (original path, before deletion) into the
 // ~/.agents/resources/<project>/ tree using the file's original relative path.
 // No *.dot-agents-backup suffix is added anywhere.
+//
+// This is the errorless wrapper retained for import.go callers, whose own
+// failure handling keys off the subsequent CopyFile into the destination
+// (a mirror-backup failure there does not destroy the user's only copy
+// because import.go never removes the source after mirrorBackup). Callers
+// that delete the original after backing it up (backupExistingConfigsList)
+// MUST use mirrorBackupChecked so a failed backup aborts before the
+// destructive removal.
 func mirrorBackup(project, projectPath, srcFile, timestamp string) {
+	_ = mirrorBackupChecked(project, projectPath, srcFile, timestamp)
+}
+
+// mirrorBackupChecked performs the same copy as mirrorBackup but propagates
+// the CopyFile errors. backupExistingConfigsList relies on this: it removes
+// the user's only copy of an unmanaged config after backing it up, so a
+// silent backup failure (unwritable ~/.agents/resources, disk full,
+// unreadable source through a symlink) would destroy that config while
+// reporting a successful backup.
+func mirrorBackupChecked(project, projectPath, srcFile, timestamp string) error {
 	agentsHome := config.AgentsHome()
 	relPath, err := filepath.Rel(projectPath, srcFile)
 	if err != nil || relPath == "." || strings.HasPrefix(relPath, "..") {
 		relPath = filepath.Base(srcFile)
 	}
 
-	// Active (latest) copy — overwritten on each backup run
+	// Active (latest) copy — overwritten on each backup run. This is the
+	// recoverable copy `da refresh` / restore reads back, so it is required.
 	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	projectsync.CopyFile(srcFile, activeTarget) //nolint:errcheck
+	if cpErr := copyFile(srcFile, activeTarget); cpErr != nil {
+		return fmt.Errorf("backing up %s -> %s: %w", srcFile, activeTarget, cpErr)
+	}
 
-	// Timestamped immutable copy
+	// Timestamped immutable copy — also required when a timestamp is given:
+	// it is the only point-in-time snapshot the user can recover from.
 	if timestamp != "" {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		projectsync.CopyFile(srcFile, tsTarget) //nolint:errcheck
+		if cpErr := copyFile(srcFile, tsTarget); cpErr != nil {
+			return fmt.Errorf("backing up %s -> %s: %w", srcFile, tsTarget, cpErr)
+		}
 	}
+	return nil
 }
 
 func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) error {

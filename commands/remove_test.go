@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // ---------- removeProjectDirs ----------
@@ -357,5 +358,67 @@ func TestRunRemove_DryRunCleansFlagShowsDestructiveWarn(t *testing.T) {
 	reloaded, _ := config.Load()
 	if reloaded.GetProjectPath("myproj") == "" {
 		t.Error("project should still be registered after dry-run remove")
+	}
+}
+
+// ---------- FINDING 3: failed managed cleanup must not unregister ----------
+
+// When a platform RemoveLinks fails (here: a managed .mcp.json symlink whose
+// removal is blocked by a read-only project dir), runRemove must return a
+// non-zero error and PRESERVE the registration so a retry can finish cleanup —
+// it must NOT print "unlinked successfully" nor drop the project from config.
+func TestRunRemove_CleanupFailurePreservesRegistration(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only dir does not deny removal")
+	}
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A managed .mcp.json: symlink whose target resolves under agentsHome.
+	canonical := filepath.Join(agentsHome, "mcp", "myproj", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcpLink := filepath.Join(projectPath, ".mcp.json")
+	linktest.Link(t, canonical, mcpLink)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the project dir read-only so removing the managed .mcp.json fails.
+	if err := os.Chmod(projectPath, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(projectPath, 0o755) })
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	err := runRemove("myproj", false)
+	if err == nil {
+		t.Skip("platform RemoveLinks did not fail on this filesystem")
+	}
+
+	// Registration MUST be preserved so cleanup can be retried.
+	reloaded, _ := config.Load()
+	if reloaded.GetProjectPath("myproj") == "" {
+		t.Error("project must remain registered when managed cleanup failed")
 	}
 }

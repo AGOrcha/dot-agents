@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -208,5 +209,46 @@ func TestWriteManagedFile_BackupFailurePreservesUserEdit(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(dst); string(b) != "precious user edit" {
 		t.Errorf("user edit must survive a failed backup, got %q", string(b))
+	}
+}
+
+// An existing destination that exists but is unreadable (e.g. perms) could
+// hold an unsaved user edit we can neither compare nor back up. Overwriting
+// it must block, not silently destroy it while reporting success.
+func TestWriteManagedFile_UnreadableExistingFileBlocksAndPreserves(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX mode bits cannot model an unreadable-but-removable file
+		// on Windows (chmod 000 does not deny the owner read), so the
+		// data-loss path under test is unreachable there.
+		t.Skip("requires POSIX permission semantics")
+	}
+	if os.Geteuid() == 0 {
+		// root bypasses the read permission bit, so os.ReadFile would
+		// succeed and the blocking branch would not be exercised.
+		t.Skip("requires non-root to enforce read perms")
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "settings.json")
+	const precious = "precious unsaved user edit"
+	if err := os.WriteFile(dst, []byte(precious), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// File unreadable, but its parent dir stays writable so the old
+	// remove/overwrite path could have destroyed it.
+	if err := os.Chmod(dst, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dst, 0644) })
+
+	if err := writeManagedFile(dst, []byte("rerendered")); err == nil {
+		t.Fatal("unreadable existing destination must block the overwrite")
+	}
+
+	if err := os.Chmod(dst, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != precious {
+		t.Errorf("original file must survive an unreadable-destination refresh, got %q", string(b))
 	}
 }
