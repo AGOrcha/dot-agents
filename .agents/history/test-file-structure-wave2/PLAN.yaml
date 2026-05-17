@@ -1,10 +1,10 @@
 schema_version: 1
 id: test-file-structure-wave2
 title: 'Test-file structure wave 2: fold _extra/_coverage buckets into mirrors'
-status: draft
+status: archived
 summary: Fold the remaining <source>_extra_test.go / _coverage buckets into their source mirrors; harden the migrator for //go:build constraints and internal-vs-external test packages
 created_at: "2026-05-17T14:46:44Z"
-updated_at: "2026-05-17T14:46:44Z"
+updated_at: "2026-05-17T15:37:48Z"
 owner: dot-agents
 success_criteria: No <source>_extra_test.go or _coverage_test.go that has a same-name mirror remains; go test ./... + 95% gate green per package; build tags & test-package clauses preserved
 verification_strategy: 'Per-package: go build ./..., go test, coverage-gate.sh, gofmt; assert no foldable _extra/_coverage files remain'

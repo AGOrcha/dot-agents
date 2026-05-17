@@ -1,10 +1,10 @@
 schema_version: 1
 id: test-file-structure
 title: Test-file structure & naming convention
-status: active
+status: archived
 summary: Redistribute iteration-numbered grab-bag test files into source-mirroring names; document + enforce the convention
 created_at: "2026-05-17T13:51:57Z"
-updated_at: "2026-05-17T13:55:06Z"
+updated_at: "2026-05-17T15:37:48Z"
 owner: dot-agents
 success_criteria: No coverage_push/integration_harness/ci_drift[N] test files remain; go test ./... + 95% coverage gate green per touched package; AGENTS.md + lesson document the convention; mapping artifact reviewed
 verification_strategy: 'Per-worktree: go test ./..., scripts/coverage-gate.sh, gofmt, go vet; grep assertion that no iteration-numbered test files remain'
