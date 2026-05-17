@@ -2788,114 +2788,111 @@ func TestNewKGCmd_SubcommandRunEDispatch(t *testing.T) {
 		captureStdout(t, fn)
 	}
 
-	// "health" — invokes runKGHealth via RunE closure.
-	if hc := find("health"); hc != nil && hc.RunE != nil {
-		swallow(func() {
-			_ = hc.RunE(hc, nil) // err best-effort; missing JSON flag is fine
-		})
-	}
-
-	// "queue" — runs against the empty inbox.
-	if qc := find("queue"); qc != nil && qc.RunE != nil {
-		swallow(func() {
-			_ = qc.RunE(qc, nil)
-		})
-	}
-
-	// "query" without --intent should return a usage error (not panic).
-	if qq := find("query"); qq != nil && qq.RunE != nil {
-		swallow(func() {
-			if err := qq.RunE(qq, nil); err == nil {
-				t.Error("query without --intent should error")
-			}
-		})
-	}
-
-	// "ingest" with --dry-run + --all returns "would ingest 0 sources".
-	if ic := find("ingest"); ic != nil && ic.RunE != nil {
-		_ = ic.Flags().Set("all", "true")
-		_ = ic.Flags().Set("dry-run", "true")
-		swallow(func() {
-			_ = ic.RunE(ic, nil)
-		})
-	}
-
-	// "lint" runs the full lint pipeline against an empty graph.
-	if lc := find("lint"); lc != nil && lc.RunE != nil {
-		swallow(func() {
-			_ = lc.RunE(lc, nil)
-		})
-	}
-
-	// "bridge mapping" — pure local output, safe to dispatch.
-	if bc := find("bridge"); bc != nil {
-		for _, sub := range bc.Commands() {
-			if sub.Name() == "mapping" && sub.RunE != nil {
-				swallow(func() {
-					_ = sub.RunE(sub, nil)
-				})
-			}
-			if sub.Name() == "health" && sub.RunE != nil {
-				swallow(func() {
-					_ = sub.RunE(sub, nil)
-				})
-			}
+	// dispatchTop runs a top-level subcommand's RunE (if present) inside a
+	// stdout-swallowing capture. Returns the RunE error for assertions.
+	dispatchTop := func(name string) error {
+		c := find(name)
+		if c == nil || c.RunE == nil {
+			return nil
 		}
+		var err error
+		swallow(func() { err = c.RunE(c, nil) })
+		return err
 	}
 
-	// "warm stats" — exercises the JSON-free output branch.
-	if wc := find("warm"); wc != nil {
-		for _, sub := range wc.Commands() {
-			if sub.Name() == "stats" && sub.RunE != nil {
-				swallow(func() {
-					_ = sub.RunE(sub, nil)
-				})
-			}
+	// dispatchSub runs a named child (or every child when childName == "") of
+	// the given parent command, swallowing stdout for each invocation.
+	dispatchSub := func(parent, childName string) {
+		p := find(parent)
+		if p == nil {
+			return
 		}
-	}
-
-	// "code-status" against an empty CRG path (returns nil with empty rows).
-	if cs := find("code-status"); cs != nil && cs.RunE != nil {
-		swallow(func() {
-			_ = cs.RunE(cs, nil)
-		})
-	}
-
-	// "setup" again is idempotent and re-runs the wrapper.
-	if sc := find("setup"); sc != nil && sc.RunE != nil {
-		swallow(func() { _ = sc.RunE(sc, nil) })
-	}
-
-	// "maintain reweave" exercises the wrapper that calls runKGReweave.
-	if mc := find("maintain"); mc != nil {
-		for _, sub := range mc.Commands() {
+		for _, sub := range p.Commands() {
 			if sub.RunE == nil {
+				continue
+			}
+			if childName != "" && sub.Name() != childName {
 				continue
 			}
 			swallow(func() { _ = sub.RunE(sub, nil) })
 		}
 	}
 
-	// "bridge query" without --intent returns an error but the wrapper itself runs.
-	if bc := find("bridge"); bc != nil {
-		for _, sub := range bc.Commands() {
-			if sub.Name() == "query" && sub.RunE != nil {
-				swallow(func() { _ = sub.RunE(sub, nil) })
+	t.Run("health", func(t *testing.T) {
+		// invokes runKGHealth via RunE closure; err best-effort.
+		_ = dispatchTop("health")
+	})
+
+	t.Run("queue", func(t *testing.T) {
+		// runs against the empty inbox.
+		_ = dispatchTop("queue")
+	})
+
+	t.Run("query_missing_intent", func(t *testing.T) {
+		// "query" without --intent should return a usage error (not panic).
+		// dispatchTop is a no-op when the subcommand is absent, so only
+		// assert when the command actually exists.
+		if qq := find("query"); qq != nil && qq.RunE != nil {
+			if err := dispatchTop("query"); err == nil {
+				t.Error("query without --intent should error")
 			}
 		}
-	}
+	})
 
-	// CRG-backed wrappers — they fail because no CRG is installed, but the
-	// closure body still runs and that lifts cmd.go coverage. Run inside an
-	// isolated PATH to make the failure deterministic.
-	t.Setenv("PATH", t.TempDir())
-	for _, name := range []string{"changes", "impact", "flows", "communities"} {
-		sub := find(name)
-		if sub == nil || sub.RunE == nil {
-			continue
+	t.Run("ingest_dry_run_all", func(t *testing.T) {
+		// "ingest" with --dry-run + --all returns "would ingest 0 sources".
+		if ic := find("ingest"); ic != nil && ic.RunE != nil {
+			_ = ic.Flags().Set("all", "true")
+			_ = ic.Flags().Set("dry-run", "true")
 		}
-		swallow(func() { _ = sub.RunE(sub, nil) })
-	}
+		_ = dispatchTop("ingest")
+	})
+
+	t.Run("lint", func(t *testing.T) {
+		// runs the full lint pipeline against an empty graph.
+		_ = dispatchTop("lint")
+	})
+
+	t.Run("bridge_mapping_and_health", func(t *testing.T) {
+		// pure local output, safe to dispatch.
+		dispatchSub("bridge", "mapping")
+		dispatchSub("bridge", "health")
+	})
+
+	t.Run("warm_stats", func(t *testing.T) {
+		// exercises the JSON-free output branch.
+		dispatchSub("warm", "stats")
+	})
+
+	t.Run("code_status", func(t *testing.T) {
+		// against an empty CRG path (returns nil with empty rows).
+		_ = dispatchTop("code-status")
+	})
+
+	t.Run("setup_idempotent", func(t *testing.T) {
+		// "setup" again is idempotent and re-runs the wrapper.
+		_ = dispatchTop("setup")
+	})
+
+	t.Run("maintain_all", func(t *testing.T) {
+		// "maintain reweave" exercises the wrapper that calls runKGReweave.
+		dispatchSub("maintain", "")
+	})
+
+	t.Run("bridge_query", func(t *testing.T) {
+		// without --intent returns an error but the wrapper itself runs.
+		dispatchSub("bridge", "query")
+	})
+
+	t.Run("crg_backed_wrappers", func(t *testing.T) {
+		// CRG-backed wrappers — they fail because no CRG is installed, but
+		// the closure body still runs and that lifts cmd.go coverage. Run
+		// inside an isolated PATH to make the failure deterministic.
+		t.Setenv("PATH", t.TempDir())
+		for _, name := range []string{"changes", "impact", "flows", "communities"} {
+			_ = dispatchTop(name)
+		}
+	})
 }
 
 // TestNewKGCmd_RegistersExpectedSubcommands confirms every published

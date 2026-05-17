@@ -65,7 +65,10 @@ func TestCollectNeighborResults_StoreClosedPropagatesError(t *testing.T) {
 
 // ── appendNeighborMatches: limit-reached and seen-skip branches ───────────────
 
-func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
+// seedNeighborMatchFixture sets up a store with Caller→{Callee1,Callee2}
+// CALLS edges and returns the resolved caller node plus its outbound edges.
+func seedNeighborMatchFixture(t *testing.T) (*graphstore.SQLiteStore, *graphstore.GraphNode, []graphstore.GraphEdge) {
+	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -74,7 +77,7 @@ func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openKGStore: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
 	// Two callees so we can stop iteration on the first via limit=1.
 	for _, name := range []string{"Caller", "Callee1", "Callee2"} {
@@ -95,53 +98,67 @@ func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// limit=1 → first match returns done=true → covers early-return branch.
-	results, err := collectNeighborResults(store, []graphstore.GraphNode{*caller}, graphstore.EdgeKindCalls, false, 1)
-	if err != nil {
-		t.Fatalf("collectNeighborResults: %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("expected exactly 1 result on limit=1, got %d", len(results))
-	}
-
-	// Pre-populate the seen-set to drive the duplicate-skip branch.
-	seen := map[string]bool{"p.go::Callee1": true, "p.go::Callee2": true}
-	var collected []GraphQueryResult
 	edges, err := store.GetEdgesBySource(caller.QualifiedName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, err := appendNeighborMatches(store, edges, graphstore.EdgeKindCalls, false, seen, &collected, 5)
-	if err != nil {
-		t.Fatalf("appendNeighborMatches: %v", err)
-	}
-	if done {
-		t.Errorf("expected done=false when every neighbor is already seen")
-	}
-	if len(collected) != 0 {
-		t.Errorf("expected zero results when every neighbor is already seen, got %d", len(collected))
-	}
+	return store, caller, edges
+}
 
-	// Edge-kind filter mismatch → `continue` branch (line ~245).
-	var collected2 []GraphQueryResult
-	done2, err := appendNeighborMatches(store, edges, "no_such_kind", false, map[string]bool{}, &collected2, 5)
-	if err != nil {
-		t.Fatalf("appendNeighborMatches kind-filter: %v", err)
-	}
-	if done2 || len(collected2) != 0 {
-		t.Errorf("kind-filter mismatch should produce no results, got done=%v len=%d", done2, len(collected2))
-	}
+func TestAppendNeighborMatches_LimitReachedAndSeen(t *testing.T) {
+	store, caller, edges := seedNeighborMatchFixture(t)
 
-	// Missing neighbor (loadNeighborNode returns false) → continue branch (~253).
-	orphanEdges := []graphstore.GraphEdge{{Kind: graphstore.EdgeKindCalls, SourceQualified: caller.QualifiedName, TargetQualified: "no-such-target"}}
-	var collected3 []GraphQueryResult
-	done3, err := appendNeighborMatches(store, orphanEdges, graphstore.EdgeKindCalls, false, map[string]bool{}, &collected3, 5)
-	if err != nil {
-		t.Fatalf("appendNeighborMatches orphan: %v", err)
-	}
-	if done3 || len(collected3) != 0 {
-		t.Errorf("missing neighbor should produce no results, got done=%v len=%d", done3, len(collected3))
-	}
+	t.Run("limit_one_early_return", func(t *testing.T) {
+		// limit=1 → first match returns done=true → early-return branch.
+		results, err := collectNeighborResults(store, []graphstore.GraphNode{*caller}, graphstore.EdgeKindCalls, false, 1)
+		if err != nil {
+			t.Fatalf("collectNeighborResults: %v", err)
+		}
+		if len(results) != 1 {
+			t.Errorf("expected exactly 1 result on limit=1, got %d", len(results))
+		}
+	})
+
+	t.Run("all_neighbors_seen", func(t *testing.T) {
+		// Pre-populate the seen-set to drive the duplicate-skip branch.
+		seen := map[string]bool{"p.go::Callee1": true, "p.go::Callee2": true}
+		var collected []GraphQueryResult
+		done, err := appendNeighborMatches(store, edges, graphstore.EdgeKindCalls, false, seen, &collected, 5)
+		if err != nil {
+			t.Fatalf("appendNeighborMatches: %v", err)
+		}
+		if done {
+			t.Errorf("expected done=false when every neighbor is already seen")
+		}
+		if len(collected) != 0 {
+			t.Errorf("expected zero results when every neighbor is already seen, got %d", len(collected))
+		}
+	})
+
+	t.Run("edge_kind_filter_mismatch", func(t *testing.T) {
+		// Edge-kind filter mismatch → `continue` branch (line ~245).
+		var collected []GraphQueryResult
+		done, err := appendNeighborMatches(store, edges, "no_such_kind", false, map[string]bool{}, &collected, 5)
+		if err != nil {
+			t.Fatalf("appendNeighborMatches kind-filter: %v", err)
+		}
+		if done || len(collected) != 0 {
+			t.Errorf("kind-filter mismatch should produce no results, got done=%v len=%d", done, len(collected))
+		}
+	})
+
+	t.Run("missing_neighbor_node", func(t *testing.T) {
+		// Missing neighbor (loadNeighborNode returns false) → continue branch (~253).
+		orphanEdges := []graphstore.GraphEdge{{Kind: graphstore.EdgeKindCalls, SourceQualified: caller.QualifiedName, TargetQualified: "no-such-target"}}
+		var collected []GraphQueryResult
+		done, err := appendNeighborMatches(store, orphanEdges, graphstore.EdgeKindCalls, false, map[string]bool{}, &collected, 5)
+		if err != nil {
+			t.Fatalf("appendNeighborMatches orphan: %v", err)
+		}
+		if done || len(collected) != 0 {
+			t.Errorf("missing neighbor should produce no results, got done=%v len=%d", done, len(collected))
+		}
+	})
 }
 
 // ── collectSymbolDecisionResults: closed-store error path ────────────────────

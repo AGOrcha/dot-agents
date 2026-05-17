@@ -509,7 +509,21 @@ func TestCollectGraphResults_DedupesAndLimits(t *testing.T) {
 
 // TestCollectNeighborResults_DirectionAndKind seeds caller/callee edges and
 // verifies both inbound (callers_of) and outbound (callees_of) traversals.
-func TestCollectNeighborResults_DirectionAndKind(t *testing.T) {
+// neighborNodeInfo builds a Function NodeInfo for the given "file::name"
+// qualified name. UpsertNode auto-derives the qualified name from
+// FilePath/Name, but the lookup just needs to succeed.
+func neighborNodeInfo(qn string) graphstore.NodeInfo {
+	name := qn
+	if parts := strings.SplitN(qn, "::", 2); len(parts) == 2 {
+		name = parts[1]
+	}
+	return graphstore.NodeInfo{Kind: "Function", Name: name, FilePath: "p.go", Language: "go"}
+}
+
+// seedNeighborGraph sets up a store with a Caller→Callee CALLS edge and
+// returns the resolved GraphNodes (skipping the test on layout mismatch).
+func seedNeighborGraph(t *testing.T) (store *graphstore.SQLiteStore, caller, callee *graphstore.GraphNode) {
+	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -518,23 +532,12 @@ func TestCollectNeighborResults_DirectionAndKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openKGStore: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
-	mk := func(qn string) graphstore.NodeInfo {
-		// UpsertNode auto-derives qualified name from FilePath/Name, but we
-		// just need the lookup to succeed.
-		parts := strings.SplitN(qn, "::", 2)
-		file := "p.go"
-		name := qn
-		if len(parts) == 2 {
-			name = parts[1]
-		}
-		return graphstore.NodeInfo{Kind: "Function", Name: name, FilePath: file, Language: "go"}
-	}
-	if _, err := store.UpsertNode(mk("p.go::Caller"), "h"); err != nil {
+	if _, err := store.UpsertNode(neighborNodeInfo("p.go::Caller"), "h"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertNode(mk("p.go::Callee"), "h"); err != nil {
+	if _, err := store.UpsertNode(neighborNodeInfo("p.go::Callee"), "h"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.UpsertEdge(graphstore.EdgeInfo{
@@ -543,30 +546,41 @@ func TestCollectNeighborResults_DirectionAndKind(t *testing.T) {
 		t.Fatalf("UpsertEdge: %v", err)
 	}
 
-	// callees_of Caller → outbound traversal hits Callee.
-	callee, err := store.GetNode("p.go::Callee")
+	callee, err = store.GetNode("p.go::Callee")
 	if err != nil || callee == nil {
 		t.Skip("dependency layout mismatch — skip neighbor traversal")
 	}
-	caller, err := store.GetNode("p.go::Caller")
+	caller, err = store.GetNode("p.go::Caller")
 	if err != nil || caller == nil {
 		t.Skip("dependency layout mismatch — skip neighbor traversal")
 	}
-	results, err := collectNeighborResults(store, []graphstore.GraphNode{*caller}, graphstore.EdgeKindCalls, false, 5)
-	if err != nil {
-		t.Fatalf("collectNeighborResults outbound: %v", err)
-	}
-	if len(results) != 1 || results[0].ID != callee.QualifiedName {
-		t.Errorf("outbound: got %+v, want neighbor %q", results, callee.QualifiedName)
-	}
+	return store, caller, callee
+}
 
-	// callers_of Callee → inbound traversal hits Caller.
-	inbound, err := collectNeighborResults(store, []graphstore.GraphNode{*callee}, graphstore.EdgeKindCalls, true, 5)
-	if err != nil {
-		t.Fatalf("collectNeighborResults inbound: %v", err)
+func TestCollectNeighborResults_DirectionAndKind(t *testing.T) {
+	store, caller, callee := seedNeighborGraph(t)
+
+	cases := []struct {
+		name    string
+		from    *graphstore.GraphNode
+		inbound bool
+		want    string
+	}{
+		// callees_of Caller → outbound traversal hits Callee.
+		{"outbound", caller, false, callee.QualifiedName},
+		// callers_of Callee → inbound traversal hits Caller.
+		{"inbound", callee, true, caller.QualifiedName},
 	}
-	if len(inbound) != 1 || inbound[0].ID != caller.QualifiedName {
-		t.Errorf("inbound: got %+v, want neighbor %q", inbound, caller.QualifiedName)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			results, err := collectNeighborResults(store, []graphstore.GraphNode{*c.from}, graphstore.EdgeKindCalls, c.inbound, 5)
+			if err != nil {
+				t.Fatalf("collectNeighborResults %s: %v", c.name, err)
+			}
+			if len(results) != 1 || results[0].ID != c.want {
+				t.Errorf("%s: got %+v, want neighbor %q", c.name, results, c.want)
+			}
+		})
 	}
 }
 
@@ -847,7 +861,11 @@ func TestDecisionNoteCandidates_ExactIDOverridesSearch(t *testing.T) {
 // TestAppendDecisionSymbolMatches_WithAndWithoutNode covers both branches of
 // appendDecisionSymbolMatches: the symbol exists in the warm store (rich
 // projection) and the link points at a symbol the store has not indexed yet.
-func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
+// seedDecisionSymbolFixture returns a store with a single "k.go::Known"
+// function node plus the note/links used by the decision-symbol projection
+// tests (including a missing target and a duplicate for dedupe coverage).
+func seedDecisionSymbolFixture(t *testing.T) (*graphstore.SQLiteStore, string, graphstore.KGNote, []graphstore.NoteSymbolLink) {
+	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -856,7 +874,7 @@ func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openKGStore: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
 	if _, err := store.UpsertNode(graphstore.NodeInfo{
 		Kind: "Function", Name: "Known", FilePath: "k.go", Language: "go",
@@ -874,26 +892,22 @@ func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
 		{NoteID: "dec-x", QualifiedName: "ghost::missing", LinkKind: "documents"},
 		{NoteID: "dec-x", QualifiedName: knownQN, LinkKind: "decides"}, // dedupe
 	}
+	return store, knownQN, note, links
+}
 
-	seen := map[string]bool{}
-	var results []GraphQueryResult
-	if appendDecisionSymbolMatches(store, note, links, seen, &results, 0) {
-		t.Error("limit=0 should never signal stop")
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 unique link projections, got %d", len(results))
-	}
-	// One result should carry warm-store metadata, the other should fall back to
-	// the link-only projection.
+// assertWarmAndFallbackProjections asserts the result set contains one
+// warm-store-backed projection (knownQN) and one link-only fallback (ghost).
+func assertWarmAndFallbackProjections(t *testing.T, results []GraphQueryResult, knownQN string) {
+	t.Helper()
 	foundKnown, foundGhost := false, false
 	for _, r := range results {
-		if r.ID == knownQN {
+		switch r.ID {
+		case knownQN:
 			foundKnown = true
 			if r.QualifiedName == "" {
 				t.Errorf("warm-store result missing qualified_name: %+v", r)
 			}
-		}
-		if r.ID == "ghost::missing" {
+		case "ghost::missing":
 			foundGhost = true
 			if r.Type != "symbol" {
 				t.Errorf("fallback projection should report type=symbol, got %q", r.Type)
@@ -903,16 +917,33 @@ func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
 	if !foundKnown || !foundGhost {
 		t.Errorf("expected both warm and fallback projections; results=%+v", results)
 	}
+}
 
-	// Limit returns true once full.
-	seen2 := map[string]bool{}
-	var results2 []GraphQueryResult
-	if !appendDecisionSymbolMatches(store, note, links, seen2, &results2, 1) {
-		t.Error("expected limit=1 to halt iteration")
-	}
-	if len(results2) != 1 {
-		t.Errorf("limit=1: expected 1 result, got %d", len(results2))
-	}
+func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
+	store, knownQN, note, links := seedDecisionSymbolFixture(t)
+
+	t.Run("limit_zero_collects_unique_projections", func(t *testing.T) {
+		seen := map[string]bool{}
+		var results []GraphQueryResult
+		if appendDecisionSymbolMatches(store, note, links, seen, &results, 0) {
+			t.Error("limit=0 should never signal stop")
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 unique link projections, got %d", len(results))
+		}
+		assertWarmAndFallbackProjections(t, results, knownQN)
+	})
+
+	t.Run("limit_one_halts_iteration", func(t *testing.T) {
+		seen := map[string]bool{}
+		var results []GraphQueryResult
+		if !appendDecisionSymbolMatches(store, note, links, seen, &results, 1) {
+			t.Error("expected limit=1 to halt iteration")
+		}
+		if len(results) != 1 {
+			t.Errorf("limit=1: expected 1 result, got %d", len(results))
+		}
+	})
 }
 
 // TestCollectDecisionSymbolResults_NoMatches confirms an empty store returns

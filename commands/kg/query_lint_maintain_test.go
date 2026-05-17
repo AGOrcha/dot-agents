@@ -70,19 +70,32 @@ func newLintCmd(check string) *cobra.Command {
 	return cmd
 }
 
+// noteSpec groups the parameters that describe a fixture GraphNote so callers
+// pass a single value instead of a long positional argument list.
+type noteSpec struct {
+	id         string
+	typ        string
+	title      string
+	summary    string
+	status     string
+	ts         string
+	sourceRefs []string
+	links      []string
+}
+
 // makeNote returns a populated GraphNote with sensible defaults applied.
-func makeNote(id, typ, title, summary, status, ts string, sourceRefs, links []string) *GraphNote {
+func makeNote(s noteSpec) *GraphNote {
 	return &GraphNote{
 		SchemaVersion: 1,
-		ID:            id,
-		Type:          typ,
-		Title:         title,
-		Summary:       summary,
-		Status:        status,
-		SourceRefs:    sourceRefs,
-		Links:         links,
-		CreatedAt:     ts,
-		UpdatedAt:     ts,
+		ID:            s.id,
+		Type:          s.typ,
+		Title:         s.title,
+		Summary:       s.summary,
+		Status:        s.status,
+		SourceRefs:    s.sourceRefs,
+		Links:         s.links,
+		CreatedAt:     s.ts,
+		UpdatedAt:     s.ts,
 	}
 }
 
@@ -255,7 +268,7 @@ func TestQuery_TextOutput_NoResults(t *testing.T) {
 // TestQuery_JSON_RoundTrip verifies the JSON marshalling path on runKGQuery.
 func TestQuery_JSON_RoundTrip(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("ent-json-q", "entity", "JSON Entity", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-json-q", typ: "entity", title: "JSON Entity", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	deps := Deps{Flags: GlobalFlags{JSON: true}, ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") }}
@@ -281,10 +294,10 @@ func TestQuery_JSON_RoundTrip(t *testing.T) {
 // traversal from a given note ID).
 func TestExecuteQuery_RelatedNotes(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("ent-target", "entity", "Target", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-target", typ: "entity", title: "Target", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote("dec-root", "decision", "Root", "S.", "active", now, nil, []string{"ent-target"}), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-root", typ: "decision", title: "Root", summary: "S.", status: "active", ts: now, links: []string{"ent-target"}}), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,10 +324,10 @@ func TestExecuteQuery_RelatedNotes_MissingNote(t *testing.T) {
 // rather than causing the whole traversal to error.
 func TestSearchByLinks_BadLinkedIDs(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("ent-keep", "entity", "Keep", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-keep", typ: "entity", title: "Keep", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	root := makeNote("dec-mixed", "decision", "Mixed Links", "S.", "active", now, nil, []string{"ent-keep", "missing-target"})
+	root := makeNote(noteSpec{id: "dec-mixed", typ: "decision", title: "Mixed Links", summary: "S.", status: "active", ts: now, links: []string{"ent-keep", "missing-target"}})
 	if err := createGraphNote(home, root, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +344,7 @@ func TestSearchByLinks_BadLinkedIDs(t *testing.T) {
 // while continuing to process the rest of the batch.
 func TestExecuteBatchQuery_PartialErrors(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("ent-batch", "entity", "Batch", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-batch", typ: "entity", title: "Batch", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	responses, err := executeBatchQuery(home, []GraphQuery{
@@ -417,14 +430,14 @@ func seedLintAllIssues(t *testing.T) string {
 	notes := []*GraphNote{
 		// missing_source_refs (decision with no source_refs) + contradictions
 		// (two active decisions sharing >=2 keywords).
-		makeNote("dec-config-yaml", "decision", "Use YAML config format", "Use YAML.", "active", now, nil, nil),
-		makeNote("dec-config-json", "decision", "Use JSON config format", "Use JSON.", "active", now, nil, nil),
+		makeNote(noteSpec{id: "dec-config-yaml", typ: "decision", title: "Use YAML config format", summary: "Use YAML.", status: "active", ts: now}),
+		makeNote(noteSpec{id: "dec-config-json", typ: "decision", title: "Use JSON config format", summary: "Use JSON.", status: "active", ts: now}),
 		// stale_pages: status=active but last UpdatedAt is far past cutoff.
-		makeNote("ent-stale-x", "entity", "Stale X", "S.", "active", oldTS, []string{"src-stub"}, nil),
+		makeNote(noteSpec{id: "ent-stale-x", typ: "entity", title: "Stale X", summary: "S.", status: "active", ts: oldTS, sourceRefs: []string{"src-stub"}}),
 		// broken_links: links to a missing note.
-		makeNote("dec-broken-link", "decision", "Broken Link", "S.", "active", now, []string{"src-stub"}, []string{"ent-missing"}),
+		makeNote(noteSpec{id: "dec-broken-link", typ: "decision", title: "Broken Link", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-stub"}, links: []string{"ent-missing"}}),
 		// orphan: no inbound links and no source_refs and not a source type.
-		makeNote("ent-orphan-x", "entity", "Orphan X", "S.", "active", now, nil, nil),
+		makeNote(noteSpec{id: "ent-orphan-x", typ: "entity", title: "Orphan X", summary: "S.", status: "active", ts: now}),
 	}
 	for _, n := range notes {
 		if err := createGraphNote(home, n, "body"); err != nil {
@@ -434,7 +447,7 @@ func seedLintAllIssues(t *testing.T) string {
 
 	// oversize_pages: write a real on-disk note exceeding defaultMaxNoteBytes (50 KB).
 	oversizeID := "ent-oversize"
-	oversize := makeNote(oversizeID, "entity", "Oversize", "S.", "active", now, []string{"src-stub"}, nil)
+	oversize := makeNote(noteSpec{id: oversizeID, typ: "entity", title: "Oversize", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-stub"}})
 	if err := createGraphNote(home, oversize, "body"); err != nil {
 		t.Fatal(err)
 	}
@@ -547,8 +560,8 @@ func TestRunKGLint_CheckFilter(t *testing.T) {
 	home, now := curationKG(t)
 	// Two contradicting decisions only — no broken_links so the run returns nil.
 	for _, n := range []*GraphNote{
-		makeNote("dec-only-yaml", "decision", "Use YAML format config", "S.", "active", now, []string{"src-x"}, nil),
-		makeNote("dec-only-json", "decision", "Use JSON format config", "S.", "active", now, []string{"src-x"}, nil),
+		makeNote(noteSpec{id: "dec-only-yaml", typ: "decision", title: "Use YAML format config", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
+		makeNote(noteSpec{id: "dec-only-json", typ: "decision", title: "Use JSON format config", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 	} {
 		if err := createGraphNote(home, n, ""); err != nil {
 			t.Fatal(err)
@@ -598,7 +611,7 @@ func TestFilterLintResultsByCheck(t *testing.T) {
 func TestLintOversizePages_TriggersOnLargeBody(t *testing.T) {
 	home, now := curationKG(t)
 	id := "ent-big"
-	n := makeNote(id, "entity", "Big", "S.", "active", now, []string{"src-x"}, nil)
+	n := makeNote(noteSpec{id: id, typ: "entity", title: "Big", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}})
 	if err := createGraphNote(home, n, "body"); err != nil {
 		t.Fatal(err)
 	}
@@ -646,8 +659,8 @@ func TestUpdateHealthFromLint_WarnOnlyPromotion(t *testing.T) {
 func TestFindContradictions_ViaQueryIntent(t *testing.T) {
 	home, now := curationKG(t)
 	for _, n := range []*GraphNote{
-		makeNote("dec-cn-a", "decision", "Pick Postgres for storage backend", "S.", "active", now, []string{"src-x"}, nil),
-		makeNote("dec-cn-b", "decision", "Pick SQLite for storage backend", "S.", "active", now, []string{"src-x"}, nil),
+		makeNote(noteSpec{id: "dec-cn-a", typ: "decision", title: "Pick Postgres for storage backend", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
+		makeNote(noteSpec{id: "dec-cn-b", typ: "decision", title: "Pick SQLite for storage backend", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 	} {
 		if err := createGraphNote(home, n, ""); err != nil {
 			t.Fatal(err)
@@ -670,10 +683,10 @@ func TestFindContradictions_ViaQueryIntent(t *testing.T) {
 func TestRunKGReweave_AddsMissingSourceRefLinks(t *testing.T) {
 	home, now := curationKG(t)
 	// Source note that the entity references.
-	if err := createGraphNote(home, makeNote("src-rw", "source", "Reweave Source", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "src-rw", typ: "source", title: "Reweave Source", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote("ent-rw", "entity", "RW Entity", "S.", "active", now, []string{"src-rw"}, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-rw", typ: "entity", title: "RW Entity", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-rw"}}), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -701,7 +714,7 @@ func TestRunKGReweave_AddsMissingSourceRefLinks(t *testing.T) {
 // passes through reweave without errors.
 func TestRunKGReweave_NoChangesNeeded(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("dec-clean", "decision", "Clean", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-clean", typ: "decision", title: "Clean", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := runKGReweave(home); err != nil {
@@ -715,13 +728,13 @@ func TestRunKGMarkStale_SkipsArchivedAndSuperseded(t *testing.T) {
 	home, _ := curationKG(t)
 	oldTS := time.Now().Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)
 
-	if err := createGraphNote(home, makeNote("dec-arch", "decision", "Arch", "S.", "archived", oldTS, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-arch", typ: "decision", title: "Arch", summary: "S.", status: "archived", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote("dec-sup", "decision", "Sup", "S.", "superseded", oldTS, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-sup", typ: "decision", title: "Sup", summary: "S.", status: "superseded", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote("dec-old-active", "decision", "Old", "S.", "active", oldTS, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-old-active", typ: "decision", title: "Old", summary: "S.", status: "active", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -756,7 +769,7 @@ func TestRunKGMarkStale_SkipsArchivedAndSuperseded(t *testing.T) {
 func TestRunKGMarkStale_NoStaleNotes(t *testing.T) {
 	home, _ := curationKG(t)
 	freshTS := time.Now().UTC().Format(time.RFC3339)
-	if err := createGraphNote(home, makeNote("dec-fresh", "decision", "Fresh", "S.", "active", freshTS, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-fresh", typ: "decision", title: "Fresh", summary: "S.", status: "active", ts: freshTS}), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -776,9 +789,9 @@ func TestRunKGMarkStale_NoStaleNotes(t *testing.T) {
 func TestRunKGCompact_HandlesMultipleNotesAndIndex(t *testing.T) {
 	home, now := curationKG(t)
 	for _, n := range []*GraphNote{
-		makeNote("dec-archive-1", "decision", "Old 1", "S.", "archived", now, nil, nil),
-		makeNote("dec-supersede-1", "decision", "Old 2", "S.", "superseded", now, nil, nil),
-		makeNote("dec-keep", "decision", "Keep", "S.", "active", now, nil, nil),
+		makeNote(noteSpec{id: "dec-archive-1", typ: "decision", title: "Old 1", summary: "S.", status: "archived", ts: now}),
+		makeNote(noteSpec{id: "dec-supersede-1", typ: "decision", title: "Old 2", summary: "S.", status: "superseded", ts: now}),
+		makeNote(noteSpec{id: "dec-keep", typ: "decision", title: "Keep", summary: "S.", status: "active", ts: now}),
 	} {
 		if err := createGraphNote(home, n, ""); err != nil {
 			t.Fatal(err)
@@ -816,7 +829,7 @@ func TestRunKGCompact_HandlesMultipleNotesAndIndex(t *testing.T) {
 // TestRunKGCompact_NoArchivedNotes exercises the empty-result path.
 func TestRunKGCompact_NoArchivedNotes(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote("dec-active", "decision", "Active", "S.", "active", now, nil, nil), ""); err != nil {
+	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-active", typ: "decision", title: "Active", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := runKGCompact(home); err != nil {
@@ -959,7 +972,7 @@ func TestRemoveIndexEntry_StripsTargetIDOnly(t *testing.T) {
 func TestPersistReweavedNote_PreservesBody(t *testing.T) {
 	home, now := curationKG(t)
 	id := "dec-fallback"
-	note := makeNote(id, "decision", "Fallback", "S.", "active", now, nil, []string{"missing-target"})
+	note := makeNote(noteSpec{id: id, typ: "decision", title: "Fallback", summary: "S.", status: "active", ts: now, links: []string{"missing-target"}})
 	if err := createGraphNote(home, note, "## Body\nimportant context.\n"); err != nil {
 		t.Fatal(err)
 	}

@@ -88,6 +88,16 @@ func TestWalkNoteFiles_MissingNotesDir(t *testing.T) {
 
 // ── deriveGraphHealthStatus paths ─────────────────────────────────────────────
 
+// hasWarningContaining reports whether any warning string contains substr.
+func hasWarningContaining(warnings []string, substr string) bool {
+	for _, w := range warnings {
+		if strings.Contains(w, substr) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDeriveGraphHealthStatus_AllBranches(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -108,17 +118,8 @@ func TestDeriveGraphHealthStatus_AllBranches(t *testing.T) {
 			if h.Status != tc.wantStatus {
 				t.Errorf("status: got %q want %q", h.Status, tc.wantStatus)
 			}
-			if tc.wantWarnRegexp != "" {
-				found := false
-				for _, w := range h.Warnings {
-					if strings.Contains(w, tc.wantWarnRegexp) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("expected warning containing %q, got %v", tc.wantWarnRegexp, h.Warnings)
-				}
+			if tc.wantWarnRegexp != "" && !hasWarningContaining(h.Warnings, tc.wantWarnRegexp) {
+				t.Errorf("expected warning containing %q, got %v", tc.wantWarnRegexp, h.Warnings)
 			}
 		})
 	}

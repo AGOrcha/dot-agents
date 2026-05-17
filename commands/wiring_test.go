@@ -27,8 +27,7 @@ func TestKGDeps_PopulatesFromGlobalFlagsAndUXHelpers(t *testing.T) {
 
 	Flags.JSON = false
 	Flags.DryRun = false
-	d2 := kgDeps()
-	if d2.Flags.JSON || d2.Flags.DryRun {
+	if d2 := kgDeps(); d2.Flags.JSON || d2.Flags.DryRun {
 		t.Errorf("kgDeps did not re-snapshot cleared GlobalFlags: %+v", d2.Flags)
 	}
 }
