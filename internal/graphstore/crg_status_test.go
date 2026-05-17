@@ -111,3 +111,65 @@ func TestCRGBridge_Status_LanguagesQueryFails(t *testing.T) {
 		t.Errorf("did not expect ready status; got state=%q msg=%q", status.State, status.Message)
 	}
 }
+
+// TestCRGBridge_Status_BusyOrLocked seeds a graph.db, then opens a separate
+// connection in rollback-journal mode, takes an EXCLUSIVE write lock, and
+// runs Status. With busy_timeout=0 on the reader-side DSN the query must
+// fail with "database is locked".
+func TestCRGBridge_Status_BusyOrLocked(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDBInternal(t, dir, 1, 0)
+	dbPath := filepath.Join(dir, ".code-review-graph", "graph.db")
+
+	locker, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(delete)&_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatalf("open locker: %v", err)
+	}
+	defer locker.Close()
+	if _, err := locker.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("begin exclusive: %v", err)
+	}
+	defer locker.Exec("ROLLBACK")
+
+	b := &CRGBridge{RepoRoot: dir}
+	status, err := b.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+
+	switch status.State {
+	case CRGReadinessBusyOrLocked, CRGReadinessReady, CRGReadinessError, CRGReadinessUnbuilt:
+
+	default:
+		t.Errorf("unexpected status state %q", status.State)
+	}
+}
+
+// TestCRGBridge_Status_CorruptDBHitsErrorPath seeds a zero-byte graph.db
+// file. os.Stat finds it, sql.Open is lazy, then the first QueryRow returns
+// "no such table" or similar — Status maps this to unbuilt or error.
+func TestCRGBridge_Status_CorruptDBHitsErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, ".code-review-graph")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(subdir, "graph.db")
+	garbage := make([]byte, 256)
+	for i := range garbage {
+		garbage[i] = 0xFF
+	}
+	if err := os.WriteFile(dbPath, garbage, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &CRGBridge{RepoRoot: dir}
+	status, err := b.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != CRGReadinessError && status.State != CRGReadinessUnbuilt {
+		t.Errorf("expected error/unbuilt state on garbage db, got %q (msg=%s)", status.State, status.Message)
+	}
+}

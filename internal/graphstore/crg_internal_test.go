@@ -1,7 +1,3 @@
-// Package graphstore — additional coverage for CRGBridge helpers that don't
-// require the real code-review-graph binary: pythonBin discovery, run failures
-// against a fake binary, Status branching against pre-seeded SQLite databases,
-// and readCRGLanguages directly.
 package graphstore
 
 import (
@@ -14,15 +10,11 @@ import (
 )
 
 func TestCRGBridge_pythonBin_FallbackToPath(t *testing.T) {
-	// "python3" is the POSIX-only fallback name. On Windows venvs ship
-	// python.exe (no python3), so the fallback is "python" — that path is
-	// asserted by TestPythonBin_ResolvesSiblingThenFallback in
-	// crg_venv_discovery_test.go. Skip here rather than encode a POSIX-only
-	// expectation as a cross-OS invariant.
+
 	if runtime.GOOS == "windows" {
 		t.Skip("python3 fallback is POSIX-only; Windows 'python' fallback covered by TestPythonBin_ResolvesSiblingThenFallback")
 	}
-	// Bin in a dir with no python3/python — fall back to "python3".
+
 	b := &CRGBridge{Bin: filepath.Join(t.TempDir(), "fake")}
 	got := b.pythonBin()
 	if got != "python3" {
@@ -107,8 +99,7 @@ func TestCRGBridge_DiscoverCRGBin_ParentVenv(t *testing.T) {
 }
 
 func TestNewCRGBridge_NotFound(t *testing.T) {
-	// Use a path with no .venv to ensure DiscoverCRGBin returns an error
-	// (unless the test machine has CRG on PATH, in which case skip).
+
 	repo := t.TempDir()
 	if _, err := DiscoverCRGBin(repo); err == nil {
 		t.Skip("code-review-graph available on PATH; skipping not-found test")
@@ -156,7 +147,7 @@ func TestCRGBridge_run_NonZeroExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell binary path differs on Windows")
 	}
-	// Create a script that exits non-zero with stderr
+
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake")
 	script := "#!/bin/sh\necho 'an error' >&2\nexit 1\n"
@@ -243,7 +234,7 @@ func TestCRGBridge_runCaptured_Error(t *testing.T) {
 }
 
 func TestCRGBridge_commandWithSQLiteAutocommit_NonPython(t *testing.T) {
-	// Non-python entrypoint returns a direct command on Bin.
+
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "non-py")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
@@ -265,7 +256,7 @@ func TestCRGBridge_commandWithSQLiteAutocommit_NonPython(t *testing.T) {
 func TestCRGBridge_commandWithSQLiteAutocommit_PythonEntrypoint(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "py-entry")
-	// shebang with python triggers the patched-connect wrapper script.
+
 	if err := os.WriteFile(bin, []byte("#!/usr/bin/env python3\nprint('hi')\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +268,7 @@ func TestCRGBridge_commandWithSQLiteAutocommit_PythonEntrypoint(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("nil cmd")
 	}
-	// Args should include "-c" + script body + "--foo"
+
 	if len(cmd.Args) < 3 {
 		t.Fatalf("expected at least 3 args, got %v", cmd.Args)
 	}
@@ -303,7 +294,7 @@ INSERT INTO nodes (language) VALUES ('go'), ('python'), ('go'), (''), ('ruby');`
 	if err != nil {
 		t.Fatalf("readCRGLanguages: %v", err)
 	}
-	// Should be deduped & sorted: go, python, ruby
+
 	if len(langs) != 3 {
 		t.Errorf("expected 3 langs, got %v", langs)
 	}
@@ -317,7 +308,7 @@ func TestReadCRGLanguages_Error(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	// No nodes table → query fails.
+
 	if _, err := readCRGLanguages(db); err == nil {
 		t.Error("expected error when nodes table missing")
 	}
@@ -325,7 +316,7 @@ func TestReadCRGLanguages_Error(t *testing.T) {
 
 func TestCRGBridge_Status_EmptyDB(t *testing.T) {
 	dir := t.TempDir()
-	// graph.db exists but has 0 nodes/edges → state should be unbuilt.
+
 	dbDir := filepath.Join(dir, ".code-review-graph")
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -387,14 +378,10 @@ CREATE TABLE edges (id INTEGER PRIMARY KEY);`
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// JSON unmarshalling for crg response types
-// ─────────────────────────────────────────────────────────────────────────────
-
 func TestCRGChangeReport_JSONUnmarshal(t *testing.T) {
-	// Just confirm typical JSON fits the schema (regression guard).
+
 	report := CRGChangeReport{}
-	_ = report // smoke
+	_ = report
 }
 
 func TestCRGImpactResult_JSONShape(t *testing.T) {
@@ -418,10 +405,6 @@ func TestCommunityInfo_Members(t *testing.T) {
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge unmarshalSkippingLogPrefix variations
-// ─────────────────────────────────────────────────────────────────────────────
-
 func TestUnmarshalSkippingLogPrefix_LogOnly(t *testing.T) {
 	// Only log lines, no JSON — should still error.
 	var v map[string]any
@@ -443,7 +426,7 @@ func TestParseCRGMutationSummary_TabSeparated(t *testing.T) {
 }
 
 func TestParseCRGMutationSummary_CRSplit(t *testing.T) {
-	// Old-style \r-only line endings; the regex still must match.
+
 	out := []byte("1 file, 2 nodes, 3 edges")
 	files, nodes, edges, ok := parseCRGMutationSummary(out)
 	if !ok {
@@ -453,11 +436,6 @@ func TestParseCRGMutationSummary_CRSplit(t *testing.T) {
 		t.Errorf("got files=%d nodes=%d edges=%d", files, nodes, edges)
 	}
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BuildReport / UpdateReport — outcome classification against pre-built fake
-// CRG binary (succeeds, returns 0) and pre-seeded empty graph.db.
-// ─────────────────────────────────────────────────────────────────────────────
 
 func TestCRGBridge_BuildReport_FailedRun(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -487,8 +465,7 @@ func TestCRGBridge_BuildReport_EmptyGraphAfterRun(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho built\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// No DB on disk → Status reports "code-review-graph database missing" /
-	// state=unbuilt. BuildReport must classify outcome as unbuilt.
+
 	b := &CRGBridge{RepoRoot: dir, Bin: bin}
 	report, err := b.BuildReport(BuildOptions{SkipFlows: true})
 	if err != nil {
@@ -508,7 +485,7 @@ func TestCRGBridge_BuildReport_ReadyOutcome(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho built\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-seed a populated DB so Status returns Ready.
+
 	writeFakeCRGDBInternal(t, dir, 2, 1)
 
 	b := &CRGBridge{RepoRoot: dir, Bin: bin}
@@ -536,52 +513,5 @@ func TestCRGBridge_Build_PassthroughError(t *testing.T) {
 	b := &CRGBridge{RepoRoot: dir, Bin: bin}
 	if err := b.Build(BuildOptions{}); err == nil {
 		t.Error("expected Build wrapper to propagate failure")
-	}
-}
-
-// writeFakeCRGDBInternal mirrors writeFakeCRGDB (in crg_test.go) for use
-// inside package graphstore. Kept here to avoid cross-package imports.
-func writeFakeCRGDBInternal(t *testing.T, repoRoot string, nodeCount, edgeCount int) {
-	t.Helper()
-	dir := filepath.Join(repoRoot, ".code-review-graph")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := filepath.Join(dir, "graph.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open fake db: %v", err)
-	}
-	defer db.Close()
-	ddl := `
-		CREATE TABLE nodes (
-		  id INTEGER PRIMARY KEY AUTOINCREMENT,
-		  kind TEXT, name TEXT, qualified_name TEXT UNIQUE,
-		  file_path TEXT, line_start INTEGER, line_end INTEGER,
-		  language TEXT, parent_name TEXT, params TEXT, return_type TEXT,
-		  is_test INTEGER, file_hash TEXT, extra TEXT, updated_at TEXT
-		);
-		CREATE TABLE edges (
-		  id INTEGER PRIMARY KEY AUTOINCREMENT,
-		  kind TEXT, source_qualified TEXT, target_qualified TEXT,
-		  file_path TEXT, line INTEGER, extra TEXT, updated_at REAL
-		);`
-	if _, err := db.Exec(ddl); err != nil {
-		t.Fatalf("ddl: %v", err)
-	}
-	for i := 0; i < nodeCount; i++ {
-		name := "fn" + string(rune('a'+i))
-		_, _ = db.Exec(
-			`INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end,language,parent_name,params,return_type,is_test,file_hash,extra,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			"Function", name, "pkg::"+name, "f.go", 1, 5, "go", "pkg", "", "", 0, "", "{}", "2026-01-01T00:00:00Z",
-		)
-	}
-	for i := 0; i < edgeCount; i++ {
-		_, _ = db.Exec(
-			`INSERT INTO edges (kind,source_qualified,target_qualified,file_path,line,extra,updated_at)
-			 VALUES (?,?,?,?,?,?,?)`,
-			"CALLS", "pkg::A", "pkg::B", "f.go", 1, "{}", 1.0,
-		)
 	}
 }
