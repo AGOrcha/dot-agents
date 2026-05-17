@@ -2,7 +2,7 @@
 
 **The operational layer for AI coding agents**
 
-One CLI to manage configurations — and soon, workflows — across Cursor, Claude Code, Codex, GitHub Copilot, and more.
+One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and more.
 
 ```bash
 # Install
@@ -94,19 +94,22 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 └── (your code)
 ```
 
-### Layer 2: Workflow Proposals (Shipping)
+### Layer 2: Workflow Management (Shipping)
 
-The first slice of workflow management ships today: agents queue rule/skill/config
-changes for human review, and you approve or reject them through `da review`.
+Workflow-state management ships today through `da workflow`: agents orient at
+session start, persist checkpoints and verification state as they go, manage
+canonical plans and tasks, delegate bounded fan-out work, and queue
+rule/skill/config changes for human review through `da review`.
 
 | Primitive | What It Does | Status |
 |-----------|-------------|--------|
 | **Propose** | Agents queue rule/skill/config changes for human review when patterns emerge | Shipped (`da review`) |
-| **Orient** | Load active plan, last checkpoint, verification state, recent lessons at session start | Roadmap |
-| **Persist** | Save files touched, tests run, blockers, and next action at natural breakpoints | Roadmap |
+| **Orient** | Load active plan, last checkpoint, verification state at session start | Shipped (`da workflow orient`) |
+| **Persist** | Save checkpoints, verification results, and plan/task progress at natural breakpoints | Shipped (`da workflow checkpoint`, `verify`, `advance`) |
+| **Delegate** | Bounded fan-out to sub-agents with write-scope constraints and merge-back | Shipped (`da workflow fanout`, `merge-back`) |
 
-The design principle: **agents operate, humans steer.** Deeper workflow-state
-management (orient/persist) is on the roadmap; see the Roadmap section below.
+The design principle: **agents operate, humans steer.** Deeper multi-agent
+coordination is on the roadmap; see the Roadmap section below.
 
 ## Installation
 
@@ -161,7 +164,7 @@ da install
 
 ## Commands
 
-`da` exposes 18 top-level commands.
+`da` exposes 19 top-level commands.
 
 ### Project Management
 
@@ -209,6 +212,67 @@ These inspect and manage canonical files under `~/.agents/`. Each supports
 | `review show <id>` | Show a pending proposal |
 | `review approve <id>` | Approve and apply a pending proposal |
 | `review reject <id>` | Reject a pending proposal |
+
+### Workflow State
+
+`da workflow` captures repository-local workflow state — canonical plans,
+checkpoints, verification logs, preferences, fanout artifacts, and bridge
+queries — so humans and agents can resume work safely.
+
+| Command | Description |
+|---------|-------------|
+| `workflow status` | Show workflow state for the current project |
+| `workflow orient` | Render session orient context for the current project |
+| `workflow next` | Suggest the next actionable canonical task |
+| `workflow eligible` | List all unblocked eligible tasks across active plans with conflict detection |
+| `workflow complete --plan <id>` | Probe scoped plan-completion state |
+| `workflow health` | Show workflow health snapshot |
+| `workflow app-types` | List available app_type values for the current repo |
+
+#### Plans & Tasks
+
+| Command | Description |
+|---------|-------------|
+| `workflow plan` | List canonical plans (`show`, `graph`, `schedule` subcommands) |
+| `workflow plan create <id> --title <t>` | Create a new canonical plan with PLAN.yaml and TASKS.yaml stubs |
+| `workflow plan update <id>` | Update PLAN.yaml metadata fields |
+| `workflow plan archive --plan <id>` | Archive one or more completed canonical plans |
+| `workflow plan derive-scope <plan> <task>` | Derive a candidate scope-evidence sidecar via KG/CRG queries |
+| `workflow plan check-scope <plan> <task>` | Check changed files against a task's scope-evidence sidecar |
+| `workflow task add <plan> --id <id> --title <t>` | Append a new task to a plan's TASKS.yaml |
+| `workflow task update <plan> --task <id>` | Update notes, write-scope, or title for a task |
+| `workflow tasks <plan>` | Show tasks for a canonical plan |
+| `workflow slices <plan>` | Show slices for a canonical plan |
+| `workflow advance <plan> --task <id> --status <s>` | Advance a task's status within a plan |
+
+#### Persist & Verify
+
+| Command | Description |
+|---------|-------------|
+| `workflow checkpoint --message <m>` | Write a checkpoint for the current project |
+| `workflow log` | Show recent checkpoint log entries |
+| `workflow verify record` | Record a verification run (test/lint/build/review) |
+| `workflow verify log` | Show verification log entries |
+| `workflow prefs` | Show resolved workflow preferences (`set-local`, `set-shared`) |
+| `workflow graph query` | Query knowledge graph context by bridge intent (`graph health`) |
+
+#### Delegation
+
+| Command | Description |
+|---------|-------------|
+| `workflow fanout --plan <id> --task <id>` | Delegate a task to a sub-agent with a bounded write scope |
+| `workflow merge-back --task <id> --summary <s>` | Record a sub-agent's completed work as a merge-back artifact |
+| `workflow delegation closeout` | Archive merge-back artifacts and reconcile canonical task state |
+| `workflow delegation gate --task <id>` | Evaluate task-local review evidence into a parent-gate outcome |
+| `workflow fold-back create` | Route loop observations into plan artifacts or proposals (`update`, `list`) |
+| `workflow bundle stages <path>` | Expand a delegation bundle into the ordered stage list |
+
+#### Drift (cross-repo, read-only by default)
+
+| Command | Description |
+|---------|-------------|
+| `workflow drift` | Detect workflow drift across managed repos (read-only) |
+| `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
 
 ### Sync
 
@@ -404,14 +468,14 @@ Changes follow an **approval gradient**:
 
 ### Workflow State
 
-Based on analysis of real session data across Claude Code, Cursor, and Codex, dot-agents will manage six workflow concerns:
+Based on analysis of real session data across Claude Code, Cursor, and Codex, dot-agents manages six workflow concerns. The foundation ships today via `da workflow`; remaining work deepens coverage:
 
-1. **Resume context** — collect active plan, last handoff, and likely next step
-2. **Plan & task state** — canonical plan artifacts with dependency-aware phases
-3. **Verification state** — persist test/lint/build results so agents stop rediscovering what's broken
-4. **Approvals & tool health** — surface auth expiry, rate-limit risk, environment readiness
-5. **Repo preferences** — persist per-repo habits (test commands, CI expectations, review preferences)
-6. **Delegation & handoff** — bounded fan-out with ownership constraints and merge-back summaries
+1. **Resume context** — collect active plan, last handoff, and likely next step (shipped: `workflow orient`, `next`)
+2. **Plan & task state** — canonical plan artifacts with dependency-aware phases (shipped: `workflow plan`, `task`, `advance`)
+3. **Verification state** — persist test/lint/build results so agents stop rediscovering what's broken (shipped: `workflow verify`, `checkpoint`)
+4. **Approvals & tool health** — surface auth expiry, rate-limit risk, environment readiness (roadmap)
+5. **Repo preferences** — persist per-repo habits like test commands and review preferences (shipped: `workflow prefs`)
+6. **Delegation & handoff** — bounded fan-out with ownership constraints and merge-back summaries (shipped: `workflow fanout`, `merge-back`)
 
 ### Multi-Agent Coordination
 
