@@ -164,7 +164,7 @@ da install
 
 ## Commands
 
-`da` exposes 19 top-level commands.
+`da` exposes 20 top-level commands.
 
 ### Project Management
 
@@ -273,6 +273,53 @@ queries — so humans and agents can resume work safely.
 |---------|-------------|
 | `workflow drift` | Detect workflow drift across managed repos (read-only) |
 | `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
+
+### Knowledge Graph
+
+`da kg` creates, queries, and maintains the local knowledge graph used for
+structured project memory, bridge queries, and code-to-note context.
+
+| Command | Description |
+|---------|-------------|
+| `kg setup` | Initialize the knowledge graph at `KG_HOME` |
+| `kg health` | Show knowledge graph health |
+| `kg serve` | Start the MCP server (stdio transport, JSON-RPC 2.0) |
+| `kg ingest [file]` | Ingest a raw source into the graph (`--all`, `--type`, `--dry-run`) |
+| `kg queue` | List pending sources in the inbox |
+| `kg query [string] --intent <i>` | Query the knowledge graph by intent |
+| `kg lint` | Check graph integrity and knowledge quality (`--check`) |
+
+#### Maintenance
+
+| Command | Description |
+|---------|-------------|
+| `kg maintain reweave` | Repair broken links and add missing source_ref links |
+| `kg maintain mark-stale` | Mark notes not updated beyond threshold as stale (`--days`) |
+| `kg maintain compact` | Archive superseded and archived notes |
+| `kg sync` | Sync graph via git pull + lint (`--push` to push) |
+| `kg warm` | Sync hot filesystem notes into the warm SQLite layer (`stats` subcommand) |
+
+#### Bridge
+
+| Command | Description |
+|---------|-------------|
+| `kg bridge query --intent <i>` | Execute a bridge intent query |
+| `kg bridge health` | Show adapter availability and health |
+| `kg bridge mapping` | Show bridge intent to KG intent mapping |
+
+#### Code Graph
+
+| Command | Description |
+|---------|-------------|
+| `kg build` | Full code graph build (re-parse all files via code-review-graph) |
+| `kg update` | Incremental code graph update (changed files only) |
+| `kg code-status` | Show code graph stats (nodes, edges, languages) |
+| `kg changes` | Detect change impact in the current diff |
+| `kg impact [file...]` | Show blast radius for given files (or current diff) |
+| `kg flows` | List detected execution flows |
+| `kg communities` | List detected code communities |
+| `kg postprocess` | Rebuild flows, communities, and FTS index |
+| `kg link add\|list\|remove` | Manage note→code symbol cross-references |
 
 ### Sync
 
