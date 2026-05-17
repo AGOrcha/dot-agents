@@ -24,13 +24,13 @@ cd "$repo_root"
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_EXEC_PATH \
       GIT_REFLOG_ACTION GIT_AUTHOR_DATE GIT_COMMITTER_DATE 2>/dev/null || true
 
-say()  { printf '\n\033[1m[mandate:%s] %s\033[0m\n' "${1:-?}" "${2:-}"; }
-fail() { printf '\n\033[31m[mandate] BLOCKED: %s\033[0m\n' "$1" >&2; exit 1; }
+say()  { local label="${1:-?}" msg="${2:-}"; printf '\n\033[1m[mandate:%s] %s\033[0m\n' "$label" "$msg"; }
+fail() { local reason="${1:-}"; printf '\n\033[31m[mandate] BLOCKED: %s\033[0m\n' "$reason" >&2; exit 1; }
 
 cmd_fmt() {
   say fmt "gofmt"
   u="$(gofmt -l ./cmd ./commands ./internal 2>/dev/null || true)"
-  if [ -n "$u" ]; then
+  if [[ -n "$u" ]]; then
     printf '%s\n' "$u"
     fail "gofmt: run gofmt -w on the files above"
   fi
@@ -67,15 +67,15 @@ cmd_sonar() {
   # (gitignored — never committed). Looked up in the current worktree
   # then the main worktree (.mcp.json is gitignored so it only exists in
   # the primary checkout). The token value is never printed.
-  if [ -z "${SONAR_TOKEN:-}" ]; then
+  if [[ -z "${SONAR_TOKEN:-}" ]]; then
     mcp_json=""
     for cand in \
       "$repo_root/.mcp.json" \
       "$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')/.mcp.json"
     do
-      [ -f "$cand" ] && { mcp_json="$cand"; break; }
+      [[ -f "$cand" ]] && { mcp_json="$cand"; break; }
     done
-    if [ -n "$mcp_json" ]; then
+    if [[ -n "$mcp_json" ]]; then
       if command -v jq >/dev/null 2>&1; then
         SONAR_TOKEN="$(jq -r '.mcpServers.sonarqube.env.SONARQUBE_TOKEN // empty' "$mcp_json" 2>/dev/null)"
         : "${SONAR_HOST_URL:=$(jq -r '.mcpServers.sonarqube.env.SONARQUBE_CLOUD_URL // empty' "$mcp_json" 2>/dev/null)}"
@@ -84,10 +84,10 @@ cmd_sonar() {
         : "${SONAR_HOST_URL:=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("mcpServers",{}).get("sonarqube",{}).get("env",{}).get("SONARQUBE_CLOUD_URL",""))' "$mcp_json" 2>/dev/null)}"
       fi
       export SONAR_TOKEN SONAR_HOST_URL
-      [ -n "$SONAR_TOKEN" ] && printf '[mandate:sonar] using SonarQube MCP credentials from .mcp.json\n'
+      [[ -n "$SONAR_TOKEN" ]] && printf '[mandate:sonar] using SonarQube MCP credentials from .mcp.json\n'
     fi
   fi
-  if [ -z "${SONAR_TOKEN:-}" ]; then
+  if [[ -z "${SONAR_TOKEN:-}" ]]; then
     printf '\033[33m================ SONAR NOT ENFORCED ================\n'
     printf '[mandate:sonar] SKIPPED: no SONAR_TOKEN and no sonarqube token\n'
     printf 'in .mcp.json — the SonarCloud quality gate (incl. new security\n'

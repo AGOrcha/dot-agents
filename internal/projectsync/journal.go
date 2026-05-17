@@ -97,7 +97,7 @@ func BeginPromoteJournal(agentsHome string, entry PromoteJournalEntry) (string, 
 // entry. The file is rewritten in place. A missing journal file is reported as
 // an error so the caller can distinguish "lost-journal" failures from normal
 // progression.
-func AdvancePromoteJournal(path string, newState string) error {
+func AdvancePromoteJournal(path, newState string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading journal entry %s: %w", path, err)
@@ -135,49 +135,61 @@ func ListPendingPromoteJournals(agentsHome string) ([]PromoteJournalEntry, error
 	dir := promoteJournalDirPath(agentsHome)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Distinguish "journal dir simply absent" (legitimate no-op) from "a
-		// path component is not a directory" (e.g. agents-home is a regular
-		// file, so the .promote-journal subpath cannot exist). On Windows,
-		// os.ReadDir under a regular file maps to a NotExist-class error, so
-		// os.IsNotExist alone would silently hide the fault. The parent
-		// (agents-home) must be an existing *directory* for an absent journal
-		// dir to be benign; if the parent exists but is not a directory, the
-		// failure is real and must propagate. The %v (not %w) deliberately
-		// breaks the fs.ErrNotExist chain so callers cannot re-swallow it.
-		if pi, statErr := os.Lstat(agentsHome); statErr == nil && !pi.IsDir() {
-			return nil, fmt.Errorf("reading promote-journal dir %s (%v)", dir, err)
-		}
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading promote-journal dir %s: %w", dir, err)
+		return classifyJournalReadDirError(agentsHome, dir, err)
 	}
 	var pending []PromoteJournalEntry
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
+		if je, ok := readPendingJournalEntry(dir, e); ok {
+			pending = append(pending, je)
 		}
-		if filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		data, rerr := os.ReadFile(path)
-		if rerr != nil {
-			continue
-		}
-		var je PromoteJournalEntry
-		if jerr := json.Unmarshal(data, &je); jerr != nil {
-			continue
-		}
-		if isTerminalPromoteState(je.State) {
-			continue
-		}
-		pending = append(pending, je)
 	}
 	sort.Slice(pending, func(i, j int) bool {
 		return pending[i].StartedAt.Before(pending[j].StartedAt)
 	})
 	return pending, nil
+}
+
+// classifyJournalReadDirError maps an os.ReadDir failure on the journal dir to
+// either a benign no-op (dir simply absent) or a propagated fault.
+//
+// It distinguishes "journal dir simply absent" (legitimate no-op) from "a
+// path component is not a directory" (e.g. agents-home is a regular file, so
+// the .promote-journal subpath cannot exist). On Windows, os.ReadDir under a
+// regular file maps to a NotExist-class error, so os.IsNotExist alone would
+// silently hide the fault. The parent (agents-home) must be an existing
+// *directory* for an absent journal dir to be benign; if the parent exists
+// but is not a directory, the failure is real and must propagate. The %v (not
+// %w) deliberately breaks the fs.ErrNotExist chain so callers cannot
+// re-swallow it.
+func classifyJournalReadDirError(agentsHome, dir string, err error) ([]PromoteJournalEntry, error) {
+	if pi, statErr := os.Lstat(agentsHome); statErr == nil && !pi.IsDir() {
+		return nil, fmt.Errorf("reading promote-journal dir %s (%v)", dir, err)
+	}
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("reading promote-journal dir %s: %w", dir, err)
+}
+
+// readPendingJournalEntry decodes a single directory entry into a journal
+// entry, returning ok=false for non-JSON files, unreadable/unparseable files,
+// and entries already in a terminal state.
+func readPendingJournalEntry(dir string, e os.DirEntry) (PromoteJournalEntry, bool) {
+	if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		return PromoteJournalEntry{}, false
+	}
+	data, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+	if rerr != nil {
+		return PromoteJournalEntry{}, false
+	}
+	var je PromoteJournalEntry
+	if json.Unmarshal(data, &je) != nil {
+		return PromoteJournalEntry{}, false
+	}
+	if isTerminalPromoteState(je.State) {
+		return PromoteJournalEntry{}, false
+	}
+	return je, true
 }
 
 // isTerminalPromoteState reports whether the journal state indicates the

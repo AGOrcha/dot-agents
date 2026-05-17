@@ -17,6 +17,16 @@ import (
 
 const doctorOpenCodeDir = ".opencode"
 
+// Owned repo-relative file/name constants shared across doctor's link
+// collectors. Centralized so the broken-link and OK-count paths cannot drift.
+const (
+	doctorAgentsMD     = "AGENTS.md"
+	doctorCopilotInstr = "copilot-instructions.md"
+	doctorMCPJSON      = "mcp.json"
+	doctorOpenCodeJSON = "opencode.json"
+	doctorGlobalPrefix = "global--"
+)
+
 func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -338,31 +348,45 @@ func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string
 		if !e.IsDir() {
 			continue
 		}
-		backLink := filepath.Join(projectPath, ".agents", bucket, e.Name())
-		if _, err := os.Lstat(backLink); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				orphans = append(orphans, e.Name())
-			}
-			continue
-		}
-		// If the back-link is a resolvable managed link (POSIX symlink /
-		// Windows junction), verify it points at THIS canonical. A link that
-		// resolves to a different canonical (or anywhere else) is still an
-		// orphan — the canonical here has no live reference. A non-resolvable
-		// entry (real dir, or a hard-linked file with no reparse point) is a
-		// live back-reference and not an orphan.
-		if raw, ok := links.ManagedLinkTarget(backLink); ok {
-			target := raw
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(filepath.Dir(backLink), target)
-			}
-			expected := filepath.Join(canonicalDir, e.Name())
-			if filepath.Clean(target) != filepath.Clean(expected) {
-				orphans = append(orphans, e.Name()+"  (mis-pointed: "+target+")")
-			}
+		if entry, ok := classifyCanonicalOrphan(projectPath, canonicalDir, bucket, e.Name()); ok {
+			orphans = append(orphans, entry)
 		}
 	}
 	return orphans
+}
+
+// classifyCanonicalOrphan decides whether a single canonical entry is an
+// orphan. It returns the display string to record and true when it is. A
+// missing back-link is a plain orphan; a back-link that is a resolvable
+// managed link pointing elsewhere is a mis-pointed orphan; any other present
+// back-link is a live reference (not an orphan).
+func classifyCanonicalOrphan(projectPath, canonicalDir, bucket, name string) (string, bool) {
+	backLink := filepath.Join(projectPath, ".agents", bucket, name)
+	if _, err := os.Lstat(backLink); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return name, true
+		}
+		return "", false
+	}
+	// If the back-link is a resolvable managed link (POSIX symlink /
+	// Windows junction), verify it points at THIS canonical. A link that
+	// resolves to a different canonical (or anywhere else) is still an
+	// orphan — the canonical here has no live reference. A non-resolvable
+	// entry (real dir, or a hard-linked file with no reparse point) is a
+	// live back-reference and not an orphan.
+	raw, ok := links.ManagedLinkTarget(backLink)
+	if !ok {
+		return "", false
+	}
+	target := raw
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(backLink), target)
+	}
+	expected := filepath.Join(canonicalDir, name)
+	if filepath.Clean(target) != filepath.Clean(expected) {
+		return name + "  (mis-pointed: " + target + ")", true
+	}
+	return "", false
 }
 
 func hasPluginPlatform(platforms []string, want string) bool {
@@ -435,8 +459,8 @@ func managedLinkHealthy(linkPath string) bool {
 func claudeRuleHardlinked(linkPath, entryName, projectName, agentsHome string) bool {
 	scope, rest := "", ""
 	switch {
-	case strings.HasPrefix(entryName, "global--"):
-		scope, rest = "global", strings.TrimPrefix(entryName, "global--")
+	case strings.HasPrefix(entryName, doctorGlobalPrefix):
+		scope, rest = "global", strings.TrimPrefix(entryName, doctorGlobalPrefix)
 	case strings.HasPrefix(entryName, projectName+"--"):
 		scope, rest = projectName, strings.TrimPrefix(entryName, projectName+"--")
 	default:
@@ -472,8 +496,8 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 				continue
 			}
 			f := filepath.Join(cursorRulesDir, e.Name())
-			if strings.HasPrefix(e.Name(), "global--") {
-				srcName := strings.TrimPrefix(e.Name(), "global--")
+			if strings.HasPrefix(e.Name(), doctorGlobalPrefix) {
+				srcName := strings.TrimPrefix(e.Name(), doctorGlobalPrefix)
 				src := filepath.Join(agentsHome, "rules", "global", srcName)
 				if linked, _ := links.AreHardlinked(f, src); linked {
 					continue
@@ -527,11 +551,11 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 		platformID string
 		path       string
 	}{
-		{"codex", filepath.Join(path, "AGENTS.md")},
-		{"copilot", filepath.Join(path, ".github", "copilot-instructions.md")},
-		{"copilot", filepath.Join(path, ".vscode", "mcp.json")},
+		{"codex", filepath.Join(path, doctorAgentsMD)},
+		{"copilot", filepath.Join(path, ".github", doctorCopilotInstr)},
+		{"copilot", filepath.Join(path, ".vscode", doctorMCPJSON)},
 		{"claude", filepath.Join(path, ".mcp.json")},
-		{"opencode", filepath.Join(path, "opencode.json")},
+		{"opencode", filepath.Join(path, doctorOpenCodeJSON)},
 	}
 	for _, sf := range singleFiles {
 		if dest, isLink, isBroken := managedLinkBroken(sf.path); isLink && isBroken {
@@ -608,8 +632,8 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 				continue
 			}
 			f := filepath.Join(cursorRulesDir, e.Name())
-			if strings.HasPrefix(e.Name(), "global--") {
-				srcName := strings.TrimPrefix(e.Name(), "global--")
+			if strings.HasPrefix(e.Name(), doctorGlobalPrefix) {
+				srcName := strings.TrimPrefix(e.Name(), doctorGlobalPrefix)
 				src := filepath.Join(agentsHome, "rules", "global", srcName)
 				if linked, _ := links.AreHardlinked(f, src); linked {
 					ok++
@@ -644,11 +668,11 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 	// canonical source is reconstructed from the project scope, mirroring
 	// the cursor/claude paths above and collectBrokenLinks' singleFiles.
 	for _, sf := range []struct{ dst, src string }{
-		{filepath.Join(path, "AGENTS.md"), filepath.Join(agentsHome, "rules", name, "AGENTS.md")},
-		{filepath.Join(path, ".github", "copilot-instructions.md"), filepath.Join(agentsHome, "rules", name, "copilot-instructions.md")},
-		{filepath.Join(path, "opencode.json"), filepath.Join(agentsHome, "settings", name, "opencode.json")},
-		{filepath.Join(path, ".mcp.json"), filepath.Join(agentsHome, "mcp", name, "mcp.json")},
-		{filepath.Join(path, ".vscode", "mcp.json"), filepath.Join(agentsHome, "mcp", name, "mcp.json.vscode")},
+		{filepath.Join(path, doctorAgentsMD), filepath.Join(agentsHome, "rules", name, doctorAgentsMD)},
+		{filepath.Join(path, ".github", doctorCopilotInstr), filepath.Join(agentsHome, "rules", name, doctorCopilotInstr)},
+		{filepath.Join(path, doctorOpenCodeJSON), filepath.Join(agentsHome, "settings", name, doctorOpenCodeJSON)},
+		{filepath.Join(path, ".mcp.json"), filepath.Join(agentsHome, "mcp", name, doctorMCPJSON)},
+		{filepath.Join(path, ".vscode", doctorMCPJSON), filepath.Join(agentsHome, "mcp", name, "mcp.json.vscode")},
 	} {
 		if managedLinkHealthy(sf.dst) {
 			ok++

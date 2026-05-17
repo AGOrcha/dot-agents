@@ -33,6 +33,17 @@ func systemExe(rel string) string {
 
 var winPowerShell = systemExe(`System32\WindowsPowerShell\v1.0\powershell.exe`)
 
+// PowerShell invocation flags and the env-var prefix used to pass the
+// caller-controlled target path to every fallback (defined once to avoid
+// duplicated string literals — SonarCloud go:S1192).
+const (
+	psNoProfile      = "-NoProfile"
+	psNonInteractive = "-NonInteractive"
+	psExecPolicy     = "-ExecutionPolicy"
+	psCommand        = "-Command"
+	fsopsTargetEnv   = "FSOPS_TARGET="
+)
+
 // MkdirAll creates a directory path and all missing parents. When the Go
 // runtime call fails it is retried component-by-component with os.Mkdir
 // (which absorbs benign EEXIST / racing-creator cases); there is no shell
@@ -91,11 +102,11 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	cmd := exec.Command(
 		winPowerShell,
-		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command",
+		psNoProfile, psNonInteractive, psExecPolicy, "Bypass",
+		psCommand,
 		"[IO.File]::WriteAllBytes($env:FSOPS_TARGET,[Convert]::FromBase64String($env:FSOPS_B64))",
 	)
-	cmd.Env = append(os.Environ(), "FSOPS_TARGET="+path, "FSOPS_B64="+encoded)
+	cmd.Env = append(os.Environ(), fsopsTargetEnv+path, "FSOPS_B64="+encoded)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("write %s via powershell: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
@@ -110,11 +121,11 @@ func Remove(path string) error {
 	}
 	cmd := exec.Command(
 		winPowerShell,
-		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command",
+		psNoProfile, psNonInteractive, psExecPolicy, "Bypass",
+		psCommand,
 		"if (Test-Path -LiteralPath $env:FSOPS_TARGET) { Remove-Item -LiteralPath $env:FSOPS_TARGET -Force }",
 	)
-	cmd.Env = append(os.Environ(), "FSOPS_TARGET="+path)
+	cmd.Env = append(os.Environ(), fsopsTargetEnv+path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("remove %s via powershell: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
@@ -132,11 +143,11 @@ func RemoveAll(path string) error {
 	}
 	cmd := exec.Command(
 		winPowerShell,
-		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command",
+		psNoProfile, psNonInteractive, psExecPolicy, "Bypass",
+		psCommand,
 		"if (Test-Path -LiteralPath $env:FSOPS_TARGET) { Remove-Item -LiteralPath $env:FSOPS_TARGET -Recurse -Force }",
 	)
-	cmd.Env = append(os.Environ(), "FSOPS_TARGET="+path)
+	cmd.Env = append(os.Environ(), fsopsTargetEnv+path)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("remove tree %s via powershell: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}

@@ -119,45 +119,13 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 	}
 
 	// AGENTS.md: global then project override
-	globalCandidates := []string{
-		filepath.Join(agentsHome, "rules", "global", "agents.md"),
-		filepath.Join(agentsHome, "rules", "global", "agents.mdc"),
-		filepath.Join(agentsHome, "rules", "global", "rules.md"),
-		filepath.Join(agentsHome, "rules", "global", "rules.mdc"),
-	}
-	for _, src := range globalCandidates {
-		if _, err := os.Stat(src); err == nil {
-			// Managed-replace: AGENTS.md is a dot-agents output at a fixed
-			// owned repo path that refresh re-points (global → project). A
-			// stale managed symlink is idempotently re-pointed; a genuine
-			// user-authored AGENTS.md is preserved as
-			// AGENTS.md.dot-agents-backup, never silently destroyed.
-			if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexAgentsMarkdown), backupSidecar); err != nil {
-				return err
-			}
-			break
-		}
-	}
-	// Project override
-	for _, name := range []string{"agents.md", "agents.mdc"} {
-		src := filepath.Join(agentsHome, "rules", project, name)
-		if _, err := os.Stat(src); err == nil {
-			if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexAgentsMarkdown), backupSidecar); err != nil {
-				return err
-			}
-			break
-		}
+	if err := c.linkCodexAgentsMD(project, repoPath, agentsHome); err != nil {
+		return err
 	}
 
 	// .codex/config.toml
-	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := c.linkCodexConfigToml(project, repoPath, agentsHome); err != nil {
 		return err
-	}
-	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
-		// Managed-replace at a fixed owned path (.codex/config.toml).
-		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, "config.toml"), backupSidecar); err != nil {
-			return err
-		}
 	}
 
 	// Project agents → .codex/agents/*.toml (rendered by CollectAndExecuteSharedTargetPlan)
@@ -175,6 +143,61 @@ func (c *codex) CreateLinks(project, repoPath string) error {
 		return err
 	}
 
+	return nil
+}
+
+// linkCodexAgentsMD points the owned repo AGENTS.md at the highest-priority
+// canonical source: the first existing global candidate, then a project
+// override if present (the override symlink-replaces the global). Every
+// links.SymlinkReplacing error propagates unchanged — this is the
+// link-error-propagation contract added by a prior remediation.
+func (c *codex) linkCodexAgentsMD(project, repoPath, agentsHome string) error {
+	dst := filepath.Join(repoPath, codexAgentsMarkdown)
+	globalCandidates := []string{
+		filepath.Join(agentsHome, "rules", "global", "agents.md"),
+		filepath.Join(agentsHome, "rules", "global", "agents.mdc"),
+		filepath.Join(agentsHome, "rules", "global", "rules.md"),
+		filepath.Join(agentsHome, "rules", "global", "rules.mdc"),
+	}
+	for _, src := range globalCandidates {
+		if _, err := os.Stat(src); err == nil {
+			// Managed-replace: AGENTS.md is a dot-agents output at a fixed
+			// owned repo path that refresh re-points (global → project). A
+			// stale managed symlink is idempotently re-pointed; a genuine
+			// user-authored AGENTS.md is preserved as
+			// AGENTS.md.dot-agents-backup, never silently destroyed.
+			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	// Project override
+	for _, name := range []string{"agents.md", "agents.mdc"} {
+		src := filepath.Join(agentsHome, "rules", project, name)
+		if _, err := os.Stat(src); err == nil {
+			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
+}
+
+// linkCodexConfigToml ensures .codex/ exists and symlink-replaces
+// .codex/config.toml with the scoped codex.toml when one resolves. Link
+// errors propagate unchanged.
+func (c *codex) linkCodexConfigToml(project, repoPath, agentsHome string) error {
+	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+		return err
+	}
+	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
+		// Managed-replace at a fixed owned path (.codex/config.toml).
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, "config.toml"), backupSidecar); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

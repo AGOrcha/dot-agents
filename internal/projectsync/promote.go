@@ -175,34 +175,56 @@ func materializePromoteSource(sourcePath, canonicalPath string, sourceInfo os.Fi
 	if journalPath != "" {
 		_ = AdvancePromoteJournal(journalPath, PromoteStateSourceRemoved)
 	}
-	if err := osSymlink(canonicalPath, sourcePath); err != nil {
-		// Rollback: restore the repo-local directory from the canonical copy so
-		// we never leave the source path missing if symlink creation fails.
-		if rerr := osRename(canonicalPath, sourcePath); rerr != nil {
-			// Cross-filesystem rename fails with EXDEV (e.g. NFS home + local
-			// repo, Docker bind-mount over tmpfs). Fall back to CopyTree + remove
-			// so rollback still succeeds across mount boundaries.
-			if errors.Is(rerr, syscall.EXDEV) {
-				if cerr := CopyTree(canonicalPath, sourcePath); cerr != nil {
-					return fmt.Errorf("creating managed symlink failed and rollback failed (canonical=%s, source=%s now missing): symlink=%w; rename=%w; copy=%w",
-						canonicalPath, sourcePath, err, rerr, cerr)
-				}
-				if rmerr := os.RemoveAll(canonicalPath); rmerr != nil {
-					// Source restored but canonical still present — partial recovery.
-					return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q but canonical still present at %s (manual cleanup needed): symlink=%w; canonical-remove=%w",
-						spec.Singular, name, canonicalPath, err, rmerr)
-				}
-				return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q (via cross-fs copy): %w", spec.Singular, name, err)
-			}
-			return fmt.Errorf("creating managed symlink failed and rollback also failed; canonical=%s, source=%s now missing: symlink=%w; rollback=%w",
-				canonicalPath, sourcePath, err, rerr)
-		}
-		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q: %w", spec.Singular, name, err)
+	if err := symlinkOrRollback(sourcePath, canonicalPath, name, spec); err != nil {
+		return err
 	}
 	if journalPath != "" {
 		_ = AdvancePromoteJournal(journalPath, PromoteStateSymlinked)
 	}
 	return nil
+}
+
+// symlinkOrRollback creates the managed symlink at sourcePath pointing at
+// canonicalPath. On symlink failure it restores the repo-local directory from
+// the canonical copy so the source path is never left missing, then returns a
+// fully-contextualized error. The error wrapping (every %w / %v) is preserved
+// verbatim from the prior inline implementation: a security remediation relies
+// on these exact chains, do not collapse them.
+func symlinkOrRollback(sourcePath, canonicalPath, name string, spec PromoteSpec) error {
+	err := osSymlink(canonicalPath, sourcePath)
+	if err == nil {
+		return nil
+	}
+	// Rollback: restore the repo-local directory from the canonical copy so
+	// we never leave the source path missing if symlink creation fails.
+	rerr := osRename(canonicalPath, sourcePath)
+	if rerr == nil {
+		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q: %w", spec.Singular, name, err)
+	}
+	// Cross-filesystem rename fails with EXDEV (e.g. NFS home + local
+	// repo, Docker bind-mount over tmpfs). Fall back to CopyTree + remove
+	// so rollback still succeeds across mount boundaries.
+	if !errors.Is(rerr, syscall.EXDEV) {
+		return fmt.Errorf("creating managed symlink failed and rollback also failed; canonical=%s, source=%s now missing: symlink=%w; rollback=%w",
+			canonicalPath, sourcePath, err, rerr)
+	}
+	return crossFSRollback(sourcePath, canonicalPath, name, spec, err, rerr)
+}
+
+// crossFSRollback performs the EXDEV rollback path: copy canonical back to the
+// repo-local source, then remove the canonical copy. Error chains preserved
+// verbatim.
+func crossFSRollback(sourcePath, canonicalPath, name string, spec PromoteSpec, err, rerr error) error {
+	if cerr := CopyTree(canonicalPath, sourcePath); cerr != nil {
+		return fmt.Errorf("creating managed symlink failed and rollback failed (canonical=%s, source=%s now missing): symlink=%w; rename=%w; copy=%w",
+			canonicalPath, sourcePath, err, rerr, cerr)
+	}
+	if rmerr := os.RemoveAll(canonicalPath); rmerr != nil {
+		// Source restored but canonical still present — partial recovery.
+		return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q but canonical still present at %s (manual cleanup needed): symlink=%w; canonical-remove=%w",
+			spec.Singular, name, canonicalPath, err, rmerr)
+	}
+	return fmt.Errorf("creating managed symlink failed; rolled back to repo-local %s %q (via cross-fs copy): %w", spec.Singular, name, err)
 }
 
 // isManagedSource reports whether the repo-local source path is an
