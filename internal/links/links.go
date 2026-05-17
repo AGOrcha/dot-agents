@@ -20,6 +20,26 @@ func ownedManagedLink(linkPath string) bool {
 	return IsManagedLinkUnder(linkPath, config.AgentsHome())
 }
 
+// ownedManagedHardlink reports whether linkPath is a managed *file hard
+// link* we own. On Windows a managed file link is a hard link with no
+// reparse point, so os.Readlink cannot resolve it and
+// IsManagedLinkUnder (resolvable-link only) reports false — a stale
+// managed hard link would otherwise be misclassified as an unmanaged
+// occupant and refused. Identity here is the production-trusted file-link
+// signal already used by IsManagedFileLink / RemoveIfHardlinkedToAny: a
+// non-symlink regular file whose inode is shared (link count >= 2). A
+// file dot-agents rendered itself has a link count of 1, so a user's
+// plain config file is still correctly refused. On POSIX a symlink takes
+// the os.Readlink branch before this is reached, so behavior there is
+// unchanged for the common case and uniform for genuine hard links.
+func ownedManagedHardlink(linkPath string) bool {
+	info, err := os.Lstat(linkPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	return IsManagedFileLink(linkPath)
+}
+
 // handleUnmanagedOccupant applies the ownership contract to an existing
 // entry at path that is NOT a managed link we own. An empty directory
 // carries no data and is removed (single-entry) so idempotent re-link
@@ -109,8 +129,15 @@ func symlinkWithPolicy(target, linkPath string, backup func(path string) error) 
 			return uErr
 		}
 	} else if !os.IsNotExist(err) {
-		// Not a symlink/junction: a regular file or a real directory.
-		if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
+		// Not a symlink/junction: a regular file, a real directory, or a
+		// Windows managed file hard link (no reparse point). A hard link
+		// we own (shared inode, link count >= 2) is provably ours and is
+		// updated like a stale managed link; a plain user file is refused.
+		if ownedManagedHardlink(linkPath) {
+			if rmErr := fsopsRemoveAll(linkPath); rmErr != nil {
+				return fmt.Errorf("removing old managed hard link %s: %w", linkPath, rmErr)
+			}
+		} else if uErr := handleUnmanagedOccupant(linkPath, backup); uErr != nil {
 			return uErr
 		}
 	}

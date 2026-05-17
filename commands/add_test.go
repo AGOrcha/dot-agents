@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -984,6 +985,13 @@ func TestRestoreFromResourcesCounted_NonDirIsError(t *testing.T) {
 // A non-ENOENT stat error (permission denied on a parent component) must be
 // propagated, not collapsed to (0, nil).
 func TestRestoreFromResourcesCounted_StatErrorIsPropagated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// chmod 0000 on a directory only toggles the read-only attribute
+		// on Windows; it does NOT deny traversal/stat of children, so the
+		// non-ENOENT stat error cannot be induced here. The propagation
+		// contract is covered on POSIX.
+		t.Skip("read-only-dir chmod does not deny stat on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: permission bits do not deny stat")
 	}

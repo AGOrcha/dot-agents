@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -237,7 +238,10 @@ func TestSidecarBackupFile(t *testing.T) {
 	}
 
 	// Write failure: backup destination directory is unwritable.
-	if os.Geteuid() != 0 {
+	// On Windows os.Chmod(0555) only sets the read-only attribute on the
+	// directory itself, which does not prevent creating/writing children,
+	// so this fault cannot be injected there. Covered on POSIX.
+	if os.Geteuid() != 0 && runtime.GOOS != "windows" {
 		ro := filepath.Join(tmp, "ro")
 		if err := os.MkdirAll(ro, 0555); err != nil {
 			t.Fatal(err)

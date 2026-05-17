@@ -1,6 +1,7 @@
 package links_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -60,6 +61,55 @@ func TestSymlinkUpdatesStaleLink(t *testing.T) {
 	}
 	if links.IsManagedLink(linkPath, target1) {
 		t.Errorf("link should no longer resolve to stale target %s", target1)
+	}
+}
+
+// A stale *managed hard link* (the Windows file-link model; also valid on
+// POSIX) must be recognized as owned and updated to a new canonical
+// target, NOT refused as an unmanaged occupant. os.Readlink cannot
+// resolve a hard link, so this exercises the ownedManagedHardlink branch.
+func TestSymlinkUpdatesStaleManagedHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	target1 := filepath.Join(tmp, "h1.txt")
+	target2 := filepath.Join(tmp, "h2.txt")
+	linkPath := filepath.Join(tmp, "hlink.txt")
+
+	if err := os.WriteFile(target1, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target2, []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing managed hard link to target1 (link count >= 2).
+	if err := os.Link(target1, linkPath); err != nil {
+		t.Fatalf("seed hard link: %v", err)
+	}
+
+	if err := links.Symlink(target2, linkPath); err != nil {
+		t.Fatalf("Symlink update over managed hard link: %v", err)
+	}
+	if !links.IsManagedLink(linkPath, target2) {
+		t.Errorf("expected updated link to resolve to %s", target2)
+	}
+}
+
+// A plain user file (link count 1) at the link path is NOT a managed hard
+// link and must still be refused with ErrUnmanagedTarget.
+func TestSymlinkRefusesPlainUserFile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	target := filepath.Join(tmp, "canon.txt")
+	linkPath := filepath.Join(tmp, "user.txt")
+	if err := os.WriteFile(target, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkPath, []byte("user data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := links.Symlink(target, linkPath)
+	if !errors.Is(err, links.ErrUnmanagedTarget) {
+		t.Fatalf("expected ErrUnmanagedTarget for plain user file, got %v", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -601,6 +602,14 @@ func TestRemoveManagedIntentTarget_DirectFileHardLinkRemoved(t *testing.T) {
 // A removal failure on the hard-link path must surface, not be swallowed
 // (otherwise da remove reports success while the managed file is still live).
 func TestRemoveManagedIntentTarget_DirectFileHardLinkRemovalFailureSurfaces(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Fault injection here relies on a read-only parent directory
+		// denying child deletion. On Windows os.Chmod only toggles the
+		// read-only attribute and does NOT prevent deleting children, so
+		// RemoveAll would succeed and the failure path cannot be
+		// exercised. The error-propagation contract is covered on POSIX.
+		t.Skip("read-only-dir fault injection does not deny deletion on Windows")
+	}
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
 	agentsHome := filepath.Join(tmp, ".agents")
