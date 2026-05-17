@@ -36,6 +36,22 @@ func createLink(target, linkPath string) error {
 	return nil
 }
 
+// CreateManagedLink exposes the production Windows link primitive (junction
+// for directories, hard link for files) so test-support code (internal/
+// linktest) can mirror production behavior without re-implementing the
+// Win32 reparse-point machinery. This is the single source of truth;
+// linktest must not drift from it.
+func CreateManagedLink(target, link string) error {
+	return createLink(target, link)
+}
+
+// CreateJunction exposes the production directory-junction primitive for
+// the same test-support reuse reason as CreateManagedLink. Signature is
+// (link, target) to match the junction-creation convention.
+func CreateJunction(link, target string) error {
+	return createJunction(link, target)
+}
+
 // createJunction creates an NTFS directory junction at linkPath pointing to
 // target. A junction (IO_REPARSE_TAG_MOUNT_POINT) needs no special
 // privilege, unlike a true symlink. Go's os.Readlink and os.Lstat resolve
