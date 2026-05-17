@@ -247,7 +247,7 @@ var cliHintRules = []cliHintRule{
 		"Supported scopes are `project`, `global`, and `all`.",
 	}},
 	{"unknown preference key", []string{
-		"Run `da workflow prefs` to list valid preference keys and resolved values.",
+		"Check the preference key against the documented configuration keys for your installed `da` version.",
 	}},
 	{"invalid task status", []string{
 		"Valid task statuses are `pending`, `in_progress`, `blocked`, `completed`, and `cancelled`.",

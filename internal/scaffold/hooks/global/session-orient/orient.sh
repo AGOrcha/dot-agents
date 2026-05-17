@@ -177,7 +177,10 @@ print_fallback_orient() {
 }
 
 main() {
-  if command -v da >/dev/null 2>&1; then
+  # The workflow surface ships in da 0.3.1+. On installs without it,
+  # skip silently to the shell fallback rather than crying wolf with a
+  # "failed" warning for a command that simply is not present yet.
+  if command -v da >/dev/null 2>&1 && da workflow --help >/dev/null 2>&1; then
     if (
       cd "$project_dir" &&
       da workflow orient
