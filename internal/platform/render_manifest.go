@@ -66,7 +66,19 @@ func loadRenderManifest() *renderManifest {
 	if json.Unmarshal(data, &loaded) != nil || loaded.Entries == nil {
 		return m // corrupt → treat as empty; never block a render on it
 	}
-	loaded.SchemaVersion = renderManifestSchemaVersion
+	// Schema-skew guard: an older binary must never trust a future schema's
+	// hashes. Doing so would let it skip BackupBeforeOverwrite for a divergent
+	// file whose entry semantics it no longer understands — the opposite of a
+	// conservative data-loss guard. Only a manifest whose schema_version
+	// exactly matches what this binary writes is trusted; a missing/0 version
+	// or any version other than the current one is treated as untrusted →
+	// empty manifest, so divergent files are conservatively backed up rather
+	// than silently overwritten. (Currently only v1 exists; when a v2 ships,
+	// add explicit forward-/backward-compatible handling for known older
+	// versions here.)
+	if loaded.SchemaVersion != renderManifestSchemaVersion {
+		return m
+	}
 	return &loaded
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 func TestNewInitCmd_Metadata(t *testing.T) {
@@ -153,6 +154,110 @@ func TestRunInit_ForceReinitializes(t *testing.T) {
 	}
 	if loaded.Version != 1 {
 		t.Errorf("expected config version 1 after force, got %d", loaded.Version)
+	}
+}
+
+// init --force over an existing UNMANAGED ~/.claude/settings.json must
+// preserve it as a sidecar <path>.dot-agents-backup and install the managed
+// link — never destroy the user's file and never report false success.
+func TestRunInit_ForcePreservesUnmanagedClaudeSettings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Make claude "installed" via the ~/.claude directory probe.
+	claudeDir := filepath.Join(tmp, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing UNMANAGED user settings.json (a real regular file).
+	claudeSettings := filepath.Join(claudeDir, "settings.json")
+	userData := []byte(`{"user":"do-not-lose-me"}`)
+	if err := os.WriteFile(claudeSettings, userData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, Force: true}
+	defer func() { Flags = saved }()
+
+	if err := runInit(NewInitCmd(), nil); err != nil {
+		t.Fatalf("runInit --force: %v", err)
+	}
+
+	// The user's original bytes must survive as a sidecar backup.
+	bak := claudeSettings + ".dot-agents-backup"
+	got, err := os.ReadFile(bak)
+	if err != nil {
+		t.Fatalf("unmanaged user settings.json was not preserved as %s: %v", bak, err)
+	}
+	if string(got) != string(userData) {
+		t.Errorf("sidecar backup content mismatch: %q", string(got))
+	}
+
+	// settings.json must now be a managed link whose target resolves under
+	// the canonical agents root (not the old user regular file).
+	if !links.IsManagedLinkUnder(claudeSettings, agentsHome) {
+		// Windows hard-link model has no resolvable target; fall back to
+		// asserting it is at least a managed link distinct from the old
+		// user bytes.
+		if !links.IsManagedFileLink(claudeSettings) {
+			t.Error("expected ~/.claude/settings.json to be a managed link after --force")
+		}
+		if d, err := os.ReadFile(claudeSettings); err == nil && string(d) == string(userData) {
+			t.Error("settings.json still holds the old unmanaged user bytes — link not installed")
+		}
+	}
+}
+
+func TestSidecarBackupFile(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Read failure: source does not exist.
+	if err := sidecarBackupFile(filepath.Join(tmp, "missing")); err == nil {
+		t.Error("expected error backing up a missing file")
+	}
+
+	// Happy path: bytes copied to <path>.dot-agents-backup.
+	src := filepath.Join(tmp, "settings.json")
+	if err := os.WriteFile(src, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sidecarBackupFile(src); err != nil {
+		t.Fatalf("sidecarBackupFile: %v", err)
+	}
+	got, err := os.ReadFile(src + ".dot-agents-backup")
+	if err != nil || string(got) != "keep" {
+		t.Errorf("backup content mismatch: %q (err=%v)", string(got), err)
+	}
+
+	// Write failure: backup destination directory is unwritable.
+	if os.Geteuid() != 0 {
+		ro := filepath.Join(tmp, "ro")
+		if err := os.MkdirAll(ro, 0555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(ro, 0755) })
+		roSrc := filepath.Join(ro, "f")
+		// File exists (created before chmod via a sibling write trick):
+		// write it then drop dir perms.
+		if err := os.Chmod(ro, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(roSrc, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(ro, 0555); err != nil {
+			t.Fatal(err)
+		}
+		if err := sidecarBackupFile(roSrc); err == nil {
+			t.Error("expected error writing backup into a read-only directory")
+		}
 	}
 }
 

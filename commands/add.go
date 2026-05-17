@@ -551,9 +551,17 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 		if _, err := os.Lstat(f); err != nil {
 			continue
 		}
-		// A resolvable managed link (POSIX symlink / Windows junction) has no
+		// A PROVEN managed link (resolvable POSIX symlink / Windows junction
+		// whose target resolves under the canonical agents root) has no
 		// standalone content to preserve — remove it without a backup.
-		if _, isLink := links.ManagedLinkTarget(f); isLink {
+		// A merely-resolvable link is NOT proof: a project-owned
+		// symlink/junction pointing at a real user file OUTSIDE dot-agents
+		// (the symlink twin of the unmanaged-hard-link case below) carries
+		// the user's only copy of that config. Dropping it without mirroring
+		// the resolved content destroys it while claiming a backup. Such an
+		// unmanaged link falls through to the normal mirror/backup path,
+		// which copies the resolved bytes before removal.
+		if links.IsManagedLinkUnder(f, agentsHome) {
 			os.Remove(f)
 			count++
 			continue
@@ -590,9 +598,23 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 func restoreFromResourcesCounted(project, projectPath string) (int, error) {
 	agentsHome := config.AgentsHome()
 	resourcesDir := filepath.Join(agentsHome, "resources", project)
-	if _, err := os.Stat(resourcesDir); err != nil {
-		// No resources to restore is not a failure.
-		return 0, nil
+	info, err := os.Stat(resourcesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No resources to restore is not a failure.
+			return 0, nil
+		}
+		// A permission-denied / broken-symlink / other non-ENOENT stat
+		// error is NOT "nothing to restore": treating it as success makes
+		// refresh stamp fresh metadata over backed-up resource data that
+		// was never restored. Surface it so refresh.go's projectFailed
+		// path fires.
+		return 0, fmt.Errorf("stat resources dir %s: %w", resourcesDir, err)
+	}
+	if !info.IsDir() {
+		// A non-directory squatting the resources path cannot be walked;
+		// silently skipping it would also mask unrestored data.
+		return 0, fmt.Errorf("resources path %s is not a directory", resourcesDir)
 	}
 	count := 0
 	var restoreErr error

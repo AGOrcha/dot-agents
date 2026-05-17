@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
@@ -209,7 +210,12 @@ func TestBackupExistingConfigsList_SkipsBackupArtifacts(t *testing.T) {
 	}
 }
 
-func TestBackupExistingConfigsList_RemovesSymlinkNoBackup(t *testing.T) {
+// An UNMANAGED symlink (resolvable, but pointing at a real user file OUTSIDE
+// dot-agents) is the project's only copy of that config. It must NOT be
+// dropped without a backup just because it resolves: the resolved content is
+// mirrored into resources before the link is removed (the symlink twin of
+// TestBackupExistingConfigsList_UnmanagedHardlinkIsBackedUp).
+func TestBackupExistingConfigsList_UnmanagedSymlinkIsBackedUp(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -217,7 +223,7 @@ func TestBackupExistingConfigsList_RemovesSymlinkNoBackup(t *testing.T) {
 
 	// Create an unmanaged symlink (pointing somewhere outside agentsHome)
 	target := filepath.Join(tmp, "external.md")
-	os.WriteFile(target, []byte("x"), 0644)
+	os.WriteFile(target, []byte("# the real project config"), 0644)
 	linkPath := filepath.Join(tmp, "AGENTS.md")
 	linktest.Link(t, target, linkPath)
 
@@ -227,15 +233,67 @@ func TestBackupExistingConfigsList_RemovesSymlinkNoBackup(t *testing.T) {
 		t.Errorf("expected count=1, got %d", count)
 	}
 
-	// Symlink should be removed
+	// The link entry itself is removed (replaced by a managed link later)...
 	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Error("unmanaged symlink should have been removed")
+		t.Error("config entry should have been removed after backup")
 	}
 
-	// No resources entry for symlinks (no content to preserve)
+	// ...but the resolved content MUST have been mirrored into resources
+	// (and into the timestamped immutable copy) so the user's data survives.
+	activeTarget := filepath.Join(agentsHome, "resources", "myproject", "AGENTS.md")
+	data, err := os.ReadFile(activeTarget)
+	if err != nil {
+		t.Fatalf("unmanaged symlink was dropped without a mirror backup: %v", err)
+	}
+	if string(data) != "# the real project config" {
+		t.Errorf("mirror backup content mismatch: %q", string(data))
+	}
+	tsTarget := filepath.Join(agentsHome, "resources", "myproject", "backups", "ts", "AGENTS.md")
+	if _, err := os.Stat(tsTarget); err != nil {
+		t.Errorf("expected timestamped mirror backup at %s: %v", tsTarget, err)
+	}
+
+	// The original external target must be untouched.
+	if d, err := os.ReadFile(target); err != nil || string(d) != "# the real project config" {
+		t.Errorf("external symlink target must not be modified: %q (err=%v)", string(d), err)
+	}
+}
+
+// A PROVEN managed symlink (resolves UNDER agentsHome) has no standalone
+// content and is removed without a mirror backup.
+func TestBackupExistingConfigsList_ManagedSymlinkNoBackup(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Canonical source lives UNDER agentsHome — the managed case.
+	canonical := filepath.Join(agentsHome, "resources", "myproject", "AGENTS.canonical.md")
+	os.MkdirAll(filepath.Dir(canonical), 0755)
+	os.WriteFile(canonical, []byte("managed"), 0644)
+	linkPath := filepath.Join(tmp, "AGENTS.md")
+	linktest.Link(t, canonical, linkPath)
+
+	// On POSIX this is a symlink resolving under agentsHome (managed). On
+	// Windows linktest.Link makes a hard link (no resolvable target) which
+	// IsManagedLinkUnder reports false — there it correctly falls to the
+	// mirror path, which is also safe. Skip the managed-no-backup assertion
+	// where the link is not resolvable.
+	if !links.IsManagedLinkUnder(linkPath, agentsHome) {
+		t.Skip("link not resolvable under agentsHome on this platform")
+	}
+
+	count := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
+	if count != 1 {
+		t.Errorf("expected count=1, got %d", count)
+	}
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Error("managed symlink should have been removed")
+	}
+	// No mirror backup for a managed link (no standalone content).
 	activeTarget := filepath.Join(agentsHome, "resources", "myproject", "AGENTS.md")
 	if _, err := os.Stat(activeTarget); !os.IsNotExist(err) {
-		t.Error("symlinks should not produce a resources backup entry")
+		t.Error("managed symlink should not produce a resources backup entry")
 	}
 }
 
@@ -840,6 +898,62 @@ func TestRestoreFromResourcesCounted_NoResourcesDir(t *testing.T) {
 
 	if n, err := restoreFromResourcesCounted("ghost", tmp); n != 0 || err != nil {
 		t.Errorf("expected 0 restores for missing resources, got %d (err=%v)", n, err)
+	}
+}
+
+// A non-directory squatting the resources path must surface an error, not be
+// silently treated as "nothing to restore" (which would let refresh stamp
+// fresh metadata over unrestored backup data).
+func TestRestoreFromResourcesCounted_NonDirIsError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	resourcesProj := filepath.Join(agentsHome, "resources", "proj")
+	if err := os.MkdirAll(filepath.Dir(resourcesProj), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A regular file where the per-project resources dir should be.
+	if err := os.WriteFile(resourcesProj, []byte("not a dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := restoreFromResourcesCounted("proj", tmp)
+	if n != 0 {
+		t.Errorf("expected 0 restores, got %d", n)
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for a non-directory resources path, got nil (silent false success)")
+	}
+}
+
+// A non-ENOENT stat error (permission denied on a parent component) must be
+// propagated, not collapsed to (0, nil).
+func TestRestoreFromResourcesCounted_StatErrorIsPropagated(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not deny stat")
+	}
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	resourcesRoot := filepath.Join(agentsHome, "resources")
+	if err := os.MkdirAll(resourcesRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Deny traversal into resources/ so stat(resources/proj) fails with
+	// EACCES (a non-ENOENT error).
+	if err := os.Chmod(resourcesRoot, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(resourcesRoot, 0755) })
+
+	n, err := restoreFromResourcesCounted("proj", tmp)
+	if n != 0 {
+		t.Errorf("expected 0 restores, got %d", n)
+	}
+	if err == nil {
+		t.Fatal("expected non-ENOENT stat error to be propagated, got nil")
 	}
 }
 

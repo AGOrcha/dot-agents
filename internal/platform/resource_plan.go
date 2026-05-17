@@ -561,25 +561,36 @@ func RemoveSharedTargetPlan(project, repoPath string, platforms []Platform) erro
 }
 
 // RemoveSharedTargets deletes managed outputs for each resource in the plan.
+// Per-resource removal failures are aggregated (errors.Join) rather than
+// short-circuiting so that one stuck target cannot hide the removal status of
+// the rest, and so the caller (da remove) never reports a clean unlink while a
+// managed output is still live on disk.
 func (p ResourcePlan) RemoveSharedTargets(repoPath, agentsHome string) error {
+	var errs []error
 	for _, res := range p.Resources {
 		if err := removeManagedIntentTarget(res.Intent, repoPath, agentsHome); err != nil {
-			return fmt.Errorf("%s: %w", res.Intent.IntentID, err)
+			errs = append(errs, fmt.Errorf("%s: %w", res.Intent.IntentID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func removeManagedIntentTarget(intent ResourceIntent, repoPath, agentsHome string) error {
 	target := resolveIntentTargetPath(intent.TargetPath, repoPath)
 	switch {
 	case (intent.Shape == ResourceShapeDirectDir || intent.Shape == ResourceShapeDirectFile) && intent.Transport == ResourceTransportSymlink:
-		_ = links.RemoveIfSymlinkUnder(target, agentsHome)
+		// A missing entry is a successful no-op; any other failure means a
+		// managed link is still live and MUST be surfaced.
+		if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove managed symlink %s: %w", target, err)
+		}
 		return nil
 	case intent.Shape == ResourceShapeRenderSingle && intent.Transport == ResourceTransportWrite:
 		switch intent.Materializer {
 		case codexAgentTomlMaterializer:
-			_ = os.Remove(target)
+			if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove rendered file %s: %w", target, err)
+			}
 			return nil
 		default:
 			return fmt.Errorf("unsupported materializer %q for remove", intent.Materializer)

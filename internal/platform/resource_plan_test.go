@@ -471,6 +471,87 @@ func TestRemoveSharedTargetPlanRemovesCodexAgentToml(t *testing.T) {
 	}
 }
 
+// A failed rendered-file removal must NOT be swallowed: da remove relies on
+// this error to avoid reporting a clean unlink while a managed output is
+// still live on disk. os.Remove of a non-empty directory fails with a
+// non-IsNotExist error, exercising the propagation branch.
+func TestRemoveManagedIntentTarget_RenderedRemoveErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "out.toml")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "child"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+		TargetPath:   "out.toml",
+	}
+	err := removeManagedIntentTarget(intent, tmp, t.TempDir())
+	if err == nil {
+		t.Fatal("non-IsNotExist remove failure must propagate, got nil")
+	}
+	if !strings.Contains(err.Error(), "remove rendered file") {
+		t.Fatalf("error must identify the failing op, got %v", err)
+	}
+}
+
+// A missing rendered target is a successful no-op (IsNotExist swallowed).
+func TestRemoveManagedIntentTarget_MissingRenderedTargetIsNoop(t *testing.T) {
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+		TargetPath:   "does-not-exist.toml",
+	}
+	if err := removeManagedIntentTarget(intent, t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("missing target must be a no-op, got %v", err)
+	}
+}
+
+// RemoveSharedTargets must aggregate per-resource failures (errors.Join)
+// rather than short-circuiting, so one stuck target cannot mask the rest.
+func TestRemoveSharedTargets_AggregatesFailures(t *testing.T) {
+	tmp := t.TempDir()
+	mkBlockedToml := func(name string) string {
+		d := filepath.Join(tmp, name)
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "child"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: ResourceIntent{
+			IntentID:     "first",
+			Shape:        ResourceShapeRenderSingle,
+			Transport:    ResourceTransportWrite,
+			Materializer: codexAgentTomlMaterializer,
+			TargetPath:   mkBlockedToml("a.toml"),
+		}},
+		{Intent: ResourceIntent{
+			IntentID:     "second",
+			Shape:        ResourceShapeRenderSingle,
+			Transport:    ResourceTransportWrite,
+			Materializer: codexAgentTomlMaterializer,
+			TargetPath:   mkBlockedToml("b.toml"),
+		}},
+	}}
+	err := plan.RemoveSharedTargets(tmp, t.TempDir())
+	if err == nil {
+		t.Fatal("aggregated removal failures must surface, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "first") || !strings.Contains(msg, "second") {
+		t.Fatalf("both failures must be reported (errors.Join), got %v", err)
+	}
+}
+
 func TestEnsureFileSymlinkIntentRejectsUnmanagedFileOutsideAllowlist(t *testing.T) {
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")

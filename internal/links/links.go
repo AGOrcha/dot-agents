@@ -262,16 +262,34 @@ func IsManagedLinkUnder(linkPath, prefix string) bool {
 	if !ok {
 		return false
 	}
-	if strings.HasPrefix(dest, prefix) {
-		return true
+	// A POSIX symlink target may be relative to the link's own directory;
+	// resolve it before the containment test.
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(linkPath), dest)
 	}
-	// Junction targets are absolute; also test the absolute prefix form.
-	if absPrefix, err := filepath.Abs(prefix); err == nil {
-		if strings.HasPrefix(dest, absPrefix) {
-			return true
-		}
+	return pathUnder(dest, prefix)
+}
+
+// pathUnder reports whether target is the same path as, or strictly
+// nested within, root. It uses a path-boundary check (clean+abs, then
+// filepath.Rel) NOT raw string prefixing: raw HasPrefix wrongly treats a
+// sibling like ".../.agents-old" as under ".../.agents", which would let
+// a user-owned link in a sibling directory be misclassified as a managed
+// link and destroyed without backup.
+func pathUnder(target, root string) bool {
+	at, err1 := filepath.Abs(target)
+	ar, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil {
+		return false
 	}
-	return false
+	rel, err := filepath.Rel(filepath.Clean(ar), filepath.Clean(at))
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true // target == root
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // IsSymlinkTo is retained for callers/tests that specifically assert the

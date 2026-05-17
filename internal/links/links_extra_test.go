@@ -85,6 +85,37 @@ func TestSymlinkParentDirCreation(t *testing.T) {
 	}
 }
 
+func TestRemoveIfHardlinkedToAny_RemovalFailurePropagates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX dir-perm to force a removal failure")
+	}
+	tmp := t.TempDir()
+	canonical := filepath.Join(tmp, "canonical")
+	if err := os.WriteFile(canonical, []byte("c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	holder := filepath.Join(tmp, "holder")
+	if err := os.MkdirAll(holder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(holder, "f")
+	if err := os.Link(canonical, managed); err != nil {
+		t.Fatal(err)
+	}
+	// Read-only parent dir → unlink of the hard link fails → the helper
+	// must report (true, err), not silently (true, nil). This is exactly
+	// the failure the (bool,error) signature was introduced to surface.
+	if err := os.Chmod(holder, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(holder, 0o755) })
+
+	ok, err := links.RemoveIfHardlinkedToAny(managed, []string{canonical})
+	if !ok || err == nil {
+		t.Fatalf("want (true, non-nil) on a removal failure, got (%v, %v)", ok, err)
+	}
+}
+
 func TestHardlinkRefusesUnmanagedThenReplacingBacksUp(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "src.txt")

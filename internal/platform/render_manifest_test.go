@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -105,6 +106,85 @@ func TestWriteManagedFile_ProvenanceGatesOverwrite(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(dst); string(b) != "v3" {
 		t.Fatalf("want v3 after backup+replace, got %q", string(b))
+	}
+}
+
+// writeManifestFile persists a hand-crafted manifest at the canonical path.
+func writeManifestFile(t *testing.T, m renderManifest) {
+	t.Helper()
+	if err := osMkdirAll(filepath.Dir(renderManifestPath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(renderManifestPath(), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadRenderManifest_SchemaSkewIsUntrusted(t *testing.T) {
+	cases := []struct {
+		name    string
+		version int
+	}{
+		{"missing/zero version", 0},
+		{"future version", renderManifestSchemaVersion + 1},
+		{"unknown older version", renderManifestSchemaVersion - 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+			writeManifestFile(t, renderManifest{
+				SchemaVersion: tc.version,
+				Entries: map[string]renderManifestEntry{
+					"/some/path": {SHA256: "deadbeef", RenderedAt: "2026-01-01T00:00:00Z"},
+				},
+			})
+			m := loadRenderManifest()
+			if len(m.Entries) != 0 {
+				t.Fatalf("schema_version %d must be untrusted (empty), got %+v", tc.version, m)
+			}
+			if m.SchemaVersion != renderManifestSchemaVersion {
+				t.Fatalf("untrusted manifest must report current schema, got %d", m.SchemaVersion)
+			}
+		})
+	}
+}
+
+// A FUTURE-schema entry whose hash matches the on-disk file must NOT suppress
+// BackupBeforeOverwrite. An older binary cannot understand future entry
+// semantics, so it must conservatively preserve the divergent file.
+func TestWriteManagedFile_FutureSchemaEntryDoesNotSuppressBackup(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "settings.json")
+
+	onDisk := []byte("content from a newer binary")
+	if err := os.WriteFile(dst, onDisk, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A future-schema manifest claiming this exact on-disk content is ours.
+	writeManifestFile(t, renderManifest{
+		SchemaVersion: renderManifestSchemaVersion + 1,
+		Entries: map[string]renderManifestEntry{
+			manifestKey(dst): {SHA256: renderContentHash(onDisk), RenderedAt: "2026-01-01T00:00:00Z"},
+		},
+	})
+
+	if err := writeManagedFile(dst, []byte("rerendered")); err != nil {
+		t.Fatalf("writeManagedFile: %v", err)
+	}
+	bak, err := os.ReadFile(dst + ".dot-agents-backup")
+	if err != nil {
+		t.Fatalf("future-schema entry must NOT suppress backup; no backup found: %v", err)
+	}
+	if string(bak) != string(onDisk) {
+		t.Fatalf("divergent file must be backed up verbatim, got %q", string(bak))
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "rerendered" {
+		t.Fatalf("want rerendered after backup, got %q", string(b))
 	}
 }
 
