@@ -66,6 +66,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history: the SonarQube Scan step in this job needs blame
+          # / SCM data for new-code detection. A shallow clone makes
+          # SonarCloud warn "shallow clone detected, no blame info".
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6

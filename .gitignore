@@ -105,6 +105,11 @@ pip-delete-this-directory.txt
 # Shell scripts
 *.sh~
 
+# SonarQube/SonarCloud scanner working dir — generated during the
+# SonarQube Scan step; must be ignored or GoReleaser aborts the release
+# with "git is in a dirty state".
+.scannerwork/
+
 # Archives
 *.zip
 *.tar.gz
