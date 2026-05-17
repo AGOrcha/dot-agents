@@ -1,0 +1,112 @@
+schema_version: 1
+plan_id: test-file-structure
+tasks:
+  - id: t1-mapping
+    title: 'Mapping artifact: grab-bag Test funcs -> source/feature destination'
+    status: pending
+    depends_on: []
+    blocks:
+      - t3-redistribute-workflow
+      - t4-redistribute-root-cidrift
+    owner: dot-agents
+    write_scope:
+      - .agents/workflow/plans/test-file-structure/mapping.md
+    verification_required: false
+    notes: |-
+      For every Test*/Benchmark*/helper in the grab-bag files, record
+      old file -> symbol -> destination file. Grab-bag sets:
+      pr3b worktree commands/workflow: coverage_push{,2..10}_test.go (11),
+      integration_harness{,2..5}_test.go (5).
+      master commands: ci_drift{,2,3}_test.go (3).
+      pr3c worktree commands/kg: scan for any drift.
+      Destination = <sourcefile>_test.go, or an existing feature file
+      (lifecycle_e2e_test.go, delegation_fanout_test.go, etc.). No
+      numbered destinations. Artifact is reviewed before any moves.
+  - id: t2-convention-docs
+    title: 'Document convention in AGENTS.md + capture lesson'
+    status: pending
+    depends_on: []
+    blocks:
+      - t5-audit
+    owner: dot-agents
+    write_scope:
+      - /Users/nikashp/.agents/rules/dot-agents/agents.md
+      - .agents/lessons/test-file-naming/LESSON.md
+      - .agents/lessons/index.md
+    verification_required: false
+    notes: |-
+      Add the explicit rule to the AGENTS.md Testing Guidelines: test
+      file mirrors source file/feature; iteration numbers forbidden.
+      Lesson records the slice-driven coverage-push root cause and the
+      prevention rule (new tests go in the source-mirroring file, never
+      a new numbered file). Parallel with t1.
+  - id: t3-redistribute-workflow
+    title: 'Redistribute commands/workflow grab-bags (pr3b)'
+    status: pending
+    depends_on:
+      - t1-mapping
+    blocks:
+      - t6-verify-close
+    owner: dot-agents
+    write_scope:
+      - commands/workflow/
+    verification_required: true
+    notes: |-
+      Worktree .claude/worktrees/pr3b, branch pr3b-rebased -> PR#16.
+      Pure git-mv-equivalent moves of Test funcs per the t1 mapping:
+      coverage_push*_test.go + integration_harness*_test.go dissolved
+      into source-mirroring / feature files. No test-body, name, or
+      t.Run changes. Keep package-var seam references verbatim (DI is
+      di-refactor-rollout's job, not this).
+  - id: t4-redistribute-root-cidrift
+    title: 'Redistribute root commands ci_drift cluster (MASTER-direct)'
+    status: pending
+    depends_on:
+      - t1-mapping
+    blocks:
+      - t6-verify-close
+    owner: dot-agents
+    write_scope:
+      - commands/
+    verification_required: true
+    notes: |-
+      DEVIATION from the "on pr3b/pr3c" directive, by necessity:
+      commands/ci_drift{,2,3}_test.go are ALREADY MERGED to master
+      (via pr3a #15). They are not pr3b-owned; moving them on pr3b
+      would violate pr3b write_scope and pollute its diff. Correct
+      home is a small master-direct branch/commit (a dedicated
+      test-hygiene change). Flag to user before executing.
+  - id: t5-audit
+    title: 'Full audit: all packages vs convention; fix/record drift'
+    status: pending
+    depends_on:
+      - t2-convention-docs
+    blocks:
+      - t6-verify-close
+    owner: dot-agents
+    write_scope:
+      - .agents/workflow/plans/test-file-structure/audit.md
+    verification_required: false
+    notes: |-
+      Inventory every *_test.go across all packages (all 3 worktrees +
+      master) against the documented convention. Each file: conformant
+      / move-needed / accepted-exception(+rationale). Moves beyond the
+      grab-bags get appended to the t1 mapping and executed in the
+      owning branch's redistribute task scope.
+  - id: t6-verify-close
+    title: 'Per-worktree verify + close (tests, coverage gate, assertions)'
+    status: pending
+    depends_on:
+      - t3-redistribute-workflow
+      - t4-redistribute-root-cidrift
+      - t5-audit
+    owner: dot-agents
+    write_scope: []
+    verification_required: true
+    notes: |-
+      Per touched worktree: go test ./..., scripts/coverage-gate.sh
+      green for every moved package (moves only -> no statement delta),
+      gofmt, go vet. Assert no iteration-numbered test files remain:
+      git ls-files '*_test.go' | grep -E
+      '(coverage_push|integration_harness|ci_drift)[0-9]*_test' is
+      empty. Update PR#16 (and PR#18 if touched) bodies; push.
