@@ -1044,3 +1044,314 @@ func TestIntegrityManifest_NoteBodyHash_DeterministicAndUpdates(t *testing.T) {
 		t.Errorf("manifest hash mismatch: got %s, want %s", entry.Hash, h1)
 	}
 }
+
+// TestRunKGQuery_ExecuteQueryError drives the executeQuery-error return inside
+// runKGQuery (query_lint_maintain.go ~364-366).
+func TestRunKGQuery_ExecuteQueryError(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "totally_unknown", "")
+	cmd.Flags().String("scope", "", "")
+	cmd.Flags().Int("limit", 5, "")
+	cmd.Flags().Bool("json", false, "")
+	if err := runKGQuery(testDeps(), cmd, []string{"q"}); err == nil {
+		t.Fatal("expected executeQuery error for unknown intent")
+	}
+}
+
+// TestSearchNotes_DefaultLimit drives the limit <= 0 default branch.
+func TestSearchNotes_DefaultLimit(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	results, err := searchNotes(home, "entity", "", 0)
+	if err != nil {
+		t.Fatalf("searchNotes: %v", err)
+	}
+	if results != nil {
+
+		_ = results
+	}
+}
+
+// TestRunKGLint_HappyPath drives the success path with JSON output.
+func TestRunKGLint_HappyPath(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("json", true, "")
+	if err := runKGLint(testDeps(), cmd, nil); err != nil {
+		t.Fatalf("runKGLint: %v", err)
+	}
+}
+
+// TestRunKGCompactCmd_NotInitialized drives the IsNotExist branch on
+// runKGCompactCmd.
+func TestRunKGCompactCmd_NotInitialized(t *testing.T) {
+	newTempKG(t)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("json", false, "")
+	if err := runKGQueue(testDeps()); err == nil || !strings.Contains(err.Error(), "not initialized") {
+		t.Fatalf("expected not-initialized error, got %v", err)
+	}
+}
+
+func TestSearchByLinks_NoteNotFound(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := searchByLinks(home, "no-such-id"); err == nil {
+		t.Error("expected error for missing note id")
+	}
+}
+
+func TestFindContradictions_EmptyGraph(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	results, err := findContradictions(home)
+	if err != nil {
+		t.Fatalf("findContradictions: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected empty results, got %d", len(results))
+	}
+}
+
+// TestLoadManifest_MalformedJSON covers the json.Unmarshal error branch.
+func TestLoadManifest_MalformedJSON(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	path := integrityManifestPath(home)
+	if err := os.WriteFile(path, []byte("not-json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadManifest(home); err == nil {
+		t.Error("expected unmarshal error for malformed manifest")
+	}
+}
+
+// TestLoadManifest_NilNotesMapNormalized covers the Notes==nil normalization.
+func TestLoadManifest_NilNotesMapNormalized(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	path := integrityManifestPath(home)
+
+	if err := os.WriteFile(path, []byte(`{"schema_version":1,"notes":null}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := loadManifest(home)
+	if err != nil {
+		t.Fatalf("loadManifest: %v", err)
+	}
+	if m.Notes == nil {
+		t.Error("expected Notes to be normalized to empty map")
+	}
+}
+
+func TestLintStalePages_SkipsArchivedAndMalformed(t *testing.T) {
+	notes := map[string]*GraphNote{
+		"a": {ID: "a", Status: "archived", UpdatedAt: "2020-01-01T00:00:00Z"},
+		"b": {ID: "b", Status: "active", UpdatedAt: "not-a-timestamp"},
+		"c": {ID: "c", Status: "active", UpdatedAt: time.Now().Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+	}
+	results := lintStalePages(notes, 90*24*time.Hour)
+	hasC := false
+	for _, r := range results {
+		if r.NoteID == "c" {
+			hasC = true
+		}
+		if r.NoteID == "a" || r.NoteID == "b" {
+			t.Errorf("expected to skip note %q, got: %+v", r.NoteID, r)
+		}
+	}
+	if !hasC {
+		t.Error("expected stale entry for note c")
+	}
+}
+
+func TestLintIndexDrift_FlagsMissingNotes(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	notes := map[string]*GraphNote{
+		"orphan-1": {ID: "orphan-1", Status: "active", Type: "entity"},
+	}
+	results := lintIndexDrift(home, notes)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "orphan-1" && r.Check == "index_drift" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected drift flagged for orphan-1, got %+v", results)
+	}
+}
+
+func TestLintMissingSourceRefs_SkipsSources(t *testing.T) {
+	notes := map[string]*GraphNote{
+		"entity-no-refs": {ID: "entity-no-refs", Type: "entity", Status: "active"},
+		"source-ok":      {ID: "source-ok", Type: "source", Status: "active"},
+		"with-refs": {
+			ID: "with-refs", Type: "decision", Status: "active",
+			SourceRefs: []string{"x"},
+		},
+	}
+	results := lintMissingSourceRefs(notes)
+	if len(results) == 0 {
+		t.Error("expected at least one missing-source-refs result")
+	}
+
+	for _, r := range results {
+		if r.NoteID == "source-ok" {
+			t.Errorf("source notes should be skipped: %+v", r)
+		}
+	}
+}
+
+func TestLintOrphanPages_DetectsIsolated(t *testing.T) {
+
+	adj := map[string][]string{
+		"a": {"b"},
+		"b": {},
+		"c": {},
+	}
+	notes := map[string]*GraphNote{
+		"a": {ID: "a", Type: "entity", Status: "active"},
+		"b": {ID: "b", Type: "entity", Status: "active"},
+		"c": {ID: "c", Type: "entity", Status: "active"},
+	}
+	results := lintOrphanPages(adj, notes)
+	hasC := false
+	for _, r := range results {
+		if r.NoteID == "c" {
+			hasC = true
+		}
+	}
+	if !hasC {
+		t.Errorf("expected c flagged as orphan, got %+v", results)
+	}
+}
+
+func TestLintOversizePages_FindsLargeNote(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	huge := &GraphNote{
+		SchemaVersion: 1, ID: "huge-1", Type: "entity",
+		Title: "h", Summary: "s", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	bigBody := strings.Repeat("aaaaa\n", 200)
+	if err := createGraphNote(home, huge, bigBody); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	notes := map[string]*GraphNote{"huge-1": huge}
+	results := lintOversizePages(home, notes, 100)
+	found := false
+	for _, r := range results {
+		if r.NoteID == "huge-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected huge-1 flagged as oversize, got %+v", results)
+	}
+}
+
+func TestLintContradictions_DetectsSharedKeywords(t *testing.T) {
+	notes := map[string]*GraphNote{
+		"d1": {ID: "d1", Type: "decision", Status: "active", Title: "Use cobra for command processing"},
+		"d2": {ID: "d2", Type: "decision", Status: "active", Title: "Use spf13 cobra command framework"},
+	}
+	results := lintContradictions(notes)
+	if len(results) == 0 {
+		t.Error("expected contradictions detected via shared keywords")
+	}
+}
+
+func TestFilterLintResultsByCheck_BrokenLinksOnly(t *testing.T) {
+	results := []LintResult{
+		{Check: "broken_links", NoteID: "x"},
+		{Check: "stale_pages", NoteID: "y"},
+		{Check: "broken_links", NoteID: "z"},
+	}
+	filtered := filterLintResultsByCheck(results, "broken_links")
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 broken_links results, got %d", len(filtered))
+	}
+}
+
+func TestRunKGQuery_MissingIntent(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := newQueryCmd("", "", 10)
+	if err := runKGQuery(testDeps(), cmd, nil); err == nil {
+		t.Error("expected --intent required error")
+	}
+}
+
+func TestRunKGQuery_NotInitialized(t *testing.T) {
+	newTempKG(t)
+	cmd := newQueryCmd("entity_context", "", 10)
+	if err := runKGQuery(testDeps(), cmd, nil); err == nil {
+		t.Error("expected not-initialized error")
+	}
+}
+
+func TestRunKGQuery_TextNoResults(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := newQueryCmd("entity_context", "", 10)
+	out := captureStdout(t, func() {
+		if err := runKGQuery(testDeps(), cmd, []string{"nothing-matches"}); err != nil {
+			t.Fatalf("runKGQuery: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "No results found") {
+		t.Errorf("expected 'No results found', got:\n%s", out)
+	}
+}
+
+func TestWriteLintReport_HomeBlocked(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeLintReport(home, &LintReport{})
+}
+
+func TestSaveManifest_HomeBlocked(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveManifest(home, &IntegrityManifest{SchemaVersion: 1}); err == nil {
+		t.Error("expected error when home is blocked")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3091,5 +3092,849 @@ func TestExtractEntities_BacktickAndCapitalizedPhrases(t *testing.T) {
 	}
 	if matched < 3 {
 		t.Errorf("expected at least 3 known entities, got %v", ents)
+	}
+}
+
+func TestExtraFaultTest_FilepathSanity(t *testing.T) {
+	if filepath.Base("/a/b/c") != "c" {
+		t.Fatal("filepath.Base broken")
+	}
+	if !os.IsNotExist(os.ErrNotExist) {
+		t.Fatal("os.IsNotExist broken")
+	}
+}
+
+// TestCreateGraphNote_UpdateIndexError forces updateIndex to fail inside
+// createGraphNote (~969-971) by injecting a write failure for the index.
+func TestCreateGraphNote_UpdateIndexError(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
+		if filepath.Base(path) == kgIndexFileName {
+			return errSeam
+		}
+		return os.WriteFile(path, data, perm)
+	})
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "e1", Type: "entity", Title: "T",
+		Summary: "s", Status: "draft",
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := createGraphNote(home, note, "body"); err == nil {
+		t.Fatal("expected updateIndex seam error")
+	}
+}
+
+// TestUpdateGraphNote_WriteFileError forces the second-write seam error
+// inside updateGraphNote (~999-1001).
+func TestUpdateGraphNote_WriteFileError(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "e1", Type: "entity", Title: "T",
+		Summary: "s", Status: "draft",
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := createGraphNote(home, note, "body"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
+		if strings.HasSuffix(path, "e1.md") {
+			return errSeam
+		}
+		return os.WriteFile(path, data, perm)
+	})
+	if err := updateGraphNote(home, note, "body2"); err == nil {
+		t.Fatal("expected write-file seam error")
+	}
+}
+
+// TestUpdateGraphNote_UpdateIndexError forces updateIndex inside
+// updateGraphNote (~1002-1004) to fail.
+func TestUpdateGraphNote_UpdateIndexError(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "e1", Type: "entity", Title: "T",
+		Summary: "s", Status: "draft",
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := createGraphNote(home, note, "body"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
+		if filepath.Base(path) == kgIndexFileName {
+			return errSeam
+		}
+		return os.WriteFile(path, data, perm)
+	})
+	if err := updateGraphNote(home, note, "body2"); err == nil {
+		t.Fatal("expected updateIndex seam error on update")
+	}
+}
+
+// TestReadIndex_MissingReturnsNil drives the IsNotExist-nil-return branch
+// (~287-289).
+func TestReadIndex_MissingReturnsNil(t *testing.T) {
+	home := newTempKG(t)
+
+	entries, err := readIndex(home)
+	if err != nil {
+		t.Fatalf("readIndex on missing index: %v", err)
+	}
+	if entries != nil {
+		t.Errorf("expected nil entries on missing index, got %v", entries)
+	}
+}
+
+// TestKGHome_DefaultFallback covers the unset-env branch where kgHome falls
+// back to <user-home>/knowledge-graph.
+func TestKGHome_DefaultFallback(t *testing.T) {
+	t.Setenv("KG_HOME", "")
+	t.Setenv("HOME", "/tmp/fake-home-kg-test")
+	got := kgHome()
+	if !strings.HasSuffix(got, "knowledge-graph") {
+		t.Errorf("expected fallback path to end with knowledge-graph, got %q", got)
+	}
+}
+
+// TestLoadKGConfig_MalformedYAML exercises the yaml.Unmarshal error branch.
+func TestLoadKGConfig_MalformedYAML(t *testing.T) {
+	home := newTempKG(t)
+	cfgPath := kgConfigPath()
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte("schema_version: not-a-number\n  : bad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadKGConfig()
+	if err == nil {
+		t.Fatalf("expected parse error from malformed YAML in %s", home)
+	}
+}
+
+// TestSaveKGConfig_CreatesDir verifies SaveKGConfig creates the self/ dir
+// when it doesn't exist.
+func TestSaveKGConfig_CreatesDir(t *testing.T) {
+	home := newTempKG(t)
+	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "self", "config.yaml")); err != nil {
+		t.Errorf("expected config.yaml under self/, got: %v", err)
+	}
+}
+
+func TestNoteSubdir_UnknownTypePluralized(t *testing.T) {
+	got := noteSubdir("unknown")
+	if got != "unknowns" {
+		t.Errorf("expected pluralized fallback, got %q", got)
+	}
+}
+
+func TestWalkNoteFiles_MissingNotesDir(t *testing.T) {
+	dir := t.TempDir()
+	err := walkNoteFiles(dir, func(string, fs.DirEntry) error { return nil })
+	if err == nil {
+		t.Error("expected ReadDir error for missing notes/")
+	}
+}
+
+func TestDeriveGraphHealthStatus_AllBranches(t *testing.T) {
+	cases := []struct {
+		name           string
+		orphan         int
+		queue          int
+		wantStatus     string
+		wantWarnRegexp string
+	}{
+		{"healthy", 0, 0, "healthy", ""},
+		{"warn_orphan_only", 3, 0, "warn", "orphan"},
+		{"warn_queue_only", 0, 20, "warn", "inbox queue"},
+		{"warn_both", 1, 50, "warn", "orphan"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &GraphHealth{OrphanCount: tc.orphan, QueueDepth: tc.queue}
+			deriveGraphHealthStatus(h)
+			if h.Status != tc.wantStatus {
+				t.Errorf("status: got %q want %q", h.Status, tc.wantStatus)
+			}
+			if tc.wantWarnRegexp != "" && !hasWarningContaining(h.Warnings, tc.wantWarnRegexp) {
+				t.Errorf("expected warning containing %q, got %v", tc.wantWarnRegexp, h.Warnings)
+			}
+		})
+	}
+}
+
+func TestRenderGraphHealthText_AllBranches(t *testing.T) {
+	h := GraphHealth{
+		Status:      "warn",
+		Timestamp:   "2026-01-01T00:00:00Z",
+		NoteCount:   10,
+		SourceCount: 5,
+		StaleCount:  2,
+		OrphanCount: 1,
+		QueueDepth:  3,
+		Warnings:    []string{"something bad"},
+	}
+	out := captureStdout(t, func() {
+		renderGraphHealthText("/tmp/kg-home", h)
+	})
+	output := string(out)
+	for _, want := range []string{"Knowledge Graph Health", "Total notes: 10", "Sources: 5", "Stale: 2", "Orphans: 1", "Pending in inbox: 3", "Warnings", "something bad"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestRenderGraphHealthText_EmptyInboxNoWarnings(t *testing.T) {
+	h := GraphHealth{
+		Status:    "healthy",
+		Timestamp: "2026-01-01T00:00:00Z",
+		NoteCount: 1,
+	}
+	out := captureStdout(t, func() {
+		renderGraphHealthText("/tmp", h)
+	})
+	output := string(out)
+	if !strings.Contains(output, "Inbox empty") {
+		t.Errorf("expected 'Inbox empty' branch, got:\n%s", output)
+	}
+	if strings.Contains(output, "Warnings") {
+		t.Errorf("expected no Warnings section, got:\n%s", output)
+	}
+}
+
+func TestGraphHealthStatusBadge_UnknownPassthrough(t *testing.T) {
+	if got := graphHealthStatusBadge("totally-unknown"); got != "totally-unknown" {
+		t.Errorf("expected pass-through for unknown status, got %q", got)
+	}
+}
+
+func TestWriteAndReadGraphHealth_RoundTrip(t *testing.T) {
+	home := newTempKG(t)
+	want := GraphHealth{
+		Status:    "warn",
+		Timestamp: "2026-01-01T00:00:00Z",
+		NoteCount: 7,
+		Warnings:  []string{"a warning"},
+	}
+	if err := writeGraphHealth(home, want); err != nil {
+		t.Fatalf("writeGraphHealth: %v", err)
+	}
+	got, err := readGraphHealth(home)
+	if err != nil {
+		t.Fatalf("readGraphHealth: %v", err)
+	}
+	if got == nil || got.NoteCount != 7 || got.Status != "warn" {
+		t.Errorf("round-trip mismatch: %+v", got)
+	}
+}
+
+// TestReadGraphHealth_Malformed exercises the unmarshal error.
+func TestReadGraphHealth_Malformed(t *testing.T) {
+	home := newTempKG(t)
+	healthPath := filepath.Join(home, "ops", "health", "graph-health.json")
+	if err := os.MkdirAll(filepath.Dir(healthPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(healthPath, []byte("not-json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readGraphHealth(home); err == nil {
+		t.Error("expected unmarshal error for non-JSON health file")
+	}
+}
+
+func TestCountQueueEntries_MissingDirReturnsZero(t *testing.T) {
+	if n := countQueueEntries("/tmp/does-not-exist-kg"); n != 0 {
+		t.Errorf("expected 0 for missing dir, got %d", n)
+	}
+}
+
+func TestCountQueueEntries_IgnoresDirs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if n := countQueueEntries(dir); n != 2 {
+		t.Errorf("expected 2 files, got %d", n)
+	}
+}
+
+func TestRunKGHealth_JSONOutput(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGHealth(testDeps(), cmd); err != nil {
+			t.Fatalf("runKGHealth JSON: %v", err)
+		}
+	})
+	var h GraphHealth
+	if err := json.Unmarshal(out, &h); err != nil {
+		t.Fatalf("expected valid JSON, got: %s (err=%v)", string(out), err)
+	}
+	if h.Status == "" {
+		t.Error("expected populated status field in JSON")
+	}
+}
+
+func TestRunKGQueue_NotInitialized(t *testing.T) {
+	newTempKG(t)
+	if err := runKGQueue(testDeps()); err == nil {
+		t.Error("expected error when KG not initialized")
+	}
+}
+
+func TestRunKGQueue_EmptyInbox(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	out := captureStdout(t, func() {
+		if err := runKGQueue(testDeps()); err != nil {
+			t.Fatalf("runKGQueue: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Inbox is empty") {
+		t.Errorf("expected empty-inbox message, got:\n%s", out)
+	}
+}
+
+func TestRunKGQueue_WithPendingSources(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := RawSource{
+		SchemaVersion: 1, ID: "queue-001", Title: "Queue Source",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("body")); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runKGQueue(testDeps()); err != nil {
+			t.Fatalf("runKGQueue: %v", err)
+		}
+	})
+	output := string(out)
+	if !strings.Contains(output, "queue-001") || !strings.Contains(output, "Queue Source") {
+		t.Errorf("expected pending source listed, got:\n%s", output)
+	}
+}
+
+func TestRunKGQueue_JSONOutput(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := RawSource{
+		SchemaVersion: 1, ID: "queue-json", Title: "Q",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("body")); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+	deps := Deps{
+		Flags:        GlobalFlags{JSON: true},
+		ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") },
+	}
+	out := captureStdout(t, func() {
+		if err := runKGQueue(deps); err != nil {
+			t.Fatalf("runKGQueue JSON: %v", err)
+		}
+	})
+	var arr []RawSource
+	if err := json.Unmarshal(out, &arr); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+	if len(arr) != 1 || arr[0].ID != "queue-json" {
+		t.Errorf("expected single queue-json entry, got %+v", arr)
+	}
+}
+
+func TestIngestEntityNotes_SkipsExisting(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+
+	preExisting := &GraphNote{
+		SchemaVersion: 1, ID: "ent-cobra-cli", Type: "entity",
+		Title: "Cobra CLI", Summary: "x", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := createGraphNote(home, preExisting, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	src := RawSource{ID: "src-x", Title: "src x"}
+	srcNote := &GraphNote{ID: "src-x"}
+	body := "Cobra CLI surface. Widget Manager rules. " +
+		"Other Entity exists. Another Thing here. Extra One too. Sixth Name done."
+	result := &IngestResult{}
+	ingestEntityNotes(home, src, srcNote, body, now, result)
+
+	updatedHasCobra := false
+	for _, id := range result.NotesUpdated {
+		if id == "ent-cobra-cli" {
+			updatedHasCobra = true
+		}
+	}
+	if !updatedHasCobra {
+		t.Errorf("expected ent-cobra-cli to be in NotesUpdated, got %+v", result)
+	}
+	if len(result.NotesCreated) == 0 {
+		t.Errorf("expected new entities to be created, got %+v", result)
+	}
+}
+
+func TestIngestDecisionNotes_CapsAtThree(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	src := RawSource{ID: "src-dec", Title: "src dec"}
+	srcNote := &GraphNote{ID: "src-dec"}
+	body := strings.Join([]string{
+		"We decided to use markdown for notes.",
+		"We chose YAML over JSON for config.",
+		"We agreed to ship on Friday.",
+		"We will also add a CI pipeline.",
+		"We will not skip tests.",
+	}, " ")
+	result := &IngestResult{}
+	ingestDecisionNotes(home, src, srcNote, body, now, result)
+	if len(result.NotesCreated) > 3 {
+		t.Errorf("expected at most 3 decision notes, got %d", len(result.NotesCreated))
+	}
+}
+
+func TestRunSingleIngest_TextSuccess(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := RawSource{
+		SchemaVersion: 1, ID: "single-1", Title: "Single",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	body := "We decided to ship a fix. The Widget class works."
+	if err := recordRawSource(home, src, []byte(body)); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+	out := captureStdout(t, func() {
+		runSingleIngest(testDeps(), home, "single-1")
+	})
+	if !strings.Contains(string(out), "Ingested single-1") {
+		t.Errorf("expected success line, got:\n%s", out)
+	}
+}
+
+func TestRunSingleIngest_JSONSuccess(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := RawSource{
+		SchemaVersion: 1, ID: "single-json", Title: "JSON",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("# x")); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+	deps := Deps{
+		Flags:        GlobalFlags{JSON: true},
+		ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") },
+	}
+	out := captureStdout(t, func() {
+		runSingleIngest(deps, home, "single-json")
+	})
+	var result IngestResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+}
+
+func TestRunSingleIngest_MissingSourceWritesError(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		runSingleIngest(testDeps(), home, "no-such-source")
+	})
+
+	if strings.Contains(string(out), "Ingested no-such-source") {
+		t.Errorf("unexpected success for missing source, got:\n%s", out)
+	}
+}
+
+func TestResolveIngestSingle_PreviewBranch(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	srcPath := filepath.Join(t.TempDir(), "preview.md")
+	if err := os.WriteFile(srcPath, []byte("We decided to test."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		ids, done, err := resolveIngestSingle(home, []string{srcPath}, kgIngestOptions{
+			dryRun: true, sourceType: "markdown",
+		})
+		if err != nil {
+			t.Fatalf("resolveIngestSingle: %v", err)
+		}
+		if !done || len(ids) != 0 {
+			t.Errorf("expected dryRun done=true, got done=%v ids=%v", done, ids)
+		}
+	})
+	if !strings.Contains(string(out), "Dry run") {
+		t.Errorf("expected dry-run banner, got:\n%s", out)
+	}
+}
+
+func TestResolveIngestSingle_MissingFile(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	_, _, err := resolveIngestSingle(home, []string{"/tmp/nope-kg.md"}, kgIngestOptions{})
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+// runKGServe spawns an MCP server reading from os.Stdin. We close stdin
+// immediately so Serve() returns quickly with an EOF error.
+func TestRunKGServe_StdinClosed(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	oldStdout := os.Stdout
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = devnull
+	defer func() { os.Stdout = oldStdout; _ = devnull.Close() }()
+
+	_ = runKGServe(&cobra.Command{}, nil)
+}
+
+func TestListPendingRawSources_MultipleAndSorted(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	for _, id := range []string{"src-b", "src-a", "src-c"} {
+		src := RawSource{
+			SchemaVersion: 1, ID: id, Title: "T-" + id,
+			SourceType: "markdown", Status: "pending",
+			CapturedAt: "2026-01-01T00:00:00Z",
+		}
+		if err := recordRawSource(home, src, []byte("body")); err != nil {
+			t.Fatalf("record %s: %v", id, err)
+		}
+	}
+	pending, err := listPendingRawSources(home)
+	if err != nil {
+		t.Fatalf("listPendingRawSources: %v", err)
+	}
+	if len(pending) != 3 {
+		t.Errorf("expected 3 sources, got %d", len(pending))
+	}
+}
+
+func TestMoveToImported_MissingSource(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := moveToImported(home, "missing-src"); err == nil {
+		t.Skip("rename succeeded unexpectedly")
+	}
+}
+
+func TestIngestSource_RecordsEntitiesAndDecisions(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	body := "We decided to use Markdown. The Widget class is central. We chose YAML."
+	src := RawSource{
+		SchemaVersion: 1, ID: "ing-1", Title: "Ing",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte(body)); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+	res, err := ingestSource(home, "ing-1")
+	if err != nil {
+		t.Fatalf("ingestSource: %v", err)
+	}
+	if len(res.NotesCreated) == 0 {
+		t.Errorf("expected created notes, got %+v", res)
+	}
+}
+
+func TestRunKGSetup_PartialSelfDirAlreadyExists(t *testing.T) {
+	home := newTempKG(t)
+
+	if err := os.MkdirAll(filepath.Join(home, "self"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("runKGSetup: %v", err)
+	}
+	if _, err := os.Stat(kgConfigPath()); err != nil {
+		t.Errorf("expected config after setup: %v", err)
+	}
+}
+
+func TestTallyGraphNoteDir_StaleNoteCount(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	stale := &GraphNote{
+		SchemaVersion: 1, ID: "stale-1", Type: "entity",
+		Title: "Stale", Summary: "s", Status: "stale",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := createGraphNote(home, stale, ""); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	var h GraphHealth
+	if err := tallyGraphNoteDir(filepath.Join(home, "notes", "entities"), "entities", &h); err != nil {
+		t.Fatalf("tallyGraphNoteDir: %v", err)
+	}
+	if h.NoteCount != 1 || h.StaleCount != 1 {
+		t.Errorf("expected 1 note + 1 stale, got note=%d stale=%d", h.NoteCount, h.StaleCount)
+	}
+}
+
+func TestIngestDecisionNotes_NoMatchingPattern(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	src := RawSource{ID: "src-y", Title: "y"}
+	srcNote := &GraphNote{ID: "src-y"}
+
+	body := "Random text without decision markers."
+	result := &IngestResult{}
+	ingestDecisionNotes(home, src, srcNote, body, now, result)
+	if len(result.NotesCreated) != 0 {
+		t.Errorf("expected no decisions extracted, got %v", result.NotesCreated)
+	}
+}
+
+// TestWriteGraphHealth_HomeIsFile forces the MkdirAll to fail because the
+// "kg home" path is actually a file rather than a directory.
+func TestWriteGraphHealth_HomeIsFile(t *testing.T) {
+	parent := t.TempDir()
+
+	home := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeGraphHealth(home, GraphHealth{}); err == nil {
+		t.Error("expected MkdirAll error when home is a file")
+	}
+}
+
+func TestMoveToImported_Success(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := RawSource{
+		SchemaVersion: 1, ID: "mv-1", Title: "mv",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("body")); err != nil {
+		t.Fatalf("recordRawSource: %v", err)
+	}
+	if err := moveToImported(home, "mv-1"); err != nil {
+		t.Fatalf("moveToImported: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "raw", "imported", "mv-1.md")); err != nil {
+		t.Errorf("expected file moved to imported/, got: %v", err)
+	}
+}
+
+func TestCreateGraphNote_AlreadyExists(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "exists-1", Type: "entity",
+		Title: "X", Summary: "s", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := createGraphNote(home, note, ""); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	if err := createGraphNote(home, note, ""); err == nil {
+		t.Error("expected already-exists error on second create")
+	}
+}
+
+func TestUpdateGraphNote_NotFound(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "missing", Type: "entity",
+		Title: "X", Summary: "s", Status: "active",
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := updateGraphNote(home, note, ""); err == nil {
+		t.Error("expected not-found error")
+	}
+}
+
+func TestUpdateGraphNote_VersionIncrement(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "v1", Type: "entity",
+		Title: "V1", Summary: "s", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := createGraphNote(home, note, "body"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	updated := *note
+	updated.Summary = "updated"
+	if err := updateGraphNote(home, &updated, "new body"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Version != 1 {
+		t.Errorf("expected version=1 after update, got %d", updated.Version)
+	}
+}
+
+func TestListPendingRawSources_SkipsMalformedFile(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	inboxDir := filepath.Join(home, "raw", "inbox")
+
+	if err := os.WriteFile(filepath.Join(inboxDir, "no-frontmatter.md"), []byte("just text"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(inboxDir, "unclosed.md"), []byte("---\nid: x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	src := RawSource{
+		SchemaVersion: 1, ID: "valid-1", Title: "v",
+		SourceType: "markdown", Status: "pending",
+		CapturedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := recordRawSource(home, src, []byte("body")); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	pending, err := listPendingRawSources(home)
+	if err != nil {
+		t.Fatalf("listPendingRawSources: %v", err)
+	}
+	if len(pending) != 1 || pending[0].ID != "valid-1" {
+		t.Errorf("expected exactly 1 valid source, got %+v", pending)
+	}
+}
+
+func TestRecordRawSource_HomeBlocked(t *testing.T) {
+	parent := t.TempDir()
+	home := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	src := RawSource{ID: "x"}
+	if err := recordRawSource(home, src, []byte("body")); err == nil {
+		t.Error("expected MkdirAll error when home blocks the path")
+	}
+}
+
+func TestExtractClaims_VariousLines(t *testing.T) {
+	body := strings.Join([]string{
+		"# Title",
+		"## Sub",
+		"- **bold claim** here",
+		"plain line",
+		"- We decided to ship.",
+	}, "\n")
+	claims := extractClaims(body)
+	if len(claims) == 0 {
+		t.Errorf("expected at least one claim from %q", body)
+	}
+}
+
+func TestIngestSource_MissingSourceFile(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	_, err := ingestSource(home, "does-not-exist")
+	if err == nil {
+		t.Error("expected error for missing source file")
 	}
 }

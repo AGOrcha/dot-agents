@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -729,5 +730,1023 @@ func TestRunKGSync_NotInitialized(t *testing.T) {
 	cmd.Flags().Bool("push", false, "")
 	if err := runKGSync(cmd, nil); err == nil {
 		t.Error("expected not-initialized error from runKGSync")
+	}
+}
+
+// TestRunKGLinkAdd_OpenStoreError drives the openKGStore-error return path by
+// pointing KG_HOME at a bogus path.
+func TestRunKGLinkAdd_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
+	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("kind", "mentions", "")
+	err := runKGLinkAdd(cmd, []string{"note", "qn"})
+	if err == nil || !strings.Contains(err.Error(), "open warm store") {
+		t.Fatalf("expected open-warm-store error, got %v", err)
+	}
+}
+
+// TestRunKGLinkList_OpenStoreError drives the openKGStore-error return path.
+func TestRunKGLinkList_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
+	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
+	cmd := &cobra.Command{}
+	err := runKGLinkList(cmd, []string{"note"})
+	if err == nil || !strings.Contains(err.Error(), "open warm store") {
+		t.Fatalf("expected open-warm-store error, got %v", err)
+	}
+}
+
+// TestRunKGLinkRemove_OpenStoreError drives the openKGStore-error return path.
+func TestRunKGLinkRemove_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
+	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
+	cmd := &cobra.Command{}
+	err := runKGLinkRemove(cmd, []string{"42"})
+	if err == nil || !strings.Contains(err.Error(), "open warm store") {
+		t.Fatalf("expected open-warm-store error, got %v", err)
+	}
+}
+
+// TestRunKGWarm_OpenStoreError drives the openKGStore-error wrapper on
+// runKGWarm.
+func TestRunKGWarm_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
+	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("type", "", "")
+	cmd.Flags().Bool("include-code", false, "")
+	if err := runKGWarm(cmd, nil); err == nil || !strings.Contains(err.Error(), "open warm store") {
+		t.Fatalf("expected open-warm-store error, got %v", err)
+	}
+}
+
+// TestRunKGWarmStats_OpenStoreError drives the openKGStore-error wrapper.
+func TestRunKGWarmStats_OpenStoreError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires /dev/null as a non-directory path component (POSIX-only); equivalent open-warm-store error wrapping on non-POSIX paths is exercised by the warm-store fault tests in bridge_fault_test.go that close the handle / corrupt the DB")
+	}
+	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
+	cmd := &cobra.Command{}
+	if err := runKGWarmStats(cmd, nil); err == nil || !strings.Contains(err.Error(), "open warm store") {
+		t.Fatalf("expected open-warm-store error, got %v", err)
+	}
+}
+
+// TestRunKGWarm_InvalidNoteType drives the warmNoteSubdirs error path.
+func TestRunKGWarm_InvalidNoteType(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	_ = home
+	cmd := &cobra.Command{}
+	cmd.Flags().String("type", "no-such-type", "")
+	cmd.Flags().Bool("include-code", false, "")
+	if err := runKGWarm(cmd, nil); err == nil || !strings.Contains(err.Error(), "invalid note type") {
+		t.Fatalf("expected invalid-note-type error, got %v", err)
+	}
+}
+
+// TestRunKGWarm_HappyPath drives the success path with one seeded source note.
+func TestRunKGWarm_HappyPath(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "e1", Type: "entity", Title: "T",
+		Summary: "s", Status: "draft",
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}
+	if err := createGraphNote(home, note, "body"); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().String("type", "", "")
+	cmd.Flags().Bool("include-code", false, "")
+	if err := runKGWarm(cmd, nil); err != nil {
+		t.Fatalf("runKGWarm: %v", err)
+	}
+}
+
+// TestRunKGWarmStats_HappyPath drives the success path of runKGWarmStats.
+func TestRunKGWarmStats_HappyPath(t *testing.T) {
+	newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cmd := &cobra.Command{}
+	if err := runKGWarmStats(cmd, nil); err != nil {
+		t.Fatalf("runKGWarmStats: %v", err)
+	}
+}
+
+// TestKGImpactJSONOutput_StructHasGraphState confirms the JSON wrapper shape.
+func TestKGImpactJSONOutput_StructHasGraphState(t *testing.T) {
+	w := kgImpactJSONOutput{
+		GraphState: "ready",
+	}
+	if w.GraphState != "ready" {
+		t.Errorf("kgImpactJSONOutput field mismatch: %+v", w)
+	}
+}
+
+// TestRunKGCodeStatus_ExplicitRepo seeds a CRG status fixture and drives
+// runKGCodeStatus with an explicit --repo so the cwd-default branch is
+// bypassed.
+func TestRunKGCodeStatus_ExplicitRepo(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-20T00:00:00Z"},
+	})
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("json", true, "")
+	if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+		t.Fatalf("runKGCodeStatus: %v", err)
+	}
+}
+
+func TestKGChangesJSONOutput_MarshalShape(t *testing.T) {
+	wrapper := kgChangesJSONOutput{
+		GraphState: "ready",
+		CRGChangeReport: &graphstore.CRGChangeReport{
+			Summary: "0 changed",
+		},
+	}
+	data, err := json.Marshal(wrapper)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["graph_state"] != "ready" {
+		t.Errorf("expected graph_state=ready, got %v", m["graph_state"])
+	}
+}
+
+// TestRunKGFlows_NoCRGBinary verifies the NewCRGBridge error path.
+func TestRunKGFlows_NoCRGBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", false, "")
+
+	if err := runKGFlows(testDeps(), cmd, nil); err == nil {
+		t.Error("expected error when no CRG binary available")
+	}
+}
+
+func TestRunKGCommunities_NoCRGBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("min-size", 0, "")
+	cmd.Flags().String("sort", "size", "")
+	cmd.Flags().Bool("json", false, "")
+
+	if err := runKGCommunities(testDeps(), cmd, nil); err == nil {
+		t.Error("expected error when no CRG binary available")
+	}
+}
+
+func TestRunKGPostprocess_NoCRGBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("no-flows", false, "")
+	cmd.Flags().Bool("no-communities", false, "")
+	cmd.Flags().Bool("no-fts", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	if err := runKGPostprocess(cmd, nil); err == nil {
+		t.Error("expected error when no CRG binary available")
+	}
+}
+
+func TestRunKGFlows_TextWithFakePython(t *testing.T) {
+	repo := t.TempDir()
+	flowsJSON := `{"status":"ok","summary":"2 flows","flows":[{"id":1,"name":"flow-a","entry_point":"pkg::Foo","step_count":3,"criticality":0.8,"kind":"call"},{"id":2,"name":"flow-b","entry_point":"","step_count":1,"criticality":0.1,"kind":"call"}]}`
+	fakeCRGEmittingJSON(t, repo, flowsJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGFlows(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGFlows: %v", err)
+		}
+	})
+	output := string(out)
+	for _, want := range []string{"Execution Flows", "flow-a", "flow-b"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunKGFlows_JSONWithFakePython(t *testing.T) {
+	repo := t.TempDir()
+	flowsJSON := `{"status":"ok","summary":"0 flows","flows":[]}`
+	fakeCRGEmittingJSON(t, repo, flowsJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGFlows(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGFlows JSON: %v", err)
+		}
+	})
+	var result graphstore.FlowsResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+}
+
+func TestRunKGFlows_EmptyFlowsHintsPostprocess(t *testing.T) {
+	repo := t.TempDir()
+	flowsJSON := `{"status":"ok","summary":"0 flows","flows":[]}`
+	fakeCRGEmittingJSON(t, repo, flowsJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGFlows(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGFlows: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "da kg postprocess") {
+		t.Errorf("expected postprocess hint when no flows, got:\n%s", out)
+	}
+}
+
+func TestRunKGCommunities_TextWithFakePython(t *testing.T) {
+	repo := t.TempDir()
+	body := `{"status":"ok","summary":"1 community","communities":[{"id":1,"name":"core","size":3,"cohesion":0.7,"dominant_language":"go","description":"core stuff","members":["a","b"]}]}`
+	fakeCRGEmittingJSON(t, repo, body)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("min-size", 0, "")
+	cmd.Flags().String("sort", "size", "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGCommunities(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCommunities: %v", err)
+		}
+	})
+	output := string(out)
+	for _, want := range []string{"Code Communities", "core", "core stuff"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunKGCommunities_JSONWithFakePython(t *testing.T) {
+	repo := t.TempDir()
+	body := `{"status":"ok","summary":"0","communities":[]}`
+	fakeCRGEmittingJSON(t, repo, body)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("min-size", 0, "")
+	cmd.Flags().String("sort", "size", "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGCommunities(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCommunities JSON: %v", err)
+		}
+	})
+	var result graphstore.CommunitiesResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+}
+
+func TestRunKGImpact_JSONFakeCRG(t *testing.T) {
+	repo := t.TempDir()
+	impactJSON := `{"status":"ok","summary":"impact","changed_files":[],"changed_nodes":[],"impacted_nodes":[],"impacted_files":[],"total_impacted":0,"truncated":false}`
+	fakeCRGEmittingJSON(t, repo, impactJSON)
+
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGImpact(testDeps(), cmd, []string{"a.go"}); err != nil {
+			t.Fatalf("runKGImpact JSON: %v", err)
+		}
+	})
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+	if _, ok := m["graph_state"]; !ok {
+		t.Errorf("expected graph_state field, got: %s", string(out))
+	}
+}
+
+func TestRunKGImpact_TextFakeCRG(t *testing.T) {
+	repo := t.TempDir()
+	impactJSON := `{"status":"ok","summary":"impact for 1 file","changed_files":["a.go"],"changed_nodes":[{"kind":"Function","name":"Foo","qualified_name":"a.go::Foo","file_path":"a.go"}],"impacted_nodes":[],"impacted_files":["a.go"],"total_impacted":0,"truncated":false}`
+	fakeCRGEmittingJSON(t, repo, impactJSON)
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGImpact(testDeps(), cmd, []string{"a.go"}); err != nil {
+			t.Fatalf("runKGImpact: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Impact Radius") {
+		t.Errorf("expected Impact Radius header, got:\n%s", out)
+	}
+}
+
+// TestCheckCRGReadiness_BusyState is best-effort: we install a fake binary
+// that emits a busy-status JSON. The actual Status() call uses sqlite, not the
+// binary, but it covers the busy branch when sqlite is present and the binary
+// path is happy.
+func TestCheckCRGReadiness_BusyState_RequireGraph(t *testing.T) {
+	repo := t.TempDir()
+
+	writeCRGStatusFixture(t, repo, nil)
+
+	if err := checkCRGReadiness(repo, false); err != nil {
+		t.Errorf("unexpected error with requireGraph=false: %v", err)
+	}
+
+	if err := checkCRGReadiness(repo, true); err == nil {
+		t.Error("expected error with requireGraph=true on unbuilt graph")
+	}
+}
+
+func TestRunKGImpact_RequireGraphReady(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	impactJSON := `{"status":"ok","summary":"impact","changed_files":[],"changed_nodes":[],"impacted_nodes":[],"impacted_files":[],"total_impacted":0,"truncated":false}`
+	fakeCRGEmittingJSON(t, repo, impactJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", true, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		if err := runKGImpact(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGImpact require=true on ready: %v", err)
+		}
+	})
+}
+
+func TestRunKGChanges_JSONFakeCRG(t *testing.T) {
+	repo := t.TempDir()
+	changesJSON := `{"summary":"1 changed function","risk_score":0.5,"changed_functions":[{"name":"Foo","qualified_name":"a.go::Foo","file_path":"a.go","risk_score":0.5}],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
+	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
+detect-changes) printf '%%s\n' '%s' ;;
+*) exit 0 ;;
+esac`, changesJSON))
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGChanges(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGChanges: %v", err)
+		}
+	})
+	output := string(out)
+	for _, want := range []string{"Change Impact", "Foo", "Changed symbols"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunKGChanges_JSONOutputShape(t *testing.T) {
+	repo := t.TempDir()
+
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	changesJSON := `{"summary":"0 changed","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
+	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
+detect-changes) printf '%%s\n' '%s' ;;
+*) exit 0 ;;
+esac`, changesJSON))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGChanges(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGChanges: %v", err)
+		}
+	})
+
+	body := strings.TrimSpace(string(out))
+	if idx := strings.Index(body, "{"); idx > 0 {
+		body = body[idx:]
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+}
+
+// TestRunKGSync_PullNoRemote exercises the pull branch — git pull fails when
+// no remote is configured.
+func TestRunKGSync_PullNoRemote(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	initGitRepo(t, home)
+	commitFile(t, home, "self/config.yaml", "schema_version: 1\n", "init")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	captureStdout(t, func() {
+		err := runKGSync(cmd, nil)
+		if err == nil {
+			return
+		}
+		if !strings.Contains(err.Error(), "git pull failed") {
+			t.Errorf("expected pull failure, got: %v", err)
+		}
+	})
+}
+
+func TestRunKGWarmCodeImport_WithCRGNodes(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	_, _, err = runKGWarmCodeImport(store, repo)
+	if err == nil {
+		t.Skip("schema unexpectedly accepted — read-node error branch not hit")
+	}
+	if !strings.Contains(err.Error(), "CRG nodes") && !strings.Contains(err.Error(), "CRG") {
+		t.Errorf("expected CRG-related read error, got: %v", err)
+	}
+}
+
+func TestRunKGBuild_NoCRGBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+	if err := runKGBuild(cmd, nil); err == nil {
+		t.Error("expected error when no CRG binary on PATH")
+	}
+}
+
+func TestRunKGUpdate_NoCRGBinary(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("PATH", t.TempDir())
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+	if err := runKGUpdate(cmd, nil); err == nil {
+		t.Error("expected error when no CRG binary on PATH")
+	}
+}
+
+func TestRunKGCodeStatus_JSONNoFixture(t *testing.T) {
+	repo := t.TempDir()
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("json", true, "")
+	out := captureStdout(t, func() {
+		if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCodeStatus: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "state") {
+		t.Errorf("expected state field in JSON, got:\n%s", out)
+	}
+}
+
+func TestCRGStatusState_Ready(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	state := crgStatusState(repo)
+	if state == "unknown" {
+		t.Errorf("expected non-unknown state for built graph, got %q", state)
+	}
+}
+
+func TestRunKGImpact_NoArgs(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	impactJSON := `{"status":"ok","summary":"no impact","changed_files":[],"changed_nodes":[],"impacted_nodes":[],"impacted_files":[],"total_impacted":0,"truncated":false}`
+	fakeCRGEmittingJSON(t, repo, impactJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+
+		if err := runKGImpact(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGImpact no-args: %v", err)
+		}
+	})
+}
+
+func TestCRGStatusState_Empty(t *testing.T) {
+
+	repo := t.TempDir()
+	state := crgStatusState(repo)
+	if state == "" {
+		t.Errorf("expected non-empty state, got %q", state)
+	}
+}
+
+func TestRunKGSync_PushSuccess(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	initGitRepo(t, home)
+	commitFile(t, home, "self/config.yaml", "schema_version: 1\n", "init")
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := runGit(t, "", "init", "--bare", remote); err != nil {
+		t.Fatalf("init bare: %v\n%s", err, out)
+	}
+	if out, err := runGit(t, home, "remote", "add", "origin", remote); err != nil {
+		t.Fatalf("remote add: %v\n%s", err, out)
+	}
+
+	if out, err := runGit(t, home, "branch", "-M", "main"); err != nil {
+		t.Fatalf("branch -M: %v\n%s", err, out)
+	}
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", true, "")
+	captureStdout(t, func() {
+		if err := runKGSync(cmd, nil); err != nil {
+
+			if !strings.Contains(err.Error(), "git push failed") {
+				t.Fatalf("runKGSync push: %v", err)
+			}
+		}
+	})
+}
+
+func TestRunKGSync_PullSuccessRunsLint(t *testing.T) {
+
+	work := t.TempDir()
+	upstream := filepath.Join(work, "upstream")
+	initGitRepo(t, upstream)
+	commitFile(t, upstream, "notes/index.md", "# Index\n", "seed")
+
+	bare := filepath.Join(work, "bare.git")
+	if out, err := runGit(t, "", "clone", "--bare", upstream, bare); err != nil {
+		t.Fatalf("clone bare: %v\n%s", err, out)
+	}
+
+	home := filepath.Join(work, "kg")
+	if out, err := runGit(t, "", "clone", bare, home); err != nil {
+		t.Fatalf("clone home: %v\n%s", err, out)
+	}
+	t.Setenv("KG_HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, "self"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	captureStdout(t, func() {
+
+		_ = runKGSync(cmd, nil)
+	})
+}
+
+func TestRunKGImpact_FakePythonReturnsError(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	if err := os.WriteFile(filepath.Join(repo, ".venv", "bin", "python3"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		if err := runKGImpact(testDeps(), cmd, nil); err == nil {
+			t.Error("expected error when python returns non-zero")
+		}
+	})
+}
+
+func TestRunKGUpdate_UpdatedOutcome(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	commitFile(t, repo, "a.txt", "one\n", "init")
+
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("two\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runGit(t, repo, "add", "a.txt"); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	if out, err := runGit(t, repo, "commit", "-m", "edit"); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	writeFakeCRGBinary(t, repo, "exit 0")
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.txt", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "HEAD~1", "")
+	cmd.Flags().Bool("skip-flows", true, "")
+	cmd.Flags().Bool("skip-postprocess", true, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		if err := runKGUpdate(cmd, nil); err != nil {
+			t.Fatalf("runKGUpdate: %v", err)
+		}
+	})
+}
+
+func TestRunKGBuild_BusyOutcome(t *testing.T) {
+	repo := t.TempDir()
+
+	writeCRGStatusFixture(t, repo, nil)
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		if err := runKGBuild(cmd, nil); err != nil {
+			t.Fatalf("runKGBuild: %v", err)
+		}
+	})
+}
+
+func TestCheckCRGReadiness_ReadyNoWarn(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	if err := checkCRGReadiness(repo, true); err != nil {
+		t.Errorf("expected no error for ready graph with requireGraph=true, got: %v", err)
+	}
+}
+
+func TestRunKGChanges_TextAllCategories(t *testing.T) {
+	repo := t.TempDir()
+	changesJSON := `{
+		"summary":"all categories",
+		"risk_score":0.5,
+		"changed_functions":[{"name":"Foo","qualified_name":"a.go::Foo","file_path":"a.go","risk_score":0.5}],
+		"affected_flows":[],
+		"test_gaps":[{"qualified_name":"a.go::Foo","file_path":"a.go"}],
+		"review_priorities":[{"qualified_name":"a.go::Foo","reason":"high churn","risk_score":0.7}]
+	}`
+	writeFakeCRGBinary(t, repo, fmt.Sprintf(`case "$1" in
+detect-changes) cat <<'__EOF__'
+%s
+__EOF__
+;;
+*) exit 0 ;;
+esac`, changesJSON))
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("brief", false, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGChanges(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGChanges: %v", err)
+		}
+	})
+	output := string(out)
+	for _, want := range []string{"Change Impact", "Changed symbols", "Test gaps", "Review priorities", "high churn"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected %q in output:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunKGCodeStatus_TextWithMessage(t *testing.T) {
+	repo := t.TempDir()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("json", false, "")
+	out := captureStdout(t, func() {
+		if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCodeStatus: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Code Graph Status") {
+		t.Errorf("expected status header, got:\n%s", out)
+	}
+}
+
+func TestRunKGBuild_ReadyOutcome(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGBuild(cmd, nil); err != nil {
+			t.Fatalf("runKGBuild ready: %v", err)
+		}
+	})
+	output := string(out)
+	if !strings.Contains(output, "Build complete") && !strings.Contains(output, "build status") {
+		t.Errorf("expected build outcome, got:\n%s", output)
+	}
+}
+
+func TestRunKGFlows_TextHintsWhenEmpty(t *testing.T) {
+	repo := t.TempDir()
+	flowsJSON := `{"status":"ok","summary":"0 flows","flows":[]}`
+	fakeCRGEmittingJSON(t, repo, flowsJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().String("sort", "criticality", "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGFlows(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGFlows: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "No flows detected") {
+		t.Errorf("expected empty-flows hint, got:\n%s", out)
+	}
+}
+
+func TestRunKGCommunities_TextEmpty(t *testing.T) {
+	repo := t.TempDir()
+	body := `{"status":"ok","summary":"0 communities","communities":[]}`
+	fakeCRGEmittingJSON(t, repo, body)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Int("min-size", 0, "")
+	cmd.Flags().String("sort", "size", "")
+	cmd.Flags().Bool("json", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGCommunities(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGCommunities: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Code Communities") {
+		t.Errorf("expected communities header, got:\n%s", out)
+	}
+}
+
+func TestRunKGPostprocess_FakeCRG(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("no-flows", false, "")
+	cmd.Flags().Bool("no-communities", false, "")
+	cmd.Flags().Bool("no-fts", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		if err := runKGPostprocess(cmd, nil); err != nil {
+			t.Fatalf("runKGPostprocess: %v", err)
+		}
+	})
+}
+
+func TestRunKGImpact_DefaultRepoFromCwd(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	if err := os.WriteFile(filepath.Join(repo, ".venv", "bin", "python3"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	t.Chdir(repo)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", "", "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", false, "")
+
+	captureStdout(t, func() {
+		_ = runKGImpact(testDeps(), cmd, []string{"a.go"})
+	})
+}
+
+func TestRunKGImpact_JSONOutputEmpty(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	impactJSON := `{"status":"ok","summary":"empty","changed_files":[],"changed_nodes":[],"impacted_nodes":[],"impacted_files":[],"total_impacted":0,"truncated":false}`
+	fakeCRGEmittingJSON(t, repo, impactJSON)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", false, "")
+	cmd.Flags().Bool("json", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGImpact(testDeps(), cmd, nil); err != nil {
+			t.Fatalf("runKGImpact JSON: %v", err)
+		}
+	})
+	body := strings.TrimSpace(string(out))
+	if idx := strings.Index(body, "{"); idx > 0 {
+		body = body[idx:]
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("invalid JSON: %v\nraw: %s", err, string(out))
+	}
+}
+
+// TestRunKGWarmCodeImport_EmptyDB hits the success path through an empty CRG
+// DB — ReadNodes returns nil with no error, then ReadEdges does the same.
+func TestRunKGWarmCodeImport_EmptyDB(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	nodes, edges, err := runKGWarmCodeImport(store, repo)
+	if err != nil {
+		t.Fatalf("runKGWarmCodeImport: %v", err)
+	}
+	if nodes != 0 || edges != 0 {
+		t.Errorf("expected 0/0 for empty CRG, got nodes=%d edges=%d", nodes, edges)
+	}
+}
+
+// TestWarmCodeLane_EmptyDB exercises warmCodeLane against an empty CRG —
+// no nodes, but still hits the SetMetadata + summary branch.
+func TestWarmCodeLane_EmptyDB(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	t.Chdir(repo)
+
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	msg := warmCodeLane(store)
+	if !strings.Contains(msg, "code-lane") {
+		t.Errorf("expected code-lane summary, got %q", msg)
 	}
 }

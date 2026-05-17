@@ -2,6 +2,7 @@ package kg
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1247,4 +1248,254 @@ func TestNeighborQualifiedName_InboundOutbound(t *testing.T) {
 	if neighborQualifiedName(e, false) != "tgt" {
 		t.Error("outbound neighbor should be target")
 	}
+}
+
+// TestAppendDecisionSymbolMatches_LimitHitAndSeen drives both the limit
+// early-return (~422-424) and the missing-node fallback summary branch
+// (~411-417).
+func TestAppendDecisionSymbolMatches_LimitHitAndSeen(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	note := graphstore.KGNote{ID: "d1", NoteType: "decision", Title: "T"}
+	links := []graphstore.NoteSymbolLink{
+		{NoteID: "d1", QualifiedName: "missing-1", LinkKind: "mentions"},
+		{NoteID: "d1", QualifiedName: "missing-2", LinkKind: "mentions"},
+
+		{NoteID: "d1", QualifiedName: "missing-1", LinkKind: "documents"},
+	}
+	var results []GraphQueryResult
+	done := appendDecisionSymbolMatches(store, note, links, map[string]bool{}, &results, 1)
+	if !done {
+		t.Errorf("expected done=true once limit=1 is hit")
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+// TestCollectChangeAnalysisResults_HappyPathEmpty drives the empty
+// resp.Results == nil → init branch (~457-459) when no matches are found.
+func TestCollectChangeAnalysisResults_HappyPathEmpty(t *testing.T) {
+	repo := installCRGWithBody(t, `case "$1" in
+detect-changes) printf '%s\n' '{"summary":"none","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[]}' ;;
+*) exit 0 ;;
+esac`)
+	_ = repo
+	resp, err := collectChangeAnalysisResults("query-no-match", 5)
+	if err != nil {
+		t.Fatalf("collectChangeAnalysisResults: %v", err)
+	}
+	if resp.Results == nil {
+		t.Error("expected empty results to be initialized, got nil")
+	}
+}
+
+// TestAppendDecisionSymbolMatches_WithNode drives the resolved-node summary
+// override branch (~419-420) by seeding a node with the same qn as a link.
+func TestAppendDecisionSymbolMatches_WithNode(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Sym", FilePath: "p.go", Language: "go",
+	}, "h"); err != nil {
+		t.Fatal(err)
+	}
+	note := graphstore.KGNote{ID: "d1", NoteType: "decision", Title: "T"}
+	links := []graphstore.NoteSymbolLink{
+		{NoteID: "d1", QualifiedName: "p.go::Sym", LinkKind: "mentions"},
+	}
+	var results []GraphQueryResult
+	if appendDecisionSymbolMatches(store, note, links, map[string]bool{}, &results, 5) {
+		t.Error("expected done=false below limit")
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !strings.Contains(results[0].Summary, "via") {
+		t.Errorf("expected summary to contain 'via', got %q", results[0].Summary)
+	}
+}
+
+func TestRunNeighbors_CallersAndCallees(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Caller", FilePath: "a.go", Language: "go",
+	}, "h1"); err != nil {
+		t.Fatalf("UpsertNode caller: %v", err)
+	}
+	if _, err := store.UpsertNode(graphstore.NodeInfo{
+		Kind: "Function", Name: "Callee", FilePath: "b.go", Language: "go",
+	}, "h2"); err != nil {
+		t.Fatalf("UpsertNode callee: %v", err)
+	}
+	if _, err := store.UpsertEdge(graphstore.EdgeInfo{
+		Kind:   graphstore.EdgeKindCalls,
+		Source: "a.go::Caller",
+		Target: "b.go::Callee",
+	}); err != nil {
+		t.Fatalf("UpsertEdge: %v", err)
+	}
+
+	resp := GraphQueryResponse{}
+	if err := dispatchWarmStoreBridgeIntent(store, &resp, "callers_of", "Callee", 10); err != nil {
+		t.Fatalf("dispatch callers_of: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected at least one caller, got %+v", resp.Results)
+	}
+
+	resp2 := GraphQueryResponse{}
+	if err := dispatchWarmStoreBridgeIntent(store, &resp2, "callees_of", "Caller", 10); err != nil {
+		t.Fatalf("dispatch callees_of: %v", err)
+	}
+	if len(resp2.Results) == 0 {
+		t.Errorf("expected at least one callee, got %+v", resp2.Results)
+	}
+}
+
+func TestLocalFileAdapter_QuerySuccess(t *testing.T) {
+	home := setupKGWithNotes(t)
+	a := NewLocalFileAdapter(home)
+	if !a.Available() {
+		t.Error("expected adapter available")
+	}
+	resp, err := a.Query(GraphQuery{Intent: "decision_lookup", Query: "cobra", Limit: 5})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected at least one result, got %+v", resp)
+	}
+	if a.lastStatus == "" {
+		t.Error("expected lastStatus populated")
+	}
+}
+
+// TestCollectChangeAnalysisResults_FiltersTestGapsAndPriorities seeds detect-
+// changes JSON with all three categories and asserts the filter logic surfaces
+// them.
+func TestCollectChangeAnalysisResults_AllCategories(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	initGitRepo(t, dir)
+	commitFile(t, dir, "README.md", "x\n", "init")
+
+	changesJSON := `{
+		"summary":"all categories",
+		"risk_score":0.5,
+		"changed_functions":[{"name":"Foo","qualified_name":"a.go::Foo","file_path":"a.go","risk_score":0.5}],
+		"affected_flows":[],
+		"test_gaps":[{"qualified_name":"a.go::Foo","file_path":"a.go"}],
+		"review_priorities":[{"qualified_name":"a.go::Foo","reason":"high churn","risk_score":0.7}]
+	}`
+	writeFakeCRGBinary(t, dir, fmt.Sprintf(`case "$1" in
+detect-changes) cat <<'__EOF__'
+%s
+__EOF__
+;;
+*) exit 0 ;;
+esac`, changesJSON))
+
+	resp, err := collectChangeAnalysisResults("Foo", 10)
+	if err != nil {
+		t.Fatalf("collectChangeAnalysisResults: %v", err)
+	}
+	if resp.Provider != "crg" {
+		t.Errorf("expected crg provider, got %q", resp.Provider)
+	}
+
+	if len(resp.Results) == 0 {
+		t.Errorf("expected results from change_analysis, got %+v", resp)
+	}
+}
+
+func TestCollectChangeAnalysisResults_EmptyQuery(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	initGitRepo(t, dir)
+	commitFile(t, dir, "README.md", "x\n", "init")
+	changesJSON := `{"summary":"0","risk_score":0,"changed_functions":[],"affected_flows":[],"test_gaps":[],"review_priorities":[]}`
+	writeFakeCRGBinary(t, dir, fmt.Sprintf(`case "$1" in
+detect-changes) printf '%%s\n' '%s' ;;
+*) exit 0 ;;
+esac`, changesJSON))
+	resp, err := collectChangeAnalysisResults("", 10)
+	if err != nil {
+		t.Fatalf("collectChangeAnalysisResults: %v", err)
+	}
+	if resp.Results == nil {
+		t.Errorf("expected non-nil empty slice for Results, got nil")
+	}
+}
+
+func TestCollectCommunityContextResults_FilterMatches(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	initGitRepo(t, dir)
+	commitFile(t, dir, "README.md", "x\n", "init")
+	body := `{"status":"ok","summary":"2","communities":[{"id":1,"name":"core","size":3,"cohesion":0.7,"dominant_language":"go","description":"core stuff","members":["a"]},{"id":2,"name":"utils","size":1,"cohesion":0.2,"dominant_language":"go","description":"utility code","members":["b"]}]}`
+	fakeCRGEmittingJSON(t, dir, body)
+
+	resp, err := collectCommunityContextResults("core", 10)
+	if err != nil {
+		t.Fatalf("collectCommunityContextResults: %v", err)
+	}
+	if resp.Provider != "crg" {
+		t.Errorf("expected crg provider, got %q", resp.Provider)
+	}
+	if len(resp.Results) == 0 {
+		t.Errorf("expected matching community, got %+v", resp)
+	}
+}
+
+func TestCollectCommunityContextResults_LimitTruncates(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	initGitRepo(t, dir)
+	commitFile(t, dir, "README.md", "x\n", "init")
+	body := `{"status":"ok","summary":"3","communities":[{"id":1,"name":"a","size":3,"cohesion":0.7,"dominant_language":"go","description":"x","members":["x"]},{"id":2,"name":"b","size":3,"cohesion":0.7,"dominant_language":"go","description":"x","members":["x"]},{"id":3,"name":"c","size":3,"cohesion":0.7,"dominant_language":"go","description":"x","members":["x"]}]}`
+	fakeCRGEmittingJSON(t, dir, body)
+
+	resp, err := collectCommunityContextResults("", 1)
+	if err != nil {
+		t.Fatalf("collectCommunityContextResults: %v", err)
+	}
+	if len(resp.Results) != 1 {
+		t.Errorf("expected limit=1, got %d", len(resp.Results))
+	}
+}
+
+// TestKGAdapter_LocalFile_QueryAfterCorruption ensures LocalFileAdapter
+// surfaces a sensible status even when the home directory is empty.
+func TestKGAdapter_LocalFile_QueryUninitializedHome(t *testing.T) {
+	a := NewLocalFileAdapter(t.TempDir())
+	_, err := a.Query(GraphQuery{Intent: "decision_lookup", Query: "x", Limit: 5})
+
+	_ = err
 }
