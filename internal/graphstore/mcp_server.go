@@ -13,6 +13,15 @@ import (
 
 const mcpInvalidParamsMessage = "invalid params"
 
+// mcpMaxImpactDepth / mcpMaxImpactResults bound the impact-radius request the
+// MCP server forwards to the CRG Python subprocess, which applies no internal
+// ceiling. Without these a single client request (depth: 1e6) could exhaust
+// CPU/memory in the subprocess.
+const (
+	mcpMaxImpactDepth   = 6
+	mcpMaxImpactResults = 200
+)
+
 type mcpBridge interface {
 	Build(opts BuildOptions) error
 	Update(opts UpdateOptions) error
@@ -336,6 +345,13 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	if depth <= 0 {
 		depth = 2
 	}
+	// Server-side ceiling. This path routes to the CRG Python subprocess
+	// (bridge.GetImpactRadius), which has no internal depth bound — an
+	// unclamped client-supplied depth would let one MCP call pin CPU/memory
+	// in the subprocess. The native BFS caps itself; the subprocess does not.
+	if depth > mcpMaxImpactDepth {
+		depth = mcpMaxImpactDepth
+	}
 	files := s.resolveImpactFiles(req.Symbol)
 	bridge, err := s.requireBridge()
 	if err != nil {
@@ -349,6 +365,7 @@ func (s *MCPServer) handleGetImpactRadius(params json.RawMessage) (json.RawMessa
 	result, err := bridge.GetImpactRadius(ImpactOptions{
 		ChangedFiles: files,
 		MaxDepth:     depth,
+		MaxResults:   mcpMaxImpactResults,
 	})
 	if err != nil {
 		return nil, err

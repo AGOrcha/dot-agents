@@ -2,6 +2,16 @@ package graphstore
 
 // schemaSQL is the canonical DDL for the graphstore SQLite database.
 // It mirrors the Python code-review-graph schema and adds KG-specific tables.
+//
+// Deliberate contract: this is an *idempotent, version-less* schema, not a
+// migration system. Every statement is `CREATE ... IF NOT EXISTS` and
+// order-independent, so initSchema is safe to re-run and a process killed
+// mid-Exec cannot wedge the DB (re-run is a no-op). The tradeoff: there is
+// no mechanism to evolve an existing table — a future `ALTER TABLE` or a
+// changed column would silently no-op on already-initialized databases.
+// Before introducing the first non-idempotent / destructive schema change,
+// add real version tracking (e.g. PRAGMA user_version + ordered steps);
+// do not append an ALTER here and assume it runs.
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS nodes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -35,6 +35,13 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set WAL mode: %w", err)
 	}
+	// busy_timeout + WAL + single connection prevent corruption under
+	// concurrent access, but they do NOT serialize cross-process writers:
+	// a concurrent `da workflow` and MCP-server both writing this DB will,
+	// after 5s of contention, surface a hard SQLITE_BUSY rather than queue.
+	// That is a user-visible flake, not data loss; acceptable for the
+	// current single-orchestrator usage. Revisit (longer timeout or an
+	// app-level write lock) if concurrent-writer workflows become common.
 	if _, err := dbExec(db, "PRAGMA busy_timeout=5000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set busy_timeout: %w", err)

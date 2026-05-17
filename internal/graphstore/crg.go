@@ -684,13 +684,16 @@ func (b *CRGBridge) GetImpactRadius(opts ImpactOptions) (*CRGImpactResult, error
 		maxResults = 50
 	}
 
+	// A JSON array of strings is also a valid Python list literal, so
+	// marshalling is a single correct escaper for both grammars. Hand-rolling
+	// fmt.Sprintf("%q") relied on Go and Python string-escape rules agreeing.
 	filesJSON := "None"
 	if len(opts.ChangedFiles) > 0 {
-		parts := make([]string, len(opts.ChangedFiles))
-		for i, f := range opts.ChangedFiles {
-			parts[i] = fmt.Sprintf("%q", f)
+		encoded, err := json.Marshal(opts.ChangedFiles)
+		if err != nil {
+			return nil, fmt.Errorf("graphstore: encode changed files: %w", err)
 		}
-		filesJSON = "[" + strings.Join(parts, ", ") + "]"
+		filesJSON = string(encoded)
 	}
 
 	base := opts.Base
