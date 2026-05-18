@@ -353,8 +353,12 @@ func (s *SQLiteStore) GetAllFiles() ([]string, error) {
 }
 
 func (s *SQLiteStore) SearchNodes(query string, limit int) ([]GraphNode, error) {
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	pattern := "%" + query + "%"
-	rows, err := s.db.Query(
+	rows, err := s.db.QueryContext(
+		ctx,
 		"SELECT * FROM nodes WHERE name LIKE ? OR qualified_name LIKE ? LIMIT ?",
 		pattern, pattern, limit,
 	)
@@ -443,6 +447,12 @@ func (s *SQLiteStore) queryDistinctStrings(query string) ([]string, error) {
 // computeImpactRadius (impact.go); this method only handles the
 // SQLite-specific seed gathering and edge adjacency loading.
 func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes int) (ImpactResult, error) {
+	// Provider-owned request timeout (CONTRACT.md guarantee #2): the
+	// full-table edge scan + BFS is the long traversal; callers do not
+	// wrap their own deadline. Bounds are clamped in computeImpactRadius.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	seeds := map[string]bool{}
 	for _, f := range changedFiles {
 		nodes, err := s.GetNodesByFile(f)
@@ -454,7 +464,7 @@ func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes 
 		}
 	}
 
-	rows, err := s.db.Query("SELECT source_qualified, target_qualified FROM edges")
+	rows, err := s.db.QueryContext(ctx, "SELECT source_qualified, target_qualified FROM edges")
 	if err != nil {
 		return ImpactResult{}, err
 	}
@@ -506,6 +516,7 @@ func (s *SQLiteStore) GetKGNote(id string) (*KGNote, error) {
 }
 
 func (s *SQLiteStore) SearchKGNotes(query string, limit int) ([]KGNote, error) {
+	limit = normalizeSearchLimit(limit)
 	pattern := "%" + query + "%"
 	rows, err := s.db.Query(
 		`SELECT id, title, note_type, status, summary, file_path, version, archived_at, indexed_at

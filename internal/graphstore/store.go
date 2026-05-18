@@ -134,15 +134,15 @@ type NoteSymbolLink struct {
 //
 //   - Bounds. Where an operation accepts maxNodes/maxDepth/limit
 //     arguments (e.g. SearchNodes, GetImpactRadius on CodeGraphReader),
-//     the provider treats them as the caller's requested ceiling. The
-//     contract's intent is a hard, uniform cap across the native and CRG
-//     paths plus a request timeout; enforcing that uniformly is the
-//     provider's responsibility (Path A, delivered by gcc2 — not yet
-//     enforced by every concrete store at the time this contract is
-//     published).
+//     the provider treats them as the caller's requested ceiling and
+//     enforces a hard, uniform cap across the native and CRG paths
+//     (0/negative -> provider default; over-cap -> clamped down; the
+//     impact BFS stops exactly at the cap). Path A (gcc2) delivers this
+//     via the single bounds.go chokepoint every provider routes through.
 //   - Request timeout. Long-running graph traversals are bounded by a
-//     provider-owned request timeout; callers do not implement their own
-//     deadline around store calls.
+//     provider-owned request timeout (native: context deadline; CRG:
+//     exec.CommandContext on the Python subprocess). Callers do not
+//     implement their own deadline around store calls. Path A (gcc2).
 //   - Concurrency ownership. A store handle is single-goroutine within a
 //     process: callers must not share one handle across goroutines
 //     without their own synchronization. Cross-process safety and write

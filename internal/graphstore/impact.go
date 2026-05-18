@@ -1,5 +1,7 @@
 package graphstore
 
+import "sort"
+
 // impactStoreView is the minimum slice of Store needed by
 // computeImpactRadius — node lookup + edges-among query. Both
 // SQLiteStore and PostgresStore satisfy this implicitly.
@@ -15,13 +17,18 @@ type impactStoreView interface {
 // driver-agnostic graph-traversal + result-assembly here.
 //
 // maxDepth bounds BFS hops; maxNodes caps the visited-frontier so
-// extremely connected graphs don't fan out indefinitely.
+// extremely connected graphs don't fan out indefinitely. Both arguments
+// are normalised through the provider-owned hard caps (bounds.go) here so
+// the native path enforces the SAME ceiling the CRG path does — this is
+// the single uniform-bounds chokepoint for every native impact query
+// (Path A, gcc2). Callers' values are a requested ceiling only.
 func computeImpactRadius(
 	seeds map[string]bool,
 	fwd, rev map[string][]string,
 	maxDepth, maxNodes int,
 	store impactStoreView,
 ) (ImpactResult, error) {
+	maxDepth, maxNodes = normalizeTraversalBounds(maxDepth, maxNodes)
 	impacted := bfsImpacted(seeds, fwd, rev, maxDepth, maxNodes)
 
 	changedNodes := resolveImpactNodes(seeds, nil, store)
@@ -45,6 +52,13 @@ func computeImpactRadius(
 // bfsImpacted walks fwd/rev adjacency from the seed set, expanding hop-by-hop
 // until maxDepth hops or the maxNodes cap is reached. Seeds themselves are
 // not included in the returned set.
+//
+// maxNodes is a HARD ceiling on the size of the returned impacted set:
+// after each hop, if the impacted set has reached the cap the set is
+// trimmed back to exactly maxNodes and the walk stops, so the result can
+// never overshoot by a trailing frontier (the pre-Path-A behaviour the
+// spec flagged as "advisory, overshoot by a frontier"). The same cap is
+// enforced identically on the CRG path, so the two paths agree.
 func bfsImpacted(seeds map[string]bool, fwd, rev map[string][]string, maxDepth, maxNodes int) map[string]bool {
 	visited := map[string]bool{}
 	frontier := make([]string, 0, len(seeds))
@@ -54,12 +68,36 @@ func bfsImpacted(seeds map[string]bool, fwd, rev map[string][]string, maxDepth, 
 	impacted := map[string]bool{}
 	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
 		next := expandFrontier(frontier, fwd, rev, visited, impacted)
-		if len(visited)+len(next) > maxNodes {
+		// Hard cap: if this hop pushed the impacted set past maxNodes,
+		// trim it back to exactly maxNodes and stop. The result never
+		// overshoots by a trailing frontier (the pre-Path-A behaviour
+		// the spec flagged) and the CRG path enforces the SAME cap.
+		if len(impacted) >= maxNodes {
+			capImpactedSet(impacted, maxNodes)
 			break
 		}
 		frontier = next
 	}
 	return impacted
+}
+
+// capImpactedSet deterministically shrinks impacted to at most maxNodes
+// entries (lexicographic order, so the kept set is stable across runs —
+// not map-iteration-order dependent). The hard cap is a ceiling on the
+// returned set size; which specific nodes survive past the cap is
+// unspecified by the contract, only that the count never exceeds it.
+func capImpactedSet(impacted map[string]bool, maxNodes int) {
+	if len(impacted) <= maxNodes {
+		return
+	}
+	keys := make([]string, 0, len(impacted))
+	for k := range impacted {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys[maxNodes:] {
+		delete(impacted, k)
+	}
 }
 
 // expandFrontier marks the current frontier visited and returns the next
