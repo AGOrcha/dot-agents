@@ -123,27 +123,27 @@ type NoteSymbolLink struct {
 	CreatedAt     float64
 }
 
-// Store is the published, backend-agnostic contract for all graph
-// operations. It is the single stable surface that downstream callers and
-// the injected Deps handle bind to — never to a concrete backend
-// (*SQLiteStore, *PostgresStore) or to a process model. Binding to this
-// interface is what makes the ephemeral→pooled→daemon evolution
-// (spec graphstore-concurrency-contract, decision C-Hybrid) a transparent
-// provider swap with no caller-visible change.
+// The graphstore contract is segregated into cohesive ROLE interfaces,
+// grouped by how callers actually use the store, then composed into the
+// whole-store Store. This is an Interface-Segregation split: a caller or
+// the injected Deps handle should depend on the NARROWEST role it uses, so
+// a test fake stubs only that role's handful of methods instead of all 28.
 //
-// Provider guarantees (the contract callers may rely on):
+// Provider guarantees apply uniformly to every role (a role is a view of
+// the same provider, not a different backend):
 //
 //   - Bounds. Where an operation accepts maxNodes/maxDepth/limit
-//     arguments (e.g. SearchNodes, GetImpactRadius), the provider treats
-//     them as the caller's requested ceiling. The contract's intent is a
-//     hard, uniform cap across the native and CRG paths plus a request
-//     timeout; enforcing that uniformly is the provider's responsibility
-//     (Path A, delivered by gcc2 — not yet enforced by every concrete
-//     store at the time this contract is published).
+//     arguments (e.g. SearchNodes, GetImpactRadius on CodeGraphReader),
+//     the provider treats them as the caller's requested ceiling. The
+//     contract's intent is a hard, uniform cap across the native and CRG
+//     paths plus a request timeout; enforcing that uniformly is the
+//     provider's responsibility (Path A, delivered by gcc2 — not yet
+//     enforced by every concrete store at the time this contract is
+//     published).
 //   - Request timeout. Long-running graph traversals are bounded by a
 //     provider-owned request timeout; callers do not implement their own
-//     deadline around Store calls.
-//   - Concurrency ownership. A Store handle is single-goroutine within a
+//     deadline around store calls.
+//   - Concurrency ownership. A store handle is single-goroutine within a
 //     process: callers must not share one handle across goroutines
 //     without their own synchronization. Cross-process safety and write
 //     serialization (SQLite's single-writer/WAL behavior, a connection
@@ -152,25 +152,22 @@ type NoteSymbolLink struct {
 //     holder of a contract-typed handle (see Handle); it is explicitly
 //     NOT the concurrency story — the provider behind the contract is.
 //   - Lifecycle. Acquiring and releasing a handle is explicit and cheap.
-//     Callers obtain a Store, use it, and Close it; they never manage
-//     backend connections, pools, or subprocess workers directly.
+//     Callers obtain a store, use it, and Close it (the Lifecycle role);
+//     they never manage backend connections, pools, or subprocess
+//     workers directly.
 //
-// The contract is intentionally derived from existing concrete-store
-// usage (the read/write/bounds/lifecycle operations callers already use)
-// and is additive: *SQLiteStore and *PostgresStore already satisfy it
-// (see the compile-time assertions below). Publishing it changes no
-// behavior; gcc2 implements the Path A enforcement internals and gcc3
-// binds all callers + the Deps singleton to this type.
-type Store interface {
-	// Code graph — write
-	UpsertNode(node NodeInfo, fileHash string) (int64, error)
-	UpsertEdge(edge EdgeInfo) (int64, error)
-	RemoveFileData(filePath string) error
-	StoreFileNodesEdges(filePath string, nodes []NodeInfo, edges []EdgeInfo, fileHash string) error
-	SetMetadata(key, value string) error
-	Commit() error
+// The roles are derived from existing concrete-store usage and the change
+// is additive: *SQLiteStore and *PostgresStore already satisfy every role
+// and the composed Store (see the compile-time assertions below).
+// Publishing this changes no behavior; gcc2 implements the Path A
+// enforcement internals and gcc3 binds all callers + the Deps singleton
+// to the narrowest role each needs.
 
-	// Code graph — read
+// CodeGraphReader is the read-only view of the code-structure graph:
+// node/edge lookups, file enumeration, search, metadata reads, aggregate
+// stats, and bounded impact-radius traversal. Read-mostly callers (status,
+// review, impact, orient flows) should depend on this role alone.
+type CodeGraphReader interface {
 	GetNode(qualifiedName string) (*GraphNode, error)
 	GetNodesByFile(filePath string) ([]GraphNode, error)
 	GetEdgesBySource(qualifiedName string) ([]GraphEdge, error)
@@ -181,31 +178,86 @@ type Store interface {
 	GetMetadata(key string) (string, error)
 	GetStats() (GraphStats, error)
 	GetImpactRadius(changedFiles []string, maxDepth, maxNodes int) (ImpactResult, error)
+}
 
-	// KG notes
+// CodeGraphWriter is the mutation view of the code-structure graph:
+// node/edge upserts, per-file replace, metadata writes, and Commit. Only
+// the build/update pipeline (graph build, precommit refresh) depends on
+// this role.
+type CodeGraphWriter interface {
+	UpsertNode(node NodeInfo, fileHash string) (int64, error)
+	UpsertEdge(edge EdgeInfo) (int64, error)
+	RemoveFileData(filePath string) error
+	StoreFileNodesEdges(filePath string, nodes []NodeInfo, edges []EdgeInfo, fileHash string) error
+	SetMetadata(key, value string) error
+	Commit() error
+}
+
+// KGNoteStore is the knowledge-graph note view: upsert/get/search a note
+// and list archived notes. KG curation/sync callers depend on this role
+// (often paired with NoteSymbolLinkStore).
+type KGNoteStore interface {
 	UpsertKGNote(note KGNote) error
 	GetKGNote(id string) (*KGNote, error)
 	SearchKGNotes(query string, limit int) ([]KGNote, error)
 	ListArchivedKGNotes() ([]KGNote, error)
+}
 
-	// Note→symbol links
+// NoteSymbolLinkStore is the note↔code-symbol link view: upsert, the two
+// directional lookups, and delete. The warm-link sync flow depends on this
+// role.
+type NoteSymbolLinkStore interface {
 	UpsertNoteSymbolLink(link NoteSymbolLink) (int64, error)
 	GetLinksForNote(noteID string) ([]NoteSymbolLink, error)
 	GetLinksForSymbol(qualifiedName string) ([]NoteSymbolLink, error)
 	DeleteNoteSymbolLink(id int64) error
+}
 
-	// Lifecycle
+// Lifecycle is the acquire/release view. Callers that own a handle's
+// lifetime depend on this role to release it; callers handed a borrowed
+// handle should NOT depend on it (they must not Close what they do not
+// own).
+type Lifecycle interface {
 	Close() error
 }
 
+// Store is the published, backend-agnostic whole-store contract: every
+// role composed. Existing whole-store callers and the Deps handle bind to
+// this; callers that use only one concern should instead depend on the
+// matching role above. It is the single stable surface that makes the
+// ephemeral→pooled→daemon evolution (spec graphstore-concurrency-contract,
+// decision C-Hybrid) a transparent provider swap with no caller-visible
+// change.
+type Store interface {
+	CodeGraphReader
+	CodeGraphWriter
+	KGNoteStore
+	NoteSymbolLinkStore
+	Lifecycle
+}
+
 // Compile-time assertions that the existing concrete stores satisfy the
-// published contract. These pin the interface to real implementations so
-// the contract cannot drift away from what callers actually run, and so
-// the additive nature of this change is verified by the compiler (gcc1
-// changes no behavior — it only publishes and documents the surface).
+// composed contract AND every segregated role. These pin the interfaces to
+// real implementations so the contract cannot drift away from what callers
+// actually run, and so the additive nature of this change is verified by
+// the compiler (gcc1 changes no behavior — it only publishes, segregates,
+// and documents the surface). Asserting each role explicitly guarantees a
+// caller may safely narrow to any single role.
 var (
 	_ Store = (*SQLiteStore)(nil)
 	_ Store = (*PostgresStore)(nil)
+
+	_ CodeGraphReader     = (*SQLiteStore)(nil)
+	_ CodeGraphWriter     = (*SQLiteStore)(nil)
+	_ KGNoteStore         = (*SQLiteStore)(nil)
+	_ NoteSymbolLinkStore = (*SQLiteStore)(nil)
+	_ Lifecycle           = (*SQLiteStore)(nil)
+
+	_ CodeGraphReader     = (*PostgresStore)(nil)
+	_ CodeGraphWriter     = (*PostgresStore)(nil)
+	_ KGNoteStore         = (*PostgresStore)(nil)
+	_ NoteSymbolLinkStore = (*PostgresStore)(nil)
+	_ Lifecycle           = (*PostgresStore)(nil)
 )
 
 // Handle is the contract-typed boundary the dependency-injection singleton
@@ -230,8 +282,45 @@ type Handle struct {
 // connection/pool/serialization concerns.
 func NewHandle(store Store) Handle { return Handle{store: store} }
 
-// Store returns the contract-typed handle. Callers bind to this interface,
-// never to a concrete backend. Returns nil if the handle is unset, letting
-// callers fall back to their existing direct-open path until gcc3 wires
-// this end-to-end.
+// Store returns the whole-store contract-typed handle. Callers bind to
+// this interface, never to a concrete backend. Returns nil if the handle
+// is unset, letting callers fall back to their existing direct-open path
+// until gcc3 wires this end-to-end.
+//
+// Prefer a role-narrowed accessor below when the caller uses only one
+// concern: it documents the dependency and lets a test fake stub only
+// that role. Each accessor returns the same underlying provider widened
+// to the role (nil-safe: nil store yields a nil role, matching Store()).
 func (h Handle) Store() Store { return h.store }
+
+// CodeGraphReader narrows the handle to the read-only code-graph role.
+func (h Handle) CodeGraphReader() CodeGraphReader {
+	if h.store == nil {
+		return nil
+	}
+	return h.store
+}
+
+// CodeGraphWriter narrows the handle to the code-graph mutation role.
+func (h Handle) CodeGraphWriter() CodeGraphWriter {
+	if h.store == nil {
+		return nil
+	}
+	return h.store
+}
+
+// KGNoteStore narrows the handle to the KG-note role.
+func (h Handle) KGNoteStore() KGNoteStore {
+	if h.store == nil {
+		return nil
+	}
+	return h.store
+}
+
+// NoteSymbolLinkStore narrows the handle to the note↔symbol link role.
+func (h Handle) NoteSymbolLinkStore() NoteSymbolLinkStore {
+	if h.store == nil {
+		return nil
+	}
+	return h.store
+}

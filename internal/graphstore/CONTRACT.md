@@ -14,16 +14,55 @@ contract*, introduced later when measured load justifies it.
 ## What `Store` is
 
 `Store` is the single, stable, backend-agnostic surface for every graph
-operation: code-graph read/write, KG-note read/write, note↔symbol links,
-bounded queries (`SearchNodes`, `GetImpactRadius`), and lifecycle
-(`Close`). It is derived from the operations callers already use against
-the concrete stores — it is not over-specified with speculative methods.
+operation. It is **segregated into cohesive role interfaces** (grouped by
+how callers actually use the store) and then composed: `Store` embeds all
+roles. It is derived from the operations callers already use against the
+concrete stores — not over-specified with speculative methods.
 
-Callers and the injected `Deps` handle bind to `Store`, **never** to a
-concrete backend (`*SQLiteStore`, `*PostgresStore`) and **never** to a
-process model. That binding is what makes the
-ephemeral → pooled → daemon evolution a transparent provider swap with no
-caller-visible change.
+Callers and the injected `Deps` handle bind to `Store` (or, preferably, a
+narrower role), **never** to a concrete backend (`*SQLiteStore`,
+`*PostgresStore`) and **never** to a process model. That binding is what
+makes the ephemeral → pooled → daemon evolution a transparent provider
+swap with no caller-visible change.
+
+## Role segregation (ISP) — depend on the narrowest role
+
+The 28-method surface is split into five roles. **A caller, and the Deps
+handle, should depend on the narrowest role it actually uses.** This is
+the Interface-Segregation point: a test fake stubs only that role's
+handful of methods, not all 28 — exactly what the cg6b 95%-coverage tail
+exploits.
+
+| Role | Methods | Typical caller |
+|---|---|---|
+| `CodeGraphReader` | `GetNode`, `GetNodesByFile`, `GetEdgesBySource/Target/Among`, `GetAllFiles`, `SearchNodes`, `GetMetadata`, `GetStats`, `GetImpactRadius` | read-mostly: status, review, impact, orient |
+| `CodeGraphWriter` | `UpsertNode`, `UpsertEdge`, `RemoveFileData`, `StoreFileNodesEdges`, `SetMetadata`, `Commit` | build/update pipeline only |
+| `KGNoteStore` | `UpsertKGNote`, `GetKGNote`, `SearchKGNotes`, `ListArchivedKGNotes` | KG curation/sync |
+| `NoteSymbolLinkStore` | `UpsertNoteSymbolLink`, `GetLinksForNote/ForSymbol`, `DeleteNoteSymbolLink` | warm-link sync |
+| `Lifecycle` | `Close` | the handle owner only — borrowed handles must not depend on it |
+
+`Store = CodeGraphReader + CodeGraphWriter + KGNoteStore +
+NoteSymbolLinkStore + Lifecycle` (interface embedding). Whole-store
+callers and `var _ Store = (*SQLiteStore)(nil)` /
+`(*PostgresStore)(nil)` still hold unchanged; each role also has its own
+`var _ Role = (*SQLiteStore)(nil)` / `(*PostgresStore)(nil)` assertion so
+narrowing to any role is compiler-guaranteed safe.
+
+### How a caller picks a role
+
+1. Identify the single concern the caller exercises (it almost always
+   uses exactly one of read / write / KG-note / link).
+2. Depend on that role interface in the function/struct signature — not
+   `Store`. If it genuinely spans concerns, depend on `Store`.
+3. From the DI handle, obtain the role via the matching accessor:
+   `h.CodeGraphReader()`, `h.CodeGraphWriter()`, `h.KGNoteStore()`,
+   `h.NoteSymbolLinkStore()`, or `h.Store()` for the whole surface. Each
+   is nil-safe and returns the same underlying provider widened to the
+   role — no extra allocation, no behavior change.
+4. Tests inject a fake implementing only that role.
+
+Do not depend on `Lifecycle` unless the caller owns the handle's lifetime
+(it must not `Close` a borrowed handle).
 
 ## Provider guarantees
 
@@ -57,11 +96,15 @@ serialization. The singleton is only a holder of the contract; it is
 
 `graphstore.Handle` pins that boundary:
 
-- `Handle` carries a single `Store` and exposes it only via `Store()`.
-- The singleton reads the graph exclusively through `Handle.Store()` and
-  can never reach a concrete backend.
-- `Handle.Store()` returns `nil` when unset, so callers keep their
-  existing direct-open path until gcc3 wires this end-to-end.
+- `Handle` carries a single `Store` and exposes it only through
+  contract-typed accessors — never a concrete backend.
+- `Store()` returns the whole surface; `CodeGraphReader()`,
+  `CodeGraphWriter()`, `KGNoteStore()`, `NoteSymbolLinkStore()` return
+  the same provider widened to the matching role, so the singleton (and
+  gcc3-bound callers) depend on the narrowest role they use.
+- Every accessor is nil-safe: an unset handle yields a nil role/store, so
+  callers keep their existing direct-open path until gcc3 wires this
+  end-to-end.
 
 This closes di-refactor OD-1's path (A) "with teeth": the singleton is
 justified by the provider-owns-concurrency rationale, not waved through.
@@ -70,11 +113,12 @@ justified by the provider-owns-concurrency rationale, not waved through.
 
 **In scope (this PR, additive, no behavior change):**
 
-- Publish + document the `Store` contract (godoc + this file).
-- Compile-time assertions: `var _ Store = (*SQLiteStore)(nil)` and
-  `(*PostgresStore)(nil)`.
-- Define the contract-typed `Handle` boundary the Deps singleton will
-  hold.
+- Publish + document the `Store` contract, segregated into five role
+  interfaces composed into `Store` (godoc + this file).
+- Compile-time assertions for the composed `Store` AND each role against
+  `(*SQLiteStore)(nil)` and `(*PostgresStore)(nil)`.
+- Define the contract-typed `Handle` boundary with whole-store and
+  role-narrowed accessors the Deps singleton will hold.
 
 **Deferred (gated on review of this contract):**
 
