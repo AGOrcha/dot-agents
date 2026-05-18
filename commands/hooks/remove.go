@@ -11,17 +11,25 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
+// Test seams: indirection over the deeper helpers so the error-return
+// guards in runHooksRemove can be exercised. Production always binds the
+// real functions; only tests reassign these (and restore them).
+var (
+	hookRemovalTargetFn         = hookRemovalTarget
+	ensureUnderHooksScopeTreeFn = ensureUnderHooksScopeTree
+)
+
 func runHooksRemove(deps Deps, scope, name string) error {
 	agentsHome := config.AgentsHome()
 	spec, err := findHookSpec(deps, agentsHome, scope, name)
 	if err != nil {
 		return err
 	}
-	target, err := hookRemovalTarget(spec)
+	target, err := hookRemovalTargetFn(spec)
 	if err != nil {
 		return err
 	}
-	if err := ensureUnderHooksScopeTree(agentsHome, scope, target); err != nil {
+	if err := ensureUnderHooksScopeTreeFn(agentsHome, scope, target); err != nil {
 		return err
 	}
 

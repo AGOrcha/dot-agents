@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,81 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
+
+// writeBundleHook creates a minimal canonical hook bundle on disk under
+// AGENTS_HOME so findHookSpec resolves successfully and runHooksRemove
+// proceeds to the seam-guarded helper calls.
+func writeBundleHook(t *testing.T, agentsHome, scope, name string) {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "hooks", scope, name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "HOOK.yaml"), []byte("name: "+name+`
+when: stop
+run:
+  command: true
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunHooksRemovePropagatesHookRemovalTargetError forces the
+// hookRemovalTargetFn seam to fail and asserts runHooksRemove returns
+// exactly that error (the guard right after hookRemovalTarget).
+func TestRunHooksRemovePropagatesHookRemovalTargetError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	scope := "g"
+	writeBundleHook(t, agentsHome, scope, "alpha")
+
+	sentinel := errors.New("forced hookRemovalTarget failure")
+	orig := hookRemovalTargetFn
+	hookRemovalTargetFn = func(*platform.HookSpec) (string, error) {
+		return "", sentinel
+	}
+	t.Cleanup(func() { hookRemovalTargetFn = orig })
+
+	deps := testDeps()
+	deps.Flags.Yes = true
+	err := runHooksRemove(deps, scope, "alpha")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected runHooksRemove to propagate the hookRemovalTarget error verbatim, got: %v", err)
+	}
+	// The bundle must remain — removal never ran.
+	if _, statErr := os.Stat(filepath.Join(agentsHome, "hooks", scope, "alpha")); statErr != nil {
+		t.Fatalf("bundle must be intact when hookRemovalTarget fails, stat err=%v", statErr)
+	}
+}
+
+// TestRunHooksRemovePropagatesScopeTreeGuardError forces the
+// ensureUnderHooksScopeTreeFn seam to fail and asserts runHooksRemove
+// returns exactly that error (the guard right after the scope-tree check).
+func TestRunHooksRemovePropagatesScopeTreeGuardError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	scope := "g"
+	writeBundleHook(t, agentsHome, scope, "beta")
+
+	sentinel := errors.New("forced scope-tree guard failure")
+	orig := ensureUnderHooksScopeTreeFn
+	ensureUnderHooksScopeTreeFn = func(string, string, string) error {
+		return sentinel
+	}
+	t.Cleanup(func() { ensureUnderHooksScopeTreeFn = orig })
+
+	deps := testDeps()
+	deps.Flags.Yes = true
+	err := runHooksRemove(deps, scope, "beta")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected runHooksRemove to propagate the scope-tree guard error verbatim, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(agentsHome, "hooks", scope, "beta")); statErr != nil {
+		t.Fatalf("bundle must be intact when the scope-tree guard fails, stat err=%v", statErr)
+	}
+}
 
 // TestHookRemovalTargetUnsupportedKind covers the default branch of
 // hookRemovalTarget: an unknown source kind must produce a descriptive
