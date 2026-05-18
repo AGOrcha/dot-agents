@@ -502,6 +502,56 @@ da import myproject
 
 This detects existing rules, skills, agents, and hooks in the project and copies them into the central `~/.agents/` directory.
 
+### Knowledge Graph
+
+The knowledge graph (`da kg`) is a local store of structured project memory:
+durable notes about decisions, entities, concepts, and sessions, plus a
+code graph and the cross-references between them. It backs the `workflow
+orient` context an agent loads at session start, so the agent resumes with
+what was already learned instead of rediscovering it.
+
+Notes carry a type — `source`, `entity`, `concept`, `synthesis`,
+`decision`, `repo`, or `session` — and live as hot Markdown files that are
+synced into a warm SQLite layer for fast querying. Raw material (Markdown,
+text, PDFs, URLs, transcripts) is brought in through an inbox and turned
+into typed notes:
+
+```bash
+# One-time: initialize the graph at KG_HOME
+da kg setup
+
+# Ingest a source (or --all to drain the inbox), then sync to the warm layer
+da kg ingest notes.md
+da kg warm
+
+# Query by intent (decision_lookup, repo_context, related_notes, ...)
+da kg query --intent decision_lookup "why postgres backend"
+
+# Health and integrity
+da kg health
+da kg lint
+```
+
+A code graph is built from the repo with `da kg build` (incremental
+updates via `da kg update`). It powers impact analysis — `da kg impact`
+shows the blast radius of changed files, and `da kg changes` detects
+change impact in the current diff. Notes can be tied to specific code
+symbols so context follows the code:
+
+```bash
+# Build the code graph, then cross-reference a note to a symbol
+da kg build
+da kg link add <note-id> <qualified-name>
+da kg link list <note-id>
+```
+
+Maintenance keeps the graph honest: `da kg maintain reweave` repairs
+broken links, `mark-stale` flags notes past a freshness threshold, and
+`compact` archives superseded notes. `da kg sync` pulls and lints the
+graph (add `--push` to publish), and `da kg serve` exposes the graph to
+agents over MCP. See the [Knowledge Graph](#knowledge-graph) command
+table above for the full surface.
+
 ## Roadmap
 
 ### Agent-as-Operator
