@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-17
+
+Workflow subpackage line (PR3b).
+
+### Added
+
+- **`da workflow`** surface extracted into `commands/workflow/` —
+  plan/task lifecycle, state/checkpoint/orient, verification +
+  review-gate + delegation, drift/sweep/graph, fold-back.
+- **`internal/graphstore`** — `Store` interface with SQLite + Postgres
+  backends, CRG bridge, MCP server, impact BFS, schema.
+
+### Changed
+
+- Test layout normalized to source-mirroring files in the
+  workflow/graphstore packages (no behavior change).
+
 ## [0.3.0] - 2026-05-17
 
 First Go-binary (`da`) release of the extracted surface; ships PR1–PR3a

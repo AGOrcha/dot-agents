@@ -151,6 +151,21 @@ jobs:
       - name: Verify jq installed
         run: jq --version
 
+      # Install the real code-review-graph Python CLI into a repo-root
+      # .venv so internal/graphstore TestCRGBridgeFreshBuildRealCRG
+      # actually runs (DiscoverCRGBin finds .venv/bin/code-review-graph
+      # and pythonBin() resolves .venv/bin/python3 for site-packages).
+      # Interim coverage until the in-process CRG graph adaptor lands.
+      # Windows venv layout is .venv/Scripts/ (not .venv/bin/), which
+      # DiscoverCRGBin does not probe, so the test skips there as before.
+      - name: Set up code-review-graph (.venv)
+        if: runner.os != 'Windows'
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet code-review-graph
+          .venv/bin/code-review-graph --help >/dev/null
+
       - name: Check gofmt
         run: |
           unformatted=$(gofmt -l ./cmd ./commands ./internal)
@@ -350,10 +365,19 @@ jobs:
         run: |
           "${DA_BIN}" skills list
 
-      # NOTE: `da workflow ...` smoke steps live on pr3b, which extracts the
-      # workflow subcommand. pr3a/base-commands has no `workflow` command,
-      # so those steps would fail here ("unknown command"). pr3b re-adds
-      # them after rebasing onto this test.yml.
+      - name: Test workflow orient (no project context)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          "${DA_BIN}" workflow orient 2>&1 || true
+
+      - name: Test workflow help
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          "${DA_BIN}" workflow --help
 
       - name: Cleanup
         env:

@@ -22,7 +22,7 @@ Begin each work session by understanding the current state and context.
 
 2. **Understand the current state**
    - Run `git status` to see uncommitted changes
-   - In dot-agents projects, if your `da` build provides them (workflow surface ships in 0.3.1+), optionally run `da workflow orient` and `da kg health` for session + graph readiness
+   - In dot-agents projects, run `da workflow orient` for session readiness; if your `da` build provides it (the `da kg` graph surface ships in 0.3.2+), also run `da kg health` for graph readiness
    - Review recent commits with `git log --oneline -5`
    - Check for any failing tests or build issues
 
