@@ -1,3 +1,6 @@
+> **Provenance:** Internal design record for the completed `platform-dir-unification` effort (relocated from `docs/CANONICAL_HOOKS_DESIGN.md`; technical content unchanged).
+> Related handoffs: [`handoffs/2026-03-30-hook-bundle-rendering.md`](handoffs/2026-03-30-hook-bundle-rendering.md), [`handoffs/2026-03-29-platform-dir-unification.md`](handoffs/2026-03-29-platform-dir-unification.md).
+
 # Canonical Hooks Design
 
 This document defines the target canonical storage model for hooks in `~/.agents`, the shared internal hook contract, and the staged migration path from the current flat per-platform files.
