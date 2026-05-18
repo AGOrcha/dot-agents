@@ -1428,10 +1428,19 @@ func relinkImportedProjects(cfg *config.Config, projects map[string]bool) {
 		if path == "" {
 			continue
 		}
+		var installed []platform.Platform
 		for _, p := range platform.All() {
-			if !p.IsInstalled() {
-				continue
+			if p.IsInstalled() {
+				installed = append(installed, p)
 			}
+		}
+		// Shared-target plan materializes cross-platform paths (repo
+		// .codex/agents/*.toml, Claude shared-skills projection) BEFORE the
+		// per-platform CreateLinks loop, mirroring add/install/refresh.
+		if _, err := platform.RunSharedTargetProjection(project, path, installed, Flags.DryRun); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		}
+		for _, p := range installed {
 			_ = p.CreateLinks(project, path)
 		}
 	}

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -2300,6 +2301,144 @@ func TestRelinkImportedProjects_RegisteredProjectInvokesPlatforms(t *testing.T) 
 	// Should not panic; whether platforms are installed depends on the env, but
 	// the loop must execute without errors propagating.
 	relinkImportedProjects(cfg, map[string]bool{"p": true})
+}
+
+// writeRelinkCodexAgentFixture writes a canonical Codex agent under
+// ~/.agents/agents/<project>/<name>/AGENT.md so the shared-target projection
+// emits a repo .codex/agents/<name>.toml when relink runs.
+func writeRelinkCodexAgentFixture(t *testing.T, agentsHome, project, name string) {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "agents", project, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: " + name + "\ndescription: relink fixture\n---\n\n# Body\nShip it.\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRelinkImportedProjects_RunsSharedTargetProjection asserts the NEW
+// branch in relinkImportedProjects: RunSharedTargetProjection runs for a
+// relinked managed project and materializes the cross-platform shared
+// target. We assert the projected artifact (.codex/agents/<name>.toml) —
+// the effect that ONLY the projection produces, not CreateLinks — so the
+// test cannot pass on the old (projection-less) code.
+func TestRelinkImportedProjects_RunsSharedTargetProjection(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "relinkproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRelinkCodexAgentFixture(t, agentsHome, "relinkproj", "implementer")
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("relinkproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	relinkImportedProjects(cfg, map[string]bool{"relinkproj": true})
+
+	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
+	b, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("expected shared-target projection to write %s: %v", tomlPath, err)
+	}
+	if !strings.Contains(string(b), `name = "implementer"`) || !strings.Contains(string(b), "Ship it.") {
+		t.Fatalf("projected codex toml has unexpected content: %s", b)
+	}
+}
+
+// TestRelinkImportedProjects_ProjectionErrorWarnsAndContinues asserts the
+// NEW warn-and-continue error branch: when RunSharedTargetProjection errors
+// for a project, relink logs the "shared targets:" warn bullet and does NOT
+// abort — the per-platform CreateLinks loop still runs and a second project
+// is still processed. The projection is forced to error without a seam by
+// occupying the rendered target path (.codex/agents/implementer.toml) with a
+// non-empty directory, which writeCodexAgentTomlFile's os.Remove cannot clear.
+func TestRelinkImportedProjects_ProjectionErrorWarnsAndContinues(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	badPath := filepath.Join(tmp, "badproj")
+	okPath := filepath.Join(tmp, "okproj")
+	for _, p := range []string{badPath, okPath} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRelinkCodexAgentFixture(t, agentsHome, "badproj", "implementer")
+	writeRelinkCodexAgentFixture(t, agentsHome, "okproj", "implementer")
+
+	// Occupy badproj's rendered toml target with a NON-EMPTY directory so the
+	// projection's os.Remove(dst) fails → RunSharedTargetProjection errors.
+	blocker := filepath.Join(badPath, ".codex", "agents", "implementer.toml")
+	if err := os.MkdirAll(blocker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocker, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("badproj", badPath)
+	cfg.AddProject("okproj", okPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	out := captureRelinkStdout(t, func() {
+		relinkImportedProjects(cfg, map[string]bool{"badproj": true, "okproj": true})
+	})
+
+	if !strings.Contains(out, "shared targets:") {
+		t.Fatalf("expected warn-and-continue 'shared targets:' bullet on projection error, got:\n%s", out)
+	}
+	// Loop must continue past the failed project: okproj's projection still
+	// materializes its toml (proves no abort on the error branch).
+	okToml := filepath.Join(okPath, ".codex", "agents", "implementer.toml")
+	if _, err := os.Stat(okToml); err != nil {
+		t.Fatalf("relink must continue after a projection error; expected %s: %v", okToml, err)
+	}
+}
+
+// captureRelinkStdout captures os.Stdout for the duration of fn so ui.Bullet
+// warn output emitted by relinkImportedProjects can be asserted.
+func captureRelinkStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = oldStdout
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }
 
 // TestRunImport_WithSeededGlobalCandidatesExercisesFoldAndRelink covers
