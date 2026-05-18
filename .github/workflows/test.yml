@@ -398,7 +398,9 @@ jobs:
           go-version: '1.26.x'
 
       - name: Install gocovmerge
-        run: go install github.com/wadey/gocovmerge@latest
+        # Pinned to a commit (gocovmerge has no semver tags) for a
+        # reproducible, supply-chain-stable install (Sonar S8545).
+        run: go install github.com/wadey/gocovmerge@b5bfa59ec0adc420475f97f89b58045c721d761c
 
       - name: Download coverage profiles (all OS)
         uses: actions/download-artifact@v4
