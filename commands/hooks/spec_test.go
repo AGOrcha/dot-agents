@@ -3,6 +3,7 @@ package hooks
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,6 +55,9 @@ func TestFindHookSpecMissingScopeDir(t *testing.T) {
 // scope path exists but is a regular file, so os.ReadDir returns ENOTDIR
 // (which is not os.IsNotExist) and findHookSpec must surface it verbatim.
 func TestFindHookSpecListError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ENOTDIR list-error path is POSIX-only: a file-where-dir-expected yields an IsNotExist-equivalent on Windows, so findHookSpec correctly reports the missing-dir branch there (covered cross-platform by TestFindHookSpecMissingScopeDir)")
+	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "broken"
