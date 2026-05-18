@@ -152,7 +152,7 @@ type NoteSymbolLink struct {
 //     holder of a contract-typed handle (see Handle); it is explicitly
 //     NOT the concurrency story — the provider behind the contract is.
 //   - Lifecycle. Acquiring and releasing a handle is explicit and cheap.
-//     Callers obtain a store, use it, and Close it (the Lifecycle role);
+//     Callers obtain a store, use it, and Close it (the Closer role);
 //     they never manage backend connections, pools, or subprocess
 //     workers directly.
 //
@@ -213,11 +213,11 @@ type NoteSymbolLinkStore interface {
 	DeleteNoteSymbolLink(id int64) error
 }
 
-// Lifecycle is the acquire/release view. Callers that own a handle's
-// lifetime depend on this role to release it; callers handed a borrowed
-// handle should NOT depend on it (they must not Close what they do not
-// own).
-type Lifecycle interface {
+// Closer is the acquire/release view (idiomatic single-method interface,
+// io.Closer shape). Callers that own a handle's lifetime depend on this
+// role to release it; callers handed a borrowed handle should NOT depend
+// on it (they must not Close what they do not own).
+type Closer interface {
 	Close() error
 }
 
@@ -233,7 +233,7 @@ type Store interface {
 	CodeGraphWriter
 	KGNoteStore
 	NoteSymbolLinkStore
-	Lifecycle
+	Closer
 }
 
 // Compile-time assertions that the existing concrete stores satisfy the
@@ -251,13 +251,13 @@ var (
 	_ CodeGraphWriter     = (*SQLiteStore)(nil)
 	_ KGNoteStore         = (*SQLiteStore)(nil)
 	_ NoteSymbolLinkStore = (*SQLiteStore)(nil)
-	_ Lifecycle           = (*SQLiteStore)(nil)
+	_ Closer              = (*SQLiteStore)(nil)
 
 	_ CodeGraphReader     = (*PostgresStore)(nil)
 	_ CodeGraphWriter     = (*PostgresStore)(nil)
 	_ KGNoteStore         = (*PostgresStore)(nil)
 	_ NoteSymbolLinkStore = (*PostgresStore)(nil)
-	_ Lifecycle           = (*PostgresStore)(nil)
+	_ Closer              = (*PostgresStore)(nil)
 )
 
 // Handle is the contract-typed boundary the dependency-injection singleton
@@ -287,40 +287,15 @@ func NewHandle(store Store) Handle { return Handle{store: store} }
 // is unset, letting callers fall back to their existing direct-open path
 // until gcc3 wires this end-to-end.
 //
-// Prefer a role-narrowed accessor below when the caller uses only one
-// concern: it documents the dependency and lets a test fake stub only
-// that role. Each accessor returns the same underlying provider widened
-// to the role (nil-safe: nil store yields a nil role, matching Store()).
+// To narrow to a single role, do NOT add a per-role accessor — a Store
+// already satisfies every role (it embeds them). Declare the dependency
+// as the narrow role type and assign it from Store():
+//
+//	var r CodeGraphReader = h.Store() // a Store IS a CodeGraphReader
+//
+// This is the idiomatic "accept interfaces" Go: the call site documents
+// exactly the role it needs, a test fake stubs only that role, and there
+// is exactly one nil-safe accessor (no duplicated narrowing bodies). The
+// nil-safety is inherited: an unset handle's Store() is nil, so the
+// narrowed interface value is nil too.
 func (h Handle) Store() Store { return h.store }
-
-// CodeGraphReader narrows the handle to the read-only code-graph role.
-func (h Handle) CodeGraphReader() CodeGraphReader {
-	if h.store == nil {
-		return nil
-	}
-	return h.store
-}
-
-// CodeGraphWriter narrows the handle to the code-graph mutation role.
-func (h Handle) CodeGraphWriter() CodeGraphWriter {
-	if h.store == nil {
-		return nil
-	}
-	return h.store
-}
-
-// KGNoteStore narrows the handle to the KG-note role.
-func (h Handle) KGNoteStore() KGNoteStore {
-	if h.store == nil {
-		return nil
-	}
-	return h.store
-}
-
-// NoteSymbolLinkStore narrows the handle to the note↔symbol link role.
-func (h Handle) NoteSymbolLinkStore() NoteSymbolLinkStore {
-	if h.store == nil {
-		return nil
-	}
-	return h.store
-}

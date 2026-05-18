@@ -3,16 +3,17 @@ package graphstore
 import "testing"
 
 // fakeStore is a minimal in-test Store used to exercise the Handle
-// boundary and the role-narrowed accessors. It records that a method was
-// reached through a given role so the tests can observe that widening
-// actually dispatches to this fake (not just type-checks). Each role is
-// represented by one cheap sentinel method call.
+// boundary and the narrow-role idiom (declare the role type, assign from
+// Store()). It records that a method was reached through a given role so
+// the tests can observe that widening actually dispatches to this fake
+// (not just type-checks). Each role is represented by one cheap sentinel
+// method call.
 type fakeStore struct {
 	gotNode      bool // CodeGraphReader path observed
 	upsertedNode bool // CodeGraphWriter path observed
 	gotKGNote    bool // KGNoteStore path observed
 	gotLinksNote bool // NoteSymbolLinkStore path observed
-	closed       bool // Lifecycle path observed
+	closed       bool // Closer path observed
 }
 
 // --- CodeGraphReader ---
@@ -56,7 +57,7 @@ func (f *fakeStore) GetLinksForNote(string) ([]NoteSymbolLink, error) {
 func (f *fakeStore) GetLinksForSymbol(string) ([]NoteSymbolLink, error) { return nil, nil }
 func (f *fakeStore) DeleteNoteSymbolLink(int64) error                   { return nil }
 
-// --- Lifecycle ---
+// --- Closer ---
 
 func (f *fakeStore) Close() error { f.closed = true; return nil }
 
@@ -84,71 +85,70 @@ func TestNewHandleStoreReturnsWrappedStore(t *testing.T) {
 	}
 }
 
-func TestHandleRoleAccessorsReturnNonNilAndDispatch(t *testing.T) {
+// TestStoreNarrowsToEachRoleAndDispatches exercises the documented
+// narrow-role idiom: declare the dependency as the narrow role type and
+// assign it from Store() (a Store IS each role, since Store embeds them).
+// Each narrowed value must dispatch to the underlying fake.
+func TestStoreNarrowsToEachRoleAndDispatches(t *testing.T) {
 	f := &fakeStore{}
 	h := NewHandle(f)
 
-	r := h.CodeGraphReader()
-	if r == nil {
-		t.Fatal("CodeGraphReader() returned nil for a populated handle")
-	}
+	var r CodeGraphReader = h.Store()
 	if _, err := r.GetNode("x"); err != nil {
 		t.Fatalf("CodeGraphReader dispatch error: %v", err)
 	}
 	if !f.gotNode {
-		t.Fatal("CodeGraphReader() did not widen to the fake")
+		t.Fatal("CodeGraphReader-typed Store() did not widen to the fake")
 	}
 
-	w := h.CodeGraphWriter()
-	if w == nil {
-		t.Fatal("CodeGraphWriter() returned nil for a populated handle")
-	}
+	var w CodeGraphWriter = h.Store()
 	if _, err := w.UpsertNode(NodeInfo{}, ""); err != nil {
 		t.Fatalf("CodeGraphWriter dispatch error: %v", err)
 	}
 	if !f.upsertedNode {
-		t.Fatal("CodeGraphWriter() did not widen to the fake")
+		t.Fatal("CodeGraphWriter-typed Store() did not widen to the fake")
 	}
 
-	k := h.KGNoteStore()
-	if k == nil {
-		t.Fatal("KGNoteStore() returned nil for a populated handle")
-	}
+	var k KGNoteStore = h.Store()
 	if _, err := k.GetKGNote("id"); err != nil {
 		t.Fatalf("KGNoteStore dispatch error: %v", err)
 	}
 	if !f.gotKGNote {
-		t.Fatal("KGNoteStore() did not widen to the fake")
+		t.Fatal("KGNoteStore-typed Store() did not widen to the fake")
 	}
 
-	l := h.NoteSymbolLinkStore()
-	if l == nil {
-		t.Fatal("NoteSymbolLinkStore() returned nil for a populated handle")
-	}
+	var l NoteSymbolLinkStore = h.Store()
 	if _, err := l.GetLinksForNote("id"); err != nil {
 		t.Fatalf("NoteSymbolLinkStore dispatch error: %v", err)
 	}
 	if !f.gotLinksNote {
-		t.Fatal("NoteSymbolLinkStore() did not widen to the fake")
+		t.Fatal("NoteSymbolLinkStore-typed Store() did not widen to the fake")
+	}
+
+	var c Closer = h.Store()
+	if err := c.Close(); err != nil {
+		t.Fatalf("Closer dispatch error: %v", err)
+	}
+	if !f.closed {
+		t.Fatal("Closer-typed Store() did not widen to the fake")
 	}
 }
 
-func TestZeroHandleAccessorsAreNilSafe(t *testing.T) {
+// TestZeroHandleStoreIsNilSafe asserts the nil-safety the narrow-role
+// idiom relies on: an unset handle's Store() is nil, so any role the
+// caller narrows it to is a nil interface value too.
+func TestZeroHandleStoreIsNilSafe(t *testing.T) {
 	var h Handle // zero/unset handle — no store
 
 	if h.Store() != nil {
 		t.Fatal("Store() on a zero Handle must be nil")
 	}
-	if h.CodeGraphReader() != nil {
-		t.Fatal("CodeGraphReader() on a zero Handle must be nil")
+	var r CodeGraphReader = h.Store()
+	if r != nil {
+		t.Fatal("CodeGraphReader narrowed from a zero Handle must be nil")
 	}
-	if h.CodeGraphWriter() != nil {
-		t.Fatal("CodeGraphWriter() on a zero Handle must be nil")
-	}
-	if h.KGNoteStore() != nil {
-		t.Fatal("KGNoteStore() on a zero Handle must be nil")
-	}
-	if h.NoteSymbolLinkStore() != nil {
-		t.Fatal("NoteSymbolLinkStore() on a zero Handle must be nil")
+	var c Closer = h.Store()
+	if c != nil {
+		t.Fatal("Closer narrowed from a zero Handle must be nil")
 	}
 }

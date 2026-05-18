@@ -39,10 +39,10 @@ exploits.
 | `CodeGraphWriter` | `UpsertNode`, `UpsertEdge`, `RemoveFileData`, `StoreFileNodesEdges`, `SetMetadata`, `Commit` | build/update pipeline only |
 | `KGNoteStore` | `UpsertKGNote`, `GetKGNote`, `SearchKGNotes`, `ListArchivedKGNotes` | KG curation/sync |
 | `NoteSymbolLinkStore` | `UpsertNoteSymbolLink`, `GetLinksForNote/ForSymbol`, `DeleteNoteSymbolLink` | warm-link sync |
-| `Lifecycle` | `Close` | the handle owner only — borrowed handles must not depend on it |
+| `Closer` | `Close` | the handle owner only — borrowed handles must not depend on it |
 
 `Store = CodeGraphReader + CodeGraphWriter + KGNoteStore +
-NoteSymbolLinkStore + Lifecycle` (interface embedding). Whole-store
+NoteSymbolLinkStore + Closer` (interface embedding). Whole-store
 callers and `var _ Store = (*SQLiteStore)(nil)` /
 `(*PostgresStore)(nil)` still hold unchanged; each role also has its own
 `var _ Role = (*SQLiteStore)(nil)` / `(*PostgresStore)(nil)` assertion so
@@ -54,14 +54,21 @@ narrowing to any role is compiler-guaranteed safe.
    uses exactly one of read / write / KG-note / link).
 2. Depend on that role interface in the function/struct signature — not
    `Store`. If it genuinely spans concerns, depend on `Store`.
-3. From the DI handle, obtain the role via the matching accessor:
-   `h.CodeGraphReader()`, `h.CodeGraphWriter()`, `h.KGNoteStore()`,
-   `h.NoteSymbolLinkStore()`, or `h.Store()` for the whole surface. Each
-   is nil-safe and returns the same underlying provider widened to the
-   role — no extra allocation, no behavior change.
+3. Obtain the role by declaring the dependency as the narrow role type
+   and assigning it from `Handle.Store()` — a `Store` already *is* every
+   role (it embeds them), so no per-role accessor is needed:
+
+   ```go
+   var r graphstore.CodeGraphReader = h.Store() // a Store IS a CodeGraphReader
+   ```
+
+   This is the idiomatic "accept interfaces" Go: one nil-safe accessor,
+   no duplicated narrowing bodies, and the call site documents exactly
+   the role it needs. Nil-safety is inherited — an unset handle's
+   `Store()` is nil, so the narrowed interface value is nil too.
 4. Tests inject a fake implementing only that role.
 
-Do not depend on `Lifecycle` unless the caller owns the handle's lifetime
+Do not depend on `Closer` unless the caller owns the handle's lifetime
 (it must not `Close` a borrowed handle).
 
 ## Provider guarantees
@@ -96,15 +103,14 @@ serialization. The singleton is only a holder of the contract; it is
 
 `graphstore.Handle` pins that boundary:
 
-- `Handle` carries a single `Store` and exposes it only through
-  contract-typed accessors — never a concrete backend.
-- `Store()` returns the whole surface; `CodeGraphReader()`,
-  `CodeGraphWriter()`, `KGNoteStore()`, `NoteSymbolLinkStore()` return
-  the same provider widened to the matching role, so the singleton (and
-  gcc3-bound callers) depend on the narrowest role they use.
-- Every accessor is nil-safe: an unset handle yields a nil role/store, so
-  callers keep their existing direct-open path until gcc3 wires this
-  end-to-end.
+- `Handle` carries a single `Store` and exposes it only through the
+  contract-typed `Store()` accessor — never a concrete backend.
+- The singleton (and gcc3-bound callers) narrow to the role they need by
+  declaring that role type and assigning from `Store()`; a `Store` is
+  already every role. One accessor, no duplicated narrowing code.
+- `Store()` is nil-safe: an unset handle yields a nil `Store` (hence a
+  nil narrowed role), so callers keep their existing direct-open path
+  until gcc3 wires this end-to-end.
 
 This closes di-refactor OD-1's path (A) "with teeth": the singleton is
 justified by the provider-owns-concurrency rationale, not waved through.
@@ -117,8 +123,9 @@ justified by the provider-owns-concurrency rationale, not waved through.
   interfaces composed into `Store` (godoc + this file).
 - Compile-time assertions for the composed `Store` AND each role against
   `(*SQLiteStore)(nil)` and `(*PostgresStore)(nil)`.
-- Define the contract-typed `Handle` boundary with whole-store and
-  role-narrowed accessors the Deps singleton will hold.
+- Define the contract-typed `Handle` boundary with a single nil-safe
+  `Store()` accessor the Deps singleton will hold; callers narrow to a
+  role by declaring the role type and assigning from `Store()`.
 
 **Deferred (gated on review of this contract):**
 
