@@ -51,10 +51,12 @@ Autonomous agents already behave like a workflow system — resuming work across
 
 ## The Solution
 
-**dot-agents** solves both problems in layers:
+**dot-agents** solves both problems in layers, both shipping today:
 
-- **Today**: Unified config management — one source of truth, distributed automatically
-- **Next**: Workflow management — agents orient, persist, and propose changes autonomously
+- **Config management** — one source of truth, distributed automatically
+- **Workflow management** — agents orient, persist, delegate, and propose
+  changes autonomously, backed by a local knowledge graph of structured
+  project memory (`da kg`)
 
 ### Layer 1: Config Management (Shipped)
 
@@ -79,6 +81,8 @@ Autonomous agents already behave like a workflow system — resuming work across
 │   └── myproject/
 ├── settings/                # Agent-specific settings
 │   └── global/
+├── hooks/                   # Canonical hook bundles
+│   └── global/
 └── mcp/                     # MCP server configurations
     └── global/
 ```
@@ -99,7 +103,10 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 Workflow-state management ships today through `da workflow`: agents orient at
 session start, persist checkpoints and verification state as they go, manage
 canonical plans and tasks, delegate bounded fan-out work, and queue
-rule/skill/config changes for human review through `da review`.
+rule/skill/config changes for human review through `da review`. Orient and
+related context draw on the local knowledge graph (`da kg`) — structured
+project memory and a code graph that let agents resume with what was already
+learned (see the [Knowledge Graph](#knowledge-graph) section).
 
 | Primitive | What It Does | Status |
 |-----------|-------------|--------|
