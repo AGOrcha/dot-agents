@@ -63,3 +63,5 @@ internal/platform/plugins.go                               # [legacy-tail] 93.41
 internal/platform/render_manifest.go                       # [legacy-tail] 93.94%; cg6 ratchet-loop raises to >=95%
 internal/platform/resource_plan.go                         # [legacy-tail] 94.47%; cg6 ratchet-loop raises to >=95%
 internal/projectsync/promote.go                            # [legacy-tail] 94.02%; cg6 ratchet-loop raises to >=95%
+internal/globalflagcov/analyze.go                          # [defensive-guards] 89.58% local; residue is unreachable pc==0 / FuncForPC==nil guards on a known-valid handler func, plus the "no handler symbol" note unproducible by a wired cobra command
+internal/globalflagcov/static.go                           # [defensive-guards] 91.21% local; residue is malformed-AST/types guards (nil TypesInfo, non-*types.Func defs, packages.Load failure) that the real ./commands type-check pipeline never yields

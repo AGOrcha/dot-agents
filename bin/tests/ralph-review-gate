@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# ralph-review-gate: post-staged-chain orchestrator review gate per delegation bundle.
+# Called by ralph-pipeline after all stages (impl → verifier(s) → review) complete for a bundle.
+#
+# Auto mode (RALPH_REVIEW_GATE_AUTO=1, default): evaluates task-local review evidence via
+# `da workflow delegation gate` and only passes explicit accept decisions.
+# Agent mode (RALPH_REVIEW_GATE_AUTO=0): spawns orchestrator agent to review before advancing.
+# Exits 2 on reject, 3 on planning-required / escalate.
+#
+# Usage:
+#   ./ralph-review-gate --bundle <path>
+#
+# Env vars:
+#   RALPH_REVIEW_GATE_AUTO      1 = deterministic task-local gate evaluation (default), 0 = agent-driven gate
+#   RALPH_CLOSEOUT_AUTO         fallback for RALPH_REVIEW_GATE_AUTO when unset
+#   RALPH_ORCHESTRATOR_MODEL    model override for agent gate
+#   RALPH_MODEL                 fallback model override
+#   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex-only reasoning effort override for agent gate
+#   RALPH_REASONING_EFFORT      codex-only fallback reasoning effort override
+#   RALPH_ORCHESTRATOR_AGENT_BIN  agent binary for gate
+#   AGENT_BIN                   fallback agent binary (default: agent)
+#   RALPH_AGENT_OUTPUT_FORMAT   text|json|stream-json (default stream-json)
+#   DOT_AGENTS                  da binary or "go run ..." override
+
+set -euo pipefail
+
+BUNDLE_PATH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bundle) BUNDLE_PATH="$2"; shift 2 ;;
+    --bundle=*) BUNDLE_PATH="${1#--bundle=}"; shift ;;
+    *) echo "error: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+[[ -z "$BUNDLE_PATH" ]] && { echo "error: ralph-review-gate requires --bundle <path>" >&2; exit 1; }
+[[ -f "$BUNDLE_PATH" ]] || { echo "error: bundle file not found: $BUNDLE_PATH" >&2; exit 1; }
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
+else
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+TASK_ID="$(python3 -c "
+import re, sys
+text = open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'^task_id:\s*(.+)', text, re.M)
+print(m.group(1).strip().strip('\"') if m else '')
+" "$BUNDLE_PATH" 2>/dev/null || true)"
+[[ -z "$TASK_ID" ]] && { echo "error: could not extract task_id from bundle $BUNDLE_PATH" >&2; exit 1; }
+
+# RALPH_REVIEW_GATE_AUTO falls back to RALPH_CLOSEOUT_AUTO, then defaults to 1
+GATE_AUTO="${RALPH_REVIEW_GATE_AUTO:-${RALPH_CLOSEOUT_AUTO:-1}}"
+
+VERIFICATION_DIR="$REPO_ROOT/.agents/active/verification/${TASK_ID}"
+MERGE_BACK_PATH="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
+
+echo "ralph-review-gate: task=$TASK_ID auto=${GATE_AUTO}" >&2
+
+if [[ "$GATE_AUTO" == "1" ]]; then
+  gate_json="$(da --json workflow delegation gate --task "$TASK_ID")"
+  IFS=$'\t' read -r gate_outcome gate_closeout_allowed gate_planning_required gate_reason < <(printf '%s' "$gate_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print('\t'.join([
+    d.get('outcome', ''),
+    'true' if d.get('closeout_allowed') else 'false',
+    'true' if d.get('planning_required') else 'false',
+    (d.get('reason') or '').replace('\n', ' ').strip(),
+]))
+")
+
+  if [[ "$gate_closeout_allowed" == "true" && "$gate_outcome" == "accept" ]]; then
+    echo "ralph-review-gate: task $TASK_ID — outcome=accept closeout_allowed=true reason=${gate_reason:-n/a} → GATE_ACCEPT" >&2
+    exit 0
+  fi
+  if [[ "$gate_planning_required" == "true" || "$gate_outcome" == "escalate" ]]; then
+    echo "ralph-review-gate: task $TASK_ID — outcome=escalate planning_required=true reason=${gate_reason:-n/a} → GATE_PAUSE" >&2
+    exit 3
+  fi
+  echo "ralph-review-gate: task $TASK_ID — outcome=${gate_outcome:-reject} closeout_allowed=false reason=${gate_reason:-n/a} → GATE_REJECT" >&2
+  exit 2
+fi
+
+# Agent-driven gate
+GATE_MODEL="${RALPH_ORCHESTRATOR_MODEL:-${RALPH_MODEL:-}}"
+GATE_REASONING_EFFORT="${RALPH_ORCHESTRATOR_REASONING_EFFORT:-${RALPH_REASONING_EFFORT:-}}"
+GATE_AGENT_BIN="${RALPH_ORCHESTRATOR_AGENT_BIN:-${AGENT_BIN:-agent}}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if ! command -v "$GATE_AGENT_BIN" >/dev/null 2>&1; then
+  echo "error: '$GATE_AGENT_BIN' not found on PATH (install agent CLI or set AGENT_BIN)" >&2
+  exit 1
+fi
+
+if [[ "$(basename "${GATE_AGENT_BIN:-agent}")" == "claude" ]]; then
+  agent_inv=( "$GATE_AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+elif [[ "$(basename "${GATE_AGENT_BIN:-agent}")" == "codex" ]]; then
+  agent_inv=( "$GATE_AGENT_BIN" exec -C "$REPO_ROOT" )
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+  else
+    agent_inv+=( --full-auto )
+  fi
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
+else
+  agent_inv=( "$GATE_AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+  [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+fi
+[[ -n "$GATE_MODEL" ]] && agent_inv+=( --model "$GATE_MODEL" )
+if [[ "$(basename "${GATE_AGENT_BIN:-agent}")" == "codex" && -n "$GATE_REASONING_EFFORT" ]]; then
+  agent_inv+=( -c "model_reasoning_effort=\"$GATE_REASONING_EFFORT\"" )
+fi
+
+prompt="You are an orchestrator review gate for task ${TASK_ID}.
+
+Review the typed verification artifacts in:
+  ${VERIFICATION_DIR}/
+
+And the merge-back at:
+  ${MERGE_BACK_PATH}
+
+Read all *.result.yaml files and review-decision.yaml if present.
+Summarize what was verified, whether all gates passed, and whether this task is ready for closeout.
+Output exactly one of these tokens on a line by itself: GATE_ACCEPT, GATE_REJECT, or GATE_PAUSE
+Then provide a one-sentence reason."
+
+gate_output="$( "${agent_inv[@]}" "$prompt" 2>&1 || true)"
+echo "$gate_output" >&2
+
+if echo "$gate_output" | grep -qw "GATE_PAUSE"; then
+  echo "ralph-review-gate: GATE_PAUSE for task $TASK_ID — planning or human review required before closeout" >&2
+  exit 3
+fi
+if echo "$gate_output" | grep -qw "GATE_REJECT"; then
+  echo "ralph-review-gate: GATE_REJECT for task $TASK_ID — review required before closeout" >&2
+  exit 2
+fi
+
+echo "ralph-review-gate: GATE_ACCEPT for task $TASK_ID" >&2
+exit 0

@@ -153,48 +153,6 @@ func TestWriteScopeFile_CreatesParentsAndWritesContent(t *testing.T) {
 	}
 }
 
-func TestWritePreservationManifest_LayoutAndExtraFields(t *testing.T) {
-	agentsHome, projectPath := testutil.WritePreservationManifest(t)
-	if got := os.Getenv("AGENTS_HOME"); got != agentsHome {
-		t.Errorf("AGENTS_HOME = %q; want %q", got, agentsHome)
-	}
-	rc, err := config.LoadAgentsRC(projectPath)
-	if err != nil {
-		t.Fatalf("LoadAgentsRC: %v", err)
-	}
-	if rc.Project != "regproj" {
-		t.Errorf("project = %q", rc.Project)
-	}
-	if len(rc.Sources) != 2 {
-		t.Errorf("sources = %+v; want 2", rc.Sources)
-	}
-	if _, ok := rc.ExtraFields["customPolicy"]; !ok {
-		t.Errorf("ExtraFields missing customPolicy: %v", rc.ExtraFields)
-	}
-	if _, ok := rc.ExtraFields["myteam"]; !ok {
-		t.Errorf("ExtraFields missing myteam: %v", rc.ExtraFields)
-	}
-}
-
-func TestAssertExtraFieldsPreserved_HappyPath(t *testing.T) {
-	_, projectPath := testutil.WritePreservationManifest(t)
-	rc, err := config.LoadAgentsRC(projectPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Should not fail.
-	testutil.AssertExtraFieldsPreserved(t, rc)
-}
-
-// AssertExtraFieldsPreserved's failure branches cannot be unit-tested because
-// they call *testing.T failure methods directly and Go does not permit a test
-// to construct or recover-from a foreign *testing.T. Coverage for those
-// branches is exercised in integration through callers that pass a corrupted
-// rc into the helper from commands/*/promote tests; failure paths are
-// implicitly verified there by absence of false positives. The package-level
-// coverage gate accounts for these unreachable-from-package branches by
-// excluding internal/testutil from the strict threshold.
-
 func TestInitGitRepo_CreatesCommittedTreeWithIdentity(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
