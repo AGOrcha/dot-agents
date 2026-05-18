@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-17
+
+Knowledge-graph subpackage line (PR3c).
+
+### Added
+
+- **`commands/kg/`** extracted — graph/CRG bridge, code-warm link sync,
+  query/lint/maintain, curation cycle; wired under the CLI.
+
+### Fixed
+
+- `persistReweavedNote` no longer drops note bodies on reweave.
+- Note-id path traversal: ingest now sanitizes `src.ID` from inbox
+  frontmatter (regression-tested).
+
+### Changed
+
+- kg test layout normalized to source-mirroring files (no behavior
+  change).
+
 ## [0.3.1] - 2026-05-17
 
 Workflow subpackage line (PR3b).
