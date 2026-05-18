@@ -206,24 +206,27 @@ This matrix compares official project-level locations only.
 
 This section is about the current repo implementation, not upstream platform behavior.
 
+The legacy `src/` bash implementation has been retired; the Go CLI (`da`) is
+now the sole implementation. Audit notes below describe the Go implementation.
+
 ### Current Path Strategy by Platform
 
 | Platform | Current project links in this repo | Notable difference from official docs |
 |----------|------------------------------------|---------------------------------------|
-| Cursor | `.cursor/rules/`, `.cursor/settings.json`, `.cursor/mcp.json`, `.cursor/hooks.json`, `.cursorignore`, `.claude/agents/` | Cursor-native agents would be `.cursor/agents/`, but both Go and bash implementations currently target `.claude/agents/` for compatibility reuse. The repo already manages `.cursorignore`, but not `.cursorindexingignore` or `.cursor/commands/`. |
+| Cursor | `.cursor/rules/`, `.cursor/settings.json`, `.cursor/mcp.json`, `.cursor/hooks.json`, `.cursorignore`, `.claude/agents/` | Cursor-native agents would be `.cursor/agents/`, but the implementation currently targets `.claude/agents/` for compatibility reuse. The repo already manages `.cursorignore`, but not `.cursorindexingignore` or `.cursor/commands/`. |
 | Claude Code | `.claude/rules/`, `.claude/settings.local.json`, `.mcp.json`, `.claude/agents/`, `.claude/skills/`, `.agents/skills/` | Official Claude skills docs only mention `.claude/skills/`; this repo also mirrors project skills into `.agents/skills/` for shared-tool compatibility. |
-| Codex | `AGENTS.md`, `.codex/config.toml`, `.claude/agents/`, `.agents/skills/` | Codex-native subagents are documented under `.codex/agents/*.toml`, but both Go and bash implementations currently place project agents in `.claude/agents/`. |
-| OpenCode | `opencode.json`, `.opencode/agent/`, `.agents/skills/` | OpenCode-native skills are documented under `.opencode/skills/`, but current Go and bash implementations rely on the `.agents/skills/` compatibility path instead. |
-| GitHub Copilot | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.agents/skills/`, `.vscode/mcp.json`, `.claude/settings.local.json`, and Go-only `.github/hooks/*.json` | `.agents/skills/` and `.vscode/mcp.json` are officially documented Copilot CLI locations, but this repo still skips other official Copilot locations such as `.github/skills/`, `.claude/skills/`, `.github/mcp.json`, and `.mcp.json`. Bash also still lacks `.github/hooks/*.json` output. |
+| Codex | `AGENTS.md`, `.codex/config.toml`, `~/.codex/agents/*.toml` (user scope), repo `.codex/agents/*.toml`, `~/.codex/hooks.json` + repo `.codex/hooks.json`, `.agents/skills/` | Codex-native subagents are rendered as `.codex/agents/*.toml` (not `.claude/agents/`). Repo-level `.codex/agents/*.toml` and the Claude shared-skills projection ARE produced by `da refresh` / `install` / `add` (they invoke the shared-target projection before per-platform linking). Known narrow gap: the import-relink path (`relinkImportedProjects`) and the `doctor` broken-link repair path call `CreateLinks` without first running the projection — tracked in `.agents/proposals/codex-hooks-agents-linking-gap.md` and the `shared-target-projection-wiring` plan. |
+| OpenCode | `opencode.json`, `.opencode/agent/`, `.agents/skills/` | OpenCode-native skills are documented under `.opencode/skills/`, but the current implementation relies on the `.agents/skills/` compatibility path instead. |
+| GitHub Copilot | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.agents/skills/`, `.vscode/mcp.json`, `.claude/settings.local.json`, `.github/hooks/*.json` | `.agents/skills/` and `.vscode/mcp.json` are officially documented Copilot CLI locations, but this repo still skips other official Copilot locations such as `.github/skills/`, `.claude/skills/`, `.github/mcp.json`, and `.mcp.json`. |
 
 ### Hook Wiring Audit
 
-Validated from the current Go and bash implementations:
+Validated from the current Go implementation:
 
-| Platform | Official hook location | Go implementation | Bash implementation | Notes |
-|----------|------------------------|-------------------|---------------------|-------|
-| Claude Code | `.claude/settings*.json` | Yes | Yes | Both wire Claude-compatible hook settings, but the management commands still source from `~/.agents/settings/*/claude-code.json` or `~/.agents/hooks/*/claude-code.json`, not from native Claude files. |
-| Cursor | `.cursor/hooks.json` | Yes | No | Go wires `~/.agents/hooks/{scope}/cursor.json` to project and user `hooks.json`; bash has no Cursor hook creation path. |
-| Codex | `.codex/hooks.json` | No | No | Both implementations link `AGENTS.md`, `.codex/config.toml`, skills, and agents, but neither creates `.codex/hooks.json`. |
-| GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Partial | Go links project `.github/hooks/*.json` and also wires Claude-compatible settings. Bash only wires Claude-compatible settings and does not create `.github/hooks/*.json`. |
-| OpenCode | No dedicated hook file documented | No | No | No OpenCode-specific hook handling is implemented here. |
+| Platform | Official hook location | Go implementation | Notes |
+|----------|------------------------|-------------------|-------|
+| Claude Code | `.claude/settings*.json` | Yes | Wires Claude-compatible hook settings, but the management commands still source from `~/.agents/settings/*/claude-code.json` or `~/.agents/hooks/*/claude-code.json`, not from native Claude files. |
+| Cursor | `.cursor/hooks.json` | Yes | Wires `~/.agents/hooks/{scope}/cursor.json` to project and user `hooks.json`. |
+| Codex | `.codex/hooks.json` | Yes | Renders and writes repo `.codex/hooks.json` and user `~/.codex/hooks.json` via `renderCodexHookConfig` (`internal/platform/codex.go`, `internal/platform/hooks.go`); managed regular file, not a symlink. |
+| GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. |
+| OpenCode | No dedicated hook file documented | No | No OpenCode-specific hook handling is implemented here. |
