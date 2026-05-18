@@ -1,0 +1,15 @@
+# coverage-gate per-file exceptions allowlist
+#
+# A file BELOW the per-file coverage threshold that is NOT pattern-excluded
+# must be listed here WITH A ONE-LINE RATIONALE, or the per-file gate
+# reports it as a violation (FAIL in enforce mode).
+#
+# Format (rationale is mandatory — a path with no "# <text>" is a hard error):
+#   path/relative/to/repo/file.go    # why this file legitimately can't hit threshold
+#
+# Reviewed like code. If a listed file later reaches the threshold the gate
+# prints STALE-ALLOWLIST — prune the entry. Prefer raising coverage over
+# allowlisting; allowlist only genuinely-untestable code with a real reason.
+#
+# (Phase 1: per-file gate runs in WARN mode — entries are advisory until the
+#  legacy tail is remediated and the gate ratchets to enforce.)
