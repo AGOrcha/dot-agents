@@ -123,7 +123,44 @@ type NoteSymbolLink struct {
 	CreatedAt     float64
 }
 
-// Store is the backend-agnostic interface for all graph operations.
+// Store is the published, backend-agnostic contract for all graph
+// operations. It is the single stable surface that downstream callers and
+// the injected Deps handle bind to — never to a concrete backend
+// (*SQLiteStore, *PostgresStore) or to a process model. Binding to this
+// interface is what makes the ephemeral→pooled→daemon evolution
+// (spec graphstore-concurrency-contract, decision C-Hybrid) a transparent
+// provider swap with no caller-visible change.
+//
+// Provider guarantees (the contract callers may rely on):
+//
+//   - Bounds. Where an operation accepts maxNodes/maxDepth/limit
+//     arguments (e.g. SearchNodes, GetImpactRadius), the provider treats
+//     them as the caller's requested ceiling. The contract's intent is a
+//     hard, uniform cap across the native and CRG paths plus a request
+//     timeout; enforcing that uniformly is the provider's responsibility
+//     (Path A, delivered by gcc2 — not yet enforced by every concrete
+//     store at the time this contract is published).
+//   - Request timeout. Long-running graph traversals are bounded by a
+//     provider-owned request timeout; callers do not implement their own
+//     deadline around Store calls.
+//   - Concurrency ownership. A Store handle is single-goroutine within a
+//     process: callers must not share one handle across goroutines
+//     without their own synchronization. Cross-process safety and write
+//     serialization (SQLite's single-writer/WAL behavior, a connection
+//     pool, or a future broker/daemon) are the PROVIDER's job, not the
+//     caller's and not the Deps singleton's. The Deps singleton is only a
+//     holder of a contract-typed handle (see Handle); it is explicitly
+//     NOT the concurrency story — the provider behind the contract is.
+//   - Lifecycle. Acquiring and releasing a handle is explicit and cheap.
+//     Callers obtain a Store, use it, and Close it; they never manage
+//     backend connections, pools, or subprocess workers directly.
+//
+// The contract is intentionally derived from existing concrete-store
+// usage (the read/write/bounds/lifecycle operations callers already use)
+// and is additive: *SQLiteStore and *PostgresStore already satisfy it
+// (see the compile-time assertions below). Publishing it changes no
+// behavior; gcc2 implements the Path A enforcement internals and gcc3
+// binds all callers + the Deps singleton to this type.
 type Store interface {
 	// Code graph — write
 	UpsertNode(node NodeInfo, fileHash string) (int64, error)
@@ -160,3 +197,41 @@ type Store interface {
 	// Lifecycle
 	Close() error
 }
+
+// Compile-time assertions that the existing concrete stores satisfy the
+// published contract. These pin the interface to real implementations so
+// the contract cannot drift away from what callers actually run, and so
+// the additive nature of this change is verified by the compiler (gcc1
+// changes no behavior — it only publishes and documents the surface).
+var (
+	_ Store = (*SQLiteStore)(nil)
+	_ Store = (*PostgresStore)(nil)
+)
+
+// Handle is the contract-typed boundary the dependency-injection singleton
+// (the package-level `deps` in commands/* — di-refactor OD-1) holds. It
+// deliberately exposes ONLY a contract-typed Store accessor: the singleton
+// is justified solely because it carries a Store whose provider owns
+// pooling and serialization. The singleton is NOT the concurrency story
+// and must never reach a concrete backend; it reads the graph exclusively
+// through Store().
+//
+// Defined here (write scope: internal/graphstore) so the contract and its
+// DI boundary are published together as one reviewable artifact. Binding
+// the actual command-package Deps structs to this handle is gcc3 (refactor
+// all callers) and is intentionally deferred — this type pins the shape
+// gcc3 will adopt without changing any caller now.
+type Handle struct {
+	store Store
+}
+
+// NewHandle wraps a contract-typed Store for the DI singleton to hold.
+// Acquisition is cheap and explicit; the provider behind store owns all
+// connection/pool/serialization concerns.
+func NewHandle(store Store) Handle { return Handle{store: store} }
+
+// Store returns the contract-typed handle. Callers bind to this interface,
+// never to a concrete backend. Returns nil if the handle is unset, letting
+// callers fall back to their existing direct-open path until gcc3 wires
+// this end-to-end.
+func (h Handle) Store() Store { return h.store }
