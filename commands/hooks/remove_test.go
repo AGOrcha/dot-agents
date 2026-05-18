@@ -11,9 +11,32 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
+// fakeHookSpecResolver embeds the real resolver so any method not
+// explicitly overridden delegates to production behavior; each test sets
+// exactly one hook to drive an error into the guard under test.
+type fakeHookSpecResolver struct {
+	defaultHookSpecResolver
+	removalTargetErr error
+	scopeTreeErr     error
+}
+
+func (f fakeHookSpecResolver) RemovalTarget(spec *platform.HookSpec) (string, error) {
+	if f.removalTargetErr != nil {
+		return "", f.removalTargetErr
+	}
+	return f.defaultHookSpecResolver.RemovalTarget(spec)
+}
+
+func (f fakeHookSpecResolver) EnsureUnderScopeTree(agentsHome, scope, target string) error {
+	if f.scopeTreeErr != nil {
+		return f.scopeTreeErr
+	}
+	return f.defaultHookSpecResolver.EnsureUnderScopeTree(agentsHome, scope, target)
+}
+
 // writeBundleHook creates a minimal canonical hook bundle on disk under
-// AGENTS_HOME so findHookSpec resolves successfully and runHooksRemove
-// proceeds to the seam-guarded helper calls.
+// AGENTS_HOME so the real ResolveSpec succeeds and runHooksRemove
+// proceeds to the seam-guarded RemovalTarget / EnsureUnderScopeTree calls.
 func writeBundleHook(t *testing.T, agentsHome, scope, name string) {
 	t.Helper()
 	dir := filepath.Join(agentsHome, "hooks", scope, name)
@@ -29,9 +52,9 @@ run:
 	}
 }
 
-// TestRunHooksRemovePropagatesHookRemovalTargetError forces the
-// hookRemovalTargetFn seam to fail and asserts runHooksRemove returns
-// exactly that error (the guard right after hookRemovalTarget).
+// TestRunHooksRemovePropagatesHookRemovalTargetError injects a resolver
+// whose RemovalTarget fails and asserts runHooksRemove returns exactly
+// that error (the guard right after RemovalTarget).
 func TestRunHooksRemovePropagatesHookRemovalTargetError(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -39,28 +62,24 @@ func TestRunHooksRemovePropagatesHookRemovalTargetError(t *testing.T) {
 	scope := "g"
 	writeBundleHook(t, agentsHome, scope, "alpha")
 
-	sentinel := errors.New("forced hookRemovalTarget failure")
-	orig := hookRemovalTargetFn
-	hookRemovalTargetFn = func(*platform.HookSpec) (string, error) {
-		return "", sentinel
-	}
-	t.Cleanup(func() { hookRemovalTargetFn = orig })
-
+	sentinel := errors.New("forced RemovalTarget failure")
 	deps := testDeps()
 	deps.Flags.Yes = true
+	deps.Resolver = fakeHookSpecResolver{removalTargetErr: sentinel}
+
 	err := runHooksRemove(deps, scope, "alpha")
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected runHooksRemove to propagate the hookRemovalTarget error verbatim, got: %v", err)
+		t.Fatalf("expected runHooksRemove to propagate the RemovalTarget error verbatim, got: %v", err)
 	}
 	// The bundle must remain — removal never ran.
 	if _, statErr := os.Stat(filepath.Join(agentsHome, "hooks", scope, "alpha")); statErr != nil {
-		t.Fatalf("bundle must be intact when hookRemovalTarget fails, stat err=%v", statErr)
+		t.Fatalf("bundle must be intact when RemovalTarget fails, stat err=%v", statErr)
 	}
 }
 
-// TestRunHooksRemovePropagatesScopeTreeGuardError forces the
-// ensureUnderHooksScopeTreeFn seam to fail and asserts runHooksRemove
-// returns exactly that error (the guard right after the scope-tree check).
+// TestRunHooksRemovePropagatesScopeTreeGuardError injects a resolver
+// whose EnsureUnderScopeTree fails and asserts runHooksRemove returns
+// exactly that error (the guard right after the scope-tree check).
 func TestRunHooksRemovePropagatesScopeTreeGuardError(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -69,14 +88,10 @@ func TestRunHooksRemovePropagatesScopeTreeGuardError(t *testing.T) {
 	writeBundleHook(t, agentsHome, scope, "beta")
 
 	sentinel := errors.New("forced scope-tree guard failure")
-	orig := ensureUnderHooksScopeTreeFn
-	ensureUnderHooksScopeTreeFn = func(string, string, string) error {
-		return sentinel
-	}
-	t.Cleanup(func() { ensureUnderHooksScopeTreeFn = orig })
-
 	deps := testDeps()
 	deps.Flags.Yes = true
+	deps.Resolver = fakeHookSpecResolver{scopeTreeErr: sentinel}
+
 	err := runHooksRemove(deps, scope, "beta")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected runHooksRemove to propagate the scope-tree guard error verbatim, got: %v", err)
