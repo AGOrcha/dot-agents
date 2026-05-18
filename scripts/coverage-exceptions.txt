@@ -22,9 +22,7 @@
 commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to >=95%
 commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
 commands/doctor.go                                         # [legacy-tail] 94.78%; cg6 ratchet-loop raises to >=95%
-commands/hooks/cmd.go                                      # [legacy-tail] 92.86%; cg6 ratchet-loop raises to >=95%
-commands/hooks/remove.go                                   # [legacy-tail] 89.74%; cg6 ratchet-loop raises to >=95%
-commands/hooks/spec.go                                     # [legacy-tail] 93.75%; cg6 ratchet-loop raises to >=95%
+commands/hooks/remove.go                                   # [defensive-unreachable] 94.87%; 2 residual stmts are err-propagation guards after hookRemovalTarget/ensureUnderHooksScopeTree that findHookSpec's invariants (always-known SourceKind, always-in-tree SourcePath) make unreachable without a production seam
 commands/import_plugins.go                                 # [legacy-tail] 93.39%; cg6 ratchet-loop raises to >=95%
 commands/import.go                                         # [legacy-tail] 94.94%; cg6 ratchet-loop raises to >=95%
 commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to >=95%
