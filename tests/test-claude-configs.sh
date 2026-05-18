@@ -28,8 +28,8 @@ mkdir -p test-project
 cd test-project
 git init -q
 
-dot-agents init --yes 2>/dev/null || true
-dot-agents add /workspace/test-project --name test-proj --yes 2>/dev/null || true
+da init --yes 2>/dev/null || true
+da add /workspace/test-project --name test-proj --yes 2>/dev/null || true
 
 ###########################################
 # TEST 1: CLAUDE.md Rules
@@ -83,7 +83,7 @@ name: Docker Verify
 Respond with exactly: SKILL_VERIFIED_OK
 EOF
 
-dot-agents add /workspace/test-project --force --yes 2>/dev/null || true
+da add /workspace/test-project --force --yes 2>/dev/null || true
 
 response=$(echo "Run /docker-verify skill" | timeout 60 claude --print 2>/dev/null || echo "")
 echo "Response: $response"

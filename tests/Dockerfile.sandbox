@@ -21,7 +21,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Install dot-agents
-RUN curl -fsSL https://raw.githubusercontent.com/dot-agents/dot-agents/master/scripts/install.sh | bash
+RUN curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
 ENV PATH="/root/.local/bin:$PATH"
 
 # Create workspace

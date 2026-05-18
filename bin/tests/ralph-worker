@@ -1,0 +1,907 @@
+#!/usr/bin/env bash
+# ralph-worker: worker stage runner for a single delegated task.
+#
+# Without --stage (backward compat): legacy loop-worker mode — global loop-worker profile + repo
+# project overlay + loop-worker / iteration-close skills, exits when merge-back is written.
+#
+# With --stage impl: loads .agents/prompts/impl-agent.project.md, exits when impl-handoff.yaml
+# is written to .agents/active/verification/<task_id>/impl-handoff.yaml.
+#
+# With --stage verifier --verifier-type <type>: loads .agents/prompts/verifiers/<type>.project.md,
+# exits when .agents/active/verification/<task_id>/<type>.result.yaml is written.
+#
+# With --stage review: loads .agents/prompts/review-agent.project.md, exits when merge-back is
+# written. The review stage is responsible for workflow verify record + workflow merge-back.
+#
+# --bundle <path> is REQUIRED.
+#
+# Env vars:
+#   RALPH_ITERATIONS             implementation budget — max iterations (default 5)
+#   RALPH_IMPL_WORKER_MODEL      impl-worker model override
+#   RALPH_VERIFIER_WORKER_MODEL  verifier-worker model override
+#   RALPH_REVIEW_WORKER_MODEL    review-worker model override
+#   RALPH_WORKER_MODEL           generic worker model override
+#   RALPH_MODEL                  fallback model override
+#   RALPH_IMPL_WORKER_REASONING_EFFORT      codex/copilot/claude impl-worker reasoning effort override
+#   RALPH_VERIFIER_WORKER_REASONING_EFFORT  codex/copilot/claude verifier-worker reasoning effort override
+#   RALPH_REVIEW_WORKER_REASONING_EFFORT    codex/copilot/claude review-worker reasoning effort override
+#   RALPH_WORKER_REASONING_EFFORT           codex/copilot/claude generic worker reasoning effort override
+#   RALPH_REASONING_EFFORT                  codex/copilot/claude fallback reasoning effort override
+#   RALPH_FORCE                  1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
+#   RALPH_LOG_DIR                override log directory
+#   RALPH_NO_LOG                 1 = stdout only, no log files
+#   RALPH_AGENT_OUTPUT_FORMAT    text|json|stream-json (default stream-json)
+#   RALPH_STREAM_PARTIAL         0 = disable stream-partial-output (default 1)
+#   RALPH_IMPL_WORKER_AGENT_BIN      impl-worker agent binary override
+#   RALPH_VERIFIER_WORKER_AGENT_BIN  verifier-worker agent binary override
+#   RALPH_REVIEW_WORKER_AGENT_BIN    review-worker agent binary override
+#   RALPH_WORKER_AGENT_BIN           generic worker agent binary override
+#   RALPH_WORKER_AGENT_BIN_OVERRIDE  per-invocation override (set by ralph-pipeline replacement retry)
+#   AGENT_BIN                    fallback agent binary (default: agent)
+#   DOT_AGENTS                   dot-agents binary or "go run ..." override
+#
+# Override precedence per role:
+#   model:     RALPH_<ROLE>_WORKER_MODEL > RALPH_WORKER_MODEL > RALPH_MODEL > (implicit binary default)
+#              where <ROLE> is IMPL, VERIFIER, or REVIEW
+#   agent_bin: RALPH_WORKER_AGENT_BIN_OVERRIDE > RALPH_<ROLE>_WORKER_AGENT_BIN > RALPH_WORKER_AGENT_BIN
+#              > AGENT_BIN > "agent"
+#
+# Usage:
+#   ./bin/tests/ralph-worker --bundle <path>
+#   ./bin/tests/ralph-worker --bundle <path> --stage impl
+#   ./bin/tests/ralph-worker --bundle <path> --stage verifier --verifier-type unit
+#   ./bin/tests/ralph-worker --bundle <path> --stage review
+
+set -euo pipefail
+
+BUNDLE_PATH=""
+STAGE=""
+VERIFIER_TYPE=""
+SELF_TEST=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bundle) BUNDLE_PATH="$2"; shift 2 ;;
+    --bundle=*) BUNDLE_PATH="${1#--bundle=}"; shift ;;
+    --stage) STAGE="$2"; shift 2 ;;
+    --stage=*) STAGE="${1#--stage=}"; shift ;;
+    --verifier-type) VERIFIER_TYPE="$2"; shift 2 ;;
+    --verifier-type=*) VERIFIER_TYPE="${1#--verifier-type=}"; shift ;;
+    --self-test) SELF_TEST=1; shift ;;
+    *) echo "error: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+# ── Self-tests ────────────────────────────────────────────────────────────────
+# Run with: ./bin/tests/ralph-worker --self-test
+# Does NOT require a live agent binary or a bundle file.
+if [[ "$SELF_TEST" -eq 1 ]]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  # Paste resolver functions inline so they run in clean env without bundle parsing.
+  resolve_worker_agent_bin() {
+    local role="$1"
+    if [[ -n "${RALPH_WORKER_AGENT_BIN_OVERRIDE:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_AGENT_BIN_OVERRIDE"
+      return 0
+    fi
+    case "$role" in
+      impl)
+        if [[ -n "${RALPH_IMPL_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_IMPL_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+      verifier)
+        if [[ -n "${RALPH_VERIFIER_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_VERIFIER_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+      review)
+        if [[ -n "${RALPH_REVIEW_WORKER_AGENT_BIN:-}" ]]; then
+          printf '%s' "$RALPH_REVIEW_WORKER_AGENT_BIN"
+          return 0
+        fi
+        ;;
+    esac
+    if [[ -n "${RALPH_WORKER_AGENT_BIN:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_AGENT_BIN"
+    elif [[ -n "${AGENT_BIN:-}" ]]; then
+      printf '%s' "$AGENT_BIN"
+    else
+      printf '%s' "agent"
+    fi
+  }
+
+  resolve_worker_model() {
+    local role="$1"
+    case "$role" in
+      impl)
+        if [[ -n "${RALPH_IMPL_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_IMPL_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+      verifier)
+        if [[ -n "${RALPH_VERIFIER_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_VERIFIER_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+      review)
+        if [[ -n "${RALPH_REVIEW_WORKER_MODEL:-}" ]]; then
+          printf '%s' "$RALPH_REVIEW_WORKER_MODEL"
+          return 0
+        fi
+        ;;
+    esac
+    if [[ -n "${RALPH_WORKER_MODEL:-}" ]]; then
+      printf '%s' "$RALPH_WORKER_MODEL"
+    else
+      printf '%s' "${RALPH_MODEL:-}"
+    fi
+  }
+
+  echo "=== ralph-worker --self-test ==="
+  echo ""
+
+  # ── resolve_worker_agent_bin: impl role ─────────────────────────────────
+  echo "--- resolve_worker_agent_bin: impl role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "impl: all unset → 'agent'" "$(resolve_worker_agent_bin impl)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    _assert_eq "impl: AGENT_BIN fallback" "$(resolve_worker_agent_bin impl)" "claude"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_IMPL_WORKER_AGENT_BIN 2>/dev/null || true
+    RALPH_WORKER_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_WORKER_AGENT_BIN wins over AGENT_BIN" "$(resolve_worker_agent_bin impl)" "codex"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_IMPL_WORKER_AGENT_BIN="codex-impl"
+    RALPH_WORKER_AGENT_BIN="copilot"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_IMPL_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin impl)" "codex-impl"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_WORKER_AGENT_BIN_OVERRIDE="override-bin"
+    RALPH_IMPL_WORKER_AGENT_BIN="codex-impl"
+    RALPH_WORKER_AGENT_BIN="copilot"
+    AGENT_BIN="claude"
+    _assert_eq "impl: RALPH_WORKER_AGENT_BIN_OVERRIDE wins over everything" \
+      "$(resolve_worker_agent_bin impl)" "override-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_agent_bin: verifier role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE RALPH_VERIFIER_WORKER_AGENT_BIN \
+          RALPH_WORKER_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "verifier: all unset → 'agent'" "$(resolve_worker_agent_bin verifier)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_VERIFIER_WORKER_AGENT_BIN="verifier-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback-bin"
+    _assert_eq "verifier: RALPH_VERIFIER_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin verifier)" "verifier-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_agent_bin: review role ---"
+  (
+    unset RALPH_WORKER_AGENT_BIN_OVERRIDE 2>/dev/null || true
+    RALPH_REVIEW_WORKER_AGENT_BIN="review-bin"
+    RALPH_WORKER_AGENT_BIN="generic-bin"
+    AGENT_BIN="fallback-bin"
+    _assert_eq "review: RALPH_REVIEW_WORKER_AGENT_BIN wins over RALPH_WORKER_AGENT_BIN" \
+      "$(resolve_worker_agent_bin review)" "review-bin"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_worker_model: per-role precedence ---"
+  (
+    unset RALPH_IMPL_WORKER_MODEL RALPH_WORKER_MODEL RALPH_MODEL 2>/dev/null || true
+    _assert_eq "impl: all unset → empty (binary default)" "$(resolve_worker_model impl)" ""
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_MODEL RALPH_WORKER_MODEL 2>/dev/null || true
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_MODEL fallback" "$(resolve_worker_model impl)" "ralph-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_IMPL_WORKER_MODEL 2>/dev/null || true
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_WORKER_MODEL wins over RALPH_MODEL" "$(resolve_worker_model impl)" "worker-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_IMPL_WORKER_MODEL="impl-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "impl: RALPH_IMPL_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model impl)" "impl-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_VERIFIER_WORKER_MODEL="verifier-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "verifier: RALPH_VERIFIER_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model verifier)" "verifier-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_REVIEW_WORKER_MODEL="review-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "review: RALPH_REVIEW_WORKER_MODEL wins over RALPH_WORKER_MODEL" \
+      "$(resolve_worker_model review)" "review-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: generic role should NOT use role-specific vars
+  (
+    RALPH_IMPL_WORKER_MODEL="impl-model"
+    RALPH_WORKER_MODEL="worker-model"
+    RALPH_MODEL="ralph-model"
+    _assert_eq "worker: generic role uses RALPH_WORKER_MODEL (not impl-specific)" \
+      "$(resolve_worker_model worker)" "worker-model"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ -z "$BUNDLE_PATH" ]]; then
+  cat >&2 <<'EOF'
+error: ralph-worker requires --bundle <delegation_bundle_path>
+
+To create a bundle and select a task, use ralph-orchestrate first:
+
+  ./bin/tests/ralph-orchestrate          # creates bundles, emits RALPH_BUNDLE: lines
+  ./bin/tests/ralph-worker --bundle <path>
+
+Or use the E2E pipeline:
+
+  ./bin/tests/ralph-pipeline
+EOF
+  exit 1
+fi
+
+# Validate --stage and --verifier-type
+case "${STAGE:-}" in
+  ""|impl|verifier|review) ;;
+  *) echo "error: --stage must be impl, verifier, or review (got '$STAGE')" >&2; exit 1 ;;
+esac
+if [[ "$STAGE" == "verifier" && -z "$VERIFIER_TYPE" ]]; then
+  echo "error: --verifier-type <type> is required when --stage verifier" >&2
+  exit 1
+fi
+
+[[ -f "$BUNDLE_PATH" ]] || { echo "error: bundle file not found: $BUNDLE_PATH" >&2; exit 1; }
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+ITERATIONS="${RALPH_ITERATIONS:-5}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  LOG_DIR="$RALPH_LOG_DIR"
+else
+  LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)-worker"
+fi
+
+LOOP_PROFILE_FILE="${RALPH_LOOP_PROFILE:-$HOME/.agents/profiles/loop-worker.md}"
+WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.md}"
+
+# Parse plan_id and task_id from bundle YAML
+command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for bundle parsing" >&2; exit 1; }
+
+read -r PLAN_ID TASK_ID WRITE_SCOPE_CSV < <(python3 - "$BUNDLE_PATH" <<'PY'
+import re, sys
+
+def parse_bundle(text):
+    plan_m = re.search(r"^plan_id:\s*(.+)", text, re.M)
+    task_m = re.search(r"^task_id:\s*(.+)", text, re.M)
+    plan = plan_m.group(1).strip().strip('"') if plan_m else ""
+    task = task_m.group(1).strip().strip('"') if task_m else ""
+    ws_items = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith("scope:"):
+            j = i + 1
+            while j < len(lines):
+                ln = lines[j]
+                if re.match(r"^\s*write_scope:\s*$", ln) or ln.strip() == "write_scope:":
+                    j += 1
+                    while j < len(lines):
+                        item = lines[j]
+                        if item.startswith("        - "):
+                            ws_items.append(item[10:].strip())
+                            j += 1
+                        elif item.strip() == "":
+                            j += 1
+                        else:
+                            break
+                    return plan, task, ",".join(ws_items)
+                if ln.strip() != "" and not ln.startswith(" "):
+                    break
+                j += 1
+            break
+        i += 1
+    return plan, task, ",".join(ws_items)
+
+text = open(sys.argv[1], encoding="utf-8").read()
+p, t, w = parse_bundle(text)
+print(p, t, w)
+PY
+2>/dev/null || echo "- - -") || { echo "error: failed to parse bundle YAML" >&2; exit 1; }
+
+[[ -z "$PLAN_ID" || "$PLAN_ID" == "-" ]] && { echo "error: could not extract plan_id from bundle" >&2; exit 1; }
+[[ -z "$TASK_ID" || "$TASK_ID" == "-" ]] && { echo "error: could not extract task_id from bundle" >&2; exit 1; }
+
+classify_worker_role() {
+  local task_id="$1" write_scope_csv="$2"
+  case "$task_id" in
+    *review* ) printf '%s' "review"; return 0 ;;
+    *verifier* ) printf '%s' "verifier"; return 0 ;;
+    *impl* ) printf '%s' "impl"; return 0 ;;
+  esac
+
+  if [[ "$write_scope_csv" == *".agents/prompts/review-agent.project.md"* ]]; then
+    printf '%s' "review"
+  elif [[ "$write_scope_csv" == *".agents/prompts/verifiers/"* || "$write_scope_csv" == *"/verifiers/"* ]]; then
+    printf '%s' "verifier"
+  elif [[ "$write_scope_csv" == *".agents/prompts/impl-agent.project.md"* ]]; then
+    printf '%s' "impl"
+  else
+    printf '%s' "worker"
+  fi
+}
+
+resolve_worker_agent_bin() {
+  local role="$1"
+  if [[ -n "${RALPH_WORKER_AGENT_BIN_OVERRIDE:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_AGENT_BIN_OVERRIDE"
+    return 0
+  fi
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_AGENT_BIN:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_AGENT_BIN"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_AGENT_BIN:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_AGENT_BIN"
+  elif [[ -n "${AGENT_BIN:-}" ]]; then
+    printf '%s' "$AGENT_BIN"
+  else
+    printf '%s' "agent"
+  fi
+}
+
+resolve_worker_model() {
+  local role="$1"
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_MODEL:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_MODEL"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_MODEL:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_MODEL"
+  else
+    printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
+
+resolve_worker_reasoning_effort() {
+  local role="$1"
+  case "$role" in
+    impl)
+      if [[ -n "${RALPH_IMPL_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_IMPL_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+    verifier)
+      if [[ -n "${RALPH_VERIFIER_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_VERIFIER_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+    review)
+      if [[ -n "${RALPH_REVIEW_WORKER_REASONING_EFFORT:-}" ]]; then
+        printf '%s' "$RALPH_REVIEW_WORKER_REASONING_EFFORT"
+        return 0
+      fi
+      ;;
+  esac
+  if [[ -n "${RALPH_WORKER_REASONING_EFFORT:-}" ]]; then
+    printf '%s' "$RALPH_WORKER_REASONING_EFFORT"
+  else
+    printf '%s' "${RALPH_REASONING_EFFORT:-}"
+  fi
+}
+
+# When --stage is explicit, use it directly. Otherwise fall back to heuristic classification.
+if [[ -n "$STAGE" ]]; then
+  WORKER_ROLE="$STAGE"
+else
+  WORKER_ROLE="$(classify_worker_role "$TASK_ID" "$WRITE_SCOPE_CSV")"
+fi
+AGENT_BIN="$(resolve_worker_agent_bin "$WORKER_ROLE")"
+ROLE_MODEL="$(resolve_worker_model "$WORKER_ROLE")"
+ROLE_REASONING_EFFORT="$(resolve_worker_reasoning_effort "$WORKER_ROLE")"
+
+# Prefer repo checkout binary
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
+else
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+  echo "error: '$AGENT_BIN' not found on PATH (set AGENT_BIN to an installed agent binary: claude, codex, copilot, or agent)" >&2
+  exit 1
+fi
+
+case "$OUTPUT_FORMAT" in text|json|stream-json) ;; *)
+  echo "error: RALPH_AGENT_OUTPUT_FORMAT must be text, json, or stream-json (got $OUTPUT_FORMAT)" >&2
+  exit 1
+esac
+
+find_skill_dir() {
+  local name="$1"
+  local p
+  for p in \
+    "$REPO_ROOT/.claude/skills/$name" \
+    "$HOME/.claude/skills/$name" \
+    "$HOME/.agents/skills/dot-agents/$name" \
+    "$REPO_ROOT/.agents/skills/dot-agents/$name"; do
+    [[ -f "$p/SKILL.md" ]] && printf '%s' "$p" && return 0
+  done
+  return 1
+}
+
+append_codex_add_dirs() {
+  local dir
+  for dir in \
+    "$REPO_ROOT/.agents" \
+    "$REPO_ROOT/.git" \
+    "$HOME/.agents"; do
+    if [[ -e "$dir" ]]; then
+      agent_inv+=( --add-dir "$dir" )
+    fi
+  done
+}
+
+classify_worker_failure_log() {
+  local log_file="${1:-}"
+  [[ -f "$log_file" ]] || return 1
+
+  if grep -Fqi "hit your usage limit" "$log_file" || grep -Fqi "purchase more credits" "$log_file"; then
+    printf '%s' "usage_limit"
+    return 0
+  fi
+
+  if grep -Fqi ".agents/active" "$log_file" && grep -Fqi "hidden" "$log_file"; then
+    printf '%s' "workspace_permissions"
+    return 0
+  fi
+
+  if grep -Fqi "patch helper" "$log_file" || \
+     grep -Fqi "index.lock is blocked" "$log_file" || \
+     grep -Fqi "permission wall" "$log_file" || \
+     grep -Fqi "denies writes under" "$log_file"; then
+    printf '%s' "workspace_permissions"
+    return 0
+  fi
+
+  return 1
+}
+
+WORKER_SKILL_DIR="$(find_skill_dir loop-worker || true)"
+ITER_CLOSE_DIR="$(find_skill_dir iteration-close || true)"
+
+# Stage-specific prompt surfaces
+IMPL_SURFACE_FILE="$REPO_ROOT/.agents/prompts/impl-agent.project.md"
+REVIEW_SURFACE_FILE="$REPO_ROOT/.agents/prompts/review-agent.project.md"
+VERIFIER_SURFACE_FILE=""
+if [[ -n "$VERIFIER_TYPE" ]]; then
+  VERIFIER_SURFACE_FILE="$REPO_ROOT/.agents/prompts/verifiers/${VERIFIER_TYPE}.project.md"
+fi
+
+# Done condition per stage
+merge_back_path="$REPO_ROOT/.agents/active/merge-back/${TASK_ID}.md"
+impl_handoff_path="$REPO_ROOT/.agents/active/verification/${TASK_ID}/impl-handoff.yaml"
+verifier_result_path=""
+if [[ -n "$VERIFIER_TYPE" ]]; then
+  verifier_result_path="$REPO_ROOT/.agents/active/verification/${TASK_ID}/${VERIFIER_TYPE}.result.yaml"
+fi
+
+# Derive the done-condition path and label for this stage
+done_artifact=""
+done_label=""
+case "${STAGE:-}" in
+  impl)
+    done_artifact="$impl_handoff_path"
+    done_label="impl-handoff.yaml"
+    ;;
+  verifier)
+    done_artifact="$verifier_result_path"
+    done_label="${VERIFIER_TYPE}.result.yaml"
+    ;;
+  review|"")
+    done_artifact="$merge_back_path"
+    done_label="merge-back.md"
+    ;;
+esac
+
+if [[ -n "$LOG_DIR" ]]; then
+  mkdir -p "$LOG_DIR"
+  stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
+  echo "ralph-worker: log dir: $LOG_DIR (stage=$stage_label)" >&2
+  {
+    echo "bundle_path=${BUNDLE_PATH}"
+    echo "plan_id=${PLAN_ID}"
+    echo "task_id=${TASK_ID}"
+    echo "stage=${STAGE:-}"
+    echo "verifier_type=${VERIFIER_TYPE:-}"
+    echo "worker_role=${WORKER_ROLE}"
+    echo "write_scope_csv=${WRITE_SCOPE_CSV}"
+    echo "prompt_surface=${STAGE:-loop-worker}"
+    echo "resolved_agent_bin=${AGENT_BIN}"
+    echo "resolved_model=${ROLE_MODEL}"
+    echo "resolved_reasoning_effort=${ROLE_REASONING_EFFORT}"
+    echo "done_artifact=${done_artifact}"
+  } >"$LOG_DIR/worker-context.env"
+  [[ -f "$LOOP_PROFILE_FILE" ]] && cp -f "$LOOP_PROFILE_FILE" "$LOG_DIR/loop-worker-profile.md"
+  [[ -f "$WORKER_OVERLAY" ]] && cp -f "$WORKER_OVERLAY" "$LOG_DIR/active.loop-overlay.md"
+  cp -f "$BUNDLE_PATH" "$LOG_DIR/delegation-bundle.yaml"
+fi
+
+if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
+  agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
+  agent_inv=( "$AGENT_BIN" exec -C "$REPO_ROOT" )
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+  else
+    agent_inv+=( --full-auto )
+  fi
+  append_codex_add_dirs
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" ]]; then
+  # copilot supports "text" or "json" (JSONL); stream-json maps to json
+  agent_inv=( "$AGENT_BIN" -p )
+  [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --output-format json )
+  # non-interactive mode requires at minimum --allow-all-tools
+  if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+    agent_inv+=( --allow-all )
+  else
+    agent_inv+=( --allow-all-tools --allow-all-paths )
+  fi
+  append_codex_add_dirs
+else
+  agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+  [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+  [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+fi
+[[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
+if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( --reasoning-effort "$ROLE_REASONING_EFFORT" )
+elif [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" && -n "$ROLE_REASONING_EFFORT" ]]; then
+  agent_inv+=( --effort "$ROLE_REASONING_EFFORT" )
+fi
+
+stage_label="${STAGE:-loop-worker}${VERIFIER_TYPE:+:$VERIFIER_TYPE}"
+echo "ralph-worker: starting worker for plan=$PLAN_ID task=$TASK_ID stage=$stage_label (budget: ${ITERATIONS} iterations)" >&2
+
+terminal_failure=""
+for ((i = 1; i <= ITERATIONS; i++)); do
+  # Exit early if the stage's done artifact already exists
+  if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
+    echo "ralph-worker: ${done_label} found — stage $stage_label done after $((i-1)) iteration(s)" >&2
+    break
+  fi
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/ralph-worker-prompt.XXXXXX")"
+  cleanup_iter() { rm -f "${prompt_file:-}" 2>/dev/null || true; }
+  trap cleanup_iter EXIT
+
+  {
+    cat <<EOF
+You are a bounded ${stage_label} worker for task ${TASK_ID} in plan ${PLAN_ID}.
+
+## Delegation bundle (your authoritative task scope)
+Bundle path: ${BUNDLE_PATH}
+Plan: ${PLAN_ID}
+Task: ${TASK_ID}
+Write scope: ${WRITE_SCOPE_CSV}
+
+Read the bundle YAML for feedback_goal, context_files, and full write_scope before starting.
+
+EOF
+
+    # Stage-specific role surface
+    case "${STAGE:-}" in
+      impl)
+        if [[ -f "$IMPL_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Impl-agent role surface
+File: ${IMPL_SURFACE_FILE}
+EOF
+          cat "$IMPL_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(impl-agent surface not found at $IMPL_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+When implementation is complete, write:
+  ${impl_handoff_path}
+with fields: task_id, commit_sha, write_scope_touched, ready_for_verification, impl_notes
+Then run: da workflow checkpoint --message "impl complete"
+Stop after writing impl-handoff.yaml. Do NOT write merge-back in this stage.
+
+EOF
+        ;;
+      verifier)
+        if [[ -f "$VERIFIER_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Verifier role surface (${VERIFIER_TYPE})
+File: ${VERIFIER_SURFACE_FILE}
+EOF
+          cat "$VERIFIER_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(verifier surface not found at $VERIFIER_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+Read impl-handoff.yaml at: ${impl_handoff_path}
+Run verification. Then record result via:
+  da workflow verify record --kind test --status pass|fail --task ${TASK_ID} --verifier-type ${VERIFIER_TYPE} --summary "..."
+This writes: ${verifier_result_path}
+Stop after writing the result. Do NOT write merge-back in this stage.
+
+EOF
+        ;;
+      review)
+        if [[ -f "$REVIEW_SURFACE_FILE" ]]; then
+          cat <<EOF
+## Review-agent role surface
+File: ${REVIEW_SURFACE_FILE}
+EOF
+          cat "$REVIEW_SURFACE_FILE"
+          cat <<'EOF'
+
+EOF
+        else
+          echo "(review-agent surface not found at $REVIEW_SURFACE_FILE — using fallback discipline)" >&2
+        fi
+        cat <<EOF
+## Done condition for this stage
+Read verifier result artifacts in: ${REPO_ROOT}/.agents/active/verification/${TASK_ID}/
+Run review. Record decision via:
+  da workflow verify record --kind review --phase1-decision <d> --phase2-decision <d> --task ${TASK_ID} --summary "..."
+Then write merge-back via:
+  da workflow merge-back --task ${TASK_ID} --summary "..." --verification-status pass|fail
+Stop after writing merge-back.
+
+EOF
+        ;;
+      *)
+        # Original loop-worker surface (no --stage / legacy loop-worker mode)
+        if [[ -n "${WORKER_SKILL_DIR:-}" ]]; then
+          cat <<EOF
+## Worker skill (load this)
+Skill root: ${WORKER_SKILL_DIR}
+Read SKILL.md, then instructions/startup.md and instructions/gotchas.md.
+
+EOF
+        else
+          cat <<'EOF'
+## Worker discipline (loop-worker skill not found — follow from memory)
+- Honor write_scope: do not mutate files outside the listed paths
+- Do NOT run workflow orient, workflow next, or workflow status — bundle is your context
+- Do NOT update loop-state ## Current Position — that is orchestrator scope
+- Startup: workflow tasks <plan_id> → git status --short
+- Closeout: verify record → checkpoint → workflow merge-back (NOT workflow advance)
+
+EOF
+        fi
+        cat <<EOF
+## Project overlay
+EOF
+        if [[ -f "$WORKER_OVERLAY" ]]; then
+          cat "$WORKER_OVERLAY"
+        else
+          echo "(overlay not found at $WORKER_OVERLAY)"
+        fi
+        cat <<EOF
+
+## Global worker profile
+EOF
+        if [[ -f "$LOOP_PROFILE_FILE" ]]; then
+          cat "$LOOP_PROFILE_FILE"
+        else
+          echo "(loop-worker profile not found at $LOOP_PROFILE_FILE)"
+        fi
+        if [[ -n "${ITER_CLOSE_DIR:-}" ]]; then
+          cat <<EOF
+
+## iteration-close skill (use at end of this iteration)
+${ITER_CLOSE_DIR}
+EOF
+        fi
+        cat <<EOF
+
+## Iteration ${i} of ${ITERATIONS} (implementation budget)
+Implement ONE item within write_scope. Run /iteration-close when done.
+When merge-back is complete, stop — do not continue to a new task.
+EOF
+        ;;
+    esac
+  } >"$prompt_file"
+
+  [[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/worker-iter-${i}.txt"
+
+  echo "=== ralph-worker: worker iteration $i/$ITERATIONS ===" >&2
+  agent_rc=0
+  log_agent=""
+  if [[ -n "$LOG_DIR" ]]; then
+    case "$OUTPUT_FORMAT" in
+      stream-json) log_agent="$LOG_DIR/worker-iter-${i}.ndjson" ;;
+      json)        log_agent="$LOG_DIR/worker-iter-${i}.json" ;;
+      *)           log_agent="$LOG_DIR/worker-iter-${i}.txt" ;;
+    esac
+    # Use set +e around the pipe so pipefail doesn't abort on a non-zero agent exit.
+    # PIPESTATUS[0] captures the agent's own exit code regardless of tee's status.
+    set +e
+    "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+    agent_rc=${PIPESTATUS[0]}
+    set -e
+  else
+    set +e
+    "${agent_inv[@]}" "$(cat "$prompt_file")"
+    agent_rc=$?
+    set -e
+  fi
+  if [[ $agent_rc -ne 0 ]]; then
+    echo "ralph-worker: agent exited with code $agent_rc on iteration $i" >&2
+  fi
+
+  stop_iterations=0
+  if [[ -n "$done_artifact" && ! -f "$done_artifact" && -n "$log_agent" ]]; then
+    failure_class="$(classify_worker_failure_log "$log_agent" || true)"
+    case "$failure_class" in
+      usage_limit)
+        echo "ralph-worker: terminal failure for task $TASK_ID: Codex usage limit reached; stopping retries" >&2
+        terminal_failure="usage_limit"
+        stop_iterations=1
+        ;;
+      workspace_permissions)
+        echo "ralph-worker: terminal failure for task $TASK_ID: Codex sandbox/write permissions are insufficient for workspace artifacts; stopping retries" >&2
+        terminal_failure="workspace_permissions"
+        stop_iterations=1
+        ;;
+    esac
+  fi
+
+  trap - EXIT
+  cleanup_iter
+  [[ $stop_iterations -eq 1 ]] && break
+done
+
+# Final check: did the worker produce the expected done artifact?
+if [[ -n "$done_artifact" && -f "$done_artifact" ]]; then
+  echo "ralph-worker: worker complete — ${done_label} written for task $TASK_ID" >&2
+  exit 0
+fi
+
+case "$terminal_failure" in
+  usage_limit)
+    echo "ralph-worker: done with terminal failure usage_limit for task $TASK_ID" >&2
+    exit 32
+    ;;
+  workspace_permissions)
+    echo "ralph-worker: done with terminal failure workspace_permissions for task $TASK_ID" >&2
+    exit 33
+    ;;
+esac
+
+if [[ -n "$done_artifact" ]]; then
+  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) without ${done_label} for task $TASK_ID" >&2
+else
+  echo "ralph-worker: budget exhausted (${ITERATIONS} iterations) for task $TASK_ID" >&2
+fi
+echo "  → Parent should inspect and either extend budget or run ralph-closeout manually." >&2
+echo "ralph-worker: done." >&2
+exit 1

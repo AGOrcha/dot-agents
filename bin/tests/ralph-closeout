@@ -1,0 +1,552 @@
+#!/usr/bin/env bash
+# ralph-closeout: scan .agents/active/merge-back/*.md for unprocessed merge-backs,
+# run delegation closeout + workflow advance for each.
+#
+# Env vars:
+#   RALPH_CLOSEOUT_AUTO   1 = auto-close only accepted pending merge-backs (default), 0 = spawn orchestrator review pass
+#   RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT  1 = after each successful auto-closeout, run `workflow fold-back list --plan <id>`
+#                            for each distinct plan_id touched (read-only D2 post-closeout snapshot)
+#   RALPH_RUN_PLAN        optional single id or comma-separated canonical plan scope for completion mode
+#   Post-closeout git checkpoint stages only this task's canonical plan files, archive tree,
+#   verification dir, and removals of that task's merge-back / delegation / bundle — not whole
+#   `.agents/active/delegation*` dirs (avoids scooping parallel workers' state).
+#   RALPH_LOG_DIR         override log directory
+#   RALPH_NO_LOG          1 = stdout only, no log files
+#   RALPH_AGENT_OUTPUT_FORMAT  text|json|stream-json (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_CLOSEOUT_MODEL  closeout-review model override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_MODEL           fallback model override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   RALPH_CLOSEOUT_REASONING_EFFORT  codex-only closeout reasoning effort override
+#   RALPH_REASONING_EFFORT           codex-only fallback reasoning effort override
+#   RALPH_FORCE           1 = broader allow; for codex uses dangerous bypass instead of sandboxed full-auto
+#   RALPH_CLOSEOUT_AGENT_BIN closeout-review agent binary override (only used when RALPH_CLOSEOUT_AUTO=0)
+#   AGENT_BIN             fallback agent binary (only used when RALPH_CLOSEOUT_AUTO=0)
+#   DOT_AGENTS            dot-agents binary or "go run ..." override
+#
+# Override precedence (closeout role; only relevant when RALPH_CLOSEOUT_AUTO=0):
+#   model:     RALPH_CLOSEOUT_MODEL > RALPH_MODEL > (implicit binary default)
+#   agent_bin: RALPH_CLOSEOUT_AGENT_BIN > AGENT_BIN > "agent"
+#
+# Exit codes:
+#   0  — all merge-backs processed (or none found)
+#   1  — one or more closeouts failed
+#
+# Verification:
+#   No merge-backs → exits 0, logs "no pending merge-backs"
+#   One completed merge-back → delegation closeout + advance run cleanly
+
+set -euo pipefail
+
+# Handle --self-test before any other setup (no agent binary or merge-back dir needed)
+if [[ "${1:-}" == "--self-test" ]]; then
+  _test_passed=0
+  _test_failed=0
+
+  _assert_eq() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+      echo "  ok: $label"
+      (( _test_passed += 1 )) || true
+    else
+      echo "  FAIL: $label — got='$got' want='$want'" >&2
+      (( _test_failed += 1 )) || true
+    fi
+  }
+
+  resolve_closeout_agent_bin() {
+    if [[ -n "${RALPH_CLOSEOUT_AGENT_BIN:-}" ]]; then
+      printf '%s' "$RALPH_CLOSEOUT_AGENT_BIN"
+    elif [[ -n "${AGENT_BIN:-}" ]]; then
+      printf '%s' "$AGENT_BIN"
+    else
+      printf '%s' "agent"
+    fi
+  }
+
+  resolve_closeout_model() {
+    if [[ -n "${RALPH_CLOSEOUT_MODEL:-}" ]]; then
+      printf '%s' "$RALPH_CLOSEOUT_MODEL"
+    else
+      printf '%s' "${RALPH_MODEL:-}"
+    fi
+  }
+
+  echo "=== ralph-closeout --self-test ==="
+  echo ""
+
+  echo "--- resolve_closeout_agent_bin: precedence ---"
+  (
+    unset RALPH_CLOSEOUT_AGENT_BIN AGENT_BIN 2>/dev/null || true
+    _assert_eq "all unset → 'agent'" "$(resolve_closeout_agent_bin)" "agent"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_CLOSEOUT_AGENT_BIN 2>/dev/null || true
+    AGENT_BIN="claude"
+    _assert_eq "AGENT_BIN fallback" "$(resolve_closeout_agent_bin)" "claude"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_CLOSEOUT_AGENT_BIN="codex"
+    AGENT_BIN="claude"
+    _assert_eq "RALPH_CLOSEOUT_AGENT_BIN wins over AGENT_BIN" "$(resolve_closeout_agent_bin)" "codex"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: AGENT_BIN should NOT win over RALPH_CLOSEOUT_AGENT_BIN
+  (
+    RALPH_CLOSEOUT_AGENT_BIN="role-specific"
+    AGENT_BIN="fallback"
+    got="$(resolve_closeout_agent_bin)"
+    if [[ "$got" != "fallback" ]]; then
+      echo "  ok: AGENT_BIN does not override RALPH_CLOSEOUT_AGENT_BIN (got '$got')"
+      exit 0
+    else
+      echo "  FAIL: AGENT_BIN incorrectly overrode RALPH_CLOSEOUT_AGENT_BIN" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "--- resolve_closeout_model: precedence ---"
+  (
+    unset RALPH_CLOSEOUT_MODEL RALPH_MODEL 2>/dev/null || true
+    _assert_eq "all unset → empty" "$(resolve_closeout_model)" ""
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    unset RALPH_CLOSEOUT_MODEL 2>/dev/null || true
+    RALPH_MODEL="model-fallback"
+    _assert_eq "RALPH_MODEL fallback" "$(resolve_closeout_model)" "model-fallback"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  (
+    RALPH_CLOSEOUT_MODEL="closeout-specific"
+    RALPH_MODEL="model-fallback"
+    _assert_eq "RALPH_CLOSEOUT_MODEL wins over RALPH_MODEL" "$(resolve_closeout_model)" "closeout-specific"
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  # Negative: RALPH_MODEL should NOT win over RALPH_CLOSEOUT_MODEL
+  (
+    RALPH_CLOSEOUT_MODEL="role-model"
+    RALPH_MODEL="generic-model"
+    got="$(resolve_closeout_model)"
+    if [[ "$got" != "generic-model" ]]; then
+      echo "  ok: RALPH_MODEL does not override RALPH_CLOSEOUT_MODEL (got '$got')"
+      exit 0
+    else
+      echo "  FAIL: RALPH_MODEL incorrectly overrode RALPH_CLOSEOUT_MODEL" >&2
+      exit 1
+    fi
+  ) && (( _test_passed += 1 )) || (( _test_failed += 1 ))
+
+  echo ""
+  echo "=== Results: $_test_passed passed, $_test_failed failed ==="
+  if [[ $_test_failed -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+CLOSEOUT_AUTO="${RALPH_CLOSEOUT_AUTO:-1}"
+OUTPUT_FORMAT="${RALPH_AGENT_OUTPUT_FORMAT:-stream-json}"
+
+if [[ "${RALPH_NO_LOG:-0}" == "1" ]]; then
+  LOG_DIR=""
+elif [[ -n "${RALPH_LOG_DIR:-}" ]]; then
+  LOG_DIR="$RALPH_LOG_DIR"
+else
+  LOG_DIR="$REPO_ROOT/.ralph-loop-streams/run-$(date +%Y%m%d-%H%M%S)-closeout"
+fi
+
+# Prefer repo checkout binary
+DOT_AGENTS_CMD=()
+if [[ -n "${DOT_AGENTS:-}" ]]; then
+  # shellcheck disable=SC2206
+  DOT_AGENTS_CMD=( $DOT_AGENTS )
+elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif command -v da >/dev/null 2>&1; then
+  DOT_AGENTS_CMD=(da)
+else
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  exit 1
+fi
+
+da() { (cd "$REPO_ROOT" && "${DOT_AGENTS_CMD[@]}" "$@"); }
+
+parse_plan_scope() {
+  local raw="${1:-}"
+  local -a plans=()
+  local entry trimmed
+
+  raw="${raw#./}"
+  IFS=',' read -r -a plans <<< "$raw"
+  for entry in "${plans[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -n "$trimmed" ]] && printf '%s\n' "$trimmed"
+  done
+}
+
+plan_is_in_scope() {
+  local plan_id="$1"
+  [[ -z "${RALPH_RUN_PLAN:-}" ]] && return 0
+  local scope
+  while IFS= read -r scope; do
+    [[ "$scope" == "$plan_id" ]] && return 0
+  done < <(parse_plan_scope "$RALPH_RUN_PLAN")
+  return 1
+}
+
+resolve_closeout_agent_bin() {
+  if [[ -n "${RALPH_CLOSEOUT_AGENT_BIN:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_AGENT_BIN"
+  elif [[ -n "${AGENT_BIN:-}" ]]; then
+    printf '%s' "$AGENT_BIN"
+  else
+    printf '%s' "agent"
+  fi
+}
+
+resolve_closeout_model() {
+  if [[ -n "${RALPH_CLOSEOUT_MODEL:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_MODEL"
+  else
+    printf '%s' "${RALPH_MODEL:-}"
+  fi
+}
+
+resolve_closeout_reasoning_effort() {
+  if [[ -n "${RALPH_CLOSEOUT_REASONING_EFFORT:-}" ]]; then
+    printf '%s' "$RALPH_CLOSEOUT_REASONING_EFFORT"
+  else
+    printf '%s' "${RALPH_REASONING_EFFORT:-}"
+  fi
+}
+
+append_codex_add_dirs() {
+  local dir
+  for dir in \
+    "$REPO_ROOT/.agents" \
+    "$REPO_ROOT/.git" \
+    "$HOME/.agents"; do
+    if [[ -e "$dir" ]]; then
+      agent_inv+=( --add-dir "$dir" )
+    fi
+  done
+}
+
+command -v python3 >/dev/null 2>&1 || { echo "error: python3 required for merge-back helpers" >&2; exit 1; }
+
+MERGE_BACK_DIR="$REPO_ROOT/.agents/active/merge-back"
+DELEGATION_DIR="$REPO_ROOT/.agents/active/delegation"
+
+if [[ ! -d "$MERGE_BACK_DIR" ]]; then
+  echo "ralph-closeout: no merge-back directory found — no pending merge-backs" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
+  exit 0
+fi
+
+# Collect unprocessed merge-back files (presence of file = pending)
+pending=()
+for f in "$MERGE_BACK_DIR"/*.md; do
+  [[ -f "$f" ]] || continue
+  if [[ -n "${RALPH_RUN_PLAN:-}" ]]; then
+    plan_probe="$(python3 -c "
+import re,sys
+text=open(sys.argv[1]).read()
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
+print(m.group(1).strip().strip('\"') if m else '')
+" "$f" 2>/dev/null || true)"
+    [[ -n "$plan_probe" ]] || continue
+    if ! plan_is_in_scope "$plan_probe"; then
+      continue
+    fi
+  fi
+  pending+=( "$f" )
+done
+
+if [[ ${#pending[@]} -eq 0 ]]; then
+  echo "ralph-closeout: no pending merge-backs" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
+  exit 0
+fi
+
+echo "ralph-closeout: found ${#pending[@]} pending merge-back(s)" >&2
+
+if [[ -n "$LOG_DIR" ]]; then
+  mkdir -p "$LOG_DIR"
+  echo "ralph-closeout: log dir: $LOG_DIR" >&2
+fi
+
+errors=0
+
+_fold_back_audit_plans_tmp=""
+if [[ "${RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT:-0}" == "1" ]]; then
+  _fold_back_audit_plans_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout-fb-plans.XXXXXX")"
+fi
+
+process_merge_back_auto() {
+  local mb_file="$1"
+  local base
+  base="$(basename "$mb_file" .md)"
+  local task_id="$base"
+  local delegation_id=""
+
+  echo "ralph-closeout: processing merge-back for task=$task_id" >&2
+
+  # Extract plan_id from merge-back frontmatter or delegation contract
+  local plan_id=""
+  plan_id="$(python3 -c "
+import re,sys
+text=open('${mb_file}').read()
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
+if m:
+    print(m.group(1).strip().strip('\"'))
+" 2>/dev/null || true)"
+
+  if [[ -z "$plan_id" ]]; then
+    # Try delegation contract
+    local contract="$DELEGATION_DIR/${task_id}.yaml"
+    if [[ -f "$contract" ]]; then
+      plan_id="$(python3 -c "
+import re,sys
+text=open('${contract}').read()
+m=re.search(r'^(?:parent_)?plan_id:\s*(.+)', text, re.M)
+if m:
+    print(m.group(1).strip().strip('\"'))
+" 2>/dev/null || true)"
+    fi
+  fi
+
+  if [[ -z "$plan_id" ]]; then
+    echo "error: could not extract plan_id for task=$task_id (checked merge-back + delegation contract)" >&2
+    return 1
+  fi
+
+  local gate_json gate_outcome gate_closeout_allowed gate_planning_required gate_reason
+  gate_json="$(da --json workflow delegation gate --plan "$plan_id" --task "$task_id")"
+  IFS=$'\t' read -r gate_outcome gate_closeout_allowed gate_planning_required gate_reason < <(printf '%s' "$gate_json" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print('\t'.join([
+    d.get('outcome', ''),
+    'true' if d.get('closeout_allowed') else 'false',
+    'true' if d.get('planning_required') else 'false',
+    (d.get('reason') or '').replace('\n', ' ').strip(),
+]))
+")
+  if [[ "$gate_closeout_allowed" != "true" || "$gate_outcome" != "accept" ]]; then
+    if [[ "$gate_planning_required" == "true" || "$gate_outcome" == "escalate" ]]; then
+      echo "ralph-closeout: skipping task=$task_id — planning or human review required before closeout (${gate_reason:-no reason})" >&2
+    else
+      echo "ralph-closeout: skipping task=$task_id — review gate outcome=${gate_outcome:-reject} (${gate_reason:-no reason})" >&2
+    fi
+    return 1
+  fi
+
+  # Verify delegation contract exists
+  local contract="$DELEGATION_DIR/${task_id}.yaml"
+  if [[ ! -f "$contract" ]]; then
+    echo "warning: no delegation contract at $contract for task=$task_id — skipping delegation closeout" >&2
+  else
+    # delegation closeout deletes the contract + bundle; capture id for git add -u on bundle path.
+    delegation_id="$(python3 - "$contract" <<'PY'
+import re, sys
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.search(r"^id:\s*(.+)$", text, re.M)
+    if m:
+        print(m.group(1).strip().strip('"'))
+except Exception:
+    pass
+PY
+)"
+    echo "ralph-closeout: workflow delegation closeout plan=$plan_id task=$task_id --decision accept" >&2
+    local closeout_log
+    closeout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout.XXXXXX")"
+    if da workflow delegation closeout --plan "$plan_id" --task "$task_id" --decision accept >"$closeout_log" 2>&1; then
+      cat "$closeout_log" >&2
+      [[ -n "${LOG_DIR:-}" ]] && cp -f "$closeout_log" "$LOG_DIR/closeout-${task_id}.log"
+    else
+      cat "$closeout_log" >&2
+      rm -f "$closeout_log"
+      echo "error: delegation closeout failed for task=$task_id" >&2
+      return 1
+    fi
+    rm -f "$closeout_log"
+  fi
+
+  echo "ralph-closeout: workflow advance plan=$plan_id task=$task_id completed" >&2
+  local advance_log
+  advance_log="$(mktemp "${TMPDIR:-/tmp}/ralph-advance.XXXXXX")"
+  if da workflow advance "$plan_id" --task "$task_id" --status completed >"$advance_log" 2>&1; then
+    cat "$advance_log" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$advance_log" "$LOG_DIR/advance-${task_id}.log"
+  else
+    cat "$advance_log" >&2
+    rm -f "$advance_log"
+    echo "error: workflow advance failed for task=$task_id" >&2
+    return 1
+  fi
+  rm -f "$advance_log"
+
+  echo "ralph-closeout: task=$task_id closed successfully" >&2
+
+  # Commit closeout state so workstate is clean regardless of what follows.
+  # workflow advance + delegation closeout mutate TASKS.yaml and PLAN.yaml,
+  # remove active artifacts, and archive the merge-back under history/.
+  # Stage the task-scoped archive result as part of the post-archival checkpoint
+  # so ralph-pipeline does not leave the repo dirty after a successful closeout.
+  local verification_dir="$REPO_ROOT/.agents/active/verification/${task_id}"
+  local archive_dirs=( "$REPO_ROOT/.agents/history/${plan_id}/delegate-merge-back-archive/"*/"${task_id}" )
+  git -C "$REPO_ROOT" add -- \
+    ".agents/workflow/plans/${plan_id}/PLAN.yaml" \
+    ".agents/workflow/plans/${plan_id}/TASKS.yaml" 2>/dev/null || true
+  if [[ -d "${archive_dirs[0]}" ]]; then
+    git -C "$REPO_ROOT" add -- "${archive_dirs[@]}" 2>/dev/null || true
+  fi
+  # Record deletions under active/ for this task only (parallel workers may still own siblings).
+  git -C "$REPO_ROOT" add -u -- \
+    ".agents/active/merge-back/${task_id}.md" \
+    ".agents/active/delegation/${task_id}.yaml" \
+    ".agents/active/verification/${task_id}" 2>/dev/null || true
+  if [[ -n "${delegation_id:-}" ]]; then
+    git -C "$REPO_ROOT" add -u -- ".agents/active/delegation-bundles/${delegation_id}.yaml" 2>/dev/null || true
+  fi
+  if ! git -C "$REPO_ROOT" diff --cached --quiet; then
+    git -C "$REPO_ROOT" commit -m "closeout: ${plan_id}/${task_id} accepted" --quiet
+    echo "ralph-closeout: committed closeout state for task=$task_id" >&2
+  fi
+
+  if [[ -n "${_fold_back_audit_plans_tmp:-}" ]]; then
+    printf '%s\n' "$plan_id" >>"$_fold_back_audit_plans_tmp"
+  fi
+}
+
+if [[ "$CLOSEOUT_AUTO" == "1" ]]; then
+  for mb_file in "${pending[@]}"; do
+    if ! process_merge_back_auto "$mb_file"; then
+      (( errors++ )) || true
+    fi
+  done
+else
+  # Non-auto: spawn a single orchestrator agent pass to review and decide
+  AGENT_BIN="$(resolve_closeout_agent_bin)"
+  ROLE_MODEL="$(resolve_closeout_model)"
+  ROLE_REASONING_EFFORT="$(resolve_closeout_reasoning_effort)"
+  if ! command -v "$AGENT_BIN" >/dev/null 2>&1; then
+    echo "error: '$AGENT_BIN' not found on PATH (needed for RALPH_CLOSEOUT_AUTO=0 review pass)" >&2
+    exit 1
+  fi
+
+  prompt_file="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout-prompt.XXXXXX")"
+  trap 'rm -f "$prompt_file" 2>/dev/null || true' EXIT
+
+  {
+    cat <<EOF
+You are reviewing merge-back artifacts to decide whether to accept or reject each.
+
+## Pending merge-backs
+EOF
+    for mb_file in "${pending[@]}"; do
+      local base task_id
+      base="$(basename "$mb_file" .md)"
+      task_id="$base"
+      cat <<EOF
+
+### Task: $task_id
+File: $mb_file
+
+$(cat "$mb_file")
+EOF
+    done
+    cat <<'EOF'
+
+## Your deliverables
+For each merge-back, decide: accept or reject.
+For each accepted task, run:
+  da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
+  da workflow advance <plan_id> --task <task_id> --status completed
+
+For each rejected task, run:
+  da workflow delegation closeout --plan <plan_id> --task <task_id> --decision reject
+
+Do not implement anything. Only evaluate and close out.
+EOF
+  } >"$prompt_file"
+
+  [[ -n "$LOG_DIR" ]] && cp "$prompt_file" "$LOG_DIR/closeout-review-prompt.txt"
+
+  if [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" ]]; then
+    agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" )
+    [[ "$OUTPUT_FORMAT" == "stream-json" ]] && agent_inv+=( --verbose )
+    [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --include-partial-messages )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" ]]; then
+    agent_inv=( "$AGENT_BIN" exec -C "$REPO_ROOT" )
+    if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+      agent_inv+=( --dangerously-bypass-approvals-and-sandbox )
+    else
+      agent_inv+=( --full-auto )
+    fi
+    append_codex_add_dirs
+    [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --json )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" ]]; then
+    # copilot supports "text" or "json" (JSONL); stream-json maps to json
+    agent_inv=( "$AGENT_BIN" -p )
+    [[ "$OUTPUT_FORMAT" == "stream-json" || "$OUTPUT_FORMAT" == "json" ]] && agent_inv+=( --output-format json )
+    # non-interactive mode requires at minimum --allow-all-tools
+    if [[ "${RALPH_FORCE:-0}" == "1" ]]; then
+      agent_inv+=( --allow-all )
+    else
+      agent_inv+=( --allow-all-tools --allow-all-paths )
+    fi
+    append_codex_add_dirs
+  else
+    agent_inv=( "$AGENT_BIN" -p --output-format "$OUTPUT_FORMAT" --workspace "$REPO_ROOT" )
+    [[ "$OUTPUT_FORMAT" == "stream-json" && "${RALPH_STREAM_PARTIAL:-1}" != "0" ]] && agent_inv+=( --stream-partial-output )
+    [[ "${RALPH_FORCE:-0}" == "1" ]] && agent_inv+=( -f )
+  fi
+  [[ -n "$ROLE_MODEL" ]] && agent_inv+=( --model "$ROLE_MODEL" )
+  if [[ "$(basename "${AGENT_BIN:-agent}")" == "codex" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( -c "model_reasoning_effort=\"$ROLE_REASONING_EFFORT\"" )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "copilot" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( --reasoning-effort "$ROLE_REASONING_EFFORT" )
+  elif [[ "$(basename "${AGENT_BIN:-agent}")" == "claude" && -n "$ROLE_REASONING_EFFORT" ]]; then
+    agent_inv+=( --effort "$ROLE_REASONING_EFFORT" )
+  fi
+
+  echo "=== ralph-closeout: orchestrator review pass ===" >&2
+  if [[ -n "$LOG_DIR" ]]; then
+    case "$OUTPUT_FORMAT" in
+      stream-json) log_agent="$LOG_DIR/agent-closeout-review.ndjson" ;;
+      json)        log_agent="$LOG_DIR/agent-closeout-review.json" ;;
+      *)           log_agent="$LOG_DIR/agent-closeout-review.txt" ;;
+    esac
+    "${agent_inv[@]}" "$(cat "$prompt_file")" | tee "$log_agent"
+  else
+    "${agent_inv[@]}" "$(cat "$prompt_file")"
+  fi
+fi
+
+if [[ $errors -gt 0 ]]; then
+  echo "ralph-closeout: $errors error(s) during closeout" >&2
+  rm -f "${_fold_back_audit_plans_tmp:-}"
+  exit 1
+fi
+
+if [[ -n "${_fold_back_audit_plans_tmp:-}" && -s "$_fold_back_audit_plans_tmp" ]]; then
+  echo "ralph-closeout: post-closeout fold-back audit (RALPH_POST_CLOSEOUT_FOLD_BACK_AUDIT=1)" >&2
+  sort -u "$_fold_back_audit_plans_tmp" | while IFS= read -r _fb_plan; do
+    [[ -z "$_fb_plan" ]] && continue
+    echo "ralph-closeout: --- workflow fold-back list --plan ${_fb_plan} ---" >&2
+    da workflow fold-back list --plan "$_fb_plan" >&2 || echo "ralph-closeout: warning: fold-back list failed for plan=${_fb_plan}" >&2
+  done
+fi
+rm -f "${_fold_back_audit_plans_tmp:-}"
+
+echo "ralph-closeout: done." >&2
