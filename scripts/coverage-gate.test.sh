@@ -20,7 +20,14 @@ EOF
 printf '%s\n' "# hdr" "commands/allowme.go    # untestable defensive branch" > "$tmp/exc.txt"
 
 fail=0
-chk() { if [[ "$1" != "$2" ]]; then echo "FAIL: $3 (got '$1' want '$2')"; fail=1; else echo "ok: $3"; fi; }
+chk() {
+  local got="$1" want="$2" desc="$3"
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL: $desc (got '$got' want '$want')"; fail=1
+  else
+    echo "ok: $desc"
+  fi
+}
 
 set +e
 out="$(COVERAGE_FILE=$tmp/cov.out COVERAGE_EXCEPTIONS=$tmp/exc.txt \
