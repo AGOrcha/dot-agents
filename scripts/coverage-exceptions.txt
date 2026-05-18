@@ -7,9 +7,59 @@
 # Format (rationale is mandatory — a path with no "# <text>" is a hard error):
 #   path/relative/to/repo/file.go    # why this file legitimately can't hit threshold
 #
-# Reviewed like code. If a listed file later reaches the threshold the gate
-# prints STALE-ALLOWLIST — prune the entry. Prefer raising coverage over
-# allowlisting; allowlist only genuinely-untestable code with a real reason.
+# Reviewed like code. When a listed file reaches threshold the gate prints
+# STALE-ALLOWLIST — prune the entry (that is the ratchet tightening).
 #
-# (Phase 1: per-file gate runs in WARN mode — entries are advisory until the
-#  legacy tail is remediated and the gate ratchets to enforce.)
+# === RATCHET STATE (coverage-gate-per-file / cg6) ===
+# Per-file gate is ENFORCE. Every entry below is tracked legacy debt: the
+# cg6 side-loop raises files to >=95% and DELETES the entry (enforcement
+# only ever tightens, never regresses the ~140 already-clean files).
+# Two rationale classes:
+#   [legacy-tail]      ordinary file, just needs more tests — loop target.
+#   [platform-tag]     build-tagged *_windows/_unix; residual lines may be
+#                      unreachable on the merged multi-OS profile — loop
+#                      must confirm-or-raise (not assume untestable).
+commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to >=95%
+commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
+commands/doctor.go                                         # [legacy-tail] 94.78%; cg6 ratchet-loop raises to >=95%
+commands/hooks/cmd.go                                      # [legacy-tail] 92.86%; cg6 ratchet-loop raises to >=95%
+commands/hooks/remove.go                                   # [legacy-tail] 89.74%; cg6 ratchet-loop raises to >=95%
+commands/hooks/spec.go                                     # [legacy-tail] 93.75%; cg6 ratchet-loop raises to >=95%
+commands/import_plugins.go                                 # [legacy-tail] 93.39%; cg6 ratchet-loop raises to >=95%
+commands/import.go                                         # [legacy-tail] 94.94%; cg6 ratchet-loop raises to >=95%
+commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to >=95%
+commands/kg/query_lint_maintain.go                         # [legacy-tail] 92.47%; cg6 ratchet-loop raises to >=95%
+commands/linkcount_unix.go                                 # [platform-tag] 71.43% on merged profile; cg6 confirm-or-raise
+commands/linkcount_windows.go                              # [platform-tag] 72.73% on merged profile; cg6 confirm-or-raise
+commands/refresh.go                                        # [legacy-tail] 93.53%; cg6 ratchet-loop raises to >=95%
+commands/sync.go                                           # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
+commands/sync/pull.go                                      # [legacy-tail] 88.89%; cg6 ratchet-loop raises to >=95%
+commands/workflow/app_types.go                             # [legacy-tail] 94.12%; cg6 ratchet-loop raises to >=95%
+commands/workflow/delegation.go                            # [legacy-tail] 93.74%; cg6 ratchet-loop raises to >=95%
+commands/workflow/drift.go                                 # [legacy-tail] 94.30%; cg6 ratchet-loop raises to >=95%
+commands/workflow/fs.go                                    # [legacy-tail] 93.27%; cg6 ratchet-loop raises to >=95%
+commands/workflow/graph.go                                 # [legacy-tail] 93.28%; cg6 ratchet-loop raises to >=95%
+commands/workflow/health.go                                # [legacy-tail] 94.67%; cg6 ratchet-loop raises to >=95%
+commands/workflow/iter_log_schema.go                       # [legacy-tail] 75.00%; cg6 ratchet-loop raises to >=95%
+commands/workflow/iter_log.go                              # [legacy-tail] 94.27%; cg6 ratchet-loop raises to >=95%
+commands/workflow/review_decision_schema.go                # [legacy-tail] 88.52%; cg6 ratchet-loop raises to >=95%
+commands/workflow/review_gate.go                           # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
+commands/workflow/verification_result_schema.go            # [legacy-tail] 88.71%; cg6 ratchet-loop raises to >=95%
+internal/config/config.go                                  # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
+internal/config/proposals.go                               # [legacy-tail] 92.92%; cg6 ratchet-loop raises to >=95%
+internal/fsops/fsops_windows.go                            # [platform-tag] 0.00% on merged profile; cg6 confirm-or-raise
+internal/graphstore/crg.go                                 # [legacy-tail] 94.69%; cg6 ratchet-loop raises to >=95%
+internal/graphstore/postgres.go                            # [legacy-tail] 91.56%; cg6 ratchet-loop raises to >=95%
+internal/graphstore/sqlite.go                              # [legacy-tail] 94.65%; cg6 ratchet-loop raises to >=95%
+internal/links/inode_unix.go                               # [platform-tag] 88.89% on merged profile; cg6 confirm-or-raise
+internal/links/inode_windows.go                            # [platform-tag] 79.41% on merged profile; cg6 confirm-or-raise
+internal/links/symlink_windows.go                          # [platform-tag] 77.08% on merged profile; cg6 confirm-or-raise
+internal/platform/copilot.go                               # [legacy-tail] 94.71%; cg6 ratchet-loop raises to >=95%
+internal/platform/cursor.go                                # [legacy-tail] 92.58%; cg6 ratchet-loop raises to >=95%
+internal/platform/hooks.go                                 # [legacy-tail] 94.43%; cg6 ratchet-loop raises to >=95%
+internal/platform/mcp_settings.go                          # [legacy-tail] 94.74%; cg6 ratchet-loop raises to >=95%
+internal/platform/opencode.go                              # [legacy-tail] 91.78%; cg6 ratchet-loop raises to >=95%
+internal/platform/plugins.go                               # [legacy-tail] 93.41%; cg6 ratchet-loop raises to >=95%
+internal/platform/render_manifest.go                       # [legacy-tail] 93.94%; cg6 ratchet-loop raises to >=95%
+internal/platform/resource_plan.go                         # [legacy-tail] 94.47%; cg6 ratchet-loop raises to >=95%
+internal/projectsync/promote.go                            # [legacy-tail] 94.02%; cg6 ratchet-loop raises to >=95%

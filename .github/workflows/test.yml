@@ -435,16 +435,20 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      # Phase 1 = BOTH gates warn. The merged multi-OS profile is
-      # STRICTER than the old per-OS gate (which excluded Windows
-      # entirely): it surfaces *_windows.go statements that Windows's
-      # POSIX-skipping suite covers weakly, dragging some packages <95%.
-      # Per-package cannot be enforced until the baseline is remediated
-      # (cg5) and the gate ratchets to enforce (cg6).
-      - name: Coverage gate (Phase 1 — warn, baseline only)
+      # Phase 2 (cg6) = PER-FILE ENFORCE via the ratchet.
+      # The merged multi-OS profile is STRICTER than the old per-OS gate:
+      # it surfaces *_windows.go statements Windows's POSIX-skipping suite
+      # covers weakly. Rather than block on remediating the whole legacy
+      # tail, the 44 known sub-95 files are seeded into the rationale'd
+      # coverage-exceptions allowlist; per-file now ENFORCES, so the ~140
+      # already-clean files can never regress and every NEW file must hit
+      # 95%. The cg6 side-loop raises allowlisted files and deletes their
+      # entries — enforcement only tightens. Per-package stays warn until
+      # its own baseline (cg5) is worked (separate from the per-file tail).
+      - name: Coverage gate (Phase 2 — per-file enforce, ratchet)
         env:
           COVERAGE_FILE: coverage.out
           COVERAGE_THRESHOLD: '95'
           COVERAGE_PKG_MODE: warn
-          COVERAGE_FILE_MODE: warn
+          COVERAGE_FILE_MODE: enforce
         run: bash scripts/coverage-gate.sh
