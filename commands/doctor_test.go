@@ -8,6 +8,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
 func TestHasPluginPlatform(t *testing.T) {
@@ -1309,4 +1310,68 @@ func TestCollectBrokenUserLinks_BrokenClaudeMDCIDrift(t *testing.T) {
 	got := collectBrokenUserLinks(agentsHome)
 
 	_ = got
+}
+
+// TestRepairManagedProject_DryRunLines covers the new repair branch's dry-run
+// output: it must announce the shared-target projection re-run plus one
+// CreateLinks line per installed platform, and apply nothing (return 0). The
+// doctorInstalledPlatforms seam is overridden to an empty set so the test is
+// deterministic regardless of which platforms are installed on the runner.
+func TestRepairManagedProject_DryRunLines(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	savedFlags := Flags
+	savedPlatforms := doctorInstalledPlatforms
+	Flags = GlobalFlags{DryRun: true}
+	doctorInstalledPlatforms = func() []platform.Platform { return nil }
+	defer func() {
+		Flags = savedFlags
+		doctorInstalledPlatforms = savedPlatforms
+	}()
+
+	if fixed := repairManagedProject("proj", projectPath); fixed != 0 {
+		t.Errorf("dry-run repair must apply nothing, got fixed=%d", fixed)
+	}
+}
+
+// TestRepairManagedProject_NoInstalledPlatformsIsNoOp covers the non-dry-run
+// branch with no installed platforms: the projection runs (no resources for an
+// empty platform set, so it is a clean no-op) and no CreateLinks happen, so the
+// repaired-platform count is 0. This pins the idempotence contract: a project
+// with nothing to relink produces no spurious "repaired" output and no error.
+func TestRepairManagedProject_NoInstalledPlatformsIsNoOp(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	savedFlags := Flags
+	savedPlatforms := doctorInstalledPlatforms
+	Flags = GlobalFlags{}
+	doctorInstalledPlatforms = func() []platform.Platform { return nil }
+	defer func() {
+		Flags = savedFlags
+		doctorInstalledPlatforms = savedPlatforms
+	}()
+
+	if fixed := repairManagedProject("proj", projectPath); fixed != 0 {
+		t.Errorf("no installed platforms must relink nothing, got fixed=%d", fixed)
+	}
 }

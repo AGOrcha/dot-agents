@@ -164,39 +164,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if Flags.DryRun {
-			repairedPlatforms := map[string]bool{}
-			for _, bl := range brokenLinks {
-				if repairedPlatforms[bl.platformID] {
-					continue
-				}
-				p := platform.ByID(bl.platformID)
-				if p != nil {
-					ui.DryRun(fmt.Sprintf("re-run %s CreateLinks to repair", p.DisplayName()))
-				}
-				repairedPlatforms[bl.platformID] = true
-			}
-		} else {
-			// Repair: re-run CreateLinks for each affected platform
-			repairedPlatforms := map[string]bool{}
-			for _, bl := range brokenLinks {
-				if repairedPlatforms[bl.platformID] {
-					continue
-				}
-				p := platform.ByID(bl.platformID)
-				if p == nil || !p.IsInstalled() {
-					continue
-				}
-				config.SetWindowsMirrorContext(path)
-				if err := p.CreateLinks(name, path); err != nil {
-					ui.Bullet("warn", fmt.Sprintf("repair %s: %v", p.DisplayName(), err))
-				} else {
-					ui.Bullet("ok", fmt.Sprintf("repaired %s links", p.DisplayName()))
-					totalFixed++
-				}
-				repairedPlatforms[bl.platformID] = true
-			}
-		}
+		totalFixed += repairManagedProject(name, path)
 	}
 
 	// Manifest checks
@@ -330,6 +298,73 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
+}
+
+// doctorInstalledPlatforms returns every installed platform, matching the
+// installed-only scoping used by add/install/import when they drive a full
+// CreateLinks pass. Exposed as a package var so doctor_test can substitute a
+// deterministic platform set for the new repair branch.
+var doctorInstalledPlatforms = func() []platform.Platform {
+	var installed []platform.Platform
+	for _, p := range platform.All() {
+		if p.IsInstalled() {
+			installed = append(installed, p)
+		}
+	}
+	return installed
+}
+
+// repairManagedProject runs the full repair pass for one managed project whose
+// link health audit found at least one broken link. It is NOT a symlink-only
+// repair: for the project it (a) runs the shared-target projection to fix
+// broken/missing projected artifacts (repo .codex/agents/*.toml, Claude
+// shared-skills projection) and (b) re-runs CreateLinks for every installed
+// platform — not merely the platforms whose links were already detected
+// broken — so that every managed da entity is (re)linked. This mirrors the
+// established call shape on master (refresh.go, add.go, install.go,
+// import.go relink) with warn-and-continue error handling.
+//
+// Idempotence: this only runs for projects the audit already flagged as
+// broken, so a healthy managed project produces no spurious changes and no
+// noisy output (doctor's diagnostic UX is preserved). Within a repaired
+// project, RunSharedTargetProjection.Execute and Platform.CreateLinks are
+// themselves idempotent — they re-establish managed state and are no-ops when
+// that state is already correct — so re-running doctor on an
+// already-repaired project is also a no-op. It returns the number of platforms
+// successfully (re)linked, for the run-summary counter.
+func repairManagedProject(name, path string) int {
+	installed := doctorInstalledPlatforms()
+
+	if Flags.DryRun {
+		ui.DryRun("re-run shared-target projection to repair projected artifacts")
+		for _, p := range installed {
+			ui.DryRun(fmt.Sprintf("re-run %s CreateLinks to repair", p.DisplayName()))
+		}
+		return 0
+	}
+
+	config.SetWindowsMirrorContext(path)
+
+	// (a) Shared-target projection: fixes broken/missing projected
+	// shared-target artifacts (repo .codex/agents/*.toml, Claude
+	// shared-skills projection). Warn-and-continue so a projection failure
+	// does not block the link repair below.
+	if _, err := platform.RunSharedTargetProjection(name, path, installed, false); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("repair shared targets: %v", err))
+	}
+
+	// (b) Full installed-platform CreateLinks pass: relinks ALL managed da
+	// entities, not only the links detected as broken.
+	fixed := 0
+	for _, p := range installed {
+		if err := p.CreateLinks(name, path); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("repair %s: %v", p.DisplayName(), err))
+			continue
+		}
+		ui.Bullet("ok", fmt.Sprintf("repaired %s links", p.DisplayName()))
+		fixed++
+	}
+	return fixed
 }
 
 // collectOrphanCanonicals returns the resource names under
