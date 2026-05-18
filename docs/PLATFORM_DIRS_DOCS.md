@@ -123,7 +123,7 @@ now the sole implementation. Audit notes below describe the Go implementation.
 |----------|------------------------------------|---------------------------------------|
 | Cursor | `.cursor/rules/`, `.cursor/settings.json`, `.cursor/mcp.json`, `.cursor/hooks.json`, `.cursorignore`, `.claude/agents/` | Cursor-native agents would be `.cursor/agents/`, but the implementation currently targets `.claude/agents/` for compatibility reuse. The repo already manages `.cursorignore`, but not `.cursorindexingignore` or `.cursor/commands/`. |
 | Claude Code | `.claude/rules/`, `.claude/settings.local.json`, `.mcp.json`, `.claude/agents/`, `.claude/skills/`, `.agents/skills/` | Official Claude skills docs only mention `.claude/skills/`; this repo also mirrors project skills into `.agents/skills/` for shared-tool compatibility. |
-| Codex | `AGENTS.md`, `.codex/config.toml`, `.claude/agents/`, `.agents/skills/` | Codex-native subagents are documented under `.codex/agents/*.toml`, but the implementation currently places project agents in `.claude/agents/`. |
+| Codex | `AGENTS.md`, `.codex/config.toml`, `~/.codex/agents/*.toml` (user scope), `~/.codex/hooks.json` + repo `.codex/hooks.json`, `.agents/skills/` | Codex-native subagents are rendered as `.codex/agents/*.toml` (not `.claude/agents/`). User-scoped agent TOMLs are written directly; **repo-level `.codex/agents/*.toml` is currently NOT produced on master because the shared-target projection is not invoked by any command (see `.agents/proposals/codex-hooks-agents-linking-gap.md`).** |
 | OpenCode | `opencode.json`, `.opencode/agent/`, `.agents/skills/` | OpenCode-native skills are documented under `.opencode/skills/`, but the current implementation relies on the `.agents/skills/` compatibility path instead. |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.agents/skills/`, `.vscode/mcp.json`, `.claude/settings.local.json`, `.github/hooks/*.json` | `.agents/skills/` and `.vscode/mcp.json` are officially documented Copilot CLI locations, but this repo still skips other official Copilot locations such as `.github/skills/`, `.claude/skills/`, `.github/mcp.json`, and `.mcp.json`. |
 
@@ -135,6 +135,6 @@ Validated from the current Go implementation:
 |----------|------------------------|-------------------|-------|
 | Claude Code | `.claude/settings*.json` | Yes | Wires Claude-compatible hook settings, but the management commands still source from `~/.agents/settings/*/claude-code.json` or `~/.agents/hooks/*/claude-code.json`, not from native Claude files. |
 | Cursor | `.cursor/hooks.json` | Yes | Wires `~/.agents/hooks/{scope}/cursor.json` to project and user `hooks.json`. |
-| Codex | `.codex/hooks.json` | No | Links `AGENTS.md`, `.codex/config.toml`, skills, and agents, but does not create `.codex/hooks.json`. |
+| Codex | `.codex/hooks.json` | Yes | Renders and writes repo `.codex/hooks.json` and user `~/.codex/hooks.json` via `renderCodexHookConfig` (`internal/platform/codex.go`, `internal/platform/hooks.go`); managed regular file, not a symlink. |
 | GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. |
 | OpenCode | No dedicated hook file documented | No | No OpenCode-specific hook handling is implemented here. |
