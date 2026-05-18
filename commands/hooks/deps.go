@@ -16,4 +16,8 @@ type Deps struct {
 	UsageError         func(message string, hints ...string) error
 	MaxArgsWithHints   func(n int, hints ...string) cobra.PositionalArgs
 	ExactArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
+	// Resolver is the hook-spec resolution seam. Nil in production wiring
+	// (a real defaultHookSpecResolver is used); tests inject a fake to
+	// drive the resolve-then-validate error paths in runHooksRemove.
+	Resolver hookSpecResolver
 }

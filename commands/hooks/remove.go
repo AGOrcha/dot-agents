@@ -12,16 +12,17 @@ import (
 )
 
 func runHooksRemove(deps Deps, scope, name string) error {
+	resolver := deps.hookSpecResolver()
 	agentsHome := config.AgentsHome()
-	spec, err := findHookSpec(deps, agentsHome, scope, name)
+	spec, err := resolver.ResolveSpec(deps, agentsHome, scope, name)
 	if err != nil {
 		return err
 	}
-	target, err := hookRemovalTarget(spec)
+	target, err := resolver.RemovalTarget(spec)
 	if err != nil {
 		return err
 	}
-	if err := ensureUnderHooksScopeTree(agentsHome, scope, target); err != nil {
+	if err := resolver.EnsureUnderScopeTree(agentsHome, scope, target); err != nil {
 		return err
 	}
 

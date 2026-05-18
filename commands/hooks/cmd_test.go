@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -96,5 +98,46 @@ func TestNewHooksCmd_RemoveCmdMetadata(t *testing.T) {
 	}
 	if rm.Long == "" {
 		t.Error("remove subcommand should have Long help text")
+	}
+}
+
+// TestNewHooksCmd_RemoveCmdRunEInvokesRemoval exercises the remove
+// subcommand's RunE closure end-to-end so a real bundle gets deleted via
+// the wired cobra command (not just runHooksRemove directly).
+func TestNewHooksCmd_RemoveCmdRunEInvokesRemoval(t *testing.T) {
+	deps := testDeps()
+	deps.Flags.Yes = true
+	root := NewHooksCmd(deps)
+	var rm *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "remove" {
+			rm = c
+		}
+	}
+	if rm == nil {
+		t.Fatal("remove subcommand missing")
+	}
+
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	scope := "g"
+	hookDir := filepath.Join(agentsHome, "hooks", scope, "drop-me")
+	if err := os.MkdirAll(hookDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hookDir, "HOOK.yaml"), []byte(`name: drop-me
+when: stop
+run:
+  command: true
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rm.RunE(rm, []string{scope, "drop-me"}); err != nil {
+		t.Fatalf("remove RunE: %v", err)
+	}
+	if _, err := os.Stat(hookDir); !os.IsNotExist(err) {
+		t.Fatalf("expected bundle removed via RunE, stat err=%v", err)
 	}
 }
