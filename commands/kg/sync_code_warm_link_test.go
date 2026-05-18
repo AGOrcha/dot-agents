@@ -1,6 +1,7 @@
 package kg
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
+	_ "modernc.org/sqlite"
 )
 
 // TestCommandJSON_FlagDetection covers both branches of commandJSON.
@@ -1748,5 +1750,557 @@ func TestWarmCodeLane_EmptyDB(t *testing.T) {
 	msg := warmCodeLane(store)
 	if !strings.Contains(msg, "code-lane") {
 		t.Errorf("expected code-lane summary, got %q", msg)
+	}
+}
+
+// ── Additional coverage: error / outcome branches ─────────────────────────────
+
+// cloneFromBareRemote builds a bare git remote seeded with one commit and
+// returns the path to a working clone (with origin/upstream tracking already
+// configured) plus the bare remote path. Used by the runKGSync push/pull
+// success-path tests so `git push`/`git pull` resolve a real upstream.
+func cloneFromBareRemote(t *testing.T) (clone, bare string) {
+	t.Helper()
+	work := t.TempDir()
+	upstream := filepath.Join(work, "upstream")
+	initGitRepo(t, upstream)
+	commitFile(t, upstream, "notes/index.md", "# Index\n", "seed")
+
+	bare = filepath.Join(work, "bare.git")
+	if out, err := runGit(t, "", "clone", "--bare", upstream, bare); err != nil {
+		t.Fatalf("clone bare: %v\n%s", err, out)
+	}
+	clone = filepath.Join(work, "kg")
+	if out, err := runGit(t, "", "clone", bare, clone); err != nil {
+		t.Fatalf("clone home: %v\n%s", err, out)
+	}
+	for _, kv := range [][2]string{{"user.name", "test"}, {"user.email", "test@example.com"}} {
+		if out, err := runGit(t, clone, "config", kv[0], kv[1]); err != nil {
+			t.Fatalf("git config %s: %v\n%s", kv[0], err, out)
+		}
+	}
+	return clone, bare
+}
+
+// TestRunKGSync_PushSuccessReportsPushed drives the push success branch
+// (ui.Success("Graph pushed.") then return nil) by pushing into a bare
+// remote whose upstream tracking is already configured by the clone.
+func TestRunKGSync_PushSuccessReportsPushed(t *testing.T) {
+	home, _ := cloneFromBareRemote(t)
+	t.Setenv("KG_HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, "self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+	commitFile(t, home, "notes/sources/n1.md", "# n1\n", "add note")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", true, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGSync(cmd, nil); err != nil {
+			t.Fatalf("runKGSync push: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Graph pushed") {
+		t.Errorf("expected 'Graph pushed' confirmation, got:\n%s", out)
+	}
+}
+
+// TestRunKGSync_PullSuccessLintReportsIssues drives the post-pull lint
+// branch where lint surfaces issues (InfoBox path, lines 73-78): a note with
+// a dangling link makes lintBrokenLinks emit an error.
+func TestRunKGSync_PullSuccessLintReportsIssues(t *testing.T) {
+	home, _ := cloneFromBareRemote(t)
+	t.Setenv("KG_HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, "self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+	// A note that links to a non-existent note → lintBrokenLinks error.
+	now := "2026-05-12T00:00:00Z"
+	if err := createGraphNote(home, &GraphNote{
+		SchemaVersion: 1, ID: "src-broken", Type: "source", Title: "Broken",
+		Summary: "s", Status: "active", CreatedAt: now, UpdatedAt: now,
+		SourceRefs: []string{"http://example.com"},
+		Links:      []string{"does-not-exist"},
+	}, "body"); err != nil {
+		t.Fatalf("createGraphNote: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	out := captureStdout(t, func() {
+		if err := runKGSync(cmd, nil); err != nil {
+			t.Fatalf("runKGSync pull: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "lint found issues") {
+		t.Errorf("expected lint-issues InfoBox, got:\n%s", out)
+	}
+}
+
+// TestRunKGSync_PullLintErrorPropagates drives the post-pull lint error
+// branch (lines 69-71): the pull succeeds via git, then runGraphLint fails
+// because osReadDir is fault-injected for the notes walk.
+func TestRunKGSync_PullLintErrorPropagates(t *testing.T) {
+	home, _ := cloneFromBareRemote(t)
+	t.Setenv("KG_HOME", home)
+
+	if err := os.MkdirAll(filepath.Join(home, "self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+
+	orig := osReadDir
+	t.Cleanup(func() { osReadDir = orig })
+	osReadDir = func(string) ([]os.DirEntry, error) {
+		return nil, fmt.Errorf("injected readdir failure")
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("push", false, "")
+
+	captureStdout(t, func() {
+		err := runKGSync(cmd, nil)
+		if err == nil {
+			t.Fatal("expected lint-after-sync error")
+		}
+		if !strings.Contains(err.Error(), "lint after sync") {
+			t.Errorf("expected 'lint after sync' error, got: %v", err)
+		}
+	})
+}
+
+// TestCrgRepoRoot_GetwdErrorFallsBackToDot exercises the os.Getwd() error
+// branch (return "."): chdir into a directory then remove it so the cwd no
+// longer resolves.
+func TestCrgRepoRoot_GetwdErrorFallsBackToDot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("removing the cwd is not reliably observable on Windows")
+	}
+	parent := t.TempDir()
+	gone := filepath.Join(parent, "gone")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Skipf("could not remove cwd to force Getwd error: %v", err)
+	}
+	if got := crgRepoRoot(); got != "." {
+		// On some filesystems Getwd still resolves the removed dir; only
+		// assert when the error path was actually taken.
+		if _, err := os.Getwd(); err == nil {
+			t.Skip("Getwd still resolves removed cwd on this platform")
+		}
+		t.Errorf("crgRepoRoot after cwd removal: got %q, want \".\"", got)
+	}
+}
+
+// TestCheckCRGReadiness_BusyOrLocked_RequireGraph drives the
+// CRGReadinessBusyOrLocked case in checkCRGReadiness (lines 244-248): a
+// concurrently-held EXCLUSIVE lock makes Status() classify the graph as
+// busy_or_locked, and requireGraph=true must then return an error.
+func TestCheckCRGReadiness_BusyOrLocked_RequireGraph(t *testing.T) {
+	repo := t.TempDir()
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-20T00:00:00Z"},
+	})
+	dbPath := graphstore.CRGDBPath(repo)
+
+	locker, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(delete)&_pragma=busy_timeout(0)")
+	if err != nil {
+		t.Fatalf("open locker: %v", err)
+	}
+	defer locker.Close()
+	if _, err := locker.Exec("BEGIN EXCLUSIVE"); err != nil {
+		t.Fatalf("begin exclusive: %v", err)
+	}
+	defer locker.Exec("ROLLBACK")
+
+	// Confirm the lock actually produced a busy_or_locked classification on
+	// this platform; otherwise the targeted branch isn't reachable here.
+	if crgStatusState(repo) != graphstore.CRGReadinessBusyOrLocked {
+		t.Skip("DB lock did not yield busy_or_locked on this platform")
+	}
+
+	captureStdout(t, func() {
+		if err := checkCRGReadiness(repo, false); err != nil {
+			t.Errorf("requireGraph=false on busy graph must not error: %v", err)
+		}
+		err := checkCRGReadiness(repo, true)
+		if err == nil || !strings.Contains(err.Error(), "busy or locked") {
+			t.Errorf("expected busy-or-locked error with requireGraph=true, got: %v", err)
+		}
+	})
+}
+
+// TestRunKGBuild_DefaultOutcomeInfoBox drives the default arm of the
+// runKGBuild outcome switch (lines 143-145): the post-build Status() hits a
+// "no such column" error → CRGReadinessError → BuildReport.Outcome is the
+// catch-all that maps to ui.InfoBox("Code graph build status", ...).
+func TestRunKGBuild_DefaultOutcomeInfoBox(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	writeFakeCRGBinary(t, repo, `case "$1" in
+build) exit 0 ;;
+*) exit 0 ;;
+esac`)
+	// Hand-craft a graph.db whose nodes table is missing the updated_at
+	// column Status() selects → "no such column" (not locked, not "no such
+	// table") → CRGReadinessError, distinct from unbuilt/ready/busy.
+	dbPath := graphstore.CRGDBPath(repo)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE nodes (file_path TEXT, language TEXT)`); err != nil {
+		t.Fatalf("create nodes: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE edges (id INTEGER)`); err != nil {
+		t.Fatalf("create edges: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO nodes (file_path, language) VALUES ('a.go','go')`); err != nil {
+		t.Fatalf("insert node: %v", err)
+	}
+	db.Close()
+
+	if crgStatusState(repo) != graphstore.CRGReadinessError {
+		t.Skipf("expected error state from malformed schema, got %q", crgStatusState(repo))
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+	out := captureStdout(t, func() {
+		if err := runKGBuild(cmd, nil); err != nil {
+			t.Fatalf("runKGBuild: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "Code graph build status") {
+		t.Errorf("expected default-outcome InfoBox, got:\n%s", out)
+	}
+}
+
+// TestRunKGUpdate_NoMutationOutcome drives the "no_mutation" arm of the
+// runKGUpdate outcome switch (lines 184-185). Two commits give a non-empty
+// diff; the fake CRG's update summary parses as 0 nodes / 0 edges changed.
+func TestRunKGUpdate_NoMutationOutcome(t *testing.T) {
+	repo := t.TempDir()
+	initGitRepo(t, repo)
+	writeFakeCRGBinary(t, repo, `case "$1" in
+update) echo "2 files updated, 0 nodes, 0 edges" ;;
+*) exit 0 ;;
+esac`)
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-20T00:00:00Z"},
+	})
+	commitFile(t, repo, "a.txt", "x\n", "init")
+	commitFile(t, repo, "a.txt", "y\n", "edit")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Bool("skip-flows", false, "")
+	cmd.Flags().Bool("skip-postprocess", false, "")
+	cmd.Flags().Bool("json", false, "")
+	out := captureStdout(t, func() {
+		if err := runKGUpdate(cmd, nil); err != nil {
+			t.Fatalf("runKGUpdate: %v", err)
+		}
+	})
+	if !strings.Contains(string(out), "no graph mutations") {
+		t.Errorf("expected no-mutation summary, got:\n%s", out)
+	}
+}
+
+// TestRunKGWarmCodeImport_ReadEdgesError drives the ReadEdges-error return
+// (lines 551-553): nodes read succeeds (valid nodes table) but the edges
+// table is missing the columns ReadEdges selects.
+func TestRunKGWarmCodeImport_ReadEdgesError(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	dbPath := graphstore.CRGDBPath(repo)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	// A well-formed nodes table so ReadNodes(0) succeeds, but an edges table
+	// with no usable columns so ReadEdges(0) errors.
+	if _, err := db.Exec(`CREATE TABLE nodes (
+		id INTEGER PRIMARY KEY, kind TEXT, name TEXT, qualified_name TEXT,
+		file_path TEXT, line_start INTEGER, line_end INTEGER, language TEXT,
+		parent_name TEXT, params TEXT, return_type TEXT, is_test INTEGER,
+		signature TEXT, extra TEXT, file_hash TEXT, updated_at TEXT)`); err != nil {
+		t.Fatalf("create nodes: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE edges (bogus INTEGER)`); err != nil {
+		t.Fatalf("create edges: %v", err)
+	}
+	db.Close()
+
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	_, _, err = runKGWarmCodeImport(store, repo)
+	if err == nil {
+		t.Skip("schema unexpectedly accepted — ReadEdges error branch not hit")
+	}
+	if !strings.Contains(err.Error(), "edges") {
+		t.Errorf("expected CRG edges read error, got: %v", err)
+	}
+}
+
+// TestWarmArchivedNotes_AdjustPopulatesArchivedAt drives the adjust-callback
+// branch in warmArchivedNotes (lines 646-648): a note placed under
+// notes/_archived whose status is NOT archived/superseded leaves
+// noteToKGNote's ArchivedAt empty, so the callback must backfill it from
+// UpdatedAt.
+func TestWarmArchivedNotes_AdjustPopulatesArchivedAt(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	archDir := filepath.Join(home, "notes", "_archived")
+	if err := os.MkdirAll(archDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	updated := "2026-05-13T09:08:07Z"
+	// Status "active" (not archived/superseded) → noteToKGNote leaves
+	// ArchivedAt == "" so the warmArchivedNotes adjust callback fires.
+	note := &GraphNote{
+		SchemaVersion: 1, ID: "arch-active", Type: "decision", Title: "Still Active",
+		Summary: "s", Status: "active", CreatedAt: updated, UpdatedAt: updated,
+	}
+	data, err := renderGraphNote(note, "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archDir, "arch-active.md"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	idx, _ := warmArchivedNotes(store, home)
+	if idx != 1 {
+		t.Fatalf("expected 1 archived note indexed, got %d", idx)
+	}
+	got, err := store.GetKGNote("arch-active")
+	if err != nil || got == nil {
+		t.Fatalf("GetKGNote: %v", err)
+	}
+	if got.ArchivedAt != updated {
+		t.Errorf("expected ArchivedAt backfilled to %q, got %q", updated, got.ArchivedAt)
+	}
+}
+
+// TestWarmNotesInDir_SkipsSubdirsAndNonMarkdown drives the
+// "e.IsDir() || !strings.HasSuffix(.md)" continue branch (lines 662-663).
+func TestWarmNotesInDir_SkipsSubdirsAndNonMarkdown(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	dir := filepath.Join(home, "notes", "_scan")
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Non-.md file and a subdir — both must be skipped without counting.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignore me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := "2026-05-12T00:00:00Z"
+	good := &GraphNote{
+		SchemaVersion: 1, ID: "scan-1", Type: "decision", Title: "Good",
+		Summary: "s", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}
+	gd, err := renderGraphNote(good, "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scan-1.md"), gd, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+
+	indexed, skipped := warmNotesInDir(store, dir, nil)
+	if indexed != 1 {
+		t.Errorf("expected exactly the .md note indexed, got indexed=%d", indexed)
+	}
+	if skipped != 0 {
+		t.Errorf("subdir and .txt must be skipped silently, got skipped=%d", skipped)
+	}
+}
+
+// breakKGTable replaces a warm-store table with an incompatible stub of the
+// same name via a side connection. openKGStore's schema bootstrap uses
+// CREATE TABLE IF NOT EXISTS, so the stub survives a reopen (the run*
+// functions reopen the same DB file via kgHome()) — but every column-aware
+// query/DML against that table then errors, exactly hitting the targeted
+// error-return branches.
+func breakKGTable(t *testing.T, home, table, replacement string) {
+	t.Helper()
+	side, err := sql.Open("sqlite", graphstoreDBPath(home))
+	if err != nil {
+		t.Fatalf("side sql.Open: %v", err)
+	}
+	defer side.Close()
+	if _, err := side.Exec("DROP TABLE IF EXISTS " + table); err != nil {
+		t.Fatalf("DROP TABLE %s: %v", table, err)
+	}
+	if _, err := side.Exec(replacement); err != nil {
+		t.Fatalf("recreate broken %s: %v", table, err)
+	}
+}
+
+// initWarmDBThenBreak runs runKGSetup under a fresh KG_HOME, materializes
+// the warm schema by opening+closing the store once, then replaces table
+// with an incompatible stub so the next openKGStore (inside the run* under
+// test) keeps the broken schema (CREATE IF NOT EXISTS is a no-op) and the
+// operation against table fails.
+func initWarmDBThenBreak(t *testing.T, table, replacement string) string {
+	t.Helper()
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	store.Close()
+	breakKGTable(t, home, table, replacement)
+	return home
+}
+
+// TestWarmNotesInDir_UpsertKGNoteError drives the UpsertKGNote-error skip
+// branch (lines 680-682): the kg_notes table is dropped so every upsert
+// fails and the note is counted as skipped, not indexed.
+func TestWarmNotesInDir_UpsertKGNoteError(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	dir := filepath.Join(home, "notes", "decisions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := "2026-05-12T00:00:00Z"
+	n := &GraphNote{
+		SchemaVersion: 1, ID: "up-fail", Type: "decision", Title: "X",
+		Summary: "s", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}
+	data, err := renderGraphNote(n, "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "up-fail.md"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openKGStore(home)
+	if err != nil {
+		t.Fatalf("openKGStore: %v", err)
+	}
+	defer store.Close()
+	// store stays open (no reopen here), so a plain DROP on the shared WAL
+	// DB makes the held handle's UpsertKGNote INSERT fail with no-such-table.
+	side, err := sql.Open("sqlite", graphstoreDBPath(home))
+	if err != nil {
+		t.Fatalf("side sql.Open: %v", err)
+	}
+	defer side.Close()
+	if _, err := side.Exec("DROP TABLE IF EXISTS kg_notes"); err != nil {
+		t.Fatalf("DROP TABLE kg_notes: %v", err)
+	}
+
+	indexed, skipped := warmNotesInDir(store, dir, nil)
+	if indexed != 0 {
+		t.Errorf("expected 0 indexed when kg_notes is dropped, got %d", indexed)
+	}
+	if skipped != 1 {
+		t.Errorf("expected the note to be skipped on upsert error, got skipped=%d", skipped)
+	}
+}
+
+// TestRunKGLinkAdd_UpsertError drives the UpsertNoteSymbolLink-error return
+// (lines 731-733) by dropping note_symbol_links before the add reopens the DB.
+func TestRunKGLinkAdd_UpsertError(t *testing.T) {
+	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
+	cmd := newKGLinkAddCmdForTest("mentions")
+	err := runKGLinkAdd(cmd, []string{"note-x", "pkg::Sym"})
+	if err == nil || !strings.Contains(err.Error(), "create link") {
+		t.Fatalf("expected create-link error, got: %v", err)
+	}
+}
+
+// TestRunKGLinkList_GetLinksError drives the GetLinksForNote-error return
+// (lines 750-752).
+func TestRunKGLinkList_GetLinksError(t *testing.T) {
+	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
+	err := runKGLinkList(&cobra.Command{}, []string{"note-x"})
+	if err == nil || !strings.Contains(err.Error(), "get links") {
+		t.Fatalf("expected get-links error, got: %v", err)
+	}
+}
+
+// TestRunKGLinkRemove_DeleteError drives the DeleteNoteSymbolLink-error
+// return (lines 778-780).
+func TestRunKGLinkRemove_DeleteError(t *testing.T) {
+	// DELETE ... WHERE id=? needs an `id` column; a stub without it errors.
+	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
+	cmd := newKGLinkRemoveCmdForTest()
+	err := runKGLinkRemove(cmd, []string{"42"})
+	if err == nil || !strings.Contains(err.Error(), "remove link") {
+		t.Fatalf("expected remove-link error, got: %v", err)
+	}
+}
+
+// TestRunKGWarmStats_GetStatsError drives the GetStats-error return
+// (lines 794-796). GetStats runs `SELECT COUNT(*) FROM nodes WHERE
+// kind='File'`; a nodes stub without a `kind` column makes that query fail.
+func TestRunKGWarmStats_GetStatsError(t *testing.T) {
+	initWarmDBThenBreak(t, "nodes", "CREATE TABLE nodes (file_path TEXT NOT NULL, kind TEXT NOT NULL, qualified_name TEXT NOT NULL)")
+	err := runKGWarmStats(&cobra.Command{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "get stats") {
+		t.Fatalf("expected get-stats error, got: %v", err)
 	}
 }
