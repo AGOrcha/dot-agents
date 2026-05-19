@@ -1,6 +1,9 @@
 package workflow
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCompiledWorkflowIterLogSchema(t *testing.T) {
 	sch, err := compiledWorkflowIterLogSchema()
@@ -21,5 +24,33 @@ func TestValidateWorkflowIterLogEntry_Invalid(t *testing.T) {
 func TestValidateWorkflowIterLogEntry_Valid(t *testing.T) {
 	if err := validateWorkflowIterLogEntry(newValidIterLogEntry()); err != nil {
 		t.Fatalf("valid entry rejected: %v", err)
+	}
+}
+
+// TestValidateWorkflowIterLogEntry_RemapUnmarshalError drives the second
+// json.Unmarshal ("remap") error branch: jsonMarshal is seam-swapped to
+// return syntactically invalid JSON bytes (not an error), so the marshal
+// succeeds but the remap unmarshal fails.
+func TestValidateWorkflowIterLogEntry_RemapUnmarshalError(t *testing.T) {
+	withJSONMarshalStub(t, func(any) ([]byte, error) { return []byte("{not-json"), nil })
+
+	err := validateWorkflowIterLogEntry(newValidIterLogEntry())
+	if err == nil {
+		t.Fatal("expected remap unmarshal error, got nil")
+	}
+	if !strings.Contains(err.Error(), "remap iteration log for schema validation") {
+		t.Errorf("expected remap error message, got %q", err.Error())
+	}
+}
+
+func TestValidateWorkflowIterLogEntry_CompileError(t *testing.T) {
+	resetCompiledSchemaOnce(t, &workflowIterLogCompiledOnce,
+		&workflowIterLogCompiled, &workflowIterLogCompiledErr)
+
+	withSchemaAddResourceStubErr(t)
+
+	err := validateWorkflowIterLogEntry(newValidIterLogEntry())
+	if err == nil {
+		t.Fatal("expected compiled-schema error to propagate, got nil")
 	}
 }

@@ -153,3 +153,37 @@ func TestValidateReviewDecisionDoc_Valid(t *testing.T) {
 		t.Fatalf("valid doc rejected: %v", err)
 	}
 }
+
+// TestValidateReviewDecisionDoc_RemapUnmarshalError drives the remap
+// json.Unmarshal error branch via a jsonMarshal seam returning invalid JSON.
+func TestValidateReviewDecisionDoc_RemapUnmarshalError(t *testing.T) {
+	withJSONMarshalStub(t, func(any) ([]byte, error) { return []byte("{not-json"), nil })
+
+	err := validateReviewDecisionDoc(newValidReviewDecisionDoc())
+	if err == nil {
+		t.Fatal("expected remap unmarshal error, got nil")
+	}
+	if !strings.Contains(err.Error(), "remap review decision for schema validation") {
+		t.Errorf("expected remap error message, got %q", err.Error())
+	}
+}
+
+func TestValidateReviewDecisionDoc_CompileError(t *testing.T) {
+	resetCompiledSchemaOnce(t, &verificationDecisionCompiledOnce,
+		&verificationDecisionCompiled, &verificationDecisionCompiledErr)
+
+	withSchemaAddResourceStubErr(t)
+
+	if err := validateReviewDecisionDoc(newValidReviewDecisionDoc()); err == nil {
+		t.Fatal("expected compiled-schema error to propagate, got nil")
+	}
+}
+
+// TestReviewDecisionYAMLPath_BlankRel drives the rel == "" guard: a task ID
+// of only path separators trims non-empty but iterLogReviewDecisionPath
+// returns "".
+func TestReviewDecisionYAMLPath_BlankRel(t *testing.T) {
+	if _, err := reviewDecisionYAMLPath("/proj", "   "); err == nil {
+		t.Fatal("expected error for whitespace-only task id")
+	}
+}

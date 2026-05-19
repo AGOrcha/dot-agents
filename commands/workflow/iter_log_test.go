@@ -1007,6 +1007,48 @@ func TestLoadIterLogDocument_InvalidYAML(t *testing.T) {
 	}
 }
 
+// TestLoadIterLogDocument_V2UnmarshalError drives the v2 yaml.Unmarshal error
+// branch: the schema_version probe succeeds (it only reads an int field) but
+// a type-mismatched field makes the full iterLogEntry unmarshal fail.
+func TestLoadIterLogDocument_V2UnmarshalError(t *testing.T) {
+	bad := []byte("schema_version: 2\niteration: [not, an, int]\n")
+	_, err := loadIterLogDocument(bad)
+	if err == nil {
+		t.Fatal("expected v2 unmarshal error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse iteration log v2") {
+		t.Errorf("expected v2 parse error, got %q", err.Error())
+	}
+}
+
+// TestLoadOrInitIterLogEntry_CorruptFile drives the loadIterLogDocument-error
+// propagation branch in loadOrInitIterLogEntry via a corrupt on-disk file.
+func TestLoadOrInitIterLogEntry_CorruptFile(t *testing.T) {
+	iterPath := filepath.Join(t.TempDir(), "iter-1.yaml")
+	if err := os.WriteFile(iterPath, []byte("not: : valid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOrInitIterLogEntry(iterPath, "goal", "t1"); err == nil {
+		t.Fatal("expected error from corrupt iter log, got nil")
+	}
+}
+
+// TestWriteIterLogEntry_ValidationError drives the validate-error branch in
+// writeIterLogEntry with a schema-invalid entry.
+func TestWriteIterLogEntry_ValidationError(t *testing.T) {
+	iterPath := filepath.Join(t.TempDir(), "iter-1.yaml")
+	if err := writeIterLogEntry(iterPath, &iterLogEntry{}); err == nil {
+		t.Fatal("expected schema validation error for empty entry, got nil")
+	}
+}
+
+// TestFindReaderByHarness_NoMatch drives the no-match `return nil` branch.
+func TestFindReaderByHarness_NoMatch(t *testing.T) {
+	if r := findReaderByHarness("definitely-not-a-real-harness-xyz"); r != nil {
+		t.Errorf("expected nil for unknown harness, got %v", r)
+	}
+}
+
 func TestLoadIterLogDocument_V1Migration(t *testing.T) {
 	v1 := []byte(`schema_version: 1
 iteration: 5

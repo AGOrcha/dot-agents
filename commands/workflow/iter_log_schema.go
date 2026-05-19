@@ -21,18 +21,9 @@ var (
 
 func compiledWorkflowIterLogSchema() (*jsonschema.Schema, error) {
 	workflowIterLogCompiledOnce.Do(func() {
-		var doc any
-		if err := json.Unmarshal(workflowIterLogSchemaJSON, &doc); err != nil {
-			workflowIterLogCompiledErr = fmt.Errorf("parse embedded workflow-iter-log schema: %w", err)
-			return
-		}
-		c := jsonschema.NewCompiler()
 		const schemaURL = "./schemas/workflow-iter-log.schema.json"
-		if err := c.AddResource(schemaURL, doc); err != nil {
-			workflowIterLogCompiledErr = fmt.Errorf("register workflow-iter-log schema: %w", err)
-			return
-		}
-		workflowIterLogCompiled, workflowIterLogCompiledErr = c.Compile(schemaURL)
+		workflowIterLogCompiled, workflowIterLogCompiledErr = compileEmbeddedSchema(
+			workflowIterLogSchemaJSON, schemaURL, "workflow-iter-log")
 	})
 	return workflowIterLogCompiled, workflowIterLogCompiledErr
 }

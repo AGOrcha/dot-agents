@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -47,4 +48,37 @@ var (
 	// inject a stub that returns an error on a chosen call to drive each
 	// branch deterministically.
 	fprintfFunc = fmt.Fprintf
+	// Schema-compile seams. compileEmbeddedSchema (below) is the single
+	// shared body behind every compiled<Name>Schema() once-block. Its two
+	// defensive branches are unreachable from production input:
+	//   - schemaJSONUnmarshal: the embedded *.schema.json blobs are valid
+	//     JSON checked in at build time, so json.Unmarshal never fails.
+	//   - schemaAddResource: with jsonschema/v6 v6.0.0, AddResource never
+	//     returns a non-nil error for the hardcoded constant schema URL
+	//     (only Compile validates, and it panics rather than erroring).
+	// Tests swap these to error-returning stubs to drive the otherwise
+	// unreachable CompiledErr branches once, not per schema file.
+	schemaJSONUnmarshal = json.Unmarshal
+	schemaAddResource   = func(c *jsonschema.Compiler, url string, doc any) error {
+		return c.AddResource(url, doc)
+	}
 )
+
+// compileEmbeddedSchema is the shared compile-and-register body for every
+// embedded JSON Schema in this package. It replaces three byte-identical
+// compiled<Name>Schema() once-bodies (composition over duplication): each
+// compiled<Name>Schema() now passes its own embedded bytes + schema URL
+// constant and is otherwise a thin sync.Once wrapper. Behaviour is identical
+// to the prior inlined logic — same parse, same AddResource, same Compile,
+// same wrapped error messages keyed off the caller-supplied schemaName.
+func compileEmbeddedSchema(schemaJSON []byte, schemaURL, schemaName string) (*jsonschema.Schema, error) {
+	var doc any
+	if err := schemaJSONUnmarshal(schemaJSON, &doc); err != nil {
+		return nil, fmt.Errorf("parse embedded %s schema: %w", schemaName, err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := schemaAddResource(c, schemaURL, doc); err != nil {
+		return nil, fmt.Errorf("register %s schema: %w", schemaName, err)
+	}
+	return c.Compile(schemaURL)
+}

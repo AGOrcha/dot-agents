@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
 )
 
@@ -1110,5 +1112,107 @@ func TestRunSweepApply_ParamConfirmerMixed(t *testing.T) {
 	})
 	if !strings.Contains(out, "Sweep complete: 1/2") {
 		t.Errorf("expected 1/2 applied summary, got %s", out)
+	}
+}
+
+// ─── compileEmbeddedSchema seam paths ────────────────────────────────────────
+//
+// compileEmbeddedSchema is the single shared body behind every
+// compiled<Name>Schema() once-block. Its two defensive branches are
+// unreachable from production input (valid checked-in JSON; AddResource never
+// errors for the constant URL with jsonschema/v6 v6.0.0). These tests
+// fault-inject the seams so both branches are exercised once here rather than
+// triplicated per schema file. The real (non-injected) path is asserted by
+// each schema file's own compiled<Name>Schema() success test.
+
+// withSchemaJSONUnmarshalStub swaps schemaJSONUnmarshal for the test lifetime.
+func withSchemaJSONUnmarshalStub(t *testing.T, stub func([]byte, any) error) {
+	t.Helper()
+	prev := schemaJSONUnmarshal
+	schemaJSONUnmarshal = stub
+	t.Cleanup(func() { schemaJSONUnmarshal = prev })
+}
+
+// withSchemaAddResourceStub swaps schemaAddResource for the test lifetime.
+func withSchemaAddResourceStub(t *testing.T, stub func(*jsonschema.Compiler, string, any) error) {
+	t.Helper()
+	prev := schemaAddResource
+	schemaAddResource = stub
+	t.Cleanup(func() { schemaAddResource = prev })
+}
+
+// withSchemaAddResourceStubErr is the common case: force schemaAddResource to
+// fail so a freshly-reset compiled<Name>Schema() once-block records a non-nil
+// CompiledErr, letting callers exercise their compiled-schema error branch.
+func withSchemaAddResourceStubErr(t *testing.T) {
+	t.Helper()
+	withSchemaAddResourceStub(t, func(*jsonschema.Compiler, string, any) error {
+		return errors.New("forced addresource failure")
+	})
+}
+
+// resetCompiledSchemaOnce clears a package-level compiled-schema once-block so
+// the next compiled<Name>Schema() call re-runs the (seam-injected) compile.
+// It never copies the sync.Once value (vet copylocks-safe): it only assigns a
+// fresh zero Once and nils the cached schema/err. On cleanup it resets to the
+// same zero state, so the next live (non-injected) caller recompiles cleanly
+// from the restored real seam — behaviour identical (compile is idempotent).
+func resetCompiledSchemaOnce(t *testing.T, once *sync.Once, sch **jsonschema.Schema, errp *error) {
+	t.Helper()
+	reset := func() {
+		*once = sync.Once{}
+		*sch = nil
+		*errp = nil
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+func TestCompileEmbeddedSchema_UnmarshalError(t *testing.T) {
+	sentinel := errors.New("unmarshal boom")
+	withSchemaJSONUnmarshalStub(t, func([]byte, any) error { return sentinel })
+
+	sch, err := compileEmbeddedSchema([]byte(`{}`), "./schemas/x.schema.json", "x")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected unmarshal sentinel wrapped, got %v", err)
+	}
+	if sch != nil {
+		t.Errorf("expected nil schema on parse failure, got %v", sch)
+	}
+	if !strings.Contains(err.Error(), "parse embedded x schema") {
+		t.Errorf("expected wrapped parse message, got %q", err.Error())
+	}
+}
+
+func TestCompileEmbeddedSchema_AddResourceError(t *testing.T) {
+	sentinel := errors.New("addresource boom")
+	withSchemaAddResourceStub(t, func(*jsonschema.Compiler, string, any) error { return sentinel })
+
+	sch, err := compileEmbeddedSchema([]byte(`{"type":"object"}`), "./schemas/x.schema.json", "x")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected addresource sentinel wrapped, got %v", err)
+	}
+	if sch != nil {
+		t.Errorf("expected nil schema on register failure, got %v", sch)
+	}
+	if !strings.Contains(err.Error(), "register x schema") {
+		t.Errorf("expected wrapped register message, got %q", err.Error())
+	}
+}
+
+// TestCompileEmbeddedSchema_RealPath asserts the non-injected path still
+// parses + registers + compiles via the live json.Unmarshal / AddResource.
+func TestCompileEmbeddedSchema_RealPath(t *testing.T) {
+	sch, err := compileEmbeddedSchema([]byte(`{"type":"object"}`), "./schemas/real.schema.json", "real")
+	if err != nil {
+		t.Fatalf("real-path compile failed: %v", err)
+	}
+	if sch == nil {
+		t.Fatal("expected non-nil compiled schema on real path")
+	}
+	// Validate against the compiled schema to prove the real Compile path
+	// produced a usable schema (behaviour parity with the prior inlined body).
+	if err := sch.Validate(map[string]any{}); err != nil {
+		t.Errorf("compiled schema rejected a valid empty object: %v", err)
 	}
 }

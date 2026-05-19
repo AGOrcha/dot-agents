@@ -27,18 +27,9 @@ var (
 
 func compiledVerificationResultSchema() (*jsonschema.Schema, error) {
 	verificationResultCompiledOnce.Do(func() {
-		var doc any
-		if err := json.Unmarshal(verificationResultSchemaJSON, &doc); err != nil {
-			verificationResultCompiledErr = fmt.Errorf("parse embedded verification-result schema: %w", err)
-			return
-		}
-		c := jsonschema.NewCompiler()
 		const schemaURL = "./schemas/verification-result.schema.json"
-		if err := c.AddResource(schemaURL, doc); err != nil {
-			verificationResultCompiledErr = fmt.Errorf("register verification-result schema: %w", err)
-			return
-		}
-		verificationResultCompiled, verificationResultCompiledErr = c.Compile(schemaURL)
+		verificationResultCompiled, verificationResultCompiledErr = compileEmbeddedSchema(
+			verificationResultSchemaJSON, schemaURL, "verification-result")
 	})
 	return verificationResultCompiled, verificationResultCompiledErr
 }

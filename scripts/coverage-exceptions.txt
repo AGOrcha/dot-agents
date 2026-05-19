@@ -37,11 +37,7 @@ commands/workflow/drift.go                                 # [legacy-tail] 94.30
 commands/workflow/fs.go                                    # [legacy-tail] 93.27%; cg6 ratchet-loop raises to >=95%
 commands/workflow/graph.go                                 # [legacy-tail] 93.28%; cg6 ratchet-loop raises to >=95%
 commands/workflow/health.go                                # [legacy-tail] 94.67%; cg6 ratchet-loop raises to >=95%
-commands/workflow/iter_log_schema.go                       # [legacy-tail] 75.00%; cg6 ratchet-loop raises to >=95%
-commands/workflow/iter_log.go                              # [legacy-tail] 94.27%; cg6 ratchet-loop raises to >=95%
-commands/workflow/review_decision_schema.go                # [legacy-tail] 88.52%; cg6 ratchet-loop raises to >=95%
 commands/workflow/review_gate.go                           # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
-commands/workflow/verification_result_schema.go            # [legacy-tail] 88.71%; cg6 ratchet-loop raises to >=95%
 internal/config/config.go                                  # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
 internal/config/proposals.go                               # [legacy-tail] 92.92%; cg6 ratchet-loop raises to >=95%
 internal/fsops/fsops_windows.go                            # [platform-tag] 0.00% on merged profile; cg6 confirm-or-raise
