@@ -10,7 +10,6 @@ tasks:
         - t3-resource-plan-helper
         - t4-commands-cli-family
         - t5-platform-mcp-settings
-        - t6-typescript-port-mirrors
       owner: ""
       write_scope:
         - .agents/workflow/specs/production-code-helper-extraction/design.md
@@ -236,51 +235,11 @@ tasks:
                                        analysis
           output contract: ~50 dup lines removed from Group MCP
       app_type: code-fix
-    - id: t6-typescript-port-mirrors
-      title: Mirror Go projectsync extraction in TypeScript port (Group TS)
-      status: pending
-      depends_on:
-        - t1-triage-and-classify
-      blocks: []
-      owner: ""
-      write_scope:
-        - ports/typescript/src/lib/projectsync.ts
-        - ports/typescript/src/commands/agents.ts
-        - ports/typescript/src/commands/skills.ts
-      verification_required: true
-      notes: |-
-        Tier: T1 (compound — three files; mirrors the Go work
-        already in PR#10).
-
-        ports/typescript/src/commands/{agents,skills}.ts have a
-        20-line cross-duplication identical in shape to the Go
-        agents/skills list extraction PR#10 already shipped via
-        internal/projectsync. Mirror that work in TS by landing
-        ports/typescript/src/lib/projectsync.ts with the equivalent
-        listBucket helper, then thin out agents.ts and skills.ts.
-
-        Coordinate with the typescript-port plan owner before
-        starting — port plan churn could revert the extraction if
-        landed in the wrong order.
-
-        Hard test:
-          npm --prefix ports/typescript test (per port test
-          conventions; confirm at task start since CI commands drift)
-
-        Anti-scope: do NOT change CLI behavior — runKgHealth /
-        runKgQuery and the public command exports must remain
-        identical.
-
-        ISP routing:
-          mode: direct (port-specific; coordinate before fanning out)
-          verifier: smoke (port test suite)
-          review: code review (port parity with Go)
-          bundle-context (if fanout): T1's classification, the
-                                       PR#10 Go projectsync helpers
-                                       as the precedent, ts-port
-                                       plan owner contact
-          output contract: ~40 dup lines removed from Group TS
-      app_type: code-fix
+    # t6-typescript-port-mirrors DROPPED 2026-05-19: obsolete.
+    # `ports/typescript/` no longer exists on master and pr6-typescript-port
+    # is parked (carve-out branch only, frozen — see memory
+    # pr6-typescript-port-parked). The Group TS ~40-line duplication target
+    # cannot apply to a tree that isn't there.
     - id: t7-archive
       title: Open follow-up PR; verify gate; archive plan
       status: pending
@@ -289,7 +248,6 @@ tasks:
         - t3-resource-plan-helper
         - t4-commands-cli-family
         - t5-platform-mcp-settings
-        - t6-typescript-port-mirrors
       blocks: []
       owner: ""
       write_scope:

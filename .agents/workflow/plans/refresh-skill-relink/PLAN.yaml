@@ -3,10 +3,38 @@ schema_version: 1
 id: "refresh-skill-relink"
 title: "Refresh Skill Relink Plan"
 status: "paused"
-summary: "Fix non-empty .agents/skills/<name> relink warnings via centralized resource planner."
+summary: |-
+    Fix non-empty .agents/skills/<name> relink warnings via centralized
+    resource planner.
+
+    STATUS NOTE 2026-05-19 (verified vs origin/master): this plan is
+    still genuinely paused — its blocker is real. The user's read that
+    "an agent was supposed to do this but failed" is partially right
+    and needs precise framing:
+      - Related shared-target work DID land: shared-target-projection-
+        wiring stp1-wire-refresh + stp2-wire-install-add are completed
+        and shipped as #31 (stp-import) and #32 (stp-doctor), with
+        stp-import-relink and stp-doctor-repair still in_progress.
+      - BUT stp's success_criteria explicitly say "no per-platform
+        CreateLinks regression" — it never committed to *replacing* or
+        *centralizing* the per-platform syncScopedDirSymlinksTargets
+        function this plan depends on. On current origin/master
+        syncScopedDirSymlinksTargets still lives per-platform in
+        internal/platform/{claude,resources}.go.
+      - So the accurate framing is NOT "scheduled-and-skipped" — it
+        is "the centralization fell through the cracks; no plan claims
+        it." This blocker has no owner.
+
+    OPEN QUESTION for maintainer: should the per-platform
+    syncScopedDirSymlinksTargets centralization be (a) folded into the
+    remaining stp work (stp-import-relink / stp-doctor-repair /
+    stp3-regression-parity), (b) given its own task in
+    shared-target-projection-wiring, or (c) a new tiny plan owned
+    here. Until that is decided this plan stays paused; restarting
+    without an owner for the centralization will just re-block.
 created_at: "2026-04-01T00:00:00Z"
-updated_at: "2026-04-11T12:00:00Z"
+updated_at: "2026-05-19T00:00:00Z"
 owner: "dot-agents"
 success_criteria: "Refresh imports then relinks shared skill mirrors without spurious directory warnings."
 verification_strategy: "refresh integration tests; manual da refresh smoke"
-current_focus_task: "Await shared executor replacing per-platform syncScopedDirSymlinksTargets"
+current_focus_task: "BLOCKED — awaits ownership decision on syncScopedDirSymlinksTargets centralization (see summary)"

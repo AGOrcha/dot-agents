@@ -1,7 +1,7 @@
 schema_version: 1
 id: go-test-fixture-extraction
 title: Extract internal/testutil to clear Cluster D test-fixture duplication
-status: proposed
+status: active
 summary: |-
     Cluster D from sonarqube-pr10/findings.md: ~1,500-1,700 duplicated
     lines across 18+ *_test.go files (Go test scaffolding —
@@ -18,8 +18,23 @@ summary: |-
     Spec: .agents/workflow/specs/go-test-fixture-extraction/design.md
     Source decision: docs/adr/0008-pr10-duplication-scope.md (option B)
     Source classification: .agents/workflow/plans/sonarqube-pr10/findings.md (Cluster D)
+
+    STATUS REFRESH 2026-05-19 (post-salvage audit vs origin/master):
+    helpers landed (internal/testutil/testutil.go) but per-package
+    extraction is far less complete than the prior task statuses
+    claimed. Audit of `import "…/internal/testutil"` in *_test.go:
+      - internal/platform   :  0/23 files use it  (t3: completed -> pending)
+      - commands/workflow   :  2/31 files use it  (t4: completed -> in_progress)
+      - commands (root)     :  8/96 files use it  (t5: pending  -> in_progress)
+      - commands/agents     :  4/6  files use it
+      - commands/skills     :  2/5  files use it
+      - commands/kg         :  0/11 files use it  (t7: completed -> in_progress)
+      - internal/graphstore :  0/30 files use it  (t6: still pending)
+    Plan status promoted proposed -> active; t3 demoted; t4/t5/t7
+    recharacterised as in_progress (partial). Re-audit per-task before
+    claiming completion next time.
 created_at: "2026-05-04T00:00:00Z"
-updated_at: "2026-05-06T05:35:07Z"
+updated_at: "2026-05-19T00:00:00Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate on the follow-up PR reports
