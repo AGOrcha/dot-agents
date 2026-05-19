@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-p7-plan-schedule-cmd-1776773438
+parent_plan_id: plan-archive-command
+parent_task_id: p7-plan-schedule-cmd
+title: Add workflow plan schedule subcommand
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/cmd.go
+    - commands/workflow/plan_task.go
+success_criteria: 'New read-only subcommand under planCmd. Reads TASKS.yaml, runs Kahn''s algorithm (BFS topological sort) to assign each task a wave number. Output: wave → task list (id, title, status, write_scope), critical path length (N waves), max intra-plan parallelism (max tasks in any wave). JSON output via --json. Does not store schedule — always computed fresh. This is design-time / human-readable; cross-plan runtime eligibility is workflow-parallel-orchestration spec.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:10:38Z"
+updated_at: "2026-04-21T12:35:10Z"

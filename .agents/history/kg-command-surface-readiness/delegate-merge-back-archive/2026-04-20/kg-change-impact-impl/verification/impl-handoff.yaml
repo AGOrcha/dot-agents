@@ -1,0 +1,41 @@
+task_id: kg-change-impact-impl
+commit_sha: e09e1acfb3a84486f15098f54fd5835c55d00213
+write_scope_touched:
+  - commands/kg/cmd.go
+  - commands/kg/sync_code_warm_link.go
+  - commands/kg/kg_test.go
+ready_for_verification: true
+impl_notes: |-
+  Implemented all four changes from kg-change-impact-audit.md:
+
+  1. Status() pre-flight in runKGChanges and runKGImpact: Both functions now call
+     checkCRGReadiness() before delegating to CRG. On unbuilt state, ui.WarnBox
+     emits "Code graph not built / Run 'kg build' first". On busy_or_locked state,
+     emits "Code graph is busy or locked". If Status() itself fails, the check is
+     skipped (non-blocking — CRG may still be absent).
+
+  2. --require-graph flag: Added Bool flag to both kgChangesCmd and kgImpactCmd
+     in cmd.go. When set and graph state is unbuilt or busy_or_locked,
+     checkCRGReadiness() returns a non-zero error instead of just warning.
+
+  3. graph_state in JSON output: Two wrapper structs (kgChangesJSONOutput,
+     kgImpactJSONOutput) embed the CRG result types and add a GraphState field.
+     JSON marshaling inlines all original fields plus "graph_state". The state
+     comes from a second Status() call after CRG completes; if Status() fails,
+     "unknown" is used. CRGChangeReport and CRGImpactResult are NOT modified.
+
+  4. Human advisory for empty results: runKGChanges appends
+     "Note: run 'kg code-status' to verify the code graph is current." when
+     ChangedFunctions is empty. runKGImpact does the same when both ChangedNodes
+     and ImpactedNodes are empty.
+
+  Tests added (6 new tests in kg_test.go):
+  - TestRunKGChanges_WarnOnUnbuiltGraph: warns but does not fail without --require-graph
+  - TestRunKGChanges_RequireGraphFailsOnUnbuilt: errors with --require-graph on unbuilt
+  - TestRunKGChanges_JSONOutputHasGraphState: graph_state present in --json output
+  - TestRunKGImpact_WarnOnUnbuiltGraph: warns but does not fail without --require-graph
+  - TestRunKGImpact_RequireGraphFailsOnUnbuilt: errors with --require-graph on unbuilt
+  - TestRunKGImpact_JSONOutputHasGraphState: graph_state present in wrapped output struct
+
+  All 6 new tests pass. Full commands/... and internal/... suite passes with no regressions.
+  Changes left uncommitted as per repo convention for impl slices pending review.

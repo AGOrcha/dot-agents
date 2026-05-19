@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-detect-overlap-conflicts-1776788620
+parent_plan_id: ralph-fanout-and-runtime-overrides
+parent_task_id: detect-overlap-conflicts
+title: Detect overlapping fanout conflicts
+summary: Delegated from plan Ralph Fanout And Runtime Overrides
+write_scope:
+    - bin/tests/ralph-orchestrate
+    - bin/tests/ralph-pipeline
+    - commands/workflow.go
+    - commands/workflow_test.go
+success_criteria: Make orchestrate skip pending tasks whose write scope overlaps an active delegation, and avoid selecting multiple new overlapping tasks in the same pass. The task should preserve current runtime routing while tightening selection safety.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T16:23:40Z"
+updated_at: "2026-04-21T16:34:33Z"

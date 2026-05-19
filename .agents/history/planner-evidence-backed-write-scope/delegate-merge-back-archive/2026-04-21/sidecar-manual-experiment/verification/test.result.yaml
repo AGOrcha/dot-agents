@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: sidecar-manual-experiment
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: test
+status: pass
+summary: 2 scope evidence tests pass. Hand-authored 2 .scope.yaml sidecars validated against Go struct round-trip. Research task — no Go code written.
+recorded_at: "2026-04-21T12:46:28Z"
+delegation_id: del-sidecar-manual-experiment-1776775343
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./commands/workflow/... -run TestScopeEvidence

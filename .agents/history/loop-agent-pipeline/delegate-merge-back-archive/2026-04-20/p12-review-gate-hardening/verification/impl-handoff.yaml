@@ -1,0 +1,21 @@
+task_id: p12-review-gate-hardening
+commit_sha: 55b3d75
+write_scope_touched:
+  - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+  - bin/tests/ralph-closeout
+  - bin/tests/ralph-pipeline
+  - bin/tests/ralph-review-gate
+  - commands/workflow/cmd.go
+  - commands/workflow/review_gate.go
+  - commands/workflow/review_gate_test.go
+  - docs/LOOP_ORCHESTRATION_SPEC.md
+  - tests/test-ralph-closeout-gate.sh
+  - tests/test-ralph-review-gate-auto.sh
+ready_for_verification: true
+impl_notes: >-
+  Added deterministic task-local review-gate evaluation via `workflow delegation gate`,
+  taught `ralph-review-gate` / `ralph-pipeline` / `ralph-closeout` to distinguish accept,
+  reject, and planning-required outcomes, updated the loop orchestration spec, and added
+  focused Go + shell coverage for gate and closeout behavior. Workspace remains
+  uncommitted; verifiers should evaluate the current tree at HEAD 55b3d75 plus working-tree
+  changes.

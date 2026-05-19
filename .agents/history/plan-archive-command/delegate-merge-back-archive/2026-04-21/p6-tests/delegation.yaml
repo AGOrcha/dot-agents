@@ -1,0 +1,24 @@
+schema_version: 1
+id: del-p6-tests-1776774925
+parent_plan_id: plan-archive-command
+parent_task_id: p6-tests
+title: Write table-driven tests for archive + drift + health changes
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/plan_task_test.go
+    - commands/workflow/drift_sweep_test.go
+success_criteria: |-
+    archive tests: (1) no-history dir → os.Rename fast path, (2) history dir exists with DMA →
+    merge, DMA untouched, PLAN+TASKS+plan.md overwritten, source removed, (3) identical sha256 →
+    skipped, (4) differing file + source newer → overwritten, (5) history file newer → skipped +
+    warning, (6) dry-run → no filesystem changes + per-file plan printed, (7) non-completed status
+    → error with hint, (8) --force bypasses guard, (9) RemoveAll failure → retry once → correct
+    error, (10) bulk --plan a,b → archives each in sequence, logs failure and continues.
+    drift tests: CompletedPlanIDs and InconsistentArchivedPlanIDs populated correctly per fixture.
+    health test: completed_plans_pending_archive count present in JSON and human output.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:35:25Z"
+updated_at: "2026-04-21T12:38:09Z"

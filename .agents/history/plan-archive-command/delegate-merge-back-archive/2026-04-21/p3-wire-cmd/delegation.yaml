@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-p3-wire-cmd-1776773192
+parent_plan_id: plan-archive-command
+parent_task_id: p3-wire-cmd
+title: Wire planArchiveCmd into cmd.go under planCmd
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/cmd.go
+success_criteria: |-
+    Add planArchiveCmd alongside planCreateCmd and planUpdateCmd. Flags: --plan (required, comma-separated), --force (bool). Call runWorkflowPlanArchive() per plan ID in sequence. Dry-run support via global -n flag — print per-file merge plan for each plan ID.
+    - delegation closeout reject: eagerly fanned before p2-archive-handler; re-fanout after wave-2 completes
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:06:32Z"
+updated_at: "2026-04-21T12:09:56Z"

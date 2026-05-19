@@ -1,0 +1,223 @@
+schema_version: 1
+plan_id: platform-session-integration
+tasks:
+    - id: p0-session-reader-foundation
+      title: SessionReader interface + agent block in iter-log (foundation)
+      status: completed
+      depends_on: []
+      blocks:
+        - p1-stats-reader-interface
+        - p2-session-token-scanner
+        - p3-branch-session-finder
+      owner: dot-agents
+      write_scope:
+        - internal/platform/platform.go
+        - internal/platform/session.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - commands/workflow/iter_log.go
+        - schemas/workflow-iter-log.schema.json
+        - commands/workflow/static/workflow-iter-log.schema.json
+      verification_required: true
+      notes: |-
+        Shipped on this branch ahead of the formal plan. Recorded here so downstream
+        tasks have an explicit dependency surface to point at.
+
+        Established artifacts:
+          SessionReader interface in internal/platform/platform.go.
+          scanJSONLForLastModel, claudeSessionJSONLPath, findCodexSessionFile in internal/platform/session.go.
+          resolveAgentBlock in commands/workflow/iter_log.go calling platform.All() + type-assert.
+          agent block (session_id, harness, harness_version, model, entrypoint) in iter-log entries.
+
+        Why this matters for P1-P3:
+          - All read-side platform interfaces follow the same opt-in type-assert pattern.
+          - sessionID flows from iter-log into SessionTokenScanner via Agent.SessionID.
+          - Harness identity lets SessionTokenScanner pick the right scanner per platform.
+    - id: p1-stats-reader-interface
+      title: StatsReader interface + per-platform implementations + da session stats command
+      status: completed
+      depends_on:
+        - p0-session-reader-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/platform.go
+        - internal/platform/stats.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/cursor.go
+        - commands/session_stats.go
+      verification_required: true
+      notes: |-
+        Add StatsReader interface to internal/platform/platform.go alongside SessionReader.
+        Add internal/platform/stats.go for shared data types:
+          PlatformUsageStats, ModelTokenUsage, DailyUsage, SessionSummary, CommitAttribution.
+
+        Per-platform ReadUsageStats(home string) *PlatformUsageStats implementations:
+
+          claude.go — parse ~/.claude/stats-cache.json (JSON, version 3):
+            Fields: totalSessions, totalMessages, hourCounts,
+              dailyActivity[]{date, messageCount, sessionCount, toolCallCount},
+              modelUsage{model: {inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens}}.
+
+          codex.go — parse ~/.codex/session_index.jsonl (one JSON object per line):
+            Fields per line: {id, thread_name, updated_at}.
+            Return last 10 lines as RecentSessions. TotalSessions = line count.
+
+          cursor.go — query ~/.cursor/ai-tracking/ai-code-tracking.db scored_commits table.
+            modernc.org/sqlite v1.48.2 is already in go.mod — use it directly, no new dep.
+            Query: SELECT commitHash, branchName, scoredAt, linesAdded, linesDeleted,
+              composerLinesAdded, composerLinesDeleted, humanLinesAdded, v2AiPercentage
+              FROM scored_commits ORDER BY scoredAt DESC LIMIT 10.
+            Return as CommitAttribution slice.
+
+          opencode.go, copilot.go — return nil (session schema not yet confirmed).
+
+        Command: commands/session_stats.go (new `session` subcommand group):
+          `da session stats`
+          Iterate platform.All(), type-assert to StatsReader, call ReadUsageStats(home).
+          Render each non-nil result as a named section separated by ---.
+          Nil result → print platform display name + "(no data available)".
+          Token numbers formatted with comma separators. No ANSI colors.
+          Output style consistent with da workflow status.
+    - id: p2-session-token-scanner
+      title: SessionTokenScanner interface + session_tokens block in iter-log
+      status: completed
+      depends_on:
+        - p0-session-reader-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/platform.go
+        - internal/platform/stats.go
+        - internal/platform/session.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/cursor.go
+        - internal/platform/opencode.go
+        - internal/platform/copilot.go
+        - commands/workflow/iter_log.go
+        - schemas/workflow-iter-log.schema.json
+        - commands/workflow/static/workflow-iter-log.schema.json
+      verification_required: true
+      notes: |-
+        Add SessionTokenScanner interface to internal/platform/platform.go:
+          ScanSessionTokens(home, projectPath, sessionID, afterTimestamp string) SessionTokenMetrics
+        Add SessionTokenMetrics to internal/platform/stats.go:
+          InputTokens, OutputTokens, CacheReadTokens, CacheCreationTokens int
+          ReasoningTokens int       (Codex o-series field; 0 for Claude Code)
+          CacheHitRate    float64   (0 = not computed or unavailable)
+          MessageCount    int
+
+        claude.ScanSessionTokens in internal/platform/session.go:
+          Path: claudeSessionJSONLPath(home, projectPath, sessionID).
+          Scan assistant entries where entry.timestamp > afterTimestamp (ISO-8601 UTC string compare).
+          Sum message.usage: input_tokens, output_tokens,
+            cache_read_input_tokens → CacheReadTokens,
+            cache_creation_input_tokens → CacheCreationTokens.
+          CacheHitRate = CacheReadTokens / (CacheReadTokens + CacheCreationTokens); 0 if both zero.
+          MessageCount = assistant entries scanned.
+
+        codex.ScanSessionTokens in internal/platform/session.go (or codex.go):
+          Path: findCodexSessionFile(home, sessionID).
+          Entry type: event_msg with payload.type == "token_count".
+          Use last_token_usage (per-turn delta), NOT total_token_usage (cumulative).
+          Fields: input_tokens, output_tokens, cached_input_tokens (→ CacheReadTokens),
+            reasoning_output_tokens (→ ReasoningTokens). No cache_creation concept in Codex.
+          Filter by entry.timestamp > afterTimestamp.
+          First token_count event in a session sometimes has null info — guard with nil check.
+          MessageCount = number of token_count events scanned.
+
+        cursor.ScanSessionTokens in internal/platform/cursor.go:
+          Scans ~/.cursor/projects/<slug>/agent-tools/*.txt (native cursor agent output).
+          Slug = projectPath with leading "/" stripped and "/" replaced by "-".
+          Filters files by mtime > afterTimestamp. sessionID ignored (no env var confirmed).
+          Result lines: type="result", camelCase usage schema:
+            inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens.
+          MessageCount = number of result lines with non-zero token usage.
+          Standard IDE chat sessions expose no token data via native files.
+
+        opencode.ScanSessionTokens in internal/platform/opencode.go:
+          Opens ~/.local/share/opencode/opencode.db with database/sql + modernc.org/sqlite.
+          Query: SELECT SUM($.tokens.input/output/cache.read/cache.write), COUNT(*) FROM part
+            JOIN message ON part.message_id = message.id
+            WHERE part.type = 'step-finish' AND (afterMs=0 OR message.created_at > afterMs).
+          afterMs = afterTimestamp parsed as RFC3339 converted to Unix milliseconds.
+          sessionID and projectPath ignored — no OpenCode session env var; all OpenCode usage
+            across projects in the time window is included.
+          modernc.org/sqlite imported via blank import in opencode.go.
+
+        copilot.ScanSessionTokens in internal/platform/copilot.go:
+          Scans ~/.copilot/session-state/*/events.jsonl files modified after afterTimestamp.
+          Reads session.shutdown events — the ONLY persisted token data in Copilot CLI.
+          Per-turn counts are ephemeral (memory only, shown via /usage but never written to disk).
+          modelMetrics is keyed by model name (e.g. "claude-opus-4-5"). Fields are camelCase:
+            inputTokens → InputTokens, outputTokens → OutputTokens,
+            cacheReadTokens → CacheReadTokens, cacheWriteTokens → CacheCreationTokens,
+            reasoningTokens → ReasoningTokens.
+          MessageCount = number of model-metric entries (one per model per completed session).
+          sessionID and projectPath ignored — no Copilot CLI session ID env var exists.
+          Filter by events.jsonl mtime (file is written when session.shutdown fires).
+
+        iter_log.go changes:
+          Add CheckpointAt string field (RFC3339, top-level, CLI-owned, omitempty).
+          Add SessionTokens *iterLogSessionTokensBlock field (omitempty).
+          iterLogSessionTokensBlock mirrors SessionTokenMetrics fields for YAML serialisation.
+          In mergeIterLogTopLevelGit: entry.CheckpointAt = time.Now().UTC().Format(time.RFC3339).
+          In runWorkflowCheckpointLogToIter, after resolveAgentBlock succeeds:
+            Determine prev checkpoint_at: load iter-(N-1).yaml; use "" if N==1 or file absent.
+            Find SessionTokenScanner: iterate platform.All(), type-assert, match AIAgentPrefix
+              against entry.Agent.Harness.
+            Call scanner.ScanSessionTokens(home, projectPath, sessionID, prevCheckpointAt).
+            If MessageCount > 0, set entry.SessionTokens = &iterLogSessionTokensBlock{...}.
+          On any error: log to stderr, leave SessionTokens nil, do not fail checkpoint.
+
+        Schema: add checkpoint_at (string, RFC3339) and session_tokens (object, all fields
+          integers + cache_hit_rate number) as optional properties.
+        Copy schemas/ → commands/workflow/static/ after editing.
+        TestWorkflowIterLogEmbeddedSchemaMatchesCanonical must pass.
+    - id: p3-branch-session-finder
+      title: BranchSessionFinder interface + recent sessions in da workflow orient
+      status: completed
+      depends_on:
+        - p0-session-reader-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/platform.go
+        - internal/platform/stats.go
+        - internal/platform/claude.go
+        - commands/workflow/state.go
+      verification_required: true
+      notes: |-
+        Add BranchSessionFinder interface to internal/platform/platform.go:
+          FindSessionsOnBranch(home, projectPath, branch string, maxResults int) []BranchSessionInfo
+        Add BranchSessionInfo to internal/platform/stats.go:
+          SessionID string, Timestamp string, MessageCount int
+
+        claude.FindSessionsOnBranch in internal/platform/claude.go:
+          Derive project hash: strings.ReplaceAll(projectPath, "/", "-").
+          List ~/.claude/projects/<hash>/*.jsonl sorted by mtime desc (os.ReadDir + sort).
+          Scan at most 20 files; for each, use bufio.Scanner on first 30 lines.
+          Look for JSON entry with "gitBranch":"<branch>" (string-search before JSON parse
+            to avoid parsing every line).
+          When found: extract sessionId (or uuid) and timestamp from that entry.
+          Count "assistant" substring occurrences in first 50 lines for rough MessageCount.
+          Collect up to maxResults; return early when reached.
+        Other platforms: return nil (Codex JSONL does not embed gitBranch).
+
+        state.go changes (the single file that owns orient rendering):
+          Add RecentSessions []platform.BranchSessionInfo field to workflowOrientState.
+          In enrichWorkflowState, after preferences resolution:
+            Iterate platform.All(), type-assert to platform.BranchSessionFinder.
+            Call FindSessionsOnBranch(home, project.Path, currentBranch, 3) per platform.
+            Append all results to state.RecentSessions.
+          Add renderOrientRecentSessionsSection(state, out) sibling to other renderOrient*Section.
+          Call it from renderWorkflowOrientMarkdown after renderOrientRecentCommitsSection.
+          Section format:
+            ## Recent sessions on this branch
+            claude-code  ed4c8af1  2026-05-10T14:32Z  ~47 messages
+            claude-code  5c1f0ab1  2026-05-09T22:01Z  ~121 messages
+          Session UUID truncated to first 8 chars. Timestamp trimmed to minute precision (drop seconds/ms).
+          Section omitted entirely (not rendered as empty header) when state.RecentSessions is nil/empty.
+          Import internal/platform in state.go (check for existing import first).

@@ -1,0 +1,248 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+tasks:
+    - id: t1-none-adapter-end-to-end
+      title: Built-in `none` adapter end-to-end pipeline
+      status: pending
+      depends_on: []
+      blocks:
+        - t2-compliance-read-only
+        - t3-ttrpg-dogfood
+        - t4-crg-dual-read
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/builtin/none/
+        - internal/kg/registry/
+        - internal/kg/lockfile/
+        - cmd/dot-agents/commands/kg/
+      verification_required: true
+      notes: |-
+        Smallest possible adapter; exercises the whole pipeline (schema
+        validation, namespace provisioning, lockfile init, query routing)
+        with no real domain logic. Spec reference:
+        graph-backend-adapter-contract §13.1.
+
+        Delivers:
+          * Adapter YAML loader + schema validator (§4)
+          * Namespace token issuance and storage validation (§8.2)
+          * Lockfile state machine init + reconciliation (§10.1)
+          * `da kg lockfile show`, `da kg lockfile reconcile` commands
+            (§10.1.4)
+          * Conformance tests T1-T5 (basic query forms) passing
+
+        Hard test:
+          A profile selecting `graph_backend: dotagents-builtin:graph/none@^1.0`
+          resolves, lockfile registers, no-op impact_radius runs.
+
+        Anti-scope:
+          NO domain-specific logic; NO real bootstrap skill; NO real DSL
+          beyond basic MATCH/RETURN.
+
+        ISP routing:
+          mode: fanout-amenable (bounded write_scope; integration tests
+                clear-cut)
+          verifier: integration tests
+          review: code review
+
+    - id: t2-compliance-read-only
+      title: Compliance register adapter (read-only / stub bootstrap)
+      status: pending
+      depends_on:
+        - t1-none-adapter-end-to-end
+      blocks:
+        - t5-cross-adapter-reads-from
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/builtin/compliance-register/
+        - internal/kg/dsl/
+        - testdata/compliance/
+      verification_required: true
+      notes: |-
+        Hand-author the schema; populate via a stub bootstrap; run the
+        named queries. Validates DSL parser, ref-joins, env_predicates,
+        materialized views. Spec reference:
+        graph-backend-adapter-contract §13.2.
+
+        Delivers:
+          * Full DSL parser with §5.4 ref-joins, §5.4.2 OPTIONAL+WHERE
+            lowering, §5.1.1 allowed-functions-in-WHERE
+          * env_predicates wiring (§7) — time_after + webhook predicate
+            kinds
+          * Conformance tests T6-T22, T23-T31 passing (full v1 DSL)
+          * Compliance worked example loads and named queries return
+            expected results on a sample corpus
+
+        Hard test:
+          impact_radius query returns regulations/risks/findings/evidence
+          + owner on control status change; policy_review_due_impact
+          surfaces controls when policy.review_due fires.
+
+        Common false positive:
+          coalesce in WHERE accepted but only for params (T23 passes,
+          T24 must reject — guard against accidentally allowing
+          field-level computation).
+
+    - id: t3-ttrpg-dogfood
+      title: TTRPG dogfood adapter — first real adapter author UX
+      status: pending
+      depends_on:
+        - t1-none-adapter-end-to-end
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/sandbox/ttrpg-adapter/
+        - oci packages for ttrpg-campaign-bootstrap skill
+      verification_required: true
+      notes: |-
+        Real bootstrap skill parsing session logs. Validates Tier 2 OCI
+        distribution, SDK contract (§8.4), real adapter author UX.
+        First DM friend onboarded for live dogfood.
+
+        Spec references:
+          §13.3 (TTRPG worked example)
+          §8.4 (SDK contract)
+          §9 (Tier 2 OCI distribution)
+
+        Delivers:
+          * Bootstrap skill packaged as OCI artifact
+          * SDK (`da-adapter-sdk`) for Go; bootstrap uses it exclusively
+          * TTRPG adapter loads from sandbox local source; queries.yaml
+            runs against session-log corpus
+          * DM friend(s) provide initial wishlist signal
+
+        Hard test:
+          Bootstrap on a 10-session corpus produces expected note/edge
+          counts; named queries return DM-validated results.
+
+        Anti-scope:
+          No grammar extensions (§5.1) — TTRPG works within v1.
+          Wishlist accumulates §12 budget signals; do NOT pre-emptively
+          extend grammar.
+
+    - id: t4-crg-dual-read
+      title: CRG migration — dual-read mode with crg-bridge adapter
+      status: pending
+      depends_on:
+        - t1-none-adapter-end-to-end
+      blocks:
+        - t6-bridge-decommission
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/builtin/crg/
+        - internal/adapters/builtin/crg-bridge/
+        - internal/graphstore/
+        - testdata/crg-parity/
+      verification_required: true
+      notes: |-
+        Bootstrap writes to new kg-native namespace; bridge remains
+        active for tools without parity; crg-bridge adapter exposes
+        legacy bridge state as read-only mirror namespace.
+
+        Spec references:
+          §11 (CRG migration path)
+          §11.2 (crg-bridge adapter)
+          §11.3 (dual-read mode)
+          §11.6 (parity test corpus)
+
+        Delivers:
+          * crg-bridge adapter shipping inside `da`, marked
+            `migration_only: true`
+          * CRG adapter bootstrap skill performing Tree-sitter
+            ingestion to kg_crg.* namespace
+          * Parity test corpus (100 commits) with passing thresholds
+            for build/update/status/impact-radius rows (§11.1)
+          * `workflow drift` flags consumers not yet migrated
+
+        Hard test:
+          For 10 pinned commits, both bridge and kg-native adapter
+          produce equivalent node/edge counts and impact-radius results
+          for a 100-symbol corpus.
+
+        Anti-scope:
+          NO decommissioning in this task — bridge stays active.
+          flows/communities/postprocess parity is t6.
+
+    - id: t5-cross-adapter-reads-from
+      title: Cross-adapter `reads_from` — compliance view from CRG
+      status: pending
+      depends_on:
+        - t2-compliance-read-only
+        - t4-crg-dual-read
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/builtin/compliance-register/views/
+        - internal/kg/dsl/cross-namespace/
+        - testdata/cross-adapter/
+      verification_required: true
+      notes: |-
+        Compliance adapter declares a view that reads from CRG.
+        Validates namespace-token set derivation (§8.2), multi-namespace
+        query plans, lockfile cross-adapter coordination (§10).
+
+        Spec references:
+          §8.3 (cross-adapter reads via reads_from)
+          §10.3 (cross-adapter cutover)
+          §10.1.3 (fail-closed reconciliation)
+
+        Delivers:
+          * Multi-namespace token derivation per N3-N4 conformance tests
+          * Cross-namespace SQL plan validation per N6-N9
+          * View `controls_with_changed_function_evidence` from §8.3
+            example loads and refreshes correctly
+          * Lockfile state machine transitions through full
+            pending-recompat-check → pending-rebuild → ready cycle
+            when CRG schema is bumped
+
+        Hard test:
+          Bump CRG to a backward-compatible new schema; the dependent
+          view transitions through the state machine and rebuilds.
+          Then bump CRG to an incompatible schema; the view enters
+          dsl-update-required and blocks dependee activation until
+          compliance adapter ships an updated view query.
+
+        Common false positive:
+          Cross-adapter writes attempted via materialized view —
+          must be storage-layer rejected (N8).
+
+    - id: t6-bridge-decommission
+      title: Bridge decommissioning — close §11.4 gate
+      status: pending
+      depends_on:
+        - t4-crg-dual-read
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/ (deletions)
+        - internal/adapters/builtin/crg/ (full feature parity)
+        - .github/workflows/ci.yml (parity test promotion)
+      verification_required: true
+      notes: |-
+        Flip `da` core to prefer new CRG namespace. Decommission the
+        Python subprocess bridge once §11.4 gate passes.
+
+        Spec references:
+          §11.1 (full parity matrix — flows/communities/postprocess
+                  remain)
+          §11.4 (decommissioning gate)
+
+        Delivers:
+          * flows/communities/postprocess parity (named queries OR
+            materialized views OR adapter MCP server per §11.1 — log
+            budget signal if MCP server is used)
+          * 3 consecutive weeks of CI green on the parity matrix
+          * Behavior-preservation gate (§6.2 of app-type-profiles)
+            passes on 100-task corpus
+          * `workflow drift` reports zero consumers still using bridge
+          * crg-bridge adapter removed from `da` core
+          * Python subprocess machinery deleted
+
+        Hard test:
+          After deletion, `kg build|update|impact|flows|communities|
+          postprocess|changes` commands all work end-to-end against
+          new kg-native namespace only.
+
+        Anti-scope:
+          Do NOT delete bridge until ALL §11.4 gate conditions are
+          met. If even one consumer's lockfile still has
+          `reads_from: [crg-bridge]`, keep the bridge.

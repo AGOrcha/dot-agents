@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t5-sweep-skills-rules-claude-md
+parent_plan_id: binary-rename-da-sweep
+verifier_type: merge-back
+status: pass
+summary: Edits land in user's home directory (~/.agents/ and ~/.claude/CLAUDE.md). Per task brief, did not git-commit from inside the project repo — those paths are outside this repo's tracking. ~/.agents/ may be its own git repo with pre-existing dirty state at session start (mcp/, settings/, context/, etc.) — left untouched; only the in-scope files for t5 were modified. Project repo dirty state (PLAN.yaml, TASKS.yaml, delegation-bundles/, delegation/, history/) was the workflow runtime's own bookkeeping and is untouched. Repo-local .agents/skills/* are symlinks into ~/.agents/skills/dot-agents/, so the edits are immediately visible without running 'da skills promote' or 'da refresh'.
+recorded_at: "2026-05-04T02:58:56Z"
+delegation_id: del-t5-sweep-skills-rules-claude-md-1777862348
+artifact_paths:
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml

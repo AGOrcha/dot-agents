@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+task_id: kg-freshness-impl
+delegation_id: del-kg-freshness-impl-1776636903
+decision: accept
+closed_at: "2026-04-20T00:52:20Z"

@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-phase-3-migrate-shared-targets-1775967976
+parent_plan_id: resource-intent-centralization
+parent_task_id: phase-3-migrate-shared-targets
+title: Phase 3 — Migrate highest-conflict repo-local outputs onto shared executor
+summary: Delegated from plan Resource Intent Centralization Plan
+write_scope:
+    - internal/platform/
+success_criteria: Skills + agents/ projections per .agents/active/resource-intent-centralization.plan.md
+verification_expectations: "go test ./internal/platform/... passes; all Phase 3 markdown checkboxes marked complete; TASKS.yaml phases 3–6 advanced to completed"
+may_mutate_workflow_state: false
+owner: shared-target-worker
+status: completed
+created_at: "2026-04-12T04:26:16Z"
+updated_at: "2026-04-12T00:00:00Z"
+outcome: "All Phase 3 items verified as already implemented in internal/platform/. Markdown checkboxes reconciled. TASKS.yaml phases 3-6 advanced to completed. PLAN.yaml status = completed. Pre-existing build break in internal/graphstore/postgres.go (missing pgx dependency) discovered and documented — not a regression from this work, out of write scope."

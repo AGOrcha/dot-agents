@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: derive-scope-command
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: unit
+status: pass
+summary: 'go test ./commands/workflow/...: all tests pass including TestDeriveScopeMode, TestDeriveScopeConfidence, TestRunWorkflowPlanDeriveScopeDegradesGracefully (positive + negative). Full suite ok.'
+recorded_at: "2026-04-21T12:51:46Z"
+delegation_id: del-derive-scope-command-1776775643
+recorded_by: dot-agents workflow verify record

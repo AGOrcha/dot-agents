@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-expand-command-surface-smokes-1776630022
+parent_plan_id: ci-smoke-suite-hardening
+parent_task_id: expand-command-surface-smokes
+title: Expand CLI smoke coverage for workflow, kg, and resource lifecycle surfaces
+summary: Delegated from plan CI Smoke Suite Hardening
+write_scope:
+    - .github/workflows/
+    - scripts/
+    - tests/
+    - commands/
+    - docs/
+success_criteria: Cover meaningful command surfaces that unit tests do not exercise well, especially workflow and kg entrypoints plus resource lifecycle paths where filesystem, flags, and layout assumptions tend to drift.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-19T20:20:22Z"
+updated_at: "2026-04-19T20:23:03Z"

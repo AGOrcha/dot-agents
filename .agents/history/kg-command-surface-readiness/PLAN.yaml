@@ -1,0 +1,23 @@
+schema_version: 1
+id: kg-command-surface-readiness
+title: KG Command Surface Readiness
+status: completed
+summary: All kg command-surface readiness tasks complete. commandWithSQLiteAutocommit resolves the nested-transaction defect; added TestCRGBridgeFreshBuildRealCRG (Go) and test-kg-real-crg-build.sh (shell) for real-CRG isolated-home regression coverage with direct graph.db assertions.
+created_at: "2026-04-19T19:42:47Z"
+updated_at: "2026-05-03T01:00:00Z"
+owner: dot-agents
+success_criteria: |-
+    kg build and kg update produce a usable, verifiable code graph from a clean checkout with
+    no undocumented preconditions. kg code-status reports provenance and freshness honestly.
+    kg changes and kg impact return useful results and clearly distinguish empty-graph from
+    no-impact in output and exit codes. kg flows/communities/postprocess have documented
+    agent-ready vs expert-only decisions. kg serve MCP tools have a published parity matrix.
+verification_strategy: |-
+    Focused go test coverage in commands/kg/ and internal/graphstore/. Command-level smoke
+    verification on known repo fixtures after each implementation task. Explicit repro cases
+    for missing-config, stale-graph, and empty-result behavior. For the fresh-build transaction
+    follow-on, do not rely only on fake CRG binaries or stub Python entrypoints: require at
+    least one isolated-home verification path against the real code-review-graph runtime and
+    direct inspection/assertion of the resulting SQLite database state so wrapper-level tests
+    cannot mask underlying DB transaction defects.
+current_focus_task: ""

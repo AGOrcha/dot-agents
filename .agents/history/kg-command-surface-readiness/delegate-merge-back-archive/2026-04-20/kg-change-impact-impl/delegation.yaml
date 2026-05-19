@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-kg-change-impact-impl-1776646638
+parent_plan_id: kg-command-surface-readiness
+parent_task_id: kg-change-impact-impl
+title: Implement kg changes/impact trustworthiness fixes and add smoke coverage
+summary: Delegated from plan KG Command Surface Readiness
+write_scope:
+    - commands/kg/cmd.go
+    - commands/kg/kg.go
+    - internal/graphstore/crg.go
+    - tests/
+    - docs/
+success_criteria: Distinguish empty-graph from no-impact in output and exit codes. Add --require-graph flag. Structured JSON output mode. Smoke tests on known repo fixtures.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-kg-change-impact-impl
+status: completed
+created_at: "2026-04-20T00:57:18Z"
+updated_at: "2026-04-20T01:01:47Z"

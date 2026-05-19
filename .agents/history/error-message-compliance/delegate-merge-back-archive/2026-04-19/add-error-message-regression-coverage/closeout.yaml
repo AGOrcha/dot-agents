@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: error-message-compliance
+task_id: add-error-message-regression-coverage
+delegation_id: del-add-error-message-regression-coverage-1776635147
+decision: accept
+closed_at: "2026-04-19T21:52:16Z"

@@ -1,0 +1,42 @@
+schema_version: 1
+id: typescript-port
+title: TypeScript Port — Sync Pipeline & Boundary Maintenance
+status: archived
+summary: |-
+    Resurrect the typescript-port plan with a current gap audit and a sync
+    pipeline that keeps the TS port aligned with the documented Phase 4
+    boundary as the Go CLI evolves. The TS port serves restricted-machine
+    users (no Go toolchain available, Node.js 20+ acceptable) and
+    Windows-first workflows where Stage 1 commands suffice. The Phase 4
+    decision is option 2 (read-only workflow surfaces + intentional Go-only
+    for KG and orchestration) per docs/TYPESCRIPT_PORT_BOUNDARY.md. This
+    plan does NOT redo that decision; it operationalizes the
+    keep-in-sync mechanism so future Go changes do not silently drift the
+    TS port out of contract.
+created_at: "2026-05-03T20:30:00Z"
+updated_at: "2026-05-04T04:22:53Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: a Go CLI change that adds, removes, or renames a top-level
+    command, or modifies a Stage 1 command's flag surface in a way the TS
+    port must mirror, fails CI with a clear diff against the
+    machine-readable boundary spec until either the TS port is updated or
+    the boundary spec explicitly opts out of mirroring. The current gap
+    between Go and TS is captured in a checked-in audit memo at
+    docs/TYPESCRIPT_PORT_GAP.md, and `node ports/typescript/dist/cli.js
+    --help` round-trips to the documented boundary surface with no
+    surprises.
+
+    Common false positive: CI check passes because the boundary spec is
+    so loose that any Go change satisfies it. The check must distinguish
+    "covered by boundary opt-out (Go-only by design)" from "drift the TS
+    port should mirror but doesn't yet."
+verification_strategy: |-
+    Automated CI check on every PR that diffs the Go command tree against
+    the boundary spec and the TS implementation. Smoke test: TS port
+    --help output matches the help-text snapshot in
+    ports/typescript/tests/boundary.test.ts. Manual review of the gap
+    audit memo (docs/TYPESCRIPT_PORT_GAP.md) on plan close. The pipeline
+    itself is verified by intentionally introducing a fake Go command and
+    confirming CI fails, then reverting.
+current_focus_task: ""

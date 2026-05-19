@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: isolate-home-based-smoke-harness
+parent_plan_id: ci-smoke-suite-hardening
+delegation_id: del-isolate-home-based-smoke-harness-1776629564
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+recorded_at: "2026-04-19T20:19:28Z"
+recorded_by: dot-agents workflow verify record

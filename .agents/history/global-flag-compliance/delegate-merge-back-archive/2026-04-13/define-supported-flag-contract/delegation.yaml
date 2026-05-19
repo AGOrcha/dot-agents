@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-define-supported-flag-contract-1776046022
+parent_plan_id: global-flag-compliance
+parent_task_id: define-supported-flag-contract
+title: Define the supported/unsupported contract for each global flag
+summary: Delegated from plan Global Flag Compliance Plan
+write_scope:
+    - docs/
+    - .agents/workflow/plans/global-flag-compliance/
+success_criteria: Decide where flags should work semantically versus where the CLI should reject them with a usage error.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: gfc-contract-worker
+status: completed
+created_at: "2026-04-13T02:07:02Z"
+updated_at: "2026-04-13T02:24:26Z"

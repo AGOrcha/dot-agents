@@ -1,0 +1,33 @@
+schema_version: 1
+id: del-phase-6-loop-worker-subagent-1776211038
+parent_plan_id: loop-runtime-refactor
+parent_task_id: phase-6-loop-worker-subagent
+title: Phase 6 — Convert loop-worker to a Claude Code sub-agent (AGENT.md + .agentsrc.json)
+summary: Delegated from plan Loop Runtime Refactor — Skill Chain + Ralph Scripts + Subagent Worker
+write_scope:
+    - .agents/skills/loop-worker/
+success_criteria: |-
+    Convert Pattern E from an inlined orchestrator prompt to a first-class Claude Code sub-agent.
+
+    Current state (Pattern E): orchestrator inlines the worker prompt inside Agent(prompt=...) in
+    orchestrator-session-start. Worker identity lives in the orchestrator skill, not self-contained.
+
+    Target state (sub-agent): AGENT.md defines the worker system prompt once. Orchestrator calls
+    Agent(subagent_type='loop-worker') — no inlined prompt. Clean role separation.
+
+    WORKER CONTEXT (session 2026-04-14):
+    - loop-worker skill (Phase 4a) already has the right shape: startup.md, workflow.md, gotchas.md files
+    - Conversion is: create AGENT.md (sub-agent system prompt format) alongside existing SKILL.md
+    - SKILL.md stays for human /loop-worker invocation — do NOT remove or rename it
+    - AGENT.md consolidates startup + workflow + gotchas into single cold-start system prompt
+    - Do NOT duplicate ~/.agents/profiles/loop-worker.md content — that loads separately
+    - Use /skill-architect (mode: improve) for AGENT.md creation and orchestrator update
+    - .agentsrc.json edit (adding 'loop-worker' to agents list) is a direct file edit, not skill-architect
+    - After .agentsrc.json edit: dot-agents skills promote loop-worker && dot-agents refresh
+    - SLICES: 6a (AGENT.md) → 6b (.agentsrc.json + orchestrator prompt strip)
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-14T23:57:18Z"
+updated_at: "2026-04-14T23:58:34Z"

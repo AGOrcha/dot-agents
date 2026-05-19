@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+task_id: p10-workflow-command-decomposition
+delegation_id: del-p10-workflow-command-decomposition-1776539976
+decision: accept
+closed_at: "2026-04-18T21:15:49Z"

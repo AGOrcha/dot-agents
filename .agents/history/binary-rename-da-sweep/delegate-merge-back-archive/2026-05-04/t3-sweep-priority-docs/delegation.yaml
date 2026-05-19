@@ -1,0 +1,57 @@
+schema_version: 1
+id: del-t3-sweep-priority-docs-1777860572
+parent_plan_id: binary-rename-da-sweep
+parent_task_id: t3-sweep-priority-docs
+title: Sweep README, docs/, ADRs, architecture note
+summary: Delegated from plan Binary Rename — dot-agents → da (UV-style abbreviation)
+write_scope:
+    - README.md
+    - docs/
+    - .agents/proposals/agent-context-resolution-architecture.md
+success_criteria: |-
+    Tier: T1 (molecule — scoped text substitution per file).
+
+    Files in scope (~30):
+      * README.md (top-level) — first user contact; high-priority
+      * docs/*.md (~26 files) — PLATFORM_DIRS_DOCS, RESOURCE_COMMAND_CONTRACT,
+        TYPESCRIPT_PORT_BOUNDARY, etc.
+      * docs/adr/0001-adopt-architecture-decision-records.md and any
+        ADRs created by today's plans (0002, 0003, 0004, 0005)
+        once they land
+      * .agents/proposals/agent-context-resolution-architecture.md §4
+        mapping table + §6.5 audit findings text
+
+    Substitution rule:
+      * `dot-agents <command>` → `da <command>` in code blocks, prose,
+        and table cells
+      * Keep the project-name "dot-agents" (in headings, repo refs,
+        "the dot-agents project") unchanged
+      * Keep `github.com/NikashPrakash/dot-agents`, `cmd/dot-agents/`,
+        `~/.agents/`, `.agents/` unchanged
+
+    For shim path (per t1): add a one-line note near the top of
+    README.md and docs/CONTRIBUTING.md that legacy `dot-agents`
+    invocations still work but print a deprecation notice.
+
+    Hard test:
+      `grep -rE "dot-agents [a-z]" README.md docs/ .agents/proposals/agent-context-resolution-architecture.md`
+      returns only intentional compat-shim references.
+
+    Common false positive:
+      Sweep touches code blocks but misses prose mentions ("run
+      dot-agents kg ..." in a sentence). Run grep with --include='*.md'
+      and visually scan results.
+
+    ISP routing:
+      mode: fanout-amenable (per-file or per-doc-area substitution; clean isolation; can split docs/ into batches if needed)
+      verifier: smoke (final grep returns clean) + manual (random spot-check 3 docs to confirm prose is updated, not just code blocks)
+      review: doc review (substitution complete; project-name preserved; shim references explicit if applicable)
+      anti-scope: do NOT touch .agents/history/ — that's the historical record. Do NOT change any code in commands/, internal/, ports/typescript/.
+      bundle-context (if fanout): ADR-0006 (decision), the substitution rule above, list of project-name-vs-binary-name distinguishing patterns
+      output contract: clean grep for dot-agents-as-command outside history dir; commit per area is fine but document the substitution rule in the commit message
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T02:09:32Z"
+updated_at: "2026-05-04T02:24:26Z"

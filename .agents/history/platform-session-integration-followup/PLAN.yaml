@@ -1,0 +1,11 @@
+schema_version: 1
+id: platform-session-integration-followup
+title: Platform Session Integration — review follow-up fixes
+status: archived
+summary: Fix gitBranch substring false-positive in claudeScanJSONLForBranch and add focused tests for the new platform scanner family.
+created_at: "2026-05-12T02:34:49Z"
+updated_at: "2026-05-12T02:48:30Z"
+owner: dot-agents
+success_criteria: claudeScanJSONLForBranch verifies the gitBranch field via JSON decode, not substring match; focused tests cover claudeScanSessionTokens, claudeScanJSONLForBranch, and cursorScanSessionTokens; full test suite green; parent plan platform-session-integration archivable.
+verification_strategy: go test ./internal/platform/ ./commands/workflow/ — focused tests must demonstrate the bug fix (negative case where a substring-only match is rejected) and exercise each new scanner with a synthetic fixture.
+current_focus_task: ""

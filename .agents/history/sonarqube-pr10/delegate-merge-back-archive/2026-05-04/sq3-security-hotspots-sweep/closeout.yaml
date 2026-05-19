@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: sonarqube-pr10
+task_id: sq3-security-hotspots-sweep
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+decision: accept
+note: 'Accepted: CI-produced SonarCloud readback on 85266c0 reports new_security_hotspots_reviewed=100.0 and 0 TO_REVIEW hotspots; no agent-side hotspot status writes used.'
+closed_at: "2026-05-04T06:00:41Z"

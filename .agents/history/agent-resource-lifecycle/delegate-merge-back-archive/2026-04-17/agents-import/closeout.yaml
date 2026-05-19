@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: agent-resource-lifecycle
+task_id: agents-import
+delegation_id: del-agents-import-1776434328
+decision: accept
+closed_at: "2026-04-17T15:21:10Z"

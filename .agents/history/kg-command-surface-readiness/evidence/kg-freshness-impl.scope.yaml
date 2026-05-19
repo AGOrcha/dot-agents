@@ -1,0 +1,210 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+task_id: kg-freshness-impl
+status: draft
+mode: code
+goal: |-
+  Make kg code-status the authoritative freshness probe with machine-readable output
+  and explicit states (unbuilt, ready, busy_or_locked, error). Fix kg build/update
+  to surface actionable non-zero failures and distinguish no-diff from no-mutation.
+confidence: high
+
+decision_locks:
+  - |-
+    kg health remains note-store health only; it must NOT be used as code-graph readiness indicator.
+    Downstream automation must anchor freshness on kg code-status output, not kg health.
+  - |-
+    kg code-status must emit at least four explicit states: unbuilt, ready, busy_or_locked, error.
+  - |-
+    kg build and kg update must surface actionable non-zero exit on missing CRG, lock/busy,
+    and runtime execution failures.
+  - |-
+    Success summaries must distinguish no-diff (graph unchanged) from no-graph-mutation outcomes.
+  - |-
+    The mismatch between build summary counts and persisted code-status counts must be
+    documented clearly even if not fully resolved in this task.
+  - |-
+    crg.go owns the readiness contract implementation; cmd.go wires it; kg_test.go covers it.
+
+required_reads:
+  - path: docs/research/kg-freshness-audit.md
+    why: |-
+      Ground truth audit findings: fresh-home fails with sqlite transaction error;
+      code-status reports 0/0/0 on clean checkout; persisted counts disagree with build summary.
+  - path: commands/kg/cmd.go
+    why: Subcommand routing; code-status and build commands wired here
+  - path: commands/kg/kg.go
+    why: High-level kg command logic; build/update/code-status implementations or delegates
+  - path: commands/kg/sync_code_warm_link.go
+    why: Warm-link sync; may interact with freshness state transitions
+  - path: internal/graphstore/crg.go
+    why: CRG-backed build path; sqlite transaction lifecycle fix lives here; readiness states
+
+seeds:
+  symbols:
+    - runKGBuild
+    - runKGCodeStatus
+    - runKGUpdate
+    - CRGReadinessState
+    - SyncCodeWarmLink
+  paths:
+    - commands/kg/kg.go
+    - commands/kg/sync_code_warm_link.go
+    - commands/kg/cmd.go
+    - internal/graphstore/crg.go
+    - commands/kg/kg_test.go
+  rationale:
+    - runKGBuild and runKGUpdate are the commands that need actionable failure surfacing
+    - runKGCodeStatus is the authoritative freshness probe being made machine-readable
+    - CRGReadinessState (or equivalent) represents the four explicit states contract
+    - SyncCodeWarmLink interacts with readiness state on build/update success
+
+queries:
+  - tool: git-diff
+    kind: scope-lane
+    intent: symbol_lookup
+    subject: runKGCodeStatus
+    summary:
+      files:
+        - commands/kg/kg.go
+        - commands/kg/cmd.go
+  - tool: git-diff
+    kind: scope-lane
+    intent: callers
+    subject: CRGReadinessState
+    summary:
+      files:
+        - internal/graphstore/crg.go
+        - commands/kg/sync_code_warm_link.go
+  - tool: git-diff
+    kind: scope-lane
+    intent: tests
+    subject: kg-freshness smoke coverage
+    summary:
+      files:
+        - commands/kg/kg_test.go
+  - tool: git-diff
+    kind: context-lane
+    intent: decision_lookup
+    subject: kg-freshness-audit.md
+    summary:
+      files:
+        - docs/research/kg-freshness-audit.md
+
+required_paths:
+  - path: internal/graphstore/crg.go
+    because:
+      - 376-line delta; owns the sqlite transaction lifecycle fix and readiness state implementation
+      - CRG-backed build path fresh-home failure is the primary bug being fixed
+  - path: commands/kg/sync_code_warm_link.go
+    because:
+      - 99-line delta; warm-link sync updated to interact with readiness states
+      - no-diff vs no-mutation distinction may require sync_code_warm_link changes
+  - path: commands/kg/kg_test.go
+    because:
+      - 273-line delta; primary test coverage for freshness readiness contract
+      - table-driven tests for each of the four readiness states
+  - path: commands/kg/kg.go
+    because:
+      - 4-line change; wire or delegate readiness state emission in build/update/code-status
+  - path: commands/kg/cmd.go
+    because:
+      - 2-line change; routing update for code-status machine-readable output flag
+  - path: commands/kg/bridge.go
+    because:
+      - 10-line change; bridge interacts with freshness guards added in this task
+  - path: commands/kg/query_lint_maintain.go
+    because:
+      - 10-line change; lint/maintain commands gain freshness guard references
+
+optional_paths:
+  - path: docs/research/kg-freshness-audit.md
+    because:
+      - 195 new lines; audit findings written as part of this task's research phase
+      - technically a write but primarily a read/context artifact for downstream tasks
+  - path: commands/ux_test.go
+    because:
+      - 34-line addition for UX regression coverage; important but not core to freshness contract
+
+excluded_paths:
+  - path: commands/agents/
+    rationale:
+      - agents/import.go, agents/promote.go, agents/remove.go changed in same commit but
+        those are error-message-compliance task changes, not freshness-impl scope
+  - path: .agents/prompts/isp.prompt.md
+    rationale:
+      - ISP prompt change in same commit belongs to orchestrator workflow, not this task's impl
+  - path: docs/ERROR_MESSAGE_CONTRACT.md
+    rationale:
+      - Error message contract changes in same commit are error-message-compliance scope
+  - path: docs/research/error-message-inventory.md
+    rationale:
+      - Error message inventory is error-message-compliance scope, not freshness-impl scope
+
+provides:
+  - |-
+    kg code-status as machine-readable authoritative freshness probe with unbuilt/ready/busy_or_locked/error states
+  - |-
+    Actionable non-zero failures from kg build and kg update on CRG missing, lock/busy, runtime error
+  - |-
+    Documented no-diff vs no-mutation distinction in build/update success summaries
+  - |-
+    Fresh-home sqlite transaction lifecycle fix in crg.go
+
+consumes:
+  - |-
+    docs/research/kg-freshness-audit.md audit findings (from kg-freshness-audit task)
+  - |-
+    Four-state readiness contract defined in kg-freshness-audit task notes
+
+final_write_scope:
+  - internal/graphstore/crg.go
+  - commands/kg/sync_code_warm_link.go
+  - commands/kg/kg_test.go
+  - commands/kg/kg.go
+  - commands/kg/cmd.go
+  - commands/kg/bridge.go
+  - commands/kg/query_lint_maintain.go
+  - commands/ux_test.go
+  - docs/research/kg-freshness-audit.md
+
+verification_focus:
+  - |-
+    go test ./commands/kg/... passes all 273 new lines of kg_test.go including four readiness states
+  - |-
+    kg code-status on clean checkout reports unbuilt state with non-zero exit
+  - |-
+    kg build on fresh KG_HOME completes without "cannot start a transaction within a transaction" error
+  - |-
+    kg build --dry-run or on unchanged graph reports no-diff summary, not no-graph-mutation
+  - |-
+    kg update with DB locked reports busy_or_locked state with non-zero exit and actionable message
+
+allowed_local_choices:
+  - |-
+    Exact flag name for machine-readable code-status output (--json, --output=json, etc.)
+  - |-
+    Whether no-diff is surfaced as a warning box or as a distinct exit code
+  - |-
+    Internal naming of readiness state enum constants in crg.go
+
+stop_conditions:
+  - |-
+    Any change to kg flows, kg communities, or kg postprocess (deferred as expert-only in audit)
+  - |-
+    Changes to MCP server tool surface (deferred to kg-mcp-transport-impl)
+  - |-
+    Changes to kg changes/impact trustworthiness (deferred to kg-change-impact-impl)
+
+open_gaps:
+  - |-
+    The mismatch between build summary counts and persisted code-status counts was documented
+    in the audit but the commit does not fully resolve the count disagreement — it remains
+    a known gap after this task completes.
+  - |-
+    kg-freshness-impl and error-message-compliance changes landed in the same commit (e09e1ac),
+    making it impossible to isolate the exact line-count attribution to each task from git alone.
+    A future policy of one-task-per-commit would make sidecar authoring more precise.
+  - |-
+    commands/ux_test.go covers error-message UX but is listed here because the commit bundles it;
+    attribution is ambiguous without task-tagged commit discipline.

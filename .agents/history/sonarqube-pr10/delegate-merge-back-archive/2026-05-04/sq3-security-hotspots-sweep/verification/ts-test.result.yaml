@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: sq3-security-hotspots-sweep
+parent_plan_id: sonarqube-pr10
+verifier_type: ts-test
+status: pass
+summary: TypeScript tests pass after code-remediating remaining TS hotspot patterns
+recorded_at: "2026-05-04T05:45:15Z"
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+recorded_by: dot-agents workflow verify record
+commands:
+    - npm test

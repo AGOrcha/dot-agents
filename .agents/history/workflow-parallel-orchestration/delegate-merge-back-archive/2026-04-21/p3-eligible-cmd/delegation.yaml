@@ -1,0 +1,32 @@
+schema_version: 1
+id: del-p3-eligible-cmd-1776777197
+parent_plan_id: workflow-parallel-orchestration
+parent_task_id: p3-eligible-cmd
+title: Implement workflow eligible command
+summary: Delegated from plan Workflow Parallel Orchestration Surface
+write_scope:
+    - commands/workflow/cmd.go
+    - commands/workflow/plan_task.go
+success_criteria: |-
+    New top-level workflow subcommand (not under plan). Flags: --plan (optional
+    comma-separated), --limit N (override max_parallel_workers pref). Calls
+    selectAllEligibleTasks + conflict detection. Output: per-task rows showing plan_id,
+    task_id, title, write_scope, conflicts_with. Summary line: ''N tasks eligible, M can run
+    in parallel (limited by max_parallel_workers=K)''. JSON: full AnnotatedTask slice +
+    MaxBatch field + per-task has_evidence (bool: sidecar file exists at
+    evidence/<task_id>.scope.yaml) + evidence_confidence (''none''|''low''|''medium''|''high''
+    from sidecar confidence field; ''none'' when no sidecar). workflow next is unchanged.
+    Schema rule: EvidenceConfidence must never be empty string — normalize to ''none'' when
+    no sidecar exists. has_evidence=false and evidence_confidence=''none'' must always
+    co-occur; assert this invariant in p6 tests. All AnnotatedTask renderers introduced here
+    must surface ConflictsWith, HasEvidence, EvidenceConfidence, and WriteScope fields.
+    Empty write_scope caution (spec §4.2): add WriteScope_declared bool field to AnnotatedTask
+    (default true; false when write_scope is empty). Human renderer appends ''[no write_scope
+    declared]'' to the task row. JSON output includes write_scope_declared field. Applies to
+    all task types — code and non-code (skills, prompts, YAML) alike.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T13:13:17Z"
+updated_at: "2026-04-21T13:58:03Z"

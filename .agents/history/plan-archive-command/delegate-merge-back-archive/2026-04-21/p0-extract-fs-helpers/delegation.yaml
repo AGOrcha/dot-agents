@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-p0-extract-fs-helpers-1776772699
+parent_plan_id: plan-archive-command
+parent_task_id: p0-extract-fs-helpers
+title: Extract workflow FS helpers from delegation.go into fs.go
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/fs.go
+    - commands/workflow/delegation.go
+success_criteria: Create commands/workflow/fs.go. Move copyWorkflowArtifact and copyWorkflowDir from delegation.go (keep call sites in delegation.go importing the same package — no behavior change). Add mergeWorkflowPlanDir stub here too (implemented in p2). This is the shared filesystem primitives layer for plan lifecycle operations. delegation.go, plan_task.go, and future archive code all import from the same package-level functions.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T11:58:19Z"
+updated_at: "2026-04-21T12:00:46Z"

@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-fanout-evidence-integration-1776795466
+parent_plan_id: planner-evidence-backed-write-scope
+parent_task_id: fanout-evidence-integration
+title: Add scope-evidence warnings to workflow fanout
+summary: Delegated from plan Planner Evidence-Backed Write Scope
+write_scope:
+    - commands/workflow/cmd.go
+    - commands/workflow/plan_task.go
+    - commands/workflow/delegation.go
+success_criteria: |-
+    Warn (not block) when code task has no sidecar and graph is healthy. Warn when sidecar
+    exists but confidence is low. Both suppressible via --skip-evidence-check. Unit tests for
+    each warning path.
+
+    Coordination: sequencing enforced by formal cross-plan deps above.
+    plan-archive-command/p0-extract-fs-helpers: copyWorkflowArtifact/copyWorkflowDir live
+    in fs.go after p0 — build on the restructured file to avoid merge conflicts.
+    workflow-parallel-orchestration/p4-max-parallel-pref: workflow eligible is fully
+    available after p4; fanout warnings should call selectAllEligibleTasks rather than
+    reimplementing eligibility logic independently.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T18:17:46Z"
+updated_at: "2026-04-21T18:27:00Z"

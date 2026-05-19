@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-implement-error-message-fixes-1776634528
+parent_plan_id: error-message-compliance
+parent_task_id: implement-error-message-fixes
+title: Normalize mismatched command errors onto the shared CLIError contract
+summary: Delegated from plan Error Message Compliance Plan
+write_scope:
+    - commands/kg/bridge.go
+    - commands/kg/query_lint_maintain.go
+    - commands/kg/sync_code_warm_link.go
+    - commands/agents/remove.go
+    - commands/agents/import.go
+    - commands/agents/promote.go
+    - commands/add.go
+    - commands/install.go
+    - commands/ux.go
+success_criteria: Implement the 2026-04-19 contract fixes from docs/ERROR_MESSAGE_CONTRACT.md and docs/research/error-message-inventory.md. Prioritize commands/kg/bridge.go, commands/kg/query_lint_maintain.go, commands/kg/sync_code_warm_link.go, and commands/agents/{remove,import,promote}.go; touch commands/add.go or commands/install.go only if needed for consistency. Convert user-correctable finite-domain and recovery-heavy failures to UsageError/ErrorWithHints, enumerate valid values, and replace hand-authored usage strings with shared arg helpers. Do not introduce a machine-readable JSON error envelope in this task.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-error-message-impl
+status: completed
+created_at: "2026-04-19T21:35:28Z"
+updated_at: "2026-04-19T21:43:58Z"

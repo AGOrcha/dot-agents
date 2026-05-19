@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-p13-replacement-worker-retry-1776656852
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p13-replacement-worker-retry
+title: Add resumable stage retry with fallback runtime selection after terminal provider failures
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - bin/tests/ralph-pipeline
+    - bin/tests/ralph-worker
+    - bin/tests/ralph-orchestrate
+    - commands/workflow/
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+    - tests/
+success_criteria: 'Focused follow-on from the completed-bundle audit. Goal: when a staged worker exits for a resumable terminal reason such as usage_limit or rate-limit/provider cap, schedule a fresh worker for the same bundle+stage and prefer a different resolved runtime path when fallback bins exist, while keeping I_S_P completion semantics aligned with scripted retry/fallback decisions. Scope: (1) classify resumable vs non-resumable terminal failures using existing worker exit codes/logs, (2) add bounded replacement budgets and observable retry state, (3) switch away from the same capped agent bin using RALPH_<ROLE>_AGENT_BIN / RALPH_WORKER_AGENT_BIN / AGENT_BIN fallback ordering, (4) preserve task-local artifacts so completed earlier stages are not rerun unnecessarily, (5) update I_S_P control-flow expectations and prompt/contracts whenever scripted replacement-worker or pause behavior changes so the interactive/manual staged runtime preserves the same stop/retry rules. Current anchor points for this pass: `bin/tests/ralph-worker` already classifies `usage_limit` and `workspace_permissions` terminal failures and exits 32/33; `bin/tests/ralph-pipeline` currently stops on those exits without scheduling a replacement stage; runtime headers already expose role-specific bin overrides (`RALPH_IMPL_WORKER_AGENT_BIN`, `RALPH_VERIFIER_WORKER_AGENT_BIN`, `RALPH_REVIEW_WORKER_AGENT_BIN`, `RALPH_WORKER_AGENT_BIN`, `AGENT_BIN`) that fallback selection should honor. Verification: focused script tests for usage_limit retry, fallback-bin selection, non-resumable hard stop, and metrics/log visibility, plus readback/spec checks that I_S_P and scripted scoped-completion semantics still match on retry, pause, and hard-stop behavior. Stop: do not redesign delegation bundles or expand this task into generic closeout review logic.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-p13-retry-fallback
+status: completed
+created_at: "2026-04-20T03:47:32Z"
+updated_at: "2026-04-20T11:46:19Z"

@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-p2-conflict-detection-1776776979
+parent_plan_id: workflow-parallel-orchestration
+parent_task_id: p2-conflict-detection
+title: Implement write-scope conflict detection and batch grouping
+summary: Delegated from plan Workflow Parallel Orchestration Surface
+write_scope:
+    - commands/workflow/plan_task.go
+success_criteria: |-
+    Given []workflowNextTaskSuggestion, compute ConflictsWith []string per task (other task IDs
+    whose write_scope overlaps). Two tasks conflict if any path in one scope is a prefix of or
+    equal to any path in the other (directory-aware: ''commands/workflow/'' conflicts with
+    ''commands/workflow/plan_task.go''). Also compute MaxNonConflictingBatch: the largest subset
+    of eligible tasks with zero pairwise conflicts (greedy, order by priority).
+    Output struct: EligibleTasks []AnnotatedTask, MaxBatch []string (task IDs), ConflictGraph
+    map[string][]string.
+    Schema rule (additive struct pattern): ConflictsWith []string in AnnotatedTask must be
+    initialized as []string{} not nil. MaxBatch []string{} not nil. ConflictGraph values must
+    be []string{} not nil for each key. All render/display functions for AnnotatedTask are
+    introduced in p3 (eligible cmd) — ensure p3's renderer surfaces all new fields.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T13:09:39Z"
+updated_at: "2026-04-21T13:12:33Z"

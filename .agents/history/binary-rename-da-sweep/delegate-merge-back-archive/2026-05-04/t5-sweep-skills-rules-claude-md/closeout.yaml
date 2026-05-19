@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: binary-rename-da-sweep
+task_id: t5-sweep-skills-rules-claude-md
+delegation_id: del-t5-sweep-skills-rules-claude-md-1777862348
+decision: accept
+note: global skills/rules/CLAUDE.md sweep; 23 files in user home; 88 substitutions; namespace dirs preserved; no in-repo commit (cross-repo)
+closed_at: "2026-05-04T02:59:57Z"

@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p2-archive-handler-1776772925
+parent_plan_id: plan-archive-command
+parent_task_id: p2-archive-handler
+title: Implement runWorkflowPlanArchive() in plan_task.go
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/plan_task.go
+    - commands/workflow/fs.go
+success_criteria: |-
+    Guard: status must be completed (or --force). Stamp status=archived + updated_at BEFORE move. Merge strategy: os.Rename if history dir absent. If history exists: content-aware merge walk — DMA artifacts always skip; PLAN.yaml/TASKS.yaml/<id>.plan.md always overwrite; all other files: compute `sha256.Sum256` of the source file via crypto/sha256 + mtime check (overwrite if newer or different, skip if identical, warn if history is newer). On RemoveAll failure: retry once automatically. Implement mergeWorkflowPlanDir() — do NOT reuse copyWorkflowDir directly (needs per-file classification + hash logic). Bulk: --plan accepts comma-separated IDs; archive each in sequence, log failure and continue.
+    - delegation closeout reject: eagerly fanned before p0-extract-fs-helpers; re-fanout after wave-1 completes
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:02:05Z"
+updated_at: "2026-04-21T12:05:58Z"

@@ -1,0 +1,69 @@
+schema_version: 1
+plan_id: graph-bridge-command-readiness
+tasks:
+    - id: inventory-current-bridge-behavior
+      title: Inventory current workflow graph query and kg bridge query behavior on repo fixtures
+      status: completed
+      depends_on: []
+      blocks:
+        - define-graph-bridge-contract
+        - implement-graph-bridge-readiness-fixes
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - commands/kg/
+        - internal/graphstore/
+        - docs/
+        - tests/
+      verification_required: false
+      notes: Reproduce the current missing-config failure for workflow graph query, the weak or empty-result cases for kg bridge query code intents, and the exact fixture inputs that downstream planning work needs to trust for both scope-lane queries (`symbol_lookup`, callers, tests, impact) and context-lane queries (`plan_context`, `decision_lookup`, contradictions, workflow memory).
+    - id: define-graph-bridge-contract
+      title: Define the repo-ready product contract for graph bridge queries
+      status: completed
+      depends_on:
+        - inventory-current-bridge-behavior
+      blocks:
+        - implement-graph-bridge-readiness-fixes
+        - add-graph-bridge-regression-smokes
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - commands/kg/
+        - internal/graphstore/
+        - docs/
+        - .agents/workflow/specs/
+      verification_required: false
+      notes: Decide whether workflow graph query should scaffold or default repo bridge config, how missing-config degradation should read, and which planner-facing intents must be considered operationally trustworthy before graph-backed planning is treated as live. The contract should cover execution-contract authoring needs, not only code blast-radius lookup — planners must be able to rely on the bridge for `write_scope` evidence plus decision/context pack reduction.
+    - id: implement-graph-bridge-readiness-fixes
+      title: Implement the bridge/config/query fixes needed for planner-facing readiness
+      status: completed
+      depends_on:
+        - inventory-current-bridge-behavior
+        - define-graph-bridge-contract
+      blocks:
+        - add-graph-bridge-regression-smokes
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - commands/kg/
+        - internal/graphstore/
+        - internal/config/
+        - docs/
+      verification_required: true
+      notes: 'Fix the highest-value readiness gaps first: repo bridge configuration expectations, query normalization and symbol lookup behavior, and planner-facing error handling that currently makes downstream automation treat the bridge as unreliable. Prioritize the intents needed to author a bounded execution contract with minimal worker ambiguity, not just raw query parity.'
+    - id: add-graph-bridge-regression-smokes
+      title: Add regression coverage and smoke commands for graph bridge usefulness
+      status: completed
+      depends_on:
+        - define-graph-bridge-contract
+        - implement-graph-bridge-readiness-fixes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/
+        - commands/workflow/
+        - internal/graphstore/
+        - tests/
+        - docs/
+      verification_required: true
+      notes: Add durable command-level coverage that proves useful results on known repo fixtures, not just routing or help output, so planner and review surfaces can rely on the graph bridge without hand-auditing each run. Smokes should demonstrate both candidate-scope usefulness and context-pack usefulness for planning.

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: detect-overlap-conflicts
+parent_plan_id: ralph-fanout-and-runtime-overrides
+verifier_type: merge-back
+status: pass
+summary: Clean apply; only bin/tests/ralph-orchestrate changed. RALPH_BUNDLE output line format unchanged. The active_delegation_scopes(), scope_lists_overlap(), and parse_plan_scope() helpers remain defined (for backward compat / manual path), though active_delegation_scopes() and parse_plan_scope() are no longer called by discover_unblocked_tasks().
+recorded_at: "2026-04-21T16:34:33Z"
+delegation_id: del-detect-overlap-conflicts-1776788620
+artifact_paths:
+    - .agents/workflow/plans/ralph-fanout-and-runtime-overrides/TASKS.yaml
+    - .agentsrc.json

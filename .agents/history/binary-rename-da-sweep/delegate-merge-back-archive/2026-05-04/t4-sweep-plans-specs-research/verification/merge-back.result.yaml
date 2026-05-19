@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: t4-sweep-plans-specs-research
+parent_plan_id: binary-rename-da-sweep
+verifier_type: merge-back
+status: pass
+summary: 'All remaining 59 grep matches are project-name references (project-as-subject, project-as-modifier, file paths like src/bin/dot-agents, ./bin/dot-agents, cmd/dot-agents). No binary invocations of dot-agents <verb> remain in plans/specs/research. Pre-existing dirty state on PLAN.yaml/TASKS.yaml of binary-rename-da-sweep (workflow runtime updates: schema-comment removal, updated_at timestamp, current_focus_task) was carried through the commit since both files are inside this task''s write_scope and required edits anyway. .agents/history/ untouched. .agentsrc.json + research/evaluations/agent-execution.md remained as out-of-scope dirty state at session start and were left untouched.'
+recorded_at: "2026-05-04T02:37:54Z"
+delegation_id: del-t4-sweep-plans-specs-research-1777861641

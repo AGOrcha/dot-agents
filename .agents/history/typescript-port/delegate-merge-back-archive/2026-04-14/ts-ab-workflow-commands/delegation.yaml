@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-ts-ab-workflow-commands-1776194470
+parent_plan_id: typescript-port
+parent_task_id: ts-ab-workflow-commands
+title: AB-test A — Implement read-only workflow commands in TS port (orient, tasks, health)
+summary: Delegated from plan TypeScript Port Plan
+write_scope:
+    - ports/typescript/src/commands/workflow.ts
+    - ports/typescript/tests/workflow.test.ts
+success_criteria: |
+    Worker A/B comparison task. Pattern E worker.
+    Implement three read-only workflow command stubs in TS:
+    - `runWorkflowOrient(opts)` → reads loop-state.md Current Position if present, returns {branch, plan, task}
+    - `runWorkflowTasks(planId, opts)` → reads TASKS.yaml for the plan, returns task list
+    - `runWorkflowHealth(opts)` → checks workflow/ dir exists + has PLAN.yaml, returns {healthy, warnings[]}
+    All three take `agentsHomeOverride?` + `repoRootOverride?`. No Go CLI invocation — pure TS file reads.
+    Write positive + negative tests (missing file, empty plan, unknown plan) in workflow.test.ts.
+    Run: `cd ports/typescript && npm test` — all tests must pass.
+    feedback_goal: Do the three workflow read-only commands parse real YAML/MD fixtures and return
+    structured results matching the Go CLI shape?
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-04-14T19:21:10Z"
+updated_at: "2026-04-14T19:27:37Z"

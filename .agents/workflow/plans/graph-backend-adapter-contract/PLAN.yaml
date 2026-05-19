@@ -1,0 +1,11 @@
+schema_version: 1
+id: graph-backend-adapter-contract
+title: Graph Backend Adapter Contract
+status: draft
+summary: 'Implement the pluggable graph backend adapter contract: KG-native storage substrate, declarative DSL, namespace-token isolation, dependent-owned cutover, CRG migration.'
+created_at: "2026-05-11T12:45:58Z"
+updated_at: "2026-05-11T12:45:58Z"
+owner: dot-agents
+success_criteria: Citation, document-cross-ref, none built-in adapters ship and resolve; CRG adapter reaches the decommissioning gate; conformance tests pass in CI; TTRPG dogfood adapter loads and runs against a sample campaign.
+verification_strategy: Conformance test catalogs run in CI; CRG parity test corpus passes for 3 consecutive weeks; TTRPG dogfood checkpoint at 3 months drives v1.5 budget evaluation.
+current_focus_task: ""

@@ -1,0 +1,8 @@
+schema_version: 1
+id: fold-1776747454344734000
+plan_id: plan-archive-command
+task_id: ""
+observation: 'p5-sweep-extension is blocked: required functions from p2-archive-handler (runWorkflowPlanArchive) and p4-drift-extension (CompletedPlanIDs field in RepoDriftReport) not yet implemented'
+classification: proposal
+routed_to: proposal:obs-1776747454344734000.md
+created_at: "2026-04-21T04:57:34Z"

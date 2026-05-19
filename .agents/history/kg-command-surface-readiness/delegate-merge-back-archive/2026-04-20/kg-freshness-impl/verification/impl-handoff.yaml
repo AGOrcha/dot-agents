@@ -1,0 +1,17 @@
+task_id: kg-freshness-impl
+commit_sha: f56ab2688baa103e13b7a20366cc0220d804ecc6
+write_scope_touched:
+  - commands/kg/cmd.go
+  - commands/kg/kg.go
+  - commands/kg/kg_test.go
+  - commands/kg/sync_code_warm_link.go
+  - internal/graphstore/crg.go
+ready_for_verification: true
+impl_notes: >-
+  kg code-status now reads the persisted CRG SQLite DB directly, emits JSON with
+  explicit readiness state fields, and no longer depends on the CRG binary for
+  freshness probing. kg build/update now return structured reports through the
+  CLI, distinguish no_diff and no_mutation outcomes, and surface busy_or_locked
+  and other execution failures with clearer messages. Tests were added for the
+  new readiness states, JSON output, and build/update classification paths. The
+  changes are uncommitted in the working tree.

@@ -1,0 +1,106 @@
+schema_version: 1
+plan_id: command-surface-decomposition
+tasks:
+    - id: c1-kg-command-decomposition
+      title: Split kg command into narrower files or subpackages
+      status: completed
+      depends_on: []
+      blocks:
+        - c6-status-import-helper-extraction
+      owner: dot-agents
+      write_scope:
+        - commands/kg.go
+        - commands/kg_test.go
+        - commands/kg/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Break `kg` into narrower ownership slices without changing command behavior; keep the root command wiring stable while separating bridge, query, link, warm, maintenance, and code-status concerns into files that workers can own independently.
+
+        `commands/kg.go` is the largest remaining command hotspot after workflow. Prefer a real `commands/kg/` subpackage plus a thin top-level shim unless package-level constraints force a same-package split.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c1-kg-command-decomposition-1776539821.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/kg.go`, `commands/kg_test.go`, `commands/kg/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
+    - id: c2-agents-command-decomposition
+      title: Split agents command by lifecycle surface
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents.go
+        - commands/agents_test.go
+        - commands/agents/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c2-agents-command-decomposition-1776539822.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/agents.go`, `commands/agents_test.go`, `commands/agents/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
+    - id: c3-sync-command-decomposition
+      title: Split sync command by subcommand family
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/sync.go
+        - commands/sync/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Decompose `sync` into stable command-family files (`init`, `commit`, `pull`, `push`, `status`, `log`) so small changes do not require workers to load or edit the whole sync surface.
+
+        **write_scope:** `commands/sync.go`, `commands/sync/` — implement only here; preserve CLI behavior.
+
+        **delegation (this run):** `.agents/active/delegation-bundles/del-c3-sync-command-decomposition-1776539849.yaml` — profile `loop-worker`, overlay `.agents/active/active.loop.md`.
+
+        **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Parallel wave: disjoint from `c4-skills-command-decomposition` (`commands/skills*`); avoid touching other command packages.
+    - id: c4-skills-command-decomposition
+      title: Split skills command by lifecycle surface
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/skills.go
+        - commands/skills_test.go
+        - commands/skills/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Separate `skills list/new/promote` ownership into narrower files or a subpackage, matching tests to the same boundaries and keeping generated or mutation helpers from re-accumulating in one file.
+
+        **write_scope:** `commands/skills.go`, `commands/skills_test.go`, `commands/skills/` — implement only here; preserve CLI behavior.
+
+        **delegation (this run):** `.agents/active/delegation-bundles/del-c4-skills-command-decomposition-1776539849.yaml` — profile `loop-worker`, overlay `.agents/active/active.loop.md`.
+
+        **context:** Required reads per bundle — `.agents/active/loop-state.md`, this `TASKS.yaml`. Parallel wave: disjoint from `c3-sync-command-decomposition` (`commands/sync*`); avoid touching other command packages.
+    - id: c5-hooks-command-decomposition
+      title: Split hooks command by subcommand family
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/hooks.go
+        - commands/hooks_test.go
+        - commands/hooks/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Narrow `hooks list/show/remove` into independently owned files so hook work can run without touching one shared command file.
+
+        Orchestrator (2026-04-18): **delegation active** — bundle `.agents/active/delegation-bundles/del-c5-hooks-command-decomposition-1776539976.yaml` (profile `loop-worker`, overlay `.agents/active/active.loop.md`; D5). **write_scope:** `commands/hooks.go`, `commands/hooks_test.go`, `commands/hooks/`. **context:** `.agents/active/loop-state.md`, this `TASKS.yaml`.
+    - id: c6-status-import-helper-extraction
+      title: Extract internal helper seams for status and import without forcing premature package splits
+      status: completed
+      depends_on:
+        - c1-kg-command-decomposition
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/status.go
+        - commands/status_test.go
+        - commands/import.go
+        - commands/import_test.go
+        - commands/import_plugins.go
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Create smaller helper seams in `status` and `import` where the code is large but not yet clearly divisible into subcommand packages. Reduce worker context load and make future package splits easier without forcing a bad decomposition now.
+
+        This task is intentionally helper-first, not package-split-first.

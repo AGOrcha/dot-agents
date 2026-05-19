@@ -1,0 +1,13 @@
+task_id: implement-error-message-fixes
+commit_sha: f56ab2688baa103e13b7a20366cc0220d804ecc6
+write_scope_touched:
+  - commands/kg/bridge.go
+  - commands/kg/query_lint_maintain.go
+  - commands/kg/sync_code_warm_link.go
+  - commands/agents/remove.go
+  - commands/agents/import.go
+  - commands/agents/promote.go
+ready_for_verification: true
+tests_unchanged_justified: false
+impl_notes: |
+  Normalized the highest-drift user-correctable CLI errors in the scoped KG and agents commands by tightening messages, enumerating valid values, and adding actionable recovery text where the package wiring allowed it. Changes are uncommitted; verification ran against the working tree.

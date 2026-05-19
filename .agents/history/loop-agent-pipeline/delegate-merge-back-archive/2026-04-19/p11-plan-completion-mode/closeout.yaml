@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+task_id: p11-plan-completion-mode
+delegation_id: del-p11-plan-completion-mode-1776572292
+decision: accept
+closed_at: "2026-04-19T15:15:11Z"

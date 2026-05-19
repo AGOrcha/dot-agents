@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-p3c-api-verifier-1776516721
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p3c-api-verifier
+title: API verifier surface and result contract
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - .agents/prompts/verifiers/api.project.md
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+success_criteria: Add API verifier guidance, contract and perf artifact expectations, and Playwright API setup expectations on top of the canonical verification result schema.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T12:52:01Z"
+updated_at: "2026-04-18T12:55:08Z"

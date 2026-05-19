@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-add-error-message-regression-coverage-1776635147
+parent_plan_id: error-message-compliance
+parent_task_id: add-error-message-regression-coverage
+title: Add regression coverage for error message rendering and recovery hints
+summary: Delegated from plan Error Message Compliance Plan
+write_scope:
+    - commands/kg/kg_test.go
+    - commands/agents/agents_test.go
+    - commands/ux_test.go
+success_criteria: Add regression coverage in commands/kg/kg_test.go, commands/agents/agents_test.go, and commands/ux_test.go for the 2026-04-19 error-message contract updates. Cover representative finite-domain validation messages (valid values are ...), KG link/bridge usage-shape errors, agent lifecycle recovery guidance, and root parse / render paths so the new wording and hints stay stable.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-error-message-tests
+status: completed
+created_at: "2026-04-19T21:45:47Z"
+updated_at: "2026-04-19T21:51:50Z"

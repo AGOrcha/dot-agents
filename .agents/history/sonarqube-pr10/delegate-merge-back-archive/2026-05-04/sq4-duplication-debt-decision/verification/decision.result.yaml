@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: sq4-duplication-debt-decision
+parent_plan_id: sonarqube-pr10
+verifier_type: decision
+status: pass
+summary: ADR-0008 written + indexed accepted; findings.md §2 has Decision (sq4) section linking ADR-0008; option (B) waiver path documented; follow-up plans go-test-fixture-extraction (cluster D) and production-code-helper-extraction (cluster E) named; Cluster F cherry exception for sq2 captured. Decision-only artifact; no code changes.
+recorded_at: "2026-05-04T03:44:44Z"
+delegation_id: del-sq4-duplication-debt-decision-1777866067
+recorded_by: dot-agents workflow verify record

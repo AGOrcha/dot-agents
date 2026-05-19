@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: sq1-current-state-audit
+parent_plan_id: sonarqube-pr10
+verifier_type: merge-back
+status: pass
+summary: 'WRITE GUARDRAIL: Subagent harness blocked Write to .agents/workflow/plans/sonarqube-pr10/findings.md. The full findings memo content is returned inline in the worker''s final assistant message — parent must copy that content into findings.md (or re-delegate with a profile that permits writing the canonical contract file). Memo content covers: per-condition current/target/gap, top-10 contributing files per condition, cluster classifications (fixable/branch-wide/false-positive), sq2 commit split (clusters A+B+C), sq3 hotspot batching (G:27 + I:4 + H:3), sq4 ADR-0008 options (A/B/C with recommendation B), proposed follow-up plans. Hard test passed: counts match live SonarCloud PR analysis (gate, reliability search, hotspot search, dup-file search all pulled via MCP at audit time).'
+recorded_at: "2026-05-04T03:21:41Z"
+delegation_id: del-sq1-current-state-audit-1777864449
+artifact_paths:
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/binary-rename-da-sweep.plan.md
+    - .agents/workflow/plans/self-review-iteration-close-wiring/PLAN.yaml
+    - .agents/workflow/plans/self-review-iteration-close-wiring/TASKS.yaml
+    - .agents/workflow/plans/sonarqube-pr10/PLAN.yaml
+    - .agents/workflow/plans/sonarqube-pr10/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/PLAN.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml

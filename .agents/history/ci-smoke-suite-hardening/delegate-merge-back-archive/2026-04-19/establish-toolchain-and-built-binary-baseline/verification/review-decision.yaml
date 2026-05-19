@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: establish-toolchain-and-built-binary-baseline
+parent_plan_id: ci-smoke-suite-hardening
+delegation_id: del-establish-toolchain-and-built-binary-baseline-1776629042
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+recorded_at: "2026-04-19T20:11:53Z"
+recorded_by: dot-agents workflow verify record

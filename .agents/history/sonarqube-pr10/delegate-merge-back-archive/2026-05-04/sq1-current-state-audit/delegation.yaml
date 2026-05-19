@@ -1,0 +1,50 @@
+schema_version: 1
+id: del-sq1-current-state-audit-1777864449
+parent_plan_id: sonarqube-pr10
+parent_task_id: sq1-current-state-audit
+title: Audit current SonarCloud state on PR#10; classify remaining findings
+summary: Delegated from plan SonarQube — PR#10 Quality Gate Clearance
+write_scope:
+    - .agents/workflow/plans/sonarqube-pr10/findings.md
+success_criteria: |-
+    Tier: T1 (molecule — research + memo).
+
+    Concrete deliverable: .agents/workflow/plans/sonarqube-pr10/findings.md
+    captures the current state of PR#10's quality gate:
+      * Per failing condition (reliability/duplication/security-hotspots):
+        current value, target, gap, list of contributing files (top 10)
+      * Classification of each top-finding cluster:
+          - "fixable in this PR" (scoped, mechanical)
+          - "branch-wide debt" (defer to follow-up plan)
+          - "false positive / waiver candidate" (justification required)
+      * Recommended split between sq2/sq3/sq4 task scope vs deferred plan
+
+    Use sonarqube MCP tools where helpful:
+      mcp__sonarqube__get_project_quality_gate_status
+      mcp__sonarqube__search_sonar_issues_in_projects
+      mcp__sonarqube__search_security_hotspots
+      mcp__sonarqube__get_duplications
+
+    Hard test:
+      findings.md exists with three classified sections; counts in
+      findings.md match the live SonarCloud PR analysis page
+      (re-check at task start since metrics drift across pushes).
+
+    Common false positive:
+      findings.md uses local-replay metrics (e.g. golint run locally)
+      instead of SonarCloud's actual analysis — the gap is in the
+      incremental-vs-full analysis logic, not in raw lint output.
+
+    ISP routing:
+      mode: direct (research; produces a single memo; uses MCP tools)
+      verifier: manual (memo well-formed and faithful to live SonarCloud)
+      review: doc review
+      anti-scope: do NOT make code fixes in this task. Audit-only.
+      bundle-context (if fanout): the source .agents/active/sonarqube-pr10.plan.md (now copied here as sonarqube-pr10.plan.md), SonarCloud project URL, current branch tip
+      output contract: findings.md with per-condition classifications + recommended task-scope split
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:14:09Z"
+updated_at: "2026-05-04T03:21:41Z"

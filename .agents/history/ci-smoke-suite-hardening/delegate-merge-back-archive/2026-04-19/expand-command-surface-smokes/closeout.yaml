@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: ci-smoke-suite-hardening
+task_id: expand-command-surface-smokes
+delegation_id: del-expand-command-surface-smokes-1776630022
+decision: accept
+closed_at: "2026-04-19T20:25:52Z"

@@ -1,0 +1,50 @@
+schema_version: "1.0"
+task_id: establish-toolchain-and-built-binary-baseline
+parent_plan_id: ci-smoke-suite-hardening
+verifier_type: unit
+status: pass
+summary: >-
+  All four verification checks passed cleanly on commit b99268f. gofmt reports
+  no unformatted files, go vet exits 0 with no diagnostics, the binary builds
+  successfully and is confirmed as a real Mach-O 64-bit executable (not a shim),
+  and the workflow YAML contains all required new steps with correct syntax.
+recorded_at: "2026-04-19T00:00:00Z"
+findings:
+  - check: gofmt -l ./cmd ./commands ./internal
+    result: pass
+    detail: >-
+      No output — all files are properly formatted. The five targeted files
+      (internal/graphstore/crg.go, internal/graphstore/sqlite.go,
+      internal/graphstore/sqlite_test.go, internal/graphstore/store.go,
+      internal/platform/opencode.go) are all clean.
+  - check: go vet ./...
+    result: pass
+    detail: Exited 0 with no diagnostics.
+  - check: go build -o /tmp/dot-agents-verify ./cmd/dot-agents
+    result: pass
+    detail: >-
+      Binary built successfully. `file /tmp/dot-agents-verify` reports
+      "Mach-O 64-bit executable arm64". Binary responded to --version with
+      "dot-agents version dev".
+  - check: .github/workflows/test.yml — gofmt check step
+    result: pass
+    detail: >-
+      Step "Check gofmt" (line 75-82) runs `gofmt -l ./cmd ./commands ./internal`,
+      captures output, and exits 1 with a message if any files are unformatted.
+  - check: .github/workflows/test.yml — go vet step
+    result: pass
+    detail: Step "Go vet" (line 84-85) runs `go vet ./...`.
+  - check: .github/workflows/test.yml — binary-type verification step
+    result: pass
+    detail: >-
+      Step "Verify built binary is real Go binary (not a shim)" (line 93-95)
+      uses `file ./bin/dot-agents | grep -qE "(ELF|Mach-O|PE32)"` to confirm
+      the binary is a real executable and not a shell wrapper.
+  - check: .github/workflows/test.yml — extended smoke steps
+    result: pass
+    detail: >-
+      Four extended smoke steps are present in correct order after existing
+      smoke tests: "Test workflow status" (line 151-153), "Test workflow health"
+      (line 155-157, with grep for healthy/health), "Test workflow plan"
+      (line 159-161), and "Test skills list" (line 147-149). All use the
+      ./bin/dot-agents binary built in the same job.

@@ -1,0 +1,62 @@
+schema_version: 1
+id: del-t2-extend-self-review-skill-1777864417
+parent_plan_id: self-review-iteration-close-wiring
+parent_task_id: t2-extend-self-review-skill
+title: Extend self-review skill to write review-decision.yaml; restore kg-context calls; add tier+contract frontmatter
+summary: Delegated from plan Self-Review ↔ Iteration-Close Wiring
+write_scope:
+    - .agents/skills/dot-agents/self-review/
+success_criteria: |-
+    Tier: T2 (compound — modifies SKILL.md orchestrator + adds two instruction
+    modules + frontmatter contract).
+
+    Concrete changes:
+      1. New `instructions/kg-context.md` as Step 0 (before code-quality):
+         runs `da kg changes --brief` and `da kg impact <files>`
+         on the staged diff; surfaces blast-radius before per-file review.
+         Restores the lost crg-kg-integration phase G integration.
+      2. New `instructions/output-format.md` defines the
+         review-decision.yaml schema (per ADR-0002) with a worked example.
+         Skill writes to the path declared by ADR-0002.
+      3. SKILL.md frontmatter gains `tier: T2`, `contract:` block with
+         reads/writes/escape_hatches. This frontmatter becomes the reusable
+         template for upgrading review-pr, review-delta, plan-wave-picker, etc.
+         in follow-up plans.
+      4. Existing instructions/{code-quality,gotchas,performance,security,
+         advisory-board,checklist}.md kept as-is — orchestrator structure is
+         preserved; the additions are ADDITIVE.
+
+    Note: the path `.agents/skills/dot-agents/self-review/` is symlinked from
+    `.agents/skills/self-review/`; edits land in the canonical location at
+    `~/.agents/skills/dot-agents/self-review/`. After editing, run
+    `da skills promote self-review` (if needed) and `da refresh`.
+
+    Hard test:
+      Invoking `/self-review` directly (without iteration-close) on a real diff:
+      (a) writes a parseable review-decision.yaml at the ADR-0002 path,
+      (b) the file contains non-stub agent-authored verdicts on the actual
+          changed files (not a placeholder template),
+      (c) Step 0 produces visible kg-changes/kg-impact output before per-file
+          review begins,
+      (d) SKILL.md frontmatter declares tier: T2 and a contract block that
+          parses as valid YAML.
+
+    Common false positive:
+      SKILL.md updated to claim it writes the file, but the actual run produces
+      stub prose without inspecting the diff. Verifier MUST diff the produced
+      file's content against an empty/template baseline and confirm material
+      per-file analysis.
+
+    ISP routing:
+      mode: fanout-amenable (largest write_scope of the plan; clean isolation; subagent can produce the three new files in parallel against pre-decided ADR-0002 schema)
+      verifier: smoke + manual (smoke = invoke /self-review on the temp diff; manual = review SKILL.md frontmatter + new instruction modules for clarity)
+      review: code review (does the orchestrator structure remain intact? does the new step ordering make sense? does the contract block parse?)
+      anti-scope: do NOT touch iteration-close — that is t3's scope. Do NOT redesign the existing instruction modules (code-quality, gotchas, performance, security, advisory-board, checklist) — additions are ADDITIVE.
+      bundle-context (if fanout): ADR-0002 (output schema, accepted by t1) + ADR-0005 (kg-context restoration, accepted by t1) + current SKILL.md content + the older template at src/share/templates/.../self-review/SKILL.md (for the kg-changes call to restore)
+      output contract: SKILL.md with tier+contract frontmatter, two new instructions/{kg-context,output-format}.md, no changes to the six existing instruction modules
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:13:37Z"
+updated_at: "2026-05-04T03:28:29Z"

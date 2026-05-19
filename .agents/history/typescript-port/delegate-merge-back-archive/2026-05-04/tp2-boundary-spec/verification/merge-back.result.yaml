@@ -1,0 +1,34 @@
+schema_version: 1
+task_id: tp2-boundary-spec
+parent_plan_id: typescript-port
+verifier_type: merge-back
+status: pass
+summary: 'Anti-scope respected: no Phase 4 prose changed; JSON encodes existing boundary decisions. Commit cece76e contains both files. tp3 should now be unblocked.'
+recorded_at: "2026-05-04T03:43:52Z"
+delegation_id: del-tp2-boundary-spec-1777866067
+artifact_paths:
+    - .agents/active/delegation-bundles/del-sq1-current-state-audit-1777864449.yaml
+    - .agents/active/delegation-bundles/del-t2-extend-self-review-skill-1777864417.yaml
+    - .agents/active/delegation-bundles/del-tp1-current-gap-audit-1777864446.yaml
+    - .agents/active/delegation/sq1-current-state-audit.yaml
+    - .agents/active/delegation/t2-extend-self-review-skill.yaml
+    - .agents/active/delegation/tp1-current-gap-audit.yaml
+    - .agents/active/merge-back/sq1-current-state-audit.md
+    - .agents/active/merge-back/t2-extend-self-review-skill.md
+    - .agents/active/merge-back/tp1-current-gap-audit.md
+    - .agents/active/verification/sq1-current-state-audit/doc-audit.result.yaml
+    - .agents/active/verification/sq1-current-state-audit/merge-back.result.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/merge-back.result.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/review-decision.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/skill-extension.result.yaml
+    - .agents/active/verification/tp1-current-gap-audit/doc-audit.result.yaml
+    - .agents/active/verification/tp1-current-gap-audit/merge-back.result.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/binary-rename-da-sweep.plan.md
+    - .agents/workflow/plans/self-review-iteration-close-wiring/PLAN.yaml
+    - .agents/workflow/plans/self-review-iteration-close-wiring/TASKS.yaml
+    - .agents/workflow/plans/sonarqube-pr10/PLAN.yaml
+    - .agents/workflow/plans/sonarqube-pr10/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/PLAN.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml

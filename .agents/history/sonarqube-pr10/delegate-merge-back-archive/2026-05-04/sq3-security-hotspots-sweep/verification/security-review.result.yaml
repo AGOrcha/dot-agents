@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: sq3-security-hotspots-sweep
+parent_plan_id: sonarqube-pr10
+verifier_type: security-review
+status: fail
+summary: 'Sweep BLOCKED: mcp__sonarqube__change_security_hotspot_status denied by sandbox (5/5 attempted calls returned permission-denied). All 35 hotspots remain in TO_REVIEW; new_security_hotspots_reviewed stayed at 0.0%. Per-hotspot inspection of clusters G (27 Go LookPath, all hard-coded), H (3 TS regex, all bounded to repo-local content), I (4 TS test publicly-writable-dir, deterministic /tmp under test process) is complete and recorded in the merge-back so a re-run with the write tool granted is mechanical. Fold-back slug sq3-mcp-write-denied filed.'
+recorded_at: "2026-05-04T04:21:15Z"
+delegation_id: del-sq3-security-hotspots-sweep-1777868354
+recorded_by: dot-agents workflow verify record

@@ -1,0 +1,33 @@
+schema_version: 1
+id: del-phase-f-go-mcp-1776006658
+parent_plan_id: crg-kg-integration
+parent_task_id: phase-f-go-mcp
+title: Phase F — Go MCP server embedded in dot-agents kg serve (stdio, JSON-RPC 2.0)
+summary: 'Delegated from plan CRG+KG Integration: Code-Review-Graph Into Knowledge Graph Subsystem'
+write_scope:
+    - internal/graphstore/
+    - commands/add.go
+    - commands/init.go
+    - commands/kg.go
+success_criteria: |
+    New file internal/graphstore/mcp_server.go: MCPServer struct with Serve(r, w), dispatch(method,
+    id, params), and eight handler methods (one per tool). Transport: JSON-RPC 2.0 over stdin/stdout.
+    Tool dispatch: method=="tools/call", route by params.name. Also handle "tools/list".
+    Eight tools (drop-in parity with Python server):
+      build_or_update_graph_tool, embed_graph_tool, list_graph_stats_tool, get_impact_radius_tool,
+      semantic_search_nodes_tool, query_graph_tool, get_review_context_tool, get_docs_section_tool.
+    All handlers delegate to CRGBridge (Phase B bridge). Input/output schemas are in plan.md Phase F.
+    commands/kg.go: add kgServeCmd; runKGServe calls graphstore.NewMCPServer(cwd).Serve(os.Stdin, os.Stdout).
+    commands/add.go: when adding MCP config, include dot-agents-kg entry using os.Executable() path
+      with args ["kg","serve"] and type "stdio".
+    commands/init.go: when agentsrc.json has a kg block, include dot-agents-kg MCP entry in generated
+      platform configs for Claude Code and Cursor.
+    Tests: TestKGServeToolsList, TestKGServeBuildOrUpdateGraph (mock CRGBridge), TestKGServeGetImpactRadius,
+    TestKGServeUnknownTool (expect JSON-RPC error -32601).
+    See plan.md Phase F for full struct definitions, tool catalog table, and test shapes.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: kg-serve-worker
+status: completed
+created_at: "2026-04-12T15:10:58Z"
+updated_at: "2026-04-12T15:21:54Z"
