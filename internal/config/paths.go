@@ -62,6 +62,25 @@ func ProjectContextDir(project string) string {
 	return filepath.Join(AgentsContextDir(), project)
 }
 
+// HooksScopeDirIn returns the canonical hooks directory for a scope under an
+// explicit agents-home root: <agentsHome>/hooks/<scope>. This is the single
+// definition of the canonical hooks-scope path model. Callers that already
+// hold a resolved agents-home (the `da hooks` scope-tree guard, which must
+// honor a test-injected root rather than the process environment) use this
+// form so the path model can never drift between entrypoints.
+func HooksScopeDirIn(agentsHome, scope string) string {
+	return filepath.Join(agentsHome, "hooks", scope)
+}
+
+// HooksScopeDir returns the canonical hooks directory for a scope rooted at
+// the resolved AgentsHome(): ~/.agents/hooks/<scope>. scope is either
+// "global" or a managed project name. `da remove --clean`'s canonical-dir
+// cleanup resolves the hooks subtree through this helper instead of
+// independently concatenating "hooks/<scope>".
+func HooksScopeDir(scope string) string {
+	return HooksScopeDirIn(AgentsHome(), scope)
+}
+
 // ExpandPath expands a path with ~ to the full absolute path.
 func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {

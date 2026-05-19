@@ -66,7 +66,7 @@ func hookRemovalTarget(spec *platform.HookSpec) (string, error) {
 }
 
 func ensureUnderHooksScopeTree(agentsHome, scope, target string) error {
-	root := filepath.Join(agentsHome, "hooks", scope)
+	root := config.HooksScopeDirIn(agentsHome, scope)
 	cleanRoot := filepath.Clean(root)
 	cleanTarget := filepath.Clean(target)
 	rel, err := filepath.Rel(cleanRoot, cleanTarget)

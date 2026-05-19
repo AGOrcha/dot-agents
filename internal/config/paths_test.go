@@ -62,6 +62,30 @@ func TestProjectContextDir(t *testing.T) {
 	}
 }
 
+func TestHooksScopeDirIn(t *testing.T) {
+	got := HooksScopeDirIn("/some/root", "billing-api")
+	if want := filepath.Join("/some/root", "hooks", "billing-api"); got != want {
+		t.Errorf("HooksScopeDirIn: got %q, want %q", got, want)
+	}
+	// Explicit-root form must NOT consult the environment: the scope-tree
+	// guard relies on this to honor a test-injected (even relative) root.
+	t.Setenv("AGENTS_HOME", "/env/should/be/ignored")
+	if got := HooksScopeDirIn("rel-root", "global"); got != filepath.Join("rel-root", "hooks", "global") {
+		t.Errorf("HooksScopeDirIn ignored explicit root: got %q", got)
+	}
+}
+
+func TestHooksScopeDirResolvesAgentsHome(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "/tmp/myhome")
+	if want := filepath.Join("/tmp/myhome", "hooks", "global"); HooksScopeDir("global") != want {
+		t.Errorf("HooksScopeDir: got %q, want %q", HooksScopeDir("global"), want)
+	}
+	// HooksScopeDir must be the home-resolving wrapper over HooksScopeDirIn.
+	if HooksScopeDir("proj") != HooksScopeDirIn(AgentsHome(), "proj") {
+		t.Errorf("HooksScopeDir not consistent with HooksScopeDirIn(AgentsHome(), ...)")
+	}
+}
+
 func TestExpandPath_AbsolutePassThrough(t *testing.T) {
 	abs := "/already/abs"
 	if runtime.GOOS == "windows" {

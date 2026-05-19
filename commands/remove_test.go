@@ -52,6 +52,34 @@ func TestRemoveProjectDirs_RemovesAllCanonicalDirs(t *testing.T) {
 	}
 }
 
+// removeProjectDirs must resolve the hooks subtree through the shared
+// canonical helper (config.HooksScopeDir) so `da remove --clean` and
+// `da hooks remove` cannot disagree about the ~/.agents/hooks/<scope> model.
+func TestRemoveProjectDirs_RemovesCanonicalHooksScopeDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	project := "hooky"
+	canonicalHooks := config.HooksScopeDir(project)
+	if canonicalHooks != filepath.Join(agentsHome, "hooks", project) {
+		t.Fatalf("precondition: HooksScopeDir resolved unexpectedly: %s", canonicalHooks)
+	}
+	if err := os.MkdirAll(canonicalHooks, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalHooks, "HOOK.yaml"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeProjectDirs(project); err != nil {
+		t.Fatalf("removeProjectDirs returned error: %v", err)
+	}
+	if _, err := os.Stat(canonicalHooks); !os.IsNotExist(err) {
+		t.Errorf("expected canonical hooks scope dir %s to be removed", canonicalHooks)
+	}
+}
+
 func TestRemoveProjectDirs_NoopOnMissingDirs(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -87,6 +115,131 @@ func TestRemoveProjectDirs_SwallowsNotExist(t *testing.T) {
 
 	if err := removeProjectDirs("p"); err != nil {
 		t.Fatalf("not-exist must be swallowed, got %v", err)
+	}
+}
+
+// ---------- emptyProjectDirs ----------
+
+// fakeDirCleaner is an interface-DI test double for dirCleaner. A nil func
+// field delegates to the real os implementation, so a test overrides only
+// the operation it wants to fault-inject.
+type fakeDirCleaner struct {
+	readDir   func(string) ([]os.DirEntry, error)
+	removeAll func(string) error
+}
+
+func (f fakeDirCleaner) ReadDir(name string) ([]os.DirEntry, error) {
+	if f.readDir != nil {
+		return f.readDir(name)
+	}
+	return os.ReadDir(name)
+}
+
+func (f fakeDirCleaner) RemoveAll(path string) error {
+	if f.removeAll != nil {
+		return f.removeAll(path)
+	}
+	return os.RemoveAll(path)
+}
+
+// emptyProjectDirs clears each canonical dir's contents (files + nested
+// subtrees) but leaves the now-empty dir in place; a sibling project's dir
+// is untouched.
+func TestEmptyProjectDirs_ClearsContentsKeepsDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	project := "emptyme"
+	dirs := []string{
+		filepath.Join(agentsHome, "rules", project),
+		filepath.Join(agentsHome, "settings", project),
+		filepath.Join(agentsHome, "hooks", project),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(filepath.Join(d, "nested"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "f.txt"), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "nested", "g.txt"), []byte("y"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	survivorContent := filepath.Join(agentsHome, "rules", "other", "keep.txt")
+	os.MkdirAll(filepath.Dir(survivorContent), 0755)
+	os.WriteFile(survivorContent, []byte("z"), 0644)
+
+	if err := emptyProjectDirs(osDirCleaner{}, project); err != nil {
+		t.Fatalf("emptyProjectDirs: %v", err)
+	}
+
+	for _, d := range dirs {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			t.Fatalf("dir %s should still exist: %v", d, err)
+		}
+		if len(entries) != 0 {
+			t.Errorf("dir %s should be empty, has %d entries", d, len(entries))
+		}
+	}
+	if _, err := os.Stat(survivorContent); err != nil {
+		t.Errorf("other project's content was unexpectedly removed: %v", err)
+	}
+}
+
+// A canonical dir that does not exist is the expected "nothing to clear"
+// case: emptyProjectDirs must not error and must not recreate it.
+func TestEmptyProjectDirs_MissingDirNoopNoRecreate(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := emptyProjectDirs(osDirCleaner{}, "ghost"); err != nil {
+		t.Fatalf("missing dirs must be a no-op, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "ghost")); !os.IsNotExist(err) {
+		t.Error("emptyProjectDirs must not recreate a missing canonical dir")
+	}
+}
+
+// A non-not-exist ReadDir failure must be aggregated, not swallowed.
+func TestEmptyProjectDirs_AggregatesReadDirFailures(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	sentinel := errors.New("readdir boom")
+	dc := fakeDirCleaner{readDir: func(string) ([]os.DirEntry, error) { return nil, sentinel }}
+
+	err := emptyProjectDirs(dc, "p")
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected aggregated ReadDir sentinel, got %v", err)
+	}
+}
+
+// A child RemoveAll failure must be aggregated, not swallowed.
+func TestEmptyProjectDirs_AggregatesChildRemoveFailures(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	d := filepath.Join(agentsHome, "rules", "p")
+	if err := os.MkdirAll(d, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := errors.New("removeall boom")
+	// readDir nil → real os.ReadDir finds the seeded file; RemoveAll faults.
+	dc := fakeDirCleaner{removeAll: func(string) error { return sentinel }}
+
+	err := emptyProjectDirs(dc, "p")
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected aggregated RemoveAll sentinel, got %v", err)
 	}
 }
 
@@ -253,7 +406,9 @@ func TestRunRemove_UnregistersAndOptionallyCleans(t *testing.T) {
 	}
 }
 
-func TestRunRemove_NoCleanKeepsDirs(t *testing.T) {
+// Without --clean, the canonical dirs' CONTENTS are cleared but the
+// (now-empty) directories themselves are kept.
+func TestRunRemove_NoCleanClearsContentsKeepsDirs(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -265,6 +420,17 @@ func TestRunRemove_NoCleanKeepsDirs(t *testing.T) {
 
 	rulesDir := filepath.Join(agentsHome, "rules", "myproj")
 	os.MkdirAll(rulesDir, 0755)
+	// Seed content (file + nested subdir) that must be cleared.
+	if err := os.WriteFile(filepath.Join(rulesDir, "rule.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(rulesDir, "sub", "deep")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "n.txt"), []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	cfg.AddProject("myproj", projectPath)
@@ -280,8 +446,21 @@ func TestRunRemove_NoCleanKeepsDirs(t *testing.T) {
 		t.Fatalf("runRemove: %v", err)
 	}
 
-	if _, err := os.Stat(rulesDir); err != nil {
-		t.Errorf("rules dir should be preserved without --clean: %v", err)
+	// Dir kept...
+	info, err := os.Stat(rulesDir)
+	if err != nil {
+		t.Fatalf("rules dir should be preserved without --clean: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("rules path should still be a directory")
+	}
+	// ...but emptied.
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(rulesDir): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rules dir should be empty without --clean, has %d entries", len(entries))
 	}
 }
 
