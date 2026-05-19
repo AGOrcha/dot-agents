@@ -7,7 +7,7 @@ import (
 )
 
 func TestCompiledVerificationDecisionSchema(t *testing.T) {
-	sch, err := compiledVerificationDecisionSchema()
+	sch, err := compiledVerificationDecisionSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatalf("compiledVerificationDecisionSchema: %v", err)
 	}
@@ -172,7 +172,12 @@ func TestValidateReviewDecisionDoc_CompileError(t *testing.T) {
 	resetCompiledSchemaOnce(t, &verificationDecisionCompiledOnce,
 		&verificationDecisionCompiled, &verificationDecisionCompiledErr)
 
-	withSchemaAddResourceStubErr(t)
+	// Prime the once-block with an injected failing compiler so the cached
+	// CompiledErr is non-nil; validateReviewDecisionDoc then exercises its
+	// compiled-schema error-propagation guard on the real (std) call.
+	if _, err := compiledVerificationDecisionSchema(addResourceErrCompiler()); err == nil {
+		t.Fatal("precondition: primed compile should have failed")
+	}
 
 	if err := validateReviewDecisionDoc(newValidReviewDecisionDoc()); err == nil {
 		t.Fatal("expected compiled-schema error to propagate, got nil")

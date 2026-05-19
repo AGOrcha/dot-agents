@@ -25,11 +25,11 @@ var (
 	verificationResultCompiledErr  error
 )
 
-func compiledVerificationResultSchema() (*jsonschema.Schema, error) {
+func compiledVerificationResultSchema(sc schemaCompiler) (*jsonschema.Schema, error) {
 	verificationResultCompiledOnce.Do(func() {
 		const schemaURL = "./schemas/verification-result.schema.json"
 		verificationResultCompiled, verificationResultCompiledErr = compileEmbeddedSchema(
-			verificationResultSchemaJSON, schemaURL, "verification-result")
+			sc, verificationResultSchemaJSON, schemaURL, "verification-result")
 	})
 	return verificationResultCompiled, verificationResultCompiledErr
 }
@@ -55,7 +55,7 @@ func validateVerificationResultDoc(doc *VerificationResultDoc) error {
 	if doc == nil {
 		return fmt.Errorf("verification result: nil document")
 	}
-	sch, err := compiledVerificationResultSchema()
+	sch, err := compiledVerificationResultSchema(stdSchemaCompiler{})
 	if err != nil {
 		return err
 	}

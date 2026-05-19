@@ -6,7 +6,7 @@ import (
 )
 
 func TestCompiledWorkflowIterLogSchema(t *testing.T) {
-	sch, err := compiledWorkflowIterLogSchema()
+	sch, err := compiledWorkflowIterLogSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatalf("compiledWorkflowIterLogSchema: %v", err)
 	}
@@ -47,10 +47,14 @@ func TestValidateWorkflowIterLogEntry_CompileError(t *testing.T) {
 	resetCompiledSchemaOnce(t, &workflowIterLogCompiledOnce,
 		&workflowIterLogCompiled, &workflowIterLogCompiledErr)
 
-	withSchemaAddResourceStubErr(t)
+	// Prime the once-block with an injected failing compiler so the cached
+	// CompiledErr is non-nil; validateWorkflowIterLogEntry then exercises
+	// its compiled-schema error-propagation guard on the real (std) call.
+	if _, err := compiledWorkflowIterLogSchema(addResourceErrCompiler()); err == nil {
+		t.Fatal("precondition: primed compile should have failed")
+	}
 
-	err := validateWorkflowIterLogEntry(newValidIterLogEntry())
-	if err == nil {
+	if err := validateWorkflowIterLogEntry(newValidIterLogEntry()); err == nil {
 		t.Fatal("expected compiled-schema error to propagate, got nil")
 	}
 }

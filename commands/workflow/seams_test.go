@@ -1125,30 +1125,38 @@ func TestRunSweepApply_ParamConfirmerMixed(t *testing.T) {
 // triplicated per schema file. The real (non-injected) path is asserted by
 // each schema file's own compiled<Name>Schema() success test.
 
-// withSchemaJSONUnmarshalStub swaps schemaJSONUnmarshal for the test lifetime.
-func withSchemaJSONUnmarshalStub(t *testing.T, stub func([]byte, any) error) {
-	t.Helper()
-	prev := schemaJSONUnmarshal
-	schemaJSONUnmarshal = stub
-	t.Cleanup(func() { schemaJSONUnmarshal = prev })
+// fakeSchemaCompiler is an interface-DI test double for schemaCompiler. A
+// nil func field delegates to the real stdSchemaCompiler behaviour, so a
+// test overrides only the step (parse or register) it wants to fault-inject.
+type fakeSchemaCompiler struct {
+	unmarshal   func([]byte, any) error
+	addResource func(*jsonschema.Compiler, string, any) error
 }
 
-// withSchemaAddResourceStub swaps schemaAddResource for the test lifetime.
-func withSchemaAddResourceStub(t *testing.T, stub func(*jsonschema.Compiler, string, any) error) {
-	t.Helper()
-	prev := schemaAddResource
-	schemaAddResource = stub
-	t.Cleanup(func() { schemaAddResource = prev })
+func (f fakeSchemaCompiler) Unmarshal(data []byte, v any) error {
+	if f.unmarshal != nil {
+		return f.unmarshal(data, v)
+	}
+	return stdSchemaCompiler{}.Unmarshal(data, v)
 }
 
-// withSchemaAddResourceStubErr is the common case: force schemaAddResource to
-// fail so a freshly-reset compiled<Name>Schema() once-block records a non-nil
-// CompiledErr, letting callers exercise their compiled-schema error branch.
-func withSchemaAddResourceStubErr(t *testing.T) {
-	t.Helper()
-	withSchemaAddResourceStub(t, func(*jsonschema.Compiler, string, any) error {
-		return errors.New("forced addresource failure")
-	})
+func (f fakeSchemaCompiler) AddResource(c *jsonschema.Compiler, url string, doc any) error {
+	if f.addResource != nil {
+		return f.addResource(c, url, doc)
+	}
+	return stdSchemaCompiler{}.AddResource(c, url, doc)
+}
+
+// addResourceErrCompiler is the common case: a schemaCompiler whose
+// AddResource always fails, so a freshly-reset compiled<Name>Schema() once
+// block records a non-nil CompiledErr and callers can exercise their
+// compiled-schema error branch.
+func addResourceErrCompiler() fakeSchemaCompiler {
+	return fakeSchemaCompiler{
+		addResource: func(*jsonschema.Compiler, string, any) error {
+			return errors.New("forced addresource failure")
+		},
+	}
 }
 
 // resetCompiledSchemaOnce clears a package-level compiled-schema once-block so
@@ -1170,9 +1178,9 @@ func resetCompiledSchemaOnce(t *testing.T, once *sync.Once, sch **jsonschema.Sch
 
 func TestCompileEmbeddedSchema_UnmarshalError(t *testing.T) {
 	sentinel := errors.New("unmarshal boom")
-	withSchemaJSONUnmarshalStub(t, func([]byte, any) error { return sentinel })
+	sc := fakeSchemaCompiler{unmarshal: func([]byte, any) error { return sentinel }}
 
-	sch, err := compileEmbeddedSchema([]byte(`{}`), "./schemas/x.schema.json", "x")
+	sch, err := compileEmbeddedSchema(sc, []byte(`{}`), "./schemas/x.schema.json", "x")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected unmarshal sentinel wrapped, got %v", err)
 	}
@@ -1186,9 +1194,9 @@ func TestCompileEmbeddedSchema_UnmarshalError(t *testing.T) {
 
 func TestCompileEmbeddedSchema_AddResourceError(t *testing.T) {
 	sentinel := errors.New("addresource boom")
-	withSchemaAddResourceStub(t, func(*jsonschema.Compiler, string, any) error { return sentinel })
+	sc := fakeSchemaCompiler{addResource: func(*jsonschema.Compiler, string, any) error { return sentinel }}
 
-	sch, err := compileEmbeddedSchema([]byte(`{"type":"object"}`), "./schemas/x.schema.json", "x")
+	sch, err := compileEmbeddedSchema(sc, []byte(`{"type":"object"}`), "./schemas/x.schema.json", "x")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected addresource sentinel wrapped, got %v", err)
 	}
@@ -1203,7 +1211,7 @@ func TestCompileEmbeddedSchema_AddResourceError(t *testing.T) {
 // TestCompileEmbeddedSchema_RealPath asserts the non-injected path still
 // parses + registers + compiles via the live json.Unmarshal / AddResource.
 func TestCompileEmbeddedSchema_RealPath(t *testing.T) {
-	sch, err := compileEmbeddedSchema([]byte(`{"type":"object"}`), "./schemas/real.schema.json", "real")
+	sch, err := compileEmbeddedSchema(stdSchemaCompiler{}, []byte(`{"type":"object"}`), "./schemas/real.schema.json", "real")
 	if err != nil {
 		t.Fatalf("real-path compile failed: %v", err)
 	}

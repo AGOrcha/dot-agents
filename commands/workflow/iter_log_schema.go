@@ -19,11 +19,11 @@ var (
 	workflowIterLogCompiledErr  error
 )
 
-func compiledWorkflowIterLogSchema() (*jsonschema.Schema, error) {
+func compiledWorkflowIterLogSchema(sc schemaCompiler) (*jsonschema.Schema, error) {
 	workflowIterLogCompiledOnce.Do(func() {
 		const schemaURL = "./schemas/workflow-iter-log.schema.json"
 		workflowIterLogCompiled, workflowIterLogCompiledErr = compileEmbeddedSchema(
-			workflowIterLogSchemaJSON, schemaURL, "workflow-iter-log")
+			sc, workflowIterLogSchemaJSON, schemaURL, "workflow-iter-log")
 	})
 	return workflowIterLogCompiled, workflowIterLogCompiledErr
 }
@@ -33,7 +33,7 @@ func compiledWorkflowIterLogSchema() (*jsonschema.Schema, error) {
 // Uses JSON marshal for the validation round-trip since jsonschema/v6
 // operates on JSON-compatible types.
 func validateWorkflowIterLogEntry(entry *iterLogEntry) error {
-	sch, err := compiledWorkflowIterLogSchema()
+	sch, err := compiledWorkflowIterLogSchema(stdSchemaCompiler{})
 	if err != nil {
 		return err
 	}

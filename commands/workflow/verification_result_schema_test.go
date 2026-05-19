@@ -10,7 +10,7 @@ import (
 )
 
 func TestCompiledVerificationResultSchema(t *testing.T) {
-	sch, err := compiledVerificationResultSchema()
+	sch, err := compiledVerificationResultSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatalf("compiledVerificationResultSchema: %v", err)
 	}
@@ -18,7 +18,7 @@ func TestCompiledVerificationResultSchema(t *testing.T) {
 		t.Error("expected non-nil schema")
 	}
 
-	sch2, err := compiledVerificationResultSchema()
+	sch2, err := compiledVerificationResultSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,12 @@ func TestValidateVerificationResultDoc_CompileError(t *testing.T) {
 	resetCompiledSchemaOnce(t, &verificationResultCompiledOnce,
 		&verificationResultCompiled, &verificationResultCompiledErr)
 
-	withSchemaAddResourceStubErr(t)
+	// Prime the once-block with an injected failing compiler so the cached
+	// CompiledErr is non-nil; validateVerificationResultDoc then exercises
+	// its compiled-schema error-propagation guard on the real (std) call.
+	if _, err := compiledVerificationResultSchema(addResourceErrCompiler()); err == nil {
+		t.Fatal("precondition: primed compile should have failed")
+	}
 
 	if err := validateVerificationResultDoc(newValidVerificationResultDoc()); err == nil {
 		t.Fatal("expected compiled-schema error to propagate, got nil")

@@ -21,11 +21,11 @@ var (
 	verificationDecisionCompiledErr  error
 )
 
-func compiledVerificationDecisionSchema() (*jsonschema.Schema, error) {
+func compiledVerificationDecisionSchema(sc schemaCompiler) (*jsonschema.Schema, error) {
 	verificationDecisionCompiledOnce.Do(func() {
 		const schemaURL = "./schemas/verification-decision.schema.json"
 		verificationDecisionCompiled, verificationDecisionCompiledErr = compileEmbeddedSchema(
-			verificationDecisionSchemaJSON, schemaURL, "verification-decision")
+			sc, verificationDecisionSchemaJSON, schemaURL, "verification-decision")
 	})
 	return verificationDecisionCompiled, verificationDecisionCompiledErr
 }
@@ -85,7 +85,7 @@ func validateReviewDecisionDoc(doc *ReviewDecisionDoc) error {
 	if doc == nil {
 		return fmt.Errorf("review decision: nil document")
 	}
-	sch, err := compiledVerificationDecisionSchema()
+	sch, err := compiledVerificationDecisionSchema(stdSchemaCompiler{})
 	if err != nil {
 		return err
 	}
