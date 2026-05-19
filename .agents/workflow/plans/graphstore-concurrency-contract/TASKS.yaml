@@ -27,7 +27,7 @@ tasks:
         shape; getting it wrong propagates xN. No behavior change.
     - id: gcc2-path-a-impl
       title: Implement Path A behind the contract (bounded ephemeral)
-      status: in_progress
+      status: completed
       depends_on:
         - gcc1-pin-store-contract
       blocks:

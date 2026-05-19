@@ -2,7 +2,7 @@
 schema_version: 1
 id: "refresh-skill-relink"
 title: "Refresh Skill Relink Plan"
-status: "paused"
+status: "active"
 summary: |-
     Fix non-empty .agents/skills/<name> relink warnings via centralized
     resource planner.
@@ -48,4 +48,4 @@ updated_at: "2026-05-19T00:00:00Z"
 owner: "dot-agents"
 success_criteria: "Refresh imports then relinks shared skill mirrors without spurious directory warnings."
 verification_strategy: "refresh integration tests; manual da refresh smoke"
-current_focus_task: "UNBLOCKED 2026-05-19 — dependency (resource-intent-centralization) completed; next step is routing commands/refresh.go skill-mirror relink through internal/platform/resource_plan.go SharedTargetPlan. Awaits maintainer unpark."
+current_focus_task: "Route commands/refresh.go skill-mirror through internal/platform/resource_plan.go SharedTargetPlan; cross-plan depends_on shared-target-projection-wiring/stp1-wire-refresh (completed); closeout regression runs under stp3-regression-parity."

@@ -1,11 +1,29 @@
 schema_version: 1
 id: shared-target-projection-wiring
 title: Shared-target projection wiring
-status: draft
-summary: Forward-port the command-layer invocation of the shared-target projection (Codex repo agent TOMLs + Claude shared skills) onto master; reference impl 829a3490/c78b470b
+status: in_progress
+summary: |-
+    Forward-port the command-layer invocation of the shared-target projection
+    (Codex repo agent TOMLs + Claude shared skills) onto master; reference
+    impl 829a3490/c78b470b.
+
+    STATUS REFRESH 2026-05-19: status draft -> in_progress. stp1-wire-refresh
+    + stp2-wire-install-add already completed; stp-import-relink shipped via
+    #31 and stp-doctor-repair via #32 — both promoted in_progress -> completed.
+    Remaining: stp3-regression-parity (broaden to also cover the refresh-
+    skill-relink skill-mirror routing once that lands), stp4-doc-reconcile-
+    close.
+
+    CORRELATION with refresh-skill-relink: that plan's fix-shared-skill-relink
+    task is the missing routing of commands/refresh.go's skill-mirror call
+    through internal/platform/resource_plan.go SharedTargetPlan. It
+    depends_on shared-target-projection-wiring/stp1-wire-refresh (now
+    completed). stp3's regression sweep should include the skill-mirror
+    path so closeout proves no per-platform CreateLinks regression there
+    too.
 created_at: "2026-05-18T21:19:14Z"
-updated_at: "2026-05-18T22:35:01Z"
+updated_at: "2026-05-19T00:00:00Z"
 owner: dot-agents
-success_criteria: da refresh/install/add produce repo .codex/agents/*.toml and Claude shared-skills projection on master; dry-run no-mutation + idempotent second run proven by regression tests; no per-platform CreateLinks regression
+success_criteria: da refresh/install/add produce repo .codex/agents/*.toml and Claude shared-skills projection on master; dry-run no-mutation + idempotent second run proven by regression tests; no per-platform CreateLinks regression (incl. refresh-skill-relink skill-mirror path)
 verification_strategy: Regression tests in commands/*_test.go (projection produced, dry-run parity, idempotence) + go test ./... green + per-file cov gate satisfied with interface seams (no new allowlist entries)
-current_focus_task: Wire projection into import.go relinkImportedProjects (the real gap)
+current_focus_task: stp3-regression-parity (now covers refresh-skill-relink skill-mirror routing too); stp4 doc reconcile follows
