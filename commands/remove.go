@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -93,13 +94,24 @@ func runRemove(projectName string, cleanDirs bool) error {
 
 	if cleanDirs {
 		ui.WarnBox("Destructive Action",
-			"The --clean flag will permanently delete:",
+			"The --clean flag will permanently delete these directories entirely:",
 			"  ~/.agents/rules/"+projectName+"/",
 			"  ~/.agents/settings/"+projectName+"/",
 			"  ~/.agents/mcp/"+projectName+"/",
 			"  ~/.agents/hooks/"+projectName+"/",
 			"  ~/.agents/skills/"+projectName+"/",
 			"  ~/.agents/agents/"+projectName+"/",
+		)
+	} else {
+		ui.PreviewSection("From ~/.agents/ (managed canonical dirs):",
+			"Contents cleared; the now-empty directories are kept:",
+			"  ~/.agents/rules/"+projectName+"/",
+			"  ~/.agents/settings/"+projectName+"/",
+			"  ~/.agents/mcp/"+projectName+"/",
+			"  ~/.agents/hooks/"+projectName+"/",
+			"  ~/.agents/skills/"+projectName+"/",
+			"  ~/.agents/agents/"+projectName+"/",
+			"Pass --clean to remove the directories themselves too.",
 		)
 	}
 
@@ -156,19 +168,32 @@ func runRemove(projectName string, cleanDirs bool) error {
 	// Canonical-dir cleanup runs BEFORE unregistering: a permission/locked-file
 	// failure here must leave the project registered so a re-run still has a
 	// handle to retry against. Unregistering first would orphan stale canonical
-	// data with no recovery path while falsely reporting "removed completely".
+	// data with no recovery path while falsely reporting success.
+	//
+	// Plain `da remove` clears the canonical dirs' contents but keeps the
+	// (now-empty) directory skeleton; `--clean` removes the directories too.
+	ui.Step("Cleaning project directories...")
+	var cleanupErr error
+	doneMsg := "Cleared project directory contents (directories kept)"
 	if cleanDirs {
-		ui.Step("Cleaning project directories...")
-		if err := removeProjectDirs(projectName); err != nil {
-			return ErrorWithHints(
-				fmt.Sprintf("remove incomplete for '%s': could not clean project directories: %v", projectName, err),
-				"The project registration was PRESERVED so cleanup can be retried. "+
-					"Resolve the errors above (permissions, locked files), then re-run "+
-					"`da remove "+projectName+" --clean`.",
-			)
-		}
-		ui.Bullet("ok", "Removed project directories")
+		cleanupErr = removeProjectDirs(projectName)
+		doneMsg = "Removed project directories"
+	} else {
+		cleanupErr = emptyProjectDirs(osDirCleaner{}, projectName)
 	}
+	if cleanupErr != nil {
+		retryCmd := "da remove " + projectName
+		if cleanDirs {
+			retryCmd += " --clean"
+		}
+		return ErrorWithHints(
+			fmt.Sprintf("remove incomplete for '%s': could not clean project directories: %v", projectName, cleanupErr),
+			"The project registration was PRESERVED so cleanup can be retried. "+
+				"Resolve the errors above (permissions, locked files), then re-run "+
+				"`"+retryCmd+"`.",
+		)
+	}
+	ui.Bullet("ok", doneMsg)
 
 	cfg.RemoveProject(projectName)
 	if err := cfg.Save(); err != nil {
@@ -189,30 +214,81 @@ func runRemove(projectName string, cleanDirs bool) error {
 	return nil
 }
 
-// removeProjectDirs deletes the project's canonical directories under
-// ~/.agents/. It aggregates and returns every removal failure (errors.Join)
-// rather than discarding them: a swallowed permission/locked-file error left
-// `da remove --clean` reporting complete removal while stale canonical data
-// remained on disk. A not-exist error is the expected "nothing to clean"
-// case and is the only error swallowed.
-func removeProjectDirs(project string) error {
+// projectCanonicalDirs is the canonical ~/.agents/ directory set owned by a
+// single project. removeProjectDirs deletes these entirely; emptyProjectDirs
+// clears their contents but keeps the dirs. The hooks scope dir resolves
+// through the shared canonical helper so `da remove`/`--clean` and
+// `da hooks remove` cannot disagree about where ~/.agents/hooks/<scope> lives.
+func projectCanonicalDirs(project string) []string {
 	agentsHome := config.AgentsHome()
-	dirs := []string{
+	return []string{
 		agentsHome + "/rules/" + project,
 		agentsHome + "/settings/" + project,
 		agentsHome + "/mcp/" + project,
-		// The hooks scope dir is resolved through the shared canonical
-		// helper so `da remove --clean` and `da hooks remove` cannot
-		// disagree about where ~/.agents/hooks/<scope> lives. Behavior is
-		// unchanged: the whole scope subtree is still removed here.
 		config.HooksScopeDir(project),
 		agentsHome + "/skills/" + project,
 		agentsHome + "/agents/" + project,
 	}
+}
+
+// removeProjectDirs deletes the project's canonical directories under
+// ~/.agents/ (the `--clean` behavior: content AND the dirs themselves). It
+// aggregates and returns every removal failure (errors.Join) rather than
+// discarding them: a swallowed permission/locked-file error left
+// `da remove --clean` reporting complete removal while stale canonical data
+// remained on disk. A not-exist error is the expected "nothing to clean"
+// case and is the only error swallowed.
+func removeProjectDirs(project string) error {
 	var errs []error
-	for _, d := range dirs {
+	for _, d := range projectCanonicalDirs(project) {
 		if err := osRemoveAll(d); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// dirCleaner is the narrow filesystem collaborator emptyProjectDirs needs.
+// It is injected (interface-DI) so the not-exist / aggregated-failure
+// branches are provable with a fake rather than a package-level func-var
+// seam — the project's preferred test-seam shape.
+type dirCleaner interface {
+	ReadDir(name string) ([]os.DirEntry, error)
+	RemoveAll(path string) error
+}
+
+// osDirCleaner is the production dirCleaner backed by the os package.
+type osDirCleaner struct{}
+
+func (osDirCleaner) ReadDir(name string) ([]os.DirEntry, error) { return os.ReadDir(name) }
+func (osDirCleaner) RemoveAll(path string) error                { return os.RemoveAll(path) }
+
+// emptyProjectDirs deletes the *contents* of each canonical project dir but
+// leaves the (now-empty) directory in place. This is the default `da remove`
+// behavior: unmanage the project and reclaim its canonical content while
+// keeping the dir skeleton so a later re-add lands in the same place;
+// `--clean` (removeProjectDirs) additionally removes the directories.
+//
+// A missing dir is the expected "nothing to clear" case (ReadDir not-exist)
+// and is skipped without recreating it. Every child-removal failure is
+// aggregated (errors.Join) rather than discarded, mirroring removeProjectDirs:
+// a swallowed permission error must not let `da remove` falsely report success
+// while stale canonical content remains on disk.
+func emptyProjectDirs(dc dirCleaner, project string) error {
+	var errs []error
+	for _, d := range projectCanonicalDirs(project) {
+		entries, err := dc.ReadDir(d)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("%s: %w", d, err))
+			}
+			continue
+		}
+		for _, e := range entries {
+			child := filepath.Join(d, e.Name())
+			if err := dc.RemoveAll(child); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("%s: %w", child, err))
+			}
 		}
 	}
 	return errors.Join(errs...)
