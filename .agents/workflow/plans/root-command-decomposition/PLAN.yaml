@@ -1,0 +1,11 @@
+schema_version: 1
+id: root-command-decomposition
+title: Root commands package decomposition
+status: draft
+summary: Extract the lifecycle/resource command cluster out of root commands into a subpackage so root is a thin composition root
+created_at: "2026-05-17T13:53:43Z"
+updated_at: "2026-05-17T13:53:43Z"
+owner: dot-agents
+success_criteria: root commands no longer imports internal/links|platform|projectsync|scaffold directly; lifecycle cluster lives in its own subpackage; tests + coverage gate green
+verification_strategy: go test ./...; import-graph assertion that root commands no longer reaches the resource internal/ packages
+current_focus_task: ""

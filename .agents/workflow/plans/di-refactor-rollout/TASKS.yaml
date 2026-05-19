@@ -1,0 +1,57 @@
+schema_version: 1
+plan_id: di-refactor-rollout
+tasks:
+    - id: commands
+      title: 'DI refactor: commands'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3a. Mirror the workflow-di-refactor reference implementation.'
+    - id: commands-kg
+      title: 'DI refactor: commands-kg'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3c. Mirror the workflow-di-refactor reference implementation.'
+    - id: commands-agents
+      title: 'DI refactor: commands-agents'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3a. Mirror the workflow-di-refactor reference implementation.'
+    - id: internal-platform
+      title: 'DI refactor: internal-platform'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3a. Mirror the workflow-di-refactor reference implementation.'
+    - id: internal-graphstore
+      title: 'DI refactor: internal-graphstore'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3b. Mirror the workflow-di-refactor reference implementation.'
+    - id: internal-projectsync
+      title: 'DI refactor: internal-projectsync'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Apply Deps struct + WithXxx test helpers pattern. Eliminate package-var seams. Branch: pr3a. Mirror the workflow-di-refactor reference implementation.'

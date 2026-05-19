@@ -1,0 +1,166 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+tasks:
+    - id: cg1-gate-rework
+      title: coverage-gate.sh -> per-file + exclusion/allowlist + warn|enforce
+      status: completed
+      depends_on: []
+      blocks:
+        - cg2-ci-merge-job
+        - cg3-phase1-land
+      owner: dot-agents
+      write_scope:
+        - scripts/coverage-gate.sh
+        - scripts/coverage-exceptions.txt
+      verification_required: true
+      notes: |-
+        Switch aggregation key package->file. Carry+extend EXCLUDE_RE
+        (ignore-tagged scripts/cov*.go, *.rb, cmd/*, storetest, testutil,
+        linktest, scaffold embeds). Add coverage-exceptions.txt: file path
+        + mandatory rationale; unlisted sub-threshold = fail. Mode via env
+        COVERAGE_GATE_MODE=warn|enforce (default warn for per-file in P1).
+        Unit-test on a synthetic merged profile that includes a
+        platform-tagged file credited from one OS only.
+    - id: cg2-ci-merge-job
+      title: 'CI: post-matrix merged-profile gate job (test.yml)'
+      status: completed
+      depends_on:
+        - cg1-gate-rework
+      blocks:
+        - cg3-phase1-land
+      owner: dot-agents
+      write_scope:
+        - .github/workflows/test.yml
+      verification_required: true
+      notes: |-
+        New job after the OS matrix: download coverage-{windows,macos,
+        ubuntu}-latest artifacts, gocovmerge (or equivalent) into one
+        profile, run coverage-gate.sh once on the union. Demote the
+        in-matrix per-OS gate to non-blocking smoke (or remove). This is
+        what makes platform files credited from their own OS run -> zero
+        platform false-positives.
+    - id: cg3-phase1-land
+      title: 'Phase 1: per-file=warn, package=enforce (CI green) + baseline'
+      status: completed
+      depends_on:
+        - cg1-gate-rework
+        - cg2-ci-merge-job
+      blocks:
+        - cg4-pr3c-comply
+        - cg5-legacy-remediation
+      owner: dot-agents
+      write_scope:
+        - .github/workflows/test.yml
+      verification_required: true
+      notes: |-
+        Ship the gate with per-file in WARN, package gate still ENFORCE
+        -> CI stays green on merge. Capture the merged-profile baseline
+        offender list as the P2 worklist. PR to master (no direct commit).
+    - id: cg4-pr3c-comply
+      title: 'sync_code_warm_link.go >=95% (unblock #18 / v0.3.2)'
+      status: completed
+      depends_on:
+        - cg3-phase1-land
+      blocks:
+        - cg6-ratchet-enforce
+      owner: dot-agents
+      write_scope:
+        - commands/kg/
+      verification_required: true
+      notes: |-
+        On pr3c (#18): real tests lifting commands/kg/sync_code_warm_link.go
+        from 61% to >=95% (merged-profile). NOT allowlisted (it is the
+        originating offender). Re-measure; #18 then merges -> v0.3.2.
+        Gate-before-#18 ordering: cg1-3 land first, then this.
+    - id: cg5-legacy-remediation
+      title: Legacy tail (~40 files) sized remediation backlog
+      status: completed
+      depends_on:
+        - cg3-phase1-land
+      blocks:
+        - cg6-ratchet-enforce
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/coverage-gate-per-file/legacy-backlog.md
+      verification_required: false
+      notes: |-
+        Enumerate every genuine sub-95 production file from the P1
+        baseline (crg.go 51%, init.go 83%, links.go 76%, import.go 92%,
+        plan_task.go 93%, doctor.go 93% ...). Per file: test-up vs
+        allowlist-with-rationale. Size + phase into sub-batches. This is
+        the large program; NOT one PR.
+    - id: cg6a-activate-enforce
+      title: Activate per-file enforce NOW via seeded ratchet allowlist
+      status: completed
+      depends_on:
+        - cg4-pr3c-comply
+        - cg5-legacy-remediation
+      blocks:
+        - cg6b-ratchet-loop
+      owner: dot-agents
+      write_scope:
+        - scripts/coverage-exceptions.txt
+        - .github/workflows/test.yml
+      verification_required: true
+      notes: |-
+        Reframed: do NOT block enforce on remediating all 44. Seed the
+        rationale'd coverage-exceptions allowlist with the exact 44
+        current sub-95 files (authoritative: e72c8583 coverage-gate run)
+        and flip COVERAGE_FILE_MODE warn->enforce. Net immediately: ~140
+        already-clean files HARD-enforced (regression-proof) + every NEW
+        file must hit 95%; only the 44 known-debt files are graced. No
+        gate code change — the cg1 rationale'd-allowlist mechanism was
+        built for exactly this. Per-package stays warn (its baseline is
+        separate). PR (no direct master commit). Verify CI coverage-gate
+        green with 44 ALLOWLISTED, 0 unlisted FAIL.
+    - id: cg6b-ratchet-loop
+      title: 'Maintained side-loop: shrink the allowlist file-by-file'
+      status: in_progress
+      depends_on:
+        - cg6a-activate-enforce
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/coverage-exceptions.txt
+      verification_required: true
+      notes: |-
+        Long-running maintained loop, NOT a one-shot. Each iteration:
+        pick one package-batch from coverage-exceptions.txt, raise those
+        files to >=95% with behavior-asserting tests (cg4 pattern, source-
+        mirroring test files), DELETE their allowlist entries, open a PR
+        (user gates merge). STALE-ALLOWLIST output confirms a pruned
+        entry. [platform-tag] entries: confirm-or-raise, do not assume
+        untestable. Loop runs alongside (not blocking) the worktree-
+        platform / workflow-commit-command / di-refactor design work.
+        Done when the allowlist holds only genuinely-untestable code with
+        a defensible rationale. Then cg-verify-close.
+        ---
+        Ratchet progress (PR = maintainer-merge-gated; one-PR-in-flight):
+        - B1 commands/hooks x3 -> PR #26 MERGED. 3 entries pruned.
+        - B2 commands/workflow schema group (iter_log_schema,
+          iter_log, review_decision_schema, verification_result_schema)
+          -> PR #35, all gates PASS (Sonar 0 open by PR id 35, QG OK,
+          new_coverage 100pct, CI all-green incl merged multi-OS gate),
+          maintainer-merge-ready. Option 1+2 executed (shared
+          compileEmbeddedSchema seam in seams.go, dead AddResource
+          branch seam-tested once, behavior-preserving). 4 entries
+          pruned, 0 added.
+        - B3 (authored, spawns only post-#35-merge): next allowlist
+          package-group, plus prefs.go verify-or-raise (measure on the
+          merged multi-OS profile first, raise with real tests if
+          genuinely below 95pct, NO allowlist entry either way).
+          internal/graphstore/* stays FENCED (gcc2/gcc4 own those 3
+          entries; never a cg6b batch until gcc2->gcc3 complete).
+    - id: cg-verify-close
+      title: Verify spec done-criteria + close
+      status: pending
+      depends_on:
+        - cg6b-ratchet-loop
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        Prove every done criterion: zero platform false-positives,
+        offender-list accuracy, mode flags, allowlist+rationale enforced,
+        sync_code_warm_link >=95%, package gate gone. Archive plan.

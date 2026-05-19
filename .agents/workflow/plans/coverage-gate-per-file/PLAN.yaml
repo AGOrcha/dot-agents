@@ -1,0 +1,11 @@
+schema_version: 1
+id: coverage-gate-per-file
+title: Per-file platform-aware coverage gate (phased -> hard 95%)
+status: draft
+summary: 'Rework coverage-gate.sh to per-file 95% on a merged multi-OS profile; phased warn->enforce; exclusion+exception model; #18 must comply'
+created_at: "2026-05-18T01:58:47Z"
+updated_at: "2026-05-18T04:54:15Z"
+owner: dot-agents
+success_criteria: 'Post-matrix merged-profile per-file gate, zero platform false-positives; P1 warn lands CI-green; sync_code_warm_link.go >=95% before #18; end state per-file enforce with legacy tail remediated/allowlisted; package gate retired'
+verification_strategy: 'Gate unit-tested on synthetic merged profile incl. platform-tagged files; CI dry-run shows correct offender list; #18 kg coverage re-measured; phased flags exercised'
+current_focus_task: 'Maintained side-loop: shrink the allowlist file-by-file'

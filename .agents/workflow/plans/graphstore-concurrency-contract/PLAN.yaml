@@ -1,0 +1,11 @@
+schema_version: 1
+id: graphstore-concurrency-contract
+title: Graphstore concurrency contract (Path A)
+status: draft
+summary: Publish the stable Store contract + Path A (bounded ephemeral) per locked decision C-Hybrid; pin the Deps boundary that di-refactor-rollout and the cg6b 95% tail consume
+created_at: "2026-05-18T21:41:18Z"
+updated_at: "2026-05-18T23:24:15Z"
+owner: dot-agents
+success_criteria: One published Store contract; all callers+Deps bind to it; bounds+timeout enforced uniformly native/CRG with regression proof; maxNodes Low-1 closed via contract; di-refactor OD-1 closed (provider-owns-concurrency rationale)
+verification_strategy: 'Regression tests prove hard-cap + cross-path (native/CRG) parity + timeout; go test ./... green; downstream: di-refactor-rollout + cg6b tail unblocked once the boundary is pinned (gcc1)'
+current_focus_task: Implement Path A behind the contract (bounded ephemeral)
