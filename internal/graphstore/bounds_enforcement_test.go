@@ -26,14 +26,20 @@ func openTestSQLiteInternal(t *testing.T) *SQLiteStore {
 func TestSQLiteSearchNodesEnforcesHardLimit(t *testing.T) {
 	s := openTestSQLiteInternal(t)
 	total := hardSearchLimit + 50
+	// One transaction instead of `total` implicit per-UpsertNode commits.
+	// modernc/Windows fsyncs on every commit, so a per-row seed of this
+	// size dominated the suite wall-clock; StoreFileNodesEdges wraps the
+	// whole seed in a single Tx (same rows, same upsert semantics).
+	nodes := make([]NodeInfo, 0, total)
 	for i := 0; i < total; i++ {
-		if _, err := s.UpsertNode(NodeInfo{
+		nodes = append(nodes, NodeInfo{
 			Kind:     NodeKindFunction,
 			Name:     fmt.Sprintf("fn%d", i),
 			FilePath: "f.go",
-		}, ""); err != nil {
-			t.Fatalf("seed node %d: %v", i, err)
-		}
+		})
+	}
+	if err := s.StoreFileNodesEdges("f.go", nodes, nil, ""); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
 
 	got, err := s.SearchNodes("fn", 10_000_000) // caller asks for "everything"
@@ -52,12 +58,16 @@ func TestSQLiteSearchNodesEnforcesHardLimit(t *testing.T) {
 // the provider default, not "unbounded".
 func TestSQLiteSearchNodesZeroLimitUsesDefault(t *testing.T) {
 	s := openTestSQLiteInternal(t)
-	for i := 0; i < defaultSearchLimit+25; i++ {
-		if _, err := s.UpsertNode(NodeInfo{
+	// Single-Tx seed (see note in TestSQLiteSearchNodesEnforcesHardLimit).
+	total := defaultSearchLimit + 25
+	nodes := make([]NodeInfo, 0, total)
+	for i := 0; i < total; i++ {
+		nodes = append(nodes, NodeInfo{
 			Kind: NodeKindFunction, Name: fmt.Sprintf("fn%d", i), FilePath: "f.go",
-		}, ""); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
+		})
+	}
+	if err := s.StoreFileNodesEdges("f.go", nodes, nil, ""); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
 	got, err := s.SearchNodes("fn", 0)
 	if err != nil {
@@ -79,20 +89,23 @@ func TestSQLiteImpactRadiusBoundsAreClampedAndUniform(t *testing.T) {
 	// (see makeQualified): the edge source must match the seed node's
 	// qualified name or the BFS finds no neighbours.
 	const center = "seed.go::center"
-	if _, err := s.UpsertNode(NodeInfo{Kind: NodeKindFunction, Name: "center", FilePath: "seed.go"}, ""); err != nil {
-		t.Fatalf("seed center: %v", err)
-	}
 	leaves := hardMaxNodes + 100
+	// Single-Tx seed (see note in TestSQLiteSearchNodesEnforcesHardLimit):
+	// ~5.1k nodes + ~5.1k edges was the dominant per-row commit cost. The
+	// filePath param only scopes the (no-op, fresh-DB) pre-delete; each
+	// node/edge keeps its own FilePath, so the seeded shape is unchanged.
+	nodes := make([]NodeInfo, 0, leaves+1)
+	nodes = append(nodes, NodeInfo{Kind: NodeKindFunction, Name: "center", FilePath: "seed.go"})
+	edges := make([]EdgeInfo, 0, leaves)
 	for i := 0; i < leaves; i++ {
 		ln := fmt.Sprintf("leaf%d", i)
-		if _, err := s.UpsertNode(NodeInfo{Kind: NodeKindFunction, Name: ln, FilePath: "leaf.go"}, ""); err != nil {
-			t.Fatalf("seed leaf %d: %v", i, err)
-		}
-		if _, err := s.UpsertEdge(EdgeInfo{
+		nodes = append(nodes, NodeInfo{Kind: NodeKindFunction, Name: ln, FilePath: "leaf.go"})
+		edges = append(edges, EdgeInfo{
 			Kind: EdgeKindCalls, Source: center, Target: "leaf.go::" + ln, FilePath: "seed.go",
-		}); err != nil {
-			t.Fatalf("seed edge %d: %v", i, err)
-		}
+		})
+	}
+	if err := s.StoreFileNodesEdges("seed.go", nodes, edges, ""); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
 
 	// Ask for far more than the hard cap; provider must clamp.

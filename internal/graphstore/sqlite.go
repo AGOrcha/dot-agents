@@ -53,8 +53,15 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 	// concurrently still serialize via busy_timeout with zero corruption.
 	// Path A is ephemeral + cheap, so conns are kept short-lived and the
 	// idle set small rather than long-pooled.
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(2)
+	//
+	// Pool size is a pure throughput knob, not a correctness one: WAL +
+	// busy_timeout (set below) own write-serialization at the file/OS
+	// level regardless of how many conns the pool hands out, so raising
+	// the cap only buys more intra-process read/seed concurrency (e.g.
+	// bulk graph builds). 4 was conservative; 16 removes that ceiling
+	// while keeping the idle set small for the ephemeral Path-A profile.
+	db.SetMaxOpenConns(16)
+	db.SetMaxIdleConns(4)
 	db.SetConnMaxIdleTime(30 * time.Second)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
