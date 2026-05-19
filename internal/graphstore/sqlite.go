@@ -18,14 +18,10 @@ import (
 type SQLiteStore struct {
 	db *sql.DB
 
-	// Store lifecycle. lifeCtx is cancelled by Close as the shutdown
-	// signal; reapers tracks the abandon-and-fail conn-drain goroutines
-	// (see queryContextGuarded) so Close blocks until every orphaned
-	// connection has actually been returned to the pool rather than
-	// racing db.Close() against an in-flight reaper. Cancelling lifeCtx
-	// cannot interrupt a non-preemptible modernc step in flight — the
-	// WaitGroup is the real shutdown guarantee; the context is the
-	// lifecycle handle for paths that can observe it.
+	// Shutdown lifecycle. reapers tracks the abandon-and-fail conn-drain
+	// goroutines (see queryContextGuarded) so Close blocks until every
+	// orphaned connection has actually been returned to the pool rather
+	// than racing db.Close() against an in-flight reaper.
 	//
 	// mu serialises reaper registration against Close: a reaper is
 	// spawned lazily (only when a request times out), so reapers.Add
@@ -34,11 +30,9 @@ type SQLiteStore struct {
 	// no new tracked reaper is registered — a timeout racing shutdown
 	// drains its conn untracked (best effort; Close already committed to
 	// Wait) so nothing is stranded.
-	lifeCtx    context.Context
-	cancelLife context.CancelFunc
-	mu         sync.Mutex
-	closed     bool
-	reapers    sync.WaitGroup
+	mu      sync.Mutex
+	closed  bool
+	reapers sync.WaitGroup
 }
 
 // OpenSQLite opens (or creates) the SQLite database at dbPath and initialises
@@ -127,10 +121,8 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("graphstore: enable foreign_keys: %w", err)
 	}
 
-	lifeCtx, cancelLife := context.WithCancel(context.Background())
-	s := &SQLiteStore{db: db, lifeCtx: lifeCtx, cancelLife: cancelLife}
+	s := &SQLiteStore{db: db}
 	if err := s.initSchema(); err != nil {
-		cancelLife()
 		db.Close()
 		return nil, err
 	}
@@ -144,16 +136,16 @@ func (s *SQLiteStore) initSchema() error {
 	return nil
 }
 
-// Close shuts the store down deterministically: it signals the store
-// lifecycle (cancelLife), waits for every in-flight abandon-and-fail
-// reaper to finish draining its orphaned connection, then closes the
-// pool. Waiting on reapers before db.Close() is the correctness point —
-// a timed-out request abandons its connection to a background reaper
-// (see queryContextGuarded); closing the pool while that reaper still
-// holds the conn would race db.Close() against an in-flight step and
-// could leak the goroutine + connection past the store's lifetime.
+// Close shuts the store down deterministically: it marks the store
+// closed (so no new tracked reaper can register), waits for every
+// in-flight abandon-and-fail reaper to finish draining its orphaned
+// connection, then closes the pool. Waiting on reapers before
+// db.Close() is the correctness point — a timed-out request abandons
+// its connection to a background reaper (see queryContextGuarded);
+// closing the pool while that reaper still holds the conn would race
+// db.Close() against an in-flight step and could leak the goroutine +
+// connection past the store's lifetime.
 func (s *SQLiteStore) Close() error {
-	s.cancelLife()
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
