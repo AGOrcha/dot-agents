@@ -201,7 +201,11 @@ func removeProjectDirs(project string) error {
 		agentsHome + "/rules/" + project,
 		agentsHome + "/settings/" + project,
 		agentsHome + "/mcp/" + project,
-		agentsHome + "/hooks/" + project,
+		// The hooks scope dir is resolved through the shared canonical
+		// helper so `da remove --clean` and `da hooks remove` cannot
+		// disagree about where ~/.agents/hooks/<scope> lives. Behavior is
+		// unchanged: the whole scope subtree is still removed here.
+		config.HooksScopeDir(project),
 		agentsHome + "/skills/" + project,
 		agentsHome + "/agents/" + project,
 	}

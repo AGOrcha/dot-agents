@@ -52,6 +52,34 @@ func TestRemoveProjectDirs_RemovesAllCanonicalDirs(t *testing.T) {
 	}
 }
 
+// removeProjectDirs must resolve the hooks subtree through the shared
+// canonical helper (config.HooksScopeDir) so `da remove --clean` and
+// `da hooks remove` cannot disagree about the ~/.agents/hooks/<scope> model.
+func TestRemoveProjectDirs_RemovesCanonicalHooksScopeDir(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	project := "hooky"
+	canonicalHooks := config.HooksScopeDir(project)
+	if canonicalHooks != filepath.Join(agentsHome, "hooks", project) {
+		t.Fatalf("precondition: HooksScopeDir resolved unexpectedly: %s", canonicalHooks)
+	}
+	if err := os.MkdirAll(canonicalHooks, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(canonicalHooks, "HOOK.yaml"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeProjectDirs(project); err != nil {
+		t.Fatalf("removeProjectDirs returned error: %v", err)
+	}
+	if _, err := os.Stat(canonicalHooks); !os.IsNotExist(err) {
+		t.Errorf("expected canonical hooks scope dir %s to be removed", canonicalHooks)
+	}
+}
+
 func TestRemoveProjectDirs_NoopOnMissingDirs(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
