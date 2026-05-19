@@ -160,7 +160,7 @@ func newWedgeStore(t *testing.T, maxOpen int) (*SQLiteStore, chan struct{}, chan
 	wedgeDriverRegistered.Store(true)
 
 	prev := sqlOpen
-	sqlOpen = func(_ string, dsn string) (*sql.DB, error) { return sql.Open(name, dsn) }
+	sqlOpen = func(_, dsn string) (*sql.DB, error) { return sql.Open(name, dsn) }
 	t.Cleanup(func() { sqlOpen = prev })
 
 	dir := t.TempDir()

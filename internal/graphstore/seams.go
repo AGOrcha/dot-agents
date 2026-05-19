@@ -28,4 +28,7 @@ var dbExec = func(db *sql.DB, query string, args ...any) (sql.Result, error) {
 // in production). The regression test swaps it to deterministically observe
 // that the conn-release path fires on ctx expiry — the behaviour modernc on
 // Windows would otherwise never trigger, causing the single-conn deadlock.
-var onGuardedQueryTimeout = func() {}
+var onGuardedQueryTimeout = func() {
+	// Intentionally empty: the production default is a zero-overhead
+	// no-op; only the regression test swaps in an observing stub.
+}
