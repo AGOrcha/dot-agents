@@ -182,6 +182,38 @@ func TestGetImpactRadius_NoSelfDeadlockUnderSingleConn(t *testing.T) {
 	}
 }
 
+// TestOpenSQLite_SyncNormalForWindowsBulkWrite asserts the durability tuning
+// that makes the bulk write path tractable on modernc/Windows is actually
+// applied. The windows-latest "test timed out after 5m" panic was NOT a
+// conn-acquisition deadlock — the goroutine dump showed a single [runnable]
+// goroutine spinning in modernc's pure-Go VM inside an un-contexted
+// UpsertEdge QueryRow during a 5k-iteration auto-commit write loop
+// (TestSQLiteImpactRadiusBoundsAreClampedAndUniform). synchronous=FULL (the
+// modernc default) fsyncs per auto-commit transaction; on Windows that fsync
+// is pathologically slow, so the loop blew the 5m budget. WAL + NORMAL is
+// the SQLite-recommended, crash-safe pairing that removes the per-statement
+// fsync. This test pins that pragma so a regression cannot silently restore
+// the slow default. It is the deterministic, cross-platform proxy for the
+// Windows perf fix (a real 5m Windows reproduction is not feasible here).
+func TestOpenSQLite_SyncNormalForWindowsBulkWrite(t *testing.T) {
+	s := openInternalTestStore(t)
+	var mode int
+	// PRAGMA synchronous returns 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA.
+	if err := s.db.QueryRow("PRAGMA synchronous").Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA synchronous: %v", err)
+	}
+	if mode != 1 {
+		t.Fatalf("synchronous mode = %d, want 1 (NORMAL); FULL/default reintroduces the modernc/Windows 5m-timeout bulk-write regression", mode)
+	}
+	var jmode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&jmode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if jmode != "wal" {
+		t.Fatalf("journal_mode = %q, want wal (NORMAL is only crash-safe paired with WAL)", jmode)
+	}
+}
+
 // itoa is a tiny dependency-free int->string for stable test fixture names.
 func itoa(i int) string {
 	if i == 0 {

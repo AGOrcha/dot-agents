@@ -37,6 +37,22 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set WAL mode: %w", err)
 	}
+	// synchronous=NORMAL is the SQLite-recommended pairing with WAL. In WAL
+	// mode NORMAL is crash-safe across application crashes (a transaction
+	// can only be lost on OS crash / power loss, and then only the last
+	// one) — appropriate for this rebuildable derived graph cache. It drops
+	// the per-auto-commit fsync that modernc.org/sqlite's pure-Go VM pays
+	// on every statement. On Windows that fsync is pathologically slow:
+	// without this, an un-batched bulk write loop (e.g. the bounds
+	// enforcement test's 5k+ UpsertNode/UpsertEdge auto-commit statements)
+	// exceeds the 5-minute test budget and the windows-latest job panics
+	// "test timed out after 5m" (ubuntu/macos finish in seconds). This
+	// changes durability tuning only — it does not weaken the Path-A
+	// bounds/timeout contract or any read semantics.
+	if _, err := dbExec(db, "PRAGMA synchronous=NORMAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("graphstore: set synchronous mode: %w", err)
+	}
 	// busy_timeout + WAL + single connection prevent corruption under
 	// concurrent access, but they do NOT serialize cross-process writers:
 	// a concurrent `da workflow` and MCP-server both writing this DB will,
