@@ -73,3 +73,92 @@ func TestLazyStoreCloseWithoutOpenIsNoop(t *testing.T) {
 		t.Fatal("Close triggered a late open on an unused handle")
 	}
 }
+
+// lazyMethods is every non-Close Store method exercised through a lazyStore,
+// each reduced to its error return. Used by both the happy-path delegation
+// test and the sticky-open-error test so each delegator's resolve()+dispatch
+// and resolve()-error branches are both covered without per-method tests.
+func lazyMethods() []struct {
+	name string
+	call func(Store) error
+} {
+	return []struct {
+		name string
+		call func(Store) error
+	}{
+		{"GetNode", func(s Store) error { _, e := s.GetNode("q"); return e }},
+		{"GetNodesByFile", func(s Store) error { _, e := s.GetNodesByFile("f"); return e }},
+		{"GetEdgesBySource", func(s Store) error { _, e := s.GetEdgesBySource("q"); return e }},
+		{"GetEdgesByTarget", func(s Store) error { _, e := s.GetEdgesByTarget("q"); return e }},
+		{"GetEdgesAmong", func(s Store) error { _, e := s.GetEdgesAmong([]string{"q"}); return e }},
+		{"GetAllFiles", func(s Store) error { _, e := s.GetAllFiles(); return e }},
+		{"SearchNodes", func(s Store) error { _, e := s.SearchNodes("q", 1); return e }},
+		{"GetMetadata", func(s Store) error { _, e := s.GetMetadata("k"); return e }},
+		{"GetStats", func(s Store) error { _, e := s.GetStats(); return e }},
+		{"GetImpactRadius", func(s Store) error { _, e := s.GetImpactRadius([]string{"f"}, 1, 1); return e }},
+		{"UpsertNode", func(s Store) error { _, e := s.UpsertNode(NodeInfo{}, ""); return e }},
+		{"UpsertEdge", func(s Store) error { _, e := s.UpsertEdge(EdgeInfo{}); return e }},
+		{"RemoveFileData", func(s Store) error { return s.RemoveFileData("f") }},
+		{"StoreFileNodesEdges", func(s Store) error { return s.StoreFileNodesEdges("f", nil, nil, "") }},
+		{"SetMetadata", func(s Store) error { return s.SetMetadata("k", "v") }},
+		{"Commit", func(s Store) error { return s.Commit() }},
+		{"UpsertKGNote", func(s Store) error { return s.UpsertKGNote(KGNote{}) }},
+		{"GetKGNote", func(s Store) error { _, e := s.GetKGNote("id"); return e }},
+		{"SearchKGNotes", func(s Store) error { _, e := s.SearchKGNotes("q", 1); return e }},
+		{"ListArchivedKGNotes", func(s Store) error { _, e := s.ListArchivedKGNotes(); return e }},
+		{"UpsertNoteSymbolLink", func(s Store) error { _, e := s.UpsertNoteSymbolLink(NoteSymbolLink{}); return e }},
+		{"GetLinksForNote", func(s Store) error { _, e := s.GetLinksForNote("id"); return e }},
+		{"GetLinksForSymbol", func(s Store) error { _, e := s.GetLinksForSymbol("q"); return e }},
+		{"DeleteNoteSymbolLink", func(s Store) error { return s.DeleteNoteSymbolLink(1) }},
+	}
+}
+
+// TestLazyStoreDelegatesAllMethods proves every contract method resolves the
+// backend and dispatches to it (covers each delegator's happy path).
+func TestLazyStoreDelegatesAllMethods(t *testing.T) {
+	for _, m := range lazyMethods() {
+		t.Run(m.name, func(t *testing.T) {
+			opens := 0
+			ls := NewLazyStore(func() (Store, error) {
+				opens++
+				return &fakeStore{}, nil
+			})
+			if err := m.call(ls); err != nil {
+				t.Fatalf("%s through lazy store: %v", m.name, err)
+			}
+			if opens != 1 {
+				t.Fatalf("%s: opens=%d want 1", m.name, opens)
+			}
+		})
+	}
+}
+
+// TestLazyStoreAllMethodsPropagateOpenError proves the resolve()-error guard
+// in every delegator returns the sticky open error (no half-open dispatch).
+func TestLazyStoreAllMethodsPropagateOpenError(t *testing.T) {
+	wantErr := errors.New("open failed")
+	for _, m := range lazyMethods() {
+		t.Run(m.name, func(t *testing.T) {
+			ls := NewLazyStore(func() (Store, error) { return nil, wantErr })
+			if err := m.call(ls); !errors.Is(err, wantErr) {
+				t.Fatalf("%s err=%v want %v", m.name, err, wantErr)
+			}
+		})
+	}
+}
+
+// TestLazyStoreCloseAfterUseDelegates proves Close releases the backend once
+// it has actually been opened (the l.store != nil branch).
+func TestLazyStoreCloseAfterUseDelegates(t *testing.T) {
+	inner := &fakeStore{}
+	ls := NewLazyStore(func() (Store, error) { return inner, nil })
+	if _, err := ls.GetNode("x"); err != nil {
+		t.Fatalf("prime open: %v", err)
+	}
+	if err := ls.Close(); err != nil {
+		t.Fatalf("Close after use: %v", err)
+	}
+	if !inner.closed {
+		t.Fatal("Close did not delegate to the opened backend")
+	}
+}
