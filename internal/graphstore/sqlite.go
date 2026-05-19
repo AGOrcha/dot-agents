@@ -73,11 +73,24 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 	// Pool size is a pure throughput knob, not a correctness one: WAL +
 	// busy_timeout (set below) own write-serialization at the file/OS
 	// level regardless of how many conns the pool hands out, so raising
-	// the cap only buys more intra-process read/seed concurrency (e.g.
-	// bulk graph builds). 4 was conservative; 16 removes that ceiling
-	// while keeping the idle set small for the ephemeral Path-A profile.
-	db.SetMaxOpenConns(16)
-	db.SetMaxIdleConns(4)
+	// the cap only buys more intra-process read concurrency.
+	//
+	// Sizing target: agent fleets. A single review/planning stage fans
+	// out ~3 subagents that each hit `da kg` (and other `da` commands,
+	// sometimes scripted in batches) to gather lens/analysis context; an
+	// orchestrator multiplies that across plans and tasks. Rough demand
+	// is (n_tasks * r_agents * x_calls) concurrent short reads against
+	// the same store. 512 is an initial ceiling meant to absorb a basic
+	// squadron/fleet without the pool itself becoming the chokepoint;
+	// node fd/memory limits are the real cap and will surface first.
+	// This is an untested heuristic from session anecdote + forum
+	// discussion, NOT a tuned figure — expect to revise it with real
+	// fleet telemetry. Idle is kept at 64 (not 4) so steady-state fleet
+	// traffic reuses warm conns instead of paying modernc's per-conn
+	// open + WAL/PRAGMA cost on every burst; ConnMaxIdleTime still reaps
+	// the long tail so an idle store does not pin 64 fds forever.
+	db.SetMaxOpenConns(512)
+	db.SetMaxIdleConns(64)
 	db.SetConnMaxIdleTime(30 * time.Second)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
