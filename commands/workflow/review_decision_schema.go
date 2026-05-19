@@ -21,20 +21,11 @@ var (
 	verificationDecisionCompiledErr  error
 )
 
-func compiledVerificationDecisionSchema() (*jsonschema.Schema, error) {
+func compiledVerificationDecisionSchema(sc schemaCompiler) (*jsonschema.Schema, error) {
 	verificationDecisionCompiledOnce.Do(func() {
-		var doc any
-		if err := json.Unmarshal(verificationDecisionSchemaJSON, &doc); err != nil {
-			verificationDecisionCompiledErr = fmt.Errorf("parse embedded verification-decision schema: %w", err)
-			return
-		}
-		c := jsonschema.NewCompiler()
 		const schemaURL = "./schemas/verification-decision.schema.json"
-		if err := c.AddResource(schemaURL, doc); err != nil {
-			verificationDecisionCompiledErr = fmt.Errorf("register verification-decision schema: %w", err)
-			return
-		}
-		verificationDecisionCompiled, verificationDecisionCompiledErr = c.Compile(schemaURL)
+		verificationDecisionCompiled, verificationDecisionCompiledErr = compileEmbeddedSchema(
+			sc, verificationDecisionSchemaJSON, schemaURL, "verification-decision")
 	})
 	return verificationDecisionCompiled, verificationDecisionCompiledErr
 }
@@ -94,7 +85,7 @@ func validateReviewDecisionDoc(doc *ReviewDecisionDoc) error {
 	if doc == nil {
 		return fmt.Errorf("review decision: nil document")
 	}
-	sch, err := compiledVerificationDecisionSchema()
+	sch, err := compiledVerificationDecisionSchema(stdSchemaCompiler{})
 	if err != nil {
 		return err
 	}
@@ -117,10 +108,10 @@ func reviewDecisionYAMLPath(projectPath, taskID string) (string, error) {
 	if taskID == "" {
 		return "", fmt.Errorf("task_id is required")
 	}
+	// taskID is already trimmed and non-empty here, so
+	// iterLogReviewDecisionPath cannot return "" (it only does so for
+	// empty/whitespace input). No redundant rel == "" guard needed.
 	rel := iterLogReviewDecisionPath(taskID)
-	if rel == "" {
-		return "", fmt.Errorf("task_id is required")
-	}
 	return filepath.Join(projectPath, filepath.FromSlash(rel)), nil
 }
 

@@ -10,7 +10,7 @@ import (
 )
 
 func TestCompiledVerificationResultSchema(t *testing.T) {
-	sch, err := compiledVerificationResultSchema()
+	sch, err := compiledVerificationResultSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatalf("compiledVerificationResultSchema: %v", err)
 	}
@@ -18,7 +18,7 @@ func TestCompiledVerificationResultSchema(t *testing.T) {
 		t.Error("expected non-nil schema")
 	}
 
-	sch2, err := compiledVerificationResultSchema()
+	sch2, err := compiledVerificationResultSchema(stdSchemaCompiler{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,5 +146,58 @@ func TestWriteVerificationResultYAML_YAMLMarshalError_Wrapped(t *testing.T) {
 func TestValidateVerificationResultDoc_Valid_Push8(t *testing.T) {
 	if err := validateVerificationResultDoc(newValidVerificationResultDoc()); err != nil {
 		t.Fatalf("valid doc rejected: %v", err)
+	}
+}
+
+// TestValidateVerificationResultDoc_RemapUnmarshalError drives the remap
+// json.Unmarshal error branch via a jsonMarshal seam returning invalid JSON.
+func TestValidateVerificationResultDoc_RemapUnmarshalError(t *testing.T) {
+	withJSONMarshalStub(t, func(any) ([]byte, error) { return []byte("{not-json"), nil })
+
+	err := validateVerificationResultDoc(newValidVerificationResultDoc())
+	if err == nil {
+		t.Fatal("expected remap unmarshal error, got nil")
+	}
+	if !strings.Contains(err.Error(), "remap verification result for schema validation") {
+		t.Errorf("expected remap error message, got %q", err.Error())
+	}
+}
+
+func TestValidateVerificationResultDoc_CompileError(t *testing.T) {
+	resetCompiledSchemaOnce(t, &verificationResultCompiledOnce,
+		&verificationResultCompiled, &verificationResultCompiledErr)
+
+	// Prime the once-block with an injected failing compiler so the cached
+	// CompiledErr is non-nil; validateVerificationResultDoc then exercises
+	// its compiled-schema error-propagation guard on the real (std) call.
+	if _, err := compiledVerificationResultSchema(addResourceErrCompiler()); err == nil {
+		t.Fatal("precondition: primed compile should have failed")
+	}
+
+	if err := validateVerificationResultDoc(newValidVerificationResultDoc()); err == nil {
+		t.Fatal("expected compiled-schema error to propagate, got nil")
+	}
+}
+
+// TestWriteVerificationResultYAML_FilePathError drives the
+// verificationResultFilePath error branch in writeVerificationResultYAML:
+// a non-empty verifier_type passes the early guard but an empty task_id
+// makes verificationResultFilePath fail.
+func TestWriteVerificationResultYAML_FilePathError(t *testing.T) {
+	doc := &VerificationResultDoc{
+		SchemaVersion: 1,
+		TaskID:        "",
+		ParentPlanID:  "p1",
+		VerifierType:  "unit",
+		Status:        "pass",
+		Summary:       "ok",
+		RecordedAt:    "2026-05-12T00:00:00Z",
+	}
+	err := writeVerificationResultYAML(t.TempDir(), doc)
+	if err == nil {
+		t.Fatal("expected file-path error for empty task_id, got nil")
+	}
+	if !strings.Contains(err.Error(), "task_id is required") {
+		t.Errorf("expected task_id error, got %q", err.Error())
 	}
 }
