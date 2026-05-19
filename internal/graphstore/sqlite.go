@@ -1,12 +1,14 @@
 package graphstore
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
@@ -357,7 +359,7 @@ func (s *SQLiteStore) SearchNodes(query string, limit int) ([]GraphNode, error) 
 	ctx, cancel := requestContext(nil)
 	defer cancel()
 	pattern := "%" + query + "%"
-	rows, err := s.db.QueryContext(
+	rows, err := s.queryContextGuarded(
 		ctx,
 		"SELECT * FROM nodes WHERE name LIKE ? OR qualified_name LIKE ? LIMIT ?",
 		pattern, pattern, limit,
@@ -366,7 +368,7 @@ func (s *SQLiteStore) SearchNodes(query string, limit int) ([]GraphNode, error) 
 		return nil, err
 	}
 	defer rows.Close()
-	return collectNodes(rows)
+	return collectNodes(rows.Rows)
 }
 
 func (s *SQLiteStore) GetStats() (GraphStats, error) {
@@ -464,17 +466,33 @@ func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes 
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, "SELECT source_qualified, target_qualified FROM edges")
-	if err != nil {
-		return ImpactResult{}, err
-	}
-	fwd, rev, err := buildEdgeAdjacency(rows)
-	rows.Close()
+	fwd, rev, err := s.loadEdgeAdjacency(ctx)
 	if err != nil {
 		return ImpactResult{}, err
 	}
 
+	// computeImpactRadius re-enters the single-conn store (GetEdgesAmong /
+	// resolveImpactNodes); the edge result set MUST already be closed and
+	// the lone conn released before this call, or it deadlocks under
+	// SetMaxOpenConns(1). loadEdgeAdjacency guarantees that via its own
+	// deferred Close.
 	return computeImpactRadius(seeds, fwd, rev, maxDepth, maxNodes, s)
+}
+
+// loadEdgeAdjacency runs the full-table edge scan under the request-timeout
+// context and builds the forward/reverse adjacency maps. The result set is
+// closed via defer before this function returns, so the single SQLite
+// connection is deterministically released — an early return, scan error, or
+// panic cannot strand the lone conn (the original ~467 bare, non-deferred
+// rows.Close() could). The timeout watchdog in queryContextGuarded also
+// frees the conn if modernc/Windows ignores the ctx deadline mid-scan.
+func (s *SQLiteStore) loadEdgeAdjacency(ctx context.Context) (fwd, rev map[string][]string, err error) {
+	rows, err := s.queryContextGuarded(ctx, "SELECT source_qualified, target_qualified FROM edges")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return buildEdgeAdjacency(rows.Rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -600,6 +618,64 @@ func (s *SQLiteStore) GetLinksForSymbol(qualifiedName string) ([]NoteSymbolLink,
 func (s *SQLiteStore) DeleteNoteSymbolLink(id int64) error {
 	_, err := s.db.Exec("DELETE FROM note_symbol_links WHERE id=?", id)
 	return err
+}
+
+// queryContextGuarded runs a request-timeout-bounded read against the
+// single-connection SQLite pool (SetMaxOpenConns(1)) and guarantees the lone
+// connection is released when the provider-owned deadline expires.
+//
+// Why this is needed: gcc2 routes SQLite reads through QueryContext with the
+// Path-A request-timeout context (requestContext). On modernc.org/sqlite +
+// Windows the driver does NOT honor a ctx deadline mid-query — an in-flight
+// scan is not interrupted when ctx fires. With SetMaxOpenConns(1) the
+// uninterrupted query holds the only connection, so the next acquisition
+// blocks forever and the test harness panics ("test timed out after 5m").
+//
+// The fix preserves the Path-A contract (provider-owned 30s timeout + single
+// cheap conn — the deadline is NOT removed and MaxOpenConns is NOT raised).
+// It makes the deadline effective on every driver/OS by attaching a watchdog
+// that force-closes the result set when ctx expires. sql.Rows.Close()
+// unblocks an in-flight modernc scan and returns the connection to the pool,
+// so a slow/uncancellable query can no longer strand the lone conn. The
+// caller still must defer rows.Close() for the normal-completion path; the
+// watchdog only covers the deadline-exceeded path.
+func (s *SQLiteStore) queryContextGuarded(ctx context.Context, query string, args ...any) (*guardedRows, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var once sync.Once
+	closeRows := func() { once.Do(func() { _ = rows.Close() }) }
+
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// modernc/Windows ignores the ctx mid-scan; force the conn
+			// free so the next acquisition cannot deadlock.
+			closeRows()
+			onGuardedQueryTimeout()
+		case <-done:
+		}
+	}()
+
+	return &guardedRows{Rows: rows, done: done, closeOnce: closeRows}, nil
+}
+
+// guardedRows wraps *sql.Rows so that Close also stops the deadline watchdog
+// goroutine and is idempotent (the watchdog may have already closed it).
+type guardedRows struct {
+	*sql.Rows
+	done      chan struct{}
+	closeOnce func()
+	stopOnce  sync.Once
+}
+
+func (g *guardedRows) Close() error {
+	g.stopOnce.Do(func() { close(g.done) })
+	g.closeOnce()
+	return nil
 }
 
 // ---------------------------------------------------------------------------
