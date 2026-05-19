@@ -1,0 +1,55 @@
+schema_version: 1
+id: del-tp3-sync-pipeline-1777867045
+parent_plan_id: typescript-port
+parent_task_id: tp3-sync-pipeline
+title: Implement CI sync check that diffs Go command tree against the boundary spec
+summary: Delegated from plan TypeScript Port — Sync Pipeline & Boundary Maintenance
+write_scope:
+    - ports/typescript/scripts/check-boundary.ts
+    - ports/typescript/tests/boundary-sync.test.ts
+    - .github/workflows/typescript-port.yml
+success_criteria: |-
+    Tier: T2 (compound — script + test + CI workflow).
+
+    Concrete deliverable: ports/typescript/scripts/check-boundary.ts
+    runs the following diff:
+
+    1. Parse the Go cobra command tree from `dot-agents __dump-tree`
+       (or, if no such command exists yet, parse `commands/*.go` for
+       cobra.Command literals — a fallback parser is acceptable for
+       the first pass).
+    2. Parse the TS commander tree from
+       ports/typescript/src/cli.ts.
+    3. Load docs/typescript-port-boundary.json.
+    4. For every top-level Go command:
+         - if name in stage1_commands AND name not in TS tree → FAIL
+           (must-mirror gap).
+         - if name in phase4_optouts OR phase5_deferred → ALLOW.
+         - if name not in spec at all → FAIL with message "Go gained
+           a top-level command not classified in the boundary spec.
+           Add it to stage1_commands, phase4_optouts, or
+           phase5_deferred."
+    5. For each Stage 1 command, also diff flag-level surface against
+       stage1_flag_lock; FAIL on undocumented additions or removals.
+
+    CI workflow (.github/workflows/typescript-port.yml) runs this on
+    every PR. Failure messages include actionable diffs.
+
+    Verification: introduce a fake Go command in a draft commit, run
+    the check locally, confirm it fails with a useful message, then
+    revert. (This validation is performed in tp3 by the implementer
+    and noted in the merge-back; not a permanent test artifact.)
+
+    ISP routing:
+      mode: fanout-amenable (CI tooling work; bundle-context-rich; isolated write scope under ports/typescript/scripts/ and .github/workflows/)
+      verifier: smoke (run check-boundary locally; confirm it parses spec, parses Go tree, parses TS tree, exits 0 on current state)
+      review: code review (diff logic correct? error messages actionable? edge cases — empty spec, malformed Go file — handled?)
+      anti-scope: do NOT introduce a new Go subcommand `__dump-tree` in this task — if the parser fallback is sufficient, ship that; the Go-side dump-tree command is a separate, smaller follow-up if parser fragility shows up.
+      bundle-context (if fanout): docs/typescript-port-boundary.json (from tp2), ports/typescript/src/cli.ts, commands/root.go (Go cobra root), existing CI workflows under .github/workflows/ for style consistency
+      output contract: passing CI on this branch with the new workflow active; the validation experiment (fake-Go-command-fails) noted in merge-back
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:57:25Z"
+updated_at: "2026-05-04T04:12:01Z"

@@ -1,0 +1,53 @@
+schema_version: 1
+id: del-t3-extend-iteration-close-1777866086
+parent_plan_id: self-review-iteration-close-wiring
+parent_task_id: t3-extend-iteration-close
+title: Wire iteration-close to invoke self-review and call workflow checkpoint --role review
+summary: Delegated from plan Self-Review ↔ Iteration-Close Wiring
+write_scope:
+    - .agents/skills/dot-agents/iteration-close/SKILL.md
+    - .agents/skills/dot-agents/iteration-close/instructions/workflow.md
+success_criteria: |-
+    Tier: T2 (compound — modifies SKILL.md orchestrator + workflow instruction).
+
+    Concrete changes:
+      1. iteration-close instruction trail gains a new step that invokes
+         `/self-review` at the ordering chosen in ADR-0003 (before/after/parallel
+         with verify-record-test).
+      2. After self-review writes review-decision.yaml, iteration-close calls
+         `da workflow checkpoint --log-to-iter <N> --role review` so
+         mergeReviewIterLog reads the review-decision.yaml and populates the
+         iter-log review block. This is the path that has been dead-coded
+         since v2 of the schema landed.
+      3. iteration-close SKILL.md frontmatter gains `tier: T2` and a
+         `contract:` block matching t2's pattern.
+
+    Hard test:
+      Running iteration-close on a fresh dummy iteration produces an
+      iter-N.yaml where:
+      - review.overall_decision is non-empty (accept | reject | conditional)
+      - review.verify_record_appended: true
+      - review.reviewer_notes contains text traceable to the
+        review-decision.yaml from t2 (NOT a verbatim copy — the writer
+        extracts the structured verdict, not the prose)
+
+    Common false positive:
+      iteration-close calls workflow checkpoint --log-to-iter but omits
+      --role review. The iter-log gains a checkpoint entry but the review
+      block remains empty. OR: review block populates but with hardcoded
+      values rather than reading from review-decision.yaml — no actual
+      link between self-review output and iter-log content.
+
+    ISP routing:
+      mode: direct (single skill, mostly instructions/workflow.md edit; needs to coordinate closely with t2's output schema)
+      verifier: smoke (run iteration-close end-to-end on a tiny dummy edit, confirm review block populates)
+      review: code review + integration (does the call sequence respect ADR-0003 ordering? does mergeReviewIterLog actually fire?)
+      anti-scope: do NOT redesign mergeReviewIterLog or verify-record. Just call them correctly. Do NOT add new flags to workflow checkpoint — use --role review path that already exists.
+      bundle-context (if fanout): ADR-0003 (fire ordering, accepted by t1) + commands/workflow/iter_log.go mergeReviewIterLog + commands/workflow/verification.go review-record writer + iteration-close current instructions/workflow.md
+      output contract: SKILL.md with tier+contract; instructions/workflow.md with the new self-review invocation step + the --role review checkpoint call
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:41:26Z"
+updated_at: "2026-05-04T03:55:54Z"

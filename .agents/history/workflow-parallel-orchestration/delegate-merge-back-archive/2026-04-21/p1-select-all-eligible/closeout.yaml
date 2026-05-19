@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: workflow-parallel-orchestration
+task_id: p1-select-all-eligible
+delegation_id: del-p1-select-all-eligible-1776776673
+decision: accept
+closed_at: "2026-04-21T13:09:31Z"

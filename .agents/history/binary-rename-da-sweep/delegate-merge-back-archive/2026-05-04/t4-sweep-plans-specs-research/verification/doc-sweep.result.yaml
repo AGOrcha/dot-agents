@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t4-sweep-plans-specs-research
+parent_plan_id: binary-rename-da-sweep
+verifier_type: doc-sweep
+status: pass
+summary: 'Swept ''dot-agents <verb>'' -> ''da <verb>'' across .agents/workflow/plans/, .agents/workflow/specs/, and research/ per ADR-0006 hard cutover. 34 files modified in commit 88fd4a6. Final hard-test grep returns 59 matches, all project-name prose (subject/modifier) or file paths (src/bin/dot-agents, ./bin/dot-agents) — no binary invocations remain. Anti-scope preserved: project name, Go module path, cmd/dot-agents/ source dir, ~/.agents/ layout, .agents/history/ untouched.'
+recorded_at: "2026-05-04T02:37:38Z"
+delegation_id: del-t4-sweep-plans-specs-research-1777861641
+recorded_by: dot-agents workflow verify record

@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: binary-rename-da-sweep
+task_id: t3-sweep-priority-docs
+delegation_id: del-t3-sweep-priority-docs-1777860572
+decision: accept
+note: doc sweep complete; hard test passing; anti-scope held
+closed_at: "2026-05-04T02:27:03Z"

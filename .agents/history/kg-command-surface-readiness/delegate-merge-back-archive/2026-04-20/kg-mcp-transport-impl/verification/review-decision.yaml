@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: kg-mcp-transport-impl
+parent_plan_id: kg-command-surface-readiness
+delegation_id: del-kg-mcp-transport-impl-1776647625
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: 'Phase 1: change directly fixes the two audit-identified gaps (files param ignored in DetectChanges + no freshness guard in get_review_context_tool and get_impact_radius_tool). Structured JSON error on unbuilt/busy_or_locked is the correct MCP pattern — callers distinguish error state from empty results. Tests cover unbuilt, busy_or_locked, and ready paths. Phase 2: mcpBridge interface unchanged, DetectChangesOptions.Files correctly wired with a v1.x limitation comment, freshness guard pattern mirrors CLI commands, no dead code or leaky abstractions.'
+recorded_at: "2026-04-20T01:26:58Z"
+recorded_by: dot-agents workflow verify record

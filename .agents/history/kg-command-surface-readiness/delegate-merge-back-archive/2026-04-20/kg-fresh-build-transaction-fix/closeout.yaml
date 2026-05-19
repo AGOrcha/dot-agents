@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+task_id: kg-fresh-build-transaction-fix
+delegation_id: del-kg-fresh-build-transaction-fix-1776685855
+decision: accept
+closed_at: "2026-04-20T12:26:33Z"

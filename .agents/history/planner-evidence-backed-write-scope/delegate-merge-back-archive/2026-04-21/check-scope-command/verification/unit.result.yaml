@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: check-scope-command
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: unit
+status: pass
+summary: 'go test ./commands/workflow/...: all tests pass. Implemented check-scope command with --changed-file and --from-git-diff flags; exit 0=clean, 1=warning, 2=no-sidecar.'
+recorded_at: "2026-04-21T12:58:10Z"
+delegation_id: del-check-scope-command-1776776189
+recorded_by: dot-agents workflow verify record

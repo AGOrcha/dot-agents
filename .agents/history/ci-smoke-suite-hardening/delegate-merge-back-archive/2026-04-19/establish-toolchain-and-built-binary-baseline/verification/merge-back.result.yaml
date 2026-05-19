@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: establish-toolchain-and-built-binary-baseline
+parent_plan_id: ci-smoke-suite-hardening
+verifier_type: merge-back
+status: pass
+summary: No conflicts. All changes are additive steps in the test job. gofmt fix-up commits are on the same branch.
+recorded_at: "2026-04-19T20:07:37Z"
+delegation_id: del-establish-toolchain-and-built-binary-baseline-1776629042
+artifact_paths:
+    - .agents/workflow/plans/ci-smoke-suite-hardening/TASKS.yaml

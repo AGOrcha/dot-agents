@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: fanout-evidence-integration
+parent_plan_id: planner-evidence-backed-write-scope
+verifier_type: merge-back
+status: pass
+summary: No conflicts with existing fanout behavior. checkFanoutScopeEvidenceWarnings is called after the TDD gate in runWorkflowFanout, before contract creation. New --skip-evidence-check flag registered in cmd.go fanoutCmd block.
+recorded_at: "2026-04-21T18:27:00Z"
+delegation_id: del-fanout-evidence-integration-1776795466
+artifact_paths:
+    - .agents/workflow/plans/planner-evidence-backed-write-scope/TASKS.yaml
+    - .agentsrc.json

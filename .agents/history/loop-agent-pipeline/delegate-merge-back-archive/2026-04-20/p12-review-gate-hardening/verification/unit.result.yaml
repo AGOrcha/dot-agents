@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p12-review-gate-hardening
+parent_plan_id: loop-agent-pipeline
+verifier_type: unit
+status: pass
+summary: Scoped workflow tests passed; review-gate auto, pipeline, and closeout shell coverage passed; full Go suite passed with -race.
+recorded_at: "2026-04-20T03:43:08Z"
+delegation_id: del-p12-review-gate-hardening-1776655217
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./commands/workflow/...; bash tests/test-ralph-review-gate-auto.sh; bash tests/test-ralph-pipeline-review-gate.sh; bash tests/test-ralph-closeout-gate.sh; go test ./... -race -count=1 -timeout=300s

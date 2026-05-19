@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-tasks.schema.json
+schema_version: 1
+plan_id: "refresh-skill-relink"
+tasks:
+  - id: "fix-shared-skill-relink"
+    title: "Route shared skill mirror relink through central planner/executor"
+    status: "blocked"
+    depends_on: []
+    blocks: []
+    owner: "dot-agents"
+    write_scope: ["commands/refresh.go", "internal/platform/", "internal/links/"]
+    verification_required: true
+    notes: "Blocked on resource-intent-centralization Phase 3–5"

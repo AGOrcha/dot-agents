@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-p5-iter-log-v2-1776475771
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p5-iter-log-v2
+title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - schemas/workflow-iter-log.schema.json
+    - commands/static/workflow-iter-log.schema.json
+    - commands/workflow_iter_log_schema.go
+    - commands/workflow.go
+    - commands/workflow_test.go
+success_criteria: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T01:29:31Z"
+updated_at: "2026-04-18T12:48:43Z"

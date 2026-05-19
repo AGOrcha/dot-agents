@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t2-extend-self-review-skill
+parent_plan_id: self-review-iteration-close-wiring
+verifier_type: skill-extension
+status: pass
+summary: 'self-review skill extended per ADRs 0002/0003/0005: instructions/kg-context.md (Step 0 + graceful degradation) and instructions/output-format.md (strict on-disk schema + envelope packing) added; SKILL.md frontmatter gains tier T2 and contract block; hard test wrote schema-valid review-decision.yaml at ADR-0002 path with non-stub content'
+recorded_at: "2026-05-04T03:28:10Z"
+delegation_id: del-t2-extend-self-review-skill-1777864417
+recorded_by: dot-agents workflow verify record

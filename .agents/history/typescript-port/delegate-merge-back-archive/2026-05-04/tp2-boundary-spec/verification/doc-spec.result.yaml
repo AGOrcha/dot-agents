@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: tp2-boundary-spec
+parent_plan_id: typescript-port
+verifier_type: doc-spec
+status: pass
+summary: 'JSON parses (python3 json.load); schema matches tp2 contract: version=1, 8 stage1_commands (init/add/refresh/status/doctor/skills/agents/hooks), 11 phase4_optouts (10 commands + workflow mutating slice), 2 phase5_deferred, 35 stage2_deferred_subitems; flag_lock keys equal stage1_commands (no drift); cross-reference line added to TYPESCRIPT_PORT_BOUNDARY.md line 66'
+recorded_at: "2026-05-04T03:43:40Z"
+delegation_id: del-tp2-boundary-spec-1777866067
+recorded_by: dot-agents workflow verify record

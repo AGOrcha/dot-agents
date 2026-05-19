@@ -1,0 +1,46 @@
+schema_version: 1
+task_id: expand-command-surface-smokes
+parent_plan_id: ci-smoke-suite-hardening
+verifier_type: unit
+status: pass
+summary: |-
+  All 9 new surface smoke steps present with HOME/AGENTS_HOME isolation; gofmt and go vet clean; test.yml is valid YAML.
+  Steps confirmed: workflow orient, workflow next, kg --help (with grep), kg bridge health, agents list, hooks list, rules list, mcp list, settings list.
+recorded_at: "2026-04-19T00:00:00Z"
+findings:
+  - check: gofmt -l ./cmd ./commands ./internal
+    result: pass
+    detail: No unformatted files
+  - check: go vet ./...
+    result: pass
+    detail: No issues
+  - check: ruby YAML.load_file test.yml
+    result: pass
+    detail: Valid YAML
+  - check: workflow orient step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 211-217
+  - check: workflow next step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 218-224
+  - check: kg --help with grep "knowledge graph"
+    result: pass
+    detail: Present at line 225-231
+  - check: kg bridge health step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 232-238
+  - check: agents list step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 239-245
+  - check: hooks list step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 246-252
+  - check: rules list step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 253-259
+  - check: mcp list step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 260-266
+  - check: settings list step with HOME/AGENTS_HOME isolation
+    result: pass
+    detail: Present at line 267-273

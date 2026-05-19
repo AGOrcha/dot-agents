@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-role-runtime-overrides-1776789322
+parent_plan_id: ralph-fanout-and-runtime-overrides
+parent_task_id: role-runtime-overrides
+title: Add per-role runtime overrides
+summary: Delegated from plan Ralph Fanout And Runtime Overrides
+write_scope:
+    - bin/tests/ralph-orchestrate
+    - bin/tests/ralph-worker
+    - bin/tests/ralph-closeout
+    - bin/tests/ralph-pipeline
+    - commands/workflow.go
+    - commands/workflow_test.go
+success_criteria: Support separate model and AGENT_BIN overrides for orchestrator, closeout, generic worker, impl worker, verifier worker, and review worker. Keep the override precedence explicit and readable so the runtime stays deterministic.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T16:35:22Z"
+updated_at: "2026-04-21T16:47:10Z"

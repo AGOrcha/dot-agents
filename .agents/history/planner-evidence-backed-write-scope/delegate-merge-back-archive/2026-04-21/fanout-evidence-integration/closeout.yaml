@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+task_id: fanout-evidence-integration
+delegation_id: del-fanout-evidence-integration-1776795466
+decision: accept
+closed_at: "2026-04-21T18:27:34Z"

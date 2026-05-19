@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: tp1-current-gap-audit
+parent_plan_id: typescript-port
+verifier_type: merge-back
+status: pass
+summary: Pre-existing dirty state outside write_scope (modified plan YAMLs in self-review-iteration-close-wiring/sonarqube-pr10/typescript-port, deleted binary-rename-da-sweep plan dir, untracked delegation bundles for sq1/t2/tp1) was left untouched per worker rules. Parent should run workflow advance for tp1 after reviewing the memo.
+recorded_at: "2026-05-04T03:19:42Z"
+delegation_id: del-tp1-current-gap-audit-1777864446
+artifact_paths:
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/binary-rename-da-sweep.plan.md
+    - .agents/workflow/plans/self-review-iteration-close-wiring/PLAN.yaml
+    - .agents/workflow/plans/self-review-iteration-close-wiring/TASKS.yaml
+    - .agents/workflow/plans/sonarqube-pr10/PLAN.yaml
+    - .agents/workflow/plans/sonarqube-pr10/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/PLAN.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml

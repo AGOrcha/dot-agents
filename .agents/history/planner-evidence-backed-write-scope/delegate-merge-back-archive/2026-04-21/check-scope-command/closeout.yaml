@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+task_id: check-scope-command
+delegation_id: del-check-scope-command-1776776189
+decision: accept
+closed_at: "2026-04-21T12:58:38Z"

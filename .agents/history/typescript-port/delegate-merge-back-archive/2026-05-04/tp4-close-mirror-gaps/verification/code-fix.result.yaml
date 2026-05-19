@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: tp4-close-mirror-gaps
+parent_plan_id: typescript-port
+verifier_type: code-fix
+status: pass
+summary: No must-mirror Stage 1 gaps to close. tp1 audit confirmed all 8 Stage 1 commands mirrored. Section 2 'missing' rows (add:project-name-validation, refresh:--import, status:--audit, status:--agent, doctor:platform-installation-detection, doctor:manifest-health-checks, skills:append-to-agentsrc, hooks:show) are explicitly encoded in stage2_deferred_subitems of docs/typescript-port-boundary.json (not stage1_flag_lock), per Phase 4 boundary. tp3 boundary-sync.test.ts currently reports zero violations. Gaps also exceed bundle's implementation budget (~3 commands / 5 flag changes), but fold-back unnecessary because tp3 already provides the tracking mechanism. TS port test suite remains 99/99 passing.
+recorded_at: "2026-05-04T04:20:46Z"
+delegation_id: del-tp4-close-mirror-gaps-1777868356
+recorded_by: dot-agents workflow verify record

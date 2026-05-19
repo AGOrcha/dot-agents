@@ -1,0 +1,47 @@
+schema_version: 1
+id: del-t4-sweep-plans-specs-research-1777861641
+parent_plan_id: binary-rename-da-sweep
+parent_task_id: t4-sweep-plans-specs-research
+title: Sweep .agents/workflow/{plans,specs}/ + research/ for binary-name references
+summary: Delegated from plan Binary Rename — dot-agents → da (UV-style abbreviation)
+write_scope:
+    - .agents/workflow/plans/
+    - .agents/workflow/specs/
+    - research/
+success_criteria: |-
+    Tier: T1 (molecule — text substitution; same rule as t3).
+
+    Files in scope (~63):
+      * .agents/workflow/plans/{self-review-iteration-close-wiring,
+        typescript-port, others}/{PLAN.yaml, TASKS.yaml, *.plan.md}
+      * .agents/workflow/specs/* design documents
+      * research/ (13 files reference dot-agents as command examples)
+
+    Same substitution rule as t3. Plan task notes reference
+    `dot-agents workflow ...` heavily; these need updating so future
+    ISP runs read accurate guidance.
+
+    Hard test:
+      `grep -rE "dot-agents [a-z]" .agents/workflow/ research/` returns
+      only entries inside `.agents/workflow/plans/<archived>/` (none
+      today since archived plans live in `.agents/history/`).
+
+    Common false positive:
+      `evidence_confidence`, `app_type`, and other YAML structured
+      fields don't carry binary-name strings, so substitution should
+      be safe. But review prose blocks (notes:, summary:, etc.) and
+      markdown bodies carefully.
+
+    ISP routing:
+      mode: fanout-amenable (per-plan or per-research-area; safe to parallelize since write scopes don't overlap)
+      verifier: smoke (final grep clean)
+      review: doc review (sweep complete; YAML still parses)
+      anti-scope: do NOT touch .agents/history/. Do NOT change schema_version or any non-prose fields. Do NOT modify open-decision content (just the binary references in prose).
+      bundle-context (if fanout): ADR-0006, t3 substitution rule, list of files
+      output contract: clean grep + valid YAML (no syntax breakage)
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T02:27:21Z"
+updated_at: "2026-05-04T02:37:54Z"

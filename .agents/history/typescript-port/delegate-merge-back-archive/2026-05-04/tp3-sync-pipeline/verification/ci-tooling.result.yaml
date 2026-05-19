@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: tp3-sync-pipeline
+parent_plan_id: typescript-port
+verifier_type: ci-tooling
+status: pass
+summary: 'boundary-sync CI check live: vitest tests/boundary-sync.test.ts asserts zero violations against the current Go cobra command tree (19 top-level cmds, 8 Stage 1) and ports/typescript/src/cli.ts. Verified actionable failure mode by injecting a fake top-level Go command — check produced go-unclassified-top-level diagnostic naming spec sections to update, then reverted. All 99 TS tests pass.'
+recorded_at: "2026-05-04T04:11:36Z"
+delegation_id: del-tp3-sync-pipeline-1777867045
+recorded_by: dot-agents workflow verify record

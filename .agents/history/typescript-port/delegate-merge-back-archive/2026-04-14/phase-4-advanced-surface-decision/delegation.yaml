@@ -1,0 +1,42 @@
+schema_version: 1
+id: del-phase-4-advanced-surface-decision-1776192016
+parent_plan_id: typescript-port
+parent_task_id: phase-4-advanced-surface-decision
+title: Phase 4 — Decide and document the TS boundary for workflow and KG features
+summary: Delegated from plan TypeScript Port Plan
+write_scope:
+    - docs/
+    - ports/typescript/src/
+    - ports/typescript/tests/
+success_criteria: |
+    Do not imply full CLI parity by default. Make an explicit call between:
+    1. config-and-resource-only Windows port
+    2. selected `workflow` read-only surfaces
+    3. broader parity that includes KG bridge and orchestration commands
+    The chosen boundary must be reflected in CLI help, docs, and tests.
+
+    Orchestrator (2026-04-14, iteration 36): **delegation active** — canonical bundle on disk:
+    `.agents/active/delegation-bundles/del-phase-4-advanced-surface-decision-1776191464.yaml`
+    (`workflow fanout`, profile `loop-worker`, overlays `active.loop.md`; supersedes
+    `...1776190659.yaml` / `...1776188348.yaml` if those appear only as stale references).
+    **No additional fanout** this orchestrator pass — single lane until merge-back.
+    Worker implements the boundary decision end-to-end in docs, TS CLI help, and tests within
+    canonical write_scope only. Pattern E (Claude Code): subagent reads bundle +
+    `.agents/skills/loop-worker/SKILL.md`, then `/iteration-close` (verify → checkpoint → merge-back;
+    parent advances + delegation closeout). Rationale: role isolation for TS-boundary work; scope is
+    broad (not ≤5 files) — fanout overhead accepted for orchestrator/worker separation.
+    feedback_goal: Can a reader infer from docs, `ports/typescript` CLI `--help`, and tests exactly
+    which workflow/KG/orchestration surfaces the TS port implements vs permanently defers?
+    write_scope (canonical): docs/, ports/typescript/src/, ports/typescript/tests/
+    context: Task stays `in_progress` until merge-back. `workflow next` may return `phase-5` first
+    (phase-5 `depends_on` is only phase-3) — **YAML + orchestrator priority: finish phase-4 before
+    starting phase-5**. Phase-4 blocks the narrative gate for phase-5/6. pgx: use
+    `cd ports/typescript && npm test` only until `internal/graphstore/postgres.go` / go.mod pgx fix lands.
+    verification: `cd ports/typescript && npm test` after CLI/help/test edits; do not rely on
+    `go test ./...` until pgx blocker is resolved.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-14T18:40:16Z"
+updated_at: "2026-04-14T19:02:33Z"

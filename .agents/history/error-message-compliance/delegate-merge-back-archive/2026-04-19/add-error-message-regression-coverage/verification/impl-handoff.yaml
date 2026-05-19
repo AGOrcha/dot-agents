@@ -1,0 +1,8 @@
+task_id: add-error-message-regression-coverage
+commit_sha: f56ab2688baa103e13b7a20366cc0220d804ecc6
+write_scope_touched:
+  - commands/kg/kg_test.go
+  - commands/agents/agents_test.go
+  - commands/ux_test.go
+ready_for_verification: true
+impl_notes: Added regression tests for KG bridge finite-domain wording, KG link usage-shape errors, agent removal recovery guidance, and root parse/render behavior. Changes are uncommitted in the working tree.

@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: self-review-iteration-close-wiring
+task_id: t2-extend-self-review-skill
+delegation_id: del-t2-extend-self-review-skill-1777864417
+decision: accept
+note: skill extended per ADRs 0002/0003/0005; tier+contract frontmatter; kg-context Step 0 restored; output-format module added
+closed_at: "2026-05-04T03:39:12Z"

@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-slices.schema.json
+schema_version: 1
+plan_id: "loop-runtime-refactor"
+slices:
+  - id: "phase-5a-migrate-loop-state"
+    parent_task_id: "phase-5-loop-state-split"
+    title: "5a — Migrate loop-state.md: archive iteration log, strip to 3 prose sections"
+    summary: "Archive all existing ## Iteration Log entries to iteration-log/historical.yaml, create the iteration-log/ directory, and reduce loop-state.md to the 3 agent-written prose sections only."
+    status: "completed"
+    depends_on: []
+    write_scope:
+      - ".agents/active/loop-state.md"
+      - ".agents/active/iteration-log/"
+    verification_focus: "loop-state.md contains only ## Current Position, ## Loop Health, ## Next Iteration Playbook (≤500 tokens). iteration-log/historical.yaml exists with all prior entries. No ## Iteration Log section remains in loop-state.md."
+    owner: "dot-agents"
+
+  - id: "phase-5b-update-worker-overlay"
+    parent_task_id: "phase-5-loop-state-split"
+    title: "5b — Update active.loop.md worker instructions for two-author protocol"
+    summary: "Replace the loop-state write instructions in active.loop.md with the two-author protocol: run checkpoint --log-to-iter to create the stub, fill agent fields in iter-N.yaml, update only the 3 prose sections in loop-state.md."
+    status: "completed"
+    depends_on:
+      - "phase-5a-migrate-loop-state"
+    write_scope:
+      - ".agents/active/active.loop.md"
+    verification_focus: "active.loop.md contains no instruction to append to ## Iteration Log. The loop-state write section references checkpoint --log-to-iter, iter-N.yaml stub fill, and the 3 prose sections."
+    owner: "dot-agents"
+
+  - id: "phase-5c-checkpoint-log-to-iter"
+    parent_task_id: "phase-5-loop-state-split"
+    title: "5c — Implement workflow checkpoint --log-to-iter flag"
+    summary: "Add --log-to-iter N flag to workflow checkpoint. Creates .agents/active/iteration-log/iter-N.yaml with CLI-deterministic fields (date, wave, task_id, commit, files_changed, lines_added, lines_removed) from git and the active delegation contract, and agent-field stubs set to empty/zero values."
+    status: "completed"
+    depends_on:
+      - "phase-5a-migrate-loop-state"
+    write_scope:
+      - "commands/workflow.go"
+      - "commands/workflow/"
+    verification_focus: "workflow checkpoint --log-to-iter 38 creates iter-38.yaml with correct git-derived fields and empty agent stubs. Test covers: correct commit sha, files_changed from diff stat, empty item/summary/scenario_tags, self_assessment all false/empty."
+    owner: "dot-agents"
+
+  - id: "phase-5d-schema-wire-in"
+    parent_task_id: "phase-5d-iter-log-schema"
+    title: "5d — Wire schema reference into --log-to-iter stub output and validate on write"
+    summary: "Add yaml-language-server header to iter-N.yaml stubs. Add schema validation in the --log-to-iter implementation. Ensure migration script output is schema-valid."
+    status: "completed"
+    depends_on:
+      - "phase-5c-checkpoint-log-to-iter"
+    write_scope:
+      - "schemas/workflow-iter-log.schema.json"
+      - "commands/workflow.go"
+      - "commands/workflow/"
+    verification_focus: "iter-N.yaml stubs contain yaml-language-server header pointing to schema. Writing an invalid iter-N.yaml (e.g. negative files_changed) is caught at write time."
+    owner: "dot-agents"
+
+  - id: "phase-5e-run-migration"
+    parent_task_id: "phase-5e-migration-script"
+    title: "5e — Write and run migrate-loop-state.sh against current loop-state.md"
+    summary: "Reconciled as completed from durable repo state: the one-off migration landed directly in commits 50d3a51 and 3e66ab2, producing the iter-N.yaml archive, historical.yaml, and the reduced 3-section loop-state.md surface without retaining a standalone migrate-loop-state.sh script."
+    status: "completed"
+    depends_on:
+      - "phase-5a-migrate-loop-state"
+      - "phase-5d-schema-wire-in"
+    write_scope:
+      - "bin/tests/migrate-loop-state.sh"
+      - ".agents/active/iteration-log/"
+      - ".agents/active/loop-state.md"
+    verification_focus: "The migration outcome is present in repo state: iter-N.yaml files plus historical.yaml exist under .agents/active/iteration-log/, numbering was reconciled to satisfy schema iteration.minimum=1, and loop-state.md contains only the 3 prose sections."
+    owner: "dot-agents"
+
+  - id: "phase-6a-agent-md"
+    parent_task_id: "phase-6-loop-worker-subagent"
+    title: "6a — Write AGENT.md for loop-worker sub-agent"
+    summary: "Create .agents/skills/loop-worker/AGENT.md as the sub-agent system prompt. Consolidates startup, workflow, and gotchas content into a single cold-start system prompt. SKILL.md stays for human /loop-worker invocation."
+    status: "completed"
+    depends_on: []
+    write_scope:
+      - ".agents/skills/loop-worker/"
+    verification_focus: "AGENT.md exists with sub-agent system prompt format. Does not duplicate loop-worker.md global profile content. SKILL.md still loads correctly for /loop-worker human invocation."
+    owner: "dot-agents"
+
+  - id: "phase-6b-agentsrc-and-orchestrator"
+    parent_task_id: "phase-6-loop-worker-subagent"
+    title: "6b — Add loop-worker to .agentsrc.json and strip inlined prompt from orchestrator"
+    summary: "Add 'loop-worker' to the agents list in .agentsrc.json. Run dot-agents skills promote loop-worker && dot-agents refresh. Update orchestrator-session-start Pattern E section to use Agent(subagent_type='loop-worker', prompt='<bundle_path>') instead of the inlined worker prompt."
+    status: "completed"
+    depends_on:
+      - "phase-6a-agent-md"
+    write_scope:
+      - ".agentsrc.json"
+      - ".agents/skills/orchestrator-session-start/"
+    verification_focus: ".agentsrc.json agents list includes 'loop-worker'. orchestrator-session-start Pattern E section uses subagent_type not an inlined prompt block. dot-agents refresh runs without error."
+    owner: "dot-agents"

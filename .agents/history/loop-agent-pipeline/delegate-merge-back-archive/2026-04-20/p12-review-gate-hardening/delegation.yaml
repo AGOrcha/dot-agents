@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-p12-review-gate-hardening-1776655217
+parent_plan_id: loop-agent-pipeline
+parent_task_id: p12-review-gate-hardening
+title: Replace heuristic auto-accept with real post-task orchestrator review application
+summary: Delegated from plan Loop Agent Pipeline Plan
+write_scope:
+    - bin/tests/ralph-review-gate
+    - bin/tests/ralph-pipeline
+    - bin/tests/ralph-closeout
+    - commands/workflow/
+    - docs/LOOP_ORCHESTRATION_SPEC.md
+success_criteria: 'Focused follow-on from the completed-bundle audit. Goal: make the post-task review gate real in the default runtime path rather than artifact-presence auto-accept, and keep I_S_P behavior in sync with the scripted staged runtime. Scope: (1) replace or sharply narrow RALPH_REVIEW_GATE_AUTO=1 auto-accept semantics, (2) route fold-back/proposal-worthy findings through deterministic command-owned apply/finalize helpers where possible, (3) make per-task accept/reject/pause outcomes observable in task-local artifacts and logs, (4) keep end-of-session closeout separate from per-task review judgment, (5) update the I_S_P path and its prompts/contracts whenever scripted review-gate semantics change so the interactive/manual staged runtime does not diverge from ralph-pipeline. Current anchor points for this pass: `bin/tests/ralph-review-gate` still treats artifact presence as enough to auto-accept and currently allows `overall_decision=escalate` to pass; `bin/tests/ralph-pipeline` only distinguishes pass vs fail at the gate boundary; `bin/tests/ralph-closeout` still auto-accepts merge-backs in auto mode. Verification: add focused script coverage for gate-pass, gate-reject, gate-pause/planning-required, and closeout-skip behavior, plus readback/spec checks that I_S_P still follows the same impl -> verifier(s) -> review -> parent-gate contract. Stop: do not broaden this task into replacement-worker scheduling or general plan-completion control flow.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: isp-p12-review-gate
+status: completed
+created_at: "2026-04-20T03:20:17Z"
+updated_at: "2026-04-20T03:45:40Z"

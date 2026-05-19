@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: workflow-parallel-orchestration
+task_id: p2-conflict-detection
+delegation_id: del-p2-conflict-detection-1776776979
+decision: accept
+closed_at: "2026-04-21T13:13:05Z"

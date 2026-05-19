@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t3-sweep-priority-docs
+parent_plan_id: binary-rename-da-sweep
+verifier_type: doc-sweep
+status: pass
+summary: 'Replaced dot-agents <verb> binary invocations with da <verb> across README.md, docs/ (specs, ADRs, RFCs, research), and .agents/proposals/agent-context-resolution-architecture.md per ADR-0006 hard cutover. Hard test passes: grep -rE ''dot-agents [a-z]'' returns only project-name references (subject/modifier prose), no binary invocations remain. 19 files modified, project name and module path preserved per anti-scope.'
+recorded_at: "2026-05-04T02:24:06Z"
+delegation_id: del-t3-sweep-priority-docs-1777860572
+recorded_by: dot-agents workflow verify record

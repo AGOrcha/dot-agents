@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: tp1-current-gap-audit
+parent_plan_id: typescript-port
+verifier_type: doc-audit
+status: pass
+summary: 'Wrote docs/TYPESCRIPT_PORT_GAP.md: 3-section gap memo classifies all 19 Go top-level commands (Stage 1+mirrored, Phase 4 opt-out, Phase 5 deferred), enumerates Stage 1 subcommand/flag depth row-by-row for init/add/refresh/status/doctor/skills/agents/hooks, captures Stage 2 deferred items already named (plugin spec section, read-only workflow CLI surfaces). Classifications trace to docs/TYPESCRIPT_PORT_BOUNDARY.md Phase 4 contract.'
+recorded_at: "2026-05-04T03:19:14Z"
+delegation_id: del-tp1-current-gap-audit-1777864446
+recorded_by: dot-agents workflow verify record

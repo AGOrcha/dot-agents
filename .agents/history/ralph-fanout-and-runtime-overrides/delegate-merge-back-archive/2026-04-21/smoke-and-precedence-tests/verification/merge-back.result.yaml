@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: smoke-and-precedence-tests
+parent_plan_id: ralph-fanout-and-runtime-overrides
+verifier_type: merge-back
+status: pass
+summary: 'Added --self-test mode to all four ralph scripts (ralph-orchestrate, ralph-worker, ralph-closeout, ralph-pipeline). Tests cover: (1) conflict guard — discover_unblocked_tasks excludes tasks not in max_batch (overlapping write_scope), verified by mocking da() to return eligible JSON with t1/t2 conflict where only t1 is in max_batch; (2) per-role model/bin precedence — RALPH_IMPL/VERIFIER/REVIEW_WORKER_MODEL win over RALPH_WORKER_MODEL which wins over RALPH_MODEL; same chain for AGENT_BIN. All 60 tests pass without a live agent binary.'
+recorded_at: "2026-04-21T17:44:23Z"
+delegation_id: del-smoke-and-precedence-tests-1776790069
+artifact_paths:
+    - .agents/workflow/plans/ralph-fanout-and-runtime-overrides/PLAN.yaml
+    - .agents/workflow/plans/ralph-fanout-and-runtime-overrides/TASKS.yaml
+    - .agentsrc.json

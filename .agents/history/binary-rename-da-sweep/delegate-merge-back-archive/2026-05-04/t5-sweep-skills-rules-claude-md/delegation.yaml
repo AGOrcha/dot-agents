@@ -1,0 +1,51 @@
+schema_version: 1
+id: del-t5-sweep-skills-rules-claude-md-1777862348
+parent_plan_id: binary-rename-da-sweep
+parent_task_id: t5-sweep-skills-rules-claude-md
+title: Sweep ~/.agents/{skills,rules}/ + ~/.claude/CLAUDE.md for binary-name references
+summary: Delegated from plan Binary Rename — dot-agents → da (UV-style abbreviation)
+write_scope:
+    - /Users/nikashp/.agents/skills/
+    - /Users/nikashp/.agents/rules/
+    - /Users/nikashp/.claude/CLAUDE.md
+success_criteria: |-
+    Tier: T1 (molecule — text substitution + skills promote/refresh).
+
+    Files in scope (~31):
+      * ~/.agents/skills/ — 25 files referencing dot-agents commands
+        in instructions/*.md
+      * ~/.agents/rules/ — 6 files (mostly the dot-agents/ namespace)
+      * ~/.claude/CLAUDE.md — 7 occurrences; was already touched
+        today during the task-management rewrite
+
+    Same substitution rule as t3.
+
+    After editing, run `dot-agents skills promote` (legacy invocation
+    if shim is live; otherwise `da skills promote`) for each modified
+    skill to re-distribute, then `da refresh` to update project
+    symlinks.
+
+    Hard test:
+      * `grep -rE "dot-agents [a-z]" ~/.agents/skills ~/.agents/rules`
+        returns only intentional compat-shim references.
+      * A fresh `/orchestrator-session-start` session output uses
+        `da` consistently in agent-emitted text.
+
+    Common false positive:
+      Skill instruction files updated but `~/.agents/skills/dot-agents/`
+      (the namespace dir) NOT renamed (correct — namespace is part of
+      the dot-agents project name; binary rename does not change it).
+
+    ISP routing:
+      mode: direct (involves shell commands beyond text edits — skills promote, refresh)
+      verifier: smoke (final grep + `da skills list` shows all expected skills + a session test)
+      review: doc + behavior review (sweep complete; skills still load correctly; agent emits `da` not `dot-agents`)
+      anti-scope: do NOT rename `~/.agents/skills/dot-agents/` or `~/.agents/rules/dot-agents/` directories — those use the project name, not the binary name.
+      bundle-context (if fanout): ADR-0006, t3 substitution rule, list of skill instruction files
+      output contract: clean grep + skills functional + a sanity-check session output captured in merge-back
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T02:39:08Z"
+updated_at: "2026-05-04T02:58:56Z"

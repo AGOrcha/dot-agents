@@ -1,0 +1,44 @@
+schema_version: 1
+id: del-tp2-boundary-spec-1777866067
+parent_plan_id: typescript-port
+parent_task_id: tp2-boundary-spec
+title: Define machine-readable boundary spec the sync pipeline can consume
+summary: Delegated from plan TypeScript Port — Sync Pipeline & Boundary Maintenance
+write_scope:
+    - docs/typescript-port-boundary.json
+    - docs/TYPESCRIPT_PORT_BOUNDARY.md
+success_criteria: |-
+    Tier: T1 (molecule — schema design + cross-reference update).
+
+    Concrete deliverable: docs/typescript-port-boundary.json — a
+    machine-readable spec that the CI pipeline (tp3) reads to decide
+    whether a Go change demands a TS change. Schema:
+
+      {
+        "version": 1,
+        "stage1_commands": [<must-mirror command names>],
+        "stage1_flag_lock": {
+          "<cmd>": ["<flag1>", "<flag2>", ...]
+        },
+        "phase4_optouts": [<commands intentionally Go-only>],
+        "phase5_deferred": [<commands deferred to future Stage 2 work>],
+        "stage2_deferred_subitems": [<feature-level items>]
+      }
+
+    docs/TYPESCRIPT_PORT_BOUNDARY.md gains a forward reference:
+    "Machine-readable form: docs/typescript-port-boundary.json
+    (consumed by ports/typescript/scripts/check-boundary.* in CI)."
+
+    ISP routing:
+      mode: direct (single JSON spec + small markdown cross-reference edit)
+      verifier: manual (spec parses; matches the prose boundary doc)
+      review: doc review (spec faithfully encodes the Phase 4 decision)
+      anti-scope: do NOT change the Phase 4 decision content. The JSON encodes the existing prose; deviations require a superseding ADR.
+      bundle-context (if fanout): docs/TYPESCRIPT_PORT_BOUNDARY.md (current), docs/TYPESCRIPT_PORT_GAP.md (from tp1)
+      output contract: docs/typescript-port-boundary.json (parses as valid JSON; matches the schema above) + the cross-reference line in TYPESCRIPT_PORT_BOUNDARY.md
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T03:41:07Z"
+updated_at: "2026-05-04T03:43:52Z"

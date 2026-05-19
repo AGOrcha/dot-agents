@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: sq1-current-state-audit
+parent_plan_id: sonarqube-pr10
+verifier_type: doc-audit
+status: pass
+summary: 'PR#10 SonarCloud audit complete. Live gate: ERROR. new_reliability_rating=4 (target 1) with 47 reliability issues across 11 files; new_duplicated_lines_density=4.7% (target 3%) across 40 files / 2501 dup lines; new_security_hotspots_reviewed=0.0% (target 100%) with 35 TO_REVIEW hotspots. Findings memo returned inline (write blocked by subagent harness). Classifications: sq2 fixable=A,B,C; sq3 review=G,H,I; sq4 decision on D,E + cluster F cherry. Follow-up plans proposed: go-test-fixture-extraction, production-code-helper-extraction. Drift caught: source plan claimed reviewed=2.8 but live=0.0 with 0 REVIEWED hotspots.'
+recorded_at: "2026-05-04T03:21:17Z"
+delegation_id: del-sq1-current-state-audit-1777864449
+recorded_by: dot-agents workflow verify record

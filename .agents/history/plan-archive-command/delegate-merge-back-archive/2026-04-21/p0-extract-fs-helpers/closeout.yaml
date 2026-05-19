@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: plan-archive-command
+task_id: p0-extract-fs-helpers
+delegation_id: del-p0-extract-fs-helpers-1776772699
+decision: accept
+closed_at: "2026-04-21T12:01:30Z"

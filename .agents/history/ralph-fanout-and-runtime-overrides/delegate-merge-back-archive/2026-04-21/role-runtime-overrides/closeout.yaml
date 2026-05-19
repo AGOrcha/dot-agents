@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: ralph-fanout-and-runtime-overrides
+task_id: role-runtime-overrides
+delegation_id: del-role-runtime-overrides-1776789322
+decision: accept
+closed_at: "2026-04-21T16:47:31Z"

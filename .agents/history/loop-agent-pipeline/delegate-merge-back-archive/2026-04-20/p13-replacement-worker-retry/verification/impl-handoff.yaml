@@ -1,0 +1,17 @@
+task_id: p13-replacement-worker-retry
+commit_sha: 68f2628
+write_scope_touched:
+  - .agents/workflow/plans/loop-agent-pipeline/TASKS.yaml
+  - bin/tests/ralph-pipeline
+  - bin/tests/ralph-worker
+  - docs/LOOP_ORCHESTRATION_SPEC.md
+  - tests/test-ralph-pipeline-stage-retry.sh
+ready_for_verification: true
+impl_notes: >-
+  Added stage-scoped replacement retry with fallback agent-bin selection in
+  `ralph-pipeline`, exposed per-invocation worker bin override handling in
+  `ralph-worker`, documented the retry/fallback parity expectation for I_S_P,
+  and added focused shell coverage for recovered usage-limit retry and
+  non-resumable workspace-permissions hard stops. Workspace remains uncommitted;
+  verifiers should evaluate the current tree at HEAD 68f2628 plus working-tree
+  changes.

@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: p3-wire-cmd
+parent_plan_id: plan-archive-command
+verifier_type: build
+status: pass
+summary: 'go build ./...: pass. go test ./commands/... ./commands/workflow/...: 7 packages pass. planArchiveCmd wired with --plan, --force flags; dry-run via global -n; help verified.'
+recorded_at: "2026-04-21T12:09:44Z"
+delegation_id: del-p3-wire-cmd-1776773192
+recorded_by: dot-agents workflow verify record

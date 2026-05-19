@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-c3-sync-command-decomposition-1776539849
+parent_plan_id: command-surface-decomposition
+parent_task_id: c3-sync-command-decomposition
+title: Split sync command by subcommand family
+summary: Delegated from plan Command Surface Decomposition Plan
+write_scope:
+    - commands/sync.go
+    - commands/sync/
+success_criteria: '**feedback_goal:** Decompose `sync` into stable command-family files (`init`, `commit`, `pull`, `push`, `status`, `log`) so small changes do not require workers to load or edit the whole sync surface.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T19:17:29Z"
+updated_at: "2026-04-18T19:28:12Z"

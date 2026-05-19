@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+task_id: p3b-unit-verifier
+delegation_id: del-p3b-unit-verifier-1776475771
+decision: accept
+closed_at: "2026-04-18T12:49:26Z"

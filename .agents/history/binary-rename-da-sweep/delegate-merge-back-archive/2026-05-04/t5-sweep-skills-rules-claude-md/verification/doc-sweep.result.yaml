@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t5-sweep-skills-rules-claude-md
+parent_plan_id: binary-rename-da-sweep
+verifier_type: doc-sweep
+status: pass
+summary: 'Swept ''dot-agents <verb>'' -> ''da <verb>'' across ~/.agents/skills/, ~/.agents/rules/, and ~/.claude/CLAUDE.md per ADR-0006 hard cutover. 81 verb invocations substituted across 23 files plus 7 backticked binary-name references in prose; 28 remaining grep matches all project-name prose, source-dir paths (cmd/dot-agents), or sibling-repo paths (../dot-agents). Anti-scope preserved: ~/.agents/skills/dot-agents/ and ~/.agents/rules/dot-agents/ namespace directories untouched; project-name prose retained.'
+recorded_at: "2026-05-04T02:58:40Z"
+delegation_id: del-t5-sweep-skills-rules-claude-md-1777862348
+recorded_by: dot-agents workflow verify record

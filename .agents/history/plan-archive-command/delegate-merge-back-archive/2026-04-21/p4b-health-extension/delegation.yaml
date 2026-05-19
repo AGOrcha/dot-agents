@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-p4b-health-extension-1776773156
+parent_plan_id: plan-archive-command
+parent_task_id: p4b-health-extension
+title: 'Extend workflow health: completed_plans_pending_archive count'
+summary: Delegated from plan Workflow Plan Archive Command
+write_scope:
+    - commands/workflow/health.go
+success_criteria: 'Add completed_plans_pending_archive int to health JSON output. Human-readable: ''completed plans pending archive: N'' line when N > 0. Informational only — does not change healthy/partial/degraded status. Reuse CompletedPlanIDs from drift logic (p4-drift-extension).'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-21T12:05:56Z"
+updated_at: "2026-04-21T12:07:54Z"

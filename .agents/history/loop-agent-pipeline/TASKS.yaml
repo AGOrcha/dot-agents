@@ -1,0 +1,303 @@
+schema_version: 1
+plan_id: loop-agent-pipeline
+tasks:
+    - id: p1-pipeline-control
+      title: ralph-pipeline outer loop, plan-scoped break check, verification directory lifecycle, and pre-verifier TDD gate
+      status: completed
+      depends_on: []
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-pipeline
+        - bin/tests/ralph-orchestrate
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Ralph pipeline + orchestrate scripts and `workflow` CLI implement plan-scoped break checks, verification dir lifecycle before dispatch, pre-verifier TDD gate, and verifier retry-cap wiring; `go test ./commands -run Workflow` (or focused workflow tests) passes; worker runs verify + checkpoint + merge-back.
+
+        **write_scope:** bin/tests/ralph-pipeline, bin/tests/ralph-orchestrate, commands/workflow.go, commands/workflow/
+
+        **context:** Active delegation bundle `del-p1-pipeline-control-1776434329` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe in parallel** with `agents-import` (disjoint scopes) and with `p2-impl-agent-surface` (p2 does not touch workflow.go). **Do not** start `p3a-result-schema` worker (`del-p3a-result-schema-1776438877`) until this task closes — both edit `commands/workflow.go` / `commands/workflow/`. **Serialize** other pipeline tasks that touch `commands/workflow.go` after this delegation closes as needed.
+
+        Control-plane entry point for D3.a: plan-scoped loop-break via workflow next/tasks filtering, verification directories before dispatch, tdd-fresh gate plus verifier retry-cap wiring.
+    - id: p2-impl-agent-surface
+      title: Separate repo-side impl-agent surface from loop-worker behavior
+      status: completed
+      depends_on: []
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-worker
+        - .agents/prompts/impl-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Repo-owned impl-agent overlay and impl-handoff contract updated; Pattern E loop-worker callers still work; `write_scope_touched`, `ready_for_verification`, and optional `tests_unchanged_justified` semantics clarified in spec + scripts; verification passes.
+
+        **write_scope:** bin/tests/ralph-worker, .agents/prompts/impl-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Delegation bundle `del-p2-impl-agent-surface-1776438876` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Safe to run in parallel** with `p1-pipeline-control` and `agents-import` — no overlap with `commands/workflow.go` or `commands/agents.go`. Worker runs verify + checkpoint + merge-back.
+    - id: p3a-result-schema
+      title: Introduce canonical verification-result artifact contract
+      status: completed
+      depends_on: []
+      blocks:
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-result.schema.json
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Canonical JSON Schema + command-side validation for verification results; typed artifact path `.agents/active/verification/<task_id>/<type>.result.yaml`; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
+
+        **write_scope:** schemas/verification-result.schema.json, commands/workflow.go, commands/workflow/
+
+        **context:** Delegation bundle `del-p3a-result-schema-1776438877` (overlay `.agents/active/active.loop.md`, context: loop-state + this file). **Blocked on `p1-pipeline-control`** — both modify `commands/workflow.go` / `commands/workflow/`. **Do not** start this worker until `del-p1-pipeline-control` merge-back completes and p1 advances. After p1 closes, worker runs verify + checkpoint + merge-back.
+    - id: p3b-unit-verifier
+      title: Unit verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/unit.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: Add unit verifier guidance with explicit go test ./... -race -count=1 -timeout=300s expectations and scoped-test discipline aligned to D12.
+    - id: p3c-api-verifier
+      title: API verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/api.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Land API verifier prompt guidance plus spec updates for Playwright/API-style checks, contract and performance artifact expectations, and alignment with the canonical verification-result schema; verification + merge-back artifacts ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/api.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3c-api-verifier-1776516721.yaml` (overlay `.agents/active/active.loop.md`; context files: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — this worker may proceed. **Serialize** `p3d`–`p3f` (and any other work touching `docs/LOOP_ORCHESTRATION_SPEC.md`) until this task merges to avoid spec merge churn. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
+    - id: p3d-ui-verifier
+      title: UI E2E verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/ui-e2e.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** UI E2E verifier prompt plus spec updates for Playwright/browser flows, screenshot or visual diff artifacts, accessibility checks, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/ui-e2e.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Delegation bundle `.agents/active/delegation-bundles/del-p3d-ui-verifier-1776517508.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). `p3a-result-schema` is **completed** — worker may proceed. **Serialize** `p3e`–`p3f` (shared `docs/LOOP_ORCHESTRATION_SPEC.md`): do **not** fan out or run batch/streaming verifier workers until this task merges and parent advances. Parent runs `workflow advance` + `workflow delegation closeout` after merge-back acceptance.
+    - id: p3e-batch-verifier
+      title: Batch verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/batch.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Batch verifier prompt plus spec updates for fixture-driven runs, expected-vs-actual diff artifacts, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/batch.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Task is **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p3e-batch-verifier-1776528136.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). **`p3f-streaming-verifier`** was serialized after this slice; parent ran `workflow advance` + `workflow delegation closeout`, then **`workflow fanout`** for **`p3f`** — see **`p3f`** notes for the active streaming bundle.
+    - id: p3f-streaming-verifier
+      title: Streaming verifier surface and result contract
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/streaming.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Streaming verifier prompt plus spec updates for SSE/WebSocket checks, timeout/backpressure/dropped-frame artifact expectations, and alignment with the canonical verification-result schema; verification + merge-back ready for parent review.
+
+        **write_scope:** .agents/prompts/verifiers/streaming.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Task is **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p3f-streaming-verifier-1776528467.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Parent ran **`workflow advance`** + **`workflow delegation closeout`**; orchestrator then **`workflow fanout`** for **`p4-review-agent`** — see **`p4`** notes for the active review-agent bundle.
+    - id: p4-review-agent
+      title: Review-agent surface plus merged workflow verify record decision writer
+      status: completed
+      depends_on:
+        - p3a-result-schema
+      blocks:
+        - p5-iter-log-v2
+        - p6-fanout-dispatch
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/verification-decision.schema.json
+        - commands/workflow.go
+        - commands/workflow/
+        - .agents/prompts/review-agent.project.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Implement D1 as a flag-first workflow verify record writer with required phase decision enums, repeatable failed-gate flags, required escalation reason handling, CLI-owned review-decision.yaml output, and a lean verification-log.jsonl append; `go test ./commands -run Workflow` (or focused) passes; merge-back ready.
+
+        **write_scope:** schemas/verification-decision.schema.json, commands/workflow.go, commands/workflow/, .agents/prompts/review-agent.project.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Task **completed** (merge-back accepted). Historical delegation bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Parent ran **`workflow advance`** + **`workflow delegation closeout`**. Downstream **`p8-orchestrator-awareness`** may edit **`docs/LOOP_ORCHESTRATION_SPEC.md`** without review-agent serialization — see **`p8`** notes for the active orchestrator-awareness bundle.
+    - id: p5-iter-log-v2
+      title: Role-owned iteration log schema v2 plus role-aware checkpoint merge
+      status: completed
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p4-review-agent
+      blocks:
+        - p7-post-closeout
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-iter-log.schema.json
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log_schema.go
+        - commands/workflow/iter_log.go
+        - commands/workflow/iter_log_test.go
+        - commands/workflow/testutil_test.go
+      verification_required: true
+      notes: Land schema_version 2 with nested impl, verifiers[], and review blocks. workflow checkpoint --log-to-iter must merge by role, reject cross-role writes, and derive review or verifier fields from the canonical artifacts.
+    - id: p6-fanout-dispatch
+      title: App-type dispatch and verifier-sequence wiring through plan schema, .agentsrc, and delegation bundles
+      status: completed
+      depends_on:
+        - p2-impl-agent-surface
+        - p3a-result-schema
+        - p3b-unit-verifier
+        - p3c-api-verifier
+        - p3d-ui-verifier
+        - p3e-batch-verifier
+        - p3f-streaming-verifier
+        - p4-review-agent
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-delegation-bundle.schema.json
+        - schemas/workflow-plan.schema.json
+        - schemas/agentsrc.schema.json
+        - src/share/templates/standard/agentsrc.json
+        - commands/workflow.go
+        - commands/workflow/
+        - bin/tests/ralph-orchestrate
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Plan schema + `.agentsrc` + `workflow fanout` carry `app_type`, verifier profiles, and `--verifier-sequence` resolution into delegation bundles; `ralph-orchestrate` and workflow tests stay green; merge-back ready.
+
+        **write_scope:** schemas/workflow-delegation-bundle.schema.json, schemas/workflow-plan.schema.json, schemas/agentsrc.schema.json, src/share/templates/standard/agentsrc.json, commands/workflow.go, commands/workflow/, bin/tests/ralph-orchestrate
+
+        **context:** Task is **completed** (closeout accepted per git history). Historical bundle reference: `.agents/active/delegation-bundles/del-p6-fanout-dispatch-1776516721.yaml`. Downstream verifier waves should still respect **spec serialization** for `docs/LOOP_ORCHESTRATION_SPEC.md` when multiple verifier tasks were mid-flight.
+
+        Integration hotspot: app_type on plan tasks, app_type_verifier_map and verifier_profiles in .agentsrc, workflow fanout --verifier-sequence, and bundle population that resolves verifier sequences from app_type.
+    - id: p7-post-closeout
+      title: Post-closeout orchestration pass plus fold-back update
+      status: completed
+      depends_on:
+        - p1-pipeline-control
+        - p4-review-agent
+        - p5-iter-log-v2
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-closeout
+        - bin/tests/ralph-pipeline
+        - commands/workflow.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Post-closeout reasoning pass in `ralph-closeout` / pipeline scripts, workflow fold-back update, stable slug routing for D2, and grouped (non-noisy) slice observations; `go test ./commands` (workflow) + script smoke paths green; merge-back ready.
+
+        **write_scope:** bin/tests/ralph-closeout, bin/tests/ralph-pipeline, commands/workflow.go, commands/workflow/
+
+        **context:** Active delegation bundle `.agents/active/delegation-bundles/del-p7-post-closeout-1776538664.yaml` (overlay `.agents/active/active.loop.md`; context: `.agents/active/loop-state.md`, this TASKS.yaml). Profile: **loop-worker**. Worker runs verify + checkpoint + merge-back; parent runs `workflow advance` + `workflow delegation closeout` after acceptance.
+
+        **follow-up:** Post-closeout archival can still leave workspace dirty until archive moves, `PLAN.yaml`, and verification artifacts are committed — align with `closeout-ci-fix` / parent checkpoint if still observed.
+    - id: p8-orchestrator-awareness
+      title: Make orchestrator prompts and dispatch role-aware
+      status: completed
+      depends_on: []
+      blocks:
+        - p6-fanout-dispatch
+      owner: dot-agents
+      write_scope:
+        - bin/tests/ralph-orchestrate
+        - bin/tests/ralph-pipeline
+        - .agents/active/orchestrator.loop.md
+        - docs/LOOP_ORCHESTRATION_SPEC.md
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Ralph orchestrate/pipeline scripts and `docs/LOOP_ORCHESTRATION_SPEC.md` describe role-aware orchestrator dispatch (impl vs verifier vs review), preserve D5 explicitly, and stop reusing the same file as both project overlay and prompt-file; script smoke + targeted tests pass; merge-back ready.
+
+        **write_scope:** bin/tests/ralph-orchestrate, bin/tests/ralph-pipeline, .agents/active/orchestrator.loop.md, docs/LOOP_ORCHESTRATION_SPEC.md
+
+        **context:** Task is **pending**. **Do not `workflow fanout`** while **`p4-review-agent`** is **`in_progress`** — both touch **`docs/LOOP_ORCHESTRATION_SPEC.md`**; **`p4`** bundle `.agents/active/delegation-bundles/del-p4-review-agent-1776528758.yaml` owns the spec until merge-back. After **`p4`** closes, delegate with profile **`loop-worker`**, overlay **`.agents/active/active.loop.md`**, context **`.agents/active/loop-state.md`** + this TASKS.yaml. Parent runs **`workflow advance`** + **`workflow delegation closeout`** after merge-back acceptance.
+    - id: p9-sources-design-fork
+      title: Fork external-sources design doc from the main implementation plan
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/external-agent-sources/design.md
+      verification_required: false
+      notes: |-
+        Doc-only placeholder for D6. Do not reintroduce the old external-sources implementation scope into this plan; this task only needs TOC completeness against D6.a.
+
+        **D6.a landed:** `.agents/workflow/specs/external-agent-sources/design.md` — forked from `decisions.1.md` D6/D6.a; sections 1–13 match locked TOC. Parent reviews merge-back, then `workflow advance` + delegation closeout.
+    - id: p10-workflow-command-decomposition
+      title: Split workflow command into subpackage files to reduce worker hotspot contention
+      status: completed
+      depends_on:
+        - p7-post-closeout
+        - p8-orchestrator-awareness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow.go
+        - commands/workflow/cmd.go
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        **feedback_goal:** Replace the monolithic workflow hotspot with a `commands/workflow/` subpackage and a thin top-level `commands/workflow.go` shim so future worker slices can own narrower files; preserve CLI behavior and test coverage while reducing cross-task write collisions.
+
+        **write_scope:** commands/workflow.go, commands/workflow/cmd.go, commands/workflow/
+
+        **context:** Structural decomposition landed: behavior lives in `commands/workflow/*.go` (e.g. `cmd.go`, `state.go`, `delegation.go`, `iter_log.go`, …); tests split across `*_test.go` plus `testutil_test.go`. Keep command semantics stable; narrow future edits to specific files under `commands/workflow/` instead of growing the shim.
+
+        **serialization note:** Prefer touching one feature file (or one test file) per worker; avoid parallel edits to the same hot file — use `commands/workflow/tasks` readback if unsure.

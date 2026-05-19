@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+task_id: sidecar-schema
+delegation_id: del-sidecar-schema-1776772737
+decision: accept
+closed_at: "2026-04-21T12:01:49Z"

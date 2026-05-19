@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: typescript-port
+task_id: tp4-close-mirror-gaps
+delegation_id: del-tp4-close-mirror-gaps-1777868356
+decision: accept
+note: no-op closure justified; 8 deferred rows tracked in stage2_deferred_subitems; tp3 CI sync gate enforces drift detection
+closed_at: "2026-05-04T04:22:13Z"

@@ -1,0 +1,11 @@
+schema_version: 1
+id: agent-resource-lifecycle
+title: Agent Resource Lifecycle — promote, import, remove, and wiring parity for Claude Code agents
+status: completed
+summary: 'Approved follow-on from loop-runtime-refactor. Finish agent lifecycle parity with the skills system: add promote/import/remove flows and fix refresh/install wiring for canonical agent directories. Existing agents list and agents new commands stay out of scope.'
+created_at: "2026-04-15T00:36:35Z"
+updated_at: "2026-04-17T15:21:11Z"
+owner: dot-agents
+success_criteria: Agent lifecycle no longer requires manual symlink surgery. Repo and canonical agent directories can be promoted, imported, removed, and re-wired deterministically through dot-agents surfaces.
+verification_strategy: Focused agents command tests plus refresh/install integration coverage; manual smoke with a project-local loop-worker agent and repo symlink healing.
+current_focus_task: ""

@@ -1,0 +1,129 @@
+---
+schema_version: 1
+task_id: t5-verify-end-to-end
+parent_plan_id: self-review-iteration-close-wiring
+title: Run a real iteration through the new chain; capture before/after iter-log diff
+summary: T5 end-to-end verification completed with a real Loop Health diff. The chain recorded test evidence, wrote review-decision.yaml via workflow verify record --kind review, populated iter-62.yaml via checkpoint --log-to-iter 62 --role review, and fixed the checkpoint delegation resolver so completed contracts cannot redirect role merges.
+files_changed:
+    - .agents/active/delegation-bundles/del-sq1-current-state-audit-1777864449.yaml
+    - .agents/active/delegation-bundles/del-t2-extend-self-review-skill-1777864417.yaml
+    - .agents/active/delegation-bundles/del-tp1-current-gap-audit-1777864446.yaml
+    - .agents/active/delegation/sq1-current-state-audit.yaml
+    - .agents/active/delegation/t2-extend-self-review-skill.yaml
+    - .agents/active/delegation/tp1-current-gap-audit.yaml
+    - .agents/active/loop-state.md
+    - .agents/active/merge-back/sq1-current-state-audit.md
+    - .agents/active/merge-back/t2-extend-self-review-skill.md
+    - .agents/active/merge-back/tp1-current-gap-audit.md
+    - .agents/active/verification/sq1-current-state-audit/doc-audit.result.yaml
+    - .agents/active/verification/sq1-current-state-audit/merge-back.result.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/merge-back.result.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/review-decision.yaml
+    - .agents/active/verification/t2-extend-self-review-skill/skill-extension.result.yaml
+    - .agents/active/verification/tp1-current-gap-audit/doc-audit.result.yaml
+    - .agents/active/verification/tp1-current-gap-audit/merge-back.result.yaml
+    - .agents/history/typescript-port/PLAN.yaml
+    - .agents/history/typescript-port/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/PLAN.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/TASKS.yaml
+    - .agents/workflow/plans/binary-rename-da-sweep/binary-rename-da-sweep.plan.md
+    - .agents/workflow/plans/self-review-iteration-close-wiring/PLAN.yaml
+    - .agents/workflow/plans/self-review-iteration-close-wiring/TASKS.yaml
+    - .agents/workflow/plans/sonarqube-pr10/PLAN.yaml
+    - .agents/workflow/plans/sonarqube-pr10/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/PLAN.yaml
+    - .agents/workflow/plans/typescript-port/TASKS.yaml
+    - .agents/workflow/plans/typescript-port/typescript-port.plan.md
+    - commands/workflow/iter_log.go
+    - commands/workflow/iter_log_test.go
+verification_result:
+    status: pass
+    summary: |-
+        Evidence quoted for parent gate:
+
+        review-decision.yaml excerpt:
+          task_id: t5-verify-end-to-end
+          parent_plan_id: self-review-iteration-close-wiring
+          phase_1_decision: accept
+          phase_2_decision: accept
+          overall_decision: accept
+          reviewer_notes includes per-file review for .agents/active/loop-state.md: Code-quality/Security/Performance/Gotchas all Accept; Verdict: accept.
+
+        iter-62.yaml review block excerpt:
+          review.phase_1_decision: accept
+          review.phase_2_decision: accept
+          review.overall_decision: accept
+          review.decision_artifact: .agents/active/verification/t5-verify-end-to-end/review-decision.yaml
+          review.verify_record_appended: true
+
+        Before/after baseline:
+          iter-61.yaml review block was empty with verify_record_appended: false.
+          iter-62.yaml review block is populated from the T5 review-decision artifact.
+
+        Additional implementation finding fixed during T5:
+          checkpoint --log-to-iter originally selected a completed SQ3 delegation because firstReadableDelegationContract did not filter by status. Patched commands/workflow/iter_log.go to ignore completed/failed/cancelled contracts and added focused regression coverage in commands/workflow/iter_log_test.go.
+
+        Verification run:
+          go test ./commands/workflow -run TestCheckpointLogToIter: pass.
+integration_notes: |-
+    Evidence quoted for parent gate:
+
+    review-decision.yaml excerpt:
+      task_id: t5-verify-end-to-end
+      parent_plan_id: self-review-iteration-close-wiring
+      phase_1_decision: accept
+      phase_2_decision: accept
+      overall_decision: accept
+      reviewer_notes includes per-file review for .agents/active/loop-state.md: Code-quality/Security/Performance/Gotchas all Accept; Verdict: accept.
+
+    iter-62.yaml review block excerpt:
+      review.phase_1_decision: accept
+      review.phase_2_decision: accept
+      review.overall_decision: accept
+      review.decision_artifact: .agents/active/verification/t5-verify-end-to-end/review-decision.yaml
+      review.verify_record_appended: true
+
+    Before/after baseline:
+      iter-61.yaml review block was empty with verify_record_appended: false.
+      iter-62.yaml review block is populated from the T5 review-decision artifact.
+
+    Additional implementation finding fixed during T5:
+      checkpoint --log-to-iter originally selected a completed SQ3 delegation because firstReadableDelegationContract did not filter by status. Patched commands/workflow/iter_log.go to ignore completed/failed/cancelled contracts and added focused regression coverage in commands/workflow/iter_log_test.go.
+
+    Verification run:
+      go test ./commands/workflow -run TestCheckpointLogToIter: pass.
+created_at: "2026-05-04T05:01:18Z"
+---
+
+## Summary
+
+T5 end-to-end verification completed with a real Loop Health diff. The chain recorded test evidence, wrote review-decision.yaml via workflow verify record --kind review, populated iter-62.yaml via checkpoint --log-to-iter 62 --role review, and fixed the checkpoint delegation resolver so completed contracts cannot redirect role merges.
+
+## Integration Notes
+
+Evidence quoted for parent gate:
+
+review-decision.yaml excerpt:
+  task_id: t5-verify-end-to-end
+  parent_plan_id: self-review-iteration-close-wiring
+  phase_1_decision: accept
+  phase_2_decision: accept
+  overall_decision: accept
+  reviewer_notes includes per-file review for .agents/active/loop-state.md: Code-quality/Security/Performance/Gotchas all Accept; Verdict: accept.
+
+iter-62.yaml review block excerpt:
+  review.phase_1_decision: accept
+  review.phase_2_decision: accept
+  review.overall_decision: accept
+  review.decision_artifact: .agents/active/verification/t5-verify-end-to-end/review-decision.yaml
+  review.verify_record_appended: true
+
+Before/after baseline:
+  iter-61.yaml review block was empty with verify_record_appended: false.
+  iter-62.yaml review block is populated from the T5 review-decision artifact.
+
+Additional implementation finding fixed during T5:
+  checkpoint --log-to-iter originally selected a completed SQ3 delegation because firstReadableDelegationContract did not filter by status. Patched commands/workflow/iter_log.go to ignore completed/failed/cancelled contracts and added focused regression coverage in commands/workflow/iter_log_test.go.
+
+Verification run:
+  go test ./commands/workflow -run TestCheckpointLogToIter: pass.

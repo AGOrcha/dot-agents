@@ -1,0 +1,11 @@
+schema_version: 1
+id: graph-bridge-command-readiness
+title: Graph Bridge Command Readiness
+status: completed
+summary: Turn the reopened graph-bridge usability audit into a canonical workflow plan that makes workflow graph query and kg bridge query dependable for downstream planning surfaces.
+created_at: "2026-04-19T14:37:51Z"
+updated_at: "2026-04-20T17:55:47Z"
+owner: dot-agents
+success_criteria: Repo fixtures and documented smoke paths prove that workflow graph query and kg bridge query return useful, deterministic results for planner-facing intents, fail helpfully when repo bridge configuration is missing, and no longer force downstream planning work to treat graph-backed scope derivation as speculative.
+verification_strategy: Focused go test coverage for graphstore and workflow command paths, command-level smoke verification against known repo fixtures, and explicit repro cases for missing-config and empty-result behavior.
+current_focus_task: ""

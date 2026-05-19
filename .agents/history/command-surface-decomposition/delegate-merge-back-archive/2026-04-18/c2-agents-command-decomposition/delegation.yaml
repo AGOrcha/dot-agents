@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-c2-agents-command-decomposition-1776539822
+parent_plan_id: command-surface-decomposition
+parent_task_id: c2-agents-command-decomposition
+title: Split agents command by lifecycle surface
+summary: Delegated from plan Command Surface Decomposition Plan
+write_scope:
+    - commands/agents.go
+    - commands/agents_test.go
+    - commands/agents/
+success_criteria: '**feedback_goal:** Separate `agents list/new/promote/remove/import` ownership so lifecycle work can proceed without one shared command hotspot. Preserve existing CLI behavior and align test files with the same lifecycle boundaries.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ralph-orchestrate
+status: completed
+created_at: "2026-04-18T19:17:02Z"
+updated_at: "2026-04-18T21:43:26Z"

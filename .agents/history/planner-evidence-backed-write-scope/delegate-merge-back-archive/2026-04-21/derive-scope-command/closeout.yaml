@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: planner-evidence-backed-write-scope
+task_id: derive-scope-command
+delegation_id: del-derive-scope-command-1776775643
+decision: accept
+closed_at: "2026-04-21T12:52:12Z"

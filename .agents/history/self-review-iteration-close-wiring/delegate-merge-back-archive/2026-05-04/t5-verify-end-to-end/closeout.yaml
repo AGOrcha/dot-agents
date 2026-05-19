@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: self-review-iteration-close-wiring
+task_id: t5-verify-end-to-end
+delegation_id: del-t5-verify-end-to-end-1777868634
+decision: accept
+note: 'T5 hard test passed: iter-62 review block populated from review-decision.yaml with verify_record_appended true; resolver bug fixed and tested.'
+closed_at: "2026-05-04T05:01:38Z"

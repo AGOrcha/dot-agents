@@ -1,0 +1,158 @@
+schema_version: 1
+plan_id: kg-command-surface-readiness
+tasks:
+    - id: kg-freshness-audit
+      title: Audit kg build, kg update, and kg code-status; define graph-ready contract
+      status: completed
+      depends_on: []
+      blocks:
+        - kg-freshness-impl
+        - kg-change-impact-audit
+        - kg-advanced-surfaces-audit
+        - kg-mcp-transport-audit
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - docs/
+      verification_required: false
+      notes: 'Audit recorded in docs/research/kg-freshness-audit.md (2026-04-19). Fresh KG_HOME alone is insufficient: kg health can report healthy while code graph is absent, so readiness must be anchored on kg code-status, not kg health. On a clean checkout code-status reports 0/0/0 with Last updated: never until build runs; after a successful clean build, code-status becomes non-zero but still ignores --json and its persisted counts disagree with the build summary. The live-repo audit also reproduced a real database-is-locked failure when a concurrent kg update held the graph DB open, so kg-freshness-impl must add explicit readiness states and distinguish lock/busy, unbuilt, and ready.'
+      app_type: go-cli
+    - id: kg-freshness-impl
+      title: Implement kg build/update/code-status readiness fixes and add smoke coverage
+      status: completed
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-change-impact-impl
+        - kg-mcp-transport-impl
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: Implement the readiness contract proven by docs/research/kg-freshness-audit.md. Make kg code-status the authoritative freshness probe with machine-readable output and explicit states at minimum for unbuilt, ready, busy_or_locked, and error. kg health must remain note-store health only and must not be treated as code-graph readiness. kg build and kg update must surface actionable non-zero failures for missing CRG, lock/busy conditions, and runtime execution failures, and their success summaries must distinguish no-diff from no-graph-mutation outcomes. Resolve or clearly document the current mismatch between build summary counts and persisted code-status counts.
+      app_type: go-cli
+    - id: kg-change-impact-audit
+      title: Audit kg changes and kg impact; define empty-result semantics
+      status: completed
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-change-impact-impl
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - docs/
+      verification_required: false
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-change-impact-audit.md.
+        Both commands work correctly on a fresh graph with real diffs. Core gap: neither
+        runKGChanges nor runKGImpact check code-status before running, so empty results are
+        indistinguishable between no-impact and graph-stale/unbuilt. JSON output has no
+        graph_state field; CRGImpactResult.status is always "ok" when CRG runs.
+        Implementation must add: (1) Status() pre-flight in changes and impact with WarnBox
+        on unbuilt/busy states; (2) --require-graph flag; (3) graph_state in JSON output;
+        (4) advisory note in human output when results are empty.
+      app_type: go-cli
+    - id: kg-change-impact-impl
+      title: Implement kg changes/impact trustworthiness fixes and add smoke coverage
+      status: completed
+      depends_on:
+        - kg-freshness-impl
+        - kg-change-impact-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: Distinguish empty-graph from no-impact in output and exit codes. Add --require-graph flag. Structured JSON output mode. Smoke tests on known repo fixtures.
+      app_type: go-cli
+    - id: kg-advanced-surfaces-audit
+      title: Audit kg flows, communities, postprocess; decide agent-ready vs expert-only
+      status: completed
+      depends_on:
+        - kg-freshness-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - docs/
+      verification_required: false
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-advanced-surfaces-audit.md.
+        Decisions: kg flows=expert-only (step_count=0, entry_point="" on all flows; function names
+        not domain flows), kg communities=agent-ready with caveats (names/sizes reliable; members
+        always empty; node_modules noise in size sort), kg postprocess=expert-only operator command
+        (runs automatically via build/update). Help-text advisories added to cmd.go for all three.
+        No structural implementation needed.
+    - id: kg-mcp-transport-audit
+      title: Audit kg serve and MCP tool parity against bridge-backed equivalents
+      status: completed
+      depends_on:
+        - kg-freshness-audit
+      blocks:
+        - kg-mcp-transport-impl
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/mcp_server.go
+        - docs/
+      verification_required: false
+      notes: |-
+        Audit complete (2026-04-20). Full findings in docs/research/kg-mcp-transport-audit.md.
+        8 tools in kg serve exactly match code-review-graph MCP server names. Primary gap:
+        handleGetReviewContext ignores the files parameter for DetectChanges (always uses HEAD~1
+        diff) and has no freshness guard. Parity decision: 7 of 8 tools KEEP,
+        get_review_context_tool IMPLEMENT (pass files to DetectChanges + add freshness guard).
+        Optional: add same freshness guard to get_impact_radius_tool. Do not redesign server
+        or rename tools.
+      app_type: go-cli
+    - id: kg-mcp-transport-impl
+      title: Implement MCP parity decisions from audit
+      status: completed
+      depends_on:
+        - kg-freshness-impl
+        - kg-mcp-transport-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - internal/graphstore/mcp_server.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: 'Implement only the implement-now entries from parity matrix. Deferred decisions go to docs only. Stop: do not redesign MCP server; do not change external tool name surface.'
+      app_type: go-cli
+    - id: kg-fresh-build-transaction-fix
+      title: Fix fresh KG build transaction failure and add isolated-home regression coverage
+      status: completed
+      depends_on:
+        - kg-freshness-impl
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/cmd.go
+        - commands/kg/kg.go
+        - commands/kg/sync_code_warm_link.go
+        - internal/graphstore/crg.go
+        - tests/
+        - docs/
+      verification_required: true
+      notes: 'Fresh isolated repro on 2026-04-19 still fails: dot-agents kg build --repo . on a new KG_HOME hits sqlite3.OperationalError cannot start a transaction within a transaction. Narrow scope to the clean-home build path only. Fix the transaction lifecycle in the CRG-backed build path, document the failure mode, and add regression coverage that exercises fresh HOME, AGENTS_HOME, and KG_HOME so this path is not hidden by repo-local persisted graph state. Keep kg code-status semantics honest: ready persisted state in the repo must not be treated as proof that a fresh isolated build works. Current masking risk: tests/test-kg-fresh-build-transaction.sh uses a stubbed code-review-graph binary, commands/kg/kg_test.go relies heavily on fake CRG binaries / fake Python entrypoints, and internal/graphstore/mcp_server_test.go uses a fake bridge. Keep those fast wrapper tests, but add at least one verification path against the real code-review-graph runtime plus direct assertions on the produced .code-review-graph/graph.db contents/state so the underlying SQLite layer is exercised rather than inferred.'
+      app_type: go-cli

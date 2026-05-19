@@ -1,0 +1,31 @@
+schema_version: 1
+id: del-phase-5-loop-state-split-1776211033
+parent_plan_id: loop-runtime-refactor
+parent_task_id: phase-5-loop-state-split
+title: Phase 5 — Split loop-state.md into iter-N.yaml log + 3-section prose
+summary: Delegated from plan Loop Runtime Refactor — Skill Chain + Ralph Scripts + Subagent Worker
+write_scope:
+    - .agents/active/loop-state.md
+    - .agents/active/iteration-log/
+success_criteria: |-
+    Split the monolithic loop-state.md (33k+ tokens) into two surfaces:
+      1. .agents/active/iteration-log/iter-N.yaml — structured per-iteration log (CLI-written stub + agent-filled fields)
+      2. loop-state.md — 3 prose sections only: ## Current Position, ## Loop Health, ## Next Iteration Playbook
+
+    Two-author model: workflow checkpoint --log-to-iter N creates the stub with all
+    git-derivable fields; agent fills the interpretation fields and self_assessment block.
+
+    WORKER CONTEXT (session 2026-04-14):
+    - loop-state.md is currently 33k+ tokens (37 iteration entries in ## Iteration Log)
+    - A/B run confirmed this is the root cause of 2.5M cache-read token bloat per script worker iteration
+    - The split was designed in session d694aff6 but never captured as a task until now
+    - Schema file already exists: schemas/workflow-iter-log.schema.json
+    - Iteration numbering: current iteration is 37; new entries start at iter-38.yaml
+    - SLICES are the unit of work: 5a (migrate) → 5b (worker overlay) || 5c (CLI flag) → 5d (schema wire-in) → 5e (migration script)
+    - Start with slice phase-5a-migrate-loop-state: archive iteration log to historical.yaml, strip loop-state.md to 3 sections
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-04-14T23:57:13Z"
+updated_at: "2026-04-15T00:06:37Z"

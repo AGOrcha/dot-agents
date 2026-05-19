@@ -1,0 +1,49 @@
+schema_version: 1
+id: del-sq3-security-hotspots-sweep-1777868354
+parent_plan_id: sonarqube-pr10
+parent_task_id: sq3-security-hotspots-sweep
+title: Review and resolve security hotspots flagged on PR#10
+summary: Delegated from plan SonarQube — PR#10 Quality Gate Clearance
+write_scope:
+    - commands/
+    - internal/
+    - scripts/
+    - tests/
+    - .github/workflows/
+success_criteria: |-
+    Tier: T2 (compound — security review per hotspot).
+
+    Source plan notes: reviewing one hotspot moved
+    new_security_hotspots_reviewed from 0.0 to 2.8 — implying ~35-40
+    hotspots remain to reach an acceptable threshold (depends on
+    SonarCloud's threshold for the failing gate condition).
+
+    Use mcp__sonarqube__search_security_hotspots and
+    mcp__sonarqube__show_security_hotspot to triage.
+    Use mcp__sonarqube__change_security_hotspot_status to mark each
+    as REVIEWED with appropriate disposition (SAFE / FIXED /
+    ACKNOWLEDGED) once examined.
+
+    Hard test:
+      new_security_hotspots_reviewed moves above the failing
+      threshold AND every changed status carries a one-line
+      justification visible in SonarCloud.
+
+    Common false positive:
+      Mass-marking hotspots as SAFE without genuine review. Defeats
+      the purpose. Each hotspot must be inspected; the per-hotspot
+      rationale lives in SonarCloud's status-change comment.
+
+    ISP routing:
+      mode: direct (orchestrator-driven triage with MCP tools; per-hotspot judgment)
+      verifier: smoke (status changes land in SonarCloud); review = decision-quality (rationale per hotspot)
+      review: decision-quality + code review for any hotspots that triggered actual code fixes
+      anti-scope: do NOT mass-mark without review. Do NOT change rule severity or threshold to paper over the failure.
+      bundle-context (if fanout): sq1's hotspot list, SonarCloud project URL
+      output contract: new_security_hotspots_reviewed above threshold; per-hotspot rationale visible in SonarCloud
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-04T04:19:14Z"
+updated_at: "2026-05-04T04:22:15Z"

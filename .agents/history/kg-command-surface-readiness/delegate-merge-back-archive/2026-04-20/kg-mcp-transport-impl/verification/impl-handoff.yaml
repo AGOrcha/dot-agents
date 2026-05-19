@@ -1,0 +1,33 @@
+task_id: kg-mcp-transport-impl
+commit_sha: 7fe6b152c3c48f71cae5cb24432efb6539356ab5
+write_scope_touched:
+  - internal/graphstore/mcp_server.go
+  - internal/graphstore/crg.go
+  - internal/graphstore/mcp_server_test.go
+ready_for_verification: true
+impl_notes: |-
+  Three targeted changes to internal/graphstore/:
+
+  1. DetectChangesOptions.Files field added to crg.go with an inline comment
+     documenting that CRG v1.x CLI detect-changes does not accept --files;
+     the field is wired through but does not alter the CLI invocation.
+
+  2. handleGetReviewContext (mcp_server.go) now:
+     - Calls bridge.Status() after requireBridge() and returns a structured
+       JSON payload {"error", "state", "hint"} when state is unbuilt or
+       busy_or_locked — not a Go/RPC error, so MCP callers receive it as a
+       result payload.
+     - Passes DetectChangesOptions{Files: req.Files} to DetectChanges so the
+       caller's file scope is threaded through the options struct even though
+       the CRG CLI does not filter by it today.
+
+  3. handleGetImpactRadius (mcp_server.go) now has the same Status()-based
+     freshness guard inserted before bridge.GetImpactRadius().
+
+  4. Four new tests added to mcp_server_test.go using the existing fakeMCPBridge:
+     - TestHandleGetReviewContext_UnbuiltGraphReturnsError
+     - TestHandleGetImpactRadius_UnbuiltGraphReturnsError
+     - TestHandleGetReviewContext_BusyGraphReturnsError
+     - TestHandleGetReviewContext_ReadyGraphProceedsNormally
+
+  All graphstore tests pass (go test ./internal/graphstore/...).

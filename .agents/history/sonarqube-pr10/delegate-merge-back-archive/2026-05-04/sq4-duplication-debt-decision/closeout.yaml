@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: sonarqube-pr10
+task_id: sq4-duplication-debt-decision
+delegation_id: del-sq4-duplication-debt-decision-1777866067
+decision: accept
+note: ADR-0008 accepted option (B) waiver; follow-up plan ids reserved (go-test-fixture-extraction, production-code-helper-extraction); commit d1fb2ca
+closed_at: "2026-05-04T03:56:50Z"

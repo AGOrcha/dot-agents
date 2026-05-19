@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: expand-command-surface-smokes
+parent_plan_id: ci-smoke-suite-hardening
+verifier_type: merge-back
+status: pass
+summary: Clean add — 42 new lines, no existing steps modified, all steps inserted before Cleanup.
+recorded_at: "2026-04-19T20:23:03Z"
+delegation_id: del-expand-command-surface-smokes-1776630022
+artifact_paths:
+    - .agents/workflow/plans/ci-smoke-suite-hardening/PLAN.yaml
+    - .agents/workflow/plans/ci-smoke-suite-hardening/TASKS.yaml
+    - bin/dot-agents
