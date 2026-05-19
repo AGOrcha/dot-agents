@@ -26,8 +26,18 @@ type SQLiteStore struct {
 	// cannot interrupt a non-preemptible modernc step in flight — the
 	// WaitGroup is the real shutdown guarantee; the context is the
 	// lifecycle handle for paths that can observe it.
+	//
+	// mu serialises reaper registration against Close: a reaper is
+	// spawned lazily (only when a request times out), so reapers.Add
+	// must be ordered-before reapers.Wait via mu or the race detector
+	// (correctly) flags Add-not-happens-before-Wait. Once closed is set
+	// no new tracked reaper is registered — a timeout racing shutdown
+	// drains its conn untracked (best effort; Close already committed to
+	// Wait) so nothing is stranded.
 	lifeCtx    context.Context
 	cancelLife context.CancelFunc
+	mu         sync.Mutex
+	closed     bool
 	reapers    sync.WaitGroup
 }
 
@@ -144,6 +154,9 @@ func (s *SQLiteStore) initSchema() error {
 // could leak the goroutine + connection past the store's lifetime.
 func (s *SQLiteStore) Close() error {
 	s.cancelLife()
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.reapers.Wait()
 	return s.db.Close()
 }
@@ -751,14 +764,29 @@ func (s *SQLiteStore) queryContextGuarded(ctx context.Context, query string, arg
 		// 1) and fail with a deadline-bounded error. The reaper drains +
 		// closes the orphaned result set when the step eventually finishes
 		// so the abandoned conn is returned to the pool rather than leaked.
-		// It is registered on s.reapers so Close blocks until every such
-		// drain has completed (no goroutine/conn outlives the store).
-		s.reapers.Go(func() {
+		// It is registered on s.reapers (under s.mu so the Add is
+		// ordered-before Close's Wait) so Close blocks until every such
+		// drain has completed (no goroutine/conn outlives the store). If
+		// the store is already closing, drain untracked — Close has
+		// committed to Wait and must not observe a late Add.
+		drain := func() {
 			res := <-resCh
 			if res.rows != nil {
 				_ = res.rows.Close()
 			}
-		})
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			go drain()
+			return nil, errRequestTimeout
+		}
+		s.reapers.Add(1)
+		s.mu.Unlock()
+		go func() {
+			defer s.reapers.Done()
+			drain()
+		}()
 		return nil, errRequestTimeout
 	}
 }
