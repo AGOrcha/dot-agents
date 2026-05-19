@@ -267,9 +267,9 @@ func TestScaffoldWorkflowAssets_MkdirError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeInitDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	if err := scaffoldWorkflowAssets(t.TempDir()); !errors.Is(err, sentinel) {
+	if err := scaffoldWorkflowAssets(t.TempDir(), deps); !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
 	// silence unused import linter for config when nothing references it
@@ -1117,9 +1117,9 @@ func TestRunInit_MkdirError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeInitDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	err := runInit(nil, nil)
+	err := runInit(nil, nil, deps)
 	if err == nil || !strings.Contains(err.Error(), "creating ") {
 		t.Fatalf("expected wrapped creating error, got %v", err)
 	}

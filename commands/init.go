@@ -14,6 +14,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// initDeps is the narrow collaborator interface init.go's fault-injectable
+// operations need (interface-DI per docs/TEST_SEAMS.md). Production wires
+// stdInitDeps via NewInitCmd's RunE closure; tests inject a fakeInitDeps
+// to drive the MkdirAll error branches that a writable tmp dir never hits.
+// Per-file scope — do not grow this for unrelated needs.
+type initDeps interface {
+	MkdirAll(path string, perm os.FileMode) error
+}
+
+// stdInitDeps is the production initDeps backed by the os package.
+type stdInitDeps struct{}
+
+func (stdInitDeps) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
 func NewInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -29,12 +45,14 @@ commands that expect the shared store to exist.`,
 			"  da init --force",
 		),
 		Args: NoArgsWithHints("`da init` bootstraps the shared store and does not take a project path."),
-		RunE: runInit,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInit(cmd, args, stdInitDeps{})
+		},
 	}
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+func runInit(cmd *cobra.Command, args []string, deps initDeps) error {
 	agentsHome := config.AgentsHome()
 
 	ui.Header("da init")
@@ -84,7 +102,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		dirs = append(dirs, platform.CanonicalBucketScopeRoot(agentsHome, bucket.Name, "global"))
 	}
 	for _, d := range dirs {
-		if err := osMkdirAll(d, 0755); err != nil {
+		if err := deps.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("creating %s: %w", d, err)
 		}
 	}
@@ -124,7 +142,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	ui.Bullet("ok", "Scaffolded starter home assets")
 
-	if err := scaffoldWorkflowAssets(agentsHome); err != nil {
+	if err := scaffoldWorkflowAssets(agentsHome, deps); err != nil {
 		return fmt.Errorf("scaffolding starter hook bundles: %w", err)
 	}
 	ui.Bullet("ok", "Scaffolded starter workflow hook bundles")
@@ -143,7 +161,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if claudePlatform != nil && claudePlatform.IsInstalled() {
 		home := config.UserHome()
 		claudeDir := filepath.Join(home, ".claude")
-		os.MkdirAll(claudeDir, 0755)
+		_ = deps.MkdirAll(claudeDir, 0755) // best-effort idempotent create; SymlinkReplacing below surfaces any real failure
 		claudeSettings := filepath.Join(claudeDir, "settings.json")
 		if _, err := os.Lstat(claudeSettings); os.IsNotExist(err) || Flags.Force {
 			// --force is a deliberate replace. Route through the
@@ -169,7 +187,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(cursorHooksSrc); err == nil {
 			home := config.UserHome()
 			cursorDir := filepath.Join(home, ".cursor")
-			os.MkdirAll(cursorDir, 0755)
+			_ = deps.MkdirAll(cursorDir, 0755) // best-effort idempotent create; HardlinkReplacing below surfaces any real failure
 			cursorHooksDst := filepath.Join(cursorDir, "hooks.json")
 			if _, err := os.Lstat(cursorHooksDst); os.IsNotExist(err) || Flags.Force {
 				// Same contract as the Claude settings link above: --force
@@ -186,8 +204,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// State dir
-	os.MkdirAll(config.AgentsStateDir(), 0755)
+	// State dir — best-effort idempotent create.
+	_ = deps.MkdirAll(config.AgentsStateDir(), 0755)
 	ui.Bullet("ok", "Created state directory")
 
 	ui.SuccessBox("Initialization complete!",
@@ -222,8 +240,8 @@ func scaffoldStarterHomeAssets(agentsHome string) error {
 	return scaffoldhome.CopyMissingStarterAssets(agentsHome)
 }
 
-func scaffoldWorkflowAssets(agentsHome string) error {
-	if err := osMkdirAll(config.AgentsContextDir(), 0755); err != nil {
+func scaffoldWorkflowAssets(agentsHome string, deps initDeps) error {
+	if err := deps.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
 		return err
 	}
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
