@@ -1,12 +1,14 @@
 package graphstore
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
@@ -15,6 +17,22 @@ import (
 // SQLiteStore is the SQLite-backed implementation of Store.
 type SQLiteStore struct {
 	db *sql.DB
+
+	// Shutdown lifecycle. reapers tracks the abandon-and-fail conn-drain
+	// goroutines (see queryContextGuarded) so Close blocks until every
+	// orphaned connection has actually been returned to the pool rather
+	// than racing db.Close() against an in-flight reaper.
+	//
+	// mu serialises reaper registration against Close: a reaper is
+	// spawned lazily (only when a request times out), so reapers.Add
+	// must be ordered-before reapers.Wait via mu or the race detector
+	// (correctly) flags Add-not-happens-before-Wait. Once closed is set
+	// no new tracked reaper is registered — a timeout racing shutdown
+	// drains its conn untracked (best effort; Close already committed to
+	// Wait) so nothing is stranded.
+	mu      sync.Mutex
+	closed  bool
+	reapers sync.WaitGroup
 }
 
 // OpenSQLite opens (or creates) the SQLite database at dbPath and initialises
@@ -29,18 +47,83 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("graphstore: open db: %w", err)
 	}
 
-	db.SetMaxOpenConns(1) // SQLite doesn't benefit from a pool
+	// Connection-pool sizing is provider-internal (CONTRACT.md L104-108
+	// assigns pool / write-serialization mechanism to the provider's
+	// discretion; it is NOT a contract clause). The earlier
+	// SetMaxOpenConns(1) made the whole store a single-conn chokepoint:
+	// modernc.org/sqlite's _sqlite3Step is a non-preemptible translated-C
+	// VM loop, so on Windows a ctx deadline (or an out-of-band Close from
+	// another goroutine) CANNOT interrupt an in-progress step. With the
+	// cap at 1, any one wedged/slow step held the only connection and the
+	// next operation could never acquire it -> whole-store deadlock and
+	// the windows-latest "test timed out after 5m" panic.
+	//
+	// A small bounded pool of cheap, short-lived connections removes the
+	// chokepoint: a wedged step can be abandoned (see queryContextGuarded)
+	// and the next op acquires a different conn instead of blocking on the
+	// one stuck step. This does NOT change the documented cross-process
+	// write-serialization story — that is delivered by SQLite WAL +
+	// busy_timeout=5000 at the file/OS level (set below), which modernc
+	// honors with multiple independent connections (file locking + WAL).
+	// Empirically verified: two independent pools writing the same DB
+	// concurrently still serialize via busy_timeout with zero corruption.
+	// Path A is ephemeral + cheap, so conns are kept short-lived and the
+	// idle set small rather than long-pooled.
+	//
+	// Pool size is a pure throughput knob, not a correctness one: WAL +
+	// busy_timeout (set below) own write-serialization at the file/OS
+	// level regardless of how many conns the pool hands out, so raising
+	// the cap only buys more intra-process read concurrency.
+	//
+	// Sizing target: agent fleets. A single review/planning stage fans
+	// out ~3 subagents that each hit `da kg` (and other `da` commands,
+	// sometimes scripted in batches) to gather lens/analysis context; an
+	// orchestrator multiplies that across plans and tasks. Rough demand
+	// is (n_tasks * r_agents * x_calls) concurrent short reads against
+	// the same store. 512 is an initial ceiling meant to absorb a basic
+	// squadron/fleet without the pool itself becoming the chokepoint;
+	// node fd/memory limits are the real cap and will surface first.
+	// This is an untested heuristic from session anecdote + forum
+	// discussion, NOT a tuned figure — expect to revise it with real
+	// fleet telemetry. Idle is kept at 64 (not 4) so steady-state fleet
+	// traffic reuses warm conns instead of paying modernc's per-conn
+	// open + WAL/PRAGMA cost on every burst; ConnMaxIdleTime still reaps
+	// the long tail so an idle store does not pin 64 fds forever.
+	db.SetMaxOpenConns(512)
+	db.SetMaxIdleConns(64)
+	db.SetConnMaxIdleTime(30 * time.Second)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if _, err := dbExec(db, "PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("graphstore: set WAL mode: %w", err)
 	}
-	// busy_timeout + WAL + single connection prevent corruption under
-	// concurrent access, but they do NOT serialize cross-process writers:
-	// a concurrent `da workflow` and MCP-server both writing this DB will,
-	// after 5s of contention, surface a hard SQLITE_BUSY rather than queue.
-	// That is a user-visible flake, not data loss; acceptable for the
-	// current single-orchestrator usage. Revisit (longer timeout or an
+	// synchronous=NORMAL is the SQLite-recommended pairing with WAL. In WAL
+	// mode NORMAL is crash-safe across application crashes (a transaction
+	// can only be lost on OS crash / power loss, and then only the last
+	// one) — appropriate for this rebuildable derived graph cache. It drops
+	// the per-auto-commit fsync that modernc.org/sqlite's pure-Go VM pays
+	// on every statement. On Windows that fsync is pathologically slow:
+	// without this, an un-batched bulk write loop (e.g. the bounds
+	// enforcement test's 5k+ UpsertNode/UpsertEdge auto-commit statements)
+	// exceeds the 5-minute test budget and the windows-latest job panics
+	// "test timed out after 5m" (ubuntu/macos finish in seconds). This
+	// changes durability tuning only — it does not weaken the Path-A
+	// bounds/timeout contract or any read semantics.
+	if _, err := dbExec(db, "PRAGMA synchronous=NORMAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("graphstore: set synchronous mode: %w", err)
+	}
+	// WAL + busy_timeout are the cross-process write-serialization
+	// mechanism (CONTRACT.md guidance): a concurrent `da workflow` and
+	// MCP-server both writing this DB serialize at the SQLite file/OS
+	// level and, only after 5s of sustained contention, surface a hard
+	// SQLITE_BUSY rather than queue. That is a user-visible flake, not
+	// data loss; acceptable for the current single-orchestrator usage.
+	// This serialization is independent of the Go connection-pool size
+	// (it is enforced by SQLite's file lock + WAL, not *sql.DB), which is
+	// precisely why the pool cap above could be relaxed without changing
+	// the documented concurrency behavior. Revisit (longer timeout or an
 	// app-level write lock) if concurrent-writer workflows become common.
 	if _, err := dbExec(db, "PRAGMA busy_timeout=5000"); err != nil {
 		db.Close()
@@ -66,8 +149,20 @@ func (s *SQLiteStore) initSchema() error {
 	return nil
 }
 
-// Close closes the underlying database connection.
+// Close shuts the store down deterministically: it marks the store
+// closed (so no new tracked reaper can register), waits for every
+// in-flight abandon-and-fail reaper to finish draining its orphaned
+// connection, then closes the pool. Waiting on reapers before
+// db.Close() is the correctness point — a timed-out request abandons
+// its connection to a background reaper (see queryContextGuarded);
+// closing the pool while that reaper still holds the conn would race
+// db.Close() against an in-flight step and could leak the goroutine +
+// connection past the store's lifetime.
 func (s *SQLiteStore) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.reapers.Wait()
 	return s.db.Close()
 }
 
@@ -353,8 +448,12 @@ func (s *SQLiteStore) GetAllFiles() ([]string, error) {
 }
 
 func (s *SQLiteStore) SearchNodes(query string, limit int) ([]GraphNode, error) {
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	pattern := "%" + query + "%"
-	rows, err := s.db.Query(
+	rows, err := s.queryContextGuarded(
+		ctx,
 		"SELECT * FROM nodes WHERE name LIKE ? OR qualified_name LIKE ? LIMIT ?",
 		pattern, pattern, limit,
 	)
@@ -362,7 +461,7 @@ func (s *SQLiteStore) SearchNodes(query string, limit int) ([]GraphNode, error) 
 		return nil, err
 	}
 	defer rows.Close()
-	return collectNodes(rows)
+	return collectNodes(rows.Rows)
 }
 
 func (s *SQLiteStore) GetStats() (GraphStats, error) {
@@ -443,6 +542,12 @@ func (s *SQLiteStore) queryDistinctStrings(query string) ([]string, error) {
 // computeImpactRadius (impact.go); this method only handles the
 // SQLite-specific seed gathering and edge adjacency loading.
 func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes int) (ImpactResult, error) {
+	// Provider-owned request timeout (CONTRACT.md guarantee #2): the
+	// full-table edge scan + BFS is the long traversal; callers do not
+	// wrap their own deadline. Bounds are clamped in computeImpactRadius.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	seeds := map[string]bool{}
 	for _, f := range changedFiles {
 		nodes, err := s.GetNodesByFile(f)
@@ -454,17 +559,35 @@ func (s *SQLiteStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes 
 		}
 	}
 
-	rows, err := s.db.Query("SELECT source_qualified, target_qualified FROM edges")
-	if err != nil {
-		return ImpactResult{}, err
-	}
-	fwd, rev, err := buildEdgeAdjacency(rows)
-	rows.Close()
+	fwd, rev, err := s.loadEdgeAdjacency(ctx)
 	if err != nil {
 		return ImpactResult{}, err
 	}
 
+	// computeImpactRadius re-enters the store (GetEdgesAmong /
+	// resolveImpactNodes). loadEdgeAdjacency releases its edge result set
+	// via a deferred Close before this call returns, so re-entrant reads
+	// reuse a freed conn promptly. (Under the now-relaxed pool a stranded
+	// result set no longer deadlocks the whole store, but deterministic
+	// release keeps the pool small and conns short-lived per Path A.)
 	return computeImpactRadius(seeds, fwd, rev, maxDepth, maxNodes, s)
+}
+
+// loadEdgeAdjacency runs the full-table edge scan under the request-timeout
+// context and builds the forward/reverse adjacency maps. The result set is
+// closed via defer before this function returns, so its connection is
+// deterministically released — an early return, scan error, or panic cannot
+// strand it. If the request timeout fires mid-scan, queryContextGuarded
+// returns a timeout error here (abandoning the wedged modernc conn) rather
+// than blocking; see its doc comment for why that is the only correct
+// mechanism on the non-preemptible modernc/Windows path.
+func (s *SQLiteStore) loadEdgeAdjacency(ctx context.Context) (fwd, rev map[string][]string, err error) {
+	rows, err := s.queryContextGuarded(ctx, "SELECT source_qualified, target_qualified FROM edges")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return buildEdgeAdjacency(rows.Rows)
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +629,7 @@ func (s *SQLiteStore) GetKGNote(id string) (*KGNote, error) {
 }
 
 func (s *SQLiteStore) SearchKGNotes(query string, limit int) ([]KGNote, error) {
+	limit = normalizeSearchLimit(limit)
 	pattern := "%" + query + "%"
 	rows, err := s.db.Query(
 		`SELECT id, title, note_type, status, summary, file_path, version, archived_at, indexed_at
@@ -589,6 +713,101 @@ func (s *SQLiteStore) GetLinksForSymbol(qualifiedName string) ([]NoteSymbolLink,
 func (s *SQLiteStore) DeleteNoteSymbolLink(id int64) error {
 	_, err := s.db.Exec("DELETE FROM note_symbol_links WHERE id=?", id)
 	return err
+}
+
+// errRequestTimeout is returned by queryContextGuarded when the
+// provider-owned request deadline fires before the SQLite query produced a
+// result set. It preserves the CONTRACT.md guarantee #2 (caller sees a
+// deadline-bounded error); only the SQLite mechanism for delivering it
+// changed (see queryContextGuarded).
+var errRequestTimeout = fmt.Errorf("graphstore: sqlite request exceeded provider timeout")
+
+// queryContextGuarded runs a request-timeout-bounded read and, on timeout,
+// ABANDONS the wedged connection and fails rather than trying to interrupt
+// the in-progress step.
+//
+// Why "abandon-and-fail", not "cancel the step": gcc2 routes SQLite reads
+// through QueryContext with the Path-A request-timeout context. modernc's
+// _sqlite3Step is a non-preemptible translated-C VM loop — on Windows
+// neither a ctx deadline NOR an out-of-band sql.Rows.Close() from another
+// goroutine can interrupt an in-progress step (the prior watchdog fix
+// assumed Close could; it cannot, which is why two Windows passes failed).
+// QueryContext itself does not return until the wedged step completes, so a
+// watchdog that waits for *sql.Rows has nothing to close yet.
+//
+// Correct mechanism: run QueryContext on its own goroutine. If the
+// request-timeout ctx fires first, return errRequestTimeout immediately and
+// leave the goroutine (and its conn) to finish out-of-band. The orphaned
+// modernc step runs to completion on its now-abandoned conn and is reaped by
+// the closeAbandoned helper; it does NOT block the next op because the
+// connection pool is no longer capped at 1 (OpenSQLite) — the next
+// acquisition simply uses a different conn. The timeout *guarantee* (caller
+// sees a deadline-bounded error) is preserved; only its SQLite mechanism
+// changed from "cancel the step" (impossible on modernc/Windows) to
+// "abandon the conn + fail". The bounded-result enforcement (hard
+// node/depth cap) is unaffected and still applied by computeImpactRadius.
+func (s *SQLiteStore) queryContextGuarded(ctx context.Context, query string, args ...any) (*guardedRows, error) {
+	type queryResult struct {
+		rows *sql.Rows
+		err  error
+	}
+	resCh := make(chan queryResult, 1)
+	go func() {
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		resCh <- queryResult{rows: rows, err: err}
+	}()
+
+	select {
+	case res := <-resCh:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return &guardedRows{Rows: res.rows}, nil
+	case <-ctx.Done():
+		// modernc/Windows cannot interrupt the in-flight step; abandon the
+		// goroutine + its conn (safe only because the pool is not capped at
+		// 1) and fail with a deadline-bounded error. The reaper drains +
+		// closes the orphaned result set when the step eventually finishes
+		// so the abandoned conn is returned to the pool rather than leaked.
+		// It is registered on s.reapers (under s.mu so the Add is
+		// ordered-before Close's Wait) so Close blocks until every such
+		// drain has completed (no goroutine/conn outlives the store). If
+		// the store is already closing, drain untracked — Close has
+		// committed to Wait and must not observe a late Add.
+		drain := func() {
+			res := <-resCh
+			if res.rows != nil {
+				_ = res.rows.Close()
+			}
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			go drain()
+			return nil, errRequestTimeout
+		}
+		s.reapers.Add(1)
+		s.mu.Unlock()
+		go func() {
+			defer s.reapers.Done()
+			drain()
+		}()
+		return nil, errRequestTimeout
+	}
+}
+
+// guardedRows wraps *sql.Rows. The deadline mechanism now lives in
+// queryContextGuarded (abandon-and-fail before returning rows), so Close is
+// just an idempotent passthrough; callers still defer it on the
+// normal-completion path to release the conn deterministically.
+type guardedRows struct {
+	*sql.Rows
+	closeOnce sync.Once
+}
+
+func (g *guardedRows) Close() error {
+	g.closeOnce.Do(func() { _ = g.Rows.Close() })
+	return nil
 }
 
 // ---------------------------------------------------------------------------

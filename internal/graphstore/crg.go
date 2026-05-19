@@ -9,6 +9,7 @@ package graphstore
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -135,13 +136,23 @@ repo_root = %q
 %s
 `, b.RepoRoot, b.RepoRoot, pyExpr)
 
+	// Provider-owned request timeout (CONTRACT.md guarantee #2): a CRG
+	// query is a Python subprocess that can run a long graph traversal.
+	// exec.CommandContext kills it when the provider's deadline elapses
+	// so callers never wrap their own deadline around Store/CRG calls.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	py := b.pythonBin()
-	cmd := exec.Command(py, "-c", script)
+	cmd := exec.CommandContext(ctx, py, "-c", script)
 	cmd.Dir = b.RepoRoot
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("crg-py: request timed out after %s", requestTimeout)
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
@@ -675,14 +686,12 @@ type ImpactNode struct {
 
 // GetImpactRadius returns the blast-radius for the given files (or current diff).
 func (b *CRGBridge) GetImpactRadius(opts ImpactOptions) (*CRGImpactResult, error) {
-	maxDepth := opts.MaxDepth
-	if maxDepth == 0 {
-		maxDepth = 2
-	}
-	maxResults := opts.MaxResults
-	if maxResults == 0 {
-		maxResults = 50
-	}
+	// Uniform hard bounds (Path A): the CRG bridge clamps MaxDepth /
+	// MaxResults through the SAME provider caps the native BFS uses
+	// (bounds.go) so a blast-radius query has identical ceilings whether
+	// it ran in-process or in the Python subprocess. Caller values are a
+	// requested ceiling only.
+	maxDepth, maxResults := normalizeTraversalBounds(opts.MaxDepth, opts.MaxResults)
 
 	// A JSON array of strings is also a valid Python list literal, so
 	// marshalling is a single correct escaper for both grammars. Hand-rolling
@@ -892,8 +901,20 @@ func CRGDBPath(repoRoot string) string {
 }
 
 // ReadNodes reads up to limit nodes directly from the CRG SQLite database.
-// If limit <= 0, all nodes are returned. Returns an empty slice if the
-// database does not exist or has no nodes.
+// If limit <= 0, ALL nodes are returned.
+//
+// CONTRACT-PRESSURE (Path A, gcc2): ReadNodes/ReadEdges are bulk *export*
+// operations — the warm-link sync (commands/kg/sync_code_warm_link.go)
+// calls ReadNodes(0)/ReadEdges(0) to mirror the ENTIRE CRG graph into the
+// warm store. The published contract's "hard uniform cap, 0 = default"
+// bound model fits user-facing bounded queries (SearchNodes,
+// GetImpactRadius) but NOT a full-graph mirror: clamping 0 -> a default
+// limit would silently truncate the sync on any repo with more rows than
+// the cap. So Path A intentionally does NOT apply the search-limit clamp
+// here; it only adds the provider-owned request timeout (still a valid,
+// uniform guarantee). The contract is left UNCHANGED and this divergence
+// is flagged for the spec/gcc3 to resolve (e.g. exempt bulk export, or
+// give it a streaming/paged contract) rather than silently bent.
 func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	dbPath := CRGDBPath(b.RepoRoot)
 	if _, err := os.Stat(dbPath); err != nil {
@@ -905,6 +926,11 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	}
 	defer db.Close()
 
+	// Provider-owned request timeout (CONTRACT.md guarantee #2) — applies
+	// even to the export path so a wedged read cannot hang the process.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	q := `SELECT id,kind,name,qualified_name,file_path,
 	             COALESCE(line_start,0),COALESCE(line_end,0),
 	             COALESCE(language,''),COALESCE(parent_name,''),
@@ -915,7 +941,7 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	if limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
-	rows, err := db.Query(q)
+	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query CRG nodes: %w", err)
 	}
@@ -940,7 +966,11 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 }
 
 // ReadEdges reads up to limit edges directly from the CRG SQLite database.
-// If limit <= 0, all edges are returned.
+// If limit <= 0, ALL edges are returned. Like ReadNodes this is a bulk
+// export path: the search-limit clamp is intentionally NOT applied (see
+// the CONTRACT-PRESSURE note on ReadNodes); only the provider request
+// timeout is added. The contract is left unchanged and the divergence is
+// flagged for the spec/gcc3.
 func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	dbPath := CRGDBPath(b.RepoRoot)
 	if _, err := os.Stat(dbPath); err != nil {
@@ -952,6 +982,9 @@ func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	}
 	defer db.Close()
 
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	q := `SELECT id,kind,source_qualified,target_qualified,
 	             COALESCE(file_path,''),COALESCE(line,0),
 	             COALESCE(extra,'{}'),updated_at
@@ -959,7 +992,7 @@ func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	if limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
-	rows, err := db.Query(q)
+	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query CRG edges: %w", err)
 	}

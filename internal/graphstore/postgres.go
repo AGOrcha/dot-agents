@@ -453,7 +453,9 @@ func (s *PostgresStore) GetAllFiles() ([]string, error) {
 // For production workloads with large graphs, consider adding a tsvector GIN
 // index and using to_tsquery instead.
 func (s *PostgresStore) SearchNodes(query string, limit int) ([]GraphNode, error) {
-	ctx := context.Background()
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	pattern := "%" + query + "%"
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
@@ -562,6 +564,11 @@ func (s *PostgresStore) collectLanguages(ctx context.Context) ([]string, error) 
 // Postgres-specific: uses pgx for the seed/edge queries; the BFS body
 // is shared with the SQLite backend via computeImpactRadius (impact.go).
 func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNodes int) (ImpactResult, error) {
+	// Provider-owned request timeout (CONTRACT.md guarantee #2). Bounds
+	// are clamped uniformly in computeImpactRadius.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+
 	seeds := map[string]bool{}
 	for _, f := range changedFiles {
 		nodes, err := s.GetNodesByFile(f)
@@ -573,7 +580,6 @@ func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNode
 		}
 	}
 
-	ctx := context.Background()
 	rows, err := s.pool.Query(ctx, "SELECT source_qualified, target_qualified FROM edges")
 	if err != nil {
 		return ImpactResult{}, err
@@ -627,7 +633,9 @@ func (s *PostgresStore) GetKGNote(id string) (*KGNote, error) {
 }
 
 func (s *PostgresStore) SearchKGNotes(query string, limit int) ([]KGNote, error) {
-	ctx := context.Background()
+	limit = normalizeSearchLimit(limit)
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	pattern := "%" + query + "%"
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, title, note_type, status, summary, file_path, version, archived_at, indexed_at
