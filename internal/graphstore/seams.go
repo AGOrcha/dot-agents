@@ -21,14 +21,3 @@ var sqlOpen = sql.Open
 var dbExec = func(db *sql.DB, query string, args ...any) (sql.Result, error) {
 	return db.Exec(query, args...)
 }
-
-// onGuardedQueryTimeout is invoked by queryContextGuarded's deadline
-// watchdog immediately after it force-closes a timed-out result set to
-// release the single SQLite connection. Default is a no-op (zero overhead
-// in production). The regression test swaps it to deterministically observe
-// that the conn-release path fires on ctx expiry — the behaviour modernc on
-// Windows would otherwise never trigger, causing the single-conn deadlock.
-var onGuardedQueryTimeout = func() {
-	// Intentionally empty: the production default is a zero-overhead
-	// no-op; only the regression test swaps in an observing stub.
-}

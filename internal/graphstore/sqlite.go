@@ -17,6 +17,18 @@ import (
 // SQLiteStore is the SQLite-backed implementation of Store.
 type SQLiteStore struct {
 	db *sql.DB
+
+	// Store lifecycle. lifeCtx is cancelled by Close as the shutdown
+	// signal; reapers tracks the abandon-and-fail conn-drain goroutines
+	// (see queryContextGuarded) so Close blocks until every orphaned
+	// connection has actually been returned to the pool rather than
+	// racing db.Close() against an in-flight reaper. Cancelling lifeCtx
+	// cannot interrupt a non-preemptible modernc step in flight — the
+	// WaitGroup is the real shutdown guarantee; the context is the
+	// lifecycle handle for paths that can observe it.
+	lifeCtx    context.Context
+	cancelLife context.CancelFunc
+	reapers    sync.WaitGroup
 }
 
 // OpenSQLite opens (or creates) the SQLite database at dbPath and initialises
@@ -105,8 +117,10 @@ func OpenSQLite(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("graphstore: enable foreign_keys: %w", err)
 	}
 
-	s := &SQLiteStore{db: db}
+	lifeCtx, cancelLife := context.WithCancel(context.Background())
+	s := &SQLiteStore{db: db, lifeCtx: lifeCtx, cancelLife: cancelLife}
 	if err := s.initSchema(); err != nil {
+		cancelLife()
 		db.Close()
 		return nil, err
 	}
@@ -120,8 +134,17 @@ func (s *SQLiteStore) initSchema() error {
 	return nil
 }
 
-// Close closes the underlying database connection.
+// Close shuts the store down deterministically: it signals the store
+// lifecycle (cancelLife), waits for every in-flight abandon-and-fail
+// reaper to finish draining its orphaned connection, then closes the
+// pool. Waiting on reapers before db.Close() is the correctness point —
+// a timed-out request abandons its connection to a background reaper
+// (see queryContextGuarded); closing the pool while that reaper still
+// holds the conn would race db.Close() against an in-flight step and
+// could leak the goroutine + connection past the store's lifetime.
 func (s *SQLiteStore) Close() error {
+	s.cancelLife()
+	s.reapers.Wait()
 	return s.db.Close()
 }
 
@@ -725,17 +748,17 @@ func (s *SQLiteStore) queryContextGuarded(ctx context.Context, query string, arg
 	case <-ctx.Done():
 		// modernc/Windows cannot interrupt the in-flight step; abandon the
 		// goroutine + its conn (safe only because the pool is not capped at
-		// 1) and fail with a deadline-bounded error. A separate reaper
-		// drains+closes the orphaned result set when the step eventually
-		// finishes so the abandoned conn is returned to the pool rather
-		// than leaked.
-		go func() {
+		// 1) and fail with a deadline-bounded error. The reaper drains +
+		// closes the orphaned result set when the step eventually finishes
+		// so the abandoned conn is returned to the pool rather than leaked.
+		// It is registered on s.reapers so Close blocks until every such
+		// drain has completed (no goroutine/conn outlives the store).
+		s.reapers.Go(func() {
 			res := <-resCh
 			if res.rows != nil {
 				_ = res.rows.Close()
 			}
-			onGuardedQueryTimeout()
-		}()
+		})
 		return nil, errRequestTimeout
 	}
 }

@@ -48,15 +48,6 @@ func openInternalTestStore(t *testing.T) *SQLiteStore {
 	return s
 }
 
-// withGuardedQueryTimeoutHook swaps the onGuardedQueryTimeout seam for the
-// duration of the test (mirrors withSQLOpen/withDBExec in seams_test.go).
-func withGuardedQueryTimeoutHook(t *testing.T, fn func()) {
-	t.Helper()
-	prev := onGuardedQueryTimeout
-	onGuardedQueryTimeout = fn
-	t.Cleanup(func() { onGuardedQueryTimeout = prev })
-}
-
 // --- wedging driver ---------------------------------------------------------
 //
 // wedgeDriver wraps the real modernc "sqlite" driver. Any query whose text
@@ -278,10 +269,6 @@ func seedNodes(t *testing.T, s *SQLiteStore, n int) {
 func TestQueryContextGuarded_AbandonAndFailOnDeadline(t *testing.T) {
 	s, release, wedged := newWedgeStore(t, 0)
 
-	reaped := make(chan struct{}, 1)
-	var once sync.Once
-	withGuardedQueryTimeoutHook(t, func() { once.Do(func() { close(reaped) }) })
-
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 
@@ -305,12 +292,21 @@ func TestQueryContextGuarded_AbandonAndFailOnDeadline(t *testing.T) {
 		t.Fatal("queryContextGuarded blocked on the non-preemptible step instead of abandoning + failing")
 	}
 
-	// Release the wedge: the orphaned step finishes and the reaper runs.
+	// Release the wedge so the orphaned step finishes. Close must then
+	// block until the abandon-and-fail reaper has drained that connection
+	// and return within budget — proving the reaper neither leaks past the
+	// store's lifetime nor races db.Close(). This asserts the real
+	// shutdown guarantee directly, with no production observation seam.
 	close(release)
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
 	select {
-	case <-reaped:
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close after abandon-and-fail: %v", err)
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("abandoned conn's result set was never reaped after the step finished")
+		t.Fatal("Close did not return — abandoned reaper leaked past the store lifetime")
 	}
 }
 
