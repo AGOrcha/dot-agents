@@ -14,19 +14,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// initDeps is the narrow collaborator interface init.go's fault-injectable
-// operations need (interface-DI per docs/TEST_SEAMS.md). Production wires
-// stdInitDeps via NewInitCmd's RunE closure; tests inject a fakeInitDeps
-// to drive the MkdirAll error branches that a writable tmp dir never hits.
-// Per-file scope — do not grow this for unrelated needs.
-type initDeps interface {
+// initDirMaker is the narrow collaborator init.go's fault-injectable
+// operations need (interface-DI per docs/TEST_SEAMS.md). Single-method
+// today, named with the -er suffix per Go style; rename to a multi-method
+// role name (cf. dirCleaner, schemaCompiler) if init.go grows additional
+// seam needs later. File-scoped — do not share with other commands files.
+type initDirMaker interface {
 	MkdirAll(path string, perm os.FileMode) error
 }
 
-// stdInitDeps is the production initDeps backed by the os package.
-type stdInitDeps struct{}
+// stdInitDirMaker is the production initDirMaker backed by the os package.
+type stdInitDirMaker struct{}
 
-func (stdInitDeps) MkdirAll(path string, perm os.FileMode) error {
+func (stdInitDirMaker) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
@@ -46,13 +46,13 @@ commands that expect the shared store to exist.`,
 		),
 		Args: NoArgsWithHints("`da init` bootstraps the shared store and does not take a project path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, args, stdInitDeps{})
+			return runInit(cmd, args, stdInitDirMaker{})
 		},
 	}
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, args []string, deps initDeps) error {
+func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 	agentsHome := config.AgentsHome()
 
 	ui.Header("da init")
@@ -152,56 +152,11 @@ func runInit(cmd *cobra.Command, args []string, deps initDeps) error {
 	}
 
 	// Global Claude Code settings symlink — hooks/ takes priority over settings/
-	claudeHooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
-	claudeSettingsPath := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
-	if _, err := os.Stat(claudeHooksSrc); err == nil {
-		claudeSettingsPath = claudeHooksSrc
+	if err := linkClaudeGlobalSettings(agentsHome, deps); err != nil {
+		return err
 	}
-	claudePlatform := platform.ByID("claude")
-	if claudePlatform != nil && claudePlatform.IsInstalled() {
-		home := config.UserHome()
-		claudeDir := filepath.Join(home, ".claude")
-		_ = deps.MkdirAll(claudeDir, 0755) // best-effort idempotent create; SymlinkReplacing below surfaces any real failure
-		claudeSettings := filepath.Join(claudeDir, "settings.json")
-		if _, err := os.Lstat(claudeSettings); os.IsNotExist(err) || Flags.Force {
-			// --force is a deliberate replace. Route through the
-			// backup-preserving path so an unmanaged user
-			// ~/.claude/settings.json is kept as <path>.dot-agents-backup
-			// (the established repo convention) rather than destroyed, and
-			// propagate the error: links now returns ErrUnmanagedTarget for
-			// unmanaged occupants, so swallowing it would print false
-			// success while global setup was NOT applied.
-			if err := links.SymlinkReplacing(claudeSettingsPath, claudeSettings, sidecarBackupFile); err != nil {
-				return fmt.Errorf("linking %s: %w", claudeSettings, err)
-			}
-			ui.Bullet("ok", "Created Claude Code global settings symlink")
-		} else {
-			ui.Bullet("skip", "~/.claude/settings.json exists (use --force to replace)")
-		}
-	}
-
-	// Global Cursor hooks hardlink
-	cursorPlatform := platform.ByID("cursor")
-	if cursorPlatform != nil && cursorPlatform.IsInstalled() {
-		cursorHooksSrc := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
-		if _, err := os.Stat(cursorHooksSrc); err == nil {
-			home := config.UserHome()
-			cursorDir := filepath.Join(home, ".cursor")
-			_ = deps.MkdirAll(cursorDir, 0755) // best-effort idempotent create; HardlinkReplacing below surfaces any real failure
-			cursorHooksDst := filepath.Join(cursorDir, "hooks.json")
-			if _, err := os.Lstat(cursorHooksDst); os.IsNotExist(err) || Flags.Force {
-				// Same contract as the Claude settings link above: --force
-				// is a deliberate replace, so preserve an unmanaged user
-				// ~/.cursor/hooks.json as a sidecar backup and propagate any
-				// error instead of printing false success.
-				if err := links.HardlinkReplacing(cursorHooksSrc, cursorHooksDst, sidecarBackupFile); err != nil {
-					return fmt.Errorf("linking %s: %w", cursorHooksDst, err)
-				}
-				ui.Bullet("ok", "Created Cursor global hooks hardlink")
-			} else {
-				ui.Bullet("skip", "~/.cursor/hooks.json exists (use --force to replace)")
-			}
-		}
+	if err := linkCursorGlobalHooks(agentsHome, deps); err != nil {
+		return err
 	}
 
 	// State dir — best-effort idempotent create.
@@ -240,9 +195,68 @@ func scaffoldStarterHomeAssets(agentsHome string) error {
 	return scaffoldhome.CopyMissingStarterAssets(agentsHome)
 }
 
-func scaffoldWorkflowAssets(agentsHome string, deps initDeps) error {
+func scaffoldWorkflowAssets(agentsHome string, deps initDirMaker) error {
 	if err := deps.MkdirAll(config.AgentsContextDir(), 0755); err != nil {
 		return err
 	}
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
+}
+
+// linkClaudeGlobalSettings creates the global ~/.claude/settings.json
+// symlink when Claude Code is installed. Hooks/global/claude-code.json
+// takes priority over settings/global/claude-code.json. --force routes
+// through the backup-preserving link so an unmanaged user file is kept
+// as <path>.dot-agents-backup rather than destroyed; link errors are
+// propagated (links returns ErrUnmanagedTarget for unmanaged occupants
+// and swallowing it would print false success).
+func linkClaudeGlobalSettings(agentsHome string, deps initDirMaker) error {
+	claudePlatform := platform.ByID("claude")
+	if claudePlatform == nil || !claudePlatform.IsInstalled() {
+		return nil
+	}
+	claudeHooksSrc := filepath.Join(agentsHome, "hooks", "global", "claude-code.json")
+	claudeSettingsPath := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	if _, err := os.Stat(claudeHooksSrc); err == nil {
+		claudeSettingsPath = claudeHooksSrc
+	}
+	home := config.UserHome()
+	claudeDir := filepath.Join(home, ".claude")
+	_ = deps.MkdirAll(claudeDir, 0755) // best-effort; SymlinkReplacing surfaces any real failure
+	claudeSettings := filepath.Join(claudeDir, "settings.json")
+	if _, err := os.Lstat(claudeSettings); !(os.IsNotExist(err) || Flags.Force) {
+		ui.Bullet("skip", "~/.claude/settings.json exists (use --force to replace)")
+		return nil
+	}
+	if err := links.SymlinkReplacing(claudeSettingsPath, claudeSettings, sidecarBackupFile); err != nil {
+		return fmt.Errorf("linking %s: %w", claudeSettings, err)
+	}
+	ui.Bullet("ok", "Created Claude Code global settings symlink")
+	return nil
+}
+
+// linkCursorGlobalHooks creates the global ~/.cursor/hooks.json hardlink
+// when Cursor is installed and the source hooks file exists. Same
+// backup-preserving contract as linkClaudeGlobalSettings.
+func linkCursorGlobalHooks(agentsHome string, deps initDirMaker) error {
+	cursorPlatform := platform.ByID("cursor")
+	if cursorPlatform == nil || !cursorPlatform.IsInstalled() {
+		return nil
+	}
+	cursorHooksSrc := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
+	if _, err := os.Stat(cursorHooksSrc); err != nil {
+		return nil
+	}
+	home := config.UserHome()
+	cursorDir := filepath.Join(home, ".cursor")
+	_ = deps.MkdirAll(cursorDir, 0755) // best-effort; HardlinkReplacing surfaces any real failure
+	cursorHooksDst := filepath.Join(cursorDir, "hooks.json")
+	if _, err := os.Lstat(cursorHooksDst); !(os.IsNotExist(err) || Flags.Force) {
+		ui.Bullet("skip", "~/.cursor/hooks.json exists (use --force to replace)")
+		return nil
+	}
+	if err := links.HardlinkReplacing(cursorHooksSrc, cursorHooksDst, sidecarBackupFile); err != nil {
+		return fmt.Errorf("linking %s: %w", cursorHooksDst, err)
+	}
+	ui.Bullet("ok", "Created Cursor global hooks hardlink")
+	return nil
 }

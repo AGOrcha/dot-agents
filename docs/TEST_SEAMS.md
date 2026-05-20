@@ -53,6 +53,19 @@ func emptyProjectDirs(dc dirCleaner, project string) error { … } // prod passe
 | Collaborator threaded through a `sync.Once` wrapper; prod passes `stdSchemaCompiler{}`, no production cascade | `commands/workflow/seams.go` (`schemaCompiler` / `stdSchemaCompiler`) |
 | First-class injected collaborator (constructor) | `internal/graphstore/store.go` `NewHandle(store Store)` |
 
+### Naming
+
+- **Multi-method interfaces** (most cases): name by the *role* the
+  collaborator plays — `dirCleaner`, `schemaCompiler`, `Store`. No
+  `-er` suffix required when the role name already reads as a noun
+  ending in something else.
+- **Single-method interfaces**: follow Go style and use the method
+  name plus `-er` (Sonar S8196 enforces this). Prefix with the file
+  it serves to keep per-file scope explicit when multiple files would
+  otherwise collide on the same name — e.g. `initDirMaker` (init.go's
+  MkdirAll seam). Rename to a multi-method role name if the interface
+  grows additional methods later.
+
 ### Choosing the injection site
 
 - **Constructor / struct field** when the unit is a type — inject once,

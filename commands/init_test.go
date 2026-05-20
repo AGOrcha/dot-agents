@@ -10,15 +10,15 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
-// fakeInitDeps is the interface-DI test double for initDeps (per
+// fakeInitDirMaker is the interface-DI test double for initDeps (per
 // docs/TEST_SEAMS.md). A nil func field delegates to the real os
 // implementation, so a test overrides only the operation it wants to
 // fault-inject.
-type fakeInitDeps struct {
+type fakeInitDirMaker struct {
 	mkdirAll func(string, os.FileMode) error
 }
 
-func (f fakeInitDeps) MkdirAll(path string, perm os.FileMode) error {
+func (f fakeInitDirMaker) MkdirAll(path string, perm os.FileMode) error {
 	if f.mkdirAll != nil {
 		return f.mkdirAll(path, perm)
 	}
@@ -26,7 +26,7 @@ func (f fakeInitDeps) MkdirAll(path string, perm os.FileMode) error {
 }
 
 // TestFakeInitDeps_NilDelegatesToReal pins the nil-delegates-to-real
-// contract documented on fakeInitDeps so a test that omits mkdirAll
+// contract documented on fakeInitDirMaker so a test that omits mkdirAll
 // genuinely creates the dir (rather than silently succeeding without
 // touching the filesystem). Without this, a future change to the fake's
 // default branch could regress every happy-path-but-not-overridden test
@@ -34,7 +34,7 @@ func (f fakeInitDeps) MkdirAll(path string, perm os.FileMode) error {
 func TestFakeInitDeps_NilDelegatesToReal(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "delegate", "nested")
-	if err := (fakeInitDeps{}).MkdirAll(target, 0o755); err != nil {
+	if err := (fakeInitDirMaker{}).MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("nil-mkdirAll delegate: %v", err)
 	}
 	info, err := os.Stat(target)
@@ -43,6 +43,26 @@ func TestFakeInitDeps_NilDelegatesToReal(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Errorf("delegated MkdirAll produced non-dir at %s", target)
+	}
+}
+
+// TestNewInitCmd_RunEClosureWiresStdDeps covers the RunE closure body
+// itself — without this, Cobra-driven invocation goes through code no
+// test exercises directly, and the closure could regress (e.g. forget
+// to thread args) without any other test failing. Drives a dry-run so
+// the call is mutation-free.
+func TestNewInitCmd_RunEClosureWiresStdDeps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true, Yes: true}
+	defer func() { Flags = saved }()
+
+	cmd := NewInitCmd()
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE closure: %v", err)
 	}
 }
 
@@ -72,7 +92,7 @@ func TestRunInit_DryRunMakesNoChanges(t *testing.T) {
 	Flags = GlobalFlags{DryRun: true, Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit dry-run: %v", err)
 	}
 	if _, err := os.Stat(agentsHome); !os.IsNotExist(err) {
@@ -98,7 +118,7 @@ func TestRunInit_ExistingHomeWithoutForceIsNoop(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit on existing home: %v", err)
 	}
 	// Sentinel should be intact
@@ -121,7 +141,7 @@ func TestRunInit_FreshInstallCreatesStructure(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
@@ -174,7 +194,7 @@ func TestRunInit_ForceReinitializes(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, Force: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit --force: %v", err)
 	}
 
@@ -223,7 +243,7 @@ func TestRunInit_ForcePreservesUnmanagedClaudeSettings(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, Force: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit --force: %v", err)
 	}
 
@@ -339,7 +359,7 @@ func TestScaffoldWorkflowAssets_NoHooksDir(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	// Do NOT pre-create hooks/global - exercises the auto-create branch.
-	if err := scaffoldWorkflowAssets(agentsHome, stdInitDeps{}); err != nil {
+	if err := scaffoldWorkflowAssets(agentsHome, stdInitDirMaker{}); err != nil {
 		t.Fatalf("scaffoldWorkflowAssets without pre-existing hooks dir: %v", err)
 	}
 }
@@ -353,7 +373,7 @@ func TestScaffoldWorkflowAssets_CreatesHookBundleRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks", "global"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := scaffoldWorkflowAssets(agentsHome, stdInitDeps{}); err != nil {
+	if err := scaffoldWorkflowAssets(agentsHome, stdInitDirMaker{}); err != nil {
 		t.Fatalf("scaffoldWorkflowAssets: %v", err)
 	}
 	// Context dir is required side-effect
@@ -375,7 +395,7 @@ func TestRunInit_AllPlatformsInstalledSeeded(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit (all platforms seeded): %v", err)
 	}
 
@@ -409,7 +429,7 @@ func TestRunInit_SeededClaudeExercisesClaudeSettingsBranch(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit (claude seeded): %v", err)
 	}
 
@@ -446,7 +466,7 @@ func TestRunInit_ForceWithSeededClaudeOverwritesSettings(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, Force: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit --force (claude seeded): %v", err)
 	}
 }
@@ -470,7 +490,7 @@ func TestRunInit_SeededClaudeAndExistingSettingsSkipsWithoutForce(t *testing.T) 
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit (skip claude settings without force): %v", err)
 	}
 
@@ -500,7 +520,7 @@ func TestRunInit_HooksSrcExistsRedirectsSettingsPath(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit first pass: %v", err)
 	}
 
@@ -514,7 +534,7 @@ func TestRunInit_HooksSrcExistsRedirectsSettingsPath(t *testing.T) {
 
 	Flags = GlobalFlags{Yes: true, Force: true}
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit --force after hooks seed: %v", err)
 	}
 }
@@ -535,7 +555,7 @@ func TestRunInit_MkdirOnClaudeBranchSucceedsOnEmptyDir(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInit(NewInitCmd(), nil, stdInitDeps{}); err != nil {
+	if err := runInit(NewInitCmd(), nil, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInit IsNotExist branch: %v", err)
 	}
 

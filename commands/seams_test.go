@@ -267,7 +267,7 @@ func TestScaffoldWorkflowAssets_MkdirError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	sentinel := errors.New("mkdir boom")
-	deps := fakeInitDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
+	deps := fakeInitDirMaker{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
 	if err := scaffoldWorkflowAssets(t.TempDir(), deps); !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
@@ -1117,7 +1117,7 @@ func TestRunInit_MkdirError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("mkdir boom")
-	deps := fakeInitDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
+	deps := fakeInitDirMaker{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
 	err := runInit(nil, nil, deps)
 	if err == nil || !strings.Contains(err.Error(), "creating ") {
