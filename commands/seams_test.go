@@ -774,13 +774,13 @@ func TestRunStatus_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, sentinel })
+	deps := fakeStatusConfigLoader{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runStatus(false, "")
+	err := runStatus(false, "", deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}

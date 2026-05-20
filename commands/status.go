@@ -90,6 +90,20 @@ type statusJSONProject struct {
 	LastRefreshed string               `json:"last_refreshed,omitempty"`
 }
 
+// statusConfigLoader is the narrow collaborator status.go's fault-injectable
+// LoadConfig operation needs (interface-DI per docs/TEST_SEAMS.md).
+// Single-method, file-prefixed -er form; file-scoped — do not share with
+// other commands files.
+type statusConfigLoader interface {
+	LoadConfig() (*config.Config, error)
+}
+
+// stdStatusConfigLoader is the production statusConfigLoader backed by
+// internal/config.Load.
+type stdStatusConfigLoader struct{}
+
+func (stdStatusConfigLoader) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewStatusCmd() *cobra.Command {
 	var audit bool
 	var agentFilter string
@@ -113,7 +127,7 @@ agent that must reason about the exact managed outputs.`,
 		),
 		Args: NoArgsWithHints("Use `--agent` to filter by platform instead of passing a positional argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(audit, agentFilter)
+			return runStatus(audit, agentFilter, stdStatusConfigLoader{})
 		},
 	}
 	cmd.Flags().BoolVar(&audit, "audit", false, "Show detailed link audit for each project")
@@ -334,8 +348,8 @@ func printStatusProjectManifestSummary(path string) {
 		ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
 }
 
-func runStatus(audit bool, agentFilter string) error {
-	cfg, err := configLoad()
+func runStatus(audit bool, agentFilter string, deps statusConfigLoader) error {
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
