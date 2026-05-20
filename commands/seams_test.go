@@ -280,9 +280,9 @@ func TestScaffoldWorkflowAssets_MkdirError(t *testing.T) {
 
 func TestRunInstall_GetwdError(t *testing.T) {
 	sentinel := errors.New("getwd boom")
-	withGetwdStub(t, func() (string, error) { return "", sentinel })
+	deps := fakeInstallDeps{getwd: func() (string, error) { return "", sentinel }}
 
-	err := runInstall(false)
+	err := runInstall(false, deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped getwd error, got %v", err)
 	}
@@ -290,9 +290,9 @@ func TestRunInstall_GetwdError(t *testing.T) {
 
 func TestRunInstallGenerate_GetwdError(t *testing.T) {
 	sentinel := errors.New("getwd boom")
-	withGetwdStub(t, func() (string, error) { return "", sentinel })
+	deps := fakeInstallDeps{getwd: func() (string, error) { return "", sentinel }}
 
-	err := runInstallGenerate()
+	err := runInstallGenerate(deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped getwd error, got %v", err)
 	}
@@ -321,9 +321,9 @@ func TestLinkResourceFromSources_MkdirError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeInstallDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	err := linkResourceFromSources("skills", "demo", "proj", []string{src})
+	err := linkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -350,9 +350,9 @@ func TestLinkResourceFromSources_SymlinkError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("symlink boom")
-	withSymlinkStub(t, func(string, string) error { return sentinel })
+	deps := fakeInstallDeps{symlink: func(string, string) error { return sentinel }}
 
-	err := linkResourceFromSources("skills", "demo", "proj", []string{src})
+	err := linkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
 	if err == nil || !strings.Contains(err.Error(), "symlinking demo") {
 		t.Fatalf("expected wrapped symlink error, got %v", err)
 	}
@@ -365,13 +365,13 @@ func TestLinkResourceFromSources_SymlinkError(t *testing.T) {
 
 func TestCloneGitSource_MkdirError(t *testing.T) {
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeInstallDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	_, err := cloneGitSource("git", "https://example.invalid/repo.git", "main", t.TempDir())
+	_, err := cloneGitSource("git", "https://example.invalid/repo.git", "main", t.TempDir(), deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -815,17 +815,17 @@ func TestRegisterInstallProject_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, sentinel })
+	deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
-	err := registerInstallProject("p", filepath.Join(tmp, "p"))
+	err := registerInstallProject("p", filepath.Join(tmp, "p"), deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}
 }
 
 func TestFindProjectByPath_ConfigLoadError(t *testing.T) {
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, errors.New("load boom") })
-	if got := findProjectByPath("/whatever"); got != "" {
+	deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) { return nil, errors.New("load boom") }}
+	if got := findProjectByPath("/whatever", deps); got != "" {
 		t.Errorf("expected empty string on load error, got %q", got)
 	}
 }
@@ -909,7 +909,7 @@ func TestLinkResourceFromSources_VerboseBullet(t *testing.T) {
 	Flags = GlobalFlags{Verbose: true}
 	defer func() { Flags = saved }()
 
-	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}); err != nil {
+	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}, stdInstallDeps{}); err != nil {
 		t.Fatalf("linkResourceFromSources: %v", err)
 	}
 }
@@ -1064,13 +1064,13 @@ func TestRunInstallGenerate_CorruptExistingManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectPath, config.AgentsRCFile), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withGetwdStub(t, func() (string, error) { return projectPath, nil })
+	deps := fakeInstallDeps{getwd: func() (string, error) { return projectPath, nil }}
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runInstallGenerate()
+	err := runInstallGenerate(deps)
 	if err == nil || !strings.Contains(err.Error(), "loading existing") {
 		t.Fatalf("expected loading existing manifest error, got %v", err)
 	}
@@ -1092,13 +1092,13 @@ func TestRunInstallGenerate_SaveFailure(t *testing.T) {
 	if err := os.WriteFile(projectPath, []byte("not a directory"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withGetwdStub(t, func() (string, error) { return projectPath, nil })
+	deps := fakeInstallDeps{getwd: func() (string, error) { return projectPath, nil }}
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runInstallGenerate()
+	err := runInstallGenerate(deps)
 	if err == nil {
 		t.Fatal("expected error from rc.Save on non-directory project path")
 	}
