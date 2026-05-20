@@ -245,6 +245,27 @@ var globalImportWalkDirs = []string{
 	".github/prompts",
 }
 
+// importDeps is the multi-method collaborator runImport and its helpers
+// need (interface-DI per docs/TEST_SEAMS.md). File-scoped — do not share
+// with other commands files. Multi-method role name without -er suffix
+// per the convention.
+type importDeps interface {
+	MkdirAll(path string, perm os.FileMode) error
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	LoadConfig() (*config.Config, error)
+}
+
+// stdImportDeps is the production importDeps backed by os and config.
+type stdImportDeps struct{}
+
+func (stdImportDeps) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+func (stdImportDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+func (stdImportDeps) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewImportCmd() *cobra.Command {
 	scope := "all"
 	cmd := &cobra.Command{
@@ -270,7 +291,7 @@ to normalize hand-edited config back into the managed store.`,
 			if len(args) > 0 {
 				projectFilter = args[0]
 			}
-			return runImport(projectFilter, scope)
+			return runImport(projectFilter, scope, stdImportDeps{})
 		},
 	}
 	cmd.Flags().StringVar(&scope, "scope", "all", "Import scope: project, global, or all")
@@ -283,20 +304,20 @@ func runImportFromRefresh(projectFilter, scope string) error {
 	defer func() {
 		Flags.Yes = oldYes
 	}()
-	return runImportInternal(projectFilter, scope, true)
+	return runImportInternal(projectFilter, scope, true, stdImportDeps{})
 }
 
-func runImport(projectFilter, scope string) error {
-	return runImportInternal(projectFilter, scope, false)
+func runImport(projectFilter, scope string, deps importDeps) error {
+	return runImportInternal(projectFilter, scope, false, deps)
 }
 
-func runImportInternal(projectFilter, scope string, skipRelink bool) error {
+func runImportInternal(projectFilter, scope string, skipRelink bool, deps importDeps) error {
 	scope, err := normalizeImportScope(scope)
 	if err != nil {
 		return err
 	}
 
-	cfg, err := configLoad()
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -316,7 +337,7 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 	sortImportCandidates(candidates)
 
 	timestamp := time.Now().Format("20060102-150405")
-	result := foldImportCandidates(candidates, agentsHome, timestamp)
+	result := foldImportCandidates(candidates, agentsHome, timestamp, deps)
 
 	if !skipRelink && scope != importScopeGlobal {
 		relinkImportedProjects(cfg, projectSet)
@@ -327,10 +348,10 @@ func runImportInternal(projectFilter, scope string, skipRelink bool) error {
 }
 
 // foldImportCandidates runs the import pipeline for each candidate in stable order.
-func foldImportCandidates(candidates []importCandidate, agentsHome, timestamp string) importResult {
+func foldImportCandidates(candidates []importCandidate, agentsHome, timestamp string, deps importDeps) importResult {
 	result := importResult{}
 	for _, c := range candidates {
-		delta := processImportCandidate(c, agentsHome, timestamp)
+		delta := processImportCandidate(c, agentsHome, timestamp, deps)
 		result.imported += delta.imported
 		result.skipped += delta.skipped
 	}
@@ -378,7 +399,7 @@ func sortImportCandidates(candidates []importCandidate) {
 	})
 }
 
-func processImportCandidate(c importCandidate, agentsHome, timestamp string) importResult {
+func processImportCandidate(c importCandidate, agentsHome, timestamp string, deps importDeps) importResult {
 	if isManagedImportSource(c, agentsHome) {
 		return importResult{}
 	}
@@ -389,7 +410,7 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string) imp
 		if statErr != nil || srcInfo.IsDir() {
 			return importResult{}
 		}
-		if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo); ok {
+		if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo, deps); ok {
 			return result
 		}
 		return importResult{}
@@ -400,7 +421,7 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string) imp
 		return importResult{}
 	}
 
-	if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo); ok {
+	if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo, deps); ok {
 		return result
 	}
 
@@ -655,7 +676,7 @@ func mapGlobalRelToDest(rel string) string {
 	}
 }
 
-func processCanonicalHookBundleImport(c importCandidate, agentsHome, timestamp string, srcInfo os.FileInfo) (importResult, bool) {
+func processCanonicalHookBundleImport(c importCandidate, agentsHome, timestamp string, srcInfo os.FileInfo, deps importDeps) (importResult, bool) {
 	outputs, ok, err := canonicalImportOutputs(c)
 	if !ok {
 		return importResult{}, false
@@ -667,21 +688,21 @@ func processCanonicalHookBundleImport(c importCandidate, agentsHome, timestamp s
 
 	total := importResult{}
 	for _, output := range outputs {
-		delta := processImportOutput(c, output, agentsHome, timestamp, srcInfo)
+		delta := processImportOutput(c, output, agentsHome, timestamp, srcInfo, deps)
 		total.imported += delta.imported
 		total.skipped += delta.skipped
 	}
 	return total, true
 }
 
-func processImportOutput(c importCandidate, output importOutput, agentsHome, timestamp string, srcInfo os.FileInfo) importResult {
+func processImportOutput(c importCandidate, output importOutput, agentsHome, timestamp string, srcInfo os.FileInfo, deps importDeps) importResult {
 	resolved := c
 	resolved.destRel = output.destRel
 	dest := resolved.destPath(agentsHome)
 
 	destInfo, err := os.Stat(dest)
 	if os.IsNotExist(err) {
-		return importMissingContentCandidate(resolved, dest, output.content, timestamp)
+		return importMissingContentCandidate(resolved, dest, output.content, timestamp, deps)
 	}
 	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("Failed to inspect %s: %v", resolved.destRel, err))
@@ -703,23 +724,23 @@ func processImportOutput(c importCandidate, output importOutput, agentsHome, tim
 			if _, err := os.Stat(altDest); os.IsNotExist(err) {
 				resolved := c
 				resolved.destRel = altRel
-				return importPreservedConflictCandidate(resolved, agentsHome, output, altRel, altDest, timestamp)
+				return importPreservedConflictCandidate(resolved, agentsHome, output, altRel, altDest, timestamp, deps)
 			}
 		}
 	}
 
-	return replaceImportContentCandidate(resolved, agentsHome, dest, output.content, timestamp, srcInfo, destInfo)
+	return replaceImportContentCandidate(resolved, agentsHome, dest, output.content, timestamp, srcInfo, destInfo, deps)
 }
 
-func importMissingContentCandidate(c importCandidate, dest string, content []byte, timestamp string) importResult {
+func importMissingContentCandidate(c importCandidate, dest string, content []byte, timestamp string, deps importDeps) importResult {
 	if Flags.DryRun {
 		ui.DryRun(fmt.Sprintf("Import %s -> %s", config.DisplayPath(c.sourcePath), c.destRel))
 		return importResult{imported: 1}
 	}
 
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	_ = osMkdirAll(filepath.Dir(dest), 0755)
-	if err := osWriteFile(dest, content, 0644); err != nil {
+	_ = deps.MkdirAll(filepath.Dir(dest), 0755)
+	if err := deps.WriteFile(dest, content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -728,7 +749,7 @@ func importMissingContentCandidate(c importCandidate, dest string, content []byt
 	return importResult{imported: 1}
 }
 
-func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, content []byte, timestamp string, srcInfo, destInfo os.FileInfo) importResult {
+func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, content []byte, timestamp string, srcInfo, destInfo os.FileInfo, deps importDeps) importResult {
 	if !ui.Confirm(importReplaceMessage(c, srcInfo, destInfo), Flags.Yes) {
 		return importResult{skipped: 1}
 	}
@@ -739,7 +760,7 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 
 	mirrorBackup(c.project, agentsHome, dest, timestamp)
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := osWriteFile(dest, content, 0644); err != nil {
+	if err := deps.WriteFile(dest, content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -748,22 +769,22 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 	return importResult{imported: 1}
 }
 
-func importPreservedConflictCandidate(c importCandidate, agentsHome string, output importOutput, altRel, altDest string, timestamp string) importResult {
+func importPreservedConflictCandidate(c importCandidate, agentsHome string, output importOutput, altRel, altDest string, timestamp string, deps importDeps) importResult {
 	if Flags.DryRun {
 		ui.DryRun(fmt.Sprintf("Import conflict: preserve %s; write alternate %s", output.destRel, altRel))
 		return importResult{imported: 1}
 	}
 
-	if err := writeImportConflictReviewNote(agentsHome, c.project, output.destRel, altRel, output.Origin); err != nil {
+	if err := writeImportConflictReviewNote(agentsHome, c.project, output.destRel, altRel, output.Origin, deps); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("could not write import conflict review note: %v", err))
 	}
 
 	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := osMkdirAll(filepath.Dir(altDest), 0755); err != nil {
+	if err := deps.MkdirAll(filepath.Dir(altDest), 0755); err != nil {
 		ui.Bullet("warn", fmt.Sprintf("Failed to create %s: %v", altRel, err))
 		return importResult{skipped: 1}
 	}
-	if err := osWriteFile(altDest, output.content, 0644); err != nil {
+	if err := deps.WriteFile(altDest, output.content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}
@@ -841,12 +862,12 @@ func logicalNameFromHooksDest(destRel string) string {
 	return ""
 }
 
-func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel, origin string) error {
+func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel, origin string, deps importDeps) error {
 	if Flags.DryRun {
 		return nil
 	}
 	dir := filepath.Join(agentsHome, "review-notes", "import-conflicts")
-	if err := osMkdirAll(dir, 0755); err != nil {
+	if err := deps.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	id := fmt.Sprintf("ic-%d", time.Now().UnixNano())
@@ -873,7 +894,7 @@ func writeImportConflictReviewNote(agentsHome, project, primaryRel, alternateRel
 		return err
 	}
 	fn := filepath.Join(dir, id+".yaml")
-	return osWriteFile(fn, append(data, '\n'), 0644)
+	return deps.WriteFile(fn, append(data, '\n'), 0644)
 }
 
 func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {

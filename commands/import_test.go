@@ -15,6 +15,93 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// fakeImportDeps is the interface-DI test double for importDeps (per
+// docs/TEST_SEAMS.md). A nil func field delegates to the real
+// implementation, so a test overrides only the operation it wants to
+// fault-inject.
+type fakeImportDeps struct {
+	mkdirAll   func(string, os.FileMode) error
+	writeFile  func(string, []byte, os.FileMode) error
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeImportDeps) MkdirAll(path string, perm os.FileMode) error {
+	if f.mkdirAll != nil {
+		return f.mkdirAll(path, perm)
+	}
+	return os.MkdirAll(path, perm)
+}
+
+func (f fakeImportDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	if f.writeFile != nil {
+		return f.writeFile(name, data, perm)
+	}
+	return os.WriteFile(name, data, perm)
+}
+
+func (f fakeImportDeps) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeImportDeps_NilDelegatesToReal pins the nil-delegates-to-real
+// contract for each method of the fake.
+func TestFakeImportDeps_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (fakeImportDeps{}).MkdirAll(filepath.Join(tmp, "a", "b"), 0o755); err != nil {
+		t.Fatalf("nil-mkdirAll delegate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "a", "b")); err != nil {
+		t.Fatalf("real MkdirAll did not create path: %v", err)
+	}
+
+	dst := filepath.Join(tmp, "f.txt")
+	if err := (fakeImportDeps{}).WriteFile(dst, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("nil-writeFile delegate: %v", err)
+	}
+	if data, _ := os.ReadFile(dst); string(data) != "hi" {
+		t.Errorf("expected real WriteFile content, got %q", string(data))
+	}
+
+	cfg, err := (fakeImportDeps{}).LoadConfig()
+	if err != nil {
+		t.Fatalf("nil-loadConfig delegate: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected real config.Load result, got nil")
+	}
+}
+
+// TestNewImportCmd_RunEClosureWiresStdDeps drives import's RunE closure
+// end to end. Empty config + global-scope with no candidates returns
+// success without filesystem mutation.
+func TestNewImportCmd_RunEClosureWiresStdDeps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	cmd := NewImportCmd()
+	cmd.SetArgs([]string{"--scope", "global"})
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE closure: %v", err)
+	}
+}
+
 const (
 	canonicalImportProject = "proj"
 	promptLogJSON          = "prompt-log.json"
@@ -1103,7 +1190,7 @@ func TestRunImport_GlobalScopeNoCandidatesIsNoop(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runImport("", "global"); err != nil {
+	if err := runImport("", "global", stdImportDeps{}); err != nil {
 		t.Errorf("runImport global: %v", err)
 	}
 }
@@ -1113,7 +1200,7 @@ func TestRunImport_InvalidScopeErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runImport("", "bogus"); err == nil {
+	if err := runImport("", "bogus", stdImportDeps{}); err == nil {
 		t.Error("expected error for invalid scope")
 	} else if !strings.Contains(err.Error(), "scope") {
 		t.Errorf("expected scope error, got: %v", err)
@@ -1123,7 +1210,7 @@ func TestRunImport_InvalidScopeErrors(t *testing.T) {
 // ---------- foldImportCandidates: skips backup destinations ----------
 
 func TestFoldImportCandidates_EmptyList(t *testing.T) {
-	r := foldImportCandidates(nil, t.TempDir(), "20260101-000000")
+	r := foldImportCandidates(nil, t.TempDir(), "20260101-000000", stdImportDeps{})
 	if r.imported != 0 || r.skipped != 0 {
 		t.Errorf("expected zero result, got %+v", r)
 	}
@@ -1146,7 +1233,7 @@ func TestRunImport_ProjectScopeNoCandidates(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runImport("", "project"); err != nil {
+	if err := runImport("", "project", stdImportDeps{}); err != nil {
 		t.Errorf("runImport project scope: %v", err)
 	}
 }
@@ -1185,7 +1272,7 @@ func TestRunImportInternal_InvalidScope(t *testing.T) {
 	defer func() { Flags = saved }()
 	Flags = GlobalFlags{}
 
-	if err := runImportInternal("", "bogus", false); err == nil {
+	if err := runImportInternal("", "bogus", false, stdImportDeps{}); err == nil {
 		t.Error("expected invalid-scope error")
 	}
 }
@@ -1255,7 +1342,7 @@ func TestProcessImportOutput_WritesNewDest(t *testing.T) {
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
 	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("payload")}
 
-	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo, stdImportDeps{})
 	if res.imported != 1 || res.skipped != 0 {
 		t.Errorf("result = %+v", res)
 	}
@@ -1283,7 +1370,7 @@ func TestProcessImportOutput_IdenticalDestIsNoop(t *testing.T) {
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
 	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("same")}
-	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo, stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("expected no-op for identical content, got %+v", res)
 	}
@@ -1304,7 +1391,7 @@ func TestProcessImportOutput_ReplaceWhenDifferent(t *testing.T) {
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
 	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("new")}
-	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo, stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("result = %+v", res)
 	}
@@ -1329,7 +1416,7 @@ func TestProcessImportOutput_OriginConflictPreservesExisting(t *testing.T) {
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
 	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
-	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo)
+	res := processImportOutput(c, out, agentsHome, "ts1", srcInfo, stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("expected preservation path to count as imported, got %+v", res)
 	}
@@ -1361,7 +1448,7 @@ func TestImportMissingContentCandidate_DryRunSkips(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: filepath.Join(tmp, "src"), destRel: "out/file"}
-	res := importMissingContentCandidate(c, dest, []byte("x"), "")
+	res := importMissingContentCandidate(c, dest, []byte("x"), "", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("dry-run should still report imported=1, got %+v", res)
 	}
@@ -1381,7 +1468,7 @@ func TestImportMissingContentCandidate_WritesContent(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "deep/nested/out.txt"}
-	res := importMissingContentCandidate(c, dest, []byte("payload"), "")
+	res := importMissingContentCandidate(c, dest, []byte("payload"), "", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("res = %+v", res)
 	}
@@ -1407,7 +1494,7 @@ func TestReplaceImportContentCandidate_DeclineSkips(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo)
+	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo, stdImportDeps{})
 	if res.skipped != 1 {
 		t.Errorf("expected skip on decline, got %+v", res)
 	}
@@ -1431,7 +1518,7 @@ func TestReplaceImportContentCandidate_DryRunAccepts(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo)
+	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo, stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("expected imported=1 in dry-run accept, got %+v", res)
 	}
@@ -1457,7 +1544,7 @@ func TestImportPreservedConflictCandidate_DryRun(t *testing.T) {
 	altRel := "hooks/p/cursor-demo/HOOK.yaml"
 	altDest := filepath.Join(agentsHome, altRel)
 
-	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "")
+	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("dry-run should still count as imported=1, got %+v", res)
 	}
@@ -1480,7 +1567,7 @@ func TestImportPreservedConflictCandidate_WritesAltAndNote(t *testing.T) {
 	altDest := filepath.Join(agentsHome, altRel)
 	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
 
-	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "ts")
+	res := importPreservedConflictCandidate(c, agentsHome, out, altRel, altDest, "ts", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("res = %+v", res)
 	}
@@ -1501,7 +1588,7 @@ func TestWriteImportConflictReviewNote_DryRunIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/y/HOOK.yaml", "cursor"); err != nil {
+	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/y/HOOK.yaml", "cursor", stdImportDeps{}); err != nil {
 		t.Errorf("dry-run err: %v", err)
 	}
 	entries, _ := os.ReadDir(filepath.Join(tmp, "review-notes/import-conflicts"))
@@ -1516,7 +1603,7 @@ func TestWriteImportConflictReviewNote_WritesYAMLWithFields(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/cursor-x/HOOK.yaml", "cursor"); err != nil {
+	if err := writeImportConflictReviewNote(tmp, "proj", "hooks/proj/x/HOOK.yaml", "hooks/proj/cursor-x/HOOK.yaml", "cursor", stdImportDeps{}); err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(tmp, "review-notes/import-conflicts"))
@@ -1554,7 +1641,7 @@ func TestProcessCanonicalHookBundleImport_UnsupportedRelReturnsFalse(t *testing.
 	info, _ := os.Stat(src)
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
-	_, ok := processCanonicalHookBundleImport(c, agentsHome, "", info)
+	_, ok := processCanonicalHookBundleImport(c, agentsHome, "", info, stdImportDeps{})
 	if ok {
 		t.Error("expected ok=false for unsupported source path")
 	}
@@ -1578,7 +1665,7 @@ func TestProcessCanonicalHookBundleImport_CursorHooksProducesBundle(t *testing.T
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "proj", sourceRoot: projRoot, sourcePath: hooksPath}
-	res, ok := processCanonicalHookBundleImport(c, agentsHome, "ts", info)
+	res, ok := processCanonicalHookBundleImport(c, agentsHome, "ts", info, stdImportDeps{})
 	if !ok {
 		t.Fatal("expected ok=true for cursor hooks file")
 	}
@@ -1886,7 +1973,7 @@ func TestProcessImportCandidate_ManagedSourceIsNoop(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: link, destRel: "anywhere"}
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("managed source should be a no-op, got %+v", res)
 	}
@@ -1898,7 +1985,7 @@ func TestProcessImportCandidate_SourceMissingIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("missing source = no-op, got %+v", res)
 	}
@@ -1914,7 +2001,7 @@ func TestProcessImportCandidate_DirectorySourceIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("directory source = no-op, got %+v", res)
 	}
@@ -1930,7 +2017,7 @@ func TestProcessImportCandidate_GenericFileMissingDestImports(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "deep/out.txt"}
-	res := processImportCandidate(c, agentsHome, "")
+	res := processImportCandidate(c, agentsHome, "", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("expected imported=1, got %+v", res)
 	}
@@ -1952,7 +2039,7 @@ func TestProcessImportCandidate_GenericFileIdenticalDestNoop(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := processImportCandidate(c, agentsHome, "")
+	res := processImportCandidate(c, agentsHome, "", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("identical files should be no-op, got %+v", res)
 	}
@@ -1970,7 +2057,7 @@ func TestProcessImportCandidate_GenericFileDifferentReplaces(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := processImportCandidate(c, agentsHome, "")
+	res := processImportCandidate(c, agentsHome, "", stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("expected replace, got %+v", res)
 	}
@@ -2093,7 +2180,7 @@ func TestProcessImportOutput_StatNonIsNotExistError(t *testing.T) {
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
 	output := importOutput{destRel: "notdir/sub.txt", content: []byte("hi")}
-	res := processImportOutput(c, output, agentsHome, "", srcInfo)
+	res := processImportOutput(c, output, agentsHome, "", srcInfo, stdImportDeps{})
 	if res.skipped != 1 {
 		t.Errorf("expected skipped=1 from Stat error, got %+v", res)
 	}
@@ -2473,7 +2560,7 @@ func TestRunImport_WithSeededGlobalCandidatesExercisesFoldAndRelink(t *testing.T
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runImport("", "all"); err != nil {
+	if err := runImport("", "all", stdImportDeps{}); err != nil {
 		t.Fatalf("runImport: %v", err)
 	}
 }
@@ -2509,7 +2596,7 @@ func TestRunImport_ProjectScopeWithCandidateExercisesWalkPath(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runImport("", "project"); err != nil {
+	if err := runImport("", "project", stdImportDeps{}); err != nil {
 		t.Fatalf("runImport project scope: %v", err)
 	}
 }

@@ -392,10 +392,10 @@ func TestImportMissingContentCandidate_WriteError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
-	res := importMissingContentCandidate(c, dest, []byte("data"), "")
+	res := importMissingContentCandidate(c, dest, []byte("data"), "", deps)
 	if res.imported != 0 || res.skipped != 1 {
 		t.Errorf("expected skipped=1 on write error, got %+v", res)
 	}
@@ -413,14 +413,14 @@ func TestImportPreservedConflictCandidate_MkdirError(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	// First call (writeImportConflictReviewNote) and subsequent altDest must
-	// both fail — both call osMkdirAll.
+	// Both the writeImportConflictReviewNote MkdirAll and the altDest MkdirAll
+	// go through the injected deps.
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
 	out := importOutput{destRel: "dest.txt", content: []byte("alt"), Origin: "test"}
-	res := importPreservedConflictCandidate(c, tmp, out, "alt/out.txt", altDest, "ts")
+	res := importPreservedConflictCandidate(c, tmp, out, "alt/out.txt", altDest, "ts", deps)
 	if res.imported != 0 || res.skipped != 1 {
 		t.Errorf("expected skipped=1 on mkdir error, got %+v", res)
 	}
@@ -439,11 +439,11 @@ func TestImportPreservedConflictCandidate_WriteError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
 	out := importOutput{destRel: "dest.txt", content: []byte("alt"), Origin: "test"}
-	res := importPreservedConflictCandidate(c, tmp, out, "alt/out.txt", altDest, "ts")
+	res := importPreservedConflictCandidate(c, tmp, out, "alt/out.txt", altDest, "ts", deps)
 	if res.imported != 0 || res.skipped != 1 {
 		t.Errorf("expected skipped=1 on write error, got %+v", res)
 	}
@@ -455,9 +455,9 @@ func TestWriteImportConflictReviewNote_MkdirError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	err := writeImportConflictReviewNote(t.TempDir(), "p", "rel.yaml", "alt.yaml", "origin")
+	err := writeImportConflictReviewNote(t.TempDir(), "p", "rel.yaml", "alt.yaml", "origin", deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -469,9 +469,9 @@ func TestWriteImportConflictReviewNote_WriteError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
-	err := writeImportConflictReviewNote(t.TempDir(), "p", "rel.yaml", "alt.yaml", "origin")
+	err := writeImportConflictReviewNote(t.TempDir(), "p", "rel.yaml", "alt.yaml", "origin", deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected write sentinel, got %v", err)
 	}
@@ -525,10 +525,10 @@ func TestReplaceImportContentCandidate_WriteFileError(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeImportDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
-	res := replaceImportContentCandidate(c, tmp, dest, []byte("new"), "ts", srcInfo, destInfo)
+	res := replaceImportContentCandidate(c, tmp, dest, []byte("new"), "ts", srcInfo, destInfo, deps)
 	if res.imported != 0 || res.skipped != 1 {
 		t.Errorf("expected skipped=1 on write error, got %+v", res)
 	}
@@ -557,7 +557,7 @@ func TestProcessImportCandidate_CanonicalSourceMissingIsNoop(t *testing.T) {
 		sourcePath: filepath.Join(tmp, ".cursor", "hooks.json"),
 		destRel:    "hooks/p/cursor.json",
 	}
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("expected no-op when canonical source missing, got %+v", res)
 	}
@@ -586,7 +586,7 @@ func TestProcessImportCandidate_CanonicalSourceDirIsNoop(t *testing.T) {
 		sourcePath: dirAsSrc,
 		destRel:    "hooks/p/cursor.json",
 	}
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("expected no-op when canonical source is a dir, got %+v", res)
 	}
@@ -621,7 +621,7 @@ func TestProcessImportCandidate_CanonicalCanonicalizationError(t *testing.T) {
 		sourcePath: src,
 		destRel:    "hooks/p/cursor.json",
 	}
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	// Either canonicalization succeeded with empty outputs (no-op) or failed
 	// with skipped=1. Both exercise canonical-path branches that were
 	// previously uncovered.
@@ -865,7 +865,7 @@ func TestProcessImportCandidate_DestStatErrorWarns(t *testing.T) {
 		sourcePath: src,
 		destRel:    "rules/p/foo.md",
 	}
-	res := processImportCandidate(c, agentsHome, "ts")
+	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	// Either skipped=1 (Stat fail) or imported (treated as missing) — only the
 	// stat-failure code path is interesting; both indicate the branch fired.
 	_ = res
