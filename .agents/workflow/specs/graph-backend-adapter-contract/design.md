@@ -172,6 +172,56 @@ through four review rounds. v4 (this draft) closes the v3 review findings:
   flag it as a §12 fast-path candidate so v2 executor planning can
   bind to real workloads.
 
+**v6.1 follow-on fixes** (CRG dual-read DSL gaps from
+`.agents/proposals/crg-dual-read-parity-surface-2026-05.md`,
+applied 2026-05-20):
+
+- **§5.1 MATCH allows edge aliases.** The grammar shows
+  `[<edge-alias>?:<edge-type>]` with the alias optional and lowercase
+  by convention. Edge aliases exist solely to make edge-identity
+  returns and intrinsic-column WHERE filters expressible — they do
+  NOT permit edge metadata access.
+- **§5.1 RETURN allows edge identity.** `<edge-alias>.id` and
+  `<edge-alias>.kind` are returnable. This unblocks the canonical
+  reviewer query "what is the call chain from changed function X"
+  (payout intent A in the CRG proposal), which previously could not
+  reconstruct the chain because edges were anonymous. Edge metadata
+  beyond `id`/`kind` and paths-as-objects remain forbidden in v1.
+- **§5.1 WHERE operator set is closed and enumerated.** The
+  normative set is `{ =, !=, <, <=, >, >=, IN }`. `<>` is excluded
+  (use `!=`). `IN` is restricted to `.id IN $param` against a list
+  param.
+- **§5.1 `STARTS_WITH(field, $param)` added as a narrow function
+  exception.** Cross-app monorepo review queries (payout intent B:
+  scope by `f.path` prefix) had no in-grammar expression in v5.
+  Adding a per-app scope field at bootstrap would force every
+  adapter to re-emit the corpus; a `project_root` synthetic node
+  would duplicate state the source path already encodes.
+  `STARTS_WITH` lowers to a sargable prefix range on every backend
+  (`field >= $param AND field < $param || char(65535)` or the
+  backend-native form) and is gated to a single-field, single-param
+  shape. **`LIKE` remains forbidden** — leading-wildcard `LIKE
+  '%...%'` defeats every index strategy and the trailing-wildcard
+  form is exactly what `STARTS_WITH` does, only without the
+  argument-order discipline.
+- **§5.2 forbidden list expanded to be normative-closed.** `LIKE`,
+  edge metadata beyond `id`/`kind`, paths-as-objects, and operators
+  outside the §5.1 set are all now explicitly forbidden. The v1
+  surface is closed; new operators or grammar require a spec
+  revision.
+- **§5.5 conformance catalog extended.** New rows T26–T27 cover the
+  `STARTS_WITH` accept/reject pair; new subsection §5.5.6 (T28–T31)
+  covers edge-alias returns and paths-as-objects rejection;
+  §5.5.7 (T32–T39) renumbers the prior forbidden-constructs row and
+  adds T38 (`LIKE` rejection) and T39 (`<>` rejection).
+
+Three of the seven proposals from
+`.agents/proposals/crg-dual-read-parity-surface-2026-05.md` are
+applied in v6.1 (the wording fixes E + F that unblock the two
+payout review intents). The four parity-matrix proposals (A, C, D
+on §11.1 testability gaps; G on SQL-callable views) are deferred
+to a separate spec revision.
+
 Per the **plan/spec split** introduced in v4: implementation-detail
 content (full DSL conformance test catalog, lockfile state-machine
 serialization shape, namespace token SDK enforcement hooks, namespace
@@ -488,19 +538,37 @@ parameterized; no raw SQL surface exists.
 
 ### 5.1 Allowed clauses
 
-- `MATCH (alias:<note-type>)-[:<edge-type>|<edge-type>...]->(alias:<note-type>)`
+- `MATCH (alias:<note-type>)-[<edge-alias>?:<edge-type>|<edge-type>...]->(alias:<note-type>)`
+  — edge alias is optional and lowercase by convention (`e`, `c`, `r`); it
+  exists only to enable edge-identity returns (see RETURN below) and
+  WHERE filtering on the edge's intrinsic columns (`id`, `kind`).
 - `OPTIONAL MATCH` for left-join semantics
-- `WHERE alias.<field> <op> <param-expr>` — where `<param-expr>` is
-  one of: `$<param>`, a literal, or an allowed-function call applied
-  to params and literals only (see §5.1.1)
-- `WHERE alias.id IN $<param>` — list parameters bound to query-time arrays
+- `WHERE alias.<field> <op> <param-expr>` — where `<op>` is one of
+  `=, !=, <, <=, >, >=` (normative; this is the complete set) and
+  `<param-expr>` is one of: `$<param>`, a literal, or an allowed-function
+  call applied to params and literals only (see §5.1.1). Edge aliases
+  may appear on the left only with their intrinsic columns
+  (`<edge-alias>.id`, `<edge-alias>.kind`).
+- `WHERE alias.id IN $<param>` — list parameters bound to query-time
+  arrays; `IN` is permitted only with `.id` and only against a list
+  param
+- `WHERE STARTS_WITH(alias.<field>, $<param>)` — prefix predicate on a
+  string field, used for cross-app monorepo scoping (e.g.
+  `STARTS_WITH(f.path, $app_root)`). Rationale: a prefix match folds
+  to a sargable range scan, has bounded selectivity, and avoids the
+  unanchored-wildcard footgun of `LIKE '%...%'`. See §5.1.1 for the
+  function's WHERE-side admissibility.
 - Variable-length edge patterns `[:<edge>*1..<max_depth>]`, bounded by
   the declared `max_depth`
-- `RETURN <alias>.<field>, hop_count, count(*), min(...), max(...), coalesce(...)`
+- `RETURN <alias>.<field>, <edge-alias>.id, <edge-alias>.kind, hop_count, count(*), min(...), max(...), coalesce(...)`
+  — edge-alias returns are limited to `.id` and `.kind`; edge metadata
+  beyond these two intrinsic columns and paths-as-objects remain
+  forbidden in v1 (see §5.2).
 
 #### 5.1.1 Allowed-function set and where they apply
 
-The allowed function set is `{ coalesce, count, min, max, hop_count }`.
+The allowed function set is
+`{ coalesce, count, min, max, hop_count, STARTS_WITH }`.
 Function application is constrained by clause:
 
 | Function | RETURN | WHERE |
@@ -509,6 +577,7 @@ Function application is constrained by clause:
 | `count(*)` | yes | no |
 | `min(<alias.field>)`, `max(<alias.field>)` | yes | no |
 | `hop_count` | yes | no |
+| `STARTS_WITH(<alias.field>, $<param>)` | no | yes — narrow exception for prefix predicates on string fields |
 
 **WHERE-side constraint:** functions in WHERE can only operate on
 params and literals, **never on note fields**. This rules out
@@ -521,6 +590,21 @@ foot-gun (function application defeats predicate-pushdown into the
 index); WHERE-side param normalization is neither — the function
 folds to a constant before predicate evaluation begins.
 
+**`STARTS_WITH` is a deliberate, narrow exception** to the
+no-functions-on-fields rule. It operates on a single string field
+with a single parameter and is sargable on every supported backend
+(SQLite, Postgres): it lowers to `field >= $param AND field < $param || char(65535)`
+or the backend-native prefix-range form. It is added because cross-
+app monorepo review queries (the canonical motivator: filtering by
+`f.path` prefix) have no acceptable alternative in v1 — a per-app
+scope filter pushed to bootstrap requires every adapter to re-emit
+the corpus, and a `project_root` synthetic node duplicates state
+that the source path already encodes. **`LIKE` is forbidden** —
+unanchored wildcards are not sargable and the leading-wildcard form
+defeats every index strategy worth having; if you can express a
+filter as a prefix, use `STARTS_WITH`; if not, model it as a typed
+field at bootstrap.
+
 ### 5.2 Forbidden
 
 - String concatenation in any clause
@@ -529,7 +613,17 @@ folds to a constant before predicate evaluation begins.
 - DDL of any kind (no `CREATE`, `MERGE`, `SET`, `DELETE`)
 - Functions outside the §5.1.1 allowed set
 - Allowed functions applied to note fields in WHERE (only params and
-  literals — see §5.1.1)
+  literals — see §5.1.1; the sole exception is `STARTS_WITH`, which
+  is gated to a single-field, single-param prefix predicate)
+- `LIKE` and any pattern-match operator other than `STARTS_WITH`
+- Edge metadata beyond the intrinsic `id` and `kind` columns
+  (returning or filtering on caller-defined edge fields, edge
+  payloads, or computed edge properties is a v2 concern)
+- Paths-as-objects (the result of a variable-length pattern is the
+  end-node and `hop_count`; the intermediate path is not
+  materializable as a value in v1)
+- WHERE operators outside `{ =, !=, <, <=, >, >=, IN }` — the v1 set
+  is closed; new operators require a spec revision
 
 ### 5.3 Substitution model
 
@@ -723,7 +817,7 @@ identical.
 - T21: Fresh notes return with `stale = NULL`
 - T22: Stale notes return with structured `stale: { reason, because, fired_at }`
 
-#### 5.5.5 Allowed functions in WHERE (T23–T25)
+#### 5.5.5 Allowed functions in WHERE (T23–T27)
 
 - T23: `WHERE alias.field >= coalesce($param, <literal>)` — accepted;
   null param folds to literal default before predicate evaluation
@@ -732,15 +826,37 @@ identical.
   a param)
 - T25: `WHERE alias.field = upper($param)` — **must reject**
   (function outside allowed set)
+- T26: `WHERE STARTS_WITH(f.path, $app_root)` — accepted; lowers to a
+  sargable prefix range on every backend
+- T27: `WHERE STARTS_WITH($app_root, f.path)` — **must reject**
+  (first argument must be the field, second must be the param)
 
-#### 5.5.6 Forbidden constructs (T26–T31) — must reject
+#### 5.5.6 Edge-alias returns and filters (T28–T31)
 
-- T26: String concatenation in WHERE — reject at adapter load
-- T27: Subquery — reject
-- T28: DDL (`CREATE`, `MERGE`, `SET`, `DELETE`) — reject
-- T29: Function outside allowed set — reject
-- T30: Variable-length pattern with no upper bound — reject
-- T31: Variable-length pattern exceeding declared `max_depth` — reject
+- T28: `MATCH (a:Function)-[e:CALLS]->(b:Function) RETURN e.id, e.kind` —
+  accepted; the edge alias is bound and only intrinsic columns are
+  returned
+- T29: `MATCH (a)-[e:CALLS]->(b) WHERE e.kind = $kind RETURN b.qualified_name` —
+  accepted; intrinsic edge column on the left of a permitted
+  operator
+- T30: `MATCH (a)-[e:CALLS]->(b) RETURN e.weight` — **must reject**
+  (edge metadata beyond `id`/`kind` is forbidden in v1)
+- T31: `MATCH p = (a)-[:CALLS*1..3]->(b) RETURN p` — **must reject**
+  (paths-as-objects is forbidden in v1; rewrite as
+  `RETURN b, hop_count`)
+
+#### 5.5.7 Forbidden constructs (T32–T39) — must reject
+
+- T32: String concatenation in WHERE — reject at adapter load
+- T33: Subquery — reject
+- T34: DDL (`CREATE`, `MERGE`, `SET`, `DELETE`) — reject
+- T35: Function outside allowed set — reject
+- T36: Variable-length pattern with no upper bound — reject
+- T37: Variable-length pattern exceeding declared `max_depth` — reject
+- T38: `WHERE alias.field LIKE '%foo%'` — reject (`LIKE` is forbidden;
+  see §5.2 — only `STARTS_WITH` is permitted for prefix predicates)
+- T39: `WHERE alias.field <> $param` — reject (the operator set is
+  closed at `{ =, !=, <, <=, >, >=, IN }`; `<>` is not in v1)
 
 ### 5.6 Modeling guidance
 
