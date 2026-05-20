@@ -5,11 +5,18 @@ status: proposed
 summary: |-
     Cluster E.other from sonarqube-pr10/findings.md: ~400-500 duplicated
     lines across internal/graphstore/{sqlite,postgres,mcp_server}.go,
-    internal/platform/{resource_plan,mcp_settings,plugins}.go,
-    commands/{import_plugins,settings,mcp,rules,explain,status,ux}.go,
-    and ports/typescript/src/commands/{agents,skills}.ts. Per ADR-0008
-    (option B) this work is deferred from PR#10 to a follow-up plan;
-    this is that plan.
+    internal/platform/{resource_plan,mcp_settings,plugins}.go, and
+    commands/{import_plugins,settings,mcp,rules,explain,status,ux}.go.
+    Per ADR-0008 (option B) this work is deferred from PR#10 to a
+    follow-up plan; this is that plan.
+
+    NOTE 2026-05-19: the Group TS task (mirroring projectsync extraction
+    in ports/typescript/) has been DROPPED — ports/typescript/ no longer
+    exists on master and pr6-typescript-port is parked. The ~40-line TS
+    duplication is no longer reachable scope. Remaining work is the Go
+    groups (GS, RP, CMDS, MCP) only; T3-T5 may already be partially
+    done in interim PRs and need re-audit against current Sonar before
+    starting.
 
     PR#10 already shipped the in-PR cherries: Cluster F (commands/*/list.go)
     and E.promote (commands/*/promote.go) both collapsed into
@@ -28,7 +35,7 @@ summary: |-
     Source classification: .agents/workflow/plans/sonarqube-pr10/findings.md (Cluster E)
     Companion plan: go-test-fixture-extraction (Cluster D)
 created_at: "2026-05-04T00:00:00Z"
-updated_at: "2026-05-06T05:35:14Z"
+updated_at: "2026-05-19T00:00:00Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate snapshot for the follow-up PR

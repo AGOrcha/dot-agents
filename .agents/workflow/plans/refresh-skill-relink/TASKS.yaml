@@ -3,11 +3,27 @@ schema_version: 1
 plan_id: "refresh-skill-relink"
 tasks:
   - id: "fix-shared-skill-relink"
-    title: "Route shared skill mirror relink through central planner/executor"
-    status: "blocked"
-    depends_on: []
-    blocks: []
+    title: "Route shared skill mirror relink through SharedTargetPlan"
+    status: "in_progress"
+    depends_on:
+      - "shared-target-projection-wiring/stp1-wire-refresh"
+    blocks:
+      - "shared-target-projection-wiring/stp3-regression-parity"
     owner: "dot-agents"
     write_scope: ["commands/refresh.go", "internal/platform/", "internal/links/"]
     verification_required: true
-    notes: "Blocked on resource-intent-centralization Phase 3–5"
+    notes: |-
+      Original blocker (resource-intent-centralization Phase 3–5) is
+      satisfied — that plan completed 2026-04-12 and shipped the
+      central planner at internal/platform/resource_plan.go
+      (BuildSharedTargetPlan / CollectAndExecuteSharedTargetPlan /
+      RemoveSharedTargetPlan). The follow-through here — routing
+      commands/refresh.go's skill-mirror call through SharedTargetPlan
+      instead of the per-platform syncScopedDirSymlinksTargets — was
+      missed at closeout.
+
+      CROSS-PLAN: depends_on shared-target-projection-wiring/
+      stp1-wire-refresh (the wider refresh wiring prereq; completed)
+      and blocks shared-target-projection-wiring/stp3-regression-parity
+      (the closeout sweep that validates this routing alongside
+      import-relink + doctor). Acyclic: stp1 -> here -> stp3.

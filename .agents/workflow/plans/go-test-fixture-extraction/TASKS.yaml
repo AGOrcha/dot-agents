@@ -95,7 +95,7 @@ tasks:
       app_type: code-fix
     - id: t3-extract-platform-tests
       title: Refactor internal/platform/*_test.go to use internal/testutil
-      status: completed
+      status: pending
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -139,7 +139,7 @@ tasks:
       app_type: code-fix
     - id: t4-extract-workflow-tests
       title: Refactor commands/workflow/*_test.go to use internal/testutil
-      status: completed
+      status: in_progress
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -179,7 +179,7 @@ tasks:
       app_type: code-fix
     - id: t5-extract-commands-root-tests
       title: Refactor commands/*_test.go (root) to use internal/testutil
-      status: pending
+      status: in_progress
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -253,7 +253,7 @@ tasks:
       app_type: code-fix
     - id: t7-extract-skills-and-agents-tests
       title: Refactor commands/{agents,skills,kg}/*_test.go to use internal/testutil
-      status: completed
+      status: in_progress
       depends_on:
         - t2-create-internal-testutil
       blocks: []

@@ -121,6 +121,57 @@ through four review rounds. v4 (this draft) closes the v3 review findings:
   open questions. Canonical `PLAN.yaml` + `TASKS.yaml` are created
   via `da workflow plan create graph-backend-adapter-contract`.
 
+**v6 follow-on fixes** (gcc + pgGraph reconciliation, 2026-05-19):
+
+- **§2.7 executor-tier separation added** (new section). v1 makes the
+  executor an explicit architectural tier separate from the adapter
+  contract. The contract guarantees `(schema, DSL queries, adapter
+  semantics)` — it does NOT pin a single execution engine. v1 ships
+  with a B-tree / recursive-traversal executor over the gcc-shipped
+  scoped-KG primitives (SQLite Path A; Postgres adapters extending
+  the same role-segregated `Store` / `CodeGraphReader` /
+  `CodeGraphWriter` / `Closer` / `Handle` shape). A future in-memory
+  CSR executor (the pgGraph approach independently validated this
+  direction) is a **v2 swap of the executor tier, not a contract
+  change** — adapter authors do not re-author against a new contract.
+- **§2.1 substrate language reconciled with gcc.** v5 said "shared KG
+  storage substrate" abstractly; gcc1 (#30 keystone) shipped the
+  concrete role-segregated `Store` interface family in
+  `internal/graphstore/store.go`, and gcc2 (#34) shipped Path A
+  (bounded ephemeral SQLite with reaper-aware Close). v6 names those
+  primitives as the substrate. Postgres adapters MUST follow the same
+  role-segregation pattern (separate `CodeGraphReader` / `Writer` /
+  `Closer` / `Handle` shape; do not stuff everything in one mega
+  interface) — both SQLite and Postgres back-ends present the same
+  shape to adapter code.
+- **§1 non-goal added.** "v1 targets shallow traversal" stated
+  explicitly. pgGraph's empirical claim is that recursive-CTE /
+  B-tree pointer-chasing degrades at 10+ hops on 30M+ edges; v1's
+  executor commits to ≤5-hop workloads. Deep traversal (>5 hops on
+  >100K edges) is a v2 executor-tier concern, not a contract gap.
+- **§8.2 resolve-at-boundary framing added (non-normative supplement).**
+  pgGraph's pattern — "SQL boundary resolves coordinates, labels,
+  filters, tenant scopes BEFORE entering the traversal loop; the loop
+  sees pre-resolved tenant bitmaps" — is a cleaner operational model
+  for the existing namespace token. v6 documents this as the
+  preferred lowering pattern: tokens are resolved once at the DSL
+  boundary; the executor's inner loop sees a fixed, pre-resolved
+  capability set, not a per-statement rewrite token.
+- **§12 v1 blocker fast-path added.** v5's evidence-budget table only
+  promotes to v1.5 design review at 5 points; a single blocker-class
+  request scores 3, so a real v1 blocker waited for cumulative
+  signals. v6 adds a v1-side fast-path: a verified blocker-class
+  request (user/adapter cannot proceed without it) is immediately
+  scoped into v1, not deferred to v1.5. The accumulating budget
+  remains the mechanism for non-blocking richness requests.
+- **§4 `max_depth` advisory.** Adapter-declared `max_depth` may exceed
+  2 in v1 (the §5.4.1 ref-chain cap of 2 does NOT carry over to
+  variable-length edge patterns). Executor-aware advisory: depths
+  above 5 on the v1 executor incur the asymptotics pgGraph
+  benchmarks call out; adapter authors targeting that regime should
+  flag it as a §12 fast-path candidate so v2 executor planning can
+  bind to real workloads.
+
 Per the **plan/spec split** introduced in v4: implementation-detail
 content (full DSL conformance test catalog, lockfile state-machine
 serialization shape, namespace token SDK enforcement hooks, namespace
@@ -182,6 +233,26 @@ This spec defines the **graph backend adapter contract**: a pluggable
 artifact that declares schema, queries, planner hints, staleness driver
 binding, materialized views, and a bootstrap skill — all writing into
 scoped KG storage with no separate databases or sidecar processes.
+
+### 1.1 Non-goals (v1)
+
+- **Deep-traversal performance is out of scope for v1.** v1's executor
+  is B-tree / recursive-traversal over the gcc-shipped scoped-KG
+  primitives (§2.7). pgGraph's published asymptotics establish that
+  recursive-CTE / B-tree pointer-chasing degrades around 10+ hops on
+  >30M edges; v1 commits to ≤5-hop workloads on graphs measured in
+  thousands-to-low-millions of edges. Adapter authors targeting deeper
+  regimes flag them as §12 fast-path candidates so a v2 executor swap
+  can bind to real workloads — the adapter contract itself does not
+  change.
+- **No adapter-private storage.** §2.1 already forbids separate
+  per-adapter databases. Restated as a non-goal so it stays visible.
+- **No raw SQL escape hatches.** §2.2 + §5.2 already forbid. Restated.
+- **No silent executor swap.** Switching v1's executor for a future v2
+  (e.g. in-memory CSR) is a permitted contract behavior (§2.7), but it
+  is not silent: it surfaces under a release with measured perf and a
+  documented compatibility statement. Authors can rely on v1's
+  observable semantics through the transition window.
 
 ---
 
@@ -257,6 +328,58 @@ separate dimension — never tags notes stale.
 `evidence.expires_at` as "environmental driver" while not declaring
 predicates. v2 added `env_predicates` as a first-class field; v3 adds
 the propagation rule for environmental events into derivation chains.
+
+### 2.7 The executor is an architectural tier separate from the contract
+
+The adapter contract guarantees `(schema, DSL queries, propagation
+semantics, namespace enforcement)`. It does **not** pin a single
+execution engine. v1 ships with a B-tree / recursive-traversal
+executor over the gcc-shipped scoped-KG primitives. A future executor
+swap is permitted by the contract; adapter authors are unaffected.
+
+**v1 substrate (normative).** The executor reads and writes through
+the role-segregated `Store` family already shipped by gcc1:
+
+- `CodeGraphReader` — node/edge/metadata reads, impact-radius, etc.
+- `CodeGraphWriter` — upserts + `StoreFileNodesEdges` (transactional bulk)
+- `KGNoteStore`, `NoteSymbolLinkStore` — adapter note + ref machinery
+- `Closer` — reaper-aware Close (gcc2 contract; no goroutine/conn
+  outlives the store)
+- `Handle` — the constructor-injected client view
+
+For the SQLite backend, Path A (gcc2) is the v1 implementation:
+bounded ephemeral pool, abandon-and-fail timeouts, modernc-safe.
+
+**For Postgres-backed adapters (normative).** The same role
+segregation MUST hold. Postgres adapters present a `Store` with the
+same `CodeGraphReader` / `CodeGraphWriter` / `Closer` / `Handle`
+shape backed by `pgxpool`. Do not collapse the roles back into a
+single mega interface; do not introduce store types that bypass the
+shape. pgxpool's `Close()` already provides the graceful-shutdown
+guarantee that `SQLiteStore.Close()` had to hand-build, so the
+Postgres `Closer` is a thin pass-through — but it MUST be there so
+adapter code is portable across backends. The current open
+`requestContext(nil)` / per-call ctx items (gcc3 / gcc4) tighten this
+boundary; their resolution is the same contract everywhere.
+
+**Permitted v2 swap.** An in-memory CSR executor (the pgGraph
+approach independently validated this direction) is a v2 swap of the
+executor tier — the adapter contract is unchanged. Whether to
+actually build a Go-native CSR executor is a separate, measured
+decision: pgGraph's wins materialize at deep traversals (>5 hops on
+>100K edges) under heavy multi-backend Postgres load, which dot-agents
+is not in today. The right gate is "instrument the v1 executor;
+trigger a CSR build only when a real workload exceeds its envelope" —
+not "port pgGraph pre-emptively." See the project-local note
+`executor-csr-research-2026-05` for the deferred plan.
+
+**Why this tier separation matters.** Without it, a future executor
+change would read as a contract break and adapter authors would
+panic. With it, executor experiments (different storage layouts,
+in-memory caches, materialization tiers) stay invisible to adapter
+code. The DSL §5 is the front-end contract; gcc's `Store` family is
+the back-end contract; the executor is everything between them and is
+free to evolve.
 
 ---
 
@@ -1285,7 +1408,7 @@ before the bridge can be decommissioned.
 | `update` | CRG adapter incremental reload; bootstrap skill called with `--mode=incremental --since=<commit>` | Same set of nodes inserted/updated/deleted as current `kg update` |
 | `status` | `da graph crg status` — namespace existence, node/edge counts, last-bootstrap-at, schema_digest from lockfile | Identical fields surfaced (with one-time rename of any bridge-specific fields) |
 | `impact-radius` | Adapter's `impact_radius` named query | Same result set on a corpus of 100 changed-symbol queries |
-| `flows` | Either an additional named query (if expressible in DSL) **or** materialized view + adapter MCP server (if too rich for v1 DSL) | Symbol-flow output equivalent; budget signal logged if implemented as MCP server (per §12) |
+| `flows` | Materialized view computed at bootstrap (`materialized_views[flow_membership]` storing `(flow_id, member_id, position)`); RETURN orders by `position` via the view's row order. Named-query / MCP-server alternatives are **closed** — v1 DSL §5.1 RETURN has no `ORDER BY`, so a path-position reconstruction via a named query is not v1-expressible. | Bootstrap output equivalent: `flow_memberships` set equality (per-`(flow_id, position)` row equality across implementations). |
 | `communities` | Materialized view computed at bootstrap; adapter `materialized_views[community_clusters]` with `refresh_on` driver | Community membership stable across runs at same input |
 | `postprocess` | Materialized view(s) computed by bootstrap; one view per derived data shape | Output bytes-equivalent for each derived computation |
 | `detect-changes` | Built into `source_mutation` driver; CRG adapter declares `staleness_drivers: [source_mutation]` and the driver fires on note hash change | `kg changes` output equivalent for a corpus of branch-switch test cases |
@@ -1480,6 +1603,35 @@ An adapter author can dispute a signal by writing a justification
 primitive"). Successful disputes remove the points but log the dispute
 itself as evidence — repeated dispute patterns become signal in their
 own right.
+
+### 12.4 v1 blocker fast-path
+
+The accumulating-budget machinery in §12.1–§12.3 is for non-blocking
+*richness* requests — points add up, design review opens at 5,
+implementation at 8. A verified **blocker** — a user or adapter
+provably cannot proceed without the missing primitive, and no v1
+workaround exists — bypasses the budget entirely and is scoped into
+the **v1 schedule**, not deferred to v1.5.
+
+A blocker-class request goes through this fast-path when:
+
+1. The adapter author or a `da` core maintainer files a blocker
+   declaration (one sentence + link to the failing workflow / failed
+   query / failing test).
+2. A `da` core maintainer either confirms or rebuts the blocker on
+   the linked artifact. Confirmation triggers an explicit v1 schedule
+   addition; rebuttal routes the request back to the §12.1 budget at
+   the appropriate weight.
+3. If confirmed: the v1 grammar / contract / SDK change required to
+   unblock is treated as a v1 amendment (§0 revision-history entry),
+   not as a v1.5 promotion.
+
+**Why this exists.** v5's table assigned a single blocker 3 points,
+under a 5-point threshold, so a real v1 blocker would wait for an
+unrelated second signal to even open *v1.5* review — which is the
+wrong tier (it's a v1 blocker). The accumulating budget remains the
+right mechanism for *additive* richness; blockers are a different
+class and route directly to v1.
 
 ---
 

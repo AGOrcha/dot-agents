@@ -1,0 +1,270 @@
+schema_version: 1
+plan_id: coverage-95-staged
+tasks:
+    - id: a1-platform-builder-errs
+      title: 'Stage A1: drop unused error from platform.BuildResourcePlan/BuildSharedAgentMirrorIntents'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+      verification_required: true
+      notes: 'Refactor return signatures to drop unused (always-nil) error returns. Update commands/agents/{promote,import,new,remove} callers + tests. Branch: pr3a. Expected gain: agents 94.88->~96, internal/platform 90.67->~93.'
+    - id: a2-platform-deadbranches
+      title: 'Stage A2: audit internal/platform for remaining dead-error branches'
+      status: completed
+      depends_on:
+        - a1-platform-builder-errs
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+      verification_required: true
+      notes: 'Sweep internal/platform for if-err-nil branches where the underlying call always returns nil. Either drop signatures or refactor to surface errors. Target: internal/platform 93->96+. Branch: pr3a.'
+    - id: b1-io-seams-agents
+      title: 'Stage B1: io seams for commands/agents Readlink-TOCTOU branches'
+      status: completed
+      depends_on:
+        - a1-platform-builder-errs
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/agents/
+      verification_required: true
+      notes: 'Introduce package-internal osReadlink/osLstat seams in commands/agents/import.go + remove.go to enable testing TOCTOU error branches. Mirror the pattern from internal/projectsync atomic refactor (osSymlink/osRename). Branch: pr3a. Expected: agents 96 -> 98+.'
+    - id: b2-io-seams-platform
+      title: 'Stage B2: io seams for internal/platform IO error paths'
+      status: completed
+      depends_on:
+        - a2-platform-deadbranches
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+      verification_required: true
+      notes: 'Add osXxx seams for remaining MkdirAll/Remove/Symlink error returns in platform implementors. Drive internal/platform to 95+. Branch: pr3a.'
+    - id: c1-commands-fixtures
+      title: 'Stage C1: commands/ run* full-fixture integration tests'
+      status: completed
+      depends_on:
+        - b1-io-seams-agents
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+      verification_required: true
+      notes: 'Cover runAdd/runDoctor/runRefresh/status-printer/review-flow with full ~/.agents+platform-link fixtures. Drive commands/ from 86.84% -> 95+. Branch: pr3a. Big effort, may need multiple subworkers.'
+    - id: c2-workflow-fixtures
+      title: 'Stage C2: commands/workflow run* fixtures'
+      status: completed
+      depends_on:
+        - b2-io-seams-platform
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+      verification_required: true
+      notes: 'Drive commands/workflow 83.53% -> 95+ via run-command integration tests. Branch: pr3b.'
+    - id: c3-kg-fixtures
+      title: 'Stage C3: commands/kg run* fixtures'
+      status: completed
+      depends_on:
+        - c2-workflow-fixtures
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/
+      verification_required: true
+      notes: 'Drive commands/kg 83.45% -> 95+. Branch: pr3c.'
+    - id: c4-graphstore-fixtures
+      title: 'Stage C4: internal/graphstore crg+mcp subprocess fixtures'
+      status: completed
+      depends_on:
+        - b2-io-seams-platform
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+      verification_required: true
+      notes: 'Biggest single gap: 67.25% -> 95+ (~28pp). Heavy fake-binary + fake-RPC fixture work in crg.go + mcp_server.go. Branch: pr3b.'
+    - id: d-platform-final
+      title: 'Stage D: platform final 0.04pp'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: d-commands-di
+      title: 'Stage D: commands source DI'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: Closed remaining commands/ gap via seams
+    - id: d-workflow-di
+      title: 'Stage D: workflow source DI'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: d-graphstore-final
+      title: 'Stage D: graphstore final 2.3pp'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: d-kg-di
+      title: 'Stage D: kg source DI'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: d2-commands-fixtures
+      title: 'Stage D2: commands fixture push'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: d3-commands-final
+      title: 'Stage D3: commands residual 0.58pp'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: e-workflow-refactor
+      title: 'Stage E: workflow os.Exit/Scanln refactor'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: e-kg-and-wiring
+      title: 'Stage E: kg cross-pkg seams + commands wiring'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: e2-commands-ci-final
+      title: 'Stage E2: close pr3a CI commands residual'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: e3-all-platforms-seed
+      title: 'Stage E3: all-platforms IsInstalled seed'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: f-workflow-yaml-seams
+      title: 'Stage F: workflow yaml.Marshal seams'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: g-workflow-cobra-harness
+      title: 'Stage G: workflow cobra integration harness'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: sonar-s3776-splits
+      title: SonarCloud S3776 test cognitive-complexity splits
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: workflow-source-refactor
+      title: Workflow source-level decompose for coverage
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: workflow-di-refactor
+      title: Workflow DI refactor + testutil + long-tail tests
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: pr3a-review-fixes
+      title: 'pr3a review feedback: 4 fixes (git argv, orphan detection, hint, rename)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: pr3a-review-fixes-2
+      title: 'pr3a review feedback batch 2: EXDEV, journal, sync errors, skills extract'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: pr3a-batch2-regression
+      title: Close coverage regressions from batch 2 (skills cmd, journal)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: pr3b-rebase-regression
+      title: 'Close pr3b rebase regressions: commands, workflow, graphstore'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""

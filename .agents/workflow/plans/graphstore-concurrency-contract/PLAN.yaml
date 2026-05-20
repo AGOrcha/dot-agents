@@ -1,0 +1,23 @@
+schema_version: 1
+id: graphstore-concurrency-contract
+title: Graphstore concurrency contract (Path A)
+status: in_progress
+summary: |-
+    Publish the stable Store contract + Path A (bounded ephemeral) per locked
+    decision C-Hybrid; pin the Deps boundary that di-refactor-rollout and the
+    cg6b 95% tail consume.
+
+    STATUS REFRESH 2026-05-19: status draft -> in_progress. Reality has moved
+    well past the original draft snapshot: gcc1 (#30 keystone — Store
+    contract + segregated role interfaces) is MERGED; gcc2 (#34 — Path A
+    bounded ephemeral, Windows SQLite hang resolved, real shutdown w/ reaper
+    tracking, pool sized for agent fleets) is also MERGED. Active focus is
+    now gcc3 (bind callers + Deps to the published contract — replaces
+    requestContext(nil) with integrated parent ctx). gcc4 (postgres
+    timeout-uniformity) follows gcc3.
+created_at: "2026-05-18T21:41:18Z"
+updated_at: "2026-05-19T00:00:00Z"
+owner: dot-agents
+success_criteria: One published Store contract; all callers+Deps bind to it; bounds+timeout enforced uniformly native/CRG with regression proof; maxNodes Low-1 closed via contract; di-refactor OD-1 closed (provider-owns-concurrency rationale)
+verification_strategy: 'Regression tests prove hard-cap + cross-path (native/CRG) parity + timeout; go test ./... green; downstream: di-refactor-rollout + cg6b tail unblocked once the boundary is pinned (gcc1)'
+current_focus_task: gcc3 — bind all callers + Deps to the published contract (replace requestContext(nil) with integrated parent ctx)

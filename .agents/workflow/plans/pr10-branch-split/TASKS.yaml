@@ -91,6 +91,10 @@ tasks:
         Modified roots: add, doctor, import, init, install, refresh, remove, status.
         SonarCloud fixes applied. CI + test coverage commits pushed.
         SonarCloud new_coverage: 23.2% (target 80%).
+        Windows CI greened (commit 6692837): managed file-hard-link
+        recognition in internal/links + POSIX-only skips for three
+        permission-fault-injection tests. All checks pass on
+        windows/macos/ubuntu; PR#15 mergeable/clean.
     - id: pr3b-workflow
       title: 'PR 3b: Workflow subpackage + graphstore extraction'
       status: completed
@@ -105,12 +109,25 @@ tasks:
         - internal/graphstore/
       verification_required: true
       notes: |-
-        PR#16, branch pr3b/workflow → pr3a/base-commands.
+        PR#16, branch pr3b/workflow → master.
         Extracts workflow/ subpackage (19 files) and internal/graphstore/
         (store, sqlite, postgres, crg, mcp_server, impact, migrations).
         Absorbs what was originally planned as PR4 (graphstore-kg).
         SonarCloud fixes applied. CI + test coverage commits pushed.
         SonarCloud new_coverage: 40.4% (target 80%).
+        After pr3a merged to master, rebased the 47 pr3b-own commits
+        --onto master (boundary f712e63); clean linear stack, no
+        conflicts. Force-pushed; PR#16 retargets master.
+        SonarCloud cleanup pass: extracted buildEdgeAdjacency (graphstore
+        sqlite/postgres dedupe), new scripts/internal/covprofile (shared
+        coverage parser, 100% tested for the 95% gate), anyCandidate for
+        S3776. PR#16 CI green, 0 issues, 0 duplication, merge=CLEAN.
+        3-lens review (arch/test+behavior/adversarial, same process as
+        pr3a) — reports in .agents/active/reviews/pr3b/. No blockers;
+        4 fixes landed (0eecec8): HIGH MCP impact-depth DoS clamp,
+        crg.go json.Marshal hardening, documented SQLite cross-process
+        contention + version-less migrations contract. Draft-plan JSON
+        contract noted in PR#16 body; CRG liveness-probe gap tracked.
     - id: pr3c-kg
       title: 'PR 3c: Knowledge graph subpackage extraction'
       status: completed
@@ -127,15 +144,33 @@ tasks:
         - commands/review.go
       verification_required: true
       notes: |-
-        PR#17, branch pr3c/kg → pr3b/workflow.
+        PR#18, branch pr3c/kg → pr3b/workflow (supersedes closed #17).
         Extracts kg/ subpackage (bridge, sync_code_warm_link,
         query_lint_maintain, kg, cmd, deps). Adds explain.go.
         Modifies review.go and root.go for kg command wiring.
         SonarCloud fixes applied. CI + test coverage commits pushed.
         SonarCloud new_coverage: 45.8% (target 80%).
+        After pr3b rebase, rebased the 19 pr3c-own commits --onto the
+        new pr3b (boundary dd728b7). #17 could not reopen (head fully
+        rewritten); replaced by #18 with identical scope.
+        One rebase collision: pr3c's 5ae9068 had independently done the
+        graphstore edge dedupe — kept pr3b's canonical buildEdgeAdjacency,
+        reduced 5ae9068 to kg-only parts. SonarCloud cleanup pass:
+        curation e2e (CC135) -> curationState + 13 step fns; kg_test
+        dispatch (CC32) and bridge_fault (CC20) helper-extracted;
+        wiring_test S8193. PR#18 CI green, 0 issues, 0 duplication.
+        Re-rebased onto updated pr3b after pr3b review fixes (recovered
+        from a bad-boundary rebase via reflog; correct boundary 73ff88f).
+        3-lens review (same process as pr3a) — reports in
+        .agents/active/reviews/pr3c/. arch+test+behavior approve,
+        adversarial acceptable-with-findings. Fixes landed (787571d):
+        CRITICAL note-id path-traversal (slugify src.ID + regression
+        test) + 3 hardening doc comments. Index/lint-report rewrite
+        race noted in PR#18 body (pre-existing, single-user CLI);
+        f06ab87 body-loss independently verified fixed.
     - id: pr5-scaffold-rehome
       title: 'PR 5: Scaffold re-home + legacy shell retirement'
-      status: pending
+      status: completed
       depends_on:
         - pr3c-kg
       blocks: []
@@ -144,15 +179,35 @@ tasks:
         - internal/scaffold/home/
         - internal/scaffold/hooks/
         - internal/scaffold/templates/
+        - .agents/prompts/
         - src/
       verification_required: true
       notes: |-
         Embed starter assets in Go binary, delete old shell tree.
         internal/scaffold/{home,hooks,templates} embed.go + asset dirs.
-        src/ deletions: 34 deleted shell files.
+        src/ deletions: 34 deleted shell files (legacy bash impl fully
+        retired here — confirmed src/ is untouched by pr3b/pr3c; this is
+        its only owner).
         Fold in S8184 blank import comment, S3776 copyStarterEntry extraction.
+
+        ADDED SCOPE (gap surfaced 2026-05-17, was untracked):
+        1. Latest scaffold content. The starter assets must be reconciled
+           to the current canonical content, not a stale snapshot — the
+           6 starter skills (incl. review-pr) checked against the
+           ~/.agents/skills/ canonical versions before embedding.
+        2. Missing agent-prompt overlays. isp.prompt.md,
+           review-agent.project.md, impl-agent.project.md currently exist
+           ONLY in .agents/worktrees/proj-mega-branch/.agents/prompts/ —
+           not in master, ~/.agents, or any scaffold starter. They are
+           load-bearing for the ISP staged-runtime (impl -> verifier ->
+           review) yet have no tracked home. pr5 recovers them into the
+           repo .agents/prompts/ AND the scaffold starter so new projects
+           receive them. Source of record: the proj-mega-branch worktree.
+        Without this, retiring src/ + embedding scaffold would ship a
+        binary whose ISP/review pipeline references prompts that do not
+        exist anywhere shippable.
     - id: pr6-typescript-port
-      title: 'PR 6: TypeScript port'
+      title: 'PR 6: TypeScript port (PARKED — carve-out only, frozen)'
       status: pending
       depends_on:
         - pr1-foundation
@@ -167,13 +222,21 @@ tasks:
         - docs/TYPESCRIPT_PORT_TDD_PLAN.md
       verification_required: true
       notes: |-
-        Isolated subsystem — zero Go coupling. Only depends on PR1 for
-        the boundary-sync contract. 36 TS files + CI workflow + docs.
-        Fold in SonarQube TS fixes: S3776 complexity, S7780 String.raw,
-        S4325 unnecessary assertion, replaceAll/sort compare.
+        AMENDMENT 2026-05-18 (user): PARKED. The TS port is no longer
+        deemed necessary — the constrained environment that motivated it
+        is getting the (under-review) Go binary, so the Go path covers
+        that case. Decision: still CARVE OUT the existing 36-file TS work
+        as its own branch/PR to preserve it, but FREEZE — no further
+        development now. Excluded from the retire-old-branches closeout
+        gate (see that task's deps). Revisit only if the Go-binary-on-
+        that-env plan falls through.
+        (Original scope, preserved for the carve-out: isolated subsystem,
+        zero Go coupling, depends only on PR1 boundary-sync contract;
+        36 TS files + CI workflow + docs; SonarQube TS fixes S3776/S7780/
+        S4325/replaceAll/sort were to be folded in — NOT to be done now.)
     - id: pr7-test-infra-docs
       title: 'PR 7: Test infrastructure, globalflagcov, docs, ADRs, research'
-      status: pending
+      status: completed
       depends_on:
         - pr3c-kg
       blocks: []
@@ -193,55 +256,97 @@ tasks:
         internal/testutil, internal/globalflagcov, docs/adr/ (9 ADRs),
         docs/*.md (~15 specs), research/, tests/ (smoke + sandbox),
         bin/tests/ (ralph orchestrator).
+        SCOPE ADD 2026-05-18 (user): also rescued the 21 stranded
+        design specs + resource-model-current-state.md from mega-branch
+        into tracked .agents/workflow/specs|proposals (commit d1130be5).
+        Not gitignored; Sonar excludes .agents; zero CI impact.
     - id: retire-old-branches
       title: Close PR#10, PR#14, retire stale branches
-      status: pending
+      status: in_progress
       depends_on:
         - pr3a-base-commands
         - pr3b-workflow
         - pr3c-kg
         - pr5-scaffold-rehome
-        - pr6-typescript-port
         - pr7-test-infra-docs
       blocks: []
       owner: dot-agents
       write_scope: []
       verification_required: true
       notes: |-
-        After all PRs merge to master:
-        1. Verify git diff between merged master and original branch tip
-           shows no missing changes (only .agents/ workflow artifacts expected)
-        2. Close PR#10 and PR#14 with notes pointing to replacement PRs
-        3. Delete feature/PA-cursor-projectsync-phase1-extract-293f branch
-        4. Delete feature/workflow-auto-operator branch
-        5. Delete pr3/command-decomp branch (superseded by pr3a/pr3b/pr3c)
-        6. Verify master CI green
-    - id: workflow-commit-state-coupling
-      title: Workflow state/git commit coupling (da workflow commit + iteration-close auto-stage)
+        Step 1 (salvage .agents/ artifacts before branch deletion) DONE via PR #37
+        2026-05-19: pr7 recovered 21 specs but not plans/history. PR #37 restores
+        47 missing history dirs + 5 live plans (sonarqube-pr10 active,
+        refresh-skill-relink paused, go-test-fixture-extraction +
+        production-code-helper-extraction proposed, graph-backend-adapter-contract
+        draft) from proj-mega-branch @0f459a28. Reconcile-not-clobber — 548 files,
+        all additions, 0 modified/deleted; completed mega plans land as history
+        records not active plans. Steps 2-6 (close PR#10/#14, delete
+        feature/PA-cursor-projectsync-phase1-extract-293f + feature/workflow-auto-operator
+        + pr3/command-decomp, verify CI) REMAIN — and MUST stay blocked until #37
+        merges, else the salvaged artifacts are lost with the branch.
+    - id: pr8-org-migration
+      title: 'PR 8: Migrate project to AGOrcha org remote + cmd/da rename'
       status: pending
       depends_on:
-        - pr3b-workflow
+        - retire-old-branches
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/workflow
-        - internal/workflow
-        - commands/workflow_commit.go
+        - go.mod
+        - cmd/
+        - .goreleaser.yaml
+        - Makefile
+        - .github/workflows/test.yml
+        - .github/workflows/auto-release.yml
+        - scripts/verify.sh
+        - README.md
+        - commands/root.go
       verification_required: true
-      notes: Folds global proposal obs-workflow-state-commit-coupling Part 2. Implement da workflow commit subcommand staging only derived workflow-state paths (no -A, skip submodule/pre-existing-untracked), plus iteration-close auto-stage. Headless-safe (no Claude hook dependency), per-project opt-out via workflow prefs, --dry-run prints exact git add set. Part 1 (global operator rule) handled separately at approval. Source proposal ~/.agents/proposals/obs-workflow-state-commit-coupling.md
-      app_type: go-cli
-    - id: mid-flight-proposal-awareness
-      title: Mid-flight proposal awareness for the orchestrator loop
+      notes: |-
+        Step 8 — project relocation, batched (both are project-identity
+        rewrites hitting the SAME ~7 files; do once, not twice).
+
+        A. cmd/da rename (Go convention). `cmd/dot-agents` produces
+           binary `da` only via overrides (.goreleaser.yaml `binary: da`,
+           Makefile `-o ./bin/da ./cmd/dot-agents`). Rename
+           `cmd/dot-agents/` -> `cmd/da/`; update .goreleaser.yaml
+           `main:`, Makefile build/run targets, both CI workflows,
+           scripts/verify.sh, README, and `go run ./cmd/dot-agents`
+           usages (incl. delegation-bundle template + agents.md). After:
+           `go install <module>/cmd/da@latest` yields `da` natively.
+
+        B. Org migration: origin (github.com/NikashPrakash/dot-agents)
+           -> org `git@github.com:AGOrcha/dot-agents.git`. Module path
+           `github.com/NikashPrakash/dot-agents` ->
+           `github.com/AGOrcha/dot-agents` (rewrite go.mod + every import
+           path), .goreleaser project/owner + homebrew tap owner
+           (AGOrcha/homebrew-tap), CI workflow repo URLs, CHANGELOG/README
+           links, SonarCloud project key.
+
+        EXTERNAL PREREQS (user-owned, blocking — confirm before exec):
+        - AGOrcha/dot-agents repo exists + is the canonical push target
+        - AGOrcha/homebrew-tap repo exists; tap signing key secret moved
+        - SonarCloud project re-created/renamed for AGOrcha + SONAR_TOKEN
+        - CI secrets (HOMEBREW_TAP_*, SONAR_TOKEN, release) present on the
+          AGOrcha repo
+        OPEN QUESTIONS: (1) confirm module path becomes
+        github.com/AGOrcha/dot-agents (canonical import must match the
+        remote); (2) cut a version with the migration (0.4.0?) or hold;
+        (3) keep `origin` as a mirror or fully cut over. Sequenced LAST
+        (after retire-old-branches): migrate a clean, consolidated repo.
+        NON-TRIVIAL — plan/confirm with maintainer before implementation.
+    - id: pr5-followup
+      title: PR5 follow-up — scaffold prompt/skill distribution + swallowed TODOs
       status: pending
       depends_on:
-        - pr3b-workflow
+        - pr5-scaffold-rehome
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/workflow
-        - internal/workflow
-        - internal/config
-        - schemas
+        - .agents/prompts/
+        - .agents/skills/
+        - .agents/workflow/specs/
+        - internal/scaffold/
       verification_required: true
-      notes: 'Folds global proposal obs-mid-flight-proposal-pickup. Global ~/.agents/proposals is boundary-polled (orchestrator-session-start preflight per turn) not event-pushed, so proposals added mid-iteration are invisible until the next orchestrator-turn boundary. Recommended: option 1 (loop runner re-runs proposal scan at every iteration boundary, pr3b-only) or option 4 (document boundary-only as the stated contract) now; options 2 (severity-tagged proposals + interrupt budget, proposal-schema change in pr3a/base + loop gating pr3b) and 3 (TASKS.yaml note injection) as follow-up. First step confirm actual cadence in the loop runner. Must hold for headless da loop runs (not a Claude-Code-only hook). Related task workflow-commit-state-coupling. Source ~/.agents/proposals/obs-mid-flight-proposal-pickup.md'
-      app_type: go-cli
+      notes: Swallowed-TODO recovery from session 0384c739. (1) HIGH design how recovered .agents/prompts/ (3 overlays + 5 verifier surfaces from PR#27) reach managed projects — confirm ISP runtime resolves repo/global-locally vs needs Tier-1 overlays; link config-distribution-model. (2) HIGH da skills promote the generic orchestration skills (loop-worker, orchestrator-session-start, isp, delegation-lifecycle, iteration-close, plan-wave-picker, provider-consumer-pair) to global as interim so scaffolded projects get the consuming skills. (3) verify the 6 scaffold starter skills match canonical ~/.agents/skills (not stale pr3a snapshot). (4) add an isp.prompt.md to verifier-surface cross-reference check so scaffold changes cannot strand verifier_sequence refs again. Blockers escalated to maintainer and tracked in pending-decisions memory — skill-tiering-contract D1 vocab lock, config-distribution-model §13 surface ratification.

@@ -2,11 +2,50 @@
 schema_version: 1
 id: "refresh-skill-relink"
 title: "Refresh Skill Relink Plan"
-status: "paused"
-summary: "Fix non-empty .agents/skills/<name> relink warnings via centralized resource planner."
+status: "active"
+summary: |-
+    Fix non-empty .agents/skills/<name> relink warnings via centralized
+    resource planner.
+
+    STATUS NOTE 2026-05-19 (corrected vs origin/master):
+    This plan's task notes record the original referent unambiguously
+    — "Blocked on resource-intent-centralization Phase 3–5" — and the
+    plan.md cites the resource-intent-centralization RFC. That is the
+    primary dependency; shared-target-projection-wiring (stp) is a
+    later, related thread, not the original blocker.
+
+    resource-intent-centralization is COMPLETED in master history
+    (.agents/history/resource-intent-centralization/PLAN.yaml status
+    completed, updated 2026-04-12). All three blocking phases are
+    marked completed:
+      - phase-3-migrate-shared-targets: completed
+      - phase-4-agents-thin: completed
+      - phase-5-unify-commands (refresh/install/remove/status/explain
+        on the projection executor): completed
+    The central planner/executor it delivered lives on master at
+    internal/platform/resource_plan.go (BuildSharedTargetPlan,
+    CollectAndExecuteSharedTargetPlan, RemoveSharedTargetPlan, ...).
+
+    So this plan IS UNBLOCKED — the dependency claims completion and
+    the central planner is shipped. What was missed: when
+    resource-intent-centralization closed out, the follow-through
+    here — routing commands/refresh.go's skill-mirror relink through
+    the now-landed SharedTargetPlan instead of the per-platform
+    internal/platform/resources.go::syncScopedDirSymlinksTargets —
+    was never done. That is the actionable next step. The user's read
+    that "the original schedule agent at the time just failed to do
+    so" is accurate.
+
+    Suggested unpark path (maintainer call): change status paused ->
+    active, advance fix-shared-skill-relink blocked -> in_progress,
+    and route the skill-mirror call through SharedTargetPlan in
+    commands/refresh.go (write_scope already lists refresh.go +
+    internal/platform/ + internal/links/). stp's continuing tasks
+    (stp-import-relink, stp-doctor-repair) are adjacent; coordinate
+    so the skill-mirror routing does not regress what stp wired.
 created_at: "2026-04-01T00:00:00Z"
-updated_at: "2026-04-11T12:00:00Z"
+updated_at: "2026-05-19T00:00:00Z"
 owner: "dot-agents"
 success_criteria: "Refresh imports then relinks shared skill mirrors without spurious directory warnings."
 verification_strategy: "refresh integration tests; manual da refresh smoke"
-current_focus_task: "Await shared executor replacing per-platform syncScopedDirSymlinksTargets"
+current_focus_task: "Route commands/refresh.go skill-mirror through internal/platform/resource_plan.go SharedTargetPlan; cross-plan depends_on shared-target-projection-wiring/stp1-wire-refresh (completed); closeout regression runs under stp3-regression-parity."

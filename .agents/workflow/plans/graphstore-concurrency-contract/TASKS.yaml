@@ -1,0 +1,111 @@
+schema_version: 1
+plan_id: graphstore-concurrency-contract
+tasks:
+    - id: gcc1-pin-store-contract
+      title: Define & publish the Store contract + pin the Deps boundary (KEYSTONE — review-gated)
+      status: completed
+      depends_on: []
+      blocks:
+        - gcc2-path-a-impl
+        - gcc3-bind-callers
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+      verification_required: true
+      notes: |-
+        THE keystone. Produce the stable published `Store` interface and
+        the documented concurrency-ownership + Deps-boundary semantics
+        (provider owns pooling/serialization per locked decision C-Hybrid).
+        Define the contract and have Deps hold a contract-typed handle;
+        do NOT yet refactor all call sites (that is gcc3) and do NOT
+        implement Path A internals (gcc2). Deliver a reviewable artifact:
+        the interface + a concise contract doc in internal/graphstore/
+        (godoc + a CONTRACT.md or design note) stating what the provider
+        guarantees (bounds, timeout, concurrency).
+        REVIEW GATE: open a PR and STOP for user review before gcc2/gcc3 —
+        di-refactor-rollout and the cg6b 95% tail both bind to this exact
+        shape; getting it wrong propagates xN. No behavior change.
+    - id: gcc2-path-a-impl
+      title: Implement Path A behind the contract (bounded ephemeral)
+      status: completed
+      depends_on:
+        - gcc1-pin-store-contract
+      blocks:
+        - gcc4-regression-close-od1
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+      verification_required: true
+      notes: |-
+        Per decision C / strategy A: lazy/cheap ephemeral store open,
+        short-lived read-mostly conns, enforced bounds + request timeout
+        uniform across native + CRG paths, behind the unchanged gcc1
+        contract. Document SQLite low-write-concurrency; recommend
+        Postgres + external pooler for heavy concurrent deploys. Path B
+        (daemon) explicitly deferred — contract must not assume an
+        ephemeral provider (transparent A->B swap later).
+    - id: gcc3-bind-callers
+      title: Bind all callers + Deps to the published contract
+      status: pending
+      depends_on:
+        - gcc1-pin-store-contract
+      blocks:
+        - gcc4-regression-close-od1
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+        - commands/
+      verification_required: true
+      notes: |-
+        Refactor all graphstore callers + the Deps holder to depend on the
+        gcc1 contract (typed handle whose provider owns concurrency), not
+        concrete store types. This is the propagation gcc1 was review-gated
+        to protect. Coordinate with di-refactor-rollout (this pins the
+        Deps shape it propagates x6) — do not duplicate that rollout here;
+        just establish the contract-bound boundary at the graphstore seam.
+    - id: gcc4-regression-close-od1
+      title: Regression (hard-cap + cross-path parity + timeout); close maxNodes Low-1 & OD-1
+      status: pending
+      depends_on:
+        - gcc2-path-a-impl
+        - gcc3-bind-callers
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+      verification_required: true
+      notes: |-
+        Regression tests prove: bounds hard cap enforced, native/CRG
+        cross-path parity, request timeout honored. Close maxNodes Low-1
+        *via* contract enforcement (folds in the standalone follow-up).
+        Record di-refactor-rollout OD-1 closure: the package-singleton is
+        justified ONLY as a holder of the contract-typed handle whose
+        provider owns concurrency — add that rationale comment to the
+        reference (commands/workflow/deps.go).
+        DEFERRED FROM gcc2 (PR #34, 2026-05-18): postgres.go uses raw
+        context.Background() at ~20 call sites and bypasses requestContext,
+        so the Path-A request-timeout chokepoint is NOT uniform across
+        providers. gcc2's fix pass deliberately did not rewrite this (real
+        parent ctx is wired by gcc3; uniform cross-provider timeout is
+        gcc4's charter). gcc4 MUST route postgres.go reads/execs through
+        the requestContext timeout boundary and prove cross-provider
+        timeout uniformity in the parity regression. requestContext(nil)
+        itself is correct (nil to Background, parent wired later) — do not
+        change that pattern.
+    - id: gcc5-verify-close-unblock
+      title: Verify done-criteria; close; notify downstream unblocked
+      status: pending
+      depends_on:
+        - gcc4-regression-close-od1
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        All spec done criteria proven: one published contract, all
+        callers+Deps bound, bounds+timeout uniform, maxNodes Low-1 closed,
+        OD-1 closed. go test ./... green; cov gate satisfied (interface
+        seams, no new allowlist). Archive plan. Notify: di-refactor-rollout
+        is unblocked (Deps boundary pinned at gcc1) and the cg6b 95% tail
+        may now use the pinned contract-bound seam pattern for its
+        [defensive-unreachable] files.

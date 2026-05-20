@@ -268,7 +268,9 @@ slices:
       Also covers KG note operations: UpsertKGNote, GetKGNote,
       LinkKGNoteToSymbol, GetNotesLinkedTo (warm layer indexing).
       postgres.go is skipped if no integration DB — document skip reason.
-    status: pending
+    status: completed
+    completed_at: "2026-05-12T19:30:00Z"
+    completed_commit: e3477e1
     depends_on: []
     write_scope:
       - internal/graphstore/sqlite_test.go
