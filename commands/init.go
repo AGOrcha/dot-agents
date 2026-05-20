@@ -85,56 +85,13 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 
 	ui.Step("Creating directories and files...")
 
-	dirs := []string{
-		agentsHome,
-		filepath.Join(agentsHome, "resources"),
-		filepath.Join(agentsHome, "rules", "global"),
-		filepath.Join(agentsHome, "settings", "global"),
-		filepath.Join(agentsHome, "mcp", "global"),
-		filepath.Join(agentsHome, "skills", "global"),
-		filepath.Join(agentsHome, "agents", "global"),
-		filepath.Join(agentsHome, "hooks", "global"),
-		config.AgentsContextDir(),
-		filepath.Join(agentsHome, "scripts"),
-		filepath.Join(agentsHome, "local"),
-	}
-	for _, bucket := range platform.CanonicalStoreBucketSpecs() {
-		dirs = append(dirs, platform.CanonicalBucketScopeRoot(agentsHome, bucket.Name, "global"))
-	}
-	for _, d := range dirs {
-		if err := deps.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", d, err)
-		}
+	if err := createInitialAgentsDirs(agentsHome, deps); err != nil {
+		return err
 	}
 	ui.Bullet("ok", "Created directory structure")
 
-	// Create config.json if missing
-	cfgPath := filepath.Join(agentsHome, "config.json")
-	if _, err := os.Stat(cfgPath); os.IsNotExist(err) || Flags.Force {
-		cfg := &config.Config{
-			Version:  1,
-			Projects: make(map[string]config.Project),
-			Agents:   make(map[string]config.Agent),
-		}
-		// Detect installed platforms
-		ui.Section("Detected Platforms")
-		for _, p := range platform.All() {
-			if p.IsInstalled() {
-				cfg.SetPlatformState(p.ID(), true, p.Version())
-				ver := p.Version()
-				if ver != "" {
-					ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
-				} else {
-					ui.Bullet("ok", p.DisplayName())
-				}
-			} else {
-				cfg.SetPlatformState(p.ID(), false, "")
-				ui.Bullet("none", p.DisplayName()+" (not detected)")
-			}
-		}
-		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("saving config: %w", err)
-		}
+	if err := seedInitialConfig(agentsHome); err != nil {
+		return err
 	}
 
 	if err := scaffoldStarterHomeAssets(agentsHome); err != nil {
@@ -200,6 +157,78 @@ func scaffoldWorkflowAssets(agentsHome string, deps initDirMaker) error {
 		return err
 	}
 	return scaffoldhooks.CopyMissingGlobalBundles(filepath.Join(agentsHome, "hooks", "global"))
+}
+
+// createInitialAgentsDirs creates the canonical ~/.agents/ directory
+// shape plus per-platform CanonicalStoreBucket scope roots. Each
+// MkdirAll goes through the injected deps so the error branch is
+// fault-injectable. Idempotent on re-run.
+func createInitialAgentsDirs(agentsHome string, deps initDirMaker) error {
+	dirs := []string{
+		agentsHome,
+		filepath.Join(agentsHome, "resources"),
+		filepath.Join(agentsHome, "rules", "global"),
+		filepath.Join(agentsHome, "settings", "global"),
+		filepath.Join(agentsHome, "mcp", "global"),
+		filepath.Join(agentsHome, "skills", "global"),
+		filepath.Join(agentsHome, "agents", "global"),
+		filepath.Join(agentsHome, "hooks", "global"),
+		config.AgentsContextDir(),
+		filepath.Join(agentsHome, "scripts"),
+		filepath.Join(agentsHome, "local"),
+	}
+	for _, bucket := range platform.CanonicalStoreBucketSpecs() {
+		dirs = append(dirs, platform.CanonicalBucketScopeRoot(agentsHome, bucket.Name, "global"))
+	}
+	for _, d := range dirs {
+		if err := deps.MkdirAll(d, 0755); err != nil {
+			return fmt.Errorf("creating %s: %w", d, err)
+		}
+	}
+	return nil
+}
+
+// seedInitialConfig writes ~/.agents/config.json when it does not
+// already exist (or under --force). Detects installed platforms and
+// records their state + version so subsequent commands can rely on a
+// pre-populated registry.
+func seedInitialConfig(agentsHome string) error {
+	cfgPath := filepath.Join(agentsHome, "config.json")
+	if _, err := os.Stat(cfgPath); !(os.IsNotExist(err) || Flags.Force) {
+		return nil
+	}
+	cfg := &config.Config{
+		Version:  1,
+		Projects: make(map[string]config.Project),
+		Agents:   make(map[string]config.Agent),
+	}
+	ui.Section("Detected Platforms")
+	for _, p := range platform.All() {
+		recordPlatformState(cfg, p)
+	}
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+	return nil
+}
+
+// recordPlatformState writes one platform's detected presence + version
+// into cfg and renders the bullet line. Pulled out so seedInitialConfig
+// has a flat control flow (one branch per platform, no nested
+// installed/version conditionals).
+func recordPlatformState(cfg *config.Config, p platform.Platform) {
+	if !p.IsInstalled() {
+		cfg.SetPlatformState(p.ID(), false, "")
+		ui.Bullet("none", p.DisplayName()+" (not detected)")
+		return
+	}
+	ver := p.Version()
+	cfg.SetPlatformState(p.ID(), true, ver)
+	if ver != "" {
+		ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
+	} else {
+		ui.Bullet("ok", p.DisplayName())
+	}
 }
 
 // linkClaudeGlobalSettings creates the global ~/.claude/settings.json

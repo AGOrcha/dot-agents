@@ -46,6 +46,44 @@ func TestFakeInitDeps_NilDelegatesToReal(t *testing.T) {
 	}
 }
 
+// TestLinkCursorGlobalHooks_SeededInstallCreatesHardlink covers
+// linkCursorGlobalHooks's happy path — Cursor is detected as installed,
+// the canonical hooks/global/cursor.json source exists, and the
+// hardlink to ~/.cursor/hooks.json is created. Without this, the helper
+// only ever sees its early-return-not-installed branch and stays at
+// ~30% coverage on the new code.
+func TestLinkCursorGlobalHooks_SeededInstallCreatesHardlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("seed helper skips on Windows")
+	}
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks", "global"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cursorSrc := filepath.Join(agentsHome, "hooks", "global", "cursor.json")
+	if err := os.WriteFile(cursorSrc, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := linkCursorGlobalHooks(agentsHome, stdInitDirMaker{}); err != nil {
+		t.Fatalf("linkCursorGlobalHooks: %v", err)
+	}
+	cursorDst := filepath.Join(tmp, ".cursor", "hooks.json")
+	if _, err := os.Lstat(cursorDst); err != nil {
+		t.Fatalf("expected ~/.cursor/hooks.json to be created: %v", err)
+	}
+	// Second invocation hits the "exists, no --force" skip branch.
+	if err := linkCursorGlobalHooks(agentsHome, stdInitDirMaker{}); err != nil {
+		t.Fatalf("idempotent re-call: %v", err)
+	}
+}
+
 // TestNewInitCmd_RunEClosureWiresStdDeps covers the RunE closure body
 // itself — without this, Cobra-driven invocation goes through code no
 // test exercises directly, and the closure could regress (e.g. forget
