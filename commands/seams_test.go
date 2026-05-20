@@ -672,23 +672,20 @@ func TestRunRefresh_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	// runImportFromRefresh also reads configLoad. Count calls so the import
-	// pass succeeds (returns an empty config) and the refresh-internal call
-	// returns the sentinel to exercise refresh.go line 52-54.
-	calls := 0
+	// runImportFromRefresh still uses the package-level configLoad. Stub it
+	// so the import pass succeeds (returns an empty config). The
+	// refresh-internal call now goes through the per-file
+	// refreshConfigLoader and returns the sentinel directly.
 	withConfigLoadStub(t, func() (*config.Config, error) {
-		calls++
-		if calls == 1 {
-			return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
-		}
-		return nil, sentinel
+		return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
 	})
+	deps := fakeRefreshConfigLoader{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("")
+	err := runRefresh("", deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel from refresh, got %v", err)
 	}
@@ -1023,24 +1020,26 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Two-call stub: first call (import pass) gets empty config, second
-	// (refresh) returns a config with one project named "real".
-	calls := 0
+	// runImportFromRefresh still uses package-level configLoad; stub it to
+	// return a benign empty config. The refresh-internal load goes through
+	// the injected refreshConfigLoader and returns a config with one
+	// project named "real" so the filter mismatch triggers.
 	withConfigLoadStub(t, func() (*config.Config, error) {
-		calls++
-		cfg := &config.Config{
+		return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
+	})
+	deps := fakeRefreshConfigLoader{loadConfig: func() (*config.Config, error) {
+		return &config.Config{
 			Version:  1,
 			Projects: map[string]config.Project{"real": {Path: filepath.Join(tmp, "real")}},
 			Agents:   map[string]config.Agent{},
-		}
-		return cfg, nil
-	})
+		}, nil
+	}}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("ghost-project")
+	err := runRefresh("ghost-project", deps)
 	if err == nil || !strings.Contains(err.Error(), "project not found") {
 		t.Fatalf("expected project-not-found, got %v", err)
 	}

@@ -33,5 +33,5 @@ var (
 	configLoad        = config.Load
 	applyProposalFn   = config.ApplyProposal
 	archiveProposalFn = config.ArchiveProposal
-	runRefreshFn      = runRefresh
+	runRefreshFn      = func(projectFilter string) error { return runRefresh(projectFilter, stdRefreshConfigLoader{}) }
 )

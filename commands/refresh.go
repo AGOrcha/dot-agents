@@ -19,6 +19,20 @@ var Commit = ""
 var Describe = ""
 var refreshImport bool
 
+// refreshConfigLoader is the narrow collaborator refresh.go's
+// fault-injectable LoadConfig operation needs (interface-DI per
+// docs/TEST_SEAMS.md). Single-method, file-prefixed -er form; file-scoped
+// — do not share with other commands files.
+type refreshConfigLoader interface {
+	LoadConfig() (*config.Config, error)
+}
+
+// stdRefreshConfigLoader is the production refreshConfigLoader backed by
+// internal/config.Load.
+type stdRefreshConfigLoader struct{}
+
+func (stdRefreshConfigLoader) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewRefreshCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "refresh [project]",
@@ -36,19 +50,19 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			if len(args) > 0 {
 				filter = args[0]
 			}
-			return runRefresh(filter)
+			return runRefresh(filter, stdRefreshConfigLoader{})
 		},
 	}
 	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
 	return cmd
 }
 
-func runRefresh(projectFilter string) error {
+func runRefresh(projectFilter string, deps refreshConfigLoader) error {
 	if err := runImportFromRefresh(projectFilter, refreshImportScope()); err != nil {
 		return fmt.Errorf("import before refresh: %w", err)
 	}
 
-	cfg, err := configLoad()
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
