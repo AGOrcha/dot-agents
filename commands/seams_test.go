@@ -1003,13 +1003,13 @@ func TestRunDoctor_ConfigLoadError(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, errors.New("load boom") })
+	deps := fakeDoctorConfigLoader{loadConfig: func() (*config.Config, error) { return nil, errors.New("load boom") }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(nil, nil); err != nil {
+	if err := runDoctor(nil, nil, deps); err != nil {
 		t.Fatalf("runDoctor expected nil on configLoad err, got %v", err)
 	}
 }

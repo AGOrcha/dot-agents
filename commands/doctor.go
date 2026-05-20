@@ -27,6 +27,20 @@ const (
 	doctorGlobalPrefix = "global--"
 )
 
+// doctorConfigLoader is the narrow collaborator doctor.go's
+// fault-injectable LoadConfig operation needs (interface-DI per
+// docs/TEST_SEAMS.md). Single-method, file-prefixed -er form; file-scoped
+// — do not share with other commands files.
+type doctorConfigLoader interface {
+	LoadConfig() (*config.Config, error)
+}
+
+// stdDoctorConfigLoader is the production doctorConfigLoader backed by
+// internal/config.Load.
+type stdDoctorConfigLoader struct{}
+
+func (stdDoctorConfigLoader) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -41,11 +55,13 @@ repositories, or partial setup on a new machine.`,
 			"  da doctor --dry-run",
 		),
 		Args: NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
-		RunE: runDoctor,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDoctor(cmd, args, stdDoctorConfigLoader{})
+		},
 	}
 }
 
-func runDoctor(cmd *cobra.Command, args []string) error {
+func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error {
 	ui.Header("da doctor")
 
 	agentsHome := config.AgentsHome()
@@ -99,7 +115,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check projects
-	cfg, err := configLoad()
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		ui.Bullet("warn", "Could not load config: "+err.Error())
 		return nil

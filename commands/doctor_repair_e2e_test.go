@@ -81,7 +81,7 @@ func seedManagedClaudeLink(t *testing.T) (tmp, agentsHome, projectPath, linkPath
 func assertDoctorStdoutContainsBroken(t *testing.T, label string, wantBroken bool) {
 	t.Helper()
 	out := captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("%s runDoctor: %v", label, err)
 		}
 	})
@@ -180,7 +180,7 @@ func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	_ = captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("dry-run doctor: %v", err)
 		}
 	})

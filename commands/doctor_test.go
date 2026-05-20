@@ -11,6 +11,58 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
+// fakeDoctorConfigLoader is the interface-DI test double for
+// doctorConfigLoader (per docs/TEST_SEAMS.md). A nil func field delegates
+// to the real config.Load implementation.
+type fakeDoctorConfigLoader struct {
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeDoctorConfigLoader) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeDoctorConfigLoader_NilDelegatesToReal pins the nil-delegates-to-real
+// contract so tests that omit loadConfig hit the real config.Load.
+func TestFakeDoctorConfigLoader_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := (fakeDoctorConfigLoader{}).LoadConfig()
+	if err != nil {
+		t.Fatalf("nil-loadConfig delegate: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected real config.Load result, got nil")
+	}
+}
+
+// TestNewDoctorCmd_RunEClosureWiresStdDeps drives doctor's RunE closure
+// end to end so a regression in std deps wiring fails here.
+func TestNewDoctorCmd_RunEClosureWiresStdDeps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	cmd := NewDoctorCmd()
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE closure: %v", err)
+	}
+}
+
 func TestHasPluginPlatform(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -295,7 +347,7 @@ func TestRunDoctor_EmptyConfigSucceeds(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor on empty home: %v", err)
 	}
 }
@@ -461,7 +513,7 @@ func TestRunDoctor_VerboseMode(t *testing.T) {
 	Flags = GlobalFlags{Verbose: true}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor verbose: %v", err)
 	}
 }
@@ -489,7 +541,7 @@ func TestRunDoctor_CorruptManifestReported(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with corrupt manifest: %v", err)
 	}
 }
@@ -519,7 +571,7 @@ func TestRunDoctor_GitSourceNotFetched(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with unfetched git source: %v", err)
 	}
 }
@@ -559,7 +611,7 @@ func TestRunDoctor_GitSourceCachePresent(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with cached git source: %v", err)
 	}
 }
@@ -575,7 +627,7 @@ func TestRunDoctor_NoAgentsHomeAndNoConfig(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with absent home: %v", err)
 	}
 }
@@ -602,7 +654,7 @@ func TestRunDoctor_BrokenUserLinksReportedNonVerbose(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with broken user links: %v", err)
 	}
 }
@@ -640,7 +692,7 @@ func TestRunDoctor_PluginUnsupportedPlatform(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with plugins: %v", err)
 	}
 }
@@ -670,7 +722,7 @@ func TestRunDoctor_OrphanCanonicalReported(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor orphan: %v", err)
 	}
 }
@@ -701,7 +753,7 @@ func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor repair dry-run: %v", err)
 	}
 }
@@ -724,7 +776,7 @@ func TestRunDoctor_MissingProjectDirectory(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with missing project dir: %v", err)
 	}
 }
@@ -870,7 +922,7 @@ func TestRunDoctor_DetectsOrphanCanonicalResource(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	runErr := runDoctor(NewDoctorCmd(), nil)
+	runErr := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{})
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -925,7 +977,7 @@ func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	// Dry run should not error even with broken links
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor --dry-run with broken link: %v", err)
 	}
 }
@@ -1094,7 +1146,7 @@ func TestRunDoctor_WithInstalledClaudePlatformAndPlugins(t *testing.T) {
 	r, w, _ := os.Pipe()
 	oldStdout := os.Stdout
 	os.Stdout = w
-	runErr := runDoctor(NewDoctorCmd(), nil)
+	runErr := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{})
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -1139,7 +1191,7 @@ func TestRunDoctor_VerboseWithHealthyAndManifest(t *testing.T) {
 	Flags = GlobalFlags{Verbose: true}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor verbose: %v", err)
 	}
 }
@@ -1220,7 +1272,7 @@ func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+	if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with broken links + installed claude: %v", err)
 	}
 }
@@ -1246,7 +1298,7 @@ func TestRunDoctor_WithClaudeVersionShimCoversInstalledWithVersionBranch(t *test
 		t.Fatal(err)
 	}
 
-	if err := runDoctor(nil, nil); err != nil {
+	if err := runDoctor(nil, nil, stdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with claude version shim: %v", err)
 	}
 }
