@@ -702,9 +702,9 @@ func TestRunRemove_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, sentinel })
+	deps := fakeRemoveDeps{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
-	err := runRemove("some-project", false)
+	err := runRemove("some-project", false, deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}

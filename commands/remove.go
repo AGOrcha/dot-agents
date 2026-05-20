@@ -13,6 +13,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// removeDeps is the multi-method collaborator runRemove and its
+// removeProjectDirs helper need (interface-DI per docs/TEST_SEAMS.md).
+// File-scoped — do not share with other commands files. The narrower
+// dirCleaner interface below stays scoped to emptyProjectDirs; runRemove
+// has its own broader role because it loads config in addition to the
+// --clean RemoveAll path.
+type removeDeps interface {
+	RemoveAll(path string) error
+	LoadConfig() (*config.Config, error)
+}
+
+// stdRemoveDeps is the production removeDeps backed by os.RemoveAll and
+// config.Load.
+type stdRemoveDeps struct{}
+
+func (stdRemoveDeps) RemoveAll(path string) error         { return os.RemoveAll(path) }
+func (stdRemoveDeps) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewRemoveCmd() *cobra.Command {
 	var cleanDirs bool
 
@@ -30,15 +48,15 @@ With --clean, also removes project directories from ~/.agents/.`,
 		),
 		Args: ExactArgsWithHints(1, "Use the managed project name from `da status`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRemove(args[0], cleanDirs)
+			return runRemove(args[0], cleanDirs, stdRemoveDeps{})
 		},
 	}
 	cmd.Flags().BoolVar(&cleanDirs, "clean", false, "Also remove project directories from ~/.agents/")
 	return cmd
 }
 
-func runRemove(projectName string, cleanDirs bool) error {
-	cfg, err := configLoad()
+func runRemove(projectName string, cleanDirs bool, deps removeDeps) error {
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -176,7 +194,7 @@ func runRemove(projectName string, cleanDirs bool) error {
 	var cleanupErr error
 	doneMsg := "Cleared project directory contents (directories kept)"
 	if cleanDirs {
-		cleanupErr = removeProjectDirs(projectName)
+		cleanupErr = removeProjectDirs(projectName, deps)
 		doneMsg = "Removed project directories"
 	} else {
 		cleanupErr = emptyProjectDirs(osDirCleaner{}, projectName)
@@ -238,10 +256,10 @@ func projectCanonicalDirs(project string) []string {
 // `da remove --clean` reporting complete removal while stale canonical data
 // remained on disk. A not-exist error is the expected "nothing to clean"
 // case and is the only error swallowed.
-func removeProjectDirs(project string) error {
+func removeProjectDirs(project string, deps removeDeps) error {
 	var errs []error
 	for _, d := range projectCanonicalDirs(project) {
-		if err := osRemoveAll(d); err != nil && !os.IsNotExist(err) {
+		if err := deps.RemoveAll(d); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
 		}
 	}
