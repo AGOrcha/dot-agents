@@ -17,6 +17,45 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// addDeps is the multi-method collaborator runAdd and its backup / restore /
+// KG-MCP-config helpers need (interface-DI per docs/TEST_SEAMS.md). File-scoped
+// — do not share with other commands files. The six operations are the add
+// pipeline's fault-injectable touch points: filesystem materialization of
+// resource trees and MCP config parents (MkdirAll), the MCP config payload
+// itself (WriteFile), the destructive removal of an unmanaged config after a
+// successful backup (Remove), the dot-agents binary path used to build the KG
+// MCP server command (Executable), the resource copy used to back up and
+// restore unmanaged configs (CopyFile), and config.json load for project
+// registration lookups (LoadConfig).
+type addDeps interface {
+	MkdirAll(path string, perm os.FileMode) error
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	Remove(name string) error
+	Executable() (string, error)
+	CopyFile(src, dst string) error
+	LoadConfig() (*config.Config, error)
+}
+
+// stdAddDeps is the production addDeps. It intentionally delegates through the
+// legacy package-level seams in seams.go (osMkdirAll, osWriteFile, osRemove,
+// osExecutable, copyFile, configLoad) rather than calling os/projectsync/config
+// directly. Cross-file tests in refresh_test.go and seams_test.go still pin
+// fault-injection on those package vars (via withCopyFileStub, etc.); the
+// atomic-delete commit that removes the seams.go vars will also flip these
+// forwards to os.* / projectsync.CopyFile / config.Load.
+type stdAddDeps struct{}
+
+func (stdAddDeps) MkdirAll(path string, perm os.FileMode) error {
+	return osMkdirAll(path, perm)
+}
+func (stdAddDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return osWriteFile(name, data, perm)
+}
+func (stdAddDeps) Remove(name string) error            { return osRemove(name) }
+func (stdAddDeps) Executable() (string, error)         { return osExecutable() }
+func (stdAddDeps) CopyFile(src, dst string) error      { return copyFile(src, dst) }
+func (stdAddDeps) LoadConfig() (*config.Config, error) { return configLoad() }
+
 // aiScanPatterns lists file/dir names to look for when scanning for AI configs.
 var aiScanPatterns = []string{
 	// Cursor
@@ -228,14 +267,14 @@ and stay refreshable by both human operators and AI agents.`,
 		),
 		Args: ExactArgsWithHints(1, "Pass a project directory such as `.` or `~/src/my-repo`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAdd(args[0], name)
+			return runAdd(args[0], name, stdAddDeps{})
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Override project name (default: directory name)")
 	return cmd
 }
 
-func runAdd(pathArg, nameArg string) error {
+func runAdd(pathArg, nameArg string, deps addDeps) error {
 	// Resolve path
 	projectPath := config.ExpandPath(pathArg)
 	if _, err := os.Stat(projectPath); err != nil {
@@ -276,7 +315,7 @@ func runAdd(pathArg, nameArg string) error {
 		ui.Bullet("none", "Not a git repository (optional)")
 	}
 
-	cfg, err := configLoad()
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -468,7 +507,7 @@ func runAdd(pathArg, nameArg string) error {
 	if len(existingFiles) > 0 {
 		ui.Step("Backing up existing configs...")
 		timestamp := time.Now().Format("20060102-150405")
-		backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp)
+		backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp, deps)
 		if backupErr != nil {
 			// A failed backup means the user's only copy of an unmanaged
 			// config was NOT preserved. backupExistingConfigsList already
@@ -493,7 +532,7 @@ func runAdd(pathArg, nameArg string) error {
 	ui.Bullet("ok", "Created ~/.agents/ directories")
 
 	// Restore from active resources
-	restored, restoreErr := restoreFromResourcesCounted(projectName, projectPath)
+	restored, restoreErr := restoreFromResourcesCountedWithDeps(projectName, projectPath, deps)
 	if restored > 0 {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
 	}
@@ -513,7 +552,7 @@ func runAdd(pathArg, nameArg string) error {
 		)
 	}
 
-	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome); err != nil {
+	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome, deps); err != nil {
 		return fmt.Errorf("writing KG MCP configs: %w", err)
 	}
 
@@ -584,7 +623,7 @@ func runAdd(pathArg, nameArg string) error {
 // in the project. Returns count of files processed and a non-nil error if any required
 // backup copy failed. On backup failure the original is NOT removed (the user's only
 // copy is preserved) and the error aborts runAdd before any destructive removal.
-func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string) (int, error) {
+func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string, deps addDeps) (int, error) {
 	count := 0
 	for _, f := range files {
 		// Safety: never back up backup artifacts
@@ -627,10 +666,10 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 		// copy of an unmanaged config. Only proceed once the required
 		// backup copies have actually landed; otherwise abort so runAdd
 		// returns an error WITHOUT removing the original.
-		if err := mirrorBackupChecked(project, projectPath, f, timestamp); err != nil {
+		if err := mirrorBackupChecked(project, projectPath, f, timestamp, deps); err != nil {
 			return count, fmt.Errorf("backing up %s: %w", f, err)
 		}
-		if err := osRemove(f); err != nil {
+		if err := deps.Remove(f); err != nil {
 			continue
 		}
 		count++
@@ -644,7 +683,15 @@ func backupExistingConfigsList(files []string, projectPath, agentsHome, project,
 // (e.g. refresh metadata) MUST observe this error: a partially-applied
 // restore that is reported as success makes retries and doctor/refresh
 // recovery ambiguous.
+// restoreFromResourcesCounted is the legacy entry point retained for
+// refresh.go's restoreFromResources wrapper. Delegates to the deps-aware
+// implementation with stdAddDeps. The atomic-delete commit can fold this into
+// a single deps-aware function once refresh.go is converted.
 func restoreFromResourcesCounted(project, projectPath string) (int, error) {
+	return restoreFromResourcesCountedWithDeps(project, projectPath, stdAddDeps{})
+}
+
+func restoreFromResourcesCountedWithDeps(project, projectPath string, deps addDeps) (int, error) {
 	agentsHome := config.AgentsHome()
 	resourcesDir := filepath.Join(agentsHome, "resources", project)
 	info, err := os.Stat(resourcesDir)
@@ -668,7 +715,7 @@ func restoreFromResourcesCounted(project, projectPath string) (int, error) {
 	count := 0
 	var restoreErr error
 	walkErr := filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
-		n, ferr := restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err)
+		n, ferr := restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err, deps)
 		count += n
 		if ferr != nil && restoreErr == nil {
 			restoreErr = ferr
@@ -681,7 +728,7 @@ func restoreFromResourcesCounted(project, projectPath string) (int, error) {
 	return count, restoreErr
 }
 
-func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error) (int, error) {
+func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error, deps addDeps) (int, error) {
 	if walkErr != nil {
 		return 0, fmt.Errorf("walking %s: %w", path, walkErr)
 	}
@@ -696,11 +743,11 @@ func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d 
 	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
 		return 0, nil
 	}
-	canonicalCount, handled, canonErr := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path)
+	canonicalCount, handled, canonErr := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path, deps)
 	if handled {
 		return canonicalCount, canonErr
 	}
-	return restoreLegacyResourceFile(project, relPath, agentsHome, path)
+	return restoreLegacyResourceFile(project, relPath, agentsHome, path, deps)
 }
 
 func isCanonicalResourceBackupRel(relPath string) bool {
@@ -712,7 +759,7 @@ func isCanonicalResourceBackupRel(relPath string) bool {
 	return false
 }
 
-func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string) (int, bool, error) {
+func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string, deps addDeps) (int, bool, error) {
 	candidate := importCandidate{
 		project:    project,
 		sourceRoot: resourcesDir,
@@ -728,10 +775,10 @@ func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string
 	count := 0
 	for _, output := range outputs {
 		destPath := filepath.Join(agentsHome, output.destRel)
-		if err := osMkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
 		}
-		if err := osWriteFile(destPath, output.content, 0644); err != nil {
+		if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
 			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
 		}
 		count++
@@ -739,13 +786,13 @@ func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string
 	return count, true, nil
 }
 
-func restoreLegacyResourceFile(project, relPath, agentsHome, path string) (int, error) {
+func restoreLegacyResourceFile(project, relPath, agentsHome, path string, deps addDeps) (int, error) {
 	destRel := mapResourceRelToDest(project, relPath)
 	if destRel == "" {
 		return 0, nil
 	}
 	destPath := filepath.Join(agentsHome, destRel)
-	if err := copyFile(path, destPath); err != nil {
+	if err := deps.CopyFile(path, destPath); err != nil {
 		return 0, fmt.Errorf("restoring %s -> %s: %w", path, destPath, err)
 	}
 	return 1, nil
@@ -763,7 +810,7 @@ func restoreLegacyResourceFile(project, relPath, agentsHome, path string) (int, 
 // MUST use mirrorBackupChecked so a failed backup aborts before the
 // destructive removal.
 func mirrorBackup(project, projectPath, srcFile, timestamp string) {
-	_ = mirrorBackupChecked(project, projectPath, srcFile, timestamp)
+	_ = mirrorBackupChecked(project, projectPath, srcFile, timestamp, stdAddDeps{})
 }
 
 // mirrorBackupChecked performs the same copy as mirrorBackup but propagates
@@ -772,7 +819,7 @@ func mirrorBackup(project, projectPath, srcFile, timestamp string) {
 // silent backup failure (unwritable ~/.agents/resources, disk full,
 // unreadable source through a symlink) would destroy that config while
 // reporting a successful backup.
-func mirrorBackupChecked(project, projectPath, srcFile, timestamp string) error {
+func mirrorBackupChecked(project, projectPath, srcFile, timestamp string, deps addDeps) error {
 	agentsHome := config.AgentsHome()
 	relPath, err := filepath.Rel(projectPath, srcFile)
 	if err != nil || relPath == "." || strings.HasPrefix(relPath, "..") {
@@ -782,7 +829,7 @@ func mirrorBackupChecked(project, projectPath, srcFile, timestamp string) error 
 	// Active (latest) copy — overwritten on each backup run. This is the
 	// recoverable copy `da refresh` / restore reads back, so it is required.
 	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	if cpErr := copyFile(srcFile, activeTarget); cpErr != nil {
+	if cpErr := deps.CopyFile(srcFile, activeTarget); cpErr != nil {
 		return fmt.Errorf("backing up %s -> %s: %w", srcFile, activeTarget, cpErr)
 	}
 
@@ -790,14 +837,14 @@ func mirrorBackupChecked(project, projectPath, srcFile, timestamp string) error 
 	// it is the only point-in-time snapshot the user can recover from.
 	if timestamp != "" {
 		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		if cpErr := copyFile(srcFile, tsTarget); cpErr != nil {
+		if cpErr := deps.CopyFile(srcFile, tsTarget); cpErr != nil {
 			return fmt.Errorf("backing up %s -> %s: %w", srcFile, tsTarget, cpErr)
 		}
 	}
 	return nil
 }
 
-func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) error {
+func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string, deps addDeps) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		return nil
@@ -805,7 +852,7 @@ func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string) erro
 	if rc.KG == nil {
 		return nil
 	}
-	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName))
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName), deps)
 }
 
 // kgConfigPath returns the path to KG_HOME/self/config.yaml without importing
@@ -822,11 +869,11 @@ func ensureGlobalKGMCPConfigs(agentsHome string) error {
 	if _, err := os.Stat(kgConfigPath()); err != nil {
 		return nil
 	}
-	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"))
+	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"), stdAddDeps{})
 }
 
-func writeKGMCPConfigs(scopeDir string) error {
-	exe, err := osExecutable()
+func writeKGMCPConfigs(scopeDir string, deps addDeps) error {
+	exe, err := deps.Executable()
 	if err != nil {
 		return err
 	}
@@ -839,14 +886,14 @@ func writeKGMCPConfigs(scopeDir string) error {
 		"type":    "stdio",
 	}
 	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
-		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server); err != nil {
+		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server, deps); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeKGMCPConfigFile(path string, server map[string]any) error {
+func writeKGMCPConfigFile(path string, server map[string]any, deps addDeps) error {
 	configMap := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, &configMap)
@@ -863,8 +910,8 @@ func writeKGMCPConfigFile(path string, server map[string]any) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := osMkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := deps.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return osWriteFile(path, data, 0644)
+	return deps.WriteFile(path, data, 0644)
 }

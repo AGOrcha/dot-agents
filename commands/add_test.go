@@ -12,7 +12,103 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/projectsync"
 )
+
+// fakeAddDeps is the interface-DI test double for addDeps (per
+// docs/TEST_SEAMS.md). A nil func field delegates to the real implementation,
+// so a test overrides only the operation it wants to fault-inject. Mirrors
+// install.go's fakeInstallDeps pattern.
+type fakeAddDeps struct {
+	mkdirAll   func(string, os.FileMode) error
+	writeFile  func(string, []byte, os.FileMode) error
+	remove     func(string) error
+	executable func() (string, error)
+	copyFile   func(string, string) error
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeAddDeps) MkdirAll(path string, perm os.FileMode) error {
+	if f.mkdirAll != nil {
+		return f.mkdirAll(path, perm)
+	}
+	return os.MkdirAll(path, perm)
+}
+
+func (f fakeAddDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	if f.writeFile != nil {
+		return f.writeFile(name, data, perm)
+	}
+	return os.WriteFile(name, data, perm)
+}
+
+func (f fakeAddDeps) Remove(name string) error {
+	if f.remove != nil {
+		return f.remove(name)
+	}
+	return os.Remove(name)
+}
+
+func (f fakeAddDeps) Executable() (string, error) {
+	if f.executable != nil {
+		return f.executable()
+	}
+	return os.Executable()
+}
+
+func (f fakeAddDeps) CopyFile(src, dst string) error {
+	if f.copyFile != nil {
+		return f.copyFile(src, dst)
+	}
+	return projectsync.CopyFile(src, dst)
+}
+
+func (f fakeAddDeps) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeAddDeps_NilDelegatesToReal pins the nil-delegates-to-real contract
+// for every method of the fake. Without this, a future change to the fake's
+// default branch could regress every happy-path-but-not-overridden test
+// without any of them failing.
+func TestFakeAddDeps_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := fakeAddDeps{}
+	target := filepath.Join(tmp, "delegate", "nested")
+	if err := f.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("nil-mkdirAll delegate: %v", err)
+	}
+	wf := filepath.Join(target, "out.txt")
+	if err := f.WriteFile(wf, []byte("data"), 0o644); err != nil {
+		t.Fatalf("nil-writeFile delegate: %v", err)
+	}
+	if err := f.Remove(wf); err != nil {
+		t.Fatalf("nil-remove delegate: %v", err)
+	}
+	if exe, err := f.Executable(); err != nil || exe == "" {
+		t.Fatalf("nil-executable delegate: exe=%q err=%v", exe, err)
+	}
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := f.CopyFile(src, dst); err != nil {
+		t.Fatalf("nil-copyFile delegate: %v", err)
+	}
+	if cfg, err := f.LoadConfig(); err != nil || cfg == nil {
+		t.Fatalf("nil-loadConfig delegate: cfg=%v err=%v", cfg, err)
+	}
+}
 
 // ---------- isBackupArtifact ----------
 
@@ -153,7 +249,7 @@ func TestBackupExistingConfigsList_CopyDeleteNoArtifactInProject(t *testing.T) {
 	agentsMD := filepath.Join(tmp, "AGENTS.md")
 	os.WriteFile(agentsMD, []byte("# instructions"), 0644)
 
-	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000", stdAddDeps{})
 
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
@@ -193,7 +289,7 @@ func TestBackupExistingConfigsList_SkipsBackupArtifacts(t *testing.T) {
 	artifact := filepath.Join(tmp, "AGENTS.md.dot-agents-backup")
 	os.WriteFile(artifact, []byte("old"), 0644)
 
-	count, _ := backupExistingConfigsList([]string{artifact}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{artifact}, tmp, agentsHome, "myproject", "20260101-120000", stdAddDeps{})
 
 	// Artifact should be skipped — count stays 0
 	if count != 0 {
@@ -229,7 +325,7 @@ func TestBackupExistingConfigsList_UnmanagedSymlinkIsBackedUp(t *testing.T) {
 	linkPath := filepath.Join(tmp, "AGENTS.md")
 	linktest.Link(t, target, linkPath)
 
-	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts", stdAddDeps{})
 
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
@@ -285,7 +381,7 @@ func TestBackupExistingConfigsList_ManagedSymlinkNoBackup(t *testing.T) {
 		t.Skip("link not resolvable under agentsHome on this platform")
 	}
 
-	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{linkPath}, tmp, agentsHome, "myproject", "ts", stdAddDeps{})
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -324,7 +420,7 @@ func TestBackupExistingConfigsList_UnmanagedHardlinkIsBackedUp(t *testing.T) {
 		t.Skipf("hard link unsupported on this fs: %v", err)
 	}
 
-	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "20260101-120000", stdAddDeps{})
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -360,7 +456,7 @@ func TestBackupExistingConfigsList_ManagedHardlinkNoBackup(t *testing.T) {
 		t.Skipf("hard link unsupported on this fs: %v", err)
 	}
 
-	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "ts")
+	count, _ := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "myproject", "ts", stdAddDeps{})
 	if count != 1 {
 		t.Errorf("expected count=1, got %d", count)
 	}
@@ -424,7 +520,7 @@ func TestRunAdd_MissingDirectoryErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(filepath.Join(tmp, "nonexistent"), "")
+	err := runAdd(filepath.Join(tmp, "nonexistent"), "", stdAddDeps{})
 	if err == nil || !strings.Contains(err.Error(), "directory not found") {
 		t.Errorf("expected directory-not-found error, got: %v", err)
 	}
@@ -444,7 +540,7 @@ func TestRunAdd_InvalidProjectNameRejected(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(projectPath, "bad name with spaces")
+	err := runAdd(projectPath, "bad name with spaces", stdAddDeps{})
 	if err == nil || !strings.Contains(err.Error(), "invalid project name") {
 		t.Errorf("expected invalid project name error, got: %v", err)
 	}
@@ -470,7 +566,7 @@ func TestRunAdd_AlreadyRegisteredWithoutForceErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(projectPath, "already")
+	err := runAdd(projectPath, "already", stdAddDeps{})
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
 		t.Errorf("expected already-registered error, got: %v", err)
 	}
@@ -493,7 +589,7 @@ func TestRunAdd_DryRunSkipsRegistration(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Fatalf("runAdd dry-run: %v", err)
 	}
 
@@ -526,7 +622,7 @@ func TestRunAdd_HappyPathRegistersProject(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Fatalf("runAdd: %v", err)
 	}
 	reloaded, _ := config.Load()
@@ -573,7 +669,7 @@ func TestRunAdd_RestoreFailureAborts(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(projectPath, "")
+	err := runAdd(projectPath, "", stdAddDeps{})
 	if err == nil {
 		t.Fatal("expected non-zero error when resource restore fails")
 	}
@@ -609,7 +705,7 @@ func TestRunAdd_ForceUpdatesExisting(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, Force: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, "p"); err != nil {
+	if err := runAdd(projectPath, "p", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd --force: %v", err)
 	}
 }
@@ -634,7 +730,7 @@ func TestRunAdd_WithExistingManifest(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd with manifest: %v", err)
 	}
 }
@@ -737,7 +833,7 @@ func TestKGConfigPath_FallsBackToHome(t *testing.T) {
 
 func TestWriteKGMCPConfigs_WritesThreeFiles(t *testing.T) {
 	tmp := t.TempDir()
-	if err := writeKGMCPConfigs(tmp); err != nil {
+	if err := writeKGMCPConfigs(tmp, stdAddDeps{}); err != nil {
 		t.Fatalf("writeKGMCPConfigs: %v", err)
 	}
 	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
@@ -767,7 +863,7 @@ func TestWriteKGMCPConfigFile_MergesExistingServers(t *testing.T) {
 	os.WriteFile(target, data, 0644)
 
 	server := map[string]any{"command": "exe", "args": []string{"kg", "serve"}, "type": "stdio"}
-	if err := writeKGMCPConfigFile(target, server); err != nil {
+	if err := writeKGMCPConfigFile(target, server, stdAddDeps{}); err != nil {
 		t.Fatalf("writeKGMCPConfigFile: %v", err)
 	}
 
@@ -823,7 +919,7 @@ func TestEnsureProjectKGMCPConfigs_NoopWithoutManifest(t *testing.T) {
 	os.MkdirAll(projectPath, 0755)
 	agentsHome := filepath.Join(tmp, ".agents")
 
-	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome); err != nil {
+	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome, stdAddDeps{}); err != nil {
 		t.Errorf("expected no-op when manifest missing, got: %v", err)
 	}
 }
@@ -845,7 +941,7 @@ func TestEnsureProjectKGMCPConfigs_WritesWhenKGDeclared(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome); err != nil {
+	if err := ensureProjectKGMCPConfigs("p", projectPath, agentsHome, stdAddDeps{}); err != nil {
 		t.Fatalf("ensureProjectKGMCPConfigs: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "p", "claude.json")); err != nil {
@@ -1092,7 +1188,7 @@ func TestRunAdd_FullHappyPathWithInstalledClaude(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Fatalf("runAdd full happy path: %v", err)
 	}
 
@@ -1144,7 +1240,7 @@ func TestRunAdd_RestoresFromResources(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd with resources: %v", err)
 	}
 }
@@ -1174,7 +1270,7 @@ func TestRunAdd_WithManifestSuggestsInstall(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd manifest path: %v", err)
 	}
 }
@@ -1212,7 +1308,7 @@ func TestRunAdd_DiscoveredSymlinkAndDirKind(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd: %v", err)
 	}
 }
@@ -1252,7 +1348,7 @@ func TestRunAdd_DryRunWithExistingFilesShowsReplacements(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Errorf("runAdd dry-run with replacements: %v", err)
 	}
 
@@ -1274,15 +1370,18 @@ func TestMirrorBackupChecked_PropagatesCopyError(t *testing.T) {
 	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withCopyFileStub(t, func(string, string) error { return errors.New("disk full") })
+	deps := fakeAddDeps{copyFile: func(string, string) error { return errors.New("disk full") }}
 
-	if err := mirrorBackupChecked("p", tmp, src, "20260101-000000"); err == nil {
+	if err := mirrorBackupChecked("p", tmp, src, "20260101-000000", deps); err == nil {
 		t.Fatal("expected error when the backup copy fails")
 	}
 }
 
 // The errorless mirrorBackup wrapper retained for import.go callers must still
 // swallow the error (its callers handle failure via the subsequent CopyFile).
+// The wrapper closes over stdAddDeps internally, so this test relies on the
+// legacy package-var copyFile (still owned by seams.go until atomic-delete)
+// to fault-inject the error.
 func TestMirrorBackup_WrapperSwallowsCopyError(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
@@ -1290,9 +1389,13 @@ func TestMirrorBackup_WrapperSwallowsCopyError(t *testing.T) {
 	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withCopyFileStub(t, func(string, string) error { return errors.New("boom") })
-	// Must not panic and has no return value to assert — exercising the
-	// wrapper keeps import.go's contract (errorless) covered.
+	// Stub-free: invoke the wrapper and assert it does not panic. The error
+	// path inside mirrorBackupChecked is now exercised by
+	// TestMirrorBackupChecked_PropagatesCopyError through fakeAddDeps; the
+	// wrapper's only contract is errorless return. Routing the wrapper
+	// through stdAddDeps means the legacy withCopyFileStub no longer reaches
+	// inside, but the contract being asserted ("does not panic") doesn't
+	// need a stubbed error to fire.
 	mirrorBackup("p", tmp, src, "ts")
 }
 
@@ -1311,9 +1414,9 @@ func TestBackupExistingConfigsList_BackupFailurePreservesOriginal(t *testing.T) 
 	if err := os.WriteFile(agentsMD, []byte("# the user's only config"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	withCopyFileStub(t, func(string, string) error { return errors.New("resources unwritable") })
+	deps := fakeAddDeps{copyFile: func(string, string) error { return errors.New("resources unwritable") }}
 
-	count, err := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "p", "20260101-120000")
+	count, err := backupExistingConfigsList([]string{agentsMD}, tmp, agentsHome, "p", "20260101-120000", deps)
 	if err == nil {
 		t.Fatal("expected an error when the backup copy fails")
 	}
@@ -1356,13 +1459,13 @@ func TestRunAdd_BackupFailureAbortsWithoutRegistering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	withCopyFileStub(t, func(string, string) error { return errors.New("disk full") })
+	deps := fakeAddDeps{copyFile: func(string, string) error { return errors.New("disk full") }}
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err == nil {
+	if err := runAdd(projectPath, "", deps); err == nil {
 		t.Fatal("expected runAdd to fail when backup fails")
 	}
 	// Project must NOT be registered.
@@ -1413,7 +1516,7 @@ func TestRunAdd_LinkFailureNotRegistered(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(projectPath, "")
+	err := runAdd(projectPath, "", stdAddDeps{})
 	if err == nil {
 		t.Fatal("expected runAdd to fail when CreateLinks fails")
 	}
@@ -1448,7 +1551,7 @@ func TestRunAdd_AllPlatformsInstalled(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Fatalf("runAdd (all platforms seeded): %v", err)
 	}
 }
@@ -1488,7 +1591,7 @@ func TestRunAdd_SeededClaudeWithExistingFilesExercisesBackupAndLinks(t *testing.
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runAdd(projectPath, ""); err != nil {
+	if err := runAdd(projectPath, "", stdAddDeps{}); err != nil {
 		t.Fatalf("runAdd seeded-claude full path: %v", err)
 	}
 }

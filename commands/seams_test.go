@@ -80,10 +80,10 @@ func withSymlinkStub(t *testing.T, stub func(string, string) error) {
 // MkdirAll failure inside writeKGMCPConfigFile must propagate.
 func TestWriteKGMCPConfigFile_MkdirAllError(t *testing.T) {
 	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
+	deps := fakeAddDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
 	target := filepath.Join(t.TempDir(), "nested", "claude.json")
-	err := writeKGMCPConfigFile(target, map[string]any{"command": "x"})
+	err := writeKGMCPConfigFile(target, map[string]any{"command": "x"}, deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -92,10 +92,10 @@ func TestWriteKGMCPConfigFile_MkdirAllError(t *testing.T) {
 // WriteFile failure inside writeKGMCPConfigFile must propagate.
 func TestWriteKGMCPConfigFile_WriteFileError(t *testing.T) {
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeAddDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
 	target := filepath.Join(t.TempDir(), "claude.json")
-	err := writeKGMCPConfigFile(target, map[string]any{"command": "x"})
+	err := writeKGMCPConfigFile(target, map[string]any{"command": "x"}, deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected write sentinel, got %v", err)
 	}
@@ -106,9 +106,9 @@ func TestWriteKGMCPConfigFile_WriteFileError(t *testing.T) {
 // Executable() failure must propagate before any files are touched.
 func TestWriteKGMCPConfigs_ExecutableError(t *testing.T) {
 	sentinel := errors.New("no exe")
-	withExecutableStub(t, func() (string, error) { return "", sentinel })
+	deps := fakeAddDeps{executable: func() (string, error) { return "", sentinel }}
 
-	err := writeKGMCPConfigs(t.TempDir())
+	err := writeKGMCPConfigs(t.TempDir(), deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected executable sentinel, got %v", err)
 	}
@@ -117,9 +117,9 @@ func TestWriteKGMCPConfigs_ExecutableError(t *testing.T) {
 // Per-file error inside the iteration must surface as the first failure.
 func TestWriteKGMCPConfigs_PerFileError(t *testing.T) {
 	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
+	deps := fakeAddDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
-	err := writeKGMCPConfigs(t.TempDir())
+	err := writeKGMCPConfigs(t.TempDir(), deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected per-file sentinel, got %v", err)
 	}
@@ -362,13 +362,13 @@ func TestBackupExistingConfigsList_RemoveError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	withRemoveStub(t, func(string) error { return errors.New("remove boom") })
+	deps := fakeAddDeps{remove: func(string) error { return errors.New("remove boom") }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	got, err := backupExistingConfigsList([]string{target}, tmp, t.TempDir(), "p", "20240101-000000")
+	got, err := backupExistingConfigsList([]string{target}, tmp, t.TempDir(), "p", "20240101-000000", deps)
 	if err != nil {
 		t.Fatalf("backup itself should succeed (only Remove fails): %v", err)
 	}
@@ -627,13 +627,13 @@ func TestRunAdd_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	withConfigLoadStub(t, func() (*config.Config, error) { return nil, sentinel })
+	deps := fakeAddDeps{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runAdd(projectPath, "")
+	err := runAdd(projectPath, "", deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}
@@ -787,7 +787,7 @@ func TestBackupExistingConfigsList_LstatFails(t *testing.T) {
 	tmp := t.TempDir()
 	got, err := backupExistingConfigsList(
 		[]string{filepath.Join(tmp, "absent.txt")},
-		tmp, t.TempDir(), "p", "ts",
+		tmp, t.TempDir(), "p", "ts", stdAddDeps{},
 	)
 	if err != nil {
 		t.Fatalf("absent file should be skipped, not error: %v", err)
@@ -807,7 +807,7 @@ func TestBackupExistingConfigsList_SymlinkBranch(t *testing.T) {
 	}
 	link := filepath.Join(tmp, "link")
 	linktest.Link(t, dst, link)
-	got, err := backupExistingConfigsList([]string{link}, tmp, t.TempDir(), "p", "ts")
+	got, err := backupExistingConfigsList([]string{link}, tmp, t.TempDir(), "p", "ts", stdAddDeps{})
 	if err != nil {
 		t.Fatalf("managed symlink removal should not error: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestBackupExistingConfigsList_SymlinkBranch(t *testing.T) {
 // restoreLegacyResourceFile dest-empty branch (lines 614-617): when
 // mapResourceRelToDest returns "" the function returns 0.
 func TestRestoreLegacyResourceFile_NoMapping(t *testing.T) {
-	if got, err := restoreLegacyResourceFile("p", "totally/unknown/path.txt", t.TempDir(), ""); got != 0 || err != nil {
+	if got, err := restoreLegacyResourceFile("p", "totally/unknown/path.txt", t.TempDir(), "", stdAddDeps{}); got != 0 || err != nil {
 		t.Errorf("expected 0 for unmapped rel path, got %d (err=%v)", got, err)
 	}
 }
