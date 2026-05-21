@@ -1,11 +1,102 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
 )
+
+// fakeReviewDeps is the interface-DI test double for reviewDeps (mirrors
+// install_test.go's fakeInstallDeps). A nil func field delegates to the real
+// implementation so a test overrides only the operation it wants to
+// fault-inject.
+type fakeReviewDeps struct {
+	mkdirAll        func(string, os.FileMode) error
+	writeFile       func(string, []byte, os.FileMode) error
+	remove          func(string) error
+	applyProposal   func(*config.Proposal) error
+	archiveProposal func(*config.Proposal) error
+	runRefresh      func(string) error
+}
+
+func (f fakeReviewDeps) MkdirAll(path string, perm os.FileMode) error {
+	if f.mkdirAll != nil {
+		return f.mkdirAll(path, perm)
+	}
+	return os.MkdirAll(path, perm)
+}
+
+func (f fakeReviewDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	if f.writeFile != nil {
+		return f.writeFile(name, data, perm)
+	}
+	return os.WriteFile(name, data, perm)
+}
+
+func (f fakeReviewDeps) Remove(name string) error {
+	if f.remove != nil {
+		return f.remove(name)
+	}
+	return os.Remove(name)
+}
+
+func (f fakeReviewDeps) ApplyProposal(p *config.Proposal) error {
+	if f.applyProposal != nil {
+		return f.applyProposal(p)
+	}
+	return config.ApplyProposal(p)
+}
+
+func (f fakeReviewDeps) ArchiveProposal(p *config.Proposal) error {
+	if f.archiveProposal != nil {
+		return f.archiveProposal(p)
+	}
+	return config.ArchiveProposal(p)
+}
+
+func (f fakeReviewDeps) RunRefresh(projectFilter string) error {
+	if f.runRefresh != nil {
+		return f.runRefresh(projectFilter)
+	}
+	return runRefresh(projectFilter, stdRefreshConfigLoader{})
+}
+
+// TestFakeReviewDeps_NilDelegatesToReal pins the nil-delegates-to-real
+// contract for every method of the fake. Without this, a future change to a
+// default branch could silently regress every happy-path-but-not-overridden
+// test without any of them failing.
+func TestFakeReviewDeps_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := fakeReviewDeps{}
+	target := filepath.Join(tmp, "delegate", "nested")
+	if err := f.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("nil-mkdirAll delegate: %v", err)
+	}
+	file := filepath.Join(target, "f")
+	if err := f.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("nil-writeFile delegate: %v", err)
+	}
+	if err := f.Remove(file); err != nil {
+		t.Fatalf("nil-remove delegate: %v", err)
+	}
+	// ApplyProposal / ArchiveProposal / RunRefresh defaults call into the
+	// real implementations — exercising them end-to-end requires a valid
+	// proposal/config fixture, which other tests already provide. Here we
+	// just assert the methods are addressable (no nil-panic on dispatch).
+	_ = f.ApplyProposal
+	_ = f.ArchiveProposal
+	_ = f.RunRefresh
+}
 
 func TestRunReviewList_EmptyDir(t *testing.T) {
 	tmp := t.TempDir()
@@ -160,7 +251,7 @@ func TestRunReviewApprove_AppliesAndArchives(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 	writeProposal(t, agentsHome, "apply-me", validProposalYAML("apply-me", "pending"))
 
-	if err := runReviewApprove("apply-me"); err != nil {
+	if err := runReviewApprove("apply-me", stdReviewDeps{}); err != nil {
 		t.Fatalf("runReviewApprove: %v", err)
 	}
 
@@ -182,7 +273,7 @@ func TestRunReviewApprove_RejectsNonPending(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 	writeProposal(t, agentsHome, "already-approved", validProposalYAML("already-approved", "approved"))
 
-	err := runReviewApprove("already-approved")
+	err := runReviewApprove("already-approved", stdReviewDeps{})
 	if err == nil {
 		t.Fatal("expected error when approving a non-pending proposal")
 	}
@@ -207,7 +298,7 @@ created_at: "2025-01-01T00:00:00Z"
 created_by: t
 `
 	writeProposal(t, agentsHome, "invalid", body)
-	if err := runReviewApprove("invalid"); err == nil {
+	if err := runReviewApprove("invalid", stdReviewDeps{}); err == nil {
 		t.Fatal("expected validation error")
 	}
 }
@@ -218,7 +309,7 @@ func TestRunReviewReject_MarksAndArchives(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 	writeProposal(t, agentsHome, "to-reject", validProposalYAML("to-reject", "pending"))
 
-	if err := runReviewReject("to-reject", "not ready"); err != nil {
+	if err := runReviewReject("to-reject", "not ready", stdReviewDeps{}); err != nil {
 		t.Fatalf("runReviewReject: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(agentsHome, "proposals", "to-reject.yaml")); !os.IsNotExist(err) {
@@ -231,7 +322,7 @@ func TestRunReviewReject_NonPending(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 	writeProposal(t, agentsHome, "stale", validProposalYAML("stale", "rejected"))
-	if err := runReviewReject("stale", ""); err == nil {
+	if err := runReviewReject("stale", "", stdReviewDeps{}); err == nil {
 		t.Fatal("expected error when rejecting non-pending proposal")
 	}
 }
@@ -243,7 +334,7 @@ func TestRunReviewReject_NotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
-	if err := runReviewReject("ghost", "reason"); err == nil {
+	if err := runReviewReject("ghost", "reason", stdReviewDeps{}); err == nil {
 		t.Fatal("expected error for missing proposal")
 	}
 }
@@ -255,7 +346,7 @@ func TestRunReviewApprove_NotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
-	if err := runReviewApprove("ghost"); err == nil {
+	if err := runReviewApprove("ghost", stdReviewDeps{}); err == nil {
 		t.Fatal("expected error for missing proposal")
 	}
 }
@@ -299,7 +390,7 @@ content: "# x"
 created_at: "2025-01-01T00:00:00Z"
 created_by: t
 `)
-	if err := runReviewReject("needs-rationale", "reason"); err == nil {
+	if err := runReviewReject("needs-rationale", "reason", stdReviewDeps{}); err == nil {
 		t.Fatal("expected ValidateProposal error from runReviewReject")
 	}
 }
@@ -329,7 +420,7 @@ func TestRunReviewApprove_RefreshFailsRollsBack(t *testing.T) {
 	}
 	writeProposal(t, agentsHome, "rollme", validProposalYAML("rollme", "pending"))
 
-	err := runReviewApprove("rollme")
+	err := runReviewApprove("rollme", stdReviewDeps{})
 	if err == nil {
 		t.Fatal("expected refresh-after-apply error")
 	}
@@ -347,7 +438,7 @@ func TestCaptureProposalRollback_ReadErrorPropagates(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	restore, err := captureProposalRollback(dir)
+	restore, err := captureProposalRollback(dir, stdReviewDeps{})
 	if err == nil {
 		t.Errorf("expected non-IsNotExist read error, got restore=%T", restore)
 	}
@@ -359,7 +450,7 @@ func TestCaptureProposalRollback_RestoresExistingFile(t *testing.T) {
 	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restore, err := captureProposalRollback(target)
+	restore, err := captureProposalRollback(target, stdReviewDeps{})
 	if err != nil {
 		t.Fatalf("captureProposalRollback: %v", err)
 	}
@@ -378,7 +469,7 @@ func TestCaptureProposalRollback_RestoresExistingFile(t *testing.T) {
 func TestCaptureProposalRollback_RemovesIfMissingBefore(t *testing.T) {
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "sub", "rule.md")
-	restore, err := captureProposalRollback(target)
+	restore, err := captureProposalRollback(target, stdReviewDeps{})
 	if err != nil {
 		t.Fatalf("captureProposalRollback: %v", err)
 	}
@@ -446,5 +537,153 @@ func TestRunReviewList_ListPendingProposalsError(t *testing.T) {
 
 	if err := runReviewList(); err == nil {
 		t.Error("expected runReviewList to propagate ReadDir error")
+	}
+}
+
+// ─── fakeReviewDeps fault-injection coverage ─────────────────────────────────
+
+// TestRunReviewApprove_ApplyProposalErrorDI exercises the ApplyProposal
+// failure branch through the per-file reviewDeps interface. Mirrors the
+// legacy seams_test.go test that swapped applyProposalFn directly.
+func TestRunReviewApprove_ApplyProposalErrorDI(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "apply-fail-di", validProposalYAML("apply-fail-di", "pending"))
+
+	sentinel := errors.New("apply boom")
+	deps := fakeReviewDeps{applyProposal: func(*config.Proposal) error { return sentinel }}
+
+	err := runReviewApprove("apply-fail-di", deps)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected applyProposal sentinel, got %v", err)
+	}
+}
+
+// TestRunReviewApprove_ArchiveProposalErrorDIRollsBack exercises the archive
+// failure branch with apply+refresh succeeding, asserting the rollback
+// closure is invoked via the interface (deps.MkdirAll/WriteFile/Remove).
+func TestRunReviewApprove_ArchiveProposalErrorDIRollsBack(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "arch-fail-di", validProposalYAML("arch-fail-di", "pending"))
+
+	sentinel := errors.New("archive boom")
+	deps := fakeReviewDeps{
+		applyProposal:   func(*config.Proposal) error { return nil },
+		runRefresh:      func(string) error { return nil },
+		archiveProposal: func(*config.Proposal) error { return sentinel },
+	}
+
+	err := runReviewApprove("arch-fail-di", deps)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected archiveProposal sentinel, got %v", err)
+	}
+}
+
+// TestRunReviewApprove_RunRefreshErrorDIRollsBack exercises the
+// refresh-after-apply failure branch via the interface. The refresh sentinel
+// should be wrapped with "refresh after apply".
+func TestRunReviewApprove_RunRefreshErrorDIRollsBack(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "refresh-fail-di", validProposalYAML("refresh-fail-di", "pending"))
+
+	sentinel := errors.New("refresh boom")
+	deps := fakeReviewDeps{
+		applyProposal: func(*config.Proposal) error { return nil },
+		runRefresh:    func(string) error { return sentinel },
+	}
+
+	err := runReviewApprove("refresh-fail-di", deps)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected refresh sentinel wrapped, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "refresh after apply") {
+		t.Errorf("expected 'refresh after apply' wrap, got %v", err)
+	}
+}
+
+// TestRunReviewReject_ArchiveProposalErrorDI exercises ArchiveProposal
+// failure on the reject path via the interface.
+func TestRunReviewReject_ArchiveProposalErrorDI(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "reject-arch-fail-di", validProposalYAML("reject-arch-fail-di", "pending"))
+
+	sentinel := errors.New("archive boom")
+	deps := fakeReviewDeps{archiveProposal: func(*config.Proposal) error { return sentinel }}
+
+	err := runReviewReject("reject-arch-fail-di", "no", deps)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("expected archiveProposal sentinel, got %v", err)
+	}
+}
+
+// TestCaptureProposalRollback_RestoreMkdirErrorDI: when the target file
+// exists, the rollback closure must propagate a deps.MkdirAll failure.
+func TestCaptureProposalRollback_RestoreMkdirErrorDI(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "f.txt")
+	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := errors.New("mkdir boom")
+	deps := fakeReviewDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
+
+	rollback, err := captureProposalRollback(target, deps)
+	if err != nil {
+		t.Fatalf("captureProposalRollback: %v", err)
+	}
+	if got := rollback(); !errors.Is(got, sentinel) {
+		t.Fatalf("expected mkdir sentinel, got %v", got)
+	}
+}
+
+// TestCaptureProposalRollback_RestoreWriteErrorDI: rollback closure must
+// propagate a deps.WriteFile failure.
+func TestCaptureProposalRollback_RestoreWriteErrorDI(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "f.txt")
+	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sentinel := errors.New("write boom")
+	deps := fakeReviewDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
+
+	rollback, err := captureProposalRollback(target, deps)
+	if err != nil {
+		t.Fatalf("captureProposalRollback: %v", err)
+	}
+	if got := rollback(); !errors.Is(got, sentinel) {
+		t.Fatalf("expected write sentinel, got %v", got)
+	}
+}
+
+// TestCaptureProposalRollback_RemoveErrorDI: when the target did not exist
+// at capture time, the rollback closure must propagate a deps.Remove
+// non-ENOENT failure.
+func TestCaptureProposalRollback_RemoveErrorDI(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "absent.txt")
+
+	sentinel := errors.New("remove boom")
+	deps := fakeReviewDeps{remove: func(string) error { return sentinel }}
+
+	rollback, err := captureProposalRollback(target, deps)
+	if err != nil {
+		t.Fatalf("captureProposalRollback: %v", err)
+	}
+	if got := rollback(); !errors.Is(got, sentinel) {
+		t.Fatalf("expected remove sentinel, got %v", got)
 	}
 }

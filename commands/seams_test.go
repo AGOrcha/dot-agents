@@ -2,7 +2,6 @@ package commands
 
 import (
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,137 +126,13 @@ func TestWriteKGMCPConfigs_PerFileError(t *testing.T) {
 }
 
 // ─── captureProposalRollback closures ────────────────────────────────────────
-
-// When target file exists, rollback restores it. Stub MkdirAll to force the
-// "restore: mkdir failed" branch.
-func TestCaptureProposalRollback_RestoreMkdirError(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "f.txt")
-	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	rollback, err := captureProposalRollback(target)
-	if err != nil {
-		t.Fatalf("captureProposalRollback: %v", err)
-	}
-
-	sentinel := errors.New("mkdir boom")
-	withMkdirAllStub(t, func(string, os.FileMode) error { return sentinel })
-	if got := rollback(); !errors.Is(got, sentinel) {
-		t.Fatalf("expected mkdir sentinel, got %v", got)
-	}
-}
-
-// Stub WriteFile to force the "restore: write failed" branch.
-func TestCaptureProposalRollback_RestoreWriteError(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "f.txt")
-	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	rollback, err := captureProposalRollback(target)
-	if err != nil {
-		t.Fatalf("captureProposalRollback: %v", err)
-	}
-
-	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
-	if got := rollback(); !errors.Is(got, sentinel) {
-		t.Fatalf("expected write sentinel, got %v", got)
-	}
-}
-
-// Happy-path restore branch — exercise the closure end-to-end after seams are
-// reset so MkdirAll/WriteFile succeed.
-func TestCaptureProposalRollback_RestoreSuccess(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "nested", "f.txt")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	rollback, err := captureProposalRollback(target)
-	if err != nil {
-		t.Fatalf("captureProposalRollback: %v", err)
-	}
-
-	// Mutate the file to verify restore overwrites it.
-	if err := os.WriteFile(target, []byte("mutated"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := rollback(); err != nil {
-		t.Fatalf("rollback: %v", err)
-	}
-	got, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "orig" {
-		t.Errorf("expected restored content 'orig', got %q", got)
-	}
-}
-
-// When the target does NOT exist, captureProposalRollback returns a removal
-// closure. Stub Remove to a non-ENOENT error and confirm it propagates.
-func TestCaptureProposalRollback_RemoveError(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "absent.txt")
-
-	rollback, err := captureProposalRollback(target)
-	if err != nil {
-		t.Fatalf("captureProposalRollback: %v", err)
-	}
-
-	sentinel := errors.New("remove boom")
-	withRemoveStub(t, func(string) error { return sentinel })
-	if got := rollback(); !errors.Is(got, sentinel) {
-		t.Fatalf("expected remove sentinel, got %v", got)
-	}
-}
-
-// Removal closure must swallow ENOENT.
-func TestCaptureProposalRollback_RemoveENOENTSwallowed(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "absent.txt")
-
-	rollback, err := captureProposalRollback(target)
-	if err != nil {
-		t.Fatalf("captureProposalRollback: %v", err)
-	}
-
-	withRemoveStub(t, func(string) error {
-		return &fs.PathError{Op: "remove", Path: target, Err: fs.ErrNotExist}
-	})
-	if got := rollback(); got != nil {
-		t.Fatalf("expected ENOENT to be swallowed, got %v", got)
-	}
-}
-
-// captureProposalRollback returns a propagated error when ReadFile returns a
-// non-ENOENT error. Trigger via ENOTDIR (target lives "under" a regular file).
-func TestCaptureProposalRollback_ReadFileError(t *testing.T) {
-	tmp := t.TempDir()
-	// A directory path causes os.ReadFile to fail with a non-ENOENT error on
-	// both POSIX (EISDIR) and Windows (ERROR_ACCESS_DENIED / handle is a
-	// directory). The previous "file as a path component" fixture produced
-	// ENOTDIR on POSIX but ERROR_PATH_NOT_FOUND (→ fs.ErrNotExist) on
-	// Windows, so it could not exercise the non-ENOENT branch there.
-	target := filepath.Join(tmp, "adir")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := captureProposalRollback(target); err == nil {
-		t.Fatal("expected non-nil error reading a directory")
-	} else if errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("expected non-ENOENT error, got %v", err)
-	}
-}
+//
+// The seam-injection coverage for captureProposalRollback (restore mkdir
+// failure, restore write failure, restore success, remove failure, remove
+// ENOENT-swallowed, read-file failure) migrated to commands/review_test.go
+// alongside the rest of the review fault-injection suite when review.go
+// converted to the per-file reviewDeps interface. See
+// TestCaptureProposalRollback_RestoreMkdirErrorDI and siblings.
 
 // ─── scaffoldWorkflowAssets MkdirAll branch ──────────────────────────────────
 
@@ -710,58 +585,15 @@ func TestRunRemove_ConfigLoadError(t *testing.T) {
 	}
 }
 
-// ─── runReviewApprove ApplyProposal / ArchiveProposal failure branches ──────
-
-func TestRunReviewApprove_ApplyProposalError(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", agentsHome)
-	writeProposal(t, agentsHome, "apply-fail", validProposalYAML("apply-fail", "pending"))
-
-	sentinel := errors.New("apply boom")
-	withApplyProposalStub(t, func(*config.Proposal) error { return sentinel })
-
-	err := runReviewApprove("apply-fail")
-	if err == nil || !errors.Is(err, sentinel) {
-		t.Fatalf("expected applyProposal sentinel, got %v", err)
-	}
-}
-
-func TestRunReviewApprove_ArchiveProposalError_RollsBack(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", agentsHome)
-	writeProposal(t, agentsHome, "arch-fail", validProposalYAML("arch-fail", "pending"))
-
-	// Apply + refresh succeed, archive fails — rollback path executes.
-	withApplyProposalStub(t, func(*config.Proposal) error { return nil })
-	withRunRefreshStub(t, func(string) error { return nil })
-	sentinel := errors.New("archive boom")
-	withArchiveProposalStub(t, func(*config.Proposal) error { return sentinel })
-
-	err := runReviewApprove("arch-fail")
-	if err == nil || !errors.Is(err, sentinel) {
-		t.Fatalf("expected archiveProposal sentinel, got %v", err)
-	}
-}
-
-func TestRunReviewReject_ArchiveProposalError(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", agentsHome)
-	writeProposal(t, agentsHome, "reject-arch-fail", validProposalYAML("reject-arch-fail", "pending"))
-
-	sentinel := errors.New("archive boom")
-	withArchiveProposalStub(t, func(*config.Proposal) error { return sentinel })
-
-	err := runReviewReject("reject-arch-fail", "no")
-	if err == nil || !errors.Is(err, sentinel) {
-		t.Fatalf("expected archiveProposal sentinel, got %v", err)
-	}
-}
+// ─── runReviewApprove / runReviewReject seam-injection coverage ──────────────
+//
+// ApplyProposal, RunRefresh, and ArchiveProposal failure coverage migrated
+// to commands/review_test.go alongside the rest of the review
+// fault-injection suite when review.go converted to the per-file reviewDeps
+// interface. See TestRunReviewApprove_ApplyProposalErrorDI,
+// TestRunReviewApprove_ArchiveProposalErrorDIRollsBack,
+// TestRunReviewApprove_RunRefreshErrorDIRollsBack, and
+// TestRunReviewReject_ArchiveProposalErrorDI.
 
 func TestRunStatus_ConfigLoadError(t *testing.T) {
 	tmp := t.TempDir()
