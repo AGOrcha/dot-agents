@@ -13,6 +13,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// removeDeps is the multi-method collaborator runRemove and its
+// removeProjectDirs helper need (interface-DI per docs/TEST_SEAMS.md).
+// File-scoped — do not share with other commands files. The narrower
+// dirCleaner interface below stays scoped to emptyProjectDirs; runRemove
+// has its own broader role because it loads config in addition to the
+// --clean RemoveAll path.
+type removeDeps interface {
+	RemoveAll(path string) error
+	LoadConfig() (*config.Config, error)
+}
+
+// stdRemoveDeps is the production removeDeps backed by os.RemoveAll and
+// config.Load.
+type stdRemoveDeps struct{}
+
+func (stdRemoveDeps) RemoveAll(path string) error         { return os.RemoveAll(path) }
+func (stdRemoveDeps) LoadConfig() (*config.Config, error) { return config.Load() }
+
 func NewRemoveCmd() *cobra.Command {
 	var cleanDirs bool
 
@@ -30,15 +48,15 @@ With --clean, also removes project directories from ~/.agents/.`,
 		),
 		Args: ExactArgsWithHints(1, "Use the managed project name from `da status`."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRemove(args[0], cleanDirs)
+			return runRemove(args[0], cleanDirs, stdRemoveDeps{})
 		},
 	}
 	cmd.Flags().BoolVar(&cleanDirs, "clean", false, "Also remove project directories from ~/.agents/")
 	return cmd
 }
 
-func runRemove(projectName string, cleanDirs bool) error {
-	cfg, err := configLoad()
+func runRemove(projectName string, cleanDirs bool, deps removeDeps) error {
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -51,11 +69,38 @@ func runRemove(projectName string, cleanDirs bool) error {
 		)
 	}
 
-	displayPath := config.DisplayPath(projectPath)
+	announceRemoveTarget(projectName, projectPath)
+	printRemovePreview(projectName, projectPath, cleanDirs)
 
+	if Flags.DryRun {
+		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
+		return nil
+	}
+	if confirmRemoveProceed() {
+		return nil
+	}
+
+	if err := removeProjectLinks(projectName, projectPath); err != nil {
+		return err
+	}
+
+	if err := cleanProjectCanonicalDirs(projectName, cleanDirs, deps); err != nil {
+		return err
+	}
+
+	if err := unregisterRemovedProject(cfg, projectName); err != nil {
+		return err
+	}
+	emitRemoveSuccessBox(projectName, cleanDirs)
+	return nil
+}
+
+// announceRemoveTarget prints the header, project/path lines, and the
+// "Analyzing project..." bullet.
+func announceRemoveTarget(projectName, projectPath string) {
 	ui.Header("da remove")
 	fmt.Fprintf(os.Stdout, "Removing project: %s\n", ui.BoldText(projectName))
-	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
+	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(config.DisplayPath(projectPath)))
 
 	ui.Step("Analyzing project...")
 	if _, err := os.Stat(projectPath); err == nil {
@@ -63,7 +108,14 @@ func runRemove(projectName string, cleanDirs bool) error {
 	} else {
 		ui.Bullet("warn", "Project directory not found (links may have been moved)")
 	}
+}
 
+// printRemovePreview prints the "The following will be removed" preview
+// block: per-platform link inventory, registration line, git-source cache
+// warning when relevant, and the destructive/non-destructive canonical-dirs
+// preview based on cleanDirs.
+func printRemovePreview(projectName, projectPath string, cleanDirs bool) {
+	displayPath := config.DisplayPath(projectPath)
 	ui.Step("The following will be removed:")
 	ui.PreviewSection("From "+displayPath+":",
 		".cursor/rules/global--*.mdc     (hard links)",
@@ -79,19 +131,33 @@ func runRemove(projectName string, cleanDirs bool) error {
 	ui.PreviewSection("From ~/.agents/config.json:",
 		"Project registration for '"+projectName+"'",
 	)
+	warnRemoveGitSourceCache(projectPath)
+	printRemoveCanonicalDirsPreview(projectName, cleanDirs)
+}
 
-	// Warn about git source cache if manifest has git sources
-	if rc, err := config.LoadAgentsRC(projectPath); err == nil {
-		for _, src := range rc.Sources {
-			if src.Type == "git" && src.URL != "" {
-				ui.Warn("Git source cache not cleaned automatically")
-				fmt.Fprintf(os.Stdout, "  Cache: %s~/.cache/dot-agents/sources/%s\n", ui.Dim, ui.Reset)
-				fmt.Fprintf(os.Stdout, "  To clean: %srm -rf ~/.cache/dot-agents/sources/%s\n\n", ui.Dim, ui.Reset)
-				break
-			}
+// warnRemoveGitSourceCache prints the one-shot warn when the project's
+// manifest declares any git source, plus the manual rm hint. A missing
+// manifest is silently skipped — git-cache cleanup only matters when there
+// was a git source to begin with.
+func warnRemoveGitSourceCache(projectPath string) {
+	rc, err := config.LoadAgentsRC(projectPath)
+	if err != nil {
+		return
+	}
+	for _, src := range rc.Sources {
+		if src.Type == "git" && src.URL != "" {
+			ui.Warn("Git source cache not cleaned automatically")
+			fmt.Fprintf(os.Stdout, "  Cache: %s~/.cache/dot-agents/sources/%s\n", ui.Dim, ui.Reset)
+			fmt.Fprintf(os.Stdout, "  To clean: %srm -rf ~/.cache/dot-agents/sources/%s\n\n", ui.Dim, ui.Reset)
+			return
 		}
 	}
+}
 
+// printRemoveCanonicalDirsPreview prints the destructive --clean WarnBox or
+// the non-destructive "contents-cleared" PreviewSection — both list the same
+// six canonical dirs owned by the project.
+func printRemoveCanonicalDirsPreview(projectName string, cleanDirs bool) {
 	if cleanDirs {
 		ui.WarnBox("Destructive Action",
 			"The --clean flag will permanently delete these directories entirely:",
@@ -102,61 +168,64 @@ func runRemove(projectName string, cleanDirs bool) error {
 			"  ~/.agents/skills/"+projectName+"/",
 			"  ~/.agents/agents/"+projectName+"/",
 		)
-	} else {
-		ui.PreviewSection("From ~/.agents/ (managed canonical dirs):",
-			"Contents cleared; the now-empty directories are kept:",
-			"  ~/.agents/rules/"+projectName+"/",
-			"  ~/.agents/settings/"+projectName+"/",
-			"  ~/.agents/mcp/"+projectName+"/",
-			"  ~/.agents/hooks/"+projectName+"/",
-			"  ~/.agents/skills/"+projectName+"/",
-			"  ~/.agents/agents/"+projectName+"/",
-			"Pass --clean to remove the directories themselves too.",
-		)
+		return
 	}
+	ui.PreviewSection("From ~/.agents/ (managed canonical dirs):",
+		"Contents cleared; the now-empty directories are kept:",
+		"  ~/.agents/rules/"+projectName+"/",
+		"  ~/.agents/settings/"+projectName+"/",
+		"  ~/.agents/mcp/"+projectName+"/",
+		"  ~/.agents/hooks/"+projectName+"/",
+		"  ~/.agents/skills/"+projectName+"/",
+		"  ~/.agents/agents/"+projectName+"/",
+		"Pass --clean to remove the directories themselves too.",
+	)
+}
 
-	if Flags.DryRun {
-		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
+// confirmRemoveProceed prompts the user when neither --yes nor --force is
+// set. Returns true when the user declined (caller returns nil).
+func confirmRemoveProceed() bool {
+	if Flags.Yes || Flags.Force {
+		return false
+	}
+	if !ui.Confirm("Proceed with removal?", false) {
+		ui.Info("Removal cancelled.")
+		return true
+	}
+	return false
+}
+
+// removeProjectLinks runs the "Removing project..." link-removal phase:
+// shared-target unwind plus per-platform RemoveLinks. A missing project
+// directory is treated as "links already removed" (skip). Returns a typed
+// error listing every cleanup failure so the registration stays put for a
+// retry (no-orphan invariant).
+func removeProjectLinks(projectName, projectPath string) error {
+	ui.Step("Removing project...")
+	if _, err := os.Stat(projectPath); err != nil {
+		ui.Bullet("skip", "Skipped link removal (directory not found)")
 		return nil
 	}
-
-	if !Flags.Yes && !Flags.Force {
-		if !ui.Confirm("Proceed with removal?", false) {
-			ui.Info("Removal cancelled.")
-			return nil
+	config.SetWindowsMirrorContext(projectPath)
+	var installed []platform.Platform
+	for _, p := range platform.All() {
+		if p.IsInstalled() {
+			installed = append(installed, p)
 		}
 	}
-
-	ui.Step("Removing project...")
-
 	var cleanupFailures []string
-	if _, err := os.Stat(projectPath); err == nil {
-		config.SetWindowsMirrorContext(projectPath)
-		var installed []platform.Platform
-		for _, p := range platform.All() {
-			if p.IsInstalled() {
-				installed = append(installed, p)
-			}
-		}
-		if err := platform.RemoveSharedTargetPlan(projectName, projectPath, installed); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
-			cleanupFailures = append(cleanupFailures, fmt.Sprintf("shared targets: %v", err))
-		}
-		for _, p := range platform.All() {
-			if err := p.RemoveLinks(projectName, projectPath); err != nil {
-				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
-				cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
-			} else {
-				ui.Bullet("ok", p.DisplayName()+" links removed")
-			}
-		}
-	} else {
-		ui.Bullet("skip", "Skipped link removal (directory not found)")
+	if err := platform.RemoveSharedTargetPlan(projectName, projectPath, installed); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		cleanupFailures = append(cleanupFailures, fmt.Sprintf("shared targets: %v", err))
 	}
-
-	// Managed cleanup failed: removing the registration now would orphan the
-	// still-present managed outputs with no record to retry against. Preserve
-	// the registration and fail so a re-run can finish the cleanup.
+	for _, p := range platform.All() {
+		if err := p.RemoveLinks(projectName, projectPath); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+			cleanupFailures = append(cleanupFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
+			continue
+		}
+		ui.Bullet("ok", p.DisplayName()+" links removed")
+	}
 	if len(cleanupFailures) > 0 {
 		return ErrorWithHints(
 			fmt.Sprintf("remove incomplete for '%s': %s", projectName, strings.Join(cleanupFailures, "; ")),
@@ -164,19 +233,19 @@ func runRemove(projectName string, cleanDirs bool) error {
 				"Resolve the warnings above, then re-run `da remove "+projectName+"`.",
 		)
 	}
+	return nil
+}
 
-	// Canonical-dir cleanup runs BEFORE unregistering: a permission/locked-file
-	// failure here must leave the project registered so a re-run still has a
-	// handle to retry against. Unregistering first would orphan stale canonical
-	// data with no recovery path while falsely reporting success.
-	//
-	// Plain `da remove` clears the canonical dirs' contents but keeps the
-	// (now-empty) directory skeleton; `--clean` removes the directories too.
+// cleanProjectCanonicalDirs runs the canonical-dir cleanup phase. With
+// --clean the dirs themselves go away; otherwise just their contents are
+// cleared. A cleanup failure preserves the registration so a re-run still
+// has a handle to retry against (no-orphan invariant).
+func cleanProjectCanonicalDirs(projectName string, cleanDirs bool, deps removeDeps) error {
 	ui.Step("Cleaning project directories...")
 	var cleanupErr error
 	doneMsg := "Cleared project directory contents (directories kept)"
 	if cleanDirs {
-		cleanupErr = removeProjectDirs(projectName)
+		cleanupErr = removeProjectDirs(projectName, deps)
 		doneMsg = "Removed project directories"
 	} else {
 		cleanupErr = emptyProjectDirs(osDirCleaner{}, projectName)
@@ -194,24 +263,34 @@ func runRemove(projectName string, cleanDirs bool) error {
 		)
 	}
 	ui.Bullet("ok", doneMsg)
+	return nil
+}
 
+// unregisterRemovedProject removes the project from config.json. Only call
+// after every prior cleanup step succeeded — unregistration is the
+// success-stamp moment.
+func unregisterRemovedProject(cfg *config.Config, projectName string) error {
 	cfg.RemoveProject(projectName)
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	ui.Bullet("ok", "Unregistered from config.json")
+	return nil
+}
 
+// emitRemoveSuccessBox prints the final success box. --clean omits the
+// follow-up --clean hint (it was already used).
+func emitRemoveSuccessBox(projectName string, cleanDirs bool) {
 	if cleanDirs {
 		ui.SuccessBox(fmt.Sprintf("Project '%s' removed completely!", projectName),
 			"Verify removal: da status",
 		)
-	} else {
-		ui.SuccessBox(fmt.Sprintf("Project '%s' unlinked successfully!", projectName),
-			"Verify removal: da status",
-			"To also remove project directories: da remove "+projectName+" --clean",
-		)
+		return
 	}
-	return nil
+	ui.SuccessBox(fmt.Sprintf("Project '%s' unlinked successfully!", projectName),
+		"Verify removal: da status",
+		"To also remove project directories: da remove "+projectName+" --clean",
+	)
 }
 
 // projectCanonicalDirs is the canonical ~/.agents/ directory set owned by a
@@ -238,10 +317,10 @@ func projectCanonicalDirs(project string) []string {
 // `da remove --clean` reporting complete removal while stale canonical data
 // remained on disk. A not-exist error is the expected "nothing to clean"
 // case and is the only error swallowed.
-func removeProjectDirs(project string) error {
+func removeProjectDirs(project string, deps removeDeps) error {
 	var errs []error
 	for _, d := range projectCanonicalDirs(project) {
-		if err := osRemoveAll(d); err != nil && !os.IsNotExist(err) {
+		if err := deps.RemoveAll(d); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
 		}
 	}

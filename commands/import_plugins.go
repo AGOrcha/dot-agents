@@ -222,7 +222,7 @@ func directPackagePluginRefs(sourceRoot string) ([]directPackagePluginRef, error
 	return filtered, nil
 }
 
-func directPackagePluginRefsForManifest(sourceRoot, platformID, manifestPath string, build func(importedPackagePluginManifest, string) []directPackagePluginRef) ([]directPackagePluginRef, error) {
+func directPackagePluginRefsForManifest(_, platformID, manifestPath string, build func(importedPackagePluginManifest, string) []directPackagePluginRef) ([]directPackagePluginRef, error) {
 	manifest, ok, err := loadImportedPackagePluginManifest(manifestPath)
 	if err != nil {
 		return nil, err
@@ -464,7 +464,7 @@ func packagePluginNameFromMarketplace(sourcePath, platformID, manifestPath strin
 	return "", nil
 }
 
-func nameFromMarketplace(path, platformID string) (string, bool, error) {
+func nameFromMarketplace(path, _ string) (string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -530,7 +530,7 @@ func canonicalPackagePluginManifestOutputs(c importCandidate, platformID, name s
 	return outputs, true, nil
 }
 
-func canonicalPackagePluginMarketplaceOutputs(c importCandidate, platformID, name, manifestPath string) ([]importOutput, bool, error) {
+func canonicalPackagePluginMarketplaceOutputs(c importCandidate, platformID, name, _ string) ([]importOutput, bool, error) {
 	raw, err := os.ReadFile(c.sourcePath)
 	if err != nil {
 		return nil, true, err

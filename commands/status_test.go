@@ -11,6 +11,61 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
+// fakeStatusConfigLoader is the interface-DI test double for
+// statusConfigLoader (per docs/TEST_SEAMS.md). A nil func field delegates
+// to the real config.Load implementation.
+type fakeStatusConfigLoader struct {
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeStatusConfigLoader) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeStatusConfigLoader_NilDelegatesToReal pins the nil-delegates-to-real
+// contract: a test that omits loadConfig must hit the real config.Load (not a
+// silent no-op). Without this, future regressions in the fake's default
+// branch could mask happy-path test failures.
+func TestFakeStatusConfigLoader_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := (fakeStatusConfigLoader{}).LoadConfig()
+	if err != nil {
+		t.Fatalf("nil-loadConfig delegate: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected real config.Load result, got nil")
+	}
+}
+
+// TestNewStatusCmd_RunEClosureWiresStdDeps drives status' RunE closure end
+// to end so a regression that drops std deps wiring fails here rather than
+// silently in production.
+func TestNewStatusCmd_RunEClosureWiresStdDeps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	cmd := NewStatusCmd()
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE closure: %v", err)
+	}
+}
+
 func TestNewStatusCmd_FlagsAndArgs(t *testing.T) {
 	cmd := NewStatusCmd()
 	if cmd.Use != "status" {
@@ -261,7 +316,7 @@ func TestRunStatus_TextEmptyConfig(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runStatus(false, ""); err != nil {
+	if err := runStatus(false, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus: %v", err)
 	}
 }
@@ -319,7 +374,7 @@ func TestRunStatus_JSONFlagEndToEnd(t *testing.T) {
 	Flags = GlobalFlags{JSON: true}
 	defer func() { Flags = saved }()
 
-	if err := runStatus(false, ""); err != nil {
+	if err := runStatus(false, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus --json: %v", err)
 	}
 }
@@ -984,7 +1039,7 @@ func TestRunStatus_AuditMode(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runStatus(true, ""); err != nil {
+	if err := runStatus(true, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus --audit: %v", err)
 	}
 }
@@ -1007,7 +1062,7 @@ func TestRunStatus_MissingProjectDir(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runStatus(false, ""); err != nil {
+	if err := runStatus(false, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus with missing project dir: %v", err)
 	}
 }
@@ -1330,7 +1385,7 @@ func TestRunStatus_CorruptConfigErrors(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	err := runStatus(false, "")
+	err := runStatus(false, "", stdStatusConfigLoader{})
 	if err == nil {
 		t.Error("expected config.Load error from corrupt config.json")
 	}
@@ -1352,7 +1407,7 @@ func TestRunStatus_JSONMode(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{JSON: true}
 	defer func() { Flags = saved }()
-	if err := runStatus(false, ""); err != nil {
+	if err := runStatus(false, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus JSON: %v", err)
 	}
 }
@@ -1411,7 +1466,7 @@ func TestRunStatus_DirectoryMissing(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := runStatus(false, ""); err != nil {
+	if err := runStatus(false, "", stdStatusConfigLoader{}); err != nil {
 		t.Errorf("runStatus missing dir: %v", err)
 	}
 }

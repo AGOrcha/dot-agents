@@ -14,6 +14,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// installDeps is the multi-method collaborator runInstall, runInstallGenerate,
+// and their helpers need (interface-DI per docs/TEST_SEAMS.md). File-scoped —
+// do not share with other commands files. The four operations are the install
+// pipeline's fault-injectable touch points: working-directory resolution
+// (Getwd), filesystem materialization of resource link parents and git cache
+// roots (MkdirAll), the resource symlink itself (Symlink), and config.json
+// load (LoadConfig) for project registration and lookup.
+type installDeps interface {
+	Getwd() (string, error)
+	MkdirAll(path string, perm os.FileMode) error
+	Symlink(oldname, newname string) error
+	LoadConfig() (*config.Config, error)
+}
+
+// stdInstallDeps is the production installDeps backed by the os package and
+// config.Load.
+type stdInstallDeps struct{}
+
+func (stdInstallDeps) Getwd() (string, error)                       { return os.Getwd() }
+func (stdInstallDeps) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
+func (stdInstallDeps) Symlink(oldname, newname string) error        { return os.Symlink(oldname, newname) }
+func (stdInstallDeps) LoadConfig() (*config.Config, error)          { return config.Load() }
+
 func NewInstallCmd() *cobra.Command {
 	var generate bool
 	var strict bool
@@ -42,9 +65,9 @@ unknown JSON keys are preserved.`,
 		Args: NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if generate {
-				return runInstallGenerate()
+				return runInstallGenerate(stdInstallDeps{})
 			}
-			return runInstall(strict)
+			return runInstall(strict, stdInstallDeps{})
 		},
 	}
 	cmd.Flags().BoolVar(&generate, "generate", false, "Create .agentsrc.json from current ~/.agents/ state")
@@ -54,8 +77,8 @@ unknown JSON keys are preserved.`,
 
 // ─── runInstall ──────────────────────────────────────────────────────────────
 
-func runInstall(strict bool) error {
-	projectPath, err := osGetwd()
+func runInstall(strict bool, deps installDeps) error {
+	projectPath, err := deps.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
@@ -74,17 +97,17 @@ func runInstall(strict bool) error {
 	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
 
-	resolvedSources, err := resolveInstallSources(rc.Sources, strict)
+	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
 	if err != nil {
 		return err
 	}
-	if err := linkInstallResources(projectName, rc, resolvedSources, strict); err != nil {
+	if err := linkInstallResources(projectName, rc, resolvedSources, strict, deps); err != nil {
 		return err
 	}
 	if err := ensureInstallProjectDirs(projectName); err != nil {
 		return err
 	}
-	if err := registerInstallProject(projectName, projectPath); err != nil {
+	if err := registerInstallProject(projectName, projectPath, deps); err != nil {
 		return err
 	}
 
@@ -131,31 +154,31 @@ func installProjectName(manifestProject, projectPath string) string {
 	return filepath.Base(projectPath)
 }
 
-func resolveInstallSources(sources []config.Source, strict bool) ([]string, error) {
+func resolveInstallSources(sources []config.Source, strict bool, deps installDeps) ([]string, error) {
 	ui.Section("Resolving sources")
-	resolvedSources, err := resolveSources(sources)
+	resolvedSources, err := resolveSources(sources, deps)
 	if err != nil && strict {
 		return nil, err
 	}
 	return resolvedSources, nil
 }
 
-func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool) error {
+func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool, deps installDeps) error {
 	sources := resolvedSources
 	if len(sources) == 0 {
 		// Manifest may omit explicit sources while listing skills/agents that already exist
 		// under ~/.agents/<bucket>/<project>/ (e.g. after promote). Resolve from canonical home.
 		sources = []string{config.AgentsHome()}
 	}
-	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, sources, strict); err != nil {
+	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, sources, strict, deps); err != nil {
 		return err
 	}
-	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, sources, strict)
+	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, sources, strict, deps)
 }
 
-func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool) error {
+func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool, deps installDeps) error {
 	for _, name := range names {
-		if err := linkResourceFromSources(resourceType, name, projectName, sources); err != nil {
+		if err := linkResourceFromSources(resourceType, name, projectName, sources, deps); err != nil {
 			msg := fmt.Sprintf("%s '%s' not found in any source", label, name)
 			if strict {
 				return fmt.Errorf("%s (--strict mode)", msg)
@@ -178,8 +201,8 @@ func ensureInstallProjectDirs(projectName string) error {
 	return nil
 }
 
-func registerInstallProject(projectName, projectPath string) error {
-	cfg, err := configLoad()
+func registerInstallProject(projectName, projectPath string, deps installDeps) error {
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -266,8 +289,8 @@ func finalizeInstall(projectName, projectPath string) {
 
 // ─── runInstallGenerate ──────────────────────────────────────────────────────
 
-func runInstallGenerate() error {
-	projectPath, err := osGetwd()
+func runInstallGenerate(deps installDeps) error {
+	projectPath, err := deps.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
@@ -275,7 +298,7 @@ func runInstallGenerate() error {
 	ui.Header("da install --generate")
 
 	// Derive project name from config.json or directory name
-	projectName := findProjectByPath(projectPath)
+	projectName := findProjectByPath(projectPath, deps)
 	if projectName == "" {
 		projectName = filepath.Base(projectPath)
 		ui.Info("Project not registered — using directory name: " + projectName)
@@ -328,12 +351,12 @@ func runInstallGenerate() error {
 // ─── source resolution ───────────────────────────────────────────────────────
 
 // resolveSources resolves each source to a local root directory.
-func resolveSources(sources []config.Source) ([]string, error) {
+func resolveSources(sources []config.Source, deps installDeps) ([]string, error) {
 	var resolved []string
 	var firstErr error
 
 	for _, src := range sources {
-		root, err := resolveSourceRoot(src)
+		root, err := resolveSourceRoot(src, deps)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -348,7 +371,7 @@ func resolveSources(sources []config.Source) ([]string, error) {
 	return resolved, firstErr
 }
 
-func resolveSourceRoot(src config.Source) (string, error) {
+func resolveSourceRoot(src config.Source, deps installDeps) (string, error) {
 	switch src.Type {
 	case "local":
 		root := config.AgentsHome()
@@ -362,7 +385,7 @@ func resolveSourceRoot(src config.Source) (string, error) {
 			ui.Bullet("warn", "Git source missing 'url' — skipping")
 			return "", nil
 		}
-		cacheDir, err := fetchGitSource(src.URL, src.Ref)
+		cacheDir, err := fetchGitSource(src.URL, src.Ref, deps)
 		if err != nil {
 			ui.Bullet("warn", fmt.Sprintf("Failed to fetch %s — skipping", src.URL))
 			return "", err
@@ -376,7 +399,7 @@ func resolveSourceRoot(src config.Source) (string, error) {
 }
 
 // fetchGitSource clones or updates a git repository to the cache.
-func fetchGitSource(url, ref string) (string, error) {
+func fetchGitSource(url, ref string, deps installDeps) (string, error) {
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
 		return "", fmt.Errorf("git not installed")
@@ -399,7 +422,7 @@ func fetchGitSource(url, ref string) (string, error) {
 		ui.DryRun(gitCloneDryRunCommand(url, ref, cacheDir))
 		return cacheDir, nil
 	}
-	return cloneGitSource(gitBin, url, ref, cacheDir)
+	return cloneGitSource(gitBin, url, ref, cacheDir, deps)
 }
 
 func hasCachedGitSource(cacheDir string) bool {
@@ -447,11 +470,11 @@ func gitCloneDryRunCommand(url, ref, cacheDir string) string {
 	return args + " -- " + url + " " + cacheDir
 }
 
-func cloneGitSource(gitBin, url, ref, cacheDir string) (string, error) {
+func cloneGitSource(gitBin, url, ref, cacheDir string, deps installDeps) (string, error) {
 	if Flags.Verbose {
 		ui.Info("Cloning source: " + url)
 	}
-	if err := osMkdirAll(cacheDir, 0755); err != nil {
+	if err := deps.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
 	args := []string{"clone", "--depth", "1"}
@@ -477,7 +500,7 @@ func touchLastFetch(cacheDir string) {
 
 // linkResourceFromSources symlinks a resource from the first matching source
 // into ~/.agents/{resourceType}/{project}/{name}/.
-func linkResourceFromSources(resourceType, name, project string, sources []string) error {
+func linkResourceFromSources(resourceType, name, project string, sources []string, deps installDeps) error {
 	destDir := filepath.Join(config.AgentsHome(), resourceType, project, name)
 	markerFile := resourceMarkerFile(resourceType)
 	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, project, sources)
@@ -492,10 +515,10 @@ func linkResourceFromSources(resourceType, name, project string, sources []strin
 	if shouldSkipLinkDestination(destDir) {
 		return nil
 	}
-	if err := osMkdirAll(filepath.Dir(destDir), 0755); err != nil {
+	if err := deps.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return err
 	}
-	if err := osSymlink(candidate, destDir); err != nil {
+	if err := deps.Symlink(candidate, destDir); err != nil {
 		return fmt.Errorf("symlinking %s: %w", name, err)
 	}
 	if Flags.Verbose {
@@ -555,8 +578,8 @@ func shouldSkipLinkDestination(destDir string) bool {
 }
 
 // findProjectByPath looks up the registered project name for a given path.
-func findProjectByPath(projectPath string) string {
-	cfg, err := configLoad()
+func findProjectByPath(projectPath string, deps installDeps) string {
+	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return ""
 	}

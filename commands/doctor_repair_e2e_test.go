@@ -81,7 +81,7 @@ func seedManagedClaudeLink(t *testing.T) (tmp, agentsHome, projectPath, linkPath
 func assertDoctorStdoutContainsBroken(t *testing.T, label string, wantBroken bool) {
 	t.Helper()
 	out := captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("%s runDoctor: %v", label, err)
 		}
 	})
@@ -124,7 +124,7 @@ func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, ta
 	if err := os.WriteFile(filepath.Join(resources, "AGENTS.md"), []byte("# rules\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	restoreFromResources("proj", projectPath)
+	restoreFromResources("proj", projectPath, stdAddDeps{})
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected restoreFromResources to recreate %s: %v", target, err)
 	}
@@ -180,7 +180,7 @@ func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	_ = captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil); err != nil {
+		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("dry-run doctor: %v", err)
 		}
 	})

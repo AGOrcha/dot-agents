@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,6 +15,78 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
+
+// fakeInstallDeps is the interface-DI test double for installDeps (per
+// docs/TEST_SEAMS.md). A nil func field delegates to the real
+// implementation, so a test overrides only the operation it wants to
+// fault-inject.
+type fakeInstallDeps struct {
+	getwd      func() (string, error)
+	mkdirAll   func(string, os.FileMode) error
+	symlink    func(string, string) error
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeInstallDeps) Getwd() (string, error) {
+	if f.getwd != nil {
+		return f.getwd()
+	}
+	return os.Getwd()
+}
+
+func (f fakeInstallDeps) MkdirAll(path string, perm os.FileMode) error {
+	if f.mkdirAll != nil {
+		return f.mkdirAll(path, perm)
+	}
+	return os.MkdirAll(path, perm)
+}
+
+func (f fakeInstallDeps) Symlink(oldname, newname string) error {
+	if f.symlink != nil {
+		return f.symlink(oldname, newname)
+	}
+	return os.Symlink(oldname, newname)
+}
+
+func (f fakeInstallDeps) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeInstallDeps_NilDelegatesToReal pins the nil-delegates-to-real
+// contract for every method of the fake. Without this, a future change to
+// the fake's default branch could regress every happy-path-but-not-overridden
+// test without any of them failing.
+func TestFakeInstallDeps_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := fakeInstallDeps{}
+	if _, err := f.Getwd(); err != nil {
+		t.Fatalf("nil-getwd delegate: %v", err)
+	}
+	target := filepath.Join(tmp, "delegate", "nested")
+	if err := f.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("nil-mkdirAll delegate: %v", err)
+	}
+	src := filepath.Join(tmp, "src")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "link")
+	if err := f.Symlink(src, link); err != nil {
+		t.Fatalf("nil-symlink delegate: %v", err)
+	}
+	if cfg, err := f.LoadConfig(); err != nil || cfg == nil {
+		t.Fatalf("nil-loadConfig delegate: cfg=%v err=%v", cfg, err)
+	}
+}
 
 // ---------- NewInstallCmd metadata ----------
 
@@ -168,7 +241,7 @@ func TestResolveSourceRoot_LocalDefault(t *testing.T) {
 	os.MkdirAll(agentsHome, 0755)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	root, err := resolveSourceRoot(config.Source{Type: "local"})
+	root, err := resolveSourceRoot(config.Source{Type: "local"}, stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -179,7 +252,7 @@ func TestResolveSourceRoot_LocalDefault(t *testing.T) {
 
 func TestResolveSourceRoot_LocalCustomPath(t *testing.T) {
 	tmp := t.TempDir()
-	root, err := resolveSourceRoot(config.Source{Type: "local", Path: tmp})
+	root, err := resolveSourceRoot(config.Source{Type: "local", Path: tmp}, stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -189,14 +262,14 @@ func TestResolveSourceRoot_LocalCustomPath(t *testing.T) {
 }
 
 func TestResolveSourceRoot_GitMissingURL(t *testing.T) {
-	root, err := resolveSourceRoot(config.Source{Type: "git"})
+	root, err := resolveSourceRoot(config.Source{Type: "git"}, stdInstallDeps{})
 	if err != nil || root != "" {
 		t.Errorf("missing url: root=%q err=%v, want empty", root, err)
 	}
 }
 
 func TestResolveSourceRoot_UnknownType(t *testing.T) {
-	root, err := resolveSourceRoot(config.Source{Type: "ftp"})
+	root, err := resolveSourceRoot(config.Source{Type: "ftp"}, stdInstallDeps{})
 	if err != nil || root != "" {
 		t.Errorf("unknown type: root=%q err=%v, want empty", root, err)
 	}
@@ -216,7 +289,7 @@ func TestResolveSources_MixedAndCustomDirs(t *testing.T) {
 		{Type: "ftp"}, // skipped
 		{Type: "git"}, // skipped (missing url)
 	}
-	resolved, err := resolveSources(sources)
+	resolved, err := resolveSources(sources, stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -259,7 +332,7 @@ func TestCloneGitSource_MaliciousURLNotParsedAsFlag(t *testing.T) {
 
 	maliciousURL := "--upload-pack=/bin/sh -c touch /tmp/pwned"
 	cacheDir := filepath.Join(tmp, "cache")
-	_, err := cloneGitSource(fakeBin, maliciousURL, "", cacheDir)
+	_, err := cloneGitSource(fakeBin, maliciousURL, "", cacheDir, stdInstallDeps{})
 	if err == nil {
 		t.Fatal("expected clone to fail (fake git exits 1)")
 	}
@@ -375,10 +448,10 @@ func TestFindProjectByPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := findProjectByPath(projPath); got != "myrepo" {
+	if got := findProjectByPath(projPath, stdInstallDeps{}); got != "myrepo" {
 		t.Errorf("got %q, want myrepo", got)
 	}
-	if got := findProjectByPath(filepath.Join(tmp, "missing")); got != "" {
+	if got := findProjectByPath(filepath.Join(tmp, "missing"), stdInstallDeps{}); got != "" {
 		t.Errorf("missing project should return empty, got %q", got)
 	}
 }
@@ -399,7 +472,7 @@ func TestLinkResourceFromSources_DryRun(t *testing.T) {
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}); err != nil {
+	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}, stdInstallDeps{}); err != nil {
 		t.Fatalf("dry-run link failed: %v", err)
 	}
 	// Nothing should have been linked
@@ -418,7 +491,7 @@ func TestLinkResourceFromSources_NotFound(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := linkResourceFromSources("skills", "absent", "proj", []string{t.TempDir()})
+	err := linkResourceFromSources("skills", "absent", "proj", []string{t.TempDir()}, stdInstallDeps{})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected not-found error, got %v", err)
 	}
@@ -439,7 +512,7 @@ func TestLinkResourceFromSources_CreatesSymlink(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}); err != nil {
+	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}, stdInstallDeps{}); err != nil {
 		t.Fatalf("link failed: %v", err)
 	}
 	dest := filepath.Join(agentsHome, "skills", "proj", "demo")
@@ -474,7 +547,7 @@ func TestRunInstall_NoManifestErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runInstall(false)
+	err := runInstall(false, stdInstallDeps{})
 	if err == nil {
 		t.Fatal("expected error when manifest missing")
 	}
@@ -506,7 +579,7 @@ func TestRunInstall_UninitializedAgentsHomeErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runInstall(false)
+	err := runInstall(false, stdInstallDeps{})
 	if err == nil || !strings.Contains(err.Error(), "not initialized") {
 		t.Errorf("expected not-initialized error, got: %v", err)
 	}
@@ -550,7 +623,7 @@ func TestRunInstallGenerate_CreatesManifestFromState(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstallGenerate(); err != nil {
+	if err := runInstallGenerate(stdInstallDeps{}); err != nil {
 		t.Fatalf("runInstallGenerate: %v", err)
 	}
 
@@ -561,10 +634,10 @@ func TestRunInstallGenerate_CreatesManifestFromState(t *testing.T) {
 	if rc.Project != projName {
 		t.Errorf("manifest project = %q, want %q", rc.Project, projName)
 	}
-	if !containsString(rc.Skills, "demo") {
+	if !slices.Contains(rc.Skills, "demo") {
 		t.Errorf("manifest skills = %v, want demo present", rc.Skills)
 	}
-	if !containsString(rc.Agents, "support") {
+	if !slices.Contains(rc.Agents, "support") {
 		t.Errorf("manifest agents = %v, want support present", rc.Agents)
 	}
 }
@@ -589,7 +662,7 @@ func TestRunInstallGenerate_DryRunDoesNotWrite(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstallGenerate(); err != nil {
+	if err := runInstallGenerate(stdInstallDeps{}); err != nil {
 		t.Fatalf("dry-run generate: %v", err)
 	}
 
@@ -632,7 +705,7 @@ func TestRunInstallGenerate_PreservesExistingProjectAndExtras(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstallGenerate(); err != nil {
+	if err := runInstallGenerate(stdInstallDeps{}); err != nil {
 		t.Fatalf("runInstallGenerate: %v", err)
 	}
 
@@ -714,7 +787,7 @@ func TestLinkInstallResourceList_StrictReturnsErr(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, true)
+	err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, true, stdInstallDeps{})
 	if err == nil {
 		t.Error("expected --strict to return error")
 	}
@@ -729,13 +802,13 @@ func TestLinkInstallResourceList_NonStrictWarnsAndContinues(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, false); err != nil {
+	if err := linkInstallResourceList("skills", "skill", []string{"absent"}, "p", []string{t.TempDir()}, false, stdInstallDeps{}); err != nil {
 		t.Errorf("non-strict should not error, got %v", err)
 	}
 }
 
 func TestLinkInstallResourceList_EmptyNamesSkips(t *testing.T) {
-	if err := linkInstallResourceList("skills", "skill", nil, "p", nil, false); err != nil {
+	if err := linkInstallResourceList("skills", "skill", nil, "p", nil, false, stdInstallDeps{}); err != nil {
 		t.Errorf("empty names should be no-op, got %v", err)
 	}
 }
@@ -782,7 +855,7 @@ func TestRegisterInstallProject_NewlyRegisters(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := registerInstallProject("newp", filepath.Join(tmp, "p")); err != nil {
+	if err := registerInstallProject("newp", filepath.Join(tmp, "p"), stdInstallDeps{}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	reloaded, _ := config.Load()
@@ -807,7 +880,7 @@ func TestRegisterInstallProject_AlreadyRegisteredSkips(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := registerInstallProject("p", filepath.Join(tmp, "p")); err != nil {
+	if err := registerInstallProject("p", filepath.Join(tmp, "p"), stdInstallDeps{}); err != nil {
 		t.Errorf("registering already-registered should be no-op, got %v", err)
 	}
 }
@@ -827,7 +900,7 @@ func TestRegisterInstallProject_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	if err := registerInstallProject("p", filepath.Join(tmp, "p")); err != nil {
+	if err := registerInstallProject("p", filepath.Join(tmp, "p"), stdInstallDeps{}); err != nil {
 		t.Errorf("dry-run register: %v", err)
 	}
 	reloaded, _ := config.Load()
@@ -883,7 +956,7 @@ func TestResolveInstallSources_StrictPropagatesErrors(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 	sources := []config.Source{{Type: "git"}} // missing URL → skipped
-	resolved, err := resolveInstallSources(sources, true)
+	resolved, err := resolveInstallSources(sources, true, stdInstallDeps{})
 	if err != nil {
 		t.Errorf("git-missing-url: expected nil, got %v", err)
 	}
@@ -908,7 +981,7 @@ func TestLinkInstallResources_FallsBackToAgentsHome(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true} // dry-run avoids actually creating links
 	defer func() { Flags = saved }()
-	if err := linkInstallResources("p", rc, nil, false); err != nil {
+	if err := linkInstallResources("p", rc, nil, false, stdInstallDeps{}); err != nil {
 		t.Errorf("expected fallback to agents-home to work, got %v", err)
 	}
 }
@@ -942,7 +1015,7 @@ func TestRunInstall_HappyPathDryRun(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstall(false); err != nil {
+	if err := runInstall(false, stdInstallDeps{}); err != nil {
 		t.Errorf("runInstall happy: %v", err)
 	}
 }
@@ -975,7 +1048,7 @@ func TestRunInstall_StrictWithMissingSkillErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runInstall(true)
+	err := runInstall(true, stdInstallDeps{})
 	if err == nil {
 		t.Error("expected --strict to error on missing skill")
 	}
@@ -1085,7 +1158,7 @@ func TestFetchGitSource_ClonesIntoEmptyCache(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	cacheDir, err := fetchGitSource(bare, "main")
+	cacheDir, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("fetchGitSource: %v", err)
 	}
@@ -1112,7 +1185,7 @@ func TestFetchGitSource_UsesFreshCache(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	// Prime cache.
-	first, err := fetchGitSource(bare, "main")
+	first, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("priming clone: %v", err)
 	}
@@ -1120,7 +1193,7 @@ func TestFetchGitSource_UsesFreshCache(t *testing.T) {
 	sentinel := filepath.Join(first, "_sentinel")
 	os.WriteFile(sentinel, []byte("kept"), 0644)
 
-	second, err := fetchGitSource(bare, "main")
+	second, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("second fetch: %v", err)
 	}
@@ -1143,7 +1216,7 @@ func TestFetchGitSource_StaleCacheTriggersUpdate(t *testing.T) {
 	Flags = GlobalFlags{Verbose: true} // exercises the verbose log branch in updateCachedGitSource
 	defer func() { Flags = saved }()
 
-	first, err := fetchGitSource(bare, "main")
+	first, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("priming clone: %v", err)
 	}
@@ -1151,7 +1224,7 @@ func TestFetchGitSource_StaleCacheTriggersUpdate(t *testing.T) {
 	stale := time.Now().Add(-2 * time.Hour)
 	os.Chtimes(filepath.Join(first, ".last-fetch"), stale, stale)
 
-	second, err := fetchGitSource(bare, "main")
+	second, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("update fetch: %v", err)
 	}
@@ -1174,7 +1247,7 @@ func TestFetchGitSource_StaleCacheDryRunSkipsUpdate(t *testing.T) {
 	// Prime cache (non-dry-run).
 	saved := Flags
 	Flags = GlobalFlags{}
-	first, err := fetchGitSource(bare, "main")
+	first, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		Flags = saved
 		t.Fatalf("priming clone: %v", err)
@@ -1184,7 +1257,7 @@ func TestFetchGitSource_StaleCacheDryRunSkipsUpdate(t *testing.T) {
 
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	second, err := fetchGitSource(bare, "main")
+	second, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("dry-run update: %v", err)
 	}
@@ -1212,7 +1285,7 @@ func TestFetchGitSource_DryRunCloneSkipsFilesystem(t *testing.T) {
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
 
-	cacheDir, err := fetchGitSource(bare, "main")
+	cacheDir, err := fetchGitSource(bare, "main", stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("dry-run clone: %v", err)
 	}
@@ -1233,7 +1306,7 @@ func TestCloneGitSource_FailureCleansUpCacheDir(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	bogusURL := filepath.Join(t.TempDir(), "does-not-exist.git")
-	_, err := cloneGitSource(gitBin, bogusURL, "main", cacheDir)
+	_, err := cloneGitSource(gitBin, bogusURL, "main", cacheDir, stdInstallDeps{})
 	if err == nil {
 		t.Fatal("expected clone failure")
 	}
@@ -1276,7 +1349,7 @@ func TestResolveSourceRoot_GitSucceedsWithBareFixture(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	root, err := resolveSourceRoot(config.Source{Type: "git", URL: bare, Ref: "main"})
+	root, err := resolveSourceRoot(config.Source{Type: "git", URL: bare, Ref: "main"}, stdInstallDeps{})
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -1289,15 +1362,6 @@ func TestResolveSourceRoot_GitSucceedsWithBareFixture(t *testing.T) {
 }
 
 // ---------- helpers ----------
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
 
 // TestRunInstall_HappyPathWithInstalledClaude exercises the full install path
 // without --dry-run: createInstallPlatformLink calls into Claude's CreateLinks
@@ -1334,7 +1398,7 @@ func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, Verbose: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstall(false); err != nil {
+	if err := runInstall(false, stdInstallDeps{}); err != nil {
 		t.Errorf("runInstall full happy: %v", err)
 	}
 
@@ -1354,7 +1418,7 @@ func TestResolveInstallSources_StrictErrorPropagates(t *testing.T) {
 	// returns an error which strict mode surfaces.
 	tmp := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", tmp)
-	_, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, true)
+	_, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, true, stdInstallDeps{})
 	if err == nil {
 		t.Error("expected strict-mode error")
 	}
@@ -1368,7 +1432,7 @@ func TestResolveInstallSources_NonStrictIgnoresError(t *testing.T) {
 	defer func() { Flags = saved }()
 	tmp := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", tmp)
-	got, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, false)
+	got, err := resolveInstallSources([]config.Source{{Type: "git", URL: "git://nonexistent.invalid/no.git", Ref: "main"}}, false, stdInstallDeps{})
 	if err != nil {
 		t.Errorf("non-strict should swallow err, got %v / %v", got, err)
 	}
@@ -1394,7 +1458,7 @@ func TestRegisterInstallProject_AlreadyRegistered(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := registerInstallProject("p", projPath); err != nil {
+	if err := registerInstallProject("p", projPath, stdInstallDeps{}); err != nil {
 		t.Errorf("registerInstallProject: %v", err)
 	}
 }
@@ -1416,7 +1480,7 @@ func TestLinkInstallResources_NoSourcesFallsBackToAgentsHome(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	rc := &config.AgentsRC{Version: 1, Project: "proj", Skills: []string{"x"}}
-	if err := linkInstallResources("proj", rc, nil, false); err != nil {
+	if err := linkInstallResources("proj", rc, nil, false, stdInstallDeps{}); err != nil {
 		t.Errorf("linkInstallResources: %v", err)
 	}
 	// Linked dir should exist.
@@ -1438,7 +1502,7 @@ func TestLinkInstallResourceList_StrictMissing(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := linkInstallResourceList("skills", "skill", []string{"missing-skill"}, "proj", []string{agentsHome}, true)
+	err := linkInstallResourceList("skills", "skill", []string{"missing-skill"}, "proj", []string{agentsHome}, true, stdInstallDeps{})
 	if err == nil {
 		t.Error("expected strict mode error for missing skill")
 	}
@@ -1455,7 +1519,7 @@ func TestLinkInstallResourceList_NonStrictWarnings(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := linkInstallResourceList("skills", "skill", []string{"missing"}, "proj", []string{agentsHome}, false); err != nil {
+	if err := linkInstallResourceList("skills", "skill", []string{"missing"}, "proj", []string{agentsHome}, false, stdInstallDeps{}); err != nil {
 		t.Errorf("non-strict should not error: %v", err)
 	}
 }
@@ -1577,7 +1641,7 @@ func TestRunInstall_StrictWithBadGitSourceErrors(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runInstall(true); err == nil {
+	if err := runInstall(true, stdInstallDeps{}); err == nil {
 		t.Error("expected --strict runInstall to propagate git resolve error")
 	}
 }

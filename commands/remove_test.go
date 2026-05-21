@@ -40,7 +40,7 @@ func TestRemoveProjectDirs_RemovesAllCanonicalDirs(t *testing.T) {
 	survivor := filepath.Join(agentsHome, "rules", "other")
 	os.MkdirAll(survivor, 0755)
 
-	removeProjectDirs(project)
+	removeProjectDirs(project, stdRemoveDeps{})
 
 	for _, d := range created {
 		if _, err := os.Stat(d); !os.IsNotExist(err) {
@@ -72,7 +72,7 @@ func TestRemoveProjectDirs_RemovesCanonicalHooksScopeDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := removeProjectDirs(project); err != nil {
+	if err := removeProjectDirs(project, stdRemoveDeps{}); err != nil {
 		t.Fatalf("removeProjectDirs returned error: %v", err)
 	}
 	if _, err := os.Stat(canonicalHooks); !os.IsNotExist(err) {
@@ -87,20 +87,99 @@ func TestRemoveProjectDirs_NoopOnMissingDirs(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	// Nothing should panic, no error returned.
-	removeProjectDirs("ghost")
+	removeProjectDirs("ghost", stdRemoveDeps{})
 }
 
 // removeProjectDirs must aggregate every RemoveAll failure (not discard them)
 // and swallow only not-exist.
+// TestNewRemoveCmd_RunEClosureWiresStdDeps drives remove's RunE closure
+// end to end so a regression in std deps wiring fails here. Uses
+// --dry-run so no on-disk mutation occurs.
+func TestNewRemoveCmd_RunEClosureWiresStdDeps(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "myproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true, Yes: true}
+	defer func() { Flags = saved }()
+
+	cmd := NewRemoveCmd()
+	if err := cmd.RunE(cmd, []string{"myproj"}); err != nil {
+		t.Fatalf("RunE closure: %v", err)
+	}
+}
+
+// fakeRemoveDeps is the interface-DI test double for removeDeps (per
+// docs/TEST_SEAMS.md). A nil func field delegates to the real
+// implementation, so a test overrides only the operation it wants to
+// fault-inject.
+type fakeRemoveDeps struct {
+	removeAll  func(string) error
+	loadConfig func() (*config.Config, error)
+}
+
+func (f fakeRemoveDeps) RemoveAll(path string) error {
+	if f.removeAll != nil {
+		return f.removeAll(path)
+	}
+	return os.RemoveAll(path)
+}
+
+func (f fakeRemoveDeps) LoadConfig() (*config.Config, error) {
+	if f.loadConfig != nil {
+		return f.loadConfig()
+	}
+	return config.Load()
+}
+
+// TestFakeRemoveDeps_NilDelegatesToReal pins the nil-delegates-to-real
+// contract for both methods of the fake.
+func TestFakeRemoveDeps_NilDelegatesToReal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// RemoveAll: a not-exist path returns nil.
+	if err := (fakeRemoveDeps{}).RemoveAll(filepath.Join(tmp, "absent")); err != nil {
+		t.Fatalf("nil-removeAll delegate on absent path: %v", err)
+	}
+	// LoadConfig: real config.Load returns a config (or a real error).
+	cfg, err := (fakeRemoveDeps{}).LoadConfig()
+	if err != nil {
+		t.Fatalf("nil-loadConfig delegate: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected real config.Load result, got nil")
+	}
+}
+
 func TestRemoveProjectDirs_AggregatesRemoveAllFailures(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	sentinel := errors.New("removeall boom")
-	withRemoveAllStub(t, func(string) error { return sentinel })
+	deps := fakeRemoveDeps{removeAll: func(string) error { return sentinel }}
 
-	err := removeProjectDirs("p")
+	err := removeProjectDirs("p", deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected aggregated RemoveAll sentinel, got %v", err)
 	}
@@ -111,9 +190,9 @@ func TestRemoveProjectDirs_SwallowsNotExist(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	withRemoveAllStub(t, func(d string) error { return os.ErrNotExist })
+	deps := fakeRemoveDeps{removeAll: func(d string) error { return os.ErrNotExist }}
 
-	if err := removeProjectDirs("p"); err != nil {
+	if err := removeProjectDirs("p", deps); err != nil {
 		t.Fatalf("not-exist must be swallowed, got %v", err)
 	}
 }
@@ -271,13 +350,13 @@ func TestRunRemove_CleanFailurePreservesRegistration(t *testing.T) {
 	}
 
 	sentinel := errors.New("removeall boom")
-	withRemoveAllStub(t, func(string) error { return sentinel })
+	deps := fakeRemoveDeps{removeAll: func(string) error { return sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runRemove("myproj", true)
+	err := runRemove("myproj", true, deps)
 	if err == nil {
 		t.Fatal("expected non-zero error when canonical cleanup fails")
 	}
@@ -312,7 +391,7 @@ func TestRunRemove_UnknownProjectErrors(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRemove("nope", false)
+	err := runRemove("nope", false, stdRemoveDeps{})
 	if err == nil {
 		t.Fatal("expected error for unknown project, got nil")
 	}
@@ -345,7 +424,7 @@ func TestRunRemove_DryRunSkipsMutation(t *testing.T) {
 	Flags = GlobalFlags{DryRun: true, Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("myproj", true); err != nil {
+	if err := runRemove("myproj", true, stdRemoveDeps{}); err != nil {
 		t.Fatalf("runRemove --dry-run failed: %v", err)
 	}
 
@@ -389,7 +468,7 @@ func TestRunRemove_UnregistersAndOptionallyCleans(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("myproj", true); err != nil {
+	if err := runRemove("myproj", true, stdRemoveDeps{}); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 
@@ -442,7 +521,7 @@ func TestRunRemove_NoCleanClearsContentsKeepsDirs(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("myproj", false); err != nil {
+	if err := runRemove("myproj", false, stdRemoveDeps{}); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 
@@ -483,7 +562,7 @@ func TestRunRemove_MissingProjectDirStillUnregisters(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("ghost", false); err != nil {
+	if err := runRemove("ghost", false, stdRemoveDeps{}); err != nil {
 		t.Fatalf("runRemove for missing dir: %v", err)
 	}
 	reloaded, _ := config.Load()
@@ -548,7 +627,7 @@ func TestRunRemove_WithGitSourceManifestWarns(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("myproj", false); err != nil {
+	if err := runRemove("myproj", false, stdRemoveDeps{}); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 
@@ -579,7 +658,7 @@ func TestRunRemove_ConfirmDecline(t *testing.T) {
 	Flags = GlobalFlags{} // no Yes, no Force → Confirm prompts (defaults false)
 	defer func() { Flags = saved }()
 
-	if err := runRemove("p", false); err != nil {
+	if err := runRemove("p", false, stdRemoveDeps{}); err != nil {
 		t.Errorf("runRemove decline: %v", err)
 	}
 	// Project should still be registered (cancellation).
@@ -611,7 +690,7 @@ func TestRunRemove_DryRunCleansFlagShowsDestructiveWarn(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("myproj", true); err != nil {
+	if err := runRemove("myproj", true, stdRemoveDeps{}); err != nil {
 		t.Errorf("runRemove dry-run with --clean: %v", err)
 	}
 	// Should still be registered (dry run)
@@ -671,7 +750,7 @@ func TestRunRemove_CleanupFailurePreservesRegistration(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	err := runRemove("myproj", false)
+	err := runRemove("myproj", false, stdRemoveDeps{})
 	if err == nil {
 		t.Skip("platform RemoveLinks did not fail on this filesystem")
 	}
@@ -709,7 +788,7 @@ func TestRunRemove_AllPlatformsInstalled(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("rm-all", false); err != nil {
+	if err := runRemove("rm-all", false, stdRemoveDeps{}); err != nil {
 		t.Errorf("runRemove (all platforms seeded): %v", err)
 	}
 }
@@ -739,7 +818,7 @@ func TestRunRemove_AllPlatformsInstalledNonDryRun(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("rm-real", false); err != nil {
+	if err := runRemove("rm-real", false, stdRemoveDeps{}); err != nil {
 		t.Errorf("runRemove non-dry-run (all platforms seeded): %v", err)
 	}
 }
@@ -774,7 +853,7 @@ func TestRunRemove_SeededClaudeExercisesInstalledPlatformBranch(t *testing.T) {
 	Flags = GlobalFlags{Yes: true, DryRun: true}
 	defer func() { Flags = saved }()
 
-	if err := runRemove("rm-target", false); err != nil {
+	if err := runRemove("rm-target", false, stdRemoveDeps{}); err != nil {
 		t.Errorf("runRemove dry-run with installed claude: %v", err)
 	}
 }

@@ -16,6 +16,41 @@ const fmtIndentedLine = "  %s\n\n"
 
 const reviewProposalIDHint = "Pass the proposal ID from `da review`."
 
+// reviewDeps is the narrow collaborator runReviewApprove, runReviewReject, and
+// captureProposalRollback need (interface-DI per docs/TEST_SEAMS.md). One
+// interface covers both the os-level rollback touch points (MkdirAll,
+// WriteFile, Remove) and the higher-order workflow operations
+// (ApplyProposal, ArchiveProposal, RunRefresh) so review's approve pipeline
+// has a single fault-injection surface. File-scoped — do not share with
+// other commands files.
+type reviewDeps interface {
+	MkdirAll(path string, perm os.FileMode) error
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	Remove(name string) error
+	ApplyProposal(proposal *config.Proposal) error
+	ArchiveProposal(proposal *config.Proposal) error
+	RunRefresh(projectFilter string) error
+}
+
+// stdReviewDeps is the production reviewDeps backed by the os package and the
+// real config / runRefresh entry points. RunRefresh mirrors the legacy
+// runRefreshFn wrap so the default refresh path still threads
+// stdRefreshConfigLoader{} into runRefresh.
+type stdReviewDeps struct{}
+
+func (stdReviewDeps) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+func (stdReviewDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+func (stdReviewDeps) Remove(name string) error                 { return os.Remove(name) }
+func (stdReviewDeps) ApplyProposal(p *config.Proposal) error   { return config.ApplyProposal(p) }
+func (stdReviewDeps) ArchiveProposal(p *config.Proposal) error { return config.ArchiveProposal(p) }
+func (stdReviewDeps) RunRefresh(projectFilter string) error {
+	return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+}
+
 func NewReviewCmd() *cobra.Command {
 	var rejectReason string
 
@@ -56,7 +91,7 @@ not be applied silently.`,
 		),
 		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewApprove(args[0])
+			return runReviewApprove(args[0], stdReviewDeps{})
 		},
 	}
 
@@ -68,7 +103,7 @@ not be applied silently.`,
 		),
 		Args: ExactArgsWithHints(1, reviewProposalIDHint),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewReject(args[0], rejectReason)
+			return runReviewReject(args[0], rejectReason, stdReviewDeps{})
 		},
 	}
 	rejectCmd.Flags().StringVar(&rejectReason, "reason", "", "Reason for rejection")
@@ -114,7 +149,7 @@ func runReviewShow(id string) error {
 	return nil
 }
 
-func runReviewApprove(id string) error {
+func runReviewApprove(id string, deps reviewDeps) error {
 	proposal, err := config.LoadProposal(id)
 	if err != nil {
 		return err
@@ -130,21 +165,21 @@ func runReviewApprove(id string) error {
 	if err != nil {
 		return err
 	}
-	restore, err := captureProposalRollback(targetPath)
+	restore, err := captureProposalRollback(targetPath, deps)
 	if err != nil {
 		return err
 	}
 
-	if err := applyProposalFn(proposal); err != nil {
+	if err := deps.ApplyProposal(proposal); err != nil {
 		return err
 	}
-	if err := runRefreshFn(""); err != nil {
+	if err := deps.RunRefresh(""); err != nil {
 		_ = restore()
 		return fmt.Errorf("refresh after apply: %w", err)
 	}
 
 	config.MarkProposalReviewed(proposal, "approved", "")
-	if err := archiveProposalFn(proposal); err != nil {
+	if err := deps.ArchiveProposal(proposal); err != nil {
 		_ = restore()
 		return err
 	}
@@ -154,7 +189,7 @@ func runReviewApprove(id string) error {
 	return nil
 }
 
-func runReviewReject(id, reason string) error {
+func runReviewReject(id, reason string, deps reviewDeps) error {
 	proposal, err := config.LoadProposal(id)
 	if err != nil {
 		return err
@@ -166,7 +201,7 @@ func runReviewReject(id, reason string) error {
 		return fmt.Errorf("proposal %q is %s, not pending", proposal.ID, proposal.Status)
 	}
 	config.MarkProposalReviewed(proposal, "rejected", reason)
-	if err := archiveProposalFn(proposal); err != nil {
+	if err := deps.ArchiveProposal(proposal); err != nil {
 		return err
 	}
 	ui.Success("Proposal rejected")
@@ -174,22 +209,25 @@ func runReviewReject(id, reason string) error {
 	return nil
 }
 
-func captureProposalRollback(targetPath string) (func() error, error) {
+// captureProposalRollback snapshots the contents of targetPath (if any) and
+// returns a closure that restores them. The closure captures deps so it can
+// fault-inject mkdir/write/remove failures during rollback.
+func captureProposalRollback(targetPath string, deps reviewDeps) (func() error, error) {
 	content, err := os.ReadFile(targetPath)
 	if err == nil {
 		original := append([]byte{}, content...)
 		return func() error {
-			if err := osMkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := deps.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return err
 			}
-			return osWriteFile(targetPath, original, 0644)
+			return deps.WriteFile(targetPath, original, 0644)
 		}, nil
 	}
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
 	return func() error {
-		if err := osRemove(targetPath); err != nil && !os.IsNotExist(err) {
+		if err := deps.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 		return nil
