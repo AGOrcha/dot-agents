@@ -273,63 +273,119 @@ and stay refreshable by both human operators and AI agents.`,
 }
 
 func runAdd(pathArg, nameArg string, deps addDeps) error {
-	// Resolve path
-	projectPath := config.ExpandPath(pathArg)
-	if _, err := os.Stat(projectPath); err != nil {
-		return fmt.Errorf("directory not found: %s", projectPath)
+	projectPath, projectName, err := resolveAddTarget(pathArg, nameArg)
+	if err != nil {
+		return err
 	}
-
-	// Derive name
-	projectName := nameArg
-	if projectName == "" {
-		projectName = filepath.Base(projectPath)
-	}
-
-	// Validate name
-	validName := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-	if !validName.MatchString(projectName) {
-		return fmt.Errorf("invalid project name: %s (use --name for alphanumeric/hyphens/underscores)", projectName)
-	}
-
 	agentsHome := config.AgentsHome()
-	displayPath := config.DisplayPath(projectPath)
-	displayAgentsHome := config.DisplayPath(agentsHome)
 
-	ui.Header("da add")
-	fmt.Fprintf(os.Stdout, "Adding project: %s\n", ui.BoldText(projectName))
-	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(displayPath))
-
-	// Note if manifest already exists — user may prefer `install` instead
-	if _, err := config.LoadAgentsRC(projectPath); err == nil {
-		ui.Info(".agentsrc.json found — you can also use 'da install' to apply the manifest directly")
-	}
-
-	// Step 1: Scan
-	ui.Step("Scanning project...")
-
-	if _, err := os.Stat(filepath.Join(projectPath, ".git")); err == nil {
-		ui.Bullet("ok", "Valid git repository")
-	} else {
-		ui.Bullet("none", "Not a git repository (optional)")
-	}
+	announceAddTarget(projectName, projectPath, agentsHome)
 
 	cfg, err := deps.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-
-	if existing := cfg.GetProjectPath(projectName); existing != "" {
-		if !Flags.Force {
-			ui.Bullet("warn", "Already registered at: "+existing)
-			fmt.Fprintln(os.Stdout, "\n  Use --force to update, or --name to use a different name")
-			return fmt.Errorf("project '%s' already registered", projectName)
-		}
-		ui.Bullet("warn", "Will update existing registration (--force)")
-	} else {
-		ui.Bullet("ok", "Not yet registered")
+	if err := checkAddNotAlreadyRegistered(cfg, projectName); err != nil {
+		return err
 	}
 
-	// Check deprecated formats
+	hasDeprecated := reportDeprecatedFormats(projectPath)
+
+	printAddPreview(projectName, projectPath, agentsHome)
+
+	existingFiles := checkExistingConfigFiles(projectName, projectPath, agentsHome)
+	reportAddExistingFiles(existingFiles, projectName, projectPath)
+	reportDiscoveredAIConfigs(existingFiles, projectPath)
+
+	if Flags.DryRun {
+		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
+		return nil
+	}
+
+	if cancelled := confirmAddProceed(existingFiles); cancelled {
+		return nil
+	}
+
+	if err := backupAddExistingFiles(existingFiles, projectName, projectPath, agentsHome, deps); err != nil {
+		return err
+	}
+
+	if err := scaffoldAddProjectDirs(projectName, projectPath, agentsHome, deps); err != nil {
+		return err
+	}
+
+	if err := createAddLinks(projectName, projectPath); err != nil {
+		return err
+	}
+
+	if err := registerAddedProject(cfg, projectName, projectPath); err != nil {
+		return err
+	}
+
+	emitAddSuccessBox(projectName, projectPath, hasDeprecated)
+	return nil
+}
+
+// resolveAddTarget validates pathArg, derives the project name (override or
+// directory base), and validates that the name is a legal identifier. Returns
+// (projectPath, projectName, err).
+func resolveAddTarget(pathArg, nameArg string) (string, string, error) {
+	projectPath := config.ExpandPath(pathArg)
+	if _, err := os.Stat(projectPath); err != nil {
+		return "", "", fmt.Errorf("directory not found: %s", projectPath)
+	}
+	projectName := nameArg
+	if projectName == "" {
+		projectName = filepath.Base(projectPath)
+	}
+	validName := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	if !validName.MatchString(projectName) {
+		return "", "", fmt.Errorf("invalid project name: %s (use --name for alphanumeric/hyphens/underscores)", projectName)
+	}
+	return projectPath, projectName, nil
+}
+
+// announceAddTarget prints the header, the project/path lines, the optional
+// manifest-found hint, and the "Scanning project..." git-repo bullet.
+func announceAddTarget(projectName, projectPath, _ string) {
+	ui.Header("da add")
+	fmt.Fprintf(os.Stdout, "Adding project: %s\n", ui.BoldText(projectName))
+	fmt.Fprintf(os.Stdout, "Path: %s\n", ui.DimText(config.DisplayPath(projectPath)))
+
+	if _, err := config.LoadAgentsRC(projectPath); err == nil {
+		ui.Info(".agentsrc.json found — you can also use 'da install' to apply the manifest directly")
+	}
+
+	ui.Step("Scanning project...")
+	if _, err := os.Stat(filepath.Join(projectPath, ".git")); err == nil {
+		ui.Bullet("ok", "Valid git repository")
+	} else {
+		ui.Bullet("none", "Not a git repository (optional)")
+	}
+}
+
+// checkAddNotAlreadyRegistered enforces the "not already registered" guard.
+// --force downgrades it to a warning. Returns a typed error when the project
+// is registered and --force was NOT supplied.
+func checkAddNotAlreadyRegistered(cfg *config.Config, projectName string) error {
+	existing := cfg.GetProjectPath(projectName)
+	if existing == "" {
+		ui.Bullet("ok", "Not yet registered")
+		return nil
+	}
+	if !Flags.Force {
+		ui.Bullet("warn", "Already registered at: "+existing)
+		fmt.Fprintln(os.Stdout, "\n  Use --force to update, or --name to use a different name")
+		return fmt.Errorf("project '%s' already registered", projectName)
+	}
+	ui.Bullet("warn", "Will update existing registration (--force)")
+	return nil
+}
+
+// reportDeprecatedFormats prints a warn bullet for each platform whose
+// deprecated config format is detected in projectPath. Returns true when
+// at least one was found (drives the SuccessBox migrate hint).
+func reportDeprecatedFormats(projectPath string) bool {
 	hasDeprecated := false
 	for _, p := range platform.All() {
 		if p.HasDeprecatedFormat(projectPath) {
@@ -337,27 +393,21 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 			hasDeprecated = true
 		}
 	}
+	return hasDeprecated
+}
 
-	// Step 2: Preview (platform-aware)
-	ui.Step("The following will be created:")
+// addPlatformPreview captures the per-platform link-preview row.
+type addPlatformPreview struct {
+	name     string
+	id       string
+	items    []string
+	linkNote string
+}
 
-	ui.PreviewSection(displayAgentsHome+"/",
-		"rules/"+projectName+"/              (project rules)",
-		"settings/"+projectName+"/           (project settings)",
-		"  └── claude-code.json            (hooks, permissions)",
-		"mcp/"+projectName+"/                (project MCP configs)",
-		"skills/"+projectName+"/             (project skills)",
-		"agents/"+projectName+"/             (project subagents)",
-	)
-
-	// Per-platform link preview
-	type platformPreview struct {
-		name     string
-		id       string
-		items    []string
-		linkNote string
-	}
-	platformPreviews := []platformPreview{
+// addPlatformPreviews returns the static preview table — order and contents
+// must match the prior runAdd inline literal.
+func addPlatformPreviews(projectName string) []addPlatformPreview {
+	return []addPlatformPreview{
 		{
 			name:     "Cursor",
 			id:       "cursor",
@@ -405,142 +455,172 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 			},
 		},
 	}
+}
+
+// printAddPreview prints the "Step 2: Preview" block — the canonical
+// ~/.agents/ tree plus the per-platform table with installed/not-installed
+// detection — and the "About Link Types" info box.
+func printAddPreview(projectName, projectPath, agentsHome string) {
+	displayPath := config.DisplayPath(projectPath)
+	displayAgentsHome := config.DisplayPath(agentsHome)
+
+	ui.Step("The following will be created:")
+	ui.PreviewSection(displayAgentsHome+"/",
+		"rules/"+projectName+"/              (project rules)",
+		"settings/"+projectName+"/           (project settings)",
+		"  └── claude-code.json            (hooks, permissions)",
+		"mcp/"+projectName+"/                (project MCP configs)",
+		"skills/"+projectName+"/             (project skills)",
+		"agents/"+projectName+"/             (project subagents)",
+	)
 
 	fmt.Fprintf(os.Stdout, "\n  %s%s/%s\n", ui.Bold, displayPath, ui.Reset)
-	for _, pp := range platformPreviews {
-		installed := false
-		for _, p := range platform.All() {
-			if p.ID() == pp.id && p.IsInstalled() {
-				installed = true
-				break
-			}
-		}
-		if installed {
-			fmt.Fprintf(os.Stdout, "    %s%s%s %s(%s)%s\n", ui.Cyan, pp.name, ui.Reset, ui.Dim, pp.linkNote, ui.Reset)
-		} else {
-			fmt.Fprintf(os.Stdout, "    %s%s %s(not installed — skipped)%s\n", ui.Dim, pp.name, ui.Dim, ui.Reset)
-			continue
-		}
-		for _, item := range pp.items {
-			fmt.Fprintf(os.Stdout, "      %s%s%s\n", ui.Dim, item, ui.Reset)
-		}
+	for _, pp := range addPlatformPreviews(projectName) {
+		printOnePlatformPreview(pp)
 	}
 
 	ui.InfoBox("About Link Types",
 		"Cursor uses HARD LINKS (required by IDE).",
 		"Other agents use symlinks for flexibility.",
 	)
+}
 
-	// Identify files that will be replaced
-	existingFiles := checkExistingConfigFiles(projectName, projectPath, agentsHome)
-
-	// Show files that will be replaced
-	if len(existingFiles) > 0 {
-		ui.Section("Files to Replace")
-		fmt.Fprintf(os.Stdout, "  %sThese root-level files will be backed up and replaced with links:%s\n", ui.Yellow, ui.Reset)
-		for _, f := range existingFiles {
-			rel := strings.TrimPrefix(f, projectPath+"/")
-			fileType := "file"
-			if _, isLink := links.ManagedLinkTarget(f); isLink {
-				fileType = "symlink"
-			}
-			fmt.Fprintf(os.Stdout, "  %s!%s %s %s(%s)%s\n", ui.Yellow, ui.Reset, rel, ui.Dim, fileType, ui.Reset)
+// printOnePlatformPreview prints one preview row + its child items, dimming
+// the row and skipping the items when the platform is not installed.
+func printOnePlatformPreview(pp addPlatformPreview) {
+	installed := false
+	for _, p := range platform.All() {
+		if p.ID() == pp.id && p.IsInstalled() {
+			installed = true
+			break
 		}
-		fmt.Fprintf(os.Stdout, "\n  %sBackups stored in ~/.agents/resources/%s/backups/<timestamp>/%s\n", ui.Dim, projectName, ui.Reset)
 	}
+	if !installed {
+		fmt.Fprintf(os.Stdout, "    %s%s %s(not installed — skipped)%s\n", ui.Dim, pp.name, ui.Dim, ui.Reset)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "    %s%s%s %s(%s)%s\n", ui.Cyan, pp.name, ui.Reset, ui.Dim, pp.linkNote, ui.Reset)
+	for _, item := range pp.items {
+		fmt.Fprintf(os.Stdout, "      %s%s%s\n", ui.Dim, item, ui.Reset)
+	}
+}
 
-	// Scan for other AI configs in the repo (informational)
+// reportAddExistingFiles prints the "Files to Replace" section: for each
+// root-level file that will be replaced by a managed link, one yellow
+// bullet with file/symlink kind.
+func reportAddExistingFiles(existingFiles []string, projectName, projectPath string) {
+	if len(existingFiles) == 0 {
+		return
+	}
+	ui.Section("Files to Replace")
+	fmt.Fprintf(os.Stdout, "  %sThese root-level files will be backed up and replaced with links:%s\n", ui.Yellow, ui.Reset)
+	for _, f := range existingFiles {
+		rel := strings.TrimPrefix(f, projectPath+"/")
+		fileType := "file"
+		if _, isLink := links.ManagedLinkTarget(f); isLink {
+			fileType = "symlink"
+		}
+		fmt.Fprintf(os.Stdout, "  %s!%s %s %s(%s)%s\n", ui.Yellow, ui.Reset, rel, ui.Dim, fileType, ui.Reset)
+	}
+	fmt.Fprintf(os.Stdout, "\n  %sBackups stored in ~/.agents/resources/%s/backups/<timestamp>/%s\n", ui.Dim, projectName, ui.Reset)
+}
+
+// reportDiscoveredAIConfigs prints the "Other AI Configs Discovered" section
+// for any AI config files outside the to-be-replaced set, capped at 10 lines
+// with an "... and N more" trailer.
+func reportDiscoveredAIConfigs(existingFiles []string, projectPath string) {
 	allAIConfigs := scanExistingAIConfigs(projectPath)
-	var discoveredElsewhere []string
 	existingSet := map[string]bool{}
 	for _, f := range existingFiles {
 		existingSet[f] = true
 	}
+	var discoveredElsewhere []string
 	for _, f := range allAIConfigs {
 		if !existingSet[f] {
 			discoveredElsewhere = append(discoveredElsewhere, f)
 		}
 	}
-	if len(discoveredElsewhere) > 0 {
-		ui.Section("Other AI Configs Discovered")
-		fmt.Fprintf(os.Stdout, "  %sFound AI agent configs elsewhere in the repo (not replaced):%s\n", ui.Cyan, ui.Reset)
-		shown := 0
-		for _, f := range discoveredElsewhere {
-			if shown >= 10 {
-				break
-			}
-			rel := strings.TrimPrefix(f, projectPath+"/")
-			kind := "file"
-			if _, isLink := links.ManagedLinkTarget(f); isLink {
-				kind = "symlink"
-			} else if info, err := os.Lstat(f); err == nil && info.IsDir() {
-				kind = "dir"
-			}
-			fmt.Fprintf(os.Stdout, "  %s○%s %s %s(%s)%s\n", ui.Dim, ui.Reset, rel, ui.Dim, kind, ui.Reset)
-			shown++
-		}
-		if len(discoveredElsewhere) > 10 {
-			fmt.Fprintf(os.Stdout, "  %s... and %d more%s\n", ui.Dim, len(discoveredElsewhere)-10, ui.Reset)
-		}
-		fmt.Fprintf(os.Stdout, "\n  %sConsider migrating these to ~/.agents/ for centralized management.%s\n", ui.Dim, ui.Reset)
+	if len(discoveredElsewhere) == 0 {
+		return
 	}
-
-	if Flags.DryRun {
-		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
-		return nil
+	ui.Section("Other AI Configs Discovered")
+	fmt.Fprintf(os.Stdout, "  %sFound AI agent configs elsewhere in the repo (not replaced):%s\n", ui.Cyan, ui.Reset)
+	shown := 0
+	for _, f := range discoveredElsewhere {
+		if shown >= 10 {
+			break
+		}
+		rel := strings.TrimPrefix(f, projectPath+"/")
+		kind := "file"
+		if _, isLink := links.ManagedLinkTarget(f); isLink {
+			kind = "symlink"
+		} else if info, err := os.Lstat(f); err == nil && info.IsDir() {
+			kind = "dir"
+		}
+		fmt.Fprintf(os.Stdout, "  %s○%s %s %s(%s)%s\n", ui.Dim, ui.Reset, rel, ui.Dim, kind, ui.Reset)
+		shown++
 	}
+	if len(discoveredElsewhere) > 10 {
+		fmt.Fprintf(os.Stdout, "  %s... and %d more%s\n", ui.Dim, len(discoveredElsewhere)-10, ui.Reset)
+	}
+	fmt.Fprintf(os.Stdout, "\n  %sConsider migrating these to ~/.agents/ for centralized management.%s\n", ui.Dim, ui.Reset)
+}
 
+// confirmAddProceed prompts the user when --yes is not set. Returns true
+// when the user declined (caller returns nil to skip the rest of the run).
+func confirmAddProceed(existingFiles []string) bool {
 	confirmMsg := "Proceed?"
 	if len(existingFiles) > 0 {
 		confirmMsg = fmt.Sprintf("Proceed? (%d file(s) will be backed up and replaced)", len(existingFiles))
 	}
-	if !Flags.Yes {
-		if !ui.Confirm(confirmMsg, false) {
-			ui.Info("Add cancelled.")
-			return nil
-		}
+	if Flags.Yes {
+		return false
 	}
-
-	// Step 3: Backup existing configs
-	if len(existingFiles) > 0 {
-		ui.Step("Backing up existing configs...")
-		timestamp := time.Now().Format("20060102-150405")
-		backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp, deps)
-		if backupErr != nil {
-			// A failed backup means the user's only copy of an unmanaged
-			// config was NOT preserved. backupExistingConfigsList already
-			// refused to remove the original, so the repo is untouched —
-			// abort before creating links or registering the project.
-			ui.Bullet("warn", fmt.Sprintf("backup failed: %v", backupErr))
-			return ErrorWithHints(
-				fmt.Sprintf("aborting add for '%s': could not back up existing configs", projectName),
-				"No files were removed and the project was NOT registered. "+
-					"Ensure ~/.agents/resources is writable and has free space, then re-run `da add`.",
-			)
-		}
-		ui.Bullet("ok", fmt.Sprintf("Backed up %d existing file(s)", backed))
-		ui.Bullet("ok", fmt.Sprintf("Stored backups in ~/.agents/resources/%s/backups/%s/", projectName, timestamp))
+	if !ui.Confirm(confirmMsg, false) {
+		ui.Info("Add cancelled.")
+		return true
 	}
+	return false
+}
 
-	// Step 4: Create project dirs
+// backupAddExistingFiles runs Step 3 (backup existing configs) when there
+// are files to back up. A failed backup aborts add with a typed error that
+// guarantees the user's only copy of unmanaged configs is preserved.
+func backupAddExistingFiles(existingFiles []string, projectName, projectPath, agentsHome string, deps addDeps) error {
+	if len(existingFiles) == 0 {
+		return nil
+	}
+	ui.Step("Backing up existing configs...")
+	timestamp := time.Now().Format("20060102-150405")
+	backed, backupErr := backupExistingConfigsList(existingFiles, projectPath, agentsHome, projectName, timestamp, deps)
+	if backupErr != nil {
+		ui.Bullet("warn", fmt.Sprintf("backup failed: %v", backupErr))
+		return ErrorWithHints(
+			fmt.Sprintf("aborting add for '%s': could not back up existing configs", projectName),
+			"No files were removed and the project was NOT registered. "+
+				"Ensure ~/.agents/resources is writable and has free space, then re-run `da add`.",
+		)
+	}
+	ui.Bullet("ok", fmt.Sprintf("Backed up %d existing file(s)", backed))
+	ui.Bullet("ok", fmt.Sprintf("Stored backups in ~/.agents/resources/%s/backups/%s/", projectName, timestamp))
+	return nil
+}
+
+// scaffoldAddProjectDirs runs Step 4: creates project dirs, restores from
+// active resources, and writes KG MCP configs. Aborts on a partial restore
+// per the no-false-success invariant.
+func scaffoldAddProjectDirs(projectName, projectPath, agentsHome string, deps addDeps) error {
 	ui.Step("Creating project structure...")
 	if err := projectsync.CreateProjectDirs(projectName); err != nil {
 		return err
 	}
 	ui.Bullet("ok", "Created ~/.agents/ directories")
 
-	// Restore from active resources
 	restored, restoreErr := restoreFromResourcesCountedWithDeps(projectName, projectPath, deps)
 	if restored > 0 {
 		ui.Bullet("ok", fmt.Sprintf("Restored %d item(s) from ~/.agents/resources/%s/", restored, projectName))
 	}
 	if restoreErr != nil {
-		// A partial restore left some backed-up resource data unrestored.
-		// Continuing to link, write KG configs, register the project, and
-		// print the success box would stamp a partial application as
-		// complete — exactly the false-success runRefresh refuses to emit.
-		// Abort here BEFORE any registration/link work so a re-run can
-		// finish the restore against the still-registered backup data.
 		ui.Bullet("warn", fmt.Sprintf("restore from resources incomplete: %v", restoreErr))
 		return ErrorWithHints(
 			fmt.Sprintf("add incomplete for '%s': could not restore resources: %v", projectName, restoreErr),
@@ -549,12 +629,17 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 				"then re-run `da add`.",
 		)
 	}
-
 	if err := ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome, deps); err != nil {
 		return fmt.Errorf("writing KG MCP configs: %w", err)
 	}
+	return nil
+}
 
-	// Step 5: Create links
+// createAddLinks runs Step 5: shared-target projection followed by every
+// installed platform's CreateLinks. Returns a typed error listing every
+// link failure when any failed — the caller must NOT register the project
+// or print the success box (false-success invariant).
+func createAddLinks(projectName, projectPath string) error {
 	ui.Step("Creating links...")
 	config.SetWindowsMirrorContext(projectPath)
 
@@ -573,17 +658,10 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 		if err := p.CreateLinks(projectName, projectPath); err != nil {
 			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
 			linkFailures = append(linkFailures, fmt.Sprintf("%s: %v", p.DisplayName(), err))
-		} else {
-			ui.Bullet("ok", p.DisplayName()+" links created")
+			continue
 		}
+		ui.Bullet("ok", p.DisplayName()+" links created")
 	}
-
-	// A projection/CreateLinks failure (e.g. an unmanaged file occupying a
-	// managed target now returns links.ErrUnmanagedTarget) means the project
-	// is only partially linked. Registering it + printing a success box would
-	// stamp a partial application as complete, making `da refresh`/doctor
-	// recovery ambiguous. Do NOT save the registration and do NOT print
-	// success — surface the failures with recovery guidance instead.
 	if len(linkFailures) > 0 {
 		return ErrorWithHints(
 			fmt.Sprintf("add incomplete for '%s': %s", projectName, strings.Join(linkFailures, "; ")),
@@ -592,14 +670,24 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 				"must be imported (da import), backed up, or removed — then re-run `da add`.",
 		)
 	}
+	return nil
+}
 
-	// Step 6: Register
+// registerAddedProject persists the project in config.json. Only call after
+// every prior step succeeded — registration is the success-stamp moment.
+func registerAddedProject(cfg *config.Config, projectName, projectPath string) error {
 	cfg.AddProject(projectName, projectPath)
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 	ui.Bullet("ok", "Registered in config.json")
+	return nil
+}
 
+// emitAddSuccessBox prints the final success box with project-specific next
+// steps: rule-editing hint, audit hint, manifest hint (apply vs generate),
+// and the migrate hint when deprecated formats were detected.
+func emitAddSuccessBox(projectName, projectPath string, hasDeprecated bool) {
 	nextSteps := []string{
 		"Add project rules: edit ~/.agents/rules/" + projectName + "/rules.md",
 		"Check applied configs: da status --audit",
@@ -613,7 +701,6 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 		nextSteps = append(nextSteps, "Migrate deprecated formats: da migrate detect")
 	}
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
-	return nil
 }
 
 // backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
