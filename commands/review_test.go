@@ -508,7 +508,7 @@ func TestNewReviewCmd_Metadata(t *testing.T) {
 		}
 	}
 	// The reject subcommand must expose a --reason flag.
-	var rejectCmd interface{ Flags() interface{} }
+	var rejectCmd interface{ Flags() any }
 	_ = rejectCmd
 	for _, c := range cmd.Commands() {
 		if c.Name() == "reject" {

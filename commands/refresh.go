@@ -176,7 +176,7 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 				projectFailed = true
 			}
-		} else if lines != nil {
+		} else {
 			for _, line := range lines {
 				ui.DryRun(line)
 			}

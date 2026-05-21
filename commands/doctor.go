@@ -622,7 +622,7 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 }
 
 // collectBrokenUserLinks returns all broken managed user-level links in the home directory.
-func collectBrokenUserLinks(agentsHome string) []brokenLink {
+func collectBrokenUserLinks(_ string) []brokenLink {
 	var broken []brokenLink
 
 	homeDir, err := config.UserHomeDir()
@@ -737,7 +737,7 @@ func countProjectLinks(name, path, agentsHome string) (int, int) {
 }
 
 // printUserConfigStatus prints detailed user-level config status (healthy + broken).
-func printUserConfigStatus(agentsHome string) {
+func printUserConfigStatus(_ string) {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		return

@@ -869,7 +869,7 @@ func printSharedTargetRegistry(project, repo string, cfg *config.Config) {
 }
 
 // printUserConfigSection reports on user-level (home directory) config links.
-func printUserConfigSection(agentsHome string, audit bool, agentFilter string) {
+func printUserConfigSection(_ string, audit bool, agentFilter string) {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
 		return
@@ -1068,7 +1068,7 @@ func printSymlinkAudit(linkPath, label string) {
 	}
 }
 
-func printClaudeAudit(name, path, agentsHome string) {
+func printClaudeAudit(_, path, _ string) {
 	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
 	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
 	if _, err := os.ReadDir(rulesDir); err != nil {
@@ -1082,7 +1082,7 @@ func printClaudeAudit(name, path, agentsHome string) {
 	fmt.Fprintln(os.Stdout)
 }
 
-func printCodexAudit(name, path, agentsHome string) {
+func printCodexAudit(_, path, _ string) {
 	fmt.Fprintf(os.Stdout, "    %sCodex%s\n", ui.Cyan, ui.Reset)
 	printCodexAgentsMD(filepath.Join(path, statusAgentsMarkdown))
 	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusCodexConfigToml), ".codex/config.toml")
@@ -1166,7 +1166,7 @@ func printLinkedStatusLine(label, linkPath string) bool {
 	return false
 }
 
-func printOpenCodeAudit(name, path, agentsHome string) {
+func printOpenCodeAudit(_, path, _ string) {
 	fmt.Fprintf(os.Stdout, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
 
 	// opencode.json symlink
@@ -1194,7 +1194,7 @@ func printOpenCodeAudit(name, path, agentsHome string) {
 	fmt.Fprintln(os.Stdout)
 }
 
-func printCopilotAudit(name, path string) {
+func printCopilotAudit(_, path string) {
 	fmt.Fprintf(os.Stdout, "    %sGitHub Copilot%s\n", ui.Cyan, ui.Reset)
 	instructionsPath := filepath.Join(path, statusGitHubDir, statusCopilotInstructions)
 	if _, err := os.Lstat(instructionsPath); err == nil {

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -633,10 +634,10 @@ func TestRunInstallGenerate_CreatesManifestFromState(t *testing.T) {
 	if rc.Project != projName {
 		t.Errorf("manifest project = %q, want %q", rc.Project, projName)
 	}
-	if !containsString(rc.Skills, "demo") {
+	if !slices.Contains(rc.Skills, "demo") {
 		t.Errorf("manifest skills = %v, want demo present", rc.Skills)
 	}
-	if !containsString(rc.Agents, "support") {
+	if !slices.Contains(rc.Agents, "support") {
 		t.Errorf("manifest agents = %v, want support present", rc.Agents)
 	}
 }
@@ -1361,15 +1362,6 @@ func TestResolveSourceRoot_GitSucceedsWithBareFixture(t *testing.T) {
 }
 
 // ---------- helpers ----------
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
 
 // TestRunInstall_HappyPathWithInstalledClaude exercises the full install path
 // without --dry-run: createInstallPlatformLink calls into Claude's CreateLinks
