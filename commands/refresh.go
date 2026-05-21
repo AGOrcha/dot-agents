@@ -74,50 +74,19 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 
 	ui.Header("da refresh")
 
-	// Determine which platforms are enabled
-	ui.Section("Enabled Platforms")
-	enabledPlatforms := []platform.Platform{}
-	for _, p := range platform.All() {
-		if !cfg.IsPlatformEnabled(p.ID()) {
-			continue
-		}
-		enabledPlatforms = append(enabledPlatforms, p)
-		if p.IsInstalled() {
-			ver := p.Version()
-			// Update version in config
-			cfg.SetPlatformState(p.ID(), true, ver)
-			if ver != "" {
-				ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
-			} else {
-				ui.Bullet("ok", p.DisplayName())
-			}
-		} else {
-			ui.Bullet("none", p.DisplayName()+" (enabled, not detected)")
-		}
-	}
+	enabledPlatforms := reportEnabledPlatforms(cfg)
 	cfg.Save()
-
 	if len(enabledPlatforms) == 0 {
 		ui.Warn("No enabled platforms in config.json. Nothing to refresh.")
 		return nil
 	}
 
 	installedEnabled := platform.InstalledEnabledPlatforms(cfg)
-
-	// Resolve dot-agents git commit
 	refreshCommit, refreshDescribe := resolveRefreshCommit()
 
-	// Projects to process
-	projects := cfg.ListProjects()
-	if projectFilter != "" {
-		path := cfg.GetProjectPath(projectFilter)
-		if path == "" {
-			return ErrorWithHints(
-				fmt.Sprintf("project not found: %s", projectFilter),
-				"Run `da status` to see the registered project names.",
-			)
-		}
-		projects = []string{projectFilter}
+	projects, err := resolveRefreshProjects(cfg, projectFilter)
+	if err != nil {
+		return err
 	}
 
 	total := len(projects)
@@ -125,105 +94,20 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 	var failed []string
 	for i, name := range projects {
 		path := cfg.GetProjectPath(name)
-		if path == "" || path == "." {
-			ui.Warn("Skipping " + name + ": path not found")
+		if !checkRefreshProjectPath(name, path) {
 			continue
 		}
-		if _, err := os.Stat(path); err != nil {
-			ui.Warn("Skipping " + name + ": directory not found at " + path)
-			continue
-		}
+		announceRefreshProject(name, path, i, total)
+		noteManifestGitSources(path)
 
-		if total > 1 {
-			ui.StepN(i+1, total, name)
-		} else {
-			fmt.Fprintf(os.Stdout, "\n%s\n", ui.BoldText(name))
-		}
-		fmt.Fprintf(os.Stdout, "  %s\n", ui.DimText(config.DisplayPath(path)))
+		projectFailed := refreshOneProject(name, path, enabledPlatforms, installedEnabled, addD)
 
-		// Note if manifest exists — git sources need `install` to re-resolve
-		if rc, err := config.LoadAgentsRC(path); err == nil {
-			for _, src := range rc.Sources {
-				if src.Type == "git" {
-					fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'da install' to re-resolve%s\n", ui.Dim, ui.Reset)
-					break
-				}
-			}
-			_ = rc
-		}
-
-		projectFailed := false
-		if !Flags.DryRun {
-			projectsync.CreateProjectDirs(name)
-			if err := restoreFromResources(name, path, addD); err != nil {
-				// A partial restore must NOT be stamped as a successful
-				// refresh. Treat it exactly like a projection/CreateLinks
-				// failure: surface it and skip refresh metadata.
-				ui.Bullet("warn", fmt.Sprintf("restore from resources: %v", err))
-				projectFailed = true
-			}
-		}
-
-		config.SetWindowsMirrorContext(path)
-
-		// Shared-target plan materializes cross-platform paths; Claude CreateLinks then mirrors
-		// ~/.agents/agents/<project>/ into repo .agents/agents/ and .claude/agents/.
-		lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
-		if err != nil {
-			if Flags.DryRun {
-				ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
-			} else {
-				ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
-				projectFailed = true
-			}
-		} else {
-			for _, line := range lines {
-				ui.DryRun(line)
-			}
-		}
-
-		for _, p := range enabledPlatforms {
-			if !p.IsInstalled() {
-				ui.Skip(p.DisplayName() + " (not installed)")
-				continue
-			}
-			if Flags.DryRun {
-				ui.DryRun("Refresh " + p.DisplayName() + " links")
-				continue
-			}
-			if err := p.CreateLinks(name, path); err != nil {
-				ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
-				projectFailed = true
-			} else {
-				ui.Bullet("ok", p.DisplayName()+" links refreshed")
-			}
-		}
-
-		if Flags.DryRun {
-			msg := "Update .agentsrc.json refresh details"
-			if refreshCommit != "" {
-				msg += " (commit=" + refreshCommit[:8] + ")"
-			}
-			ui.DryRun(msg)
+		stamped := finalizeProjectRefresh(name, path, projectFailed, refreshCommit, refreshDescribe)
+		if stamped {
 			count++
-			continue
-		}
-
-		// Do NOT stamp fresh refresh metadata onto a project whose
-		// projection or platform links failed: a manifest claiming
-		// success for a partial application makes retries and
-		// doctor/refresh recovery ambiguous. Surface it instead.
-		if projectFailed {
+		} else if !Flags.DryRun {
 			failed = append(failed, name)
-			ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
-			continue
 		}
-		if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
-			failed = append(failed, name)
-			continue
-		}
-		count++
 	}
 
 	fmt.Fprintln(os.Stdout)
@@ -239,6 +123,184 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 		)
 	}
 	return nil
+}
+
+// reportEnabledPlatforms prints the "Enabled Platforms" section and returns
+// the slice of platforms enabled in cfg. Installed platforms have their
+// version recorded back into cfg so the caller can persist via cfg.Save().
+func reportEnabledPlatforms(cfg *config.Config) []platform.Platform {
+	ui.Section("Enabled Platforms")
+	enabled := []platform.Platform{}
+	for _, p := range platform.All() {
+		if !cfg.IsPlatformEnabled(p.ID()) {
+			continue
+		}
+		enabled = append(enabled, p)
+		if !p.IsInstalled() {
+			ui.Bullet("none", p.DisplayName()+" (enabled, not detected)")
+			continue
+		}
+		ver := p.Version()
+		cfg.SetPlatformState(p.ID(), true, ver)
+		if ver != "" {
+			ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
+		} else {
+			ui.Bullet("ok", p.DisplayName())
+		}
+	}
+	return enabled
+}
+
+// resolveRefreshProjects returns the project list to refresh: every managed
+// project, or just the filter target when one was provided. An unknown filter
+// produces a typed error with a recovery hint.
+func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string, error) {
+	if projectFilter == "" {
+		return cfg.ListProjects(), nil
+	}
+	if cfg.GetProjectPath(projectFilter) == "" {
+		return nil, ErrorWithHints(
+			fmt.Sprintf("project not found: %s", projectFilter),
+			"Run `da status` to see the registered project names.",
+		)
+	}
+	return []string{projectFilter}, nil
+}
+
+// checkRefreshProjectPath reports whether the project's recorded path is a
+// real, present directory. It emits the user-facing warn on skip so callers
+// just consult the bool.
+func checkRefreshProjectPath(name, path string) bool {
+	if path == "" || path == "." {
+		ui.Warn("Skipping " + name + ": path not found")
+		return false
+	}
+	if _, err := os.Stat(path); err != nil {
+		ui.Warn("Skipping " + name + ": directory not found at " + path)
+		return false
+	}
+	return true
+}
+
+// announceRefreshProject prints the per-project banner — StepN heading when
+// processing multiple projects, plain bold name for a single-project run —
+// followed by the dimmed display path.
+func announceRefreshProject(name, path string, i, total int) {
+	if total > 1 {
+		ui.StepN(i+1, total, name)
+	} else {
+		fmt.Fprintf(os.Stdout, "\n%s\n", ui.BoldText(name))
+	}
+	fmt.Fprintf(os.Stdout, "  %s\n", ui.DimText(config.DisplayPath(path)))
+}
+
+// noteManifestGitSources prints the one-shot hint that the project's manifest
+// has git sources and `install` (not `refresh`) is the way to re-resolve them.
+// A missing or unreadable manifest is silently skipped — refresh is
+// well-defined for manifest-less projects.
+func noteManifestGitSources(path string) {
+	rc, err := config.LoadAgentsRC(path)
+	if err != nil {
+		return
+	}
+	for _, src := range rc.Sources {
+		if src.Type == "git" {
+			fmt.Fprintf(os.Stdout, "  %sℹ  .agentsrc.json has git sources — use 'da install' to re-resolve%s\n", ui.Dim, ui.Reset)
+			return
+		}
+	}
+}
+
+// refreshOneProject performs the per-project body: optional restore-from-
+// resources, shared-target projection, and CreateLinks across every enabled
+// platform. Returns true when ANY sub-step failed so the caller can withhold
+// the success-stamp from a partial application.
+func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []platform.Platform, addD addDeps) bool {
+	projectFailed := false
+	if !Flags.DryRun {
+		projectsync.CreateProjectDirs(name)
+		if err := restoreFromResources(name, path, addD); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("restore from resources: %v", err))
+			projectFailed = true
+		}
+	}
+
+	config.SetWindowsMirrorContext(path)
+
+	if runSharedTargetsForRefresh(name, path, installedEnabled) {
+		projectFailed = true
+	}
+	if recreatePlatformLinks(name, path, enabledPlatforms) {
+		projectFailed = true
+	}
+	return projectFailed
+}
+
+// runSharedTargetsForRefresh runs the shared-target projection and prints any
+// dry-run plan lines. Returns true when a non-dry-run projection failed
+// (caller withholds the success stamp); dry-run failures are surfaced as
+// warnings but do not propagate.
+func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform) bool {
+	lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
+	if err != nil {
+		if Flags.DryRun {
+			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
+			return false
+		}
+		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
+		return true
+	}
+	for _, line := range lines {
+		ui.DryRun(line)
+	}
+	return false
+}
+
+// recreatePlatformLinks re-runs CreateLinks for every enabled+installed
+// platform. Returns true when any platform's CreateLinks failed.
+func recreatePlatformLinks(name, path string, enabledPlatforms []platform.Platform) bool {
+	failed := false
+	for _, p := range enabledPlatforms {
+		if !p.IsInstalled() {
+			ui.Skip(p.DisplayName() + " (not installed)")
+			continue
+		}
+		if Flags.DryRun {
+			ui.DryRun("Refresh " + p.DisplayName() + " links")
+			continue
+		}
+		if err := p.CreateLinks(name, path); err != nil {
+			ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
+			failed = true
+			continue
+		}
+		ui.Bullet("ok", p.DisplayName()+" links refreshed")
+	}
+	return failed
+}
+
+// finalizeProjectRefresh writes the refresh metadata stamp when the project
+// finished cleanly. Returns true on a successful stamp (counted toward the
+// success total) and false on dry-run, partial application, or stamp failure.
+// Dry-run is treated as success for the counter but skips the manifest write.
+func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit, refreshDescribe string) bool {
+	if Flags.DryRun {
+		msg := "Update .agentsrc.json refresh details"
+		if refreshCommit != "" {
+			msg += " (commit=" + refreshCommit[:8] + ")"
+		}
+		ui.DryRun(msg)
+		return true
+	}
+	if projectFailed {
+		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
+		return false
+	}
+	if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+		return false
+	}
+	return true
 }
 
 func refreshImportScope() string {
