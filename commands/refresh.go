@@ -50,15 +50,15 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			if len(args) > 0 {
 				filter = args[0]
 			}
-			return runRefresh(filter, stdRefreshConfigLoader{})
+			return runRefresh(filter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	}
 	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
 	return cmd
 }
 
-func runRefresh(projectFilter string, deps refreshConfigLoader) error {
-	if err := runImportFromRefresh(projectFilter, refreshImportScope()); err != nil {
+func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDeps, addD addDeps) error {
+	if err := runImportFromRefresh(projectFilter, refreshImportScope(), importD); err != nil {
 		return fmt.Errorf("import before refresh: %w", err)
 	}
 
@@ -155,7 +155,7 @@ func runRefresh(projectFilter string, deps refreshConfigLoader) error {
 		projectFailed := false
 		if !Flags.DryRun {
 			projectsync.CreateProjectDirs(name)
-			if err := restoreFromResources(name, path); err != nil {
+			if err := restoreFromResources(name, path, addD); err != nil {
 				// A partial restore must NOT be stamped as a successful
 				// refresh. Treat it exactly like a projection/CreateLinks
 				// failure: surface it and skip refresh metadata.
@@ -258,8 +258,8 @@ func resolveRefreshCommit() (string, string) {
 // It returns a non-nil error if any walk/mkdir/write/copy failed so callers
 // that stamp success metadata can treat a partial restore as a failure
 // instead of a silent false-success.
-func restoreFromResources(project, projectPath string) error {
-	_, err := restoreFromResourcesCounted(project, projectPath)
+func restoreFromResources(project, projectPath string, deps addDeps) error {
+	_, err := restoreFromResourcesCountedWithDeps(project, projectPath, deps)
 	return err
 }
 

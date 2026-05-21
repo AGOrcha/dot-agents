@@ -62,7 +62,7 @@ func (f fakeReviewDeps) RunRefresh(projectFilter string) error {
 	if f.runRefresh != nil {
 		return f.runRefresh(projectFilter)
 	}
-	return runRefresh(projectFilter, stdRefreshConfigLoader{})
+	return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 }
 
 // TestFakeReviewDeps_NilDelegatesToReal pins the nil-delegates-to-real

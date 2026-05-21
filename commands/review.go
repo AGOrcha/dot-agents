@@ -48,7 +48,7 @@ func (stdReviewDeps) Remove(name string) error                 { return os.Remov
 func (stdReviewDeps) ApplyProposal(p *config.Proposal) error   { return config.ApplyProposal(p) }
 func (stdReviewDeps) ArchiveProposal(p *config.Proposal) error { return config.ArchiveProposal(p) }
 func (stdReviewDeps) RunRefresh(projectFilter string) error {
-	return runRefresh(projectFilter, stdRefreshConfigLoader{})
+	return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 }
 
 func NewReviewCmd() *cobra.Command {

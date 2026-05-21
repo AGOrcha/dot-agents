@@ -298,13 +298,13 @@ to normalize hand-edited config back into the managed store.`,
 	return cmd
 }
 
-func runImportFromRefresh(projectFilter, scope string) error {
+func runImportFromRefresh(projectFilter, scope string, deps importDeps) error {
 	oldYes := Flags.Yes
 	Flags.Yes = true
 	defer func() {
 		Flags.Yes = oldYes
 	}()
-	return runImportInternal(projectFilter, scope, true, stdImportDeps{})
+	return runImportInternal(projectFilter, scope, true, deps)
 }
 
 func runImport(projectFilter, scope string, deps importDeps) error {

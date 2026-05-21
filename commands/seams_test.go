@@ -11,70 +11,6 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
-// withMkdirAllStub swaps osMkdirAll for the duration of the test.
-func withMkdirAllStub(t *testing.T, stub func(string, os.FileMode) error) {
-	t.Helper()
-	prev := osMkdirAll
-	osMkdirAll = stub
-	t.Cleanup(func() { osMkdirAll = prev })
-}
-
-// withWriteFileStub swaps osWriteFile for the duration of the test.
-func withWriteFileStub(t *testing.T, stub func(string, []byte, os.FileMode) error) {
-	t.Helper()
-	prev := osWriteFile
-	osWriteFile = stub
-	t.Cleanup(func() { osWriteFile = prev })
-}
-
-// withCopyFileStub swaps copyFile for the duration of the test.
-func withCopyFileStub(t *testing.T, stub func(string, string) error) {
-	t.Helper()
-	prev := copyFile
-	copyFile = stub
-	t.Cleanup(func() { copyFile = prev })
-}
-
-// withRemoveStub swaps osRemove for the duration of the test.
-func withRemoveStub(t *testing.T, stub func(string) error) {
-	t.Helper()
-	prev := osRemove
-	osRemove = stub
-	t.Cleanup(func() { osRemove = prev })
-}
-
-// withRemoveAllStub swaps osRemoveAll for the duration of the test.
-func withRemoveAllStub(t *testing.T, stub func(string) error) {
-	t.Helper()
-	prev := osRemoveAll
-	osRemoveAll = stub
-	t.Cleanup(func() { osRemoveAll = prev })
-}
-
-// withExecutableStub swaps osExecutable for the duration of the test.
-func withExecutableStub(t *testing.T, stub func() (string, error)) {
-	t.Helper()
-	prev := osExecutable
-	osExecutable = stub
-	t.Cleanup(func() { osExecutable = prev })
-}
-
-// withGetwdStub swaps osGetwd for the duration of the test.
-func withGetwdStub(t *testing.T, stub func() (string, error)) {
-	t.Helper()
-	prev := osGetwd
-	osGetwd = stub
-	t.Cleanup(func() { osGetwd = prev })
-}
-
-// withSymlinkStub swaps osSymlink for the duration of the test.
-func withSymlinkStub(t *testing.T, stub func(string, string) error) {
-	t.Helper()
-	prev := osSymlink
-	osSymlink = stub
-	t.Cleanup(func() { osSymlink = prev })
-}
-
 // ─── writeKGMCPConfigFile seam paths ─────────────────────────────────────────
 
 // MkdirAll failure inside writeKGMCPConfigFile must propagate.
@@ -505,38 +441,6 @@ func TestProcessImportCandidate_CanonicalCanonicalizationError(t *testing.T) {
 	}
 }
 
-// withConfigLoadStub swaps configLoad for the duration of the test.
-func withConfigLoadStub(t *testing.T, stub func() (*config.Config, error)) {
-	t.Helper()
-	prev := configLoad
-	configLoad = stub
-	t.Cleanup(func() { configLoad = prev })
-}
-
-// withApplyProposalStub swaps applyProposalFn for the duration of the test.
-func withApplyProposalStub(t *testing.T, stub func(*config.Proposal) error) {
-	t.Helper()
-	prev := applyProposalFn
-	applyProposalFn = stub
-	t.Cleanup(func() { applyProposalFn = prev })
-}
-
-// withArchiveProposalStub swaps archiveProposalFn for the duration of the test.
-func withArchiveProposalStub(t *testing.T, stub func(*config.Proposal) error) {
-	t.Helper()
-	prev := archiveProposalFn
-	archiveProposalFn = stub
-	t.Cleanup(func() { archiveProposalFn = prev })
-}
-
-// withRunRefreshStub swaps runRefreshFn for the duration of the test.
-func withRunRefreshStub(t *testing.T, stub func(string) error) {
-	t.Helper()
-	prev := runRefreshFn
-	runRefreshFn = stub
-	t.Cleanup(func() { runRefreshFn = prev })
-}
-
 // ─── runRefresh / runRemove configLoad failure branches ──────────────────────
 
 func TestRunRefresh_ConfigLoadError(t *testing.T) {
@@ -547,20 +451,21 @@ func TestRunRefresh_ConfigLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	sentinel := errors.New("load boom")
-	// runImportFromRefresh still uses the package-level configLoad. Stub it
-	// so the import pass succeeds (returns an empty config). The
-	// refresh-internal call now goes through the per-file
-	// refreshConfigLoader and returns the sentinel directly.
-	withConfigLoadStub(t, func() (*config.Config, error) {
+	// The inner runImportFromRefresh call needs a successful config load to
+	// reach the refresh-internal load that returns the sentinel. With the
+	// seam-interface-di convergence, both LoadConfig hops are injected:
+	// importD's LoadConfig serves the import pass, and the refresh-internal
+	// refreshConfigLoader returns the sentinel.
+	importD := fakeImportDeps{loadConfig: func() (*config.Config, error) {
 		return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
-	})
+	}}
 	deps := fakeRefreshConfigLoader{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("", deps)
+	err := runRefresh("", deps, importD, stdAddDeps{})
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel from refresh, got %v", err)
 	}
@@ -852,13 +757,13 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// runImportFromRefresh still uses package-level configLoad; stub it to
-	// return a benign empty config. The refresh-internal load goes through
-	// the injected refreshConfigLoader and returns a config with one
-	// project named "real" so the filter mismatch triggers.
-	withConfigLoadStub(t, func() (*config.Config, error) {
+	// The inner runImportFromRefresh needs a benign empty config to reach
+	// the refresh-internal load. With seam-interface-di convergence both
+	// hops are injected: importD returns empty, refresh-internal returns a
+	// config with one project named "real" so the filter mismatch triggers.
+	importD := fakeImportDeps{loadConfig: func() (*config.Config, error) {
 		return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
-	})
+	}}
 	deps := fakeRefreshConfigLoader{loadConfig: func() (*config.Config, error) {
 		return &config.Config{
 			Version:  1,
@@ -871,7 +776,7 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	err := runRefresh("ghost-project", deps)
+	err := runRefresh("ghost-project", deps, importD, stdAddDeps{})
 	if err == nil || !strings.Contains(err.Error(), "project not found") {
 		t.Fatalf("expected project-not-found, got %v", err)
 	}

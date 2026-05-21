@@ -1255,7 +1255,7 @@ func TestRunImportFromRefresh_EmptyConfig(t *testing.T) {
 	defer func() { Flags = saved }()
 	Flags = GlobalFlags{}
 
-	if err := runImportFromRefresh("", "all"); err != nil {
+	if err := runImportFromRefresh("", "all", stdImportDeps{}); err != nil {
 		t.Errorf("runImportFromRefresh: %v", err)
 	}
 }

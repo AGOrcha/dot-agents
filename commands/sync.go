@@ -13,7 +13,7 @@ func syncDeps() sync.Deps {
 			Force:  Flags.Force,
 		},
 		RunRefresh: func(projectFilter string) error {
-			return runRefresh(projectFilter, stdRefreshConfigLoader{})
+			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	}
 }

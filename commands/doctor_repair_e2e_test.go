@@ -124,7 +124,7 @@ func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, ta
 	if err := os.WriteFile(filepath.Join(resources, "AGENTS.md"), []byte("# rules\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	restoreFromResources("proj", projectPath)
+	restoreFromResources("proj", projectPath, stdAddDeps{})
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected restoreFromResources to recreate %s: %v", target, err)
 	}

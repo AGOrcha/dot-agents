@@ -36,25 +36,23 @@ type addDeps interface {
 	LoadConfig() (*config.Config, error)
 }
 
-// stdAddDeps is the production addDeps. It intentionally delegates through the
-// legacy package-level seams in seams.go (osMkdirAll, osWriteFile, osRemove,
-// osExecutable, copyFile, configLoad) rather than calling os/projectsync/config
-// directly. Cross-file tests in refresh_test.go and seams_test.go still pin
-// fault-injection on those package vars (via withCopyFileStub, etc.); the
-// atomic-delete commit that removes the seams.go vars will also flip these
-// forwards to os.* / projectsync.CopyFile / config.Load.
+// stdAddDeps is the production addDeps backed by direct os / projectsync /
+// config calls. Cross-file fault injection now flows through the interface
+// (refresh.go threads addDeps into restoreFromResources, runRefresh threads
+// importDeps into runImportFromRefresh); the legacy package-level seams in
+// seams.go are gone and no longer mediate the production path.
 type stdAddDeps struct{}
 
 func (stdAddDeps) MkdirAll(path string, perm os.FileMode) error {
-	return osMkdirAll(path, perm)
+	return os.MkdirAll(path, perm)
 }
 func (stdAddDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
-	return osWriteFile(name, data, perm)
+	return os.WriteFile(name, data, perm)
 }
-func (stdAddDeps) Remove(name string) error            { return osRemove(name) }
-func (stdAddDeps) Executable() (string, error)         { return osExecutable() }
-func (stdAddDeps) CopyFile(src, dst string) error      { return copyFile(src, dst) }
-func (stdAddDeps) LoadConfig() (*config.Config, error) { return configLoad() }
+func (stdAddDeps) Remove(name string) error            { return os.Remove(name) }
+func (stdAddDeps) Executable() (string, error)         { return os.Executable() }
+func (stdAddDeps) CopyFile(src, dst string) error      { return projectsync.CopyFile(src, dst) }
+func (stdAddDeps) LoadConfig() (*config.Config, error) { return config.Load() }
 
 // aiScanPatterns lists file/dir names to look for when scanning for AI configs.
 var aiScanPatterns = []string{
