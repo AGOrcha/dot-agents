@@ -66,55 +66,10 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 
 	agentsHome := config.AgentsHome()
 
-	// Check ~/.agents/
-	ui.Section("Installation")
-	if _, err := os.Stat(agentsHome); err == nil {
-		ui.Bullet("ok", "~/.agents/ exists")
-	} else {
-		ui.Bullet("error", "~/.agents/ not found — run: da init")
-	}
+	reportInstallationStatus(agentsHome)
+	reportPlatformInventory()
+	reportUserConfigHealth(agentsHome)
 
-	cfgPath := filepath.Join(agentsHome, "config.json")
-	if _, err := os.Stat(cfgPath); err == nil {
-		ui.Bullet("ok", "config.json exists")
-	} else {
-		ui.Bullet("warn", "config.json not found")
-	}
-
-	// Check platforms
-	ui.Section("Platforms")
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			ver := p.Version()
-			if ver != "" {
-				ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
-			} else {
-				ui.Bullet("ok", p.DisplayName()+" (installed)")
-			}
-		} else {
-			ui.Bullet("none", p.DisplayName()+" (not installed)")
-		}
-	}
-
-	// Check user-level config in home directory
-	ui.Section("User Config")
-	userBroken := collectBrokenUserLinks(agentsHome)
-	if len(userBroken) == 0 {
-		ui.Bullet("ok", "User-level config healthy")
-	} else {
-		ui.Bullet("warn", fmt.Sprintf("User-level config has %d broken link(s)", len(userBroken)))
-	}
-
-	if Flags.Verbose {
-		// Show full user-level detail (healthy + broken)
-		printUserConfigStatus(agentsHome)
-	} else if len(userBroken) > 0 {
-		for _, bl := range userBroken {
-			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s%s\n", ui.Red, ui.Reset, bl.linkPath, ui.Dim, bl.dest, ui.Reset)
-		}
-	}
-
-	// Check projects
 	cfg, err := deps.LoadConfig()
 	if err != nil {
 		ui.Bullet("warn", "Could not load config: "+err.Error())
@@ -129,6 +84,78 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 		return nil
 	}
 
+	reportProjectInventory(cfg, names)
+	totalFixed, anyBroken := reportLinkHealth(cfg, names, agentsHome)
+	reportManifestHealth(cfg, names)
+	reportOrphanCanonicals(cfg, names, agentsHome)
+	reportPluginHealth(cfg, names, agentsHome)
+
+	finalizeDoctorRun(anyBroken, totalFixed)
+	return nil
+}
+
+// reportInstallationStatus prints the "Installation" section: presence of
+// ~/.agents/ and config.json. Pure side-effect on the ui sink — no caller
+// state to thread.
+func reportInstallationStatus(agentsHome string) {
+	ui.Section("Installation")
+	if _, err := os.Stat(agentsHome); err == nil {
+		ui.Bullet("ok", "~/.agents/ exists")
+	} else {
+		ui.Bullet("error", "~/.agents/ not found — run: da init")
+	}
+
+	cfgPath := filepath.Join(agentsHome, "config.json")
+	if _, err := os.Stat(cfgPath); err == nil {
+		ui.Bullet("ok", "config.json exists")
+	} else {
+		ui.Bullet("warn", "config.json not found")
+	}
+}
+
+// reportPlatformInventory prints the "Platforms" section: one bullet per
+// known platform with installed/version status.
+func reportPlatformInventory() {
+	ui.Section("Platforms")
+	for _, p := range platform.All() {
+		if !p.IsInstalled() {
+			ui.Bullet("none", p.DisplayName()+" (not installed)")
+			continue
+		}
+		ver := p.Version()
+		if ver != "" {
+			ui.Bullet("ok", fmt.Sprintf("%s (%s)", p.DisplayName(), ver))
+		} else {
+			ui.Bullet("ok", p.DisplayName()+" (installed)")
+		}
+	}
+}
+
+// reportUserConfigHealth prints the "User Config" section: count of broken
+// user-level managed links plus per-link detail (verbose) or just the broken
+// ones (non-verbose).
+func reportUserConfigHealth(agentsHome string) {
+	ui.Section("User Config")
+	userBroken := collectBrokenUserLinks(agentsHome)
+	if len(userBroken) == 0 {
+		ui.Bullet("ok", "User-level config healthy")
+	} else {
+		ui.Bullet("warn", fmt.Sprintf("User-level config has %d broken link(s)", len(userBroken)))
+	}
+
+	if Flags.Verbose {
+		printUserConfigStatus(agentsHome)
+		return
+	}
+	for _, bl := range userBroken {
+		fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s%s\n", ui.Red, ui.Reset, bl.linkPath, ui.Dim, bl.dest, ui.Reset)
+	}
+}
+
+// reportProjectInventory prints the "Projects (N)" header + one bullet per
+// managed project. Missing project directories are flagged but do not stop
+// the run (downstream sections skip them).
+func reportProjectInventory(cfg *config.Config, names []string) {
 	ui.Section(fmt.Sprintf("Projects (%d)", len(names)))
 	for _, name := range names {
 		path := cfg.GetProjectPath(name)
@@ -138,8 +165,13 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 		}
 		ui.Bullet("ok", fmt.Sprintf("%s (%s)", name, config.DisplayPath(path)))
 	}
+}
 
-	// Link health per project
+// reportLinkHealth prints the "Link Health" section: per-project broken/OK
+// counts, broken-link detail (or full audit in verbose mode), and triggers
+// repair when needed. Returns the cumulative platform-repair count and
+// whether any broken links were observed (drives finalizeDoctorRun).
+func reportLinkHealth(cfg *config.Config, names []string, agentsHome string) (int, bool) {
 	ui.Section("Link Health")
 	totalFixed := 0
 	anyBroken := false
@@ -148,42 +180,52 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		brokenLinks := collectBrokenLinks(name, path, agentsHome)
-		ok, _ := countProjectLinks(name, path, agentsHome)
-		total := ok + len(brokenLinks)
-
-		if total == 0 {
-			ui.Bullet("none", fmt.Sprintf("%s — no managed links detected", name))
-			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "", cfg)
-			}
-			continue
+		broken := reportOneProjectLinkHealth(name, path, agentsHome, cfg)
+		if broken {
+			anyBroken = true
+			totalFixed += repairManagedProject(name, path)
 		}
-		if len(brokenLinks) == 0 {
-			ui.Bullet("ok", fmt.Sprintf("%s — %d links healthy", name, ok))
-			if Flags.Verbose {
-				printAudit(name, path, agentsHome, "", cfg)
-			}
-			continue
-		}
+	}
+	return totalFixed, anyBroken
+}
 
-		anyBroken = true
-		ui.Bullet("warn", fmt.Sprintf("%s — %d/%d links OK, %d broken", name, ok, total, len(brokenLinks)))
+// reportOneProjectLinkHealth handles the link-health audit for a single
+// project. Returns true when broken links were observed (caller triggers
+// repair); false for empty or fully-healthy projects.
+func reportOneProjectLinkHealth(name, path, agentsHome string, cfg *config.Config) bool {
+	brokenLinks := collectBrokenLinks(name, path, agentsHome)
+	ok, _ := countProjectLinks(name, path, agentsHome)
+	total := ok + len(brokenLinks)
 
+	if total == 0 {
+		ui.Bullet("none", fmt.Sprintf("%s — no managed links detected", name))
 		if Flags.Verbose {
-			// Show full audit detail (healthy + broken) in verbose mode
 			printAudit(name, path, agentsHome, "", cfg)
-		} else {
-			// Default: show only broken links
-			for _, bl := range brokenLinks {
-				fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s%s\n", ui.Red, ui.Reset, bl.linkPath, ui.Dim, bl.dest, ui.Reset)
-			}
 		}
-
-		totalFixed += repairManagedProject(name, path)
+		return false
+	}
+	if len(brokenLinks) == 0 {
+		ui.Bullet("ok", fmt.Sprintf("%s — %d links healthy", name, ok))
+		if Flags.Verbose {
+			printAudit(name, path, agentsHome, "", cfg)
+		}
+		return false
 	}
 
-	// Manifest checks
+	ui.Bullet("warn", fmt.Sprintf("%s — %d/%d links OK, %d broken", name, ok, total, len(brokenLinks)))
+	if Flags.Verbose {
+		printAudit(name, path, agentsHome, "", cfg)
+	} else {
+		for _, bl := range brokenLinks {
+			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s%s\n", ui.Red, ui.Reset, bl.linkPath, ui.Dim, bl.dest, ui.Reset)
+		}
+	}
+	return true
+}
+
+// reportManifestHealth prints the "Manifests" section: per-project manifest
+// presence, corruption status, and per-git-source fetch state.
+func reportManifestHealth(cfg *config.Config, names []string) {
 	ui.Section("Manifests (.agentsrc.json)")
 	anyManifestIssue := false
 	for _, name := range names {
@@ -191,48 +233,58 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		rc, err := config.LoadAgentsRC(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: da install --generate", name))
-			} else {
-				ui.Bullet("error", fmt.Sprintf("%s — corrupt manifest: %v", name, err))
-			}
+		if reportOneProjectManifestHealth(name, path) {
 			anyManifestIssue = true
-			continue
-		}
-		// Check every declared git source — all must be fetched before reporting healthy.
-		var missingGit []string
-		var presentGit []string
-		for _, src := range rc.Sources {
-			if src.Type != "git" || src.URL == "" {
-				continue
-			}
-			cacheDir := config.GitSourceCacheDir(src.URL)
-			if _, err := os.Stat(cacheDir); err != nil {
-				missingGit = append(missingGit, src.URL)
-			} else {
-				presentGit = append(presentGit, src.URL)
-			}
-		}
-		if len(missingGit) > 0 {
-			for _, url := range missingGit {
-				ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
-			}
-			anyManifestIssue = true
-		} else if len(presentGit) > 0 {
-			ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (%d git source(s))", name, len(presentGit)))
-		} else {
-			ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
 		}
 	}
 	if !anyManifestIssue {
 		fmt.Fprintf(os.Stdout, "  %sTip: run with -v to see per-project manifest details%s\n", ui.Dim, ui.Reset)
 	}
+}
 
-	// Orphan canonical resources: ~/.agents/{skills,agents}/<project>/<name>/
-	// exists but the project has no .agents/<bucket>/<name> back-link
-	// (symlink or real dir).
+// reportOneProjectManifestHealth handles the manifest audit for a single
+// project. Returns true when an issue was reported (missing manifest, corrupt
+// manifest, or any unfetched git source); false for a fully healthy manifest.
+func reportOneProjectManifestHealth(name, path string) bool {
+	rc, err := config.LoadAgentsRC(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ui.Bullet("warn", fmt.Sprintf("%s — no manifest (not git-portable)  hint: da install --generate", name))
+		} else {
+			ui.Bullet("error", fmt.Sprintf("%s — corrupt manifest: %v", name, err))
+		}
+		return true
+	}
+	var missingGit, presentGit []string
+	for _, src := range rc.Sources {
+		if src.Type != "git" || src.URL == "" {
+			continue
+		}
+		cacheDir := config.GitSourceCacheDir(src.URL)
+		if _, err := os.Stat(cacheDir); err != nil {
+			missingGit = append(missingGit, src.URL)
+		} else {
+			presentGit = append(presentGit, src.URL)
+		}
+	}
+	if len(missingGit) > 0 {
+		for _, url := range missingGit {
+			ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
+		}
+		return true
+	}
+	if len(presentGit) > 0 {
+		ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (%d git source(s))", name, len(presentGit)))
+	} else {
+		ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
+	}
+	return false
+}
+
+// reportOrphanCanonicals prints the "Canonical Resources" section: warns
+// about ~/.agents/{skills,agents}/<project>/<name>/ entries with no live
+// back-link in the project.
+func reportOrphanCanonicals(cfg *config.Config, names []string, agentsHome string) {
 	ui.Section("Canonical Resources")
 	anyOrphan := false
 	for _, bucket := range []string{"skills", "agents"} {
@@ -241,71 +293,91 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 			if _, err := os.Stat(path); err != nil {
 				continue
 			}
-			orphans := collectOrphanCanonicals(name, path, agentsHome, bucket)
-			for _, orphan := range orphans {
+			for _, orphan := range collectOrphanCanonicals(name, path, agentsHome, bucket) {
 				anyOrphan = true
-				// Orphan entries may carry a "  (mis-pointed: …)" annotation;
-				// strip it before composing filesystem paths.
-				orphanName := orphan
-				if idx := strings.Index(orphan, "  ("); idx >= 0 {
-					orphanName = orphan[:idx]
-				}
-				canonicalPath := filepath.Join(agentsHome, bucket, name, orphanName)
-				backLink := filepath.Join(path, ".agents", bucket, orphanName)
-				// `promote --force` requires a real <project>/.agents/<bucket>/<name>
-				// directory to copy from, which an orphan by definition does not have.
-				// Surface the two real recovery options instead.
-				ui.Bullet("warn", fmt.Sprintf("%s — orphan canonical %s %q at %s; hint: restore the back-link with `ln -s %s %s` or purge the orphan with `rm -rf %s`.",
-					name, bucket, orphan, canonicalPath,
-					canonicalPath, backLink,
-					canonicalPath))
+				warnOrphanCanonical(name, path, agentsHome, bucket, orphan)
 			}
 		}
 	}
 	if !anyOrphan {
 		ui.Bullet("ok", "No orphan canonical resources")
 	}
+}
 
+// warnOrphanCanonical emits the warn bullet for a single orphan canonical
+// entry, recovering the bare entry name from any mis-pointed annotation.
+// `promote --force` cannot recover an orphan (no back-link to copy from),
+// so the surfaced hint covers the two real recovery options.
+func warnOrphanCanonical(name, path, agentsHome, bucket, orphan string) {
+	orphanName := orphan
+	if idx := strings.Index(orphan, "  ("); idx >= 0 {
+		orphanName = orphan[:idx]
+	}
+	canonicalPath := filepath.Join(agentsHome, bucket, name, orphanName)
+	backLink := filepath.Join(path, ".agents", bucket, orphanName)
+	ui.Bullet("warn", fmt.Sprintf("%s — orphan canonical %s %q at %s; hint: restore the back-link with `ln -s %s %s` or purge the orphan with `rm -rf %s`.",
+		name, bucket, orphan, canonicalPath,
+		canonicalPath, backLink,
+		canonicalPath))
+}
+
+// reportPluginHealth prints the "Plugins" section: lists canonical plugin
+// bundles, warns about emitters not yet implemented, and flags broken
+// opencode plugin symlinks in each managed project.
+func reportPluginHealth(cfg *config.Config, names []string, agentsHome string) {
 	ui.Section("Plugins")
 	pluginSpecs, pluginErr := platform.ListPluginSpecs(agentsHome, "")
 	if pluginErr != nil {
 		ui.Bullet("error", fmt.Sprintf("plugin bundles unavailable: %v", pluginErr))
-	} else if len(pluginSpecs) == 0 {
+		return
+	}
+	if len(pluginSpecs) == 0 {
 		ui.Info("No canonical plugin bundles")
-	} else {
-		for _, spec := range pluginSpecs {
-			bundleLabel := filepath.Join(spec.Scope, spec.Name)
-			for _, platformID := range spec.Platforms {
-				if platformID != "opencode" {
-					ui.Bullet("warn", fmt.Sprintf("%s: platforms includes %s but no emitter is implemented yet", bundleLabel, platformID))
-				}
-			}
-			if hasPluginPlatform(spec.Platforms, "opencode") {
-				for _, name := range names {
-					projectPath := cfg.GetProjectPath(name)
-					if projectPath == "" {
-						continue
-					}
-					linkPath := filepath.Join(projectPath, doctorOpenCodeDir, "plugins", spec.Name)
-					raw, ok := links.ManagedLinkTarget(linkPath)
-					if !ok {
-						continue
-					}
-					if _, err := os.Stat(resolveLinkDest(linkPath, raw)); err != nil {
-						ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
-					}
-				}
-			}
+		return
+	}
+	for _, spec := range pluginSpecs {
+		reportOnePluginSpec(spec, cfg, names)
+	}
+}
+
+// reportOnePluginSpec prints the per-spec plugin-health detail: emitter-not-
+// implemented warnings and, for opencode, broken plugin symlinks per project.
+func reportOnePluginSpec(spec platform.PluginSpec, cfg *config.Config, names []string) {
+	bundleLabel := filepath.Join(spec.Scope, spec.Name)
+	for _, platformID := range spec.Platforms {
+		if platformID != "opencode" {
+			ui.Bullet("warn", fmt.Sprintf("%s: platforms includes %s but no emitter is implemented yet", bundleLabel, platformID))
 		}
 	}
+	if !hasPluginPlatform(spec.Platforms, "opencode") {
+		return
+	}
+	for _, name := range names {
+		projectPath := cfg.GetProjectPath(name)
+		if projectPath == "" {
+			continue
+		}
+		linkPath := filepath.Join(projectPath, doctorOpenCodeDir, "plugins", spec.Name)
+		raw, ok := links.ManagedLinkTarget(linkPath)
+		if !ok {
+			continue
+		}
+		if _, err := os.Stat(resolveLinkDest(linkPath, raw)); err != nil {
+			ui.Bullet("error", fmt.Sprintf("%s: broken symlink at %s", bundleLabel, linkPath))
+		}
+	}
+}
 
+// finalizeDoctorRun prints the closing tip/summary line based on the
+// link-health audit. Healthy run: optional verbose tip. Broken run:
+// dry-run hint or repair summary.
+func finalizeDoctorRun(anyBroken bool, totalFixed int) {
 	fmt.Fprintln(os.Stdout)
 	if !anyBroken {
 		if !Flags.Verbose {
-			// Suggest verbose for full link detail when everything is healthy
 			fmt.Fprintf(os.Stdout, "  %sTip: run with -v to see full link details per project%s\n\n", ui.Dim, ui.Reset)
 		}
-		return nil
+		return
 	}
 	if Flags.DryRun {
 		ui.Info("Run without --dry-run to apply repairs.")
@@ -313,7 +385,6 @@ func runDoctor(cmd *cobra.Command, args []string, deps doctorConfigLoader) error
 		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'da status --audit' to verify.", totalFixed))
 		fmt.Fprintln(os.Stdout)
 	}
-	return nil
 }
 
 // doctorInstalledPlatforms returns every installed platform, matching the
