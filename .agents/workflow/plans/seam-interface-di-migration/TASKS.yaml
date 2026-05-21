@@ -25,7 +25,7 @@ tasks:
       notes: 'Convert commands/workflow/seams.go func-var seams to interface-DI and rework PR#35 (cg6b-b2-workflow-schema) onto the new shape. Preserve its non-seam value (schema-compile dedupe, retiring defensive-unreachable coverage exceptions). #35 is held for rework and merges only on the new pattern.'
     - id: commands-pkg
       title: Convert commands/seams.go (incl. finish remove.go)
-      status: pending
+      status: in_progress
       depends_on:
         - convention-doc
       blocks: []
