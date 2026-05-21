@@ -618,7 +618,10 @@ field at bootstrap.
 - `LIKE` and any pattern-match operator other than `STARTS_WITH`
 - Edge metadata beyond the intrinsic `id` and `kind` columns
   (returning or filtering on caller-defined edge fields, edge
-  payloads, or computed edge properties is a v2 concern)
+  payloads, or computed edge properties is deferred to v1.5/v2 via
+  the §12 evidence-budget mechanism — a verified blocker-class
+  request from an adapter author lands it as a v1.5 fast-path;
+  non-blocking richness accumulates against the 5-point budget)
 - Paths-as-objects (the result of a variable-length pattern is the
   end-node and `hop_count`; the intermediate path is not
   materializable as a value in v1)
