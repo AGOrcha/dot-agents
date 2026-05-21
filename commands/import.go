@@ -729,7 +729,15 @@ func processImportOutput(c importCandidate, output importOutput, agentsHome, tim
 		}
 	}
 
-	return replaceImportContentCandidate(resolved, agentsHome, dest, output.content, timestamp, srcInfo, destInfo, deps)
+	return replaceImportContentCandidate(replaceImportArgs{
+		candidate:  resolved,
+		agentsHome: agentsHome,
+		dest:       dest,
+		content:    output.content,
+		timestamp:  timestamp,
+		srcInfo:    srcInfo,
+		destInfo:   destInfo,
+	}, deps)
 }
 
 func importMissingContentCandidate(c importCandidate, dest string, content []byte, timestamp string, deps importDeps) importResult {
@@ -749,8 +757,26 @@ func importMissingContentCandidate(c importCandidate, dest string, content []byt
 	return importResult{imported: 1}
 }
 
-func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, content []byte, timestamp string, srcInfo, destInfo os.FileInfo, deps importDeps) importResult {
-	if !ui.Confirm(importReplaceMessage(c, srcInfo, destInfo), Flags.Yes) {
+// replaceImportArgs bundles the inputs to replaceImportContentCandidate so
+// the call site stays under Sonar's S107 7-parameter cap. The struct holds
+// the exact same values the prior positional parameter list carried —
+// candidate, agentsHome, destination path + content, backup timestamp, and
+// the pre-resolved source/destination FileInfos. The injected importDeps
+// stays a separate parameter so test fakes substitute without populating
+// every other field.
+type replaceImportArgs struct {
+	candidate  importCandidate
+	agentsHome string
+	dest       string
+	content    []byte
+	timestamp  string
+	srcInfo    os.FileInfo
+	destInfo   os.FileInfo
+}
+
+func replaceImportContentCandidate(args replaceImportArgs, deps importDeps) importResult {
+	c := args.candidate
+	if !ui.Confirm(importReplaceMessage(c, args.srcInfo, args.destInfo), Flags.Yes) {
 		return importResult{skipped: 1}
 	}
 	if Flags.DryRun {
@@ -758,9 +784,9 @@ func replaceImportContentCandidate(c importCandidate, agentsHome, dest string, c
 		return importResult{imported: 1}
 	}
 
-	mirrorBackup(c.project, agentsHome, dest, timestamp)
-	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, timestamp)
-	if err := deps.WriteFile(dest, content, 0644); err != nil {
+	mirrorBackup(c.project, args.agentsHome, args.dest, args.timestamp)
+	mirrorBackup(c.project, c.sourceRoot, c.sourcePath, args.timestamp)
+	if err := deps.WriteFile(args.dest, args.content, 0644); err != nil {
 		ui.Bullet("warn", fmt.Sprintf(importFailedFmt, config.DisplayPath(c.sourcePath), err))
 		return importResult{skipped: 1}
 	}

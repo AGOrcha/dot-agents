@@ -814,28 +814,7 @@ func printUserConfigStatus(_ string) {
 		return
 	}
 	displayBase := homeDir + string(os.PathSeparator)
-	rel := func(p string) string {
-		return strings.TrimPrefix(p, displayBase)
-	}
 
-	// printOne renders a single managed reference path. A resolvable managed
-	// link (POSIX symlink / Windows junction) prints ✓/✗ by target health; a
-	// present non-link path (regular file or Windows hard-linked file, which
-	// has no reparse point to resolve) prints "(local file)".
-	printOne := func(linkPath string) {
-		if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel(linkPath), ui.Dim, displayDest, ui.Reset)
-			}
-			return
-		}
-		if _, err := os.Lstat(linkPath); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel(linkPath), ui.Dim, ui.Reset)
-		}
-	}
 	printDir := func(dir string) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -844,15 +823,15 @@ func printUserConfigStatus(_ string) {
 		for _, e := range entries {
 			linkPath := filepath.Join(dir, e.Name())
 			if _, isLink, _ := managedLinkBroken(linkPath); isLink {
-				printOne(linkPath)
+				printDoctorUserConfigRef(linkPath, displayBase)
 			}
 		}
 	}
 
 	// Claude
 	claudeHome := filepath.Join(homeDir, ".claude")
-	printOne(filepath.Join(claudeHome, "CLAUDE.md"))
-	printOne(filepath.Join(claudeHome, "settings.json"))
+	printDoctorUserConfigRef(filepath.Join(claudeHome, "CLAUDE.md"), displayBase)
+	printDoctorUserConfigRef(filepath.Join(claudeHome, "settings.json"), displayBase)
 	printDir(filepath.Join(claudeHome, "agents"))
 	printDir(filepath.Join(claudeHome, "skills"))
 
@@ -861,4 +840,26 @@ func printUserConfigStatus(_ string) {
 
 	// OpenCode
 	printDir(filepath.Join(homeDir, doctorOpenCodeDir, "agent"))
+}
+
+// printDoctorUserConfigRef renders a single managed reference path. A
+// resolvable managed link (POSIX symlink / Windows junction) prints OK/X by
+// target health; a present non-link path (regular file or Windows hard-linked
+// file, which has no reparse point to resolve) prints "(local file)".
+// displayBase is the home directory + separator used to render the link as
+// relative to home.
+func printDoctorUserConfigRef(linkPath, displayBase string) {
+	rel := strings.TrimPrefix(linkPath, displayBase)
+	if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
+		displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
+		if isBroken {
+			fmt.Fprintf(os.Stdout, "      %s✗%s %s %s→ %s (broken)%s\n", ui.Red, ui.Reset, rel, ui.Dim, displayDest, ui.Reset)
+		} else {
+			fmt.Fprintf(os.Stdout, "      %s✓%s %s %s→ %s%s\n", ui.Green, ui.Reset, rel, ui.Dim, displayDest, ui.Reset)
+		}
+		return
+	}
+	if _, err := os.Lstat(linkPath); err == nil {
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, rel, ui.Dim, ui.Reset)
+	}
 }

@@ -339,7 +339,15 @@ func TestReplaceImportContentCandidate_WriteFileError(t *testing.T) {
 	deps := fakeImportDeps{writeFile: func(string, []byte, os.FileMode) error { return sentinel }}
 
 	c := importCandidate{project: "p", sourceRoot: tmp, sourcePath: src, destRel: "dest.txt"}
-	res := replaceImportContentCandidate(c, tmp, dest, []byte("new"), "ts", srcInfo, destInfo, deps)
+	res := replaceImportContentCandidate(replaceImportArgs{
+		candidate:  c,
+		agentsHome: tmp,
+		dest:       dest,
+		content:    []byte("new"),
+		timestamp:  "ts",
+		srcInfo:    srcInfo,
+		destInfo:   destInfo,
+	}, deps)
 	if res.imported != 0 || res.skipped != 1 {
 		t.Errorf("expected skipped=1 on write error, got %+v", res)
 	}

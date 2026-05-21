@@ -390,40 +390,45 @@ func runStatus(audit bool, agentFilter string, deps statusConfigLoader) error {
 	}
 
 	for _, name := range names {
-		path := cfg.GetProjectPath(name)
-		displayPath := config.DisplayPath(path)
-
-		fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Bold, name, ui.Reset)
-
-		// Suppress path display if it's just ~/name
-		homeDir, _ := config.UserHomeDir()
-		expectedSimplePath := "~/" + name
-		actualDisplayPath := strings.Replace(path, homeDir, "~", 1)
-		if actualDisplayPath != expectedSimplePath {
-			fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, displayPath, ui.Reset)
-		}
-
-		if _, err := os.Stat(path); err != nil {
-			ui.Bullet("error", "Directory not found")
-			continue
-		}
-
-		printBadgeRow(collectProjectTextBadges(path, agentsHome))
-
-		printStatusProjectManifestSummary(path)
-
-		// Last refreshed
-		if ts := readRefreshTimestamp(path); ts != "" {
-			fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)
-		}
-
-		if audit {
-			printAudit(name, path, agentsHome, agentFilter, cfg)
-		}
+		printStatusProjectBlock(name, cfg, agentsHome, audit, agentFilter)
 	}
 
 	fmt.Fprintln(os.Stdout)
 	return nil
+}
+
+// printStatusProjectBlock prints one managed project's status entry:
+// header, optional path line (suppressed when path matches ~/name),
+// missing-directory bullet, badge row, manifest summary, last-refreshed
+// timestamp, and the audit block when requested.
+func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string, audit bool, agentFilter string) {
+	path := cfg.GetProjectPath(name)
+	displayPath := config.DisplayPath(path)
+
+	fmt.Fprintf(os.Stdout, "\n  %s%s%s\n", ui.Bold, name, ui.Reset)
+
+	homeDir, _ := config.UserHomeDir()
+	expectedSimplePath := "~/" + name
+	actualDisplayPath := strings.Replace(path, homeDir, "~", 1)
+	if actualDisplayPath != expectedSimplePath {
+		fmt.Fprintf(os.Stdout, "  %s%s%s\n", ui.Dim, displayPath, ui.Reset)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		ui.Bullet("error", "Directory not found")
+		return
+	}
+
+	printBadgeRow(collectProjectTextBadges(path, agentsHome))
+	printStatusProjectManifestSummary(path)
+
+	if ts := readRefreshTimestamp(path); ts != "" {
+		fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)
+	}
+
+	if audit {
+		printAudit(name, path, agentsHome, agentFilter, cfg)
+	}
 }
 
 func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (*statusJSONReport, error) {
@@ -882,70 +887,47 @@ func printUserConfigSection(_ string, audit bool, agentFilter string) {
 
 	// Claude user-level config
 	if agentFilter == "" || agentFilter == "claude" {
-		claudeOK, claudeWarn := 0, 0
 		claudeHome := filepath.Join(homeDir, statusClaudeDir)
-
-		// CLAUDE.md
 		claudeMD := filepath.Join(claudeHome, "CLAUDE.md")
-
-		// settings.json
 		claudeSettings := filepath.Join(claudeHome, statusClaudeSettingsJSON)
-		claudeAgentsDir := filepath.Join(claudeHome, "agents")
-		claudeSkillsDir := filepath.Join(claudeHome, "skills")
-		addManagedCounts(&claudeOK, &claudeWarn, []string{claudeMD, claudeSettings}, []string{claudeAgentsDir, claudeSkillsDir})
-
-		if claudeOK+claudeWarn > 0 {
-			badges = append(badges, platformBadge{"Claude", claudeOK > 0, claudeWarn > 0})
-		}
-
-		if audit {
-			displayBase := homeDir + string(os.PathSeparator)
-			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
-
-			// Detailed listing
-			printManagedAuditPath(claudeMD, rel)
-			printManagedAuditPath(claudeSettings, rel)
-			printManagedAuditDir(claudeAgentsDir, rel)
-			printManagedAuditDir(claudeSkillsDir, rel)
-		}
+		claudeAgents := filepath.Join(claudeHome, "agents")
+		claudeSkills := filepath.Join(claudeHome, "skills")
+		badges = appendUserConfigPlatformBadge(badges, "Claude", homeDir, audit,
+			[]userConfigRef{
+				{path: claudeMD, isDir: false},
+				{path: claudeSettings, isDir: false},
+				{path: claudeAgents, isDir: true},
+				{path: claudeSkills, isDir: true},
+			},
+			[]string{claudeMD, claudeSettings},
+			[]string{claudeAgents, claudeSkills},
+		)
 	}
 
 	// Codex user-level config
 	if agentFilter == "" || agentFilter == "codex" {
-		codexOK, codexWarn := 0, 0
-		codexAgentsDir := filepath.Join(homeDir, statusCodexDir, "agents")
+		codexAgents := filepath.Join(homeDir, statusCodexDir, "agents")
 		codexHooks := filepath.Join(homeDir, statusCodexDir, statusHooksJSON)
-		codexSkillsDir := filepath.Join(homeDir, statusAgentsDir, "skills")
-		addManagedCounts(&codexOK, &codexWarn, []string{codexHooks}, []string{codexAgentsDir, codexSkillsDir})
-		if codexOK+codexWarn > 0 {
-			badges = append(badges, platformBadge{"Codex", codexOK > 0, codexWarn > 0})
-		}
-
-		if audit {
-			displayBase := homeDir + string(os.PathSeparator)
-			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
-
-			printManagedAuditDir(codexAgentsDir, rel)
-			printManagedAuditPath(codexHooks, rel)
-			printManagedAuditDir(codexSkillsDir, rel)
-		}
+		codexSkills := filepath.Join(homeDir, statusAgentsDir, "skills")
+		badges = appendUserConfigPlatformBadge(badges, "Codex", homeDir, audit,
+			[]userConfigRef{
+				{path: codexAgents, isDir: true},
+				{path: codexHooks, isDir: false},
+				{path: codexSkills, isDir: true},
+			},
+			[]string{codexHooks},
+			[]string{codexAgents, codexSkills},
+		)
 	}
 
 	// OpenCode user-level config
 	if agentFilter == "" || agentFilter == "opencode" {
-		opencodeOK, opencodeWarn := 0, 0
-		opencodeAgentDir := filepath.Join(homeDir, statusOpenCodeDir, "agent")
-		addManagedCounts(&opencodeOK, &opencodeWarn, nil, []string{opencodeAgentDir})
-		if opencodeOK+opencodeWarn > 0 {
-			badges = append(badges, platformBadge{"OpenCode", opencodeOK > 0, opencodeWarn > 0})
-		}
-
-		if audit {
-			displayBase := homeDir + string(os.PathSeparator)
-			rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
-
-			printManagedAuditDir(opencodeAgentDir, rel)
-		}
+		opencodeAgent := filepath.Join(homeDir, statusOpenCodeDir, "agent")
+		badges = appendUserConfigPlatformBadge(badges, "OpenCode", homeDir, audit,
+			[]userConfigRef{{path: opencodeAgent, isDir: true}},
+			nil,
+			[]string{opencodeAgent},
+		)
 	}
 
 	// Badge row
@@ -957,6 +939,41 @@ func printUserConfigSection(_ string, audit bool, agentFilter string) {
 
 	printBadgeRow(badges)
 	fmt.Fprintln(os.Stdout)
+}
+
+// userConfigRef is one managed reference (file or directory) in the
+// per-platform user-config audit block — the (path, isDir) pair lets
+// appendUserConfigPlatformBadge dispatch the right print helper while
+// preserving the original interleaved file/dir order per platform.
+type userConfigRef struct {
+	path  string
+	isDir bool
+}
+
+// appendUserConfigPlatformBadge counts managed files/dirs for one
+// user-level platform and appends a platformBadge if anything was detected.
+// When audit is on, prints the per-file/dir audit detail in auditOrder,
+// preserving the prior inline blocks' platform-specific ordering (Claude:
+// files then dirs; Codex: dir, file, dir; OpenCode: dir). Returns the
+// (possibly extended) badge slice.
+func appendUserConfigPlatformBadge(badges []platformBadge, label, homeDir string, audit bool, auditOrder []userConfigRef, files, dirs []string) []platformBadge {
+	ok, warn := 0, 0
+	addManagedCounts(&ok, &warn, files, dirs)
+	if ok+warn > 0 {
+		badges = append(badges, platformBadge{label, ok > 0, warn > 0})
+	}
+	if audit {
+		displayBase := homeDir + string(os.PathSeparator)
+		rel := func(p string) string { return strings.TrimPrefix(p, displayBase) }
+		for _, ref := range auditOrder {
+			if ref.isDir {
+				printManagedAuditDir(ref.path, rel)
+			} else {
+				printManagedAuditPath(ref.path, rel)
+			}
+		}
+	}
+	return badges
 }
 
 func printCursorAudit(name, path, agentsHome string) {

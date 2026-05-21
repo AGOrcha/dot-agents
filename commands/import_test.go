@@ -1494,7 +1494,14 @@ func TestReplaceImportContentCandidate_DeclineSkips(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo, stdImportDeps{})
+	res := replaceImportContentCandidate(replaceImportArgs{
+		candidate:  c,
+		agentsHome: agentsHome,
+		dest:       dest,
+		content:    []byte("new"),
+		srcInfo:    srcInfo,
+		destInfo:   destInfo,
+	}, stdImportDeps{})
 	if res.skipped != 1 {
 		t.Errorf("expected skip on decline, got %+v", res)
 	}
@@ -1518,7 +1525,14 @@ func TestReplaceImportContentCandidate_DryRunAccepts(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "out.txt"}
-	res := replaceImportContentCandidate(c, agentsHome, dest, []byte("new"), "", srcInfo, destInfo, stdImportDeps{})
+	res := replaceImportContentCandidate(replaceImportArgs{
+		candidate:  c,
+		agentsHome: agentsHome,
+		dest:       dest,
+		content:    []byte("new"),
+		srcInfo:    srcInfo,
+		destInfo:   destInfo,
+	}, stdImportDeps{})
 	if res.imported != 1 {
 		t.Errorf("expected imported=1 in dry-run accept, got %+v", res)
 	}
