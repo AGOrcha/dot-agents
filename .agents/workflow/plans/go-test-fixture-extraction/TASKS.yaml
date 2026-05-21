@@ -139,7 +139,7 @@ tasks:
       app_type: code-fix
     - id: t4-extract-workflow-tests
       title: Refactor commands/workflow/*_test.go to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
