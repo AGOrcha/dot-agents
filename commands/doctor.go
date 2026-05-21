@@ -255,18 +255,7 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		}
 		return true
 	}
-	var missingGit, presentGit []string
-	for _, src := range rc.Sources {
-		if src.Type != "git" || src.URL == "" {
-			continue
-		}
-		cacheDir := config.GitSourceCacheDir(src.URL)
-		if _, err := os.Stat(cacheDir); err != nil {
-			missingGit = append(missingGit, src.URL)
-		} else {
-			presentGit = append(presentGit, src.URL)
-		}
-	}
+	missingGit, presentGit := partitionManifestGitSources(rc)
 	if len(missingGit) > 0 {
 		for _, url := range missingGit {
 			ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
@@ -279,6 +268,24 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
 	}
 	return false
+}
+
+// partitionManifestGitSources splits the manifest's git sources into two
+// lists by whether their on-disk cache directory exists. Non-git sources
+// and entries with an empty URL are skipped.
+func partitionManifestGitSources(rc *config.AgentsRC) (missing, present []string) {
+	for _, src := range rc.Sources {
+		if src.Type != "git" || src.URL == "" {
+			continue
+		}
+		cacheDir := config.GitSourceCacheDir(src.URL)
+		if _, err := os.Stat(cacheDir); err != nil {
+			missing = append(missing, src.URL)
+		} else {
+			present = append(present, src.URL)
+		}
+	}
+	return missing, present
 }
 
 // reportOrphanCanonicals prints the "Canonical Resources" section: warns
