@@ -302,7 +302,7 @@ func runAdd(pathArg, nameArg string, deps addDeps) error {
 		return nil
 	}
 
-	if cancelled := confirmAddProceed(existingFiles); cancelled {
+	if confirmAddProceed(existingFiles) {
 		return nil
 	}
 

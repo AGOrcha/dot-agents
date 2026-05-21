@@ -76,7 +76,7 @@ func runRemove(projectName string, cleanDirs bool, deps removeDeps) error {
 		fmt.Fprintln(os.Stdout, "\nDRY RUN - no changes made")
 		return nil
 	}
-	if cancelled := confirmRemoveProceed(); cancelled {
+	if confirmRemoveProceed() {
 		return nil
 	}
 
