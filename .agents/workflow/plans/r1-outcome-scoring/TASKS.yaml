@@ -1,0 +1,63 @@
+schema_version: 1
+plan_id: r1-outcome-scoring
+tasks:
+    - id: rubric
+      title: Define and version the scoring rubric
+      status: pending
+      depends_on: []
+      blocks:
+        - signals
+        - scorer
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Specify the versioned scoring rubric: the input signals (token/cache telemetry, verifier results, merge-back status, scope adherence, test outcomes), their weights, and the combination formula. Ship it as a documented spec plus a versioned Go data structure, so changing the rubric is a deliberate, reviewable act.'
+      app_type: go-cli
+    - id: signals
+      title: Extract input signals from captured telemetry
+      status: pending
+      depends_on:
+        - rubric
+      blocks:
+        - scorer
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Map already-captured data into the rubric typed input signals: platform-session-integration token/cache telemetry, .ralph-loop-streams loop metrics, and the iteration log verifier / merge-back / scope-adherence / test-outcome fields. No new capture -- the inputs already exist.'
+      app_type: go-cli
+    - id: scorer
+      title: Compute the explainable outcome score
+      status: pending
+      depends_on:
+        - rubric
+        - signals
+      blocks:
+        - persist
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Pure scoring function: rubric plus extracted signals produce a numeric score per session and per iteration, with a per-signal breakdown showing which signals drove the score (explainable, not a black box). Unit-tested in isolation.'
+      app_type: go-cli
+    - id: persist
+      title: Persist scores alongside telemetry
+      status: pending
+      depends_on:
+        - scorer
+      blocks:
+        - cli
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: Persist each score and its breakdown alongside the existing telemetry, and compute the iteration log currently-uncomputed linked_traces_to_outcomes marker.
+      app_type: go-cli
+    - id: cli
+      title: CLI to query outcome scores
+      status: pending
+      depends_on:
+        - persist
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: Add a da command to query outcome scores per session and per iteration, rendering the score with its signal breakdown. Include a CLI smoke that scores a known run and prints the breakdown.
+      app_type: go-cli
