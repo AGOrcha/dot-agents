@@ -285,7 +285,7 @@ func TestBackfillWindowScanError(t *testing.T) {
 func TestResolveWindows(t *testing.T) {
 	// A throwaway git repo with two commits; resolveWindows must chain their
 	// timestamps into adjacent (Start, End] windows.
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha1 := commitInRepo(t, repo, "first")
 	sha2 := commitInRepo(t, repo, "second")
 
@@ -310,7 +310,7 @@ func TestResolveWindows(t *testing.T) {
 }
 
 func TestResolveWindowsUnresolvableCommit(t *testing.T) {
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha1 := commitInRepo(t, repo, "first")
 
 	records := []IterationRecord{
@@ -334,7 +334,7 @@ func TestCommitTime(t *testing.T) {
 	if _, ok := commitTime("/tmp", ""); ok {
 		t.Error("commitTime with empty SHA ok = true, want false")
 	}
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
 	if _, ok := commitTime(repo, sha); !ok {
 		t.Error("commitTime of a real commit ok = false, want true")
@@ -345,7 +345,7 @@ func TestCommitTime(t *testing.T) {
 }
 
 func TestBackfillIterations(t *testing.T) {
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha1 := commitInRepo(t, repo, "first")
 	sha2 := commitInRepo(t, repo, "second")
 
@@ -387,7 +387,7 @@ func TestBackfillIterations(t *testing.T) {
 }
 
 func TestBackfillIterationsNativeWins(t *testing.T) {
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
 	records := []IterationRecord{
 		{Iteration: 1, Commit: sha, SessionTokens: &TokenUsage{CacheHitRate: 0.9}},
@@ -403,7 +403,7 @@ func TestBackfillIterationsNativeWins(t *testing.T) {
 }
 
 func TestBackfillIterationsUnresolvableCommit(t *testing.T) {
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	records := []IterationRecord{{Iteration: 1, Commit: "deadbeef"}}
 	got, err := BackfillIterations(records, repo, t.TempDir())
 	if err != nil {
@@ -417,7 +417,7 @@ func TestBackfillIterationsUnresolvableCommit(t *testing.T) {
 
 func TestBackfillIterationsMissingTranscriptDir(t *testing.T) {
 	// A missing or empty transcript root is skipped, not fatal.
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
 	records := []IterationRecord{{Iteration: 1, Commit: sha}}
 	got, err := BackfillIterations(records, repo,
@@ -433,7 +433,7 @@ func TestBackfillIterationsMissingTranscriptDir(t *testing.T) {
 
 func TestBackfillIterationsMultipleDirs(t *testing.T) {
 	// Token counts from two transcript roots merge into one window total.
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
 	ct, _ := commitTime(repo, sha)
 
@@ -469,7 +469,7 @@ func TestBackfillIterationsScanError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) }) // let TempDir clean up
 
-	repo := newGitRepo(t)
+	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
 	records := []IterationRecord{{Iteration: 1, Commit: sha}}
 	if _, err := BackfillIterations(records, repo, dir); err == nil {
@@ -517,15 +517,15 @@ func TestBackfillRealData(t *testing.T) {
 
 // --- git fixture helpers ---------------------------------------------------
 
-// newGitRepo creates a throwaway git repository in a temp dir and returns its
+// bfNewGitRepo creates a throwaway git repository in a temp dir and returns its
 // path. The repo is removed when the test ends.
-func newGitRepo(t *testing.T) string {
+func bfNewGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	runGit(t, dir, "init", "-q")
-	runGit(t, dir, "config", "user.email", "test@example.com")
-	runGit(t, dir, "config", "user.name", "Test")
-	runGit(t, dir, "config", "commit.gpgsign", "false")
+	bfRunGit(t, dir, "init", "-q")
+	bfRunGit(t, dir, "config", "user.email", "test@example.com")
+	bfRunGit(t, dir, "config", "user.name", "Test")
+	bfRunGit(t, dir, "config", "commit.gpgsign", "false")
 	return dir
 }
 
@@ -545,22 +545,22 @@ func commitInRepo(t *testing.T, dir, label string) string {
 	commitSeq++
 	// One-hour spacing leaves room to place transcript turns inside a window.
 	stamp := time.Date(2026, 1, 1, commitSeq, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	runGit(t, dir, "add", ".")
-	runGitEnv(t, dir,
+	bfRunGit(t, dir, "add", ".")
+	bfRunGitEnv(t, dir,
 		[]string{"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp},
 		"commit", "-q", "-m", label)
-	out := runGit(t, dir, "rev-parse", "HEAD")
+	out := bfRunGit(t, dir, "rev-parse", "HEAD")
 	return string(trimNewline(out))
 }
 
-// runGit runs a git command in dir, failing the test on error.
-func runGit(t *testing.T, dir string, args ...string) []byte {
+// bfRunGit runs a git command in dir, failing the test on error.
+func bfRunGit(t *testing.T, dir string, args ...string) []byte {
 	t.Helper()
-	return runGitEnv(t, dir, nil, args...)
+	return bfRunGitEnv(t, dir, nil, args...)
 }
 
-// runGitEnv runs a git command in dir with extra environment variables.
-func runGitEnv(t *testing.T, dir string, extraEnv []string, args ...string) []byte {
+// bfRunGitEnv runs a git command in dir with extra environment variables.
+func bfRunGitEnv(t *testing.T, dir string, extraEnv []string, args ...string) []byte {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), extraEnv...)
