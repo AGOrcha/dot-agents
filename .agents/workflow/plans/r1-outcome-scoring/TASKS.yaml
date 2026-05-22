@@ -3,7 +3,7 @@ plan_id: r1-outcome-scoring
 tasks:
     - id: rubric
       title: Define and version the scoring rubric
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - signals
