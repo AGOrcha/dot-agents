@@ -7,8 +7,8 @@ import (
 )
 
 func TestRubricVersionPinned(t *testing.T) {
-	if RubricVersion != "1.0.0" {
-		t.Errorf("RubricVersion = %q, want 1.0.0 — a version change must be deliberate", RubricVersion)
+	if RubricVersion != "2.0.0" {
+		t.Errorf("RubricVersion = %q, want 2.0.0 — a version change must be deliberate", RubricVersion)
 	}
 	if got := DefaultRubric().Version; got != RubricVersion {
 		t.Errorf("DefaultRubric().Version = %q, want %q", got, RubricVersion)
@@ -33,7 +33,8 @@ func TestDefaultRubricWeightsSumToOne(t *testing.T) {
 
 func TestDefaultRubricSignalSet(t *testing.T) {
 	want := []SignalID{
-		SignalVerifier, SignalTests, SignalMergeBack, SignalScope, SignalTokenEfficiency,
+		SignalLanded, SignalVerifier, SignalTests,
+		SignalCorrectionPressure, SignalScope, SignalTokenEfficiency,
 	}
 	got := DefaultRubric().Signals
 	if len(got) != len(want) {
@@ -58,16 +59,39 @@ func TestDefaultRubricCombinationMethod(t *testing.T) {
 func TestSignalLookup(t *testing.T) {
 	r := DefaultRubric()
 
-	spec, ok := r.Signal(SignalVerifier)
+	spec, ok := r.Signal(SignalLanded)
 	if !ok {
-		t.Fatal("Signal(verifier) ok = false, want true")
+		t.Fatal("Signal(landed) ok = false, want true")
 	}
-	if spec.Weight != 0.30 {
-		t.Errorf("verifier weight = %g, want 0.30", spec.Weight)
+	if spec.Weight != 0.22 {
+		t.Errorf("landed weight = %g, want 0.22", spec.Weight)
 	}
 
 	if _, ok := r.Signal(SignalID("does_not_exist")); ok {
 		t.Error("Signal(does_not_exist) ok = true, want false")
+	}
+}
+
+func TestTwoWaySignals(t *testing.T) {
+	twoWay := make(map[SignalID]bool)
+	for _, s := range DefaultRubric().TwoWaySignals() {
+		twoWay[s.ID] = true
+	}
+
+	wantTwoWay := []SignalID{SignalLanded, SignalVerifier, SignalTests, SignalScope}
+	for _, id := range wantTwoWay {
+		if !twoWay[id] {
+			t.Errorf("signal %q should be two-way (objective + self-reported source)", id)
+		}
+	}
+	wantOneWay := []SignalID{SignalCorrectionPressure, SignalTokenEfficiency}
+	for _, id := range wantOneWay {
+		if twoWay[id] {
+			t.Errorf("signal %q should not be two-way", id)
+		}
+	}
+	if len(twoWay) != len(wantTwoWay) {
+		t.Errorf("TwoWaySignals returned %d signals, want %d", len(twoWay), len(wantTwoWay))
 	}
 }
 

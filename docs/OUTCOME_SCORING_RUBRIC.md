@@ -1,7 +1,7 @@
 # Outcome-Scoring Rubric
 
 **Status:** active
-**Rubric version:** 1.0.0
+**Rubric version:** 2.0.0
 **Owners:** dot-agents
 **Go source:** [`internal/scoring/rubric.go`](../internal/scoring/rubric.go)
 **Related:** [`agent-run-scoring-observability-platform.md`](../.agents/proposals/agent-run-scoring-observability-platform.md) (R1, the requirement this rubric serves); [ADR-0004](adr/0004-execution-telemetry-schema-seed.md) (the execution-telemetry pillar the input signals come from); [`workflow-iter-log.schema.json`](../commands/workflow/static/workflow-iter-log.schema.json) (the iteration-log schema the signals are read from)
@@ -41,99 +41,150 @@ Every persisted score records the `RubricVersion` it was computed under
 (see the `persist` task), so a later rubric change never silently
 invalidates historical scores.
 
+## Two-way checks and the integrity track
+
+A signal can have **two** sources for the same fact:
+
+- a **self-reported** source — the agent's own claim (an iteration-log
+  `scope_note`, a `focused_tests_pass` flag, a `persisted_via_workflow_commands`
+  note); and
+- an **objective** source — something checkable independently of the
+  agent (git topology, a verification artifact, the changed file set).
+
+For a signal with both, the rubric scores the run from the **objective**
+source. It additionally records the **claimed-vs-observed delta**
+(`observed − claimed`) as an **integrity** metric. A negative delta is an
+over-claim: the agent reported better than reality.
+
+Integrity deltas are attributed to the role that made the claim —
+`impl`, `verifier`, or `review` — because the v2 iteration-log blocks are
+role-owned. Aggregated, they form a per-role honesty profile: which role
+types over-claim, and therefore where environment helpers and enforcers
+are worth adding.
+
+The integrity track is a **separate parallel output**. It never affects
+the numeric outcome score — the score answers "was the run good?", the
+integrity track answers "was the self-report honest?", and conflating
+them would muddy both. Signals marked `TwoWay` in `rubric.go` are the
+ones that feed it.
+
 ## Input signals
 
-Five signals, taken verbatim from the R1 requirement: token/cache
-telemetry, verifier results, merge-back status, scope adherence, test
-outcomes. Each signal is mapped to a **sub-score in `[0, 1]`** or is
-reported **absent** when the telemetry to compute it was never captured.
+Six signals. Each is mapped to a **sub-score in `[0, 1]`** or is reported
+**absent** when the telemetry to compute it was never captured. Absent is
+a first-class state — see [Combination](#combination). Sub-score
+extraction itself is the `signals` and `scorer` tasks; this section is
+the contract those tasks implement.
 
-Absent is a first-class state — see [Combination](#combination). Sub-score
-extraction itself is the `signals` and `scorer` tasks; this section is the
-contract those tasks implement.
+### 1. `landed` — Landed on master (weight 0.22, two-way)
 
-### 1. `verifier` — Verifier results (weight 0.30)
+Did the iteration's work survive into the trunk.
+
+- **Objective source:** git topology — the iteration's `commit` SHA is
+  reachable from `master` and has not been reverted or superseded.
+- **Self-reported source:** `self_assessment.persisted_via_workflow_commands`
+  and `review.overall_decision`.
+- **Mapping:** commit reachable from `master` and not reverted → `1.0`;
+  reachable but later reverted → `0.0`; orphaned / never landed → `0.0`.
+- **Absent when:** the `commit` SHA cannot be resolved at all — early
+  entries carry abbreviated SHAs from since-rebased history. Squashed or
+  rebased work whose verbatim SHA is gone but whose change did land is a
+  known hard case; the `signals` task falls back to patch-id / commit-
+  message matching before declaring the signal absent.
+- **Why the highest weight:** surviving in `master` is the truest
+  outcome there is — it is ground truth, not self-report.
+
+### 2. `verifier` — Verifier results (weight 0.20, two-way)
 
 Did the iteration's verification gates pass.
 
-- **Source:** `verifiers[].status` in the iteration log.
-- **Mapping:** over verifier entries whose status is one of
-  `pass` / `fail` / `partial` (entries with status `unknown` are
-  excluded), sub-score = mean of `pass → 1.0`, `partial → 0.5`,
-  `fail → 0.0`.
-- **Absent when:** there are no verifier entries, or every entry has
-  status `unknown`.
-- **Why the highest weight:** the verifier gate is the broadest direct
-  check that the work is correct. If it fails, the run mostly failed,
-  regardless of how efficient or in-scope it was.
+- **Objective source:** `verifiers[].status` (v2 iteration log), the
+  `da workflow verify` log, and `review-decision.yaml` outcomes. For v1
+  entries, which have no `verifiers` array, `tests_total_pass` is the
+  verifier proxy.
+- **Self-reported source:** `self_assessment.ran_cli_command` and the
+  related discipline flags.
+- **Mapping:** over verifier records whose status is `pass` / `fail` /
+  `partial` (status `unknown` excluded), sub-score = mean of
+  `pass → 1.0`, `partial → 0.5`, `fail → 0.0`.
+- **Absent when:** no verifier evidence of any kind exists for the entry.
 
-### 2. `tests` — Test outcomes (weight 0.25)
+### 3. `tests` — Test outcomes (weight 0.18, two-way)
 
 Did the iteration's tests pass.
 
-- **Source:** `impl.focused_tests_pass` and `verifiers[].tests_total_pass`
-  (each a tri-state: `true` / `false` / unset).
+- **Objective source:** the verification artifact's test result.
+- **Self-reported source:** `impl.focused_tests_pass` (v2),
+  `verifiers[].tests_total_pass` (v2), and top-level `tests_total_pass`
+  (v1) — each a tri-state `true` / `false` / unset.
 - **Mapping:** sub-score = fraction of the *set* pass-flags that are
   `true`.
 - **Absent when:** no pass-flag is set anywhere in the entry.
-- **Note:** `*.tests_added` (test volume) is **not** scored in v1 — adding
-  tests is good practice but not an outcome. It is carried in the score
-  breakdown as context only.
+- **Note:** test *volume* (`tests_added`) is not scored — adding tests is
+  good practice but not an outcome. It rides in the breakdown as context.
 
-### 3. `merge_back` — Merge-back status (weight 0.20)
+### 4. `correction_pressure` — Correction pressure (weight 0.15)
 
-Was the iteration's work accepted into the trunk.
+How little the iteration had to be corrected. A new signal: it is the
+most informative thing the previous rubric left unweighted.
 
-- **Source:** the merge-back artifact for the task, resolved by the
-  `signals` task (merge-back archive presence; `review.overall_decision`
-  as the fallback acceptance signal).
-- **Mapping:** `accepted` / `merged → 1.0`; `escalated` /
-  `pending → 0.5`; `rejected → 0.0`.
-- **Absent when:** the iteration did no delegated work and therefore had
-  no merge-back step (direct work is common — see the data note below).
-- **Why 0.20:** partly a downstream consequence of `verifier` and
-  `tests`, but it adds the independent "a reviewer accepted this"
-  dimension, so it is weighted below them, not equal.
+- **Source:** `retries` (iteration log), `post_invocation.retries_in_loop`
+  and `post_invocation.user_corrections` (`review-decision.yaml`), and
+  the tool-call error rate from the agent transcript (`is_error` over
+  tool calls).
+- **Mapping:** sub-score = `1 / (1 + retries + user_corrections +
+  2·error_rate)` — `1.0` for a clean run, decaying as corrections
+  accumulate. `error_rate` is in `[0, 1]`; its coefficient `2` is a
+  rubric constant.
+- **Absent when:** none of the three inputs is available.
+- **Not two-way:** it is a composite of weakly-self-reported and
+  objective inputs with no single clean claimed/observed pair.
 
-### 4. `scope` — Scope adherence (weight 0.15)
+### 5. `scope` — Scope adherence (weight 0.15, two-way)
 
 Did the iteration stay within its declared write-scope.
 
-- **Source:** `impl.scope_note` in the iteration log.
-- **Mapping:** `on-target → 1.0`; `partial → 0.5`; `scope-breach → 0.0`.
-- **Absent when:** `scope_note` is empty or a free-text value that does
-  not normalize to one of the three canonical states. (Historical
-  entries predate the schema enum and carry free-text notes; the
-  `signals` task normalizes a leading `on-target` prefix, otherwise
-  treats the note as absent.)
-- **Why 0.15:** a real quality signal, but a correct run that slightly
-  overran its file scope is still mostly a good run.
+- **Objective source:** the changed file set (`git diff`) checked against
+  the task's declared `write_scope` — the same comparison
+  `da workflow plan check-scope` performs.
+- **Self-reported source:** `impl.scope_note` (v2) / top-level
+  `scope_note` (v1): `on-target → 1.0`, `partial → 0.5`,
+  `scope-breach → 0.0`. Historical entries predate the schema enum and
+  carry free-text notes; a leading `on-target` prefix normalizes,
+  otherwise the self-report is treated as absent.
+- **Mapping:** objective sub-score = fraction of changed files inside the
+  declared scope. Falls back to the normalized `scope_note` when no
+  `write_scope` is declared for the task.
+- **Absent when:** neither a `write_scope` nor a usable `scope_note`
+  exists.
 
-### 5. `token_efficiency` — Token & cache efficiency (weight 0.10)
+### 6. `token_efficiency` — Token & cache efficiency (weight 0.10)
 
 How efficiently the iteration used the model.
 
-- **Source:** `session_tokens.cache_hit_rate` in the iteration log.
+- **Source:** `session_tokens.cache_hit_rate` in the iteration log;
+  backfilled from Claude and Codex transcripts where the iteration log
+  itself never captured it (see the data note).
 - **Mapping:** sub-score = `cache_hit_rate` directly (already `[0, 1]`).
-- **Absent when:** there is no `session_tokens` block, or it carries no
-  cache tokens at all.
+- **Absent when:** no token telemetry exists and none can be backfilled.
 - **Why the lowest weight:** this is an efficiency metric, not a
-  correctness one. A correct-but-expensive run should still score well;
-  efficiency only breaks ties.
+  correctness one. A correct-but-expensive run should still score well.
 
 ### Weight summary
 
-| Signal             | Weight | Kind        |
-|--------------------|-------:|-------------|
-| `verifier`         |   0.30 | correctness |
-| `tests`            |   0.25 | correctness |
-| `merge_back`       |   0.20 | correctness |
-| `scope`            |   0.15 | process     |
-| `token_efficiency` |   0.10 | efficiency  |
-| **Total**          | **1.00** |           |
+| Signal                | Weight | Kind        | Two-way |
+|-----------------------|-------:|-------------|:-------:|
+| `landed`              |   0.22 | correctness | yes     |
+| `verifier`            |   0.20 | correctness | yes     |
+| `tests`               |   0.18 | correctness | yes     |
+| `correction_pressure` |   0.15 | process     | no      |
+| `scope`               |   0.15 | process     | yes     |
+| `token_efficiency`    |   0.10 | efficiency  | no      |
+| **Total**             | **1.00** |           |         |
 
-Correctness signals total 0.75; process and efficiency total 0.25. The
-weighting is deliberate: a run is scored first on whether it worked.
+Correctness signals total 0.60; process signals total 0.30; efficiency
+0.10. The weighting is deliberate: a run is scored first on whether it
+worked and landed.
 
 ## Combination
 
@@ -146,8 +197,8 @@ score = Σ (weightᵢ × sub_scoreᵢ)  /  Σ weightᵢ        for every present
 Absent signals drop out of **both** sums. The remaining weights
 renormalize, so a missing signal neither inflates nor deflates the score
 — it simply does not vote. This matters: the captured telemetry is
-sparse (see the data note), and a rubric that treated "absent" as 0
-would punish every iteration that predates a telemetry field.
+sparse, and a rubric that treated "absent" as 0 would punish every
+iteration that predates a telemetry field.
 
 If **every** signal is absent the iteration is **unscored** (numeric
 score is null, band `unscored`) — the rubric never invents a score from
@@ -173,41 +224,63 @@ A numeric score is also reported as a human-readable band:
 
 ## Worked examples
 
-**A clean iteration, no token telemetry.** Verifier passed, tests
-passed, work was merged, scope on-target; the entry predates
-`session_tokens` so `token_efficiency` is absent.
+**A clean iteration, no token telemetry.** Landed on master, verifier
+passed, tests passed, no corrections, scope on-target; the entry predates
+`session_tokens` and no backfill was possible, so `token_efficiency` is
+absent.
 
-| Signal             | Present | Sub-score | Weight | Eff. weight | Contribution |
-|--------------------|---------|----------:|-------:|------------:|-------------:|
-| `verifier`         | yes     | 1.00      | 0.30   | 0.333       | 0.333        |
-| `tests`            | yes     | 1.00      | 0.25   | 0.278       | 0.278        |
-| `merge_back`       | yes     | 1.00      | 0.20   | 0.222       | 0.222        |
-| `scope`            | yes     | 1.00      | 0.15   | 0.167       | 0.167        |
-| `token_efficiency` | no      | —         | 0.10   | —           | —            |
+| Signal                | Present | Sub-score | Weight | Eff. weight | Contribution |
+|-----------------------|---------|----------:|-------:|------------:|-------------:|
+| `landed`              | yes     | 1.00      | 0.22   | 0.244       | 0.244        |
+| `verifier`            | yes     | 1.00      | 0.20   | 0.222       | 0.222        |
+| `tests`               | yes     | 1.00      | 0.18   | 0.200       | 0.200        |
+| `correction_pressure` | yes     | 1.00      | 0.15   | 0.167       | 0.167        |
+| `scope`               | yes     | 1.00      | 0.15   | 0.167       | 0.167        |
+| `token_efficiency`    | no      | —         | 0.10   | —           | —            |
 
 Present weights sum to 0.90; `score = 0.90 / 0.90 = 1.00` → **excellent**.
 
-**A failed iteration.** Verifier failed, tests failed, work was
-rejected, scope partial, cache hit rate 0.60.
+**A struggling iteration.** Did not land, verifier failed, tests failed,
+three retries, scope partial, cache hit rate 0.60.
 
-| Signal             | Present | Sub-score | Weight | Contribution |
-|--------------------|---------|----------:|-------:|-------------:|
-| `verifier`         | yes     | 0.00      | 0.30   | 0.000        |
-| `tests`            | yes     | 0.00      | 0.25   | 0.000        |
-| `merge_back`       | yes     | 0.00      | 0.20   | 0.000        |
-| `scope`            | yes     | 0.50      | 0.15   | 0.075        |
-| `token_efficiency` | yes     | 0.60      | 0.10   | 0.060        |
+| Signal                | Present | Sub-score | Weight | Contribution |
+|-----------------------|---------|----------:|-------:|-------------:|
+| `landed`              | yes     | 0.00      | 0.22   | 0.000        |
+| `verifier`            | yes     | 0.00      | 0.20   | 0.000        |
+| `tests`               | yes     | 0.00      | 0.18   | 0.000        |
+| `correction_pressure` | yes     | 0.25      | 0.15   | 0.0375       |
+| `scope`               | yes     | 0.50      | 0.15   | 0.075        |
+| `token_efficiency`    | yes     | 0.60      | 0.10   | 0.060        |
 
-All signals present (weights sum to 1.00); `score = 0.135` → **poor**.
+All signals present (weights sum to 1.00); `score ≈ 0.173` → **poor**.
 
 ## Data note
 
-The rubric is grounded in the 65 iteration-log entries salvaged into
-this branch. Signal population there is uneven: `scope_note` is set in
-92% of entries, but `verifiers` in only 11%, `review` in 2%, and
-`session_tokens` in 3%. The renormalizing combination is the direct
-consequence — most historical iterations will be scored on two or three
-present signals, and that is correct behaviour, not a degraded one.
+The rubric is grounded in the 65 iteration-log entries salvaged into this
+branch — **two schemas**: 39 flat v1 entries and 26 nested v2 entries,
+both of which the `signals` reader handles. Native signal population is
+uneven: `scope_note` is set in ~92% of entries, but `verifiers` in only
+~11%, `review` in ~2%, and `session_tokens` in ~3%. The renormalizing
+combination is the direct consequence — most historical iterations are
+scored on the signals that are present, and that is correct behaviour.
+
+`token_efficiency` is the largest backfill: every entry carries a 100%-
+populated `commit` SHA, so a commit-timestamp window over the Claude
+(249 transcripts, 2026-04-22 on) and Codex (204 transcripts, 2026-02-28
+on) session logs reconstructs token/cache telemetry the iteration log
+never recorded.
+
+## Changelog
+
+- **2.0.0** — Signal set reworked after analysis of the salvaged data.
+  `merge_back` (recorded in 1/65 entries) replaced by `landed`, scored
+  from objective commit-survival. New `correction_pressure` signal.
+  `verifier`, `tests`, and `scope` gained objective sources and two-way
+  status. Introduced the integrity track. Weights rebalanced across six
+  signals. Combination method unchanged.
+- **1.0.0** — Initial rubric: five signals (`verifier`, `tests`,
+  `merge_back`, `scope`, `token_efficiency`), weighted-mean-renormalized
+  combination, score bands.
 
 ## Changing the rubric
 
@@ -215,7 +288,8 @@ A rubric change is a reviewable act. To change it:
 
 1. Edit this document and `internal/scoring/rubric.go` **in the same
    commit** — they must never disagree.
-2. Bump `RubricVersion` per the [versioning policy](#versioning-policy).
+2. Bump `RubricVersion` per the [versioning policy](#versioning-policy),
+   and add a [changelog](#changelog) entry.
 3. `internal/scoring` tests assert weights sum to 1.0, signal IDs are
-   unique, and the version is pinned — they will fail until the change
-   is internally consistent.
+   unique, and the version is pinned — they will fail until the change is
+   internally consistent.
