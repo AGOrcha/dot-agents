@@ -15,13 +15,14 @@ tasks:
       app_type: go-cli
     - id: signals
       title: Extract input signals from captured telemetry
-      status: pending
+      status: in_progress
       depends_on:
         - rubric
       blocks:
         - scorer
       owner: dot-agents
-      write_scope: []
+      write_scope:
+        - internal/scoring
       verification_required: true
       notes: 'Map already-captured data into the rubric typed input signals: platform-session-integration token/cache telemetry, .ralph-loop-streams loop metrics, and the iteration log verifier / merge-back / scope-adherence / test-outcome fields. No new capture -- the inputs already exist.'
       app_type: go-cli
