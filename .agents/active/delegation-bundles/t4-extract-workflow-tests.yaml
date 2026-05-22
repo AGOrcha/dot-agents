@@ -1,0 +1,113 @@
+delegation_id: t4-extract-workflow-tests
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: master   # work happens on a fresh branch off master
+  worktree: TBD    # worker creates: git worktree add .claude/worktrees/t4 master then branches t4-extract-workflow-tests
+  plan_id: go-test-fixture-extraction
+  feature_thread: |
+    Cluster D of the test-fixture-extraction plan: pull duplicated test
+    setup helpers from commands/workflow/*_test.go into the shared
+    internal/testutil package created in earlier task t2. This is the
+    only eligible task on the active plan (per `da workflow eligible
+    --json`); evidence_confidence=none means the worker must read
+    internal/testutil first to learn its current shape before
+    refactoring callers.
+
+task:
+  id: t4-extract-workflow-tests
+  plan_id: go-test-fixture-extraction
+  title: Refactor commands/workflow/*_test.go to use internal/testutil
+  stage: impl
+  depends_on:
+    - t2-create-internal-testutil   # already completed on master
+
+write_scope:
+  - commands/workflow/state_plan_test.go
+  - commands/workflow/testutil_test.go
+  - commands/workflow/workflow_integration_test.go
+  - commands/workflow/delegation_fanout_test.go
+  - commands/workflow/iter_log_test.go
+  - commands/workflow/foldback_test.go
+  - commands/workflow/plan_task_test.go
+  - commands/workflow/drift_sweep_test.go
+
+forbidden_scope:
+  - internal/testutil/**     # ALREADY shipped via t2; do not modify the testutil package
+  - commands/workflow/*.go   # production code, not in scope
+  - commands/**              # other commands packages
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands/workflow -race -count=1 -timeout 240s
+  - go test ./internal/testutil -race -count=1 -timeout 60s
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      Evidence sidecar is none — read `internal/testutil/` in full
+      FIRST to understand the helpers it exposes (likely things like
+      `NewTempProjectDir`, `WriteAgentsRC`, `SeedConfig`, etc.). The 8
+      test files in scope have duplicated versions of these helpers;
+      the goal is to replace those duplicates with calls into
+      internal/testutil.
+    severity: blocker
+
+  - description: |
+      DO NOT change test BEHAVIOR. Every Test* function must still
+      pass with the same assertions. The refactor is mechanical:
+      replace local setup-helper definitions with imports +
+      testutil.NewFoo() calls. If a local helper has semantics
+      internal/testutil doesn't expose, leave the local helper in
+      place and note it in the merge-back for a t5 follow-up.
+    severity: blocker
+
+  - description: |
+      NEVER `cd` to a worktree. Use `git -C <abs-path>` for every
+      git operation. Use `(cd <path> && go test ...)` subshells if
+      build/test needs cwd.
+    severity: blocker
+
+  - description: |
+      Use ONLY explicit paths in git commands. `git -C <wt> add -- <files>`,
+      never `git add .`.
+    severity: blocker
+
+  - description: |
+      Forbidden_scope is broad here intentionally. If a test file
+      change forces a signature thread into commands/workflow/*.go
+      production code, STOP — that's a planning gap. Document it in
+      merge-back and exit the bundle (don't expand scope unilaterally).
+      This is the lesson from PR #40's scope-creep workers; the fix
+      is bundle-author-side, not worker-side.
+    severity: high
+
+decision_locks:
+  - Work on a NEW branch off origin/master named `t4-extract-workflow-tests`.
+    Create a new worktree: `git worktree add /Users/nikashp/Documents/dot-agents/.claude/worktrees/t4 master`,
+    then in that worktree: `git checkout -b t4-extract-workflow-tests`.
+  - One commit per logical test-file conversion if natural; up to 8
+    commits OR a single bulk commit if the changes are uniformly
+    mechanical. Use judgment.
+  - Commit message subject for the single bulk form:
+      `refactor(commands/workflow/test): replace duplicated setup helpers with internal/testutil`
+  - Push to origin and open a PR against master with title:
+      `refactor(commands/workflow/test): adopt internal/testutil (Cluster D, t4)`
+
+required_reads:
+  - internal/testutil/   (whole package — small, ~few hundred LOC)
+  - the 8 test files in `write_scope` (skim first; deep-read each as you migrate it)
+  - .agents/workflow/plans/go-test-fixture-extraction/PLAN.yaml (for context on Cluster D)
+  - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml (for the t2 task that shipped internal/testutil — read its merge-back for the helper inventory)
+
+merge_back:
+  artifact: .agents/active/delegation/t4-extract-workflow-tests.merge-back.md
+
+followups_to_record:
+  - "Any local helper that internal/testutil doesn't cover — file for a t5 follow-up bundle that extends internal/testutil"
+  - "Any scope-creep event (test refactor forced a production-code change) — fold-back for bundle authoring (see .agents/proposals/kg-crg-aware-bundle-authoring.md)"
