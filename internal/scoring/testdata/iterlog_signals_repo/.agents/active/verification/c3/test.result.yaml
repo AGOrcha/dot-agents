@@ -1,0 +1,7 @@
+schema_version: 1
+task_id: c3-sync
+parent_plan_id: command-surface-decomposition
+verifier_type: test
+status: fail
+summary: "artifact-recorded status overrides the inline verifier status"
+recorded_at: "2026-04-18T15:30:00Z"
