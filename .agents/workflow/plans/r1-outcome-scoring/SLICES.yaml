@@ -102,7 +102,7 @@ slices:
       + transcript error rate. For each two-way signal, pair the
       self-reported (claimed) and objective (observed) sub-scores into an
       integrity delta attributed to its role (impl / verifier / review).
-    status: pending
+    status: completed
     depends_on:
       - signals-iterlog
       - signals-git
