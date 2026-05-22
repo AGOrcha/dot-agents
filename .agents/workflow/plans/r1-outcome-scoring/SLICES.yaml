@@ -39,7 +39,7 @@ slices:
       verifiers[] records, retries, and the verifier-objective read from the
       referenced verification artifacts (result_artifact / decision_artifact
       → review-decision.yaml). Produces a typed IterlogSignals partial.
-    status: pending
+    status: completed
     depends_on:
       - signals-reader
     write_scope:
@@ -60,7 +60,7 @@ slices:
       file set (git diff) checked against the task's declared write_scope,
       the same comparison da workflow plan check-scope performs. Produces a
       typed GitSignals partial.
-    status: pending
+    status: completed
     depends_on:
       - signals-reader
     write_scope:
@@ -81,7 +81,7 @@ slices:
       internal/platform/session.go's token scanners. Yields token_efficiency
       (cache hit rate) and the tool-call is_error rate that feeds
       correction_pressure. Produces a typed BackfillSignals partial.
-    status: pending
+    status: completed
     depends_on:
       - signals-reader
     write_scope:
