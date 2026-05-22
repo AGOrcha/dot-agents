@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 60
+date: "2026-04-18"
+wave: resource-command-parity
+task_id: phase-3-rules-lifecycle
+commit: 0bb9aa282ab6f8d8e457e4d9d2a23cf7d85738f4
+files_changed: 11
+lines_added: 565
+lines_removed: 13
+impl:
+    item: "Phase 3 rules lifecycle — rules list/show/remove CLI + platform canonical file helpers"
+    summary: "Added dot-agents rules (list, show, remove) for ~/.agents/rules/<scope>/ files; platform ListCanonicalRuleFiles/Resolve/EnsureUnderRulesScopeTree; contract + explain updated. Implementation lives in package commands (not commands/rules) so globalflagcov resolves closures via ./commands load."
+    scope_note: on-target
+    feedback_goal: "Rules lifecycle commands and help match the phase-1 resource contract; projections stay behind the command layer; go test green."
+    retries: 0
+    focused_tests_added: 7
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: unit
+      status: pass
+      gate_passed: true
+      tests_added: 7
+      tests_total_pass: true
+      scenario_tags:
+        - rules-lifecycle
+        - resource-command-parity
+      self_assessment:
+        tests_positive_and_negative: true
+        tests_used_sandbox: true
+        exercised_new_scenario: true
+        ran_cli_command: true
+        cli_produced_actionable_feedback: "[ok] rules --help and rules list against live ~/.agents"
+        linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/phase-3-rules-lifecycle/review-decision.yaml
+    verify_record_appended: false

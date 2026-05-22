@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 50
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p7-post-closeout
+commit: 9b1a616884444066d260cbde0db12d156f92ddef
+files_changed: 6
+lines_added: 68
+lines_removed: 13
+impl:
+    item: "p7-post-closeout: scoped closeout git checkpoint + active-delegation bundle fallback + fold-back update tests"
+    summary: "ralph-closeout stages only this task's plan YAML, archive, verification dir, and git add -u on merge-back/delegation/bundle (delegation id read pre-closeout); removed whole-dir delegation staging and loop-state.md scooping. ralph-pipeline fallback bundles only when an active delegation contract exists for the bundle task_id. Added TestFoldBackUpdateTaskScoped and TestFoldBackUpdateTaskScopedRequiresTaskFlag. (iter-50: parallel worker reused iter-49 for phase-5.)"
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 2
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record (test), checkpoint --log-to-iter 49 then 50, merge-back; parent owes advance + delegation closeout"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p7-post-closeout/review-decision.yaml
+    verify_record_appended: false

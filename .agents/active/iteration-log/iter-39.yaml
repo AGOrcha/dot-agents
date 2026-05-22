@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 39
+date: "2026-04-17"
+wave: loop-agent-pipeline
+task_id: p3a-result-schema
+commit: e84d8d93fa121db7094400d4e653c7c3e9e48fbf
+files_changed: 5
+lines_added: 402
+lines_removed: 0
+item: "Land verification-result.schema.json, jsonschema validation, merge-back writes merge-back.result.yaml"
+scenario_tags: ["schema-validation", "merge-back", "delegation-worker"]
+feedback_goal: "Complete the delegated task within write scope with verification and merge-back."
+tests_added: 4
+tests_total_pass: 4
+retries: 0
+scope_note: "Implementation commit e84d8d9 only (schema + commands/workflow.go + workflow_test.go + static mirror); merge-back and iter log closeout separate."
+summary: "Added canonical JSON Schema for per-task verification YAML artifacts, embedded compiler validation (jsonschema/v6), and workflow merge-back now writes `.agents/active/verification/<task_id>/merge-back.result.yaml` after validating. Tests cover schema validation table, merge-back integration with fanout, and invalid verification-status rejection."
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: false
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — merge-back success box lists verification result path; workflow tasks loop-agent-pipeline shows p3a in_progress until parent advance"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true

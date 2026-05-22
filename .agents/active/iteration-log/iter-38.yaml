@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 38
+date: "2026-04-17"
+wave: agent-resource-lifecycle
+task_id: agents-remove
+commit: "8e905489f1fc0377e71e798763d06ce99838f661"
+files_changed: 6
+lines_added: 392
+lines_removed: 18
+item: "Implement `dot-agents agents remove <name>`: managed symlink cleanup, .agentsrc.json list update, optional `--purge` with confirmation"
+scenario_tags:
+    - agents-remove
+    - symlink-unlink
+    - agentsrc-strip
+    - purge-destructive
+feedback_goal: "Complete the delegated task within write scope with verification and merge-back."
+tests_added: 6
+tests_total_pass: null
+retries: 0
+scope_note: "commands/agents.go, commands/agents_test.go, loop-state, iter-38, merge-back + verification result"
+summary: "Added `agents remove` with removeAgentIn: RemoveIfSymlinkUnder for .agents/agents and .claude/agents, removeAgentNameFromSlice + Save, purgeCanonicalAgent with ui.Confirm/Flags.Yes. Tests cover happy path, drift symlink, not linked, real dir, purge, symlink canonical."
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: true
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes — verify record, checkpoint --log-to-iter 38, merge-back agents-remove; parent owes advance + delegation closeout"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — `agents remove --help`; `workflow tasks agent-resource-lifecycle` lists agents-remove in_progress"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true

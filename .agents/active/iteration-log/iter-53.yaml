@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 53
+date: "2026-04-18"
+wave: command-surface-decomposition
+task_id: c4-skills-command-decomposition
+commit: 45bda7a3a5ac2589043749d4b98886f951e4b299
+files_changed: 6
+lines_added: 269
+lines_removed: 201
+impl:
+    item: "c4-skills-command-decomposition: extract list and promote into commands/skills"
+    summary: "Added package skills with List and PromoteSkillIn; commands/skills.go wires cobra and delegates list/promote. Kept createSkill, readFrontmatterDescription, and user skill links in package commands for agents + agentsrc tests. Moved promote tests to commands/skills/promote_test.go. Documented layout in active.loop.md; loop-state Loop Health notes globalflagcov ./commands/... caveat (from prior c3 work on branch)."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 1
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record (test), checkpoint --log-to-iter 53, merge-back c4-skills-command-decomposition; parent owes advance + delegation closeout"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: test
+      status: pass
+      gate_passed: true
+      tests_added: 0
+      tests_total_pass: true
+      scenario_tags:
+          - skills-promote-success
+          - skills-promote-errors
+      retries: 0
+      result_artifact: ""
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: true
+          exercised_new_scenario: true
+          ran_cli_command: true
+          cli_produced_actionable_feedback: "[ok] workflow tasks command-surface-decomposition; [ok] skills list"
+          linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/c4-skills-command-decomposition/review-decision.yaml
+    verify_record_appended: true

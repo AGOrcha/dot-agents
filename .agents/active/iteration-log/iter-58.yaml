@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 58
+date: "2026-04-18"
+wave: command-surface-decomposition
+task_id: c2-agents-command-decomposition
+commit: 7304a72ffdfe8fb4490a785c31f41af28e053c98
+files_changed: 11
+lines_added: 1394
+lines_removed: 1234
+impl:
+    item: "c2-agents-command-decomposition: commands/agents subpackage"
+    summary: "Extracted agents list/new/import/promote/remove into package agents with Deps (GlobalFlags.Yes for purge confirm); thin commands/agents.go wires cobra validators + createAgent for agentsrc tests; duplicated AGENT.md frontmatter description parsing in list.go; lifecycle tests in commands/agents/agents_test.go; commands/agents_test.go smoke test for subcommand count."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 0
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record (test), checkpoint+log iter-58, merge-back c2"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: merge-back
+      status: pass
+      gate_passed: true
+      tests_added: 0
+      tests_total_pass: true
+      scenario_tags: [agents-cli, go-test]
+      result_artifact: .agents/active/verification/c2-agents-command-decomposition/merge-back.result.yaml
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: false
+          exercised_new_scenario: false
+          ran_cli_command: true
+          cli_produced_actionable_feedback: ok
+          linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/c2-agents-command-decomposition/review-decision.yaml
+    verify_record_appended: false

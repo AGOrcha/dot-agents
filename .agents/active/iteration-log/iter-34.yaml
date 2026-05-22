@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 34
+date: "2026-04-17"
+wave: agent-resource-lifecycle
+task_id: agents-refresh-wiring
+commit: ""
+files_changed: 11
+lines_added: 227
+lines_removed: 65
+item: "Implement createAgentsLinks + install project-scoped agent resolution"
+scenario_tags:
+    - delegation-lifecycle
+    - platform-agents
+    - refresh-install
+feedback_goal: "createAgentsLinks mirrors canonical ~/.agents/agents/<project>/ into repo .agents/agents and .claude/agents; install resolves agents/skills from project-scoped paths and implicit AgentsHome when sources empty"
+tests_added: 3
+tests_total_pass: 3
+retries: 0
+scope_note: "internal/platform/claude.go, commands/install.go, commands/refresh.go, active.loop.md; reverted unrelated agents-promote edits to commands/agents.go"
+summary: "Claude createAgentsLinks uses syncScopedDirSymlinksTargets for .agents/agents and .claude/agents; install firstResourceCandidate prefers project then global scope and uses AgentsHome when manifest has no sources; integration + unit tests"
+self_assessment:
+    read_loop_state: true
+    one_item_only: true
+    committed_after_tests: true
+    tests_positive_and_negative: true
+    tests_used_sandbox: false
+    aligned_with_canonical_tasks: true
+    persisted_via_workflow_commands: "yes"
+    ran_cli_command: true
+    exercised_new_scenario: true
+    cli_produced_actionable_feedback: "ok — workflow tasks agent-resource-lifecycle; merge-back created"
+    linked_traces_to_outcomes: true
+    stayed_under_10_files: true
+    no_destructive_commands: true
