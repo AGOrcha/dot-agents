@@ -1,0 +1,21 @@
+schema_version: 1
+iteration: 7
+date: "2026-04-12"
+wave: "crg-kg-integration"
+task_id: "phase-b"
+commit: "abc1234"
+files_changed: 8
+lines_added: 320
+lines_removed: 40
+tests_added: 12
+tests_total_pass: true
+retries: 1
+scope_note: "on-target"
+summary: "v1 flat sample entry"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  ran_cli_command: true
+  linked_traces_to_outcomes: true
+  persisted_via_workflow_commands: "yes"

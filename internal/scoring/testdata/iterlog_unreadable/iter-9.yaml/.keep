@@ -1,0 +1,3 @@
+This parent directory is deliberately named iter-9.yaml. LoadIterationLog's
+glob matches it as if it were an iteration file; os.ReadFile then fails because
+it is a directory, exercising the per-file read-error path.

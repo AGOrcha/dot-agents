@@ -17,7 +17,7 @@ slices:
       load too. Commit a curated testdata/ fixture set: a v1 sample, a v2
       sample, and the edge cases — free-text scope_note, abbreviated commit
       SHA, empty verifiers.
-    status: pending
+    status: completed
     depends_on: []
     write_scope:
       - internal/scoring/iterlog.go
