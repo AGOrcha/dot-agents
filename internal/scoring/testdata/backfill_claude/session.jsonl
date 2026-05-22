@@ -1,0 +1,9 @@
+{"type":"assistant","timestamp":"2026-05-17T03:00:00.000Z","cwd":"/repo","gitBranch":"main","message":{"role":"assistant","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":100}}}
+{"type":"assistant","timestamp":"2026-05-17T04:00:00.000Z","message":{"role":"assistant","usage":{"input_tokens":20,"output_tokens":8,"cache_read_input_tokens":300,"cache_creation_input_tokens":100}}}
+{"type":"user","timestamp":"2026-05-17T04:05:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":false},{"type":"tool_result","tool_use_id":"t2","is_error":true}]}}
+{"type":"user","timestamp":"2026-05-17T04:10:00.000Z","message":{"role":"user","content":[{"type":"text"},{"type":"tool_result","tool_use_id":"t3"}]}}
+{"type":"assistant","timestamp":"2026-05-17T09:00:00.000Z","message":{"role":"assistant","usage":{"input_tokens":999,"output_tokens":999,"cache_read_input_tokens":999,"cache_creation_input_tokens":999}}}
+{"type":"assistant","timestamp":"2026-05-17T03:00:00.000Z","message":{"role":"assistant"}}
+not even json
+{"type":"system","timestamp":"2026-05-17T04:00:00.000Z"}
+{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":7,"output_tokens":7}}}
