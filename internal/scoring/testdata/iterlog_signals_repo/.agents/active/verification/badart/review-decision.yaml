@@ -1,0 +1,2 @@
+schema_version: 1
+post_invocation: [this, should, be, a, mapping, not, a, list]
