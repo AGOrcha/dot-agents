@@ -69,17 +69,17 @@ Iteration logs pick up review fields on `workflow checkpoint --log-to-iter N --r
 ## Examples
 
 ```bash
-dot-agents workflow verify record --kind review \
+da workflow verify record --kind review \
   --task my-task-id \
   --phase1-decision accept --phase2-decision accept \
   --summary "Scoped change matches bundle; ship it"
 
-dot-agents workflow verify record --kind review \
+da workflow verify record --kind review \
   --phase1-decision reject --phase2-decision accept \
   --failed-gate unit --failed-gate api \
   --summary "Unit and API gates still red on scoped surface"
 
-dot-agents workflow verify record --kind review \
+da workflow verify record --kind review \
   --phase1-decision escalate --phase2-decision accept \
   --escalation-reason "Security-sensitive diff needs staff review" \
   --summary "Defer merge pending human security pass"

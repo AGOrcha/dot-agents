@@ -54,18 +54,19 @@ flowchart TB
 
     subgraph Commands["commands/"]
         core["Project lifecycle<br/>init, add, remove, refresh, import, install"]
-        ops["Inspection and ops<br/>status, doctor, explain, sync"]
+        ops["Inspection and ops<br/>status, doctor, explain, sync, session"]
         wf["Workflow and review<br/>workflow, review, kg"]
-        authoring["Authoring<br/>skills, agents, hooks"]
+        authoring["Resource authoring<br/>skills, agents, hooks, rules, mcp, settings"]
     end
 
     subgraph Services["internal/"]
         cfg["config<br/>~/.agents config, .agentsrc.json,<br/>paths, proposal metadata"]
         plat["platform<br/>platform adapters, resource intents,<br/>shared target plans, renderers"]
         links["links<br/>symlink and hard-link helpers"]
+        fsops["fsops<br/>OS-aware filesystem operations"]
         ps["projectsync<br/>repo scaffolding, restore helpers,<br/>refresh metadata"]
-        hooks["scaffold/hooks<br/>canonical hook bundle assets"]
-        graph["graphstore<br/>KG/CRG storage and MCP surfaces"]
+        scaffold["scaffold<br/>canonical scaffold assets<br/>home, hooks, templates"]
+        gstore["graphstore<br/>KG/CRG storage and MCP surfaces"]
         ui["ui<br/>terminal formatting and prompts"]
     end
 
@@ -85,25 +86,27 @@ flowchart TB
     core --> cfg
     core --> plat
     core --> ps
+    core --> scaffold
 
     ops --> cfg
     ops --> plat
     ops --> ui
 
     wf --> cfg
-    wf --> graph
+    wf --> gstore
     wf --> ui
 
     authoring --> cfg
     authoring --> plat
-    authoring --> hooks
+    authoring --> scaffold
 
     plat --> links
+    links --> fsops
     cfg --> home
     plat --> repo
     ps --> repo
     wf --> wfstate
-    graph --> kg
+    gstore --> kg
 ```
 
 ### Reading notes
@@ -113,6 +116,8 @@ flowchart TB
 - `internal/platform` is the key projection layer. It knows platform adapters, shared-target intents, and how repo-local outputs get created.
 - `internal/config` owns the user-level and repo-level configuration contracts.
 - Workflow and knowledge-graph features are layered beside the core config-management path, not bolted into a separate binary.
+- The command layer is decomposed into per-feature subpackages (`commands/workflow`, `commands/agents`, `commands/skills`, `commands/sync`, `commands/kg`, `commands/hooks`), with shared helpers in `commands/internal/cmdutil`.
+- Test-infrastructure packages (`internal/globalflagcov`, `internal/linktest`, `internal/testutil`) and the auxiliary `cmd/globalflag-coverage` binary are omitted here for clarity.
 
 ## Practical use
 
