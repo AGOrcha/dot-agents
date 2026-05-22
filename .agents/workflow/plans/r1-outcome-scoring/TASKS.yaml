@@ -15,7 +15,7 @@ tasks:
       app_type: go-cli
     - id: signals
       title: Extract input signals from captured telemetry
-      status: in_progress
+      status: completed
       depends_on:
         - rubric
       blocks:
