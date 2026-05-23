@@ -1,0 +1,66 @@
+schema_version: 1
+id: workflow-client-commands
+title: da workflow close-task / start-task client commands + auto iter-log + scoring at close
+status: active
+summary: |-
+    Promote two recurring workflow sequences from "hand-typed each session" to first-class client commands that compose the existing fine-grained primitives:
+
+      da workflow close-task [--task T] [--score-recompute=current|recent-N|all]
+          verify record (last test result) →
+          write iter-N.yaml (auto-derived from in-flight session state) →
+          score the just-closed iteration (or wider window if requested) →
+          advance --status completed →
+          plan update --focus <next eligible> →
+          workflow commit (stage workflow-state, via go-git v6 per
+          workflow-commit-command)
+
+      da workflow start-task [--task T]
+          plan update --status active --focus T →
+          plan derive-scope T (sidecar evidence sniff) →
+          workflow fanout (if a bundle is appropriate) →
+          workflow commit (focus + scope change)
+
+    The plan is the natural integration point for R1 scoring: scoring runs inside close-task with sensible defaults, so every iteration gets a persisted, explainable outcome score as a byproduct of the normal close flow — not a separate ritual the operator has to remember. Older scores stay static once written (they're computed from immutable inputs); the default --score-recompute=current is therefore cheap. The recent-N and all flags exist for rubric or signal-shape changes that warrant backfill.
+    Critically, this plan also closes the "no source = no score" gap by making iter-N.yaml an auto-derived artifact rather than a hand-edited one. Without that, R1's downstream chain (signals → scorer → persist → cli) has nothing to score on iterations where the operator forgot to write the log.
+created_at: "2026-05-23T22:26:51Z"
+updated_at: "2026-05-23T22:39:10Z"
+owner: dot-agents
+success_criteria: |-
+    - `da workflow close-task` runs end-to-end and produces (a) an
+      iter-N.yaml entry conforming to workflow-iter-log.schema.json,
+      (b) a fresh iter-N.score.yaml sidecar, (c) status=completed on the
+      closed task, (d) refocus to the next eligible task, (e) a workflow
+      commit of the state changes — all in one invocation.
+    - `da workflow start-task` mirrors the start side: plan activated /
+      focused / scope-derived / optionally fanned out, with the workflow
+      state committed.
+    - --score-recompute=current is the default and only re-touches the
+      one new iter sidecar; recent-N and all are documented escape
+      hatches for rubric / signal-shape changes.
+    - The iteration-close skill calls close-task and renders the new
+      score's per-signal breakdown back to the operator so the
+      immediate-feedback loop closes at the same moment the iteration
+      does — no separate `da score iteration N` step.
+    - The fine-grained primitives (verify record, advance, plan update,
+      workflow commit, score run) remain callable independently — client
+      commands compose, they do not replace.
+verification_strategy: |-
+    Per-task Go unit + integration:
+      - close-task: golden-path against a tempdir repo + iter-log,
+        asserting every downstream artifact appears with the right shape
+        (iter file conforms to schema, score sidecar conforms to
+        PersistedScore, task status flipped, focus moved, commit landed).
+        Error-injection on each downstream step to confirm the orchestration
+        surfaces failures rather than silently swallowing them.
+      - start-task: same coverage, plus the fanout branch.
+      - Auto iter-log derivation: round-trip a synthetic session through
+        the helper and assert the produced yaml parses back through
+        LoadIterationLog.
+      - Score recompute scope: assert --score-recompute=current writes
+        exactly one sidecar; recent-N writes N; all reproduces the full
+        `da score run` output.
+      - Skill integration: drive iteration-close end-to-end (TBD test
+        harness) and assert the score breakdown appears in the rendered
+        output. If a skill-level test harness isn't available, gate the
+        assertion on a CLI smoke that mirrors the skill's call sequence.
+current_focus_task: iter-log-derive
