@@ -68,7 +68,7 @@ tasks:
       app_type: go-cli
     - id: scorer
       title: Compute the explainable outcome score
-      status: pending
+      status: completed
       depends_on:
         - rubric
         - signals
@@ -77,9 +77,12 @@ tasks:
       blocks:
         - persist
       owner: dot-agents
-      write_scope: []
+      write_scope:
+        - internal/scoring/scorer.go
+        - internal/scoring/scorer_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
       verification_required: true
-      notes: 'Pure scoring function: rubric plus extracted signals produce a numeric score per session and per iteration, with a per-signal breakdown showing which signals drove the score (explainable, not a black box). Unit-tested in isolation.'
+      notes: 'Pure scoring function: rubric plus extracted signals produce a numeric score per session and per iteration, with a per-signal breakdown showing which signals drove the score (explainable, not a black box). Unit-tested in isolation. In-flight: untracked scorer.go + scorer_test.go from a prior session — inspect before overwriting. Doc update only if rubric→score mapping needs codifying alongside the implementation.'
       app_type: go-cli
     - id: persist
       title: Persist scores alongside telemetry
