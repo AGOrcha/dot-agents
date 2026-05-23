@@ -74,15 +74,35 @@ type iterLogImplSelfAssessment struct {
 }
 
 type iterLogVerifierEntry struct {
-	Type           string                        `yaml:"type" json:"type"`
-	Status         string                        `yaml:"status" json:"status"`
-	GatePassed     bool                          `yaml:"gate_passed" json:"gate_passed"`
-	TestsAdded     int                           `yaml:"tests_added" json:"tests_added"`
-	TestsTotalPass interface{}                   `yaml:"tests_total_pass,omitempty" json:"tests_total_pass,omitempty"`
-	ScenarioTags   []string                      `yaml:"scenario_tags,omitempty" json:"scenario_tags,omitempty"`
-	Retries        int                           `yaml:"retries" json:"retries"`
-	ResultArtifact string                        `yaml:"result_artifact" json:"result_artifact"`
-	SelfAssessment iterLogVerifierSelfAssessment `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
+	Type             string                        `yaml:"type" json:"type"`
+	Status           string                        `yaml:"status" json:"status"`
+	GatePassed       bool                          `yaml:"gate_passed" json:"gate_passed"`
+	TestsAdded       int                           `yaml:"tests_added" json:"tests_added"`
+	TestsAddedByKind []iterLogTestAddedByKind      `yaml:"tests_added_by_kind,omitempty" json:"tests_added_by_kind,omitempty"`
+	LinkedTraces     []iterLogLinkedTrace          `yaml:"linked_traces,omitempty" json:"linked_traces,omitempty"`
+	TestsTotalPass   interface{}                   `yaml:"tests_total_pass,omitempty" json:"tests_total_pass,omitempty"`
+	ScenarioTags     []string                      `yaml:"scenario_tags,omitempty" json:"scenario_tags,omitempty"`
+	Retries          int                           `yaml:"retries" json:"retries"`
+	ResultArtifact   string                        `yaml:"result_artifact" json:"result_artifact"`
+	SelfAssessment   iterLogVerifierSelfAssessment `yaml:"self_assessment,omitempty" json:"self_assessment,omitempty"`
+}
+
+// iterLogTestAddedByKind is one entry of verifier.tests_added_by_kind — the
+// structured replacement for the deprecated tests_positive_and_negative
+// boolean. Naming the test makes the claim verifiable against the diff.
+type iterLogTestAddedByKind struct {
+	Name string `yaml:"name" json:"name"`
+	// Kind matches the schema enum: positive | negative | edge | regression.
+	Kind string `yaml:"kind" json:"kind"`
+}
+
+// iterLogLinkedTrace is one entry of verifier.linked_traces — the structured
+// replacement for the deprecated linked_traces_to_outcomes boolean. Each pair
+// names a concrete verification trace and the outcome it links to (commit
+// SHA, iteration, review-decision path, etc.).
+type iterLogLinkedTrace struct {
+	TraceRef   string `yaml:"trace_ref" json:"trace_ref"`
+	OutcomeRef string `yaml:"outcome_ref" json:"outcome_ref"`
 }
 
 type iterLogVerifierSelfAssessment struct {

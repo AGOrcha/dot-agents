@@ -115,14 +115,33 @@ type ImplBlock struct {
 // VerifierRecord is one verifier's contribution. Present only on v2 entries;
 // v1 had no verifiers array.
 type VerifierRecord struct {
-	Type           string
-	Status         string // pass | fail | partial | unknown
-	GatePassed     bool
-	TestsAdded     int
+	Type       string
+	Status     string // pass | fail | partial | unknown
+	GatePassed bool
+	TestsAdded int
+	// TestsAddedByKind is the structured replacement for the deprecated
+	// tests_positive_and_negative boolean — the actual test names with their
+	// scenario kind. Each name should resolve in the diff.
+	TestsAddedByKind []TestAdded
+	// LinkedTraces is the structured replacement for the deprecated
+	// linked_traces_to_outcomes boolean — concrete trace ↔ outcome pairs.
+	LinkedTraces   []LinkedTrace
 	TestsTotalPass OptionalBool
 	Retries        int
 	ResultArtifact string
 	SelfAssessment SelfAssessment
+}
+
+// TestAdded is one entry of verifier.tests_added_by_kind.
+type TestAdded struct {
+	Name string
+	Kind string // positive | negative | edge | regression
+}
+
+// LinkedTrace is one entry of verifier.linked_traces.
+type LinkedTrace struct {
+	TraceRef   string
+	OutcomeRef string
 }
 
 // ReviewBlock is the review-role contribution. Present only on v2 entries.
@@ -273,10 +292,18 @@ type rawV2 struct {
 		SelfAssessment    rawSelfAssessment `yaml:"self_assessment"`
 	} `yaml:"impl"`
 	Verifiers []struct {
-		Type           string            `yaml:"type"`
-		Status         string            `yaml:"status"`
-		GatePassed     bool              `yaml:"gate_passed"`
-		TestsAdded     int               `yaml:"tests_added"`
+		Type             string `yaml:"type"`
+		Status           string `yaml:"status"`
+		GatePassed       bool   `yaml:"gate_passed"`
+		TestsAdded       int    `yaml:"tests_added"`
+		TestsAddedByKind []struct {
+			Name string `yaml:"name"`
+			Kind string `yaml:"kind"`
+		} `yaml:"tests_added_by_kind"`
+		LinkedTraces []struct {
+			TraceRef   string `yaml:"trace_ref"`
+			OutcomeRef string `yaml:"outcome_ref"`
+		} `yaml:"linked_traces"`
 		TestsTotalPass OptionalBool      `yaml:"tests_total_pass"`
 		Retries        int               `yaml:"retries"`
 		ResultArtifact string            `yaml:"result_artifact"`
@@ -337,7 +364,7 @@ func (r rawV2) normalize() IterationRecord {
 		}
 	}
 	for _, v := range r.Verifiers {
-		rec.Verifiers = append(rec.Verifiers, VerifierRecord{
+		ver := VerifierRecord{
 			Type:           v.Type,
 			Status:         v.Status,
 			GatePassed:     v.GatePassed,
@@ -346,7 +373,14 @@ func (r rawV2) normalize() IterationRecord {
 			Retries:        v.Retries,
 			ResultArtifact: v.ResultArtifact,
 			SelfAssessment: v.SelfAssessment.normalize(),
-		})
+		}
+		for _, t := range v.TestsAddedByKind {
+			ver.TestsAddedByKind = append(ver.TestsAddedByKind, TestAdded{Name: t.Name, Kind: t.Kind})
+		}
+		for _, lt := range v.LinkedTraces {
+			ver.LinkedTraces = append(ver.LinkedTraces, LinkedTrace{TraceRef: lt.TraceRef, OutcomeRef: lt.OutcomeRef})
+		}
+		rec.Verifiers = append(rec.Verifiers, ver)
 	}
 	return rec
 }

@@ -1,7 +1,7 @@
 # Outcome-Scoring Rubric
 
 **Status:** active
-**Rubric version:** 2.0.1
+**Rubric version:** 2.0.2
 **Owners:** dot-agents
 **Go source:** [`internal/scoring/rubric.go`](../internal/scoring/rubric.go)
 **Related:** [`agent-run-scoring-observability-platform.md`](../.agents/proposals/agent-run-scoring-observability-platform.md) (R1, the requirement this rubric serves); [ADR-0004](adr/0004-execution-telemetry-schema-seed.md) (the execution-telemetry pillar the input signals come from); [`workflow-iter-log.schema.json`](../commands/workflow/static/workflow-iter-log.schema.json) (the iteration-log schema the signals are read from)
@@ -98,6 +98,35 @@ Four self_assessment booleans survive the evaluation: `one_item_only`
 `scoped_tests_to_write_scope`. They are **tri-stated** in the schema —
 their type is `["boolean", "null"]`, so absent stays distinct from a
 reported false, and the scorer stops treating "unmeasured" as "no."
+
+## Structured claims: name the artifact, not the box
+
+Two self-assessment booleans were genuinely informative *concepts* but
+trivially rubber-stamped as flags — `tests_positive_and_negative` and
+`linked_traces_to_outcomes`. Both are replaced with **named-list**
+fields on the verifier block. A boolean is a box you can tick; a named
+list is a set of references each of which must resolve.
+
+- `verifier.tests_added_by_kind: [{name, kind}]` replaces
+  `tests_positive_and_negative`. `kind` is one of
+  `positive | negative | edge | regression`. The boolean is *derivable*
+  ("≥1 positive AND ≥1 negative"); the value of the new field is that
+  every `name` must exist in the diff.
+- `verifier.linked_traces: [{trace_ref, outcome_ref}]` replaces
+  `linked_traces_to_outcomes`. Each pair names a concrete verification
+  trace and the outcome it links to (commit SHA, iteration, review-
+  decision path); both refs must resolve.
+
+Two other booleans are deprecated without replacements, because the
+information was already structured elsewhere or carried no signal:
+`exercised_new_scenario` (redundant with `verifier.scenario_tags`, which
+is already a list) and `tests_used_sandbox` (`t.TempDir()` and equivalent
+is universal Go test hygiene — the flag never discriminated anything).
+
+The 66 salvaged iteration-log entries predate the new fields and parse
+fine — the deprecated booleans remain in the schema (with `deprecated:
+true`) so backward-compat holds; the extractor reads the structured
+fields first and falls back to the legacy booleans.
 
 ## Input signals
 
@@ -303,6 +332,11 @@ never recorded.
 
 ## Changelog
 
+- **2.0.2** — Documents the structured-claims layer: the
+  `tests_added_by_kind` and `linked_traces` named-list fields replacing
+  two rubber-stamped booleans, and the schema deprecation of two more
+  (`exercised_new_scenario`, `tests_used_sandbox`). Signal set, weights,
+  and combination unchanged — scores remain comparable with 2.0.x.
 - **2.0.1** — Documents the objective process-discipline checks layer and
   the iteration-log self_assessment deprecations from the first
   dogfood-driven boolean-effectiveness evaluation. Signal set, weights,

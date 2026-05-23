@@ -275,6 +275,26 @@ func TestVerifierClaimed(t *testing.T) {
 		got := ExtractIterlogSignals(rec, "").VerifierClaimed
 		wantPresent(t, "VerifierClaimed", got, 0.0)
 	})
+
+	t.Run("structured linked_traces present", func(t *testing.T) {
+		// A verifier with the new structured linked_traces list — no legacy
+		// boolean anywhere. The signal must read the list and report linked.
+		rec := IterationRecord{Verifiers: []VerifierRecord{{
+			LinkedTraces: []LinkedTrace{{TraceRef: "trace.yaml", OutcomeRef: "iter-70"}},
+		}}}
+		got := ExtractIterlogSignals(rec, "").VerifierClaimed
+		wantPresent(t, "VerifierClaimed (structured)", got, 1.0)
+	})
+
+	t.Run("structured tests_added_by_kind only", func(t *testing.T) {
+		// No linked_traces, but structured tests_added_by_kind is present —
+		// the signal stays present (claim is "no linked traces"), not absent.
+		rec := IterationRecord{Verifiers: []VerifierRecord{{
+			TestsAddedByKind: []TestAdded{{Name: "TestX", Kind: "positive"}},
+		}}}
+		got := ExtractIterlogSignals(rec, "").VerifierClaimed
+		wantPresent(t, "VerifierClaimed (structured no linked)", got, 0.0)
+	})
 }
 
 // --- LandedClaimed ---------------------------------------------------------

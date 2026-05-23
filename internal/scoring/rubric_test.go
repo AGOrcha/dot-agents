@@ -7,8 +7,8 @@ import (
 )
 
 func TestRubricVersionPinned(t *testing.T) {
-	if RubricVersion != "2.0.1" {
-		t.Errorf("RubricVersion = %q, want 2.0.1 — a version change must be deliberate", RubricVersion)
+	if RubricVersion != "2.0.2" {
+		t.Errorf("RubricVersion = %q, want 2.0.2 — a version change must be deliberate", RubricVersion)
 	}
 	if got := DefaultRubric().Version; got != RubricVersion {
 		t.Errorf("DefaultRubric().Version = %q, want %q", got, RubricVersion)

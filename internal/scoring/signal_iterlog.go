@@ -185,28 +185,42 @@ func verifierStatusScore(status string) (float64, bool) {
 	}
 }
 
-// extractVerifierClaimed reads the surviving self-reported verification flag —
-// linked_traces_to_outcomes — into a sub-score. ran_cli_command and
-// committed_after_tests are no longer read (the objective_checks.go transcript
-// scanners replace them); they remain on the SelfAssessment struct only to
-// parse historical entries.
+// extractVerifierClaimed reads the verification-diligence claim from the
+// remaining self-reported sources: the structured verifier.linked_traces
+// list (preferred, populated in current entries) and the legacy
+// linked_traces_to_outcomes boolean (kept for backward compat with the 66
+// salvaged entries). The boolean is derivable from the list — a non-empty
+// list is positive evidence; the boolean stands in for entries that predate
+// the structured field.
 func extractVerifierClaimed(rec IterationRecord) SignalValue {
 	sa := rec.Impl.SelfAssessment
-	// Pick up the verifier-block self_assessment too — v2's
-	// linked_traces_to_outcomes lives there, not on the impl block.
+	// v2 carries the legacy flag on the verifier-block self_assessment too;
+	// either side, plus any verifier's structured LinkedTraces list, counts.
 	linked := sa.LinkedTracesToOutcomes
 	for _, v := range rec.Verifiers {
-		if v.SelfAssessment.LinkedTracesToOutcomes {
+		if v.SelfAssessment.LinkedTracesToOutcomes || len(v.LinkedTraces) > 0 {
 			linked = true
 		}
 	}
-	if !linked && isZeroSelfAssessment(sa) {
+	if !linked && isZeroSelfAssessment(sa) && !anyVerifierStructuredClaims(rec) {
 		return AbsentSignal("no verification self-report")
 	}
 	if linked {
-		return PresentSignal(1.0, "linked_traces_to_outcomes: true")
+		return PresentSignal(1.0, "linked traces recorded")
 	}
-	return PresentSignal(0.0, "linked_traces_to_outcomes: false")
+	return PresentSignal(0.0, "no linked traces recorded")
+}
+
+// anyVerifierStructuredClaims reports whether any verifier carries the new
+// structured-claim lists — used so the signal stays present when an entry has
+// e.g. tests_added_by_kind but no self_assessment block.
+func anyVerifierStructuredClaims(rec IterationRecord) bool {
+	for _, v := range rec.Verifiers {
+		if len(v.TestsAddedByKind) > 0 || len(v.LinkedTraces) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // extractLandedClaimed combines the self-reported persistence note with the

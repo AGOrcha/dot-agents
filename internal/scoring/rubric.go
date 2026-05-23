@@ -20,7 +20,7 @@ import (
 // changed. minor: a weight or sub-score mapping changed. patch: docs or band
 // thresholds only. Every persisted score records the version it was computed
 // under, so a rubric change never silently invalidates historical scores.
-const RubricVersion = "2.0.1"
+const RubricVersion = "2.0.2"
 
 // weightEpsilon is the tolerance for the "weights sum to 1.0" invariant,
 // allowing for floating-point representation error.

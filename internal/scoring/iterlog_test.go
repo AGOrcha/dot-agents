@@ -130,6 +130,32 @@ func TestParseV2(t *testing.T) {
 	}
 }
 
+func TestParseV2StructuredClaims(t *testing.T) {
+	rec := mustParse(t, "v2_structured.yaml")
+	if len(rec.Verifiers) != 1 {
+		t.Fatalf("Verifiers count = %d, want 1", len(rec.Verifiers))
+	}
+	v := rec.Verifiers[0]
+	if len(v.TestsAddedByKind) != 3 {
+		t.Fatalf("TestsAddedByKind count = %d, want 3", len(v.TestsAddedByKind))
+	}
+	if v.TestsAddedByKind[0] != (TestAdded{Name: "TestParseStructured", Kind: "positive"}) {
+		t.Errorf("TestsAddedByKind[0] = %+v, want {TestParseStructured positive}", v.TestsAddedByKind[0])
+	}
+	if v.TestsAddedByKind[1].Kind != "negative" {
+		t.Errorf("TestsAddedByKind[1].Kind = %q, want negative", v.TestsAddedByKind[1].Kind)
+	}
+	if v.TestsAddedByKind[2].Kind != "edge" {
+		t.Errorf("TestsAddedByKind[2].Kind = %q, want edge", v.TestsAddedByKind[2].Kind)
+	}
+	if len(v.LinkedTraces) != 1 {
+		t.Fatalf("LinkedTraces count = %d, want 1", len(v.LinkedTraces))
+	}
+	if v.LinkedTraces[0].TraceRef == "" || v.LinkedTraces[0].OutcomeRef != "iter-70" {
+		t.Errorf("LinkedTraces[0] = %+v", v.LinkedTraces[0])
+	}
+}
+
 func TestParseV2Sparse(t *testing.T) {
 	rec := mustParse(t, "v2_sparse.yaml")
 
