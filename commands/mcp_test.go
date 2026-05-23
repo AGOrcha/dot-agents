@@ -6,21 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestRunMCPList_ListsMCPConfigs(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	mcpDir := filepath.Join(agentsHome, "mcp", "global")
-	if err := os.MkdirAll(mcpDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	mcpContent := `{"mcpServers": {"test": {"command": "echo"}}}`
-	if err := os.WriteFile(filepath.Join(mcpDir, "test-mcp.json"), []byte(mcpContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "mcp", "global", "test-mcp.json", []byte(`{"mcpServers": {"test": {"command": "echo"}}}`))
 
 	if err := runMCPList("global"); err != nil {
 		t.Fatalf("runMCPList: %v", err)
@@ -58,16 +53,9 @@ func TestRunMCPList_MissingScope(t *testing.T) {
 func TestRunMCPShow_ReadsMCPConfig(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	mcpDir := filepath.Join(agentsHome, "mcp", "global")
-	if err := os.MkdirAll(mcpDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	mcpContent := `{"mcpServers": {"demo": {"command": "node"}}}`
-	if err := os.WriteFile(filepath.Join(mcpDir, "demo.json"), []byte(mcpContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "mcp", "global", "demo.json", []byte(`{"mcpServers": {"demo": {"command": "node"}}}`))
 
 	if err := runMCPShow("global", "demo.json"); err != nil {
 		t.Fatalf("runMCPShow: %v", err)
@@ -103,6 +91,18 @@ func TestFindMCPSpec_EmptyName(t *testing.T) {
 	}
 }
 
+func makeMCPDeps(dryRun, yes, force bool) mcpDeps {
+	return mcpDeps{
+		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+		maxArgsWithHints:   MaximumNArgsWithHints,
+		exactArgsWithHints: ExactArgsWithHints,
+	}
+}
+
+// writeMCPConfig is retained for commands/coverage_test.go (out of write_scope
+// for this refactor). All in-file callers were migrated to
+// testutil.WriteScopeFile; when coverage_test.go migrates, this helper can be
+// deleted outright. Tracked as a t5-followup finding.
 func writeMCPConfig(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -113,18 +113,10 @@ func writeMCPConfig(t *testing.T, dir, name, body string) {
 	}
 }
 
-func makeMCPDeps(dryRun, yes, force bool) mcpDeps {
-	return mcpDeps{
-		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
-		maxArgsWithHints:   MaximumNArgsWithHints,
-		exactArgsWithHints: ExactArgsWithHints,
-	}
-}
-
 func TestFindMCPSpec_Found(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	writeMCPConfig(t, filepath.Join(agentsHome, "mcp", "global"), "found.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "mcp", "global", "found.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	spec, err := findMCPSpec(agentsHome, "global", "found.json")
@@ -160,15 +152,14 @@ func TestFindMCPSpec_NotFoundHintsAtList(t *testing.T) {
 func TestRunMCPRemove_DryRun_KeepsFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	mcpDir := filepath.Join(agentsHome, "mcp", "global")
-	writeMCPConfig(t, mcpDir, "dry.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "mcp", "global", "dry.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeMCPDeps(true, false, false)
 	if err := runMCPRemove(deps, "global", "dry.json"); err != nil {
 		t.Fatalf("runMCPRemove dry-run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(mcpDir, "dry.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "global", "dry.json")); err != nil {
 		t.Fatalf("dry-run should preserve file: %v", err)
 	}
 }
@@ -176,15 +167,14 @@ func TestRunMCPRemove_DryRun_KeepsFile(t *testing.T) {
 func TestRunMCPRemove_Force_DeletesFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	mcpDir := filepath.Join(agentsHome, "mcp", "global")
-	writeMCPConfig(t, mcpDir, "kill.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "mcp", "global", "kill.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeMCPDeps(false, true, false)
 	if err := runMCPRemove(deps, "global", "kill.json"); err != nil {
 		t.Fatalf("runMCPRemove force: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(mcpDir, "kill.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "global", "kill.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed; stat err = %v", err)
 	}
 }

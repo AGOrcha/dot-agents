@@ -8,6 +8,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
@@ -364,9 +365,7 @@ func TestRestoreFromResources_Wrapper(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	resource := filepath.Join(agentsHome, "resources", "proj", "AGENTS.md")
-	os.MkdirAll(filepath.Dir(resource), 0755)
-	os.WriteFile(resource, []byte("# rules"), 0644)
+	testutil.WriteScopeFile(t, agentsHome, "resources", "proj", "AGENTS.md", []byte("# rules"))
 
 	// Should not panic and should perform the same restore as Counted variant.
 	restoreFromResources("proj", tmp, stdAddDeps{})
@@ -622,11 +621,7 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 
 	// Seed a legacy resource file that maps via restoreLegacyResourceFile and
 	// therefore goes through the copyFile seam.
-	resourceFile := filepath.Join(agentsHome, "resources", "p", "AGENTS.md")
-	os.MkdirAll(filepath.Dir(resourceFile), 0755)
-	if err := os.WriteFile(resourceFile, []byte("# rules"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "resources", "p", "AGENTS.md", []byte("# rules"))
 
 	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
 	cfg.AddProject("p", projectPath)
