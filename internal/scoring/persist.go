@@ -22,6 +22,11 @@ type PersistedScore struct {
 	Value         float64                 `yaml:"value"`
 	Band          string                  `yaml:"band"`
 	Breakdown     []PersistedContribution `yaml:"breakdown"`
+	// LinkedTracesToOutcomes is the derived legacy iteration-log marker:
+	// true when verifier.linked_traces names at least one trace ↔ outcome pair.
+	// Computed by DeriveLinkedTracesToOutcomes; populated by BuildPersistedScore.
+	// Omitted from the YAML when the score was written without an IterationRecord.
+	LinkedTracesToOutcomes bool `yaml:"linked_traces_to_outcomes,omitempty"`
 }
 
 // PersistedContribution is one row of the per-signal breakdown as written to disk.
