@@ -4,12 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
+
+// iterFileRE is the strict canonical-iteration-log filename match. The loader
+// uses it to drop files that the broader `iter-*.yaml` glob also captures —
+// most importantly the per-iteration score sidecars persist.go writes as
+// iter-N.score.yaml, which are derived artifacts that must not be re-fed
+// through the parser as iteration logs.
+var iterFileRE = regexp.MustCompile(`^iter-\d+\.yaml$`)
 
 // OptionalBool is a tri-state boolean parsed leniently from the iteration log.
 // The schema specifies boolean|null for the test-pass flags, but real entries
@@ -432,6 +440,9 @@ func LoadIterationLog(dir string) ([]IterationRecord, error) {
 
 	byIter := make(map[int]IterationRecord, len(matches))
 	for _, path := range matches {
+		if !iterFileRE.MatchString(filepath.Base(path)) {
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("scoring: read %s: %w", path, err)

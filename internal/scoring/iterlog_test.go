@@ -236,6 +236,34 @@ func TestLoadIterationLogEmptyDir(t *testing.T) {
 	}
 }
 
+// Score sidecars persisted by persist.go (iter-N.score.yaml) share the
+// iteration-log directory with the canonical iter-N.yaml entries, so they
+// match the broad iter-*.yaml glob. The loader must ignore them — they are
+// derived artifacts, not iteration logs, and parsing them as such was a
+// real regression caught by TestBuildSignalSets after the first dogfood run.
+func TestLoadIterationLogIgnoresScoreSidecars(t *testing.T) {
+	dir := t.TempDir()
+	canonical := filepath.Join(dir, "iter-1.yaml")
+	if err := os.WriteFile(canonical, []byte("schema_version: 2\niteration: 1\n"), 0o644); err != nil {
+		t.Fatalf("write canonical: %v", err)
+	}
+	sidecar := filepath.Join(dir, "iter-1.score.yaml")
+	if err := os.WriteFile(sidecar, []byte("iteration: 1\nrubric_version: 2.0.2\nscored: false\nvalue: 0\nband: unscored\nbreakdown: []\n"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	records, err := LoadIterationLog(dir)
+	if err != nil {
+		t.Fatalf("LoadIterationLog with sidecar present = %v, want nil", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("loaded %d records, want 1 (sidecar must be ignored)", len(records))
+	}
+	if records[0].Iteration != 1 {
+		t.Errorf("loaded iteration = %d, want 1", records[0].Iteration)
+	}
+}
+
 func TestLoadIterationLogReportsBadInput(t *testing.T) {
 	tests := []struct {
 		name string
