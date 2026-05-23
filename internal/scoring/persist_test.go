@@ -297,3 +297,98 @@ func TestWriteIterationScoreNoTempLeftover(t *testing.T) {
 		}
 	}
 }
+
+// A nonexistent target directory makes os.CreateTemp fail, which surfaces as
+// an error through the public WriteIterationScore wrapper. The error message
+// must mention the iteration number so log diagnosis is straightforward.
+func TestWriteIterationScoreErrorOnMissingDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+	_, err := WriteIterationScore(missing, DefaultRubric().Score(SignalSet{Iteration: 1, Verifier: PresentSignal(1.0, "")}))
+	if err == nil {
+		t.Fatal("expected error for missing dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "iter-1") {
+		t.Errorf("error should name the iteration: %v", err)
+	}
+}
+
+// WriteIterationScores returns immediately on the first failure and reports
+// only the paths it managed to write — the caller decides whether to retry
+// or roll back, so we must not swallow partial progress.
+func TestWriteIterationScoresStopsOnFirstError(t *testing.T) {
+	good := t.TempDir()
+	scores := []Score{
+		DefaultRubric().Score(SignalSet{Iteration: 1, Verifier: PresentSignal(1.0, "")}),
+	}
+	// First write into a healthy dir succeeds, then we corrupt the dir name
+	// for the second call.
+	paths, err := WriteIterationScores(good, scores)
+	if err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("seed paths len = %d, want 1", len(paths))
+	}
+
+	// Now request another write into a path that does not exist as a dir.
+	missing := filepath.Join(t.TempDir(), "not-a-dir")
+	scores2 := []Score{
+		DefaultRubric().Score(SignalSet{Iteration: 2, Verifier: PresentSignal(1.0, "")}),
+		DefaultRubric().Score(SignalSet{Iteration: 3, Verifier: PresentSignal(1.0, "")}),
+	}
+	paths2, err := WriteIterationScores(missing, scores2)
+	if err == nil {
+		t.Fatal("expected error for missing dir, got nil")
+	}
+	if len(paths2) != 0 {
+		t.Errorf("got %d paths back, want 0 (nothing should have been written)", len(paths2))
+	}
+}
+
+func TestWriteSessionScoreErrorOnMissingDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+	_, err := WriteSessionScore(missing, SessionScore{SessionID: "sess-err", RubricVersion: "x"})
+	if err == nil {
+		t.Fatal("expected error for missing dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "sess-err") {
+		t.Errorf("error should name the session: %v", err)
+	}
+}
+
+// WriteSessionScores is the bulk session writer. Cover the success path
+// (multiple sessions written in order) and the stop-on-first-error path.
+func TestWriteSessionScoresMany(t *testing.T) {
+	dir := t.TempDir()
+	sessions := []SessionScore{
+		{SessionID: "a", RubricVersion: "1.0.0", Scored: true, Value: 0.6, Band: "fair"},
+		{SessionID: "b", RubricVersion: "1.0.0", Scored: true, Value: 0.8, Band: "good"},
+	}
+	paths, err := WriteSessionScores(dir, sessions)
+	if err != nil {
+		t.Fatalf("WriteSessionScores: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("paths = %d, want 2", len(paths))
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("missing sidecar %q: %v", p, err)
+		}
+	}
+}
+
+func TestWriteSessionScoresStopsOnFirstError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such")
+	sessions := []SessionScore{
+		{SessionID: "a", RubricVersion: "1.0.0"},
+		{SessionID: "b", RubricVersion: "1.0.0"},
+	}
+	paths, err := WriteSessionScores(missing, sessions)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if len(paths) != 0 {
+		t.Errorf("got %d paths, want 0", len(paths))
+	}
+}

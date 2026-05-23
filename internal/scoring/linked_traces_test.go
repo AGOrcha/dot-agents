@@ -133,6 +133,20 @@ func TestWriteIterationScoreWithRecordRoundTrip(t *testing.T) {
 	}
 }
 
+// The augmented writer surfaces the underlying write error path: missing
+// destination dir → os.CreateTemp fails inside writeYAMLAtomic.
+func TestWriteIterationScoreWithRecordErrorOnMissingDir(t *testing.T) {
+	r := DefaultRubric()
+	score := r.Score(SignalSet{Iteration: 5, Verifier: PresentSignal(1.0, "")})
+	_, err := WriteIterationScoreWithRecord(
+		"/this/path/should/never/exist/under/normal/circumstances",
+		score, IterationRecord{Iteration: 5},
+	)
+	if err == nil {
+		t.Fatal("expected error for missing dir, got nil")
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
