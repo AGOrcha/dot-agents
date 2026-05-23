@@ -30,4 +30,14 @@ verification_strategy: >-
   Windows (no t.Skip log) and the assertion semantics match the POSIX
   branch. For sites kept as platform-only, the in-line comment is the
   artifact.
+
+  Adjacent debt also tracked here (carry-overs surfaced by SonarCloud on
+  the R1 PR but not in R1's write scope):
+    - internal/scoring/objective_checks.go:164 scanToolUseFile —
+      go:S3776 cognitive complexity 17 (limit 15).
+    - internal/scoring/signal_iterlog_test.go:409 — go:S3776 cog 17.
+    - internal/scoring/iterlog_test.go:80 — go:S3776 cog 16.
+  All three are from earlier R1 tasks (objective-checks /
+  signals-iterlog); refactor as a follow-up slice or alongside the
+  perms migrations.
 current_focus_task: ""
