@@ -10,11 +10,10 @@ import (
 )
 
 // The behaviour the helper exists to guarantee: after MakeFileUnreadable, the
-// same os.Open call the test target uses returns an error. The test runs on
-// every platform we ship for; CI on ubuntu-latest, macos-latest, and
-// windows-latest all exercise the same assertion through the platform-specific
-// implementation under the build tags.
-func TestMakeFileUnreadableBlocksOsOpen(t *testing.T) {
+// file's contents cannot be read. POSIX denies at open; Windows denies at
+// read. Asserting via os.ReadFile (which does both) is the cross-platform
+// contract — see MakeFileUnreadable's godoc.
+func TestMakeFileUnreadableBlocksReads(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secret.txt")
 	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
@@ -23,13 +22,12 @@ func TestMakeFileUnreadableBlocksOsOpen(t *testing.T) {
 
 	testutil.MakeFileUnreadable(t, path)
 
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err == nil {
-		_ = f.Close()
-		t.Fatal("os.Open succeeded after MakeFileUnreadable; expected denial")
+		t.Fatalf("os.ReadFile succeeded after MakeFileUnreadable; expected denial. Got: %q", data)
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("os.Open reported file-not-exist, but the fixture is still on disk: %v", err)
+		t.Fatalf("os.ReadFile reported file-not-exist, but the fixture is still on disk: %v", err)
 	}
 }
 
@@ -47,8 +45,8 @@ func TestMakeFileUnreadableCleansUp(t *testing.T) {
 
 	t.Run("denied", func(sub *testing.T) {
 		testutil.MakeFileUnreadable(sub, path)
-		if _, err := os.Open(path); err == nil {
-			sub.Fatal("os.Open succeeded; expected denial during subtest")
+		if _, err := os.ReadFile(path); err == nil {
+			sub.Fatal("os.ReadFile succeeded; expected denial during subtest")
 		}
 	})
 

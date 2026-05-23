@@ -353,25 +353,20 @@ func TestScoreRunSubcommandExecute(t *testing.T) {
 }
 
 // runScoreRun falls back to os.Getwd when opts.repoDir is empty. Drive that
-// branch by setting cwd to a non-git tempdir; we expect the build-signals
-// error to surface (no git repo at cwd) instead of a Getwd error.
+// branch by setting cwd (via t.Chdir, which restores the prior cwd at
+// cleanup time and unblocks Windows TempDir teardown) to a non-git tempdir;
+// we expect the build-signals error to surface (no git repo at cwd) instead
+// of a Getwd error.
 func TestRunScoreRunUsesCwdWhenRepoDirEmpty(t *testing.T) {
-	prior, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prior) })
 	dir := t.TempDir()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
+	t.Chdir(dir)
 	// Need an iter-log entry so we get past the empty short-circuit and into
 	// BuildSignalSets, which is what exercises the cwd-as-repoDir branch.
 	if err := os.WriteFile(filepath.Join(dir, "iter-1.yaml"),
 		[]byte("schema_version: 2\niteration: 1\ndate: \"2026-04-01\"\ntask_id: t1\n"), 0o644); err != nil {
 		t.Fatalf("seed iter: %v", err)
 	}
-	err = runScoreRun(&bytes.Buffer{}, scoreRunOpts{iterLogDir: dir})
+	err := runScoreRun(&bytes.Buffer{}, scoreRunOpts{iterLogDir: dir})
 	if err == nil {
 		t.Fatal("expected build-signals error from non-git cwd, got nil")
 	}
