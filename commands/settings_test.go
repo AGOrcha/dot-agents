@@ -6,21 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestRunSettingsList_ListsSettings(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	settingsDir := filepath.Join(agentsHome, "settings", "global")
-	if err := os.MkdirAll(settingsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	settingsContent := `{"editor.fontSize": 14}`
-	if err := os.WriteFile(filepath.Join(settingsDir, "cursor.json"), []byte(settingsContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "settings", "global", "cursor.json", []byte(`{"editor.fontSize": 14}`))
 
 	if err := runSettingsList("global"); err != nil {
 		t.Fatalf("runSettingsList: %v", err)
@@ -57,16 +52,9 @@ func TestRunSettingsList_MissingScope(t *testing.T) {
 func TestRunSettingsShow_ReadsSettingsFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	settingsDir := filepath.Join(agentsHome, "settings", "global")
-	if err := os.MkdirAll(settingsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	settingsContent := `{"theme": "dark"}`
-	if err := os.WriteFile(filepath.Join(settingsDir, "claude-code.json"), []byte(settingsContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "settings", "global", "claude-code.json", []byte(`{"theme": "dark"}`))
 
 	if err := runSettingsShow("global", "claude-code.json"); err != nil {
 		t.Fatalf("runSettingsShow: %v", err)
@@ -102,16 +90,6 @@ func TestFindSettingsSpec_EmptyName(t *testing.T) {
 	}
 }
 
-func writeSettings(t *testing.T, dir, name, body string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func makeSettingsDeps(dryRun, yes, force bool) settingsDeps {
 	return settingsDeps{
 		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
@@ -123,7 +101,7 @@ func makeSettingsDeps(dryRun, yes, force bool) settingsDeps {
 func TestFindSettingsSpec_Found(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	writeSettings(t, filepath.Join(agentsHome, "settings", "global"), "cursor.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "settings", "global", "cursor.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	spec, err := findSettingsSpec(agentsHome, "global", "cursor.json")
@@ -159,15 +137,14 @@ func TestFindSettingsSpec_NotFoundHintsAtList(t *testing.T) {
 func TestRunSettingsRemove_DryRun_KeepsFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	settingsDir := filepath.Join(agentsHome, "settings", "global")
-	writeSettings(t, settingsDir, "cursor.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "settings", "global", "cursor.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeSettingsDeps(true, false, false)
 	if err := runSettingsRemove(deps, "global", "cursor.json"); err != nil {
 		t.Fatalf("runSettingsRemove dry-run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(settingsDir, "cursor.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(agentsHome, "settings", "global", "cursor.json")); err != nil {
 		t.Fatalf("dry-run should preserve file: %v", err)
 	}
 }
@@ -175,15 +152,14 @@ func TestRunSettingsRemove_DryRun_KeepsFile(t *testing.T) {
 func TestRunSettingsRemove_Force_DeletesFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	settingsDir := filepath.Join(agentsHome, "settings", "global")
-	writeSettings(t, settingsDir, "cursor.json", "{}")
+	testutil.WriteScopeFile(t, agentsHome, "settings", "global", "cursor.json", []byte("{}"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeSettingsDeps(false, true, false)
 	if err := runSettingsRemove(deps, "global", "cursor.json"); err != nil {
 		t.Fatalf("runSettingsRemove force: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(settingsDir, "cursor.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(agentsHome, "settings", "global", "cursor.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed; stat err = %v", err)
 	}
 }
