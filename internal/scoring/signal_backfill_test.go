@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -459,6 +460,9 @@ func TestBackfillIterationsMultipleDirs(t *testing.T) {
 func TestBackfillIterationsScanError(t *testing.T) {
 	// An unreadable .jsonl file inside a real transcript dir surfaces an error.
 	// The fixture is built here (not committed) so its 0o000 mode is reliable.
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes differ on windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root; file-permission errors are not enforced")
 	}
