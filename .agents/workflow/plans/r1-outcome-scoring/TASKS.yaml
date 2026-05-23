@@ -27,12 +27,12 @@ tasks:
       notes: 'Map already-captured data into the rubric typed input signals: platform-session-integration token/cache telemetry, .ralph-loop-streams loop metrics, and the iteration log verifier / merge-back / scope-adherence / test-outcome fields. No new capture -- the inputs already exist.'
       app_type: go-cli
     - id: objective-checks
-      title: Replace rubber-stamped self-reports with objective checks
+      title: Drop dead self-reports, tri-state the rest, wire objective checks
       status: in_progress
       depends_on:
         - signals
       blocks:
-        - scorer
+        - structured-claims
       owner: dot-agents
       write_scope:
         - internal/scoring/objective_checks.go
@@ -42,8 +42,51 @@ tasks:
         - internal/scoring/signals_test.go
         - docs/OUTCOME_SCORING_RUBRIC.md
         - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log.go
       verification_required: true
-      notes: Boolean-effectiveness analysis (iter-66 dogfood) showed read_loop_state, committed_after_tests, and ran_cli_command are ~98% true — rubber-stamped self-reports, no information. tdd_refresh_performed is 0/22 (dead). stayed_under_10_files is redundant with files_changed. Build objective checks from transcripts + git topology; wire them into the integrity track in place of the dead self-reports; deprecate the dead fields in the iteration-log schema.
+      notes: >-
+        Half of the self_assessment schema rework. DROP five dead/arbitrary
+        fields — tdd_refresh_performed (0/22 true), stayed_under_10_files
+        (arbitrary threshold; correction_pressure already captures overload
+        symptoms), read_loop_state, committed_after_tests, ran_cli_command
+        (~98% true — rubber-stamped). TRI-STATE the four keepers
+        (one_item_only, aligned_with_canonical_tasks, no_destructive_commands,
+        scoped_tests_to_write_scope) by removing them from "required" — absent
+        = unmeasured, distinct from false. WIRE the objective checks
+        (ranCliCommand, readLoopState, committedAfterTests) into the integrity
+        track to replace the dropped trio; DROP filesUnder10 from
+        objective_checks.go (the arbitrary-threshold problem). The structured-
+        list expansions live in the sibling structured-claims task.
+      app_type: go-cli
+    - id: structured-claims
+      title: Expand boolean claims into named-artifact lists
+      status: pending
+      depends_on:
+        - objective-checks
+      blocks:
+        - scorer
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log.go
+        - internal/scoring/iterlog.go
+        - internal/scoring/iterlog_test.go
+        - internal/scoring/signal_iterlog.go
+        - internal/scoring/signal_iterlog_test.go
+        - internal/scoring/signals.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: >-
+        Second half of the self_assessment schema rework. DROP two redundant
+        booleans — exercised_new_scenario (already covered by scenario_tags) and
+        tests_used_sandbox (universal Go practice, no signal). EXPAND two
+        booleans into named-artifact lists so the claim becomes verifiable:
+        tests_positive_and_negative → tests_added_by_kind: [{name, kind}] with
+        kind in positive | negative | edge | regression, and
+        linked_traces_to_outcomes → linked_traces: [{trace_ref, outcome_ref}].
+        The named items must be checkable against the diff / verification
+        artifacts — a named test must exist, a named trace_ref must resolve.
+        Backward-compatible reader; the 66 salvaged entries still parse.
       app_type: go-cli
     - id: scorer
       title: Compute the explainable outcome score
@@ -52,6 +95,7 @@ tasks:
         - rubric
         - signals
         - objective-checks
+        - structured-claims
       blocks:
         - persist
       owner: dot-agents
