@@ -17,6 +17,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 // workflowTestJSON toggles JSON output in workflow tests (replaces commands.Flags.JSON for isolated workflow command runs).
@@ -818,12 +819,18 @@ func executeWorkflowCommandOutput(t *testing.T, repo string, args ...string) str
 }
 
 // initWorkflowTestRepoWithCommit creates a repo with a second commit so HEAD~1 exists.
+// Mirrors the execabs+test-identity pattern used by testutil.InitGitRepo (the helper
+// underlying initWorkflowTestRepo); we cannot call into testutil here because that
+// helper does init+single-commit and we need to layer an additional commit onto the
+// existing repo it produces.
 func initWorkflowTestRepoWithCommit(t *testing.T) string {
 	t.Helper()
 	repo := initWorkflowTestRepo(t)
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		// execabs matches the project-wide go:S4036 hardening adopted by
+		// testutil.InitGitRepo and commands/workflow/*.go production code.
+		cmd := execabs.Command("git", append([]string{"-C", repo}, args...)...)
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=Test",
 			"GIT_AUTHOR_EMAIL=test@example.com",
