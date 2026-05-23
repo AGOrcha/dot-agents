@@ -1,0 +1,69 @@
+schema_version: 1
+id: del-t5-extract-commands-root-tests-1779573181
+parent_plan_id: go-test-fixture-extraction
+parent_task_id: t5-extract-commands-root-tests
+title: Refactor commands/*_test.go (root) to use internal/testutil
+summary: Delegated from plan Extract internal/testutil to clear Cluster D test-fixture duplication
+write_scope:
+    - commands/refresh_test.go
+    - commands/import_test.go
+    - commands/mcp_settings_test.go
+    - commands/rules_test.go
+success_criteria: |-
+    Tier: T2 (compound — four files).
+
+    commands/refresh_test.go is a high-density single file
+    (32.1%, 114 dup lines) with substantial fixture overlap
+    with refresh.go's setup. commands/mcp_settings_test.go
+    (44.2%, 46 dup lines) is the highest-density per-file
+    offender — its fixture pattern likely mirrors
+    internal/platform/mcp_settings_test.go and may share a
+    helper.
+
+    One commit per file. Hard test per commit: go test ./commands/.
+
+    ISP routing:
+      mode: serialized single worker (4 files sequentially)
+      verifier: smoke (go test ./commands/)
+      review: code review per file
+      bundle-context (if fanout): T1's signature table, T2's
+                                   internal/testutil API
+      output contract: ~230 dup lines removed
+
+    ---
+    Fanout briefing (2026-05-23 — orchestrator re-pickup):
+
+    Pre-existing in_progress status carries no in-flight worker,
+    no branch, no bundle; treat as a fresh spawn.
+
+    Required reads BEFORE touching any target file:
+      1. internal/testutil/testutil.go — the canonical helper API
+         shipped by t2 (NewTempProjectDir, fixture seeders, etc.).
+      2. .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml
+         — the immediately preceding sibling bundle (t4, PR #44
+         MERGED) — same plan, same refactor pattern, same
+         forbidden_scope shape, same verification commands. Mirror
+         its commit-per-file rhythm.
+
+    Worktree: create at .agents/worktrees/t5 off master (matches
+    current repo convention; .claude/worktrees/ was cleaned up
+    2026-05-23 and is no longer used).
+
+    Branch: t5-extract-commands-root-tests off master. Fresh
+    branch, NOT stacked on any other plan's branch.
+
+    One-PR-in-flight: open PR after all 4 commits land on the
+    branch; do not merge — user gates.
+
+    Touch tests only — no production .go changes. If you find a
+    helper in internal/testutil that would benefit from a small
+    additive extension to absorb a duplicated pattern, STOP and
+    report (out of write_scope; do not silently modify the
+    shared package). Same rule for production code: report, do
+    not fix-and-pad.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t5-worker
+status: completed
+created_at: "2026-05-23T21:53:01Z"
+updated_at: "2026-05-23T22:25:04Z"

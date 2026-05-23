@@ -1,0 +1,112 @@
+schema_version: 1
+task_id: t5-extract-commands-root-tests
+plan_id: go-test-fixture-extraction
+commit_sha: 25115529d5c2bcf4bcb43a74f6622330b10d2544
+worktree: .agents/worktrees/t5
+branch: t5-extract-commands-root-tests
+write_scope_touched:
+  - commands/rules_test.go
+  - commands/mcp_test.go
+  - commands/settings_test.go
+  - commands/refresh_test.go
+write_scope_not_touched:
+  - commands/import_test.go
+ready_for_verification: true
+tests_unchanged_justified: false
+impl_notes: |-
+  Tests-only mechanical refactor of three of four write_scope files to call
+  internal/testutil.WriteScopeFile in place of inline MkdirAll+WriteFile or
+  per-file aliased helpers (writeRulesRule, writeSettings).
+
+  Commits (in order):
+    1. 6bf2de22 commands/rules_test  -16 LOC; removed writeRulesRule.
+    2. 036f90e6 commands/mcp_test + commands/settings_test  -34 LOC; removed
+       writeSettings; retained writeMCPConfig (no aliasing — same body) because
+       commands/coverage_test.go (out of write_scope) still calls it.
+    3. 25115529 commands/refresh_test  -5 LOC; only two seed sites fit
+       WriteScopeFile cleanly.
+
+  No commit for commands/import_test.go — none of the remaining dup patterns
+  fit the current testutil API and bundle policy forbids extending it.
+  Details under findings.
+
+  All verification commands ran clean after each commit and at HEAD:
+    - go build ./...
+    - go test ./commands/ -race -count=1 -timeout 240s    (PASS, ~70s)
+    - go vet ./commands/                                  (clean)
+    - gofmt -l commands/{rules,mcp,settings,refresh,import}_test.go (empty)
+findings:
+  - severity: high
+    surface: bundle-authoring
+    summary: |-
+      Bundle write_scope lists commands/mcp_settings_test.go which does
+      not exist. commands/ splits the implementation into mcp_test.go +
+      settings_test.go (the internal/platform layout where mcp_settings.go
+      is a single file does not extend to commands/). I treated both files
+      as covering the typo'd slot. Recommend the orchestrator amend the
+      bundle template or surface this back to plan authoring.
+  - severity: medium
+    surface: internal/testutil
+    summary: |-
+      The dominant duplication pattern across commands/ root tests is
+      not WriteScopeFile-shaped: it is the 5-line setup preamble
+      "tmp := t.TempDir(); t.Setenv(HOME, tmp); agentsHome := .../.agents;
+      os.MkdirAll(agentsHome, 0755); t.Setenv(AGENTS_HOME, agentsHome)"
+      repeated ~17x in refresh_test and ~10x in import_test. No existing
+      testutil helper covers it (NewTempProject overshoots; it also mints
+      projectPath + writes .agentsrc.json + adds a Source). Out of scope
+      for t5 to extend testutil; surfaced for a potential t5.5 helper-
+      extension bundle before t6/t7 hit the same pattern.
+  - severity: medium
+    surface: internal/testutil
+    summary: |-
+      testutil.WriteScopeFile takes a single basename; several remaining
+      duplications under agentsHome/resources/<project>/... use a nested
+      sub-path (e.g. ".github/hooks/pre-tool.json", or the seed loop in
+      refresh_test::TestRestoreFromResourcesCounted_RestoresDirectoryBuckets).
+      A WriteScopeFilePath(t, agentsHome, bucket, scope, relPath, content)
+      variant would absorb 3+ more sites across refresh_test and import_test.
+      Same scope rationale as above: flagged not fixed.
+  - severity: low
+    surface: commands/coverage_test.go (out of scope here)
+    summary: |-
+      writeMCPConfig is retained in commands/mcp_test.go solely because
+      commands/coverage_test.go (out of write_scope) still calls it.
+      When coverage_test.go is migrated to testutil.WriteScopeFile (likely
+      under a t5-followup or t8 sweep), writeMCPConfig can be deleted.
+  - severity: low
+    surface: import_test.go
+    summary: |-
+      The local helpers writeFile (32 callers) and writeRelinkCodexAgentFixture
+      (3 callers, custom body asserted by TestRelink_RunsSharedTargetProjection)
+      already factor the in-file pattern. A generic testutil.WriteFile and a
+      content-parameterized WriteCanonicalAgent would absorb them, but again
+      these need testutil extension. No mechanical migration is currently
+      available for import_test.go and no commit was made for it.
+duplication_deltas:
+  commands/rules_test.go:
+    before_loc: 308
+    after_loc: 285
+    helper_removed: writeRulesRule
+    callers_migrated: 5
+  commands/mcp_test.go:
+    before_loc: 208
+    after_loc: 198
+    helper_removed: none (writeMCPConfig retained for external caller)
+    callers_migrated: 4
+  commands/settings_test.go:
+    before_loc: 207
+    after_loc: 183
+    helper_removed: writeSettings
+    callers_migrated: 5
+  commands/refresh_test.go:
+    before_loc: 832
+    after_loc: 827
+    helper_removed: none
+    callers_migrated: 2
+  commands/import_test.go:
+    before_loc: 2659
+    after_loc: 2659
+    helper_removed: none
+    callers_migrated: 0
+    notes: no fit with current testutil API; see findings
