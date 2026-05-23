@@ -39,10 +39,13 @@ type IterlogSignals struct {
 	// exists.
 	Verifier SignalValue
 
-	// VerifierClaimed is the self-reported verification diligence: a [0,1]
-	// composite of the SelfAssessment flags ran_cli_command,
-	// committed_after_tests, and linked_traces_to_outcomes. Absent when the
-	// self_assessment block is entirely zero-valued.
+	// VerifierClaimed is the self-reported verification diligence — at v2.0.0
+	// it is read from linked_traces_to_outcomes alone, after the
+	// boolean-effectiveness analysis showed ran_cli_command and
+	// committed_after_tests were rubber-stamped (~98% true, no information).
+	// The objective replacements live in IterationObjectives; this field will
+	// be retired once structured-claims expands linked_traces_to_outcomes into
+	// a named-trace list.
 	VerifierClaimed SignalValue
 
 	// LandedClaimed is the self-reported landing outcome: the
@@ -182,22 +185,28 @@ func verifierStatusScore(status string) (float64, bool) {
 	}
 }
 
-// extractVerifierClaimed composites the three self-reported verification
-// discipline flags into a [0,1] sub-score.
+// extractVerifierClaimed reads the surviving self-reported verification flag —
+// linked_traces_to_outcomes — into a sub-score. ran_cli_command and
+// committed_after_tests are no longer read (the objective_checks.go transcript
+// scanners replace them); they remain on the SelfAssessment struct only to
+// parse historical entries.
 func extractVerifierClaimed(rec IterationRecord) SignalValue {
 	sa := rec.Impl.SelfAssessment
-	if isZeroSelfAssessment(sa) {
-		return AbsentSignal("self_assessment block is entirely zero-valued")
-	}
-	flags := []bool{sa.RanCliCommand, sa.CommittedAfterTests, sa.LinkedTracesToOutcomes}
-	var set int
-	for _, f := range flags {
-		if f {
-			set++
+	// Pick up the verifier-block self_assessment too — v2's
+	// linked_traces_to_outcomes lives there, not on the impl block.
+	linked := sa.LinkedTracesToOutcomes
+	for _, v := range rec.Verifiers {
+		if v.SelfAssessment.LinkedTracesToOutcomes {
+			linked = true
 		}
 	}
-	return PresentSignal(float64(set)/float64(len(flags)),
-		formatFraction("verification-diligence flags set", set, len(flags)))
+	if !linked && isZeroSelfAssessment(sa) {
+		return AbsentSignal("no verification self-report")
+	}
+	if linked {
+		return PresentSignal(1.0, "linked_traces_to_outcomes: true")
+	}
+	return PresentSignal(0.0, "linked_traces_to_outcomes: false")
 }
 
 // extractLandedClaimed combines the self-reported persistence note with the

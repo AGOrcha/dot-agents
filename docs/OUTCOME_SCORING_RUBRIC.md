@@ -1,7 +1,7 @@
 # Outcome-Scoring Rubric
 
 **Status:** active
-**Rubric version:** 2.0.0
+**Rubric version:** 2.0.1
 **Owners:** dot-agents
 **Go source:** [`internal/scoring/rubric.go`](../internal/scoring/rubric.go)
 **Related:** [`agent-run-scoring-observability-platform.md`](../.agents/proposals/agent-run-scoring-observability-platform.md) (R1, the requirement this rubric serves); [ADR-0004](adr/0004-execution-telemetry-schema-seed.md) (the execution-telemetry pillar the input signals come from); [`workflow-iter-log.schema.json`](../commands/workflow/static/workflow-iter-log.schema.json) (the iteration-log schema the signals are read from)
@@ -67,6 +67,37 @@ the numeric outcome score — the score answers "was the run good?", the
 integrity track answers "was the self-report honest?", and conflating
 them would muddy both. Signals marked `TwoWay` in `rubric.go` are the
 ones that feed it.
+
+## Objective process-discipline checks
+
+A first dogfood-driven evaluation of the iteration-log self-assessment
+booleans (`iter-66`) found three of them rubber-stamped — `read_loop_state`,
+`committed_after_tests`, and `ran_cli_command` were each true in ~98% of
+historical entries, carrying essentially no information. Two more were
+dead weight: `tdd_refresh_performed` was true in 0/22 entries, and
+`stayed_under_10_files` enforced an arbitrary threshold that
+`correction_pressure` already captures from real overload symptoms.
+
+These five fields are **deprecated** in the iteration-log schema. The
+three rubber-stamped facts are now computed *objectively* from the agent
+transcripts in `internal/scoring/objective_checks.go`:
+
+- `ranCliCommand` — was a Bash tool actually invoked in the iteration window
+- `committedAfterTests` — did a test command run in the window before the commit
+- `readLoopState` — was `loop-state.md` actually read in the window
+
+These observations live on the assembled `SignalSet.Objective`. They
+surface alongside the score as a record of what actually happened — but
+because their self-report counterparts have been removed from the
+schema, they do **not** enter the integrity track. There is nothing to
+pair against.
+
+Four self_assessment booleans survive the evaluation: `one_item_only`
+(the only flag with real outcome lift, +0.23 on scope),
+`aligned_with_canonical_tasks`, `no_destructive_commands`, and
+`scoped_tests_to_write_scope`. They are **tri-stated** in the schema —
+their type is `["boolean", "null"]`, so absent stays distinct from a
+reported false, and the scorer stops treating "unmeasured" as "no."
 
 ## Input signals
 
@@ -272,6 +303,10 @@ never recorded.
 
 ## Changelog
 
+- **2.0.1** — Documents the objective process-discipline checks layer and
+  the iteration-log self_assessment deprecations from the first
+  dogfood-driven boolean-effectiveness evaluation. Signal set, weights,
+  and combination unchanged — scores remain comparable with 2.0.0.
 - **2.0.0** — Signal set reworked after analysis of the salvaged data.
   `merge_back` (recorded in 1/65 entries) replaced by `landed`, scored
   from objective commit-survival. New `correction_pressure` signal.

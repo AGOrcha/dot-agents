@@ -137,22 +137,30 @@ type ReviewBlock struct {
 // SelfAssessment is the superset of agent-reported discipline flags. v1 carries
 // them all in one flat block; v2 splits them across the impl and verifier
 // blocks. The integrity track reads claims from here.
+//
+// Surviving keeper fields are OptionalBool, so absent in the YAML stays
+// distinct from a reported false — the boolean-effectiveness analysis showed
+// that conflating the two was poisoning their information content. The fields
+// the analysis identified as dead or rubber-stamped (ReadLoopState,
+// CommittedAfterTests, RanCliCommand, StayedUnder10Files, TddRefreshPerformed)
+// are kept as bool only so historical v1 entries still parse; the extractor
+// no longer reads them, the objective_checks.go transcript scanners do.
 type SelfAssessment struct {
-	ReadLoopState                 bool
-	OneItemOnly                   bool
-	CommittedAfterTests           bool
-	AlignedWithCanonicalTasks     bool
+	ReadLoopState                 bool         // deprecated — objective check replaces
+	OneItemOnly                   OptionalBool // kept (best scope-lift); tri-state
+	CommittedAfterTests           bool         // deprecated — objective check replaces
+	AlignedWithCanonicalTasks     OptionalBool // kept; tri-state
 	PersistedViaWorkflowCommands  string
-	RanCliCommand                 bool
+	RanCliCommand                 bool // deprecated — objective check replaces
 	ExercisedNewScenario          bool
 	TestsPositiveAndNegative      bool
 	TestsUsedSandbox              bool
 	CliProducedActionableFeedback string
 	LinkedTracesToOutcomes        bool
-	StayedUnder10Files            bool
-	NoDestructiveCommands         bool
-	ScopedTestsToWriteScope       bool
-	TddRefreshPerformed           bool
+	StayedUnder10Files            bool         // deprecated — arbitrary threshold
+	NoDestructiveCommands         OptionalBool // kept; tri-state
+	ScopedTestsToWriteScope       OptionalBool // kept; tri-state
+	TddRefreshPerformed           bool         // deprecated — 0/22 true historically
 }
 
 // --- raw YAML shapes -------------------------------------------------------
@@ -166,21 +174,21 @@ type schemaProbe struct {
 // impl block, and v2's verifier block are all subsets of these keys, so one
 // shape parses all three — absent keys simply stay zero.
 type rawSelfAssessment struct {
-	ReadLoopState                 bool   `yaml:"read_loop_state"`
-	OneItemOnly                   bool   `yaml:"one_item_only"`
-	CommittedAfterTests           bool   `yaml:"committed_after_tests"`
-	AlignedWithCanonicalTasks     bool   `yaml:"aligned_with_canonical_tasks"`
-	PersistedViaWorkflowCommands  string `yaml:"persisted_via_workflow_commands"`
-	RanCliCommand                 bool   `yaml:"ran_cli_command"`
-	ExercisedNewScenario          bool   `yaml:"exercised_new_scenario"`
-	TestsPositiveAndNegative      bool   `yaml:"tests_positive_and_negative"`
-	TestsUsedSandbox              bool   `yaml:"tests_used_sandbox"`
-	CliProducedActionableFeedback string `yaml:"cli_produced_actionable_feedback"`
-	LinkedTracesToOutcomes        bool   `yaml:"linked_traces_to_outcomes"`
-	StayedUnder10Files            bool   `yaml:"stayed_under_10_files"`
-	NoDestructiveCommands         bool   `yaml:"no_destructive_commands"`
-	ScopedTestsToWriteScope       bool   `yaml:"scoped_tests_to_write_scope"`
-	TddRefreshPerformed           bool   `yaml:"tdd_refresh_performed"`
+	ReadLoopState                 bool         `yaml:"read_loop_state"`
+	OneItemOnly                   OptionalBool `yaml:"one_item_only"`
+	CommittedAfterTests           bool         `yaml:"committed_after_tests"`
+	AlignedWithCanonicalTasks     OptionalBool `yaml:"aligned_with_canonical_tasks"`
+	PersistedViaWorkflowCommands  string       `yaml:"persisted_via_workflow_commands"`
+	RanCliCommand                 bool         `yaml:"ran_cli_command"`
+	ExercisedNewScenario          bool         `yaml:"exercised_new_scenario"`
+	TestsPositiveAndNegative      bool         `yaml:"tests_positive_and_negative"`
+	TestsUsedSandbox              bool         `yaml:"tests_used_sandbox"`
+	CliProducedActionableFeedback string       `yaml:"cli_produced_actionable_feedback"`
+	LinkedTracesToOutcomes        bool         `yaml:"linked_traces_to_outcomes"`
+	StayedUnder10Files            bool         `yaml:"stayed_under_10_files"`
+	NoDestructiveCommands         OptionalBool `yaml:"no_destructive_commands"`
+	ScopedTestsToWriteScope       OptionalBool `yaml:"scoped_tests_to_write_scope"`
+	TddRefreshPerformed           bool         `yaml:"tdd_refresh_performed"`
 }
 
 func (r rawSelfAssessment) normalize() SelfAssessment {

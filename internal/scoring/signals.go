@@ -23,6 +23,13 @@ type SignalSet struct {
 	// of its claimed / observed sides present. It is a parallel output — it
 	// never affects the numeric score.
 	Integrity []IntegrityObservation
+
+	// Objective carries the transcript-derived process-discipline checks that
+	// replaced the rubber-stamped self_assessment booleans
+	// (read_loop_state / committed_after_tests / ran_cli_command). These have
+	// no self-reported counterpart in the current schema, so they surface as
+	// observational facts alongside the score rather than as integrity pairs.
+	Objective IterationObjectives
 }
 
 // Value returns the SignalValue for a rubric signal ID, so the scorer can walk
@@ -138,16 +145,16 @@ func integrityObservations(rec IterationRecord, il IterlogSignals, gs GitSignals
 	return obs
 }
 
-// AssembleSignalSet joins the three extractor partials for one iteration into
-// the rubric's typed input set. It is pure — the scorer task consumes its
-// output.
+// AssembleSignalSet joins the extractor partials for one iteration into the
+// rubric's typed input set. It is pure — the scorer task consumes its output.
 //
 // landed and token_efficiency are objective-only. verifier and tests come from
 // the iteration log and its verification artifacts. scope prefers the objective
 // git measurement and falls back to the self-reported scope_note.
 // correction_pressure is composed from retries, user corrections, and the
-// transcript error rate.
-func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals) SignalSet {
+// transcript error rate. The IterationObjectives are recorded as observational
+// facts on the result; they do not enter the score directly.
+func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals, obj IterationObjectives) SignalSet {
 	return SignalSet{
 		Iteration:          rec.Iteration,
 		Landed:             gs.LandedObserved,
@@ -157,6 +164,7 @@ func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf
 		Scope:              coalesce(gs.ScopeObserved, il.ScopeClaimed),
 		TokenEfficiency:    bf.TokenEfficiency,
 		Integrity:          integrityObservations(rec, il, gs),
+		Objective:          obj,
 	}
 }
 
@@ -182,6 +190,11 @@ func BuildSignalSets(iterLogDir, repoDir string, transcriptDirs ...string) ([]Si
 		bfByIter[b.Iteration] = b
 	}
 
+	// resolveWindows is the same per-iteration commit-windowing the backfill
+	// uses; reusing it keeps the objective-check scans aligned with the token
+	// scans (same window, same iteration boundaries).
+	windows := resolveWindows(records, repoDir)
+
 	sets := make([]SignalSet, 0, len(records))
 	for _, rec := range records {
 		il := ExtractIterlogSignals(rec, repoDir)
@@ -189,7 +202,8 @@ func BuildSignalSets(iterLogDir, repoDir string, transcriptDirs ...string) ([]Si
 		if err != nil {
 			return nil, fmt.Errorf("scoring: git signals for iteration %d: %w", rec.Iteration, err)
 		}
-		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration]))
+		obj := ExtractIterationObjectives(rec, windows[rec.Iteration], transcriptDirs...)
+		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration], obj))
 	}
 	return sets, nil
 }

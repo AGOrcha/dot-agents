@@ -3,7 +3,6 @@ package scoring
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,14 +10,16 @@ import (
 )
 
 // IterationObjectives carries facts about an iteration checked objectively
-// from transcripts and git stats, in place of the rubber-stamped
-// self_assessment booleans the boolean-effectiveness analysis (iter-66
-// dogfood) showed carried no information.
+// from the agent transcripts, in place of the rubber-stamped self_assessment
+// booleans the boolean-effectiveness analysis (iter-66 dogfood) showed carried
+// no information.
 //
 // Each entry is a SignalValue — Present with a 0/1 sub-score for a checked
-// fact, Absent when the underlying evidence (transcript window, diff stats)
-// was not available. The integrity track pairs these against the agent's
-// self-reports.
+// fact, Absent when the transcript window had no coverage. These observations
+// surface alongside the score as a parallel record of process discipline;
+// they do not enter the numeric score directly. The self-report counterparts
+// have been removed from the schema, so there is nothing to pair against in
+// the integrity track.
 type IterationObjectives struct {
 	// RanCliCommand: did the agent actually invoke a CLI tool in the window.
 	RanCliCommand SignalValue
@@ -27,33 +28,20 @@ type IterationObjectives struct {
 	CommittedAfterTests SignalValue
 	// ReadLoopState: was loop-state.md read in the window.
 	ReadLoopState SignalValue
-	// FilesUnder10: did the iteration's commit touch ≤10 files. Derived from
-	// rec.FilesChanged — the iteration log already records this objectively,
-	// so the stayed_under_10_files self-report is redundant.
-	FilesUnder10 SignalValue
 }
 
 // ExtractIterationObjectives runs every objective check for one iteration.
 // window scopes the transcript scans (use the backfill's IterationWindow);
 // empty transcriptDirs leave the transcript-derived signals absent.
-func ExtractIterationObjectives(rec IterationRecord, window IterationWindow, transcriptDirs ...string) IterationObjectives {
+//
+// The rec argument is retained for future objective checks that need diff
+// stats or other iteration-log facts; the current set is transcript-only.
+func ExtractIterationObjectives(_ IterationRecord, window IterationWindow, transcriptDirs ...string) IterationObjectives {
 	return IterationObjectives{
 		RanCliCommand:       ranCliCommand(window, transcriptDirs),
 		ReadLoopState:       readLoopState(window, transcriptDirs),
 		CommittedAfterTests: committedAfterTests(window, transcriptDirs),
-		FilesUnder10:        filesUnder10(rec),
 	}
-}
-
-// filesUnder10 is the objective check for stayed_under_10_files.
-func filesUnder10(rec IterationRecord) SignalValue {
-	if rec.FilesChanged == 0 {
-		return AbsentSignal("no diff stats")
-	}
-	if rec.FilesChanged <= 10 {
-		return PresentSignal(1.0, fmt.Sprintf("%d files changed", rec.FilesChanged))
-	}
-	return PresentSignal(0.0, fmt.Sprintf("%d files changed (over 10)", rec.FilesChanged))
 }
 
 // ranCliCommand returns 1.0 if the window contains any Bash tool_use, 0.0 if

@@ -238,6 +238,10 @@ func TestVerifierArtifactAbsolutePathRejected(t *testing.T) {
 }
 
 // --- VerifierClaimed -------------------------------------------------------
+//
+// After the objective-checks rework VerifierClaimed reads only
+// linked_traces_to_outcomes — ran_cli_command and committed_after_tests were
+// dropped from the schema because they were rubber-stamped at ~98% true.
 
 func TestVerifierClaimed(t *testing.T) {
 	t.Run("zero self-assessment is absent", func(t *testing.T) {
@@ -245,30 +249,28 @@ func TestVerifierClaimed(t *testing.T) {
 		wantAbsent(t, "VerifierClaimed", got)
 	})
 
-	t.Run("all three diligence flags set", func(t *testing.T) {
+	t.Run("impl linked_traces_to_outcomes true", func(t *testing.T) {
 		rec := IterationRecord{Impl: ImplBlock{SelfAssessment: SelfAssessment{
-			RanCliCommand:          true,
-			CommittedAfterTests:    true,
 			LinkedTracesToOutcomes: true,
 		}}}
 		got := ExtractIterlogSignals(rec, "").VerifierClaimed
 		wantPresent(t, "VerifierClaimed", got, 1.0)
 	})
 
-	t.Run("one of three set", func(t *testing.T) {
-		// self_assessment is non-zero (a different flag is set), so the
-		// signal is present even though only one diligence flag is true.
-		rec := IterationRecord{Impl: ImplBlock{SelfAssessment: SelfAssessment{
-			RanCliCommand: true,
-			ReadLoopState: true,
+	t.Run("verifier-block linked_traces_to_outcomes true", func(t *testing.T) {
+		// v2 carries the flag on the verifier block, not impl.
+		rec := IterationRecord{Verifiers: []VerifierRecord{{
+			SelfAssessment: SelfAssessment{LinkedTracesToOutcomes: true},
 		}}}
 		got := ExtractIterlogSignals(rec, "").VerifierClaimed
-		wantPresent(t, "VerifierClaimed", got, 1.0/3.0)
+		wantPresent(t, "VerifierClaimed", got, 1.0)
 	})
 
-	t.Run("non-zero but zero diligence flags", func(t *testing.T) {
+	t.Run("self-assessment present but no linked_traces", func(t *testing.T) {
+		// self_assessment carries info but linked_traces_to_outcomes is false
+		// — the claim is recorded as not-linked: present 0.0, not absent.
 		rec := IterationRecord{Impl: ImplBlock{SelfAssessment: SelfAssessment{
-			OneItemOnly: true,
+			OneItemOnly: OptionalBool{Set: true, Value: true},
 		}}}
 		got := ExtractIterlogSignals(rec, "").VerifierClaimed
 		wantPresent(t, "VerifierClaimed", got, 0.0)
@@ -427,9 +429,9 @@ func TestExtractIterlogSignalsRealV2WithVerifier(t *testing.T) {
 	wantPresent(t, "real v2 ScopeClaimed", sig.ScopeClaimed, 1.0)
 	wantPresent(t, "real v2 Verifier", sig.Verifier, 1.0)
 	wantPresent(t, "real v2 TestsClaimed", sig.TestsClaimed, 1.0)
-	// v2_iter.yaml impl self_assessment sets only committed_after_tests of
-	// the three diligence flags -> 1/3.
-	wantPresent(t, "real v2 VerifierClaimed", sig.VerifierClaimed, 1.0/3.0)
+	// v2_iter.yaml verifier self_assessment sets linked_traces_to_outcomes,
+	// which is now the sole input to VerifierClaimed -> 1.0.
+	wantPresent(t, "real v2 VerifierClaimed", sig.VerifierClaimed, 1.0)
 	wantPresent(t, "real v2 LandedClaimed", sig.LandedClaimed, 1.0)
 	if sig.Retries != 1 {
 		t.Errorf("real v2 Retries = %d, want 1", sig.Retries)

@@ -49,31 +49,6 @@ func parseTime(t *testing.T, s string) time.Time {
 	return parsed
 }
 
-// --- filesUnder10 -----------------------------------------------------------
-
-func TestFilesUnder10(t *testing.T) {
-	tests := []struct {
-		filesChanged int
-		wantPresent  bool
-		wantScore    float64
-	}{
-		{0, false, 0},    // no diff stats -> absent
-		{1, true, 1.0},   // within
-		{10, true, 1.0},  // boundary
-		{11, true, 0.0},  // over
-		{100, true, 0.0}, // way over
-	}
-	for _, tt := range tests {
-		got := filesUnder10(IterationRecord{FilesChanged: tt.filesChanged})
-		if got.Present != tt.wantPresent {
-			t.Errorf("filesUnder10(%d).Present = %v, want %v", tt.filesChanged, got.Present, tt.wantPresent)
-		}
-		if got.Present && got.SubScore != tt.wantScore {
-			t.Errorf("filesUnder10(%d).SubScore = %g, want %g", tt.filesChanged, got.SubScore, tt.wantScore)
-		}
-	}
-}
-
 // --- objectiveFromScan ------------------------------------------------------
 
 func TestObjectiveFromScan(t *testing.T) {
@@ -329,8 +304,7 @@ func TestExtractIterationObjectives(t *testing.T) {
 		parseTime(t, "2026-05-01T10:05:00Z"),
 		"Read", map[string]string{"file_path": "/repo/.agents/active/loop-state.md"})
 
-	rec := IterationRecord{FilesChanged: 7}
-	got := ExtractIterationObjectives(rec, window, dir)
+	got := ExtractIterationObjectives(IterationRecord{}, window, dir)
 
 	if !got.RanCliCommand.Present || got.RanCliCommand.SubScore != 1.0 {
 		t.Errorf("RanCliCommand = %+v, want present 1.0", got.RanCliCommand)
@@ -340,8 +314,5 @@ func TestExtractIterationObjectives(t *testing.T) {
 	}
 	if !got.ReadLoopState.Present || got.ReadLoopState.SubScore != 1.0 {
 		t.Errorf("ReadLoopState = %+v, want present 1.0", got.ReadLoopState)
-	}
-	if !got.FilesUnder10.Present || got.FilesUnder10.SubScore != 1.0 {
-		t.Errorf("FilesUnder10 = %+v, want present 1.0", got.FilesUnder10)
 	}
 }
