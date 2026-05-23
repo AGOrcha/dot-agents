@@ -84,6 +84,11 @@ AGENTS.md
 .agents/agents/
 .github/agents/
 
+# git worktree directories — embed pointer files, not real content;
+# `git add -A` would otherwise warn about adding embedded git repos
+# and silently create broken submodule-like entries.
+.agents/worktrees/
+
 research/articles/images/
 
 # macOS

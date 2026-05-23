@@ -1,0 +1,121 @@
+delegation_id: seam-code-smell-cleanup
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  feature_thread: |
+    PR #40 has 10 conversion commits + 1 atomic convergence commit
+    (09f1f12f). All CI green. This is the cleanup pass: fix the
+    actionable LSP-reported style/lint findings as a single
+    follow-up commit. Do NOT introduce behavior changes.
+
+task:
+  id: seam-code-smell-cleanup
+  title: Address 6+ actionable static-analysis findings on seam-interface-di
+  stage: impl
+
+write_scope:
+  - commands/install_test.go
+  - commands/refresh.go
+  - commands/review_test.go
+  - commands/import_plugins.go
+  - commands/add.go
+  - commands/doctor.go
+  - commands/status.go
+
+forbidden_scope:
+  - commands/{init,install,remove,import,review,add}.go    # do not change behavior — only the .go files explicitly above (refresh, doctor, status) are open for cleanup, and only for unused-parameter renaming
+  - commands/{init,doctor,status,refresh,remove,import,add,review}_test.go    # the test scope here is only install_test.go and review_test.go (the explicit list above)
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      NEVER `cd` to the worktree. Always
+      `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di <cmd>`.
+      NEVER `git add .` — always explicit paths.
+    severity: blocker
+
+  - description: |
+      DO NOT rename a parameter to `_` if its signature implements a
+      cobra command (`func(cmd *cobra.Command, args []string) error`)
+      or satisfies an interface (e.g. cobra.PositionalArgs, or a
+      method on stdXxxDeps that has to match the interface). Cobra's
+      `cmd` and `args` parameters MUST keep their names even when
+      unused — renaming them breaks the signature match. Verify each
+      unused-parameter fix with `go build ./...` after every edit.
+    severity: high
+
+  - description: |
+      The list of confirmed smells from session diagnostics:
+        1. install_test.go:1366 — "Loop can be simplified using slices.Contains" (slicescontains)
+        2. refresh.go:179 — "unnecessary nil check around range" (S1031)
+        3. review_test.go:511 — "interface{} can be replaced by any"
+        4-6+. Pick 3-5 safe unused-parameter renames-to-underscore
+              from this candidate set, applying the cobra/interface
+              rule above:
+                - import_plugins.go:225 (sourceRoot)
+                - import_plugins.go:467 (platformID)
+                - import_plugins.go:533 (manifestPath)
+                - add.go:647 (projectPath)
+                - doctor.go:625 (agentsHome)
+                - doctor.go:740 (agentsHome)
+                - status.go:872 (agentsHome)
+                - status.go:1071 (name, agentsHome)
+                - status.go:1085 (name, agentsHome)
+                - status.go:1169 (name, agentsHome)
+                - status.go:1197 (name)
+
+      For each candidate, check whether the function is called from
+      outside its file or implements an interface. If yes, leave it
+      alone (silence the linter with `_ = paramName` only if the
+      param is genuinely never used, OR remove it from the signature
+      if you can verify no caller breaks — but signature removal is
+      out of scope for this cleanup commit).
+    severity: high
+
+  - description: |
+      DO NOT touch init.go:55 or doctor.go:64 unused params — those
+      are cobra cmd/args signatures and renaming them breaks Cobra's
+      reflective signature match.
+    severity: blocker
+
+  - description: |
+      Pre-existing diagnostics that are NOT in scope (already
+      flagged in the atomic-convergence bundle):
+        - any seams_test.go entries (file changed in 09f1f12f;
+          stale diagnostics)
+        - any seams.go entries (file deleted in 09f1f12f)
+    severity: low
+
+decision_locks:
+  - One follow-up commit only on `seam-interface-di`. Single
+    commit message: `chore(commands): address static-analysis findings flagged on the seam-DI cleanup`
+  - Aim for >= 6 findings fixed; bail on any that risk a behavior or
+    signature change. If you can't reach 6 safely, fix what you can
+    and document the rest in the merge-back for a future pass.
+  - Verify every fix with `go build ./... && go vet ./...` BEFORE
+    moving to the next one. Catch signature breaks early.
+
+required_reads:
+  - the relevant 7 files in `write_scope` (do not read the full
+    package — these are surgical edits)
+
+merge_back:
+  artifact: .agents/active/delegation/seam-code-smell-cleanup.merge-back.md
+
+followups_to_record:
+  - "Any candidate fix you SKIPPED because it would have broken a cobra/interface signature — note for the seam-interface-di-migration spec's followup list (the spec lives at .agents/workflow/specs/seam-interface-di-migration/design.md on master)"
+  - "If staticcheck couldn't run due to go-version mismatch in the local env (build env vs binary), surface that as a separate observation — the diagnostic source is the LSP, not staticcheck CLI"

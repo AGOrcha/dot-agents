@@ -1,11 +1,11 @@
 schema_version: 1
 id: seam-interface-di-migration
 title: Migrate func-var test seams to interface-DI
-status: draft
+status: active
 summary: ""
 created_at: "2026-05-19T05:37:54Z"
-updated_at: "2026-05-19T19:50:30Z"
+updated_at: "2026-05-23T21:42:53Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: Convert commands/seams.go (incl. finish remove.go)
+current_focus_task: kg-pkg

@@ -1,0 +1,132 @@
+delegation_id: seam-review-convert
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  parallel_with: seam-add-convert  # another worker is converting add.go in parallel
+  feature_thread: |
+    Migrate the commands package from package-var func-seams to per-file
+    interface-DI Deps structs. PR #40 has 7 files converted (init,
+    status, doctor, refresh, remove, import, install). add.go and
+    review.go are the last two before the atomic-delete commit that
+    removes the legacy seams.go vars + seams_test.go stubs.
+
+task:
+  id: seam-review-convert
+  title: Convert commands/review.go to per-file reviewDeps interface
+  stage: impl
+  reference_pattern: commands/install.go (commit 356d3f69) for os.* seam pattern; refresh.go (commit 5bf0f2fc) for the higher-order Fn seam pattern
+
+write_scope:
+  - commands/review.go
+  - commands/review_test.go
+
+forbidden_scope:
+  - commands/add.go            # parallel worker owns these
+  - commands/add_test.go       # parallel worker owns these
+  - commands/seams.go          # atomic-delete commit handles this AFTER both workers land
+  - commands/seams_test.go     # atomic-delete commit handles this AFTER both workers land
+  - commands/{init,status,doctor,refresh,remove,import,install}.go
+  - commands/{init,status,doctor,refresh,remove,import,install}_test.go
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s -run 'Review|review'
+  - go test ./commands -race -count=1 -timeout 240s    # full sweep at the end
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      A second worker (seam-add-convert) is operating in the SAME
+      worktree concurrently, but on disjoint files (add.go +
+      add_test.go). Their edits will appear in the working tree as
+      you work. That's expected — do NOT revert them, do NOT restage
+      them.
+    severity: blocker
+
+  - description: |
+      Use ONLY explicit paths in git commands. NEVER `git add .` or
+      `git add -A`. NEVER `git commit -a`. Always:
+      `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di commit -- commands/review.go commands/review_test.go`
+      This guarantees you don't accidentally stage the other worker's
+      in-flight changes.
+    severity: blocker
+
+  - description: |
+      On push, if you get a non-fast-forward error, the other worker
+      pushed first. Do:
+      `git -C ... fetch origin seam-interface-di`
+      `git -C ... rebase origin/seam-interface-di`
+      `git -C ... push origin seam-interface-di`
+      Your commit is on your own files, the rebase will apply cleanly.
+    severity: high
+
+  - description: |
+      review.go consumes a mix of two seam categories from seams.go:
+      (a) os-level: osMkdirAll, osWriteFile, osRemove — mirror
+          install.go's installDeps pattern
+      (b) higher-order proposal/refresh: applyProposalFn,
+          archiveProposalFn, runRefreshFn — these are function-typed
+          vars, not os.* wrappers. The cleanest shape is a single
+          `reviewDeps` interface whose methods cover both categories
+          (e.g. MkdirAll, WriteFile, Remove, ApplyProposal,
+          ArchiveProposal, RunRefresh). Default impl forwards to
+          os.MkdirAll/config.ApplyProposal/etc; `runRefresh` is
+          tricky because seams.go wraps it with stdRefreshConfigLoader{}
+          — the default reviewDeps.RunRefresh should do the same
+          wrap.
+    severity: medium
+
+  - description: |
+      Per memory init-bypasses-hooks-package: review.go is one of the
+      command files that may be incorrectly bypassing the hooks
+      package via direct settings link calls. This delegation does
+      NOT fix that — only the interface conversion. If you notice
+      review.go writing hooks via direct linkInstallResourceList or
+      similar non-hooks-package paths, flag it in the merge-back's
+      "Surprises" but do NOT refactor.
+    severity: low
+
+  - description: |
+      seams_test.go has review-related stubs that some review_test.go
+      tests still call. Migrate review_test.go tests to use a
+      `fakeReviewDeps` struct (mirror install_test.go's
+      `fakeInstallDeps` pattern). The stubs in seams_test.go stay
+      where they are; the atomic-delete commit reaps them after BOTH
+      workers land.
+    severity: medium
+
+  - description: |
+      ALL git operations MUST use `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di`.
+      Do not `cd` to the worktree.
+    severity: blocker
+
+decision_locks:
+  - Interface name: `reviewDeps` (per-file `<command>Deps` convention)
+  - Interface defined inline at the top of review.go (not in seams.go)
+  - Default impl: `stdReviewDeps struct{}` with methods forwarding to real os/config/runRefresh functions
+  - Test impl: `fakeReviewDeps struct{ ... }` mirroring install_test.go's `fakeInstallDeps`
+  - One interface covers both os-level AND higher-order Fn seams (do NOT split into two interfaces)
+
+required_reads:
+  - commands/install.go       # canonical reference for os.* methods
+  - commands/install_test.go  # how to wire fake* in tests
+  - commands/refresh.go       # canonical reference for the higher-order Fn pattern
+  - commands/seams.go         # current legacy glue (READ ONLY)
+  - commands/seams_test.go    # current legacy test glue (READ ONLY)
+
+merge_back:
+  artifact: .agents/active/delegation/seam-review-convert.merge-back.md
+
+followups_to_record:
+  - "add.go conversion is in parallel — confirm both land before atomic-delete"
+  - "atomic-delete commit removes: osMkdirAll, osWriteFile, osRemove, osRemoveAll, osExecutable, osGetwd, osSymlink, copyFile, configLoad, applyProposalFn, archiveProposalFn, runRefreshFn from seams.go AND every with*Stub helper from seams_test.go"

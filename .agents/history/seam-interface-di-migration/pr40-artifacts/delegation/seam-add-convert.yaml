@@ -1,0 +1,35 @@
+schema_version: 1
+id: del-seam-add-convert-2026-05-20
+parent_plan_id: seam-interface-di-migration
+parent_task_id: seam-add-convert
+title: Convert commands/add.go to per-file addDeps interface
+summary: |-
+    Migrate add.go from package-var func-seams (osMkdirAll, osWriteFile,
+    osRemove, osExecutable, copyFile, configLoad) to a per-file addDeps
+    interface following install.go (commit 356d3f69) for the os.* shape
+    plus configLoad. One interface covers add.go's full set of
+    fault-injectable touch points: backup/restore/MCP-config write
+    pipeline plus the runAdd configLoad entry point.
+write_scope:
+    - commands/add.go
+    - commands/add_test.go
+success_criteria: |-
+    add.go uses interface-DI per docs/TEST_SEAMS.md (addDeps, stdAddDeps,
+    fakeAddDeps with nil-delegates-to-real). Cross-file no-deps wrappers
+    (mirrorBackup, restoreFromResourcesCounted, ensureGlobalKGMCPConfigs)
+    preserved for import.go/refresh.go/init.go callers. stdAddDeps still
+    routes through the legacy seams.go package vars so
+    refresh_test.go/seams_test.go cross-file tests stay green. All
+    commands tests pass under -race; go build and go vet clean. Legacy
+    seams in seams.go remain in place — atomic delete is the next commit
+    on the branch (both review.go at 9b6a96ab and add.go now converted).
+verification_expectations: |-
+    go build ./...
+    go test ./commands -race -count=1 -timeout 240s -run 'Add|add'
+    go test ./commands -race -count=1 -timeout 240s
+    go vet ./...
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: ""
+updated_at: "2026-05-21T00:30:52Z"

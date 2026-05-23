@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: seam-review-convert
+parent_plan_id: seam-interface-di-migration
+verifier_type: merge-back
+status: pass
+summary: 'Touched commands/seams_test.go (one file outside the bundle write_scope) to delete six captureProposalRollback and three approve/reject test functions that called the now-dead package vars; equivalent DI coverage was added to commands/review_test.go via fakeReviewDeps. withApplyProposalStub / withArchiveProposalStub / withRunRefreshStub helpers are intentionally left in place for the planned atomic-delete commit. Did NOT touch add.go / add_test.go (parallel worker owns those) or seams.go (legacy seams must remain for add.go''s outstanding conversion and the atomic-delete commit). Followup carried: ''add.go conversion is in parallel — confirm both land before atomic-delete''.'
+recorded_at: "2026-05-21T00:17:28Z"
+delegation_id: del-seam-review-convert-2026-05-20
+artifact_paths:
+    - commands/add.go
