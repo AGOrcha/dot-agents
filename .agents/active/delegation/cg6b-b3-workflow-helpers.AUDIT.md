@@ -1,7 +1,25 @@
 # Audit target: cg6b-b3-workflow-helpers
 
-**Flagged:** 2026-05-20 (orchestrator session triage)
+**Status:** queued — pre-authored bundle, ready to spawn when coverage work resumes.
+**First flagged:** 2026-05-20 (orchestrator session triage).
+**Re-audited:** 2026-05-23 (orchestrator session-start) — confirmed still needed.
 **Not archived with the 20 sibling 2026-05-20 archival batch** because no evidence the work was ever performed.
+
+## 2026-05-23 re-audit findings
+
+- `scripts/coverage-exceptions.txt` still lists all 4 targets at their pre-B3 percentages:
+  - `commands/workflow/fs.go` 93.27%
+  - `commands/workflow/drift.go` 94.30%
+  - `commands/workflow/health.go` 94.67%
+  - `commands/workflow/graph.go` 93.28%
+- Local `go test ./commands/workflow/ -coverprofile=...` confirms per-function residue matches the
+  contract's expectation (sub-95% spots in `mergeWorkflowPlanDir`, `mergePlanDirCompareAndCopy`,
+  drift phase helpers, `runWorkflowGraphQueryViaKGBridge`, `readGraphBridgeHealth`).
+- No PR has touched these files' coverage in the intervening period.
+
+**Conclusion:** explanation #1 from the original audit ("the spawn was forgotten") confirmed.
+Contract content is still accurate. Revive by promoting this contract to a delegation bundle
+the next time coverage work is prioritized — do not author from scratch.
 
 ## What the contract says
 

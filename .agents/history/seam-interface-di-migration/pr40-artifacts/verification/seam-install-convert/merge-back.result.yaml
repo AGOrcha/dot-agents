@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: seam-install-convert
+parent_plan_id: seam-interface-di-migration
+verifier_type: merge-back
+status: pass
+summary: 'Push to origin/seam-interface-di is live. PR #40 lint passed at commit; test matrix (macos/ubuntu/windows) was still pending at merge-back time — recheck with gh pr checks 40 before delegating add.go bundle. Full merge-back narrative at .agents/active/delegation/seam-install-convert.merge-back.md'
+recorded_at: "2026-05-20T13:58:33Z"
+delegation_id: del-seam-install-convert-2026-05-20

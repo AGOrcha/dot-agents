@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: seam-atomic-convergence
+parent_plan_id: seam-interface-di-migration
+verifier_type: merge-back
+status: pass
+summary: 'Pre-existing TestCRGBridgeFreshBuildRealCRG (missing python module) still failing — unrelated and explicitly acceptable. PR #40 push 9cdf0d59..09f1f12f; CI Lint Workflows pass, 3 Test jobs pending at push time. After parent accepts, ensure forbidden_scope is reconciled with bundle gotcha #6 in the seam-interface-di-migration spec (the gotcha mentions 23 callers but the actual call-site fanout is 28 + 3 outside-scope = 31; only the 3 outside-scope touches need spec attention).'
+recorded_at: "2026-05-21T01:02:40Z"
+delegation_id: del-seam-atomic-convergence-2026-05-20

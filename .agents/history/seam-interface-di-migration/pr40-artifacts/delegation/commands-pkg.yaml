@@ -1,0 +1,43 @@
+schema_version: 1
+id: del-seam-atomic-convergence-2026-05-20
+parent_plan_id: seam-interface-di-migration
+parent_task_id: commands-pkg
+title: Atomic convergence — flip stdAddDeps, thread importDeps+addDeps through runRefresh, delete legacy seams
+summary: |-
+    One big convergence commit (option C per maintainer ruling 2026-05-20)
+    that flips stdAddDeps from package-var delegation to direct
+    os.*/projectsync/config calls, threads importDeps through
+    runImportFromRefresh and addDeps through runRefresh →
+    restoreFromResources, deletes commands/seams.go entirely (all 12
+    package vars), and removes the 12 with*Stub helpers from
+    seams_test.go (preserving Test* bodies migrated to the new injection
+    shape).
+write_scope:
+    - commands/add.go
+    - commands/refresh.go
+    - commands/import.go
+    - commands/review.go
+    - commands/sync.go
+    - commands/refresh_test.go
+    - commands/refresh_idempotency_test.go
+    - commands/seams.go
+    - commands/seams_test.go
+success_criteria: |-
+    commands/seams.go deleted. stdAddDeps calls os.* / projectsync.CopyFile
+    / config.Load directly. runRefresh signature is (filter,
+    refreshConfigLoader, importDeps, addDeps); runImportFromRefresh
+    accepts importDeps; restoreFromResources accepts addDeps. All
+    cross-file fault-injection tests preserved (the restore-failure
+    metadata-skip assertion now passes a fakeAddDeps{copyFile: ...}).
+    go build ./..., go vet ./..., go test ./... all green (modulo the
+    pre-existing TestCRGBridgeFreshBuildRealCRG missing-python failure).
+verification_expectations: |-
+    go build ./...
+    go vet ./...
+    go test ./commands -race -count=1 -timeout 240s
+    go test ./... -timeout 240s
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-20T00:00:00Z"
+updated_at: "2026-05-21T01:02:40Z"

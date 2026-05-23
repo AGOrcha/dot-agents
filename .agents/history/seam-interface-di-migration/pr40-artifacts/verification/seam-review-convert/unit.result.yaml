@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: seam-review-convert
+parent_plan_id: seam-interface-di-migration
+verifier_type: unit
+status: pass
+summary: review.go converted to per-file reviewDeps interface (interface-DI); focused Review|review tests pass (1.5s), full ./commands sweep passes (69.6s), go vet clean
+recorded_at: "2026-05-21T00:16:56Z"
+delegation_id: del-seam-review-convert-2026-05-20
+recorded_by: dot-agents workflow verify record
+commands:
+    - go test ./commands -race -count=1 -timeout 240s -run 'Review|review' && go test ./commands -race -count=1 -timeout 240s && go vet ./...

@@ -145,10 +145,16 @@ tasks:
           compileEmbeddedSchema seam in seams.go, dead AddResource
           branch seam-tested once, behavior-preserving). 4 entries
           pruned, 0 added.
-        - B3 (authored, spawns only post-#35-merge): next allowlist
-          package-group, plus prefs.go verify-or-raise (measure on the
-          merged multi-OS profile first, raise with real tests if
-          genuinely below 95pct, NO allowlist entry either way).
+        - B3 (authored, spawn-gate cleared 2026-05-19 when #35 merged
+          but never spawned — re-audited 2026-05-23, contract still
+          valid, all 4 targets still at pre-B3 percentages in the
+          allowlist). Queued contract:
+          .agents/active/delegation/cg6b-b3-workflow-helpers.md
+          (see sibling .AUDIT.md for re-audit findings). Targets:
+          commands/workflow/{fs,drift,health,graph}.go to >=95%,
+          plus prefs.go verify-or-raise (measure on the merged
+          multi-OS profile first, raise with real tests if genuinely
+          below 95pct, NO allowlist entry either way).
           internal/graphstore/* stays FENCED (gcc2/gcc4 own those 3
           entries; never a cg6b batch until gcc2->gcc3 complete).
     - id: cg-verify-close

@@ -1,0 +1,117 @@
+delegation_id: seam-install-convert
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  feature_thread: |
+    Migrate the commands package from package-var func-seams (e.g.
+    `var osMkdirAll = os.MkdirAll`) to per-file interface-DI Deps
+    structs. PR #40 has converted 8 files already (init, status,
+    doctor, refresh, remove, import — five most recent are now CI-green
+    at origin HEAD 461061a8). install.go is next; the previous
+    automated attempt failed mid-way.
+
+task:
+  id: seam-install-convert
+  title: Convert commands/install.go to per-file installDeps interface
+  stage: impl
+  reference_pattern: commands/init.go (commits 7e79853c → c64d85bc → 655ed489)
+
+write_scope:
+  - commands/install.go
+  - commands/install_test.go
+  - commands/seams.go      # only to remove install-related func-vars at the end; do not touch other entries
+  - commands/seams_test.go # mirror update if seams.go install entries are removed
+
+forbidden_scope:
+  - commands/{init,status,doctor,refresh,remove,import,add,review}.go
+  - commands/{init,status,doctor,refresh,remove,import,add,review}_test.go
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      The prior automated attempt (Codex subagent, 2026-05-19) used a
+      regex bulk-patch on install_test.go that misfired on a
+      multi-line linkInstallResourceList(...) call near line 717,
+      producing `expected operand, found ','` from go vet. Convert
+      install_test.go BY HAND, function-by-function. Do not run any
+      sed/regex bulk-patch against it.
+    severity: blocker
+
+  - description: |
+      The prior attempt also surfaced LSP errors:
+      `install.go:156: too many arguments to resolveSources` and
+      `remove.go:197: too many arguments to removeProjectDirs`.
+      These hint at a signature-threading miss where the converted
+      Deps interface added a receiver/extra arg that downstream
+      callers were not updated for. When converting install.go,
+      audit EVERY call site of every helper whose signature changes,
+      including in already-converted files (remove.go is on the
+      branch at efd076b7 — verify its signature thread is sound
+      with `go build ./...` before committing).
+    severity: high
+
+  - description: |
+      Per .agents/active/active.loop.md convention: every commit on
+      this branch is single-file in scope (init.go's reference shows
+      this exactly: refactor → fix-sonar → fix-phase). If install.go
+      requires more than one logical step, split into multiple commits
+      named `refactor(commands/install): ...` and `fix(commands/install): ...`.
+    severity: medium
+
+  - description: |
+      seams.go and seams_test.go house the legacy func-var glue. DO
+      NOT delete install-related vars from seams.go until install.go
+      is fully converted AND passing tests. The atomic-delete of all
+      remaining seams-glue is the FINAL commit on this branch (after
+      add.go and review.go), not part of this delegation.
+    severity: medium
+
+decision_locks:
+  - The interface naming convention for this file is `installDeps`
+    (matches the per-file pattern `<command>Deps`). Do not invent a
+    new shape; do not extract a shared `commandsDeps` umbrella.
+  - The interface is defined inline at the top of install.go, not in
+    a shared seams.go file (see init.go for the canonical layout).
+  - Default implementation is `stdInstallDeps struct{}` with methods
+    that forward to the real os/config functions (mirror init.go).
+
+required_reads:
+  - commands/init.go                   # the canonical reference pattern
+  - commands/init_test.go              # how to seed the Deps in tests
+  - commands/seams.go                  # current legacy glue (do NOT modify here)
+  - .agents/workflow/specs/seam-interface-di-migration/design.md  # the spec this branch implements
+
+merge_back:
+  artifact: .agents/active/delegation/seam-install-convert.merge-back.md
+  template: |
+    # seam-install-convert merge-back
+
+    ## Scope completed
+    - <commit shas>
+
+    ## Verification
+    - go build ./... — <pass/fail with output snippet>
+    - go test ./commands -race -count=1 — <pass/fail with timing>
+    - go vet ./... — <pass/fail>
+
+    ## Surprises
+    - <anything that wasn't in the bundle's known_gotchas>
+
+    ## Followups
+    - add.go conversion (next bundle)
+    - review.go conversion
+    - atomic-delete of seams.go install/status/doctor/refresh/remove/import vars
