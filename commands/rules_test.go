@@ -6,15 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestRunRulesList_ListsRuleFiles(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	rulesDir := filepath.Join(agentsHome, "rules", "global")
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	ruleContent := `---
@@ -23,9 +21,7 @@ description: Test rule
 # My Rule
 Some content.
 `
-	if err := os.WriteFile(filepath.Join(rulesDir, "test-rule.md"), []byte(ruleContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "test-rule.md", []byte(ruleContent))
 
 	if err := runRulesList("global"); err != nil {
 		t.Fatalf("runRulesList: %v", err)
@@ -64,10 +60,6 @@ func TestRunRulesList_MissingScope(t *testing.T) {
 func TestRunRulesShow_ReadsRuleFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	rulesDir := filepath.Join(agentsHome, "rules", "global")
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	ruleContent := `---
@@ -75,9 +67,7 @@ description: A useful rule
 ---
 # Rule Content
 `
-	if err := os.WriteFile(filepath.Join(rulesDir, "my-rule.md"), []byte(ruleContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "my-rule.md", []byte(ruleContent))
 
 	deps := rulesDeps{
 		errorWithHints:     ErrorWithHints,
@@ -177,16 +167,6 @@ func TestExtractRuleFrontmatterDescription_MissingFile(t *testing.T) {
 	}
 }
 
-func writeRulesRule(t *testing.T, dir, name, body string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
 	return rulesDeps{
 		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
@@ -200,15 +180,14 @@ func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
 func TestRunRulesRemove_DryRun_KeepsFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	rulesDir := filepath.Join(agentsHome, "rules", "global")
-	writeRulesRule(t, rulesDir, "keep.md", "---\ndescription: keep\n---\nbody")
+	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "keep.md", []byte("---\ndescription: keep\n---\nbody"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeRulesDeps(true, false, false)
 	if err := runRulesRemove(deps, "global", "keep.md"); err != nil {
 		t.Fatalf("runRulesRemove dry-run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(rulesDir, "keep.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "global", "keep.md")); err != nil {
 		t.Fatalf("dry-run should preserve file: %v", err)
 	}
 }
@@ -216,15 +195,14 @@ func TestRunRulesRemove_DryRun_KeepsFile(t *testing.T) {
 func TestRunRulesRemove_Force_DeletesFile(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	rulesDir := filepath.Join(agentsHome, "rules", "global")
-	writeRulesRule(t, rulesDir, "gone.md", "body")
+	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "gone.md", []byte("body"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeRulesDeps(false, true, false)
 	if err := runRulesRemove(deps, "global", "gone.md"); err != nil {
 		t.Fatalf("runRulesRemove force: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(rulesDir, "gone.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "global", "gone.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed; stat err = %v", err)
 	}
 }
@@ -268,8 +246,7 @@ func TestFindRuleSpec_EmptyName(t *testing.T) {
 func TestFindRuleSpec_Found(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	rulesDir := filepath.Join(agentsHome, "rules", "global")
-	writeRulesRule(t, rulesDir, "alpha.md", "x")
+	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "alpha.md", []byte("x"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	deps := makeRulesDeps(false, false, false)
