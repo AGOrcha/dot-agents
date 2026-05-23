@@ -86,15 +86,19 @@ tasks:
       app_type: go-cli
     - id: persist
       title: Persist scores alongside telemetry
-      status: pending
+      status: completed
       depends_on:
         - scorer
       blocks:
         - cli
       owner: dot-agents
-      write_scope: []
+      write_scope:
+        - internal/scoring/persist.go
+        - internal/scoring/persist_test.go
+        - internal/scoring/linked_traces.go
+        - internal/scoring/linked_traces_test.go
       verification_required: true
-      notes: Persist each score and its breakdown alongside the existing telemetry, and compute the iteration log currently-uncomputed linked_traces_to_outcomes marker.
+      notes: 'Persist each score and its breakdown alongside the existing telemetry, and compute the iteration log currently-uncomputed linked_traces_to_outcomes marker. Sidecar layout: .agents/active/iteration-log/iter-N.score.yaml per iteration, session-<id>.score.yaml per session. Marker is derivable: len(verifier.linked_traces) > 0 per structured-claims schema.'
       app_type: go-cli
     - id: cli
       title: CLI to query outcome scores
