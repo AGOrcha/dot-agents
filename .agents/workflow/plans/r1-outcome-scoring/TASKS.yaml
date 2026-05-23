@@ -26,12 +26,32 @@ tasks:
       verification_required: true
       notes: 'Map already-captured data into the rubric typed input signals: platform-session-integration token/cache telemetry, .ralph-loop-streams loop metrics, and the iteration log verifier / merge-back / scope-adherence / test-outcome fields. No new capture -- the inputs already exist.'
       app_type: go-cli
+    - id: objective-checks
+      title: Replace rubber-stamped self-reports with objective checks
+      status: in_progress
+      depends_on:
+        - signals
+      blocks:
+        - scorer
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/objective_checks.go
+        - internal/scoring/objective_checks_test.go
+        - internal/scoring/signal_iterlog.go
+        - internal/scoring/signals.go
+        - internal/scoring/signals_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+        - commands/workflow/static/workflow-iter-log.schema.json
+      verification_required: true
+      notes: Boolean-effectiveness analysis (iter-66 dogfood) showed read_loop_state, committed_after_tests, and ran_cli_command are ~98% true — rubber-stamped self-reports, no information. tdd_refresh_performed is 0/22 (dead). stayed_under_10_files is redundant with files_changed. Build objective checks from transcripts + git topology; wire them into the integrity track in place of the dead self-reports; deprecate the dead fields in the iteration-log schema.
+      app_type: go-cli
     - id: scorer
       title: Compute the explainable outcome score
       status: pending
       depends_on:
         - rubric
         - signals
+        - objective-checks
       blocks:
         - persist
       owner: dot-agents
