@@ -48,7 +48,7 @@ tasks:
       app_type: go-cli
     - id: structured-claims
       title: Expand boolean claims into named-artifact lists
-      status: pending
+      status: completed
       depends_on:
         - objective-checks
       blocks:
