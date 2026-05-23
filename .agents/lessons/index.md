@@ -19,9 +19,9 @@ cause, rule, and how-to-apply.
 - [`select-star-scan-order`](./select-star-scan-order/LESSON.md): When porting DB schemas to Go, SELECT * scans must match exact column order — enumerate columns explicitly or count and comment them inline.
 - [`use-existing-subdir-helpers`](./use-existing-subdir-helpers/LESSON.md): In kg.go, use `noteSubdir(t)` not `noteType+"s"` — "entity" maps to "entities" not "entitys".
 - [`symbol-only-references-in-artifacts`](./symbol-only-references-in-artifacts/LESSON.md): Workflow artifacts reference code by symbol/function/relational anchor — never line numbers. Line numbers drift the instant any sibling edit lands.
-- [test-file-naming](test-file-naming/LESSON.md) — test files mirror source/feature; iteration-numbered grab-bag test files (`coverage_pushN`, `ci_driftN`, …) are forbidden.
-- [subagent-out-of-workspace-access](subagent-out-of-workspace-access/LESSON.md) — spawned subagents are sandboxed to the workspace root; pre-authorize external dirs or read inline.
-- [stale-local-master-ref](stale-local-master-ref/LESSON.md) — audits must verify against origin/<branch>, not the stale local ref (caused a 3-way cascade).
-- [concurrent-workers-one-worktree](concurrent-workers-one-worktree/LESSON.md) — one active writer per worktree; workers must not self-arm CI waiters (orchestrator polls + relays).
-- [prefer-interface-di-over-funcvar-seams](prefer-interface-di-over-funcvar-seams/LESSON.md) — interface-DI is the preferred test seam; func-var `var osX = os.X` is legacy; prevalence ≠ sanctioned (audits must state descriptive vs prescriptive).
-- [match-ci-test-flags-locally](match-ci-test-flags-locally/LESSON.md) — verify concurrency changes with CI's exact flags (`-race -count=1`) before push; lazy WaitGroup.Add needs mutex+closed ordering vs Wait.
+- [`test-file-naming`](test-file-naming/LESSON.md) — test files mirror source/feature; iteration-numbered grab-bag test files (`coverage_pushN`, `ci_driftN`, …) are forbidden.
+- [`subagent-out-of-workspace-access`](subagent-out-of-workspace-access/LESSON.md) — spawned subagents are sandboxed to the workspace root; pre-authorize external dirs or read inline.
+- [`stale-local-master-ref`](stale-local-master-ref/LESSON.md) — audits must verify against origin/<branch>, not the stale local ref (caused a 3-way cascade).
+- [`concurrent-workers-one-worktree`](concurrent-workers-one-worktree/LESSON.md) — one active writer per worktree; workers must not self-arm CI waiters (orchestrator polls + relays).
+- [`prefer-interface-di-over-funcvar-seams](prefer-interface-di-over-funcvar-seams/LESSON.md) — interface-DI is the preferred test seam; func-var `var osX = os.X` is legacy; prevalence ≠ sanctioned (audits must state descriptive vs prescriptive).
+- [`match-ci-test-flags-locally`](match-ci-test-flags-locally/LESSON.md) — verify concurrency changes with CI's exact flags (`-race -count=1`) before push; lazy WaitGroup.Add needs mutex+closed ordering vs Wait.
