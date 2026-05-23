@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 66
+date: "2026-05-22"
+wave: r1-outcome-scoring
+task_id: signals
+commit: 716050a06d5acd04375532b887cb4310a85f9d47
+files_changed: 2
+lines_added: 3
+lines_removed: 3
+agent:
+    session_id: 0bff2f58-962f-4852-abaf-38cd6151218e
+    harness: claude-code
+    harness_version: 2.1.148
+    entrypoint: cli
+checkpoint_at: "2026-05-22T21:28:15Z"
+impl:
+    item: "R1 outcome-scoring: rubric v2.0.0 + signals task (five slices)"
+    summary: >-
+        First dogfood entry of the R1 run. Delivered the versioned scoring
+        rubric (v2.0.0 — six signals, integrity track) and the whole signals
+        task: dual-schema iteration-log reader, three parallel extractor
+        slices (iterlog / git / backfill), and SignalSet assembly. internal/
+        scoring is seven source files at 97.6% coverage. One integration fix
+        was needed — two parallel slices defined colliding test helpers.
+    scope_note: on-target
+    feedback_goal: "Implement R1 against the canonical plan; keep internal/scoring ruff/vet clean and well covered."
+    retries: 0
+    focused_tests_added: 103
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: false
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — da workflow plan/advance/verify/checkpoint throughout"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: test
+      status: pass
+      gate_passed: true
+      tests_added: 103
+      tests_total_pass: true
+      scenario_tags:
+          - dual-schema-parse
+          - integrity-pairing
+          - transcript-backfill
+      retries: 0
+      result_artifact: ""
+      self_assessment:
+          tests_positive_and_negative: true
+          tests_used_sandbox: true
+          exercised_new_scenario: true
+          ran_cli_command: true
+          cli_produced_actionable_feedback: "yes — da workflow slices / verify / advance gave usable state"
+          linked_traces_to_outcomes: false
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: ""
+    verify_record_appended: false

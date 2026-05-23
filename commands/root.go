@@ -62,6 +62,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewSessionCmd())
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewKGCmd())
+	root.AddCommand(NewScoreCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)

@@ -1,0 +1,6 @@
+schema_version: 1
+iteration: 1
+date: "2026-04-11"
+commit: "dedicated1"
+scope_note: "on-target"
+tests_total_pass: true

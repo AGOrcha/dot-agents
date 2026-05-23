@@ -1,0 +1,31 @@
+schema_version: 2
+iteration: 70
+date: "2026-05-23"
+wave: r1-outcome-scoring
+task_id: structured-claims
+commit: feedbeefdeadbeefdeadbeefdeadbeefdeadbeef
+files_changed: 5
+lines_added: 200
+lines_removed: 50
+impl:
+    scope_note: on-target
+    focused_tests_added: 3
+    focused_tests_pass: true
+verifiers:
+    - type: test
+      status: pass
+      gate_passed: true
+      tests_added: 3
+      tests_added_by_kind:
+          - name: TestParseStructured
+            kind: positive
+          - name: TestParseStructuredMalformed
+            kind: negative
+          - name: TestParseStructuredEmpty
+            kind: edge
+      linked_traces:
+          - trace_ref: .agents/active/verification/sc/test.result.yaml
+            outcome_ref: iter-70
+      tests_total_pass: true
+review:
+    overall_decision: accept

@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 15
+date: "2026-04-11"
+wave: "skill-import-streamline"
+task_id: ""
+commit: "b457809"
+files_changed: 5
+lines_added: 269
+lines_removed: 62
+item: "Make install --generate merge with existing .agentsrc.json (preserve sources, project, ExtraFields)"
+scenario_tags: ["clean-repo", "install-generate-source-merge"]
+feedback_goal: "After merge, does generated manifest state preserve pre-existing git/manual sources and extra keys instead of replacing sources wholesale?"
+tests_added: 6
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Added MergeGenerateAgentsRC + merge in runInstallGenerate when manifest exists; dry-run shows merged project and source count; six unit tests"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: ""
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "informative-nonblocking"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

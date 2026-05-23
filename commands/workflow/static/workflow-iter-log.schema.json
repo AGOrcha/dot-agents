@@ -170,18 +170,34 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "read_loop_state": { "type": "boolean", "default": false },
-            "one_item_only": { "type": "boolean", "default": false },
-            "committed_after_tests": { "type": "boolean", "default": false },
-            "aligned_with_canonical_tasks": { "type": "boolean", "default": false },
+            "read_loop_state": {
+              "type": "boolean",
+              "deprecated": true,
+              "description": "DEPRECATED — rubber-stamped at ~98% true in historical data (no information). The objective check internal/scoring/objective_checks.go ranCliCommand/readLoopState scans the transcript instead."
+            },
+            "one_item_only": { "type": ["boolean", "null"] },
+            "committed_after_tests": {
+              "type": "boolean",
+              "deprecated": true,
+              "description": "DEPRECATED — rubber-stamped at ~98% true. objective_checks.go committedAfterTests scans the transcript for a test command preceding the commit."
+            },
+            "aligned_with_canonical_tasks": { "type": ["boolean", "null"] },
             "persisted_via_workflow_commands": {
               "type": "string",
               "default": ""
             },
-            "stayed_under_10_files": { "type": "boolean", "default": false },
-            "no_destructive_commands": { "type": "boolean", "default": false },
-            "scoped_tests_to_write_scope": { "type": "boolean", "default": false },
-            "tdd_refresh_performed": { "type": "boolean", "default": false }
+            "stayed_under_10_files": {
+              "type": "boolean",
+              "deprecated": true,
+              "description": "DEPRECATED — the 10-file threshold was arbitrary; correction_pressure already captures the overload symptoms it was meant to proxy. files_changed remains as raw context."
+            },
+            "no_destructive_commands": { "type": ["boolean", "null"] },
+            "scoped_tests_to_write_scope": { "type": ["boolean", "null"] },
+            "tdd_refresh_performed": {
+              "type": "boolean",
+              "deprecated": true,
+              "description": "DEPRECATED — set to true in 0/22 historical entries; carried no signal."
+            }
           }
         }
       }
@@ -212,6 +228,49 @@
             "default": false
           },
           "tests_added": { "type": "integer", "minimum": 0, "default": 0 },
+          "tests_added_by_kind": {
+            "type": "array",
+            "description": "Structured replacement for tests_positive_and_negative: list the actual test names added with their scenario kind. Boolean equivalents are derivable (e.g. positive_and_negative = ≥1 of each); the named items are checkable against the diff.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Test name as it appears in the source (e.g. TestParseV1)."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["positive", "negative", "edge", "regression"]
+                }
+              }
+            },
+            "default": []
+          },
+          "linked_traces": {
+            "type": "array",
+            "description": "Structured replacement for linked_traces_to_outcomes: list the verifier-trace ↔ outcome pairs the iteration produced. Each ref must resolve (a real artifact / iteration / commit).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["trace_ref", "outcome_ref"],
+              "properties": {
+                "trace_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Path or URI of the verification trace (e.g. .agents/active/verification/<task>/test.result.yaml)."
+                },
+                "outcome_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Reference to the linked outcome (commit SHA, iteration N, review-decision path, …)."
+                }
+              }
+            },
+            "default": []
+          },
           "tests_total_pass": { "type": ["boolean", "null"], "default": null },
           "scenario_tags": {
             "type": "array",
@@ -228,12 +287,32 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "tests_positive_and_negative": { "type": "boolean", "default": false },
-              "tests_used_sandbox": { "type": "boolean", "default": false },
-              "exercised_new_scenario": { "type": "boolean", "default": false },
-              "ran_cli_command": { "type": "boolean", "default": false },
+              "tests_positive_and_negative": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "DEPRECATED — replaced by verifier.tests_added_by_kind, which names the actual tests and their kinds. The boolean is derivable: ≥1 entry of kind 'positive' AND ≥1 of kind 'negative'."
+              },
+              "tests_used_sandbox": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "DEPRECATED — t.TempDir() and equivalent sandboxing is universal practice in Go tests; this flag carried no discriminating signal."
+              },
+              "exercised_new_scenario": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "DEPRECATED — redundant with the existing verifier.scenario_tags list, which is already structured. Derive: len(scenario_tags) > 0."
+              },
+              "ran_cli_command": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "DEPRECATED — rubber-stamped at ~98% true. objective_checks.go ranCliCommand scans the transcript for a Bash tool_use in the iteration window."
+              },
               "cli_produced_actionable_feedback": { "type": "string", "default": "" },
-              "linked_traces_to_outcomes": { "type": "boolean", "default": false }
+              "linked_traces_to_outcomes": {
+                "type": "boolean",
+                "deprecated": true,
+                "description": "DEPRECATED — replaced by verifier.linked_traces, which names the trace ↔ outcome pairs. Boolean equivalent is derivable: len(linked_traces) > 0."
+              }
             }
           }
         }

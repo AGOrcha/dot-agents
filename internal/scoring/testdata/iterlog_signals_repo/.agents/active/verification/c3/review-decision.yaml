@@ -1,0 +1,14 @@
+schema_version: 1
+task_id: c3-sync
+parent_plan_id: command-surface-decomposition
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+recorded_at: "2026-04-18T16:00:00Z"
+post_invocation:
+  agent_actions_after_skill_returned: [workflow checkpoint]
+  user_corrections:
+    - "Treat draft as a valid proposal state."
+    - "init should keep seeding starter skills."
+  retries_in_loop: 1

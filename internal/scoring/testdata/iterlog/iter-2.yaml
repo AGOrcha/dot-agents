@@ -1,0 +1,6 @@
+schema_version: 2
+iteration: 2
+date: "2026-04-11"
+commit: "dedicated2"
+impl:
+  scope_note: "partial"

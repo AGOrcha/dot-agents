@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 1
+iteration: 27
+date: "2026-04-11"
+wave: "resource-intent-centralization"
+task_id: ""
+commit: ""
+files_changed: 4
+lines_added: 431
+lines_removed: 9
+item: "Phase 6 — import conflict coverage: origin-prefixed alternate hook paths + review-notes/import-conflicts/ advisory YAML"
+scenario_tags: ["clean-repo", "canonical-plan-present", "import-conflict-preserve-both"]
+feedback_goal: "After adding importOutput.Origin and preserve-both conflict handling, do unit tests prove the alternate bundle path and review note are written without hitting interactive replace?"
+tests_added: 7
+tests_total_pass: true
+retries: 0
+scope_note: "on-target"
+summary: "Hook canonical imports attach platform Origin; content mismatch writes hooks/.../<origin-logical>/HOOK.yaml (or .json fallback) plus RFC-shaped review note; dry-run skips writes; replace path unchanged when Origin empty; import --help CLI sanity"
+self_assessment:
+  read_loop_state: true
+  one_item_only: true
+  committed_after_tests: true
+  tests_positive_and_negative: false
+  tests_used_sandbox: false
+  aligned_with_canonical_tasks: false
+  persisted_via_workflow_commands: "no"
+  ran_cli_command: true
+  exercised_new_scenario: true
+  cli_produced_actionable_feedback: "informative-nonblocking"
+  linked_traces_to_outcomes: true
+  stayed_under_10_files: true
+  no_destructive_commands: false

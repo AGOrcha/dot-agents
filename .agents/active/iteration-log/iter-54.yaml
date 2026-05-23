@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 54
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p10-workflow-command-decomposition
+commit: 586e7fa0420f8c7aa2c818073e5c84d00201de71
+files_changed: 13
+lines_added: 7012
+lines_removed: 6495
+impl:
+    item: "p10-workflow-command-decomposition — extract commands/workflow subpackage"
+    summary: "Moved workflow CLI implementation to package workflow with Deps (hooks-style); thin commands/workflow.go shim keeps errNoWorkflowProject for UX; relocated verification/review/iter-log schema helpers and static embeds; globalflagcov includes ./commands/workflow; tests use InitTestDeps, workflowTestJSON, subprocess kg setup, global JSON test moved to workflow package."
+    scope_note: on-target
+    feedback_goal: "Replace monolithic workflow hotspot with commands/workflow/ + thin shim; preserve CLI behavior and tests."
+    retries: 0
+    focused_tests_added: 1
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back, checkpoint --log-to-iter 54"
+        stayed_under_10_files: false
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p10-workflow-command-decomposition/review-decision.yaml
+    verify_record_appended: false

@@ -20,10 +20,10 @@
 #                      unreachable on the merged multi-OS profile — loop
 #                      must confirm-or-raise (not assume untestable).
 commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to >=95%
+commands/agents/cmd.go                                     # [legacy-tail] 90.62%; cg6 ratchet-loop raises to >=95%
 commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
 commands/doctor.go                                         # [legacy-tail] 94.78%; cg6 ratchet-loop raises to >=95%
 commands/import_plugins.go                                 # [legacy-tail] 93.39%; cg6 ratchet-loop raises to >=95%
-commands/import.go                                         # [legacy-tail] 94.94%; cg6 ratchet-loop raises to >=95%
 commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to >=95%
 commands/kg/query_lint_maintain.go                         # [legacy-tail] 92.47%; cg6 ratchet-loop raises to >=95%
 commands/linkcount_unix.go                                 # [platform-tag] 71.43% on merged profile; cg6 confirm-or-raise
@@ -32,6 +32,7 @@ commands/refresh.go                                        # [legacy-tail] 93.53
 commands/sync.go                                           # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
 commands/sync/pull.go                                      # [legacy-tail] 88.89%; cg6 ratchet-loop raises to >=95%
 commands/workflow/app_types.go                             # [legacy-tail] 94.12%; cg6 ratchet-loop raises to >=95%
+commands/workflow/prefs.go                                 # [legacy-tail] 94.53%; cg6 ratchet-loop raises to >=95%
 commands/workflow/delegation.go                            # [legacy-tail] 93.74%; cg6 ratchet-loop raises to >=95%
 commands/workflow/drift.go                                 # [legacy-tail] 94.30%; cg6 ratchet-loop raises to >=95%
 commands/workflow/fs.go                                    # [legacy-tail] 93.27%; cg6 ratchet-loop raises to >=95%
@@ -58,3 +59,5 @@ internal/platform/resource_plan.go                         # [legacy-tail] 94.47
 internal/projectsync/promote.go                            # [legacy-tail] 94.02%; cg6 ratchet-loop raises to >=95%
 internal/globalflagcov/analyze.go                          # [defensive-guards] 89.58% local; residue is unreachable pc==0 / FuncForPC==nil guards on a known-valid handler func, plus the "no handler symbol" note unproducible by a wired cobra command
 internal/globalflagcov/static.go                           # [defensive-guards] 91.21% local; residue is malformed-AST/types guards (nil TypesInfo, non-*types.Func defs, packages.Load failure) that the real ./commands type-check pipeline never yields
+internal/scoring/objective_checks.go                       # [legacy-tail] 94.92%; pre-existing R1 carry-over (objective-checks task); cg6 ratchet-loop raises to >=95%
+internal/scoring/persist.go                                # [defensive-guards] 89.41% local; residue is writeYAMLAtomic's OS error branches (yaml.Marshal nil-input, os.CreateTemp/Write/Close/Rename failures) that the real fs path cannot trigger from a Go test without mocking

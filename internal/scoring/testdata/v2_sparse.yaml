@@ -1,0 +1,20 @@
+schema_version: 2
+iteration: 65
+date: "2026-05-12"
+wave: ""
+task_id: ""
+commit: "61cb1529b6124cbf1db9a9cf236c87e1613794bb"
+files_changed: 89
+lines_added: 3298
+lines_removed: 8300
+impl:
+  item: ""
+  summary: ""
+  scope_note: ""
+  retries: 0
+  focused_tests_added: 0
+verifiers: []
+review:
+  phase_1_decision: ""
+  phase_2_decision: ""
+  overall_decision: ""

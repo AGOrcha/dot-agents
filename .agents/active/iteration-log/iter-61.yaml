@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 61
+date: "2026-04-18"
+wave: resource-command-parity
+task_id: phase-4-mcp-settings-lifecycle
+commit: 2440efbe90126ab45ce4d6f71117322e5b2803ca
+files_changed: 8
+lines_added: 753
+lines_removed: 5
+impl:
+    item: "Phase 4 MCP/settings lifecycle — mcp and settings list/show/remove + platform canonical file helpers"
+    summary: "Added dot-agents mcp and settings command trees (list, show, remove) for ~/.agents/mcp/<scope>/ and ~/.agents/settings/<scope>/; platform List/Resolve/Ensure helpers in mcp_settings.go; RESOURCE_COMMAND_CONTRACT.md + contract test anchors updated. Mirrors rules lifecycle shape without touching install/refresh emitters."
+    scope_note: on-target
+    feedback_goal: "MCP and settings lifecycle surfaces match the phase-1 contract without duplicating emitter/planner logic; regression tests for touched commands pass."
+    retries: 0
+    focused_tests_added: 9
+    focused_tests_pass: true
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes — verify record, checkpoint, merge-back"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers:
+    - type: unit
+      status: pass
+      gate_passed: true
+      tests_added: 9
+      tests_total_pass: true
+      scenario_tags:
+        - mcp-settings-lifecycle
+        - resource-command-parity
+      self_assessment:
+        tests_positive_and_negative: true
+        tests_used_sandbox: true
+        exercised_new_scenario: true
+        ran_cli_command: true
+        cli_produced_actionable_feedback: "[ok] mcp --help; settings list --help; workflow tasks resource-command-parity"
+        linked_traces_to_outcomes: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/phase-4-mcp-settings-lifecycle/review-decision.yaml
+    verify_record_appended: false

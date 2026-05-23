@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 41
+date: "2026-04-18"
+wave: loop-agent-pipeline
+task_id: p3b-unit-verifier
+commit: 1376cc4283cb6707952d95c808e572f08f728975
+files_changed: 16
+lines_added: 1490
+lines_removed: 401
+impl:
+    item: "resource-command-parity phase-2-hooks-lifecycle: hooks list/show/remove + platform ListHookSpecs"
+    summary: "Unified hook listing on canonical HOOK.yaml bundles; added show/remove; import/remove help; remove --clean hooks/; exported ListHookSpecs/ResolveHookCommand; synced iter-log schema v2 embed with schemas/."
+    scope_note: on-target
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    retries: 0
+    focused_tests_added: 9
+    self_assessment:
+        read_loop_state: true
+        one_item_only: true
+        committed_after_tests: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes"
+        stayed_under_10_files: true
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+        tdd_refresh_performed: false
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p3b-unit-verifier/review-decision.yaml
+    verify_record_appended: false

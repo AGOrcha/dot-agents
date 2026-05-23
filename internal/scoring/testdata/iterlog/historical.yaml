@@ -1,0 +1,11 @@
+iterations:
+  - schema_version: 1
+    iteration: 1
+    date: "2026-04-11"
+    commit: "archived-loses-to-dedicated"
+    scope_note: "scope-breach"
+  - schema_version: 1
+    iteration: 99
+    date: "2026-04-01"
+    commit: "archived99"
+    scope_note: "on-target"
