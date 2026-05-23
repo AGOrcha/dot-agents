@@ -24,6 +24,15 @@ import (
 // from any subdirectory still resolve the right log directory.
 const defaultIterLogDir = ".agents/active/iteration-log"
 
+// iterLogDirFlagName / iterLogDirFlagHelp are shared by every score subcommand
+// that takes an --iter-log-dir override (run / iteration / session). Pulled
+// to constants so the flag surface stays identical across subcommands and a
+// single edit reaches all three.
+const (
+	iterLogDirFlagName = "iter-log-dir"
+	iterLogDirFlagHelp = "Iteration-log directory (default: .agents/active/iteration-log)"
+)
+
 type scoreRunOpts struct {
 	iterLogDir     string
 	repoDir        string
@@ -60,7 +69,7 @@ func newScoreRunCmd() *cobra.Command {
 			return runScoreRun(cmd.OutOrStdout(), opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.iterLogDir, "iter-log-dir", "", "Iteration-log directory (default: .agents/active/iteration-log)")
+	cmd.Flags().StringVar(&opts.iterLogDir, iterLogDirFlagName, "", iterLogDirFlagHelp)
 	cmd.Flags().StringVar(&opts.repoDir, "repo-dir", "", "Repository root (default: current working directory)")
 	cmd.Flags().StringSliceVar(&opts.transcriptDirs, "transcript-dir", nil, "Agent transcript root for token backfill (repeatable)")
 	cmd.Flags().BoolVar(&opts.noWrite, "no-write", false, "Render the summary without writing sidecars")
@@ -81,7 +90,7 @@ func newScoreIterationCmd() *cobra.Command {
 			return runScoreIteration(cmd.OutOrStdout(), resolveIterLogDir(iterLogDir), iter)
 		},
 	}
-	cmd.Flags().StringVar(&iterLogDir, "iter-log-dir", "", "Iteration-log directory (default: .agents/active/iteration-log)")
+	cmd.Flags().StringVar(&iterLogDir, iterLogDirFlagName, "", iterLogDirFlagHelp)
 	return cmd
 }
 
@@ -95,7 +104,7 @@ func newScoreSessionCmd() *cobra.Command {
 			return runScoreSession(cmd.OutOrStdout(), resolveIterLogDir(iterLogDir), args[0])
 		},
 	}
-	cmd.Flags().StringVar(&iterLogDir, "iter-log-dir", "", "Iteration-log directory (default: .agents/active/iteration-log)")
+	cmd.Flags().StringVar(&iterLogDir, iterLogDirFlagName, "", iterLogDirFlagHelp)
 	return cmd
 }
 
