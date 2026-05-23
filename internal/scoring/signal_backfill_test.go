@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // mustTime parses an RFC3339 timestamp for test setup, failing the test on a
@@ -459,19 +460,15 @@ func TestBackfillIterationsMultipleDirs(t *testing.T) {
 
 func TestBackfillIterationsScanError(t *testing.T) {
 	// An unreadable .jsonl file inside a real transcript dir surfaces an error.
-	// The fixture is built here (not committed) so its 0o000 mode is reliable.
-	if runtime.GOOS == "windows" {
-		t.Skip("file modes differ on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("running as root; file-permission errors are not enforced")
-	}
+	// testutil.MakeFileUnreadable handles the platform difference (POSIX
+	// chmod 0 vs Windows exclusive-share handle); see its godoc for the
+	// rationale.
 	dir := t.TempDir()
 	locked := filepath.Join(dir, "locked.jsonl")
-	if err := os.WriteFile(locked, []byte("{}\n"), 0o000); err != nil {
-		t.Fatalf("write locked fixture: %v", err)
+	if err := os.WriteFile(locked, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) }) // let TempDir clean up
+	testutil.MakeFileUnreadable(t, locked)
 
 	repo := bfNewGitRepo(t)
 	sha := commitInRepo(t, repo, "only")
