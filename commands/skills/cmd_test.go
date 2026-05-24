@@ -1,11 +1,9 @@
 package skills
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -449,26 +447,9 @@ func TestSkillsPromoteCmd_RunESuccessPath(t *testing.T) {
 	}
 }
 
-// TestCreateSkill_EnsureSkillMarkdownErrorPropagates covers the
-// `if err := EnsureSkillMarkdown(...); err != nil { return err }` branch
-// inside CreateSkill (line 104). MkdirAll succeeds so we reach
-// EnsureSkillMarkdown; osWriteFile then fails so EnsureSkillMarkdown errors.
-func TestCreateSkill_EnsureSkillMarkdownErrorPropagates(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
-
-	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
-
-	err := CreateSkill("err-skill", "global")
-	if err == nil || !strings.Contains(err.Error(), "creating SKILL.md") {
-		t.Fatalf("expected creating SKILL.md error from CreateSkill, got %v", err)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel, got %v", err)
-	}
-}
+// TestCreateSkill_EnsureSkillMarkdownErrorPropagates was migrated to
+// seams_test.go alongside the interface-DI seam conversion; it now drives the
+// branch through the IO-injected createSkill(fakeIO, ...) entry point.
 
 // TestAppendSkillToAgentsRC_SaveError covers the rc.Save failure branch
 // inside AppendSkillToAgentsRC (line 31). We make the project dir read-only
