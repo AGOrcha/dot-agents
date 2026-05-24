@@ -179,7 +179,7 @@ tasks:
       app_type: code-fix
     - id: t5-extract-commands-root-tests
       title: Refactor commands/*_test.go (root) to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
