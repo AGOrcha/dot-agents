@@ -7,6 +7,18 @@
 // Each step is a T0 atom that already exists in this package; this file
 // orchestrates them and surfaces wrapped errors naming which step blew
 // so the operator does not have to bisect by hand.
+//
+// tier: molecule
+// calls:
+//   - workflow-checkpoint-log-to-iter
+//   - score-iteration
+//   - workflow-advance
+//   - workflow-plan-update
+//   - workflow-commit
+//
+// Per the skill-tiering-contract (T0 atom → T1 molecule → T2 compound →
+// T3 cell), runtime agent judgment is bounded to picking among the
+// declared atoms above. A future lint pass will read this block.
 package workflow
 
 import (

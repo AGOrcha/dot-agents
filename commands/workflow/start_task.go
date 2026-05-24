@@ -10,6 +10,16 @@
 // wired in this slice — the orchestrator typically wants to decide
 // direct-vs-delegated explicitly, and `da workflow fanout` remains a
 // separate primitive call.
+//
+// tier: molecule
+// calls:
+//   - workflow-plan-update
+//   - workflow-plan-derive-scope
+//   - workflow-commit
+//
+// Per the skill-tiering-contract (T0 atom → T1 molecule → T2 compound →
+// T3 cell), runtime agent judgment is bounded to picking among the
+// declared atoms above. A future lint pass will read this block.
 package workflow
 
 import (
