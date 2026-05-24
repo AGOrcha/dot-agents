@@ -77,7 +77,7 @@ tasks:
         Honors the opt-out pref.
     - id: wc-verify-close
       title: Spec done-criteria verification + close
-      status: pending
+      status: completed
       depends_on:
         - wc-iteration-close
       blocks: []
