@@ -114,7 +114,7 @@ tasks:
       app_type: go-cli
     - id: docs-and-help
       title: Doc the client-vs-primitive layering against the tier vocabulary
-      status: pending
+      status: completed
       depends_on:
         - tier-declarations
       blocks: []
