@@ -264,13 +264,13 @@ func collectCanonicalHookSpecsForPlatform(agentsHome, project, platformID string
 	return out, nil
 }
 
-func emitHookSpec(spec *HookSpec, dst string, mode HookEmissionMode) error {
+func emitHookSpec(io platformIO, spec *HookSpec, dst string, mode HookEmissionMode) error {
 	if spec == nil {
 		return nil
 	}
 	switch mode.Shape {
 	case HookShapeDirect:
-		return emitHookFile(spec.SourcePath, dst, mode.Transport)
+		return emitHookFile(io, spec.SourcePath, dst, mode.Transport)
 	case HookShapeRenderSingle, HookShapeRenderFanout:
 		return fmt.Errorf("hook emission shape %q is not supported for single direct emission", mode.Shape)
 	default:
@@ -278,23 +278,23 @@ func emitHookSpec(spec *HookSpec, dst string, mode HookEmissionMode) error {
 	}
 }
 
-func emitHookSpecToUserHomes(spec *HookSpec, relativePath string, mode HookEmissionMode) error {
+func emitHookSpecToUserHomes(io platformIO, spec *HookSpec, relativePath string, mode HookEmissionMode) error {
 	if spec == nil {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		if err := emitHookSpec(spec, filepath.Join(homeRoot, relativePath), mode); err != nil {
+		if err := emitHookSpec(io, spec, filepath.Join(homeRoot, relativePath), mode); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitHookFanout(specs []HookSpec, dstRoot string, mode HookEmissionMode, mapName func(HookSpec) (string, bool)) error {
+func emitHookFanout(io platformIO, specs []HookSpec, dstRoot string, mode HookEmissionMode, mapName func(HookSpec) (string, bool)) error {
 	if mode.Shape != HookShapeRenderFanout {
 		return fmt.Errorf("hook fanout requires %q shape, got %q", HookShapeRenderFanout, mode.Shape)
 	}
-	if err := osMkdirAll(dstRoot, 0755); err != nil {
+	if err := io.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -302,14 +302,14 @@ func emitHookFanout(specs []HookSpec, dstRoot string, mode HookEmissionMode, map
 		if !ok {
 			continue
 		}
-		if err := emitHookFile(spec.SourcePath, filepath.Join(dstRoot, name), mode.Transport); err != nil {
+		if err := emitHookFile(io, spec.SourcePath, filepath.Join(dstRoot, name), mode.Transport); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitRenderedHookFile(specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {
+func emitRenderedHookFile(io platformIO, specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -317,15 +317,15 @@ func emitRenderedHookFile(specs []HookSpec, dst string, render func([]HookSpec) 
 	if err != nil {
 		return err
 	}
-	return writeManagedFile(dst, content)
+	return writeManagedFile(io, dst, content)
 }
 
-func emitRenderedHookFileToUserHomes(specs []HookSpec, relativePath string, render func([]HookSpec) ([]byte, error)) error {
+func emitRenderedHookFileToUserHomes(io platformIO, specs []HookSpec, relativePath string, render func([]HookSpec) ([]byte, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		if err := emitRenderedHookFile(specs, filepath.Join(homeRoot, relativePath), render); err != nil {
+		if err := emitRenderedHookFile(io, specs, filepath.Join(homeRoot, relativePath), render); err != nil {
 			return err
 		}
 	}
@@ -333,6 +333,7 @@ func emitRenderedHookFileToUserHomes(specs []HookSpec, relativePath string, rend
 }
 
 func emitPreferredHookFile(
+	io platformIO,
 	dst string,
 	render func([]HookSpec) ([]byte, error),
 	legacy *HookSpec,
@@ -344,10 +345,10 @@ func emitPreferredHookFile(
 		if len(specs) == 0 {
 			continue
 		}
-		return emitRenderedHookFile(specs, dst, render)
+		return emitRenderedHookFile(io, specs, dst, render)
 	}
 	if legacy != nil {
-		return emitHookSpec(legacy, dst, mode)
+		return emitHookSpec(io, legacy, dst, mode)
 	}
 	if removeRendered != nil {
 		return removeRendered(dst)
@@ -356,6 +357,7 @@ func emitPreferredHookFile(
 }
 
 func emitPreferredHookFileToUserHomes(
+	io platformIO,
 	relativePath string,
 	render func([]HookSpec) ([]byte, error),
 	legacy *HookSpec,
@@ -367,10 +369,10 @@ func emitPreferredHookFileToUserHomes(
 		if len(specs) == 0 {
 			continue
 		}
-		return emitRenderedHookFileToUserHomes(specs, relativePath, render)
+		return emitRenderedHookFileToUserHomes(io, specs, relativePath, render)
 	}
 	if legacy != nil {
-		return emitHookSpecToUserHomes(legacy, relativePath, mode)
+		return emitHookSpecToUserHomes(io, legacy, relativePath, mode)
 	}
 	if removeRendered == nil {
 		return nil
@@ -383,19 +385,19 @@ func emitPreferredHookFileToUserHomes(
 	return nil
 }
 
-func removeRenderedClaudeHookSettings(path string) error {
-	return removeManagedFileIf(path, isLikelyRenderedClaudeHookSettings)
+func removeRenderedClaudeHookSettings(io platformIO, path string) error {
+	return removeManagedFileIf(io, path, isLikelyRenderedClaudeHookSettings)
 }
 
-func removeRenderedCodexHookConfig(path string) error {
-	return removeManagedFileIf(path, isLikelyRenderedCodexHookConfig)
+func removeRenderedCodexHookConfig(io platformIO, path string) error {
+	return removeManagedFileIf(io, path, isLikelyRenderedCodexHookConfig)
 }
 
-func removeRenderedCursorHookConfig(path string) error {
-	return removeManagedFileIf(path, isLikelyRenderedCursorHookConfig)
+func removeRenderedCursorHookConfig(io platformIO, path string) error {
+	return removeManagedFileIf(io, path, isLikelyRenderedCursorHookConfig)
 }
 
-func removeManagedRenderedHookFile(specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {
+func removeManagedRenderedHookFile(io platformIO, specs []HookSpec, dst string, render func([]HookSpec) ([]byte, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -403,26 +405,26 @@ func removeManagedRenderedHookFile(specs []HookSpec, dst string, render func([]H
 	if err != nil {
 		return err
 	}
-	return removeManagedFile(dst, content)
+	return removeManagedFile(io, dst, content)
 }
 
-func removeManagedRenderedHookFileToUserHomes(specs []HookSpec, relativePath string, render func([]HookSpec) ([]byte, error)) error {
+func removeManagedRenderedHookFileToUserHomes(io platformIO, specs []HookSpec, relativePath string, render func([]HookSpec) ([]byte, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
-		if err := removeManagedRenderedHookFile(specs, filepath.Join(homeRoot, relativePath), render); err != nil {
+		if err := removeManagedRenderedHookFile(io, specs, filepath.Join(homeRoot, relativePath), render); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSpec) (string, []byte, bool, error)) error {
+func emitRenderedHookFanout(io platformIO, specs []HookSpec, dstRoot string, render func(HookSpec) (string, []byte, bool, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
-	if err := osMkdirAll(dstRoot, 0755); err != nil {
+	if err := io.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
 	for _, spec := range specs {
@@ -433,14 +435,14 @@ func emitRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSp
 		if !ok {
 			continue
 		}
-		if err := writeManagedFile(filepath.Join(dstRoot, name), content); err != nil {
+		if err := writeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func removeManagedRenderedHookFanout(specs []HookSpec, dstRoot string, render func(HookSpec) (string, []byte, bool, error)) error {
+func removeManagedRenderedHookFanout(io platformIO, specs []HookSpec, dstRoot string, render func(HookSpec) (string, []byte, bool, error)) error {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -452,14 +454,14 @@ func removeManagedRenderedHookFanout(specs []HookSpec, dstRoot string, render fu
 		if !ok {
 			continue
 		}
-		if err := removeManagedFile(filepath.Join(dstRoot, name), content); err != nil {
+		if err := removeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
 			return err
 		}
 	}
 	return removeDirIfEmpty(dstRoot)
 }
 
-func emitHookFile(src, dst string, transport HookTransport) error {
+func emitHookFile(io platformIO, src, dst string, transport HookTransport) error {
 	switch transport {
 	case HookTransportSymlink:
 		// Managed-replace: the hook file is a dot-agents output at a fixed
@@ -476,7 +478,7 @@ func emitHookFile(src, dst string, transport HookTransport) error {
 		if err != nil {
 			return err
 		}
-		return writeManagedFile(dst, content)
+		return writeManagedFile(io, dst, content)
 	default:
 		return fmt.Errorf("unknown hook transport %q", transport)
 	}
@@ -838,13 +840,13 @@ func marshalJSON(v any) ([]byte, error) {
 	return append(content, '\n'), nil
 }
 
-func writeManagedFile(dst string, content []byte) error {
+func writeManagedFile(io platformIO, dst string, content []byte) error {
 	newHash := renderContentHash(content)
 	existing, readErr := os.ReadFile(dst)
 	switch {
 	case readErr == nil:
 		if bytes.Equal(existing, content) {
-			recordRenderHash(dst, newHash) // heal/ensure provenance
+			recordRenderHash(io, dst, newHash) // heal/ensure provenance
 			return nil
 		}
 		// Divergent existing file. It is ONLY safe to clobber if it is
@@ -867,21 +869,21 @@ func writeManagedFile(dst string, content []byte) error {
 		return fmt.Errorf("reading existing managed file %s before refresh: %w", dst, readErr)
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := osRemove(dst); err != nil {
+		if err := io.Remove(dst); err != nil {
 			return err
 		}
 	}
-	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	if err := osWriteFile(dst, content, 0644); err != nil {
+	if err := io.WriteFile(dst, content, 0644); err != nil {
 		return err
 	}
-	recordRenderHash(dst, newHash)
+	recordRenderHash(io, dst, newHash)
 	return nil
 }
 
-func removeManagedFile(dst string, content []byte) error {
+func removeManagedFile(io platformIO, dst string, content []byte) error {
 	info, err := os.Lstat(dst)
 	if os.IsNotExist(err) {
 		return nil
@@ -903,7 +905,7 @@ func removeManagedFile(dst string, content []byte) error {
 	if !bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
+	if err := io.Remove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))
@@ -929,7 +931,7 @@ func removeDirIfEmpty(path string) error {
 	return nil
 }
 
-func removeManagedFileIf(dst string, matches func([]byte) bool) error {
+func removeManagedFileIf(io platformIO, dst string, matches func([]byte) bool) error {
 	info, err := os.Lstat(dst)
 	if os.IsNotExist(err) {
 		return nil
@@ -950,13 +952,13 @@ func removeManagedFileIf(dst string, matches func([]byte) bool) error {
 	if !matches(content) {
 		return nil
 	}
-	if err := osRemove(dst); err != nil && !os.IsNotExist(err) {
+	if err := io.Remove(dst); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return removeDirIfEmpty(filepath.Dir(dst))
 }
 
-func pruneManagedRenderedFanoutExtras(dstRoot string, wanted map[string]bool, matches func([]byte) bool) error {
+func pruneManagedRenderedFanoutExtras(io platformIO, dstRoot string, wanted map[string]bool, matches func([]byte) bool) error {
 	entries, err := os.ReadDir(dstRoot)
 	if os.IsNotExist(err) {
 		return nil
@@ -968,7 +970,7 @@ func pruneManagedRenderedFanoutExtras(dstRoot string, wanted map[string]bool, ma
 		if entry.IsDir() || wanted[entry.Name()] {
 			continue
 		}
-		if err := removeManagedFileIf(filepath.Join(dstRoot, entry.Name()), matches); err != nil {
+		if err := removeManagedFileIf(io, filepath.Join(dstRoot, entry.Name()), matches); err != nil {
 			return err
 		}
 	}

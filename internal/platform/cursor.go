@@ -20,7 +20,9 @@ import (
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
-type cursor struct{}
+type cursor struct {
+	io platformIO
+}
 
 const (
 	cursorHooksFile   = "hooks.json"
@@ -35,7 +37,7 @@ const (
 	cliExecPipeWaitDelay = 3 * time.Second
 )
 
-func NewCursor() Platform { return &cursor{} }
+func NewCursor() Platform { return &cursor{io: stdPlatformIO{}} }
 
 func (c *cursor) ID() string          { return "cursor" }
 func (c *cursor) DisplayName() string { return "Cursor" }
@@ -272,7 +274,7 @@ func (c *cursor) CreateLinks(project, repoPath string) error {
 
 func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
-	if err := osMkdirAll(rulesDir, 0755); err != nil {
+	if err := c.io.MkdirAll(rulesDir, 0755); err != nil {
 		return err
 	}
 	desired := map[string]string{}
@@ -333,7 +335,7 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 		if _, ok := desired[name]; ok {
 			continue
 		}
-		if err := osRemove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+		if err := c.io.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -341,7 +343,7 @@ func (c *cursor) pruneRuleLinks(rulesDir, project string, desired map[string]str
 }
 
 func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error {
-	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, cursorJSON); src != "" {
@@ -354,7 +356,7 @@ func (c *cursor) createSettingsLinks(project, repoPath, agentsHome string) error
 }
 
 func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
-	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
@@ -387,15 +389,16 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := osMkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
+		c.io,
 		repoTarget,
 		renderCursorHookConfig,
 		resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON),
 		directHardlinkHookMode,
-		removeRenderedCursorHookConfig,
+		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		repoBundles,
 	)
 }
@@ -406,11 +409,12 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 		return err
 	}
 	return emitPreferredHookFileToUserHomes(
+		c.io,
 		filepath.Join(cursorDir, cursorHooksFile),
 		renderCursorHookConfig,
 		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON),
 		directHardlinkHookMode,
-		removeRenderedCursorHookConfig,
+		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		globalBundles,
 	)
 }
@@ -462,7 +466,7 @@ func (c *cursor) removeHooksLink(project, repoPath, agentsHome string) error {
 	hooksFilePath := filepath.Join(repoPath, cursorDir, cursorHooksFile)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
-		_ = removeManagedRenderedHookFile(repoBundles, hooksFilePath, renderCursorHookConfig)
+		_ = removeManagedRenderedHookFile(c.io, repoBundles, hooksFilePath, renderCursorHookConfig)
 	}
 	return removeHardlinkedManaged(hooksFilePath, []string{
 		filepath.Join(agentsHome, "hooks", project, cursorJSON),

@@ -2,78 +2,21 @@ package platform
 
 // Seam-injection tests exercise the err != nil branches on os.MkdirAll /
 // os.Remove / os.WriteFile that cannot be triggered with a writable tmp
-// fixture. Each test swaps the package-level seam to an error-returning stub
-// and asserts the calling function surfaces the synthetic error.
+// fixture. Each test constructs a fakePlatformIO (see io_test.go) that
+// fault-injects exactly one operation and threads it through the unit
+// under test (receiver.io field or function parameter). The fakePlatformIO
+// helpers (withMkdirAllError / withRemoveError / withWriteFileError /
+// withMkdirAllErrorAfter) live in io_test.go alongside the interface
+// implementation.
 
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-var errSeamSynthetic = errors.New("seam synthetic failure")
-
-// withMkdirAllErrorAfter swaps osMkdirAll to fail the Nth call (1-indexed)
-// whose path contains want, and delegates the rest to the real os.MkdirAll.
-// This lets a test target a specific MkdirAll call in a CreateLinks chain
-// where earlier calls must succeed.
-func withMkdirAllErrorAfter(t *testing.T, want string, failAt int) {
-	t.Helper()
-	saved := osMkdirAll
-	t.Cleanup(func() { osMkdirAll = saved })
-	count := 0
-	osMkdirAll = func(path string, perm fs.FileMode) error {
-		if want == "" || strings.Contains(path, want) {
-			count++
-			if count == failAt {
-				return errSeamSynthetic
-			}
-		}
-		return saved(path, perm)
-	}
-}
-
-// withMkdirAllError swaps osMkdirAll to a stub that fails for any path
-// containing want. The original is restored on test cleanup.
-func withMkdirAllError(t *testing.T, want string) {
-	t.Helper()
-	saved := osMkdirAll
-	t.Cleanup(func() { osMkdirAll = saved })
-	osMkdirAll = func(path string, perm fs.FileMode) error {
-		if want == "" || strings.Contains(path, want) {
-			return errSeamSynthetic
-		}
-		return saved(path, perm)
-	}
-}
-
-func withRemoveError(t *testing.T, want string) {
-	t.Helper()
-	saved := osRemove
-	t.Cleanup(func() { osRemove = saved })
-	osRemove = func(path string) error {
-		if want == "" || strings.Contains(path, want) {
-			return errSeamSynthetic
-		}
-		return saved(path)
-	}
-}
-
-func withWriteFileError(t *testing.T, want string) {
-	t.Helper()
-	saved := osWriteFile
-	t.Cleanup(func() { osWriteFile = saved })
-	osWriteFile = func(name string, data []byte, perm fs.FileMode) error {
-		if want == "" || strings.Contains(name, want) {
-			return errSeamSynthetic
-		}
-		return saved(name, data, perm)
-	}
-}
 
 func setupAgentsHome(t *testing.T) (agentsHome, repo string) {
 	t.Helper()
@@ -95,9 +38,9 @@ func setupAgentsHome(t *testing.T) (agentsHome, repo string) {
 
 func TestCursorCreateRuleLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	_, repo := setupAgentsHome(t)
-	withMkdirAllError(t, filepath.Join(".cursor", "rules"))
+	fakeIO := withMkdirAllError(t, filepath.Join(".cursor", "rules"))
 
-	c := NewCursor().(*cursor)
+	c := &cursor{io: fakeIO}
 	err := c.createRuleLinks("proj", repo, "")
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createRuleLinks err = %v, want %v", err, errSeamSynthetic)
@@ -115,9 +58,9 @@ func TestCursorPruneRuleLinks_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "proj--stale.mdc")
+	fakeIO := withRemoveError(t, "proj--stale.mdc")
 
-	c := NewCursor().(*cursor)
+	c := &cursor{io: fakeIO}
 	err := c.pruneRuleLinks(rulesDir, "proj", map[string]string{})
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("pruneRuleLinks err = %v, want %v", err, errSeamSynthetic)
@@ -126,9 +69,9 @@ func TestCursorPruneRuleLinks_RemoveErrorSurfaces(t *testing.T) {
 
 func TestCursorCreateSettingsLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, ".cursor")
+	fakeIO := withMkdirAllError(t, ".cursor")
 
-	c := NewCursor().(*cursor)
+	c := &cursor{io: fakeIO}
 	err := c.createSettingsLinks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createSettingsLinks err = %v, want %v", err, errSeamSynthetic)
@@ -137,9 +80,9 @@ func TestCursorCreateSettingsLinks_MkdirAllErrorSurfaces(t *testing.T) {
 
 func TestCursorCreateMCPLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, ".cursor")
+	fakeIO := withMkdirAllError(t, ".cursor")
 
-	c := NewCursor().(*cursor)
+	c := &cursor{io: fakeIO}
 	err := c.createMCPLinks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createMCPLinks err = %v, want %v", err, errSeamSynthetic)
@@ -148,9 +91,9 @@ func TestCursorCreateMCPLinks_MkdirAllErrorSurfaces(t *testing.T) {
 
 func TestCursorWriteRepoHooks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, ".cursor")
+	fakeIO := withMkdirAllError(t, ".cursor")
 
-	c := NewCursor().(*cursor)
+	c := &cursor{io: fakeIO}
 	err := c.writeRepoHooks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeRepoHooks err = %v, want %v", err, errSeamSynthetic)
@@ -165,9 +108,9 @@ func TestCursorCreateLinks_ChainEarlyReturns(t *testing.T) {
 		failAt := failAt
 		t.Run(fmt.Sprintf("fail-%d", failAt), func(t *testing.T) {
 			agentsHome, repo := setupAgentsHome(t)
-			withMkdirAllErrorAfter(t, ".cursor", failAt)
+			fakeIO := withMkdirAllErrorAfter(t, ".cursor", failAt)
 
-			c := NewCursor().(*cursor)
+			c := &cursor{io: fakeIO}
 			err := c.CreateLinks("proj", repo)
 			if !errors.Is(err, errSeamSynthetic) {
 				t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
@@ -206,9 +149,9 @@ func runCopilotChainEarlyReturn(t *testing.T, failAt int) {
 	// .claude (compat). Use empty pattern so any MkdirAll counts; cleanup
 	// helpers in setupAgentsHome already created repo + agentsHome before
 	// the seam is installed.
-	withMkdirAllErrorAfter(t, "", failAt)
+	fakeIO := withMkdirAllErrorAfter(t, "", failAt)
 
-	c := NewCopilot().(*copilot)
+	c := &copilot{io: fakeIO}
 	err := c.CreateLinks("proj", repo)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
@@ -249,9 +192,9 @@ func TestClaudePrepareLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
 	// Restrict the failing path to the final MkdirAll call so the earlier
 	// ensureUser* helpers (which also call osMkdirAll) succeed.
-	withMkdirAllError(t, filepath.Join(repo, ".claude", "rules"))
+	fakeIO := withMkdirAllError(t, filepath.Join(repo, ".claude", "rules"))
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	err := c.prepareLinks(repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("prepareLinks err = %v, want %v", err, errSeamSynthetic)
@@ -366,9 +309,9 @@ func TestClaudeCreateLinks_CreateRulesLinksErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "proj--stale.md")
+	fakeIO := withRemoveError(t, "proj--stale.md")
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	err := c.CreateLinks("proj", repo)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
@@ -390,9 +333,9 @@ func TestClaudeCreateLinks_CreateAgentsLinksErrorSurfaces(t *testing.T) {
 	}
 	// Fail the MkdirAll inside syncResourceDirEntries for the `.agents/agents`
 	// destination. We use a tightly-scoped seam path so prepareLinks succeeds.
-	withMkdirAllError(t, filepath.Join(repo, ".agents", "agents"))
+	fakeIO := withMkdirAllError(t, filepath.Join(repo, ".agents", "agents"))
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	err := c.CreateLinks("proj", repo)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
@@ -414,9 +357,9 @@ func TestCodexEnsureUserAgents_MkdirContinueAndWriteAgentsError(t *testing.T) {
 	}
 	// Force the per-homeRoot MkdirAll for `.codex/agents` to fail and
 	// continue. Then the loop body completes silently and returns nil.
-	withMkdirAllError(t, filepath.Join(codexDir, "agents"))
+	fakeIO := withMkdirAllError(t, filepath.Join(codexDir, "agents"))
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	if err := c.ensureUserAgents(agentsHome); err != nil {
 		t.Fatalf("ensureUserAgents should swallow inner err, got %v", err)
 	}
@@ -442,9 +385,9 @@ func TestCodexEnsureUserAgents_WriteCodexAgentsErrorSurfaces(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	withWriteFileError(t, "reviewer.toml")
+	fakeIO := withWriteFileError(t, "reviewer.toml")
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	if err := c.ensureUserAgents(agentsHome); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("ensureUserAgents err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -454,9 +397,9 @@ func TestCodexEnsureUserAgents_WriteCodexAgentsErrorSurfaces(t *testing.T) {
 
 func TestCodexCreateLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, filepath.Join(repo, ".codex"))
+	fakeIO := withMkdirAllError(t, filepath.Join(repo, ".codex"))
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	err := c.CreateLinks("proj", repo)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
@@ -466,9 +409,9 @@ func TestCodexCreateLinks_MkdirAllErrorSurfaces(t *testing.T) {
 
 func TestCodexWriteRepoHooks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, filepath.Join(repo, ".codex"))
+	fakeIO := withMkdirAllError(t, filepath.Join(repo, ".codex"))
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	err := c.writeRepoHooks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeRepoHooks err = %v, want %v", err, errSeamSynthetic)
@@ -482,9 +425,9 @@ func TestWriteCodexAgentTomlFile_MkdirAllErrorSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "out", "foo.toml")
-	withMkdirAllError(t, filepath.Join(tmp, "out"))
+	fakeIO := withMkdirAllError(t, filepath.Join(tmp, "out"))
 
-	err := writeCodexAgentTomlFile(dst, agentMD)
+	err := writeCodexAgentTomlFile(fakeIO, dst, agentMD)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeCodexAgentTomlFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -501,9 +444,9 @@ func TestWriteCodexAgentTomlFile_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("stale"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "foo.toml")
+	fakeIO := withRemoveError(t, "foo.toml")
 
-	err := writeCodexAgentTomlFile(dst, agentMD)
+	err := writeCodexAgentTomlFile(fakeIO, dst, agentMD)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeCodexAgentTomlFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -516,9 +459,9 @@ func TestWriteCodexAgentTomlFile_WriteFileErrorSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "foo.toml")
-	withWriteFileError(t, "foo.toml")
+	fakeIO := withWriteFileError(t, "foo.toml")
 
-	err := writeCodexAgentTomlFile(dst, agentMD)
+	err := writeCodexAgentTomlFile(fakeIO, dst, agentMD)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeCodexAgentTomlFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -547,9 +490,9 @@ func TestCodexWriteCodexAgents_WriteTomlErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n# r\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withWriteFileError(t, "reviewer.toml")
+	fakeIO := withWriteFileError(t, "reviewer.toml")
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	err := c.writeCodexAgents(agentsHome, "global", filepath.Join(tmp, "dst"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeCodexAgents err = %v, want %v", err, errSeamSynthetic)
@@ -577,9 +520,9 @@ func TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dst, "reviewer.toml"), []byte(""), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "reviewer.toml")
+	fakeIO := withRemoveError(t, "reviewer.toml")
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	err := c.pruneManagedCodexAgentTomls(agentsHome, "global", dst)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("pruneManagedCodexAgentTomls err = %v, want %v", err, errSeamSynthetic)
@@ -631,9 +574,9 @@ func TestOpencodeEnsureUserAgents_MkdirAllErrorSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fail MkdirAll on the opencode-agent destination dir.
-	withMkdirAllError(t, filepath.Join(opencodeDir, "agent"))
+	fakeIO := withMkdirAllError(t, filepath.Join(opencodeDir, "agent"))
 
-	o := NewOpenCode().(*opencode)
+	o := &opencode{io: fakeIO}
 	if err := o.ensureUserAgents(agentsHome); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("ensureUserAgents err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -655,9 +598,9 @@ func TestCopilotCreateInstructionsLink_MkdirAllErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(src, []byte("# c"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, ".github")
+	fakeIO := withMkdirAllError(t, ".github")
 
-	c := NewCopilot().(*copilot)
+	c := &copilot{io: fakeIO}
 	err := c.createInstructionsLink("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createInstructionsLink err = %v, want %v", err, errSeamSynthetic)
@@ -674,9 +617,9 @@ func TestCopilotCreateMCPLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, ".vscode")
+	fakeIO := withMkdirAllError(t, ".vscode")
 
-	c := NewCopilot().(*copilot)
+	c := &copilot{io: fakeIO}
 	err := c.createMCPLinks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createMCPLinks err = %v, want %v", err, errSeamSynthetic)
@@ -758,9 +701,9 @@ func TestCopilotCreateProjectHookFiles_PropagatesParseError(t *testing.T) {
 
 func TestCopilotCreateClaudeCompatLinks_MkdirAllErrorSurfaces(t *testing.T) {
 	agentsHome, repo := setupAgentsHome(t)
-	withMkdirAllError(t, ".claude")
+	fakeIO := withMkdirAllError(t, ".claude")
 
-	c := NewCopilot().(*copilot)
+	c := &copilot{io: fakeIO}
 	err := c.createClaudeCompatLinks("proj", repo, agentsHome)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("createClaudeCompatLinks err = %v, want %v", err, errSeamSynthetic)
@@ -871,9 +814,9 @@ func TestCodexCreateLinks_EnsureUserAgentsErrorPropagates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	withWriteFileError(t, "reviewer.toml")
+	fakeIO := withWriteFileError(t, "reviewer.toml")
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	if err := c.CreateLinks("proj", repo); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -891,9 +834,9 @@ func TestCodexCreateLinks_EnsureUserSkillsErrorPropagates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, filepath.Join(".agents", "skills"))
+	fakeIO := withMkdirAllError(t, filepath.Join(".agents", "skills"))
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	if err := c.CreateLinks("proj", repo); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("CreateLinks err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -910,9 +853,9 @@ func TestCodexCreateLinks_ChainEarlyReturns(t *testing.T) {
 		failAt := failAt
 		t.Run(fmt.Sprintf("fail-%d", failAt), func(t *testing.T) {
 			agentsHome, repo := setupAgentsHome(t)
-			withMkdirAllErrorAfter(t, filepath.Join(repo, ".codex"), failAt)
+			fakeIO := withMkdirAllErrorAfter(t, filepath.Join(repo, ".codex"), failAt)
 
-			c := NewCodex().(*codex)
+			c := &codex{io: fakeIO}
 			err := c.CreateLinks("proj", repo)
 			if !errors.Is(err, errSeamSynthetic) {
 				t.Fatalf("CreateLinks fail-%d err = %v, want %v", failAt, err, errSeamSynthetic)
@@ -933,9 +876,9 @@ func TestClaudeEnsureUserSkills_ErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, filepath.Join(claudeDir, "skills"))
+	fakeIO := withMkdirAllError(t, filepath.Join(claudeDir, "skills"))
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	if err := c.ensureUserSkills(agentsHome); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("ensureUserSkills err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -952,9 +895,9 @@ func TestCodexEnsureUserSkills_ErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# s"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, filepath.Join(".agents", "skills"))
+	fakeIO := withMkdirAllError(t, filepath.Join(".agents", "skills"))
 
-	c := NewCodex().(*codex)
+	c := &codex{io: fakeIO}
 	if err := c.ensureUserSkills(agentsHome); !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("ensureUserSkills err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -973,9 +916,9 @@ func TestClaudeEnsureUserAgents_InHomeErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(globalAgents, "AGENT.md"), []byte("# r"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withMkdirAllError(t, filepath.Join(".claude", "agents"))
+	fakeIO := withMkdirAllError(t, filepath.Join(".claude", "agents"))
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	if err := c.ensureUserAgents(agentsHome); err == nil {
 		t.Fatal("ensureUserAgents must propagate the inner per-home error, got nil")
 	}
@@ -985,9 +928,9 @@ func TestClaudeEnsureUserAgents_InHomeErrorSurfaces(t *testing.T) {
 // userAgentsDir MkdirAll error branch.
 func TestClaudeEnsureUserAgentsInHome_MkdirAllErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
-	withMkdirAllError(t, ".claude")
+	fakeIO := withMkdirAllError(t, ".claude")
 
-	c := NewClaude().(*claude)
+	c := &claude{io: fakeIO}
 	err := c.ensureUserAgentsInHome(tmp, "ignored", nil)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("ensureUserAgentsInHome err = %v, want %v", err, errSeamSynthetic)
@@ -999,10 +942,10 @@ func TestClaudeEnsureUserAgentsInHome_MkdirAllErrorSurfaces(t *testing.T) {
 func TestEmitHookFanout_MkdirAllErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
 	dstRoot := filepath.Join(tmp, "fanout")
-	withMkdirAllError(t, "fanout")
+	fakeIO := withMkdirAllError(t, "fanout")
 	specs := []HookSpec{{Name: "a", SourcePath: filepath.Join(tmp, "missing.json")}}
 
-	err := emitHookFanout(specs, dstRoot, HookEmissionMode{
+	err := emitHookFanout(fakeIO, specs, dstRoot, HookEmissionMode{
 		Shape:     HookShapeRenderFanout,
 		Transport: HookTransportSymlink,
 	}, func(s HookSpec) (string, bool) { return s.Name + ".json", true })
@@ -1016,10 +959,10 @@ func TestEmitHookFanout_MkdirAllErrorSurfaces(t *testing.T) {
 func TestEmitRenderedHookFanout_MkdirAllErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
 	dstRoot := filepath.Join(tmp, "fanout")
-	withMkdirAllError(t, "fanout")
+	fakeIO := withMkdirAllError(t, "fanout")
 	specs := []HookSpec{{Name: "a"}}
 
-	err := emitRenderedHookFanout(specs, dstRoot, func(HookSpec) (string, []byte, bool, error) {
+	err := emitRenderedHookFanout(fakeIO, specs, dstRoot, func(HookSpec) (string, []byte, bool, error) {
 		return "a.json", []byte("{}"), true, nil
 	})
 	if !errors.Is(err, errSeamSynthetic) {
@@ -1036,9 +979,9 @@ func TestWriteManagedFile_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("stale"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "managed.json")
+	fakeIO := withRemoveError(t, "managed.json")
 
-	err := writeManagedFile(dst, []byte("fresh"))
+	err := writeManagedFile(fakeIO, dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1047,9 +990,9 @@ func TestWriteManagedFile_RemoveErrorSurfaces(t *testing.T) {
 func TestWriteManagedFile_MkdirAllErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "sub", "managed.json")
-	withMkdirAllError(t, filepath.Join(tmp, "sub"))
+	fakeIO := withMkdirAllError(t, filepath.Join(tmp, "sub"))
 
-	err := writeManagedFile(dst, []byte("fresh"))
+	err := writeManagedFile(fakeIO, dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1058,9 +1001,9 @@ func TestWriteManagedFile_MkdirAllErrorSurfaces(t *testing.T) {
 func TestWriteManagedFile_WriteFileErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "managed.json")
-	withWriteFileError(t, "managed.json")
+	fakeIO := withWriteFileError(t, "managed.json")
 
-	err := writeManagedFile(dst, []byte("fresh"))
+	err := writeManagedFile(fakeIO, dst, []byte("fresh"))
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("writeManagedFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1307,9 +1250,9 @@ func TestRemoveManagedFile_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(dst, content, 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "managed.json")
+	fakeIO := withRemoveError(t, "managed.json")
 
-	err := removeManagedFile(dst, content)
+	err := removeManagedFile(fakeIO, dst, content)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("removeManagedFile err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1323,9 +1266,9 @@ func TestRemoveManagedFileIf_RemoveErrorSurfaces(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("payload"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	withRemoveError(t, "managed.json")
+	fakeIO := withRemoveError(t, "managed.json")
 
-	err := removeManagedFileIf(dst, func([]byte) bool { return true })
+	err := removeManagedFileIf(fakeIO, dst, func([]byte) bool { return true })
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("removeManagedFileIf err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1542,7 +1485,7 @@ func TestListHookSpecs_MalformedManifestSurfacesError(t *testing.T) {
 
 // TestEmitHookFile_UnknownTransportError covers the default error branch.
 func TestEmitHookFile_UnknownTransportError(t *testing.T) {
-	err := emitHookFile("/x", "/y", HookTransport("bogus"))
+	err := emitHookFile(stdPlatformIO{}, "/x", "/y", HookTransport("bogus"))
 	if err == nil {
 		t.Fatal("expected unknown-transport error")
 	}
@@ -1552,7 +1495,7 @@ func TestEmitHookFile_UnknownTransportError(t *testing.T) {
 // error branch under HookTransportWrite.
 func TestEmitHookFile_WriteTransportMissingSourceError(t *testing.T) {
 	tmp := t.TempDir()
-	err := emitHookFile(filepath.Join(tmp, "missing.json"), filepath.Join(tmp, "dst.json"), HookTransportWrite)
+	err := emitHookFile(stdPlatformIO{}, filepath.Join(tmp, "missing.json"), filepath.Join(tmp, "dst.json"), HookTransportWrite)
 	if err == nil {
 		t.Fatal("expected read-source error")
 	}
@@ -1586,9 +1529,9 @@ func TestRemoveSharedTargets_UnsupportedMaterializerError(t *testing.T) {
 func TestSyncResourceDirEntries_MkdirAllErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
 	dstRoot := filepath.Join(tmp, "dst")
-	withMkdirAllError(t, "dst")
+	fakeIO := withMkdirAllError(t, "dst")
 
-	err := syncResourceDirEntries(nil, dstRoot)
+	err := syncResourceDirEntries(fakeIO, nil, dstRoot)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("syncResourceDirEntries err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -1607,9 +1550,9 @@ func TestSyncScopedFileSymlinks_MkdirAllErrorSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstRoot := filepath.Join(tmp, "dst")
-	withMkdirAllError(t, "dst")
+	fakeIO := withMkdirAllError(t, "dst")
 
-	err := syncScopedFileSymlinks(agentsHome, "skills", "global", "SKILL.md", dstRoot, ".md")
+	err := syncScopedFileSymlinks(fakeIO, agentsHome, "skills", "global", "SKILL.md", dstRoot, ".md")
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("syncScopedFileSymlinks err = %v, want %v", err, errSeamSynthetic)
 	}
