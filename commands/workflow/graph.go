@@ -273,12 +273,21 @@ func (a *LocalGraphAdapter) Health() (GraphBridgeHealth, error) {
 	}
 	h.NoteCount = countMarkdownNotes(a.graphHome)
 
-	// Query warm store for node/note counts to report code-lane and context-lane readiness.
+	// Query warm store for node/note counts to report code-lane and
+	// context-lane readiness. Bound to the gcc1 contract (gcc3): the local
+	// var is the published graphstore.Store interface — the concrete backend
+	// is acquired via the provider open and the call site never references
+	// *SQLiteStore. Counts come from the contract-published GetStats() rather
+	// than the provider-specific CountNodes()/CountKGNotes() accessors.
 	warmDBPath := filepath.Join(a.graphHome, "ops", "graphstore.db")
-	if store, err := graphstore.OpenSQLite(warmDBPath); err == nil {
+	var store graphstore.Store
+	var openErr error
+	if store, openErr = graphstore.OpenSQLite(warmDBPath); openErr == nil {
 		defer store.Close()
-		h.WarmStoreNodeCount = store.CountNodes()
-		h.WarmStoreNoteCount = store.CountKGNotes()
+		if stats, statsErr := store.GetStats(); statsErr == nil {
+			h.WarmStoreNodeCount = stats.TotalNodes
+			h.WarmStoreNoteCount = stats.NotesCount
+		}
 	}
 	h.CodeLaneReady = h.WarmStoreNodeCount > 0
 	h.ContextLaneReady = h.WarmStoreNoteCount > 0

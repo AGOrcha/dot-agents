@@ -2102,7 +2102,7 @@ func TestRunKGWarm_IndexesNotes(t *testing.T) {
 	}
 }
 
-func runWarmWithFlag(t *testing.T, flagName, flagValue string) (home string, store *graphstore.SQLiteStore) {
+func runWarmWithFlag(t *testing.T, flagName, flagValue string) (home string, store graphstore.Store) {
 	t.Helper()
 	home = setupKGWithNotes(t)
 	cmd := newKGWarmCmdForTest()
@@ -2396,8 +2396,10 @@ func TestRunKGWarm_IncludeCode_NoCRGGraceful(t *testing.T) {
 	if stats.NotesCount != 5 {
 		t.Errorf("expected 5 notes synced, got %d", stats.NotesCount)
 	}
-	if store.CountNodes() != 0 {
-		t.Errorf("expected 0 code nodes with no CRG db, got %d", store.CountNodes())
+	// Node count from the contract-published GetStats (gcc3): the test no
+	// longer touches the *SQLiteStore-specific CountNodes accessor.
+	if stats.TotalNodes != 0 {
+		t.Errorf("expected 0 code nodes with no CRG db, got %d", stats.TotalNodes)
 	}
 }
 

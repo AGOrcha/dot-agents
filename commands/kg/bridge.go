@@ -143,7 +143,7 @@ func graphNodeTypeLabel(node graphstore.GraphNode) string {
 	return "symbol"
 }
 
-func findCodeNodes(store *graphstore.SQLiteStore, query string, limit int) ([]graphstore.GraphNode, error) {
+func findCodeNodes(store graphstore.Store, query string, limit int) ([]graphstore.GraphNode, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -202,7 +202,7 @@ func collectGraphResults(nodes []graphstore.GraphNode, resultType string, limit 
 	return results
 }
 
-func collectNeighborResults(store *graphstore.SQLiteStore, nodes []graphstore.GraphNode, edgeKind string, inbound bool, limit int) ([]GraphQueryResult, error) {
+func collectNeighborResults(store graphstore.Store, nodes []graphstore.GraphNode, edgeKind string, inbound bool, limit int) ([]GraphQueryResult, error) {
 	seen := make(map[string]bool)
 	var results []GraphQueryResult
 	for _, node := range nodes {
@@ -222,7 +222,7 @@ func collectNeighborResults(store *graphstore.SQLiteStore, nodes []graphstore.Gr
 }
 
 // neighborEdges returns the inbound or outbound edges for qn.
-func neighborEdges(store *graphstore.SQLiteStore, qn string, inbound bool) ([]graphstore.GraphEdge, error) {
+func neighborEdges(store graphstore.Store, qn string, inbound bool) ([]graphstore.GraphEdge, error) {
 	if inbound {
 		return store.GetEdgesByTarget(qn)
 	}
@@ -233,7 +233,7 @@ func neighborEdges(store *graphstore.SQLiteStore, qn string, inbound bool) ([]gr
 // end, and appends a result row when the edge/neighbor pass the kind filter.
 // Returns done=true once limit has been reached.
 func appendNeighborMatches(
-	store *graphstore.SQLiteStore,
+	store graphstore.Store,
 	edges []graphstore.GraphEdge,
 	edgeKind string,
 	inbound bool,
@@ -272,7 +272,7 @@ func neighborQualifiedName(edge graphstore.GraphEdge, inbound bool) string {
 	return edge.TargetQualified
 }
 
-func loadNeighborNode(store *graphstore.SQLiteStore, neighborQN string) (*graphstore.GraphNode, bool) {
+func loadNeighborNode(store graphstore.Store, neighborQN string) (*graphstore.GraphNode, bool) {
 	neighbor, err := store.GetNode(neighborQN)
 	return neighbor, err == nil && neighbor != nil
 }
@@ -285,7 +285,7 @@ func shouldSkipNeighborForKind(edgeKind string, neighbor *graphstore.GraphNode) 
 	return false
 }
 
-func collectSymbolDecisionResults(store *graphstore.SQLiteStore, nodes []graphstore.GraphNode, limit int) ([]GraphQueryResult, error) {
+func collectSymbolDecisionResults(store graphstore.Store, nodes []graphstore.GraphNode, limit int) ([]GraphQueryResult, error) {
 	seen := make(map[string]bool)
 	var results []GraphQueryResult
 	for _, node := range nodes {
@@ -304,7 +304,7 @@ func collectSymbolDecisionResults(store *graphstore.SQLiteStore, nodes []graphst
 // the matching decision/synthesis/concept notes, and appends them to results.
 // Returns true once limit has been reached.
 func appendDecisionLinkMatches(
-	store *graphstore.SQLiteStore,
+	store graphstore.Store,
 	symbolQN string,
 	links []graphstore.NoteSymbolLink,
 	seen map[string]bool,
@@ -348,7 +348,7 @@ func isDecisionNoteType(noteType string) bool {
 	return false
 }
 
-func collectDecisionSymbolResults(store *graphstore.SQLiteStore, query string, limit int) ([]GraphQueryResult, error) {
+func collectDecisionSymbolResults(store graphstore.Store, query string, limit int) ([]GraphQueryResult, error) {
 	candidates, err := decisionNoteCandidates(store, query, limit)
 	if err != nil {
 		return nil, err
@@ -370,7 +370,7 @@ func collectDecisionSymbolResults(store *graphstore.SQLiteStore, query string, l
 // decisionNoteCandidates resolves the candidate set of decision/synthesis/
 // concept notes for collectDecisionSymbolResults, preferring an exact ID
 // match over a fuzzy search.
-func decisionNoteCandidates(store *graphstore.SQLiteStore, query string, limit int) ([]graphstore.KGNote, error) {
+func decisionNoteCandidates(store graphstore.Store, query string, limit int) ([]graphstore.KGNote, error) {
 	var candidates []graphstore.KGNote
 	if note, err := store.GetKGNote(strings.TrimSpace(query)); err == nil && note != nil && isDecisionNoteType(note.NoteType) {
 		candidates = append(candidates, *note)
@@ -394,7 +394,7 @@ func decisionNoteCandidates(store *graphstore.SQLiteStore, query string, limit i
 // appends a result row per linked symbol (resolving warm-store metadata when
 // available). Returns true once limit has been reached.
 func appendDecisionSymbolMatches(
-	store *graphstore.SQLiteStore,
+	store graphstore.Store,
 	note graphstore.KGNote,
 	links []graphstore.NoteSymbolLink,
 	seen map[string]bool,
@@ -618,7 +618,7 @@ func collectCodeBridgeResults(kgHomeDir, bridgeIntent, query string, limit int) 
 
 // dispatchWarmStoreBridgeIntent routes a warm-store bridge query to the
 // matching collector, populating resp.Results / resp.Warnings on success.
-func dispatchWarmStoreBridgeIntent(store *graphstore.SQLiteStore, resp *GraphQueryResponse, bridgeIntent, query string, limit int) error {
+func dispatchWarmStoreBridgeIntent(store graphstore.Store, resp *GraphQueryResponse, bridgeIntent, query string, limit int) error {
 	switch bridgeIntent {
 	case "symbol_lookup":
 		return runSymbolLookup(store, resp, query, limit)
@@ -645,7 +645,7 @@ func dispatchWarmStoreBridgeIntent(store *graphstore.SQLiteStore, resp *GraphQue
 }
 
 // runSymbolLookup populates resp with raw symbol matches for query.
-func runSymbolLookup(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+func runSymbolLookup(store graphstore.Store, resp *GraphQueryResponse, query string, limit int) error {
 	nodes, err := findCodeNodes(store, query, limit)
 	if err != nil {
 		return err
@@ -656,7 +656,7 @@ func runSymbolLookup(store *graphstore.SQLiteStore, resp *GraphQueryResponse, qu
 
 // runImpactRadius runs the impact-radius lookup and projects both changed
 // and impacted nodes onto resp, attaching warning metadata when relevant.
-func runImpactRadius(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+func runImpactRadius(store graphstore.Store, resp *GraphQueryResponse, query string, limit int) error {
 	nodes, err := findCodeNodes(store, query, limit)
 	if err != nil {
 		return err
@@ -697,7 +697,7 @@ func uniqueFilePaths(nodes []graphstore.GraphNode) []string {
 
 // runTestsFor runs the tests_for intent: prefers inbound tested-by edges,
 // then falls back to outbound when no results were found.
-func runTestsFor(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+func runTestsFor(store graphstore.Store, resp *GraphQueryResponse, query string, limit int) error {
 	nodes, err := findCodeNodes(store, query, limit)
 	if err != nil {
 		return err
@@ -718,7 +718,7 @@ func runTestsFor(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query 
 
 // runNeighbors handles callers_of / callees_of by walking call edges in the
 // requested direction.
-func runNeighbors(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query, edgeKind string, inbound bool, limit int) error {
+func runNeighbors(store graphstore.Store, resp *GraphQueryResponse, query, edgeKind string, inbound bool, limit int) error {
 	nodes, err := findCodeNodes(store, query, limit)
 	if err != nil {
 		return err
@@ -732,7 +732,7 @@ func runNeighbors(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query
 }
 
 // runSymbolDecisions handles the symbol_decisions intent.
-func runSymbolDecisions(store *graphstore.SQLiteStore, resp *GraphQueryResponse, query string, limit int) error {
+func runSymbolDecisions(store graphstore.Store, resp *GraphQueryResponse, query string, limit int) error {
 	nodes, err := findCodeNodes(store, query, limit)
 	if err != nil {
 		return err
@@ -747,8 +747,14 @@ func runSymbolDecisions(store *graphstore.SQLiteStore, resp *GraphQueryResponse,
 
 // annotateBridgeSparsity attaches the 0–100 sparsity score and the
 // bridge-sparse warning when both the result set and warm store are empty.
-func annotateBridgeSparsity(store *graphstore.SQLiteStore, resp *GraphQueryResponse) {
-	nodeCount := store.CountNodes()
+// Node count is read through the contract via GetStats().TotalNodes (gcc3
+// binding) — the contract publishes GetStats(); the *SQLiteStore-specific
+// CountNodes() is no longer in the caller's signature.
+func annotateBridgeSparsity(store graphstore.Store, resp *GraphQueryResponse) {
+	nodeCount := 0
+	if stats, err := store.GetStats(); err == nil {
+		nodeCount = stats.TotalNodes
+	}
 	score := computeSparsityScore(len(resp.Results), nodeCount)
 	resp.SparsityScore = &score
 	if len(resp.Results) == 0 && nodeCount == 0 {

@@ -523,7 +523,7 @@ func neighborNodeInfo(qn string) graphstore.NodeInfo {
 
 // seedNeighborGraph sets up a store with a Caller→Callee CALLS edge and
 // returns the resolved GraphNodes (skipping the test on layout mismatch).
-func seedNeighborGraph(t *testing.T) (store *graphstore.SQLiteStore, caller, callee *graphstore.GraphNode) {
+func seedNeighborGraph(t *testing.T) (store graphstore.Store, caller, callee *graphstore.GraphNode) {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
@@ -713,7 +713,7 @@ func TestAppendReviewPriorityMatches(t *testing.T) {
 // ── decision-link projections ───────────────────────────────────────────────
 
 // seedDecisionNote inserts a KGNote of the given type and returns its ID.
-func seedDecisionNote(t *testing.T, store *graphstore.SQLiteStore, id, noteType, title string) {
+func seedDecisionNote(t *testing.T, store graphstore.Store, id, noteType, title string) {
 	t.Helper()
 	if err := store.UpsertKGNote(graphstore.KGNote{
 		ID: id, Title: title, NoteType: noteType, Status: "active",
@@ -865,7 +865,7 @@ func TestDecisionNoteCandidates_ExactIDOverridesSearch(t *testing.T) {
 // seedDecisionSymbolFixture returns a store with a single "k.go::Known"
 // function node plus the note/links used by the decision-symbol projection
 // tests (including a missing target and a duplicate for dedupe coverage).
-func seedDecisionSymbolFixture(t *testing.T) (*graphstore.SQLiteStore, string, graphstore.KGNote, []graphstore.NoteSymbolLink) {
+func seedDecisionSymbolFixture(t *testing.T) (graphstore.Store, string, graphstore.KGNote, []graphstore.NoteSymbolLink) {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
