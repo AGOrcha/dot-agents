@@ -1,0 +1,36 @@
+schema_version: 1
+delegation_id: del-t10pre-extract-canonical-cmd-helpers-1779663650
+plan_id: root-command-decomposition
+task_id: t10pre-extract-canonical-cmd-helpers
+owner: t10pre-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T23:00:50Z"
+    reason: 'Next-wave cross-plan parallel fanout post PR #55-#59 merges.'
+scope:
+    write_scope:
+        - commands/internal/cmdutil/canonical_cmd.go
+        - commands/internal/cmdutil/canonical_cmd_test.go
+        - commands/rules.go
+        - commands/mcp.go
+        - commands/settings.go
+prompt:
+    inline:
+        - 'Execute task t10pre-extract-canonical-cmd-helpers per its TASKS.yaml notes. Read internal/platform/io.go + io_test.go (PR #59) for the canonical interface-DI pattern if this is a seam conversion. Worktree at .agents/worktrees/t10pre-extract-canonical-cmd-helpers off master; branch feature/t10pre-extract-canonical-cmd-helpers. Use git -C never cd per [[worktree-no-cd]].'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: Round-2 wave task spawn; see TASKS.yaml notes for goal
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

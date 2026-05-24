@@ -3,7 +3,7 @@ plan_id: root-command-decomposition
 tasks:
     - id: t01-design-subpackage-shape
       title: Design target subpackage shape + shared-symbol contract
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -63,7 +63,7 @@ tasks:
         must resolve before t13's shim deletion.
     - id: t02-introduce-lifecycle-skeleton
       title: Create commands/lifecycle/ skeleton
-      status: pending
+      status: in_progress
       depends_on:
         - t01-design-subpackage-shape
       blocks: []
@@ -229,7 +229,7 @@ tasks:
         complete.
     - id: t10pre-extract-canonical-cmd-helpers
       title: 'Precursor: lift canonicalCmdFlags + canonicalCmdExampleBlock into commands/internal/cmdutil'
-      status: pending
+      status: in_progress
       depends_on:
         - t01-design-subpackage-shape
       blocks:

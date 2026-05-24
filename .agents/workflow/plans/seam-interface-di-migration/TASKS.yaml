@@ -36,7 +36,7 @@ tasks:
       notes: 'ASSESSED 2026-05-19: 12 seams; call-site spread bounded (configLoad 7 files, osMkdirAll 5, rest 1-3) not dozens. Still the architectural-decision task (Cobra free-function injection — spec open question). Leaves (agents=1, skills=4, platform=3, kg=7) are tractable #35/#36-style and should go first to set the pattern; commands-pkg last with a decided injection shape (deps-struct vs threaded param). Paused for proj-mega-branch recovery investigation.'
     - id: kg-pkg
       title: Convert commands/kg/seams.go to interface-DI
-      status: pending
+      status: in_progress
       depends_on:
         - convention-doc
       blocks: []
@@ -47,7 +47,7 @@ tasks:
       notes: 7 func-var seams. Behavior-preserving conversion, tests green, coverage gate not regressed.
     - id: skills-pkg
       title: Convert commands/skills/seams.go to interface-DI
-      status: pending
+      status: in_progress
       depends_on:
         - convention-doc
       blocks: []
@@ -58,7 +58,7 @@ tasks:
       notes: 4 func-var seams. Behavior-preserving conversion.
     - id: agents-pkg
       title: Convert commands/agents/seams.go to interface-DI
-      status: pending
+      status: in_progress
       depends_on:
         - convention-doc
       blocks: []
@@ -69,7 +69,7 @@ tasks:
       notes: 1 func-var seam. Smallest leaf, fold in with a sibling if cheaper.
     - id: platform-pkg
       title: Convert internal/platform/seams.go to interface-DI
-      status: in_progress
+      status: completed
       depends_on:
         - convention-doc
       blocks: []

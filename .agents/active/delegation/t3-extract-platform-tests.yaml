@@ -1,0 +1,47 @@
+schema_version: 1
+id: del-t3-extract-platform-tests-1779663650
+parent_plan_id: go-test-fixture-extraction
+parent_task_id: t3-extract-platform-tests
+title: Refactor internal/platform/*_test.go to use internal/testutil
+summary: Delegated from plan Extract internal/testutil to clear Cluster D test-fixture duplication
+write_scope:
+    - internal/platform/resource_plan_test.go
+    - internal/platform/mcp_settings_test.go
+    - internal/platform/rules_test.go
+success_criteria: |-
+    Tier: T2 (compound — three files; resource_plan_test.go is
+    the largest single Cluster D offender at 239 dup lines).
+
+    Refactor each test file to consume internal/testutil
+    helpers in place of in-file setup/fixture-writer functions.
+    Delete now-unused per-file helpers.
+
+    Per-file commit convention (one commit each):
+      * "test(platform): use internal/testutil in resource_plan_test"
+      * "test(platform): use internal/testutil in mcp_settings_test"
+      * "test(platform): use internal/testutil in rules_test"
+
+    Hard test: go test ./internal/platform/ passes after each
+    commit; commit-by-commit diff shows test bodies reduced
+    by N lines with assertions unchanged.
+
+    Common false positive: refactor accidentally drops an
+    assertion when collapsing a per-file helper. Reviewer must
+    compare assertion lists pre/post.
+
+    Anti-scope: do NOT touch production code in this task.
+
+    ISP routing:
+      mode: fanout-amenable (one subagent per file)
+      verifier: smoke (go test ./internal/platform/)
+      review: code review per file
+      bundle-context (if fanout): T1's signature table, T2's
+                                   internal/testutil API
+      output contract: ~250 dup lines removed; gate-relevant
+                       density falls
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t3-worker
+status: active
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:00:50Z"

@@ -1,0 +1,34 @@
+schema_version: 1
+delegation_id: del-t02-introduce-lifecycle-skeleton-1779663678
+plan_id: root-command-decomposition
+task_id: t02-introduce-lifecycle-skeleton
+owner: t02-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T23:01:18Z"
+    reason: Wave 2 root-decomp skeleton.
+scope:
+    write_scope:
+        - commands/lifecycle/doc.go
+        - commands/lifecycle/deps.go
+prompt:
+    inline:
+        - Create commands/lifecycle/ skeleton per t02 notes. NO command moves yet. Mirror commands/agents/deps.go pattern. Worktree .agents/worktrees/t02 off master; branch feature/t02-lifecycle-skeleton.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+        - commands/agents/deps.go
+verification:
+    feedback_goal: Skeleton ready for Wave 3 lifecycle moves
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

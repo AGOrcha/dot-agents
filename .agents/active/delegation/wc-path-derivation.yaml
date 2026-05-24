@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-wc-path-derivation-1779663650
+parent_plan_id: workflow-commit-command
+parent_task_id: wc-path-derivation
+title: Deterministic workflow-state path-set derivation
+summary: Delegated from plan da workflow commit — workflow-state/git coupling (Part 2)
+write_scope:
+    - commands/workflow/
+success_criteria: |-
+    Pure function: given git status + the workflow mutation surface,
+    return ONLY managed .agents/workflow/** + .agents/history/** +
+    session-touched state paths. Never `-A`. Mandatory exclusions:
+    submodule-pointer entries and pre-existing-untracked dirs. Same
+    mutation set => same path set (deterministic). Unit-tested against
+    a deliberately dirty worktree + a submodule pointer fixture.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: wc-path-worker
+status: active
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:00:50Z"
