@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/sys/execabs"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
@@ -147,9 +148,9 @@ func probeAgentsHomeGit(agentsHome string) agentsHomeGitProbe {
 	if _, err := os.Stat(gitDir); err != nil {
 		return agentsHomeGitProbe{}
 	}
-	branchOut, _ := exec.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branchOut, _ := execabs.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	branch := strings.TrimSpace(string(branchOut))
-	remoteOut, _ := exec.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
+	remoteOut, _ := execabs.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
 	remote := strings.TrimSpace(string(remoteOut))
 	return agentsHomeGitProbe{IsRepo: true, Branch: branch, Remote: remote}
 }

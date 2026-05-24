@@ -3,7 +3,7 @@ plan_id: workflow-commit-command
 tasks:
     - id: wc-path-derivation
       title: Deterministic workflow-state path-set derivation
-      status: in_progress
+      status: completed
       depends_on:
         - pr10-branch-split/pr3b-workflow
       blocks:
@@ -11,7 +11,9 @@ tasks:
         - wc-iteration-close
       owner: dot-agents
       write_scope:
-        - commands/workflow/
+        - commands/workflow/commit_pathset.go
+        - commands/workflow/commit_pathset_test.go
+        - commands/workflow/testdata/commit_pathset/
       verification_required: true
       notes: |-
         Pure function: given git status + the workflow mutation surface,
@@ -20,9 +22,12 @@ tasks:
         submodule-pointer entries and pre-existing-untracked dirs. Same
         mutation set => same path set (deterministic). Unit-tested against
         a deliberately dirty worktree + a submodule pointer fixture.
+        Greenfield in commands/workflow/ (no existing git-staging surface
+        to integrate with). File naming follows sibling convention
+        (snake_case, one scope per file: bundle.go, iter_log.go, ...).
     - id: wc-commit-subcommand
       title: da workflow commit subcommand (+ --dry-run, idempotent)
-      status: pending
+      status: completed
       depends_on:
         - wc-path-derivation
       blocks:
@@ -40,7 +45,7 @@ tasks:
         Headless-safe: raw `da`, no Claude Code hook dependency.
     - id: wc-prefs-optout
       title: Per-project opt-out via workflow prefs
-      status: pending
+      status: completed
       depends_on:
         - wc-commit-subcommand
       blocks: []
@@ -55,7 +60,7 @@ tasks:
         elsewhere.
     - id: wc-iteration-close
       title: iteration-close atomic state-commit integration
-      status: pending
+      status: completed
       depends_on:
         - wc-commit-subcommand
         - wc-prefs-optout
@@ -72,7 +77,7 @@ tasks:
         Honors the opt-out pref.
     - id: wc-verify-close
       title: Spec done-criteria verification + close
-      status: pending
+      status: completed
       depends_on:
         - wc-iteration-close
       blocks: []

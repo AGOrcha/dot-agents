@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -372,6 +373,182 @@ func TestRunScoreRunUsesCwdWhenRepoDirEmpty(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "build signals") {
 		t.Errorf("error should surface as build-signals: %v", err)
+	}
+}
+
+// --recompute on the iteration subcommand drives the recompute path: it
+// scores iteration N fresh from the canonical inputs, writes the iter-N.
+// score.yaml sidecar, and renders the breakdown. close-task uses this as
+// its --score-recompute=current implementation.
+func TestRunScoreIterationRecomputeWritesSidecar(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, repo, 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(iterLogDir, "iter-1.score.yaml")); err != nil {
+		t.Errorf("sidecar not written: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Iteration 1") {
+		t.Errorf("missing iteration header: %s", buf.String())
+	}
+}
+
+// --recompute with --json emits the structured PersistedScore (same shape
+// as the read path) so callers can parse it without a write-vs-read branch.
+func TestRunScoreIterationRecomputeJSONOutput(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+	repo, iterLogDir := newScoreTestRepo(t)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, repo, 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+	var got scoring.PersistedScore
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, buf.String())
+	}
+	if got.Iteration != 1 {
+		t.Errorf("got iteration %d, want 1", got.Iteration)
+	}
+}
+
+// --recompute with empty repoDir falls back to cwd — headless invocations
+// from the repo root do not need to pass --repo-dir.
+func TestRunScoreIterationRecomputeUsesCwdWhenRepoDirEmpty(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	t.Chdir(repo)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, "", 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+}
+
+// A missing iteration surfaces a wrapped error rather than crashing.
+func TestRunScoreIterationRecomputeMissingIter(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreIterationRecompute(&bytes.Buffer{}, iterLogDir, repo, 99, nil)
+	if err == nil {
+		t.Fatal("expected error for missing iter, got nil")
+	}
+	if !strings.Contains(err.Error(), "score iteration") {
+		t.Errorf("error should carry the subcommand identity: %v", err)
+	}
+}
+
+// Drive the cobra subcommand through Execute with --recompute so the RunE
+// closure's recompute branch is covered. Asserts the sidecar is written
+// as a side effect.
+func TestScoreIterationSubcommandRecomputeExecute(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	cmd := newScoreIterationCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--iter-log-dir", iterLogDir, "--repo-dir", repo, "--recompute", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\n%s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(iterLogDir, "iter-1.score.yaml")); err != nil {
+		t.Errorf("sidecar not written via cobra Execute: %v", err)
+	}
+}
+
+// errWriter returns an error on every Write. Used to trigger the json.
+// Encoder error branches in the score subcommands without standing up
+// a broken pipe or full-disk fixture.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write boom") }
+
+// runScoreRun's --json branch propagates json.Encoder.Encode errors.
+func TestRunScoreRunJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreRun(errWriter{}, scoreRunOpts{iterLogDir: iterLogDir, repoDir: repo, noWrite: true})
+	if err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreIterationRecompute's --json branch propagates encoder errors.
+func TestRunScoreIterationRecomputeJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreIterationRecompute(errWriter{}, iterLogDir, repo, 1, nil)
+	if err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreIteration's --json branch propagates encoder errors. Writes
+// a real sidecar first so the read path succeeds; the error is in the
+// encode step.
+func TestRunScoreIterationJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	dir := t.TempDir()
+	r := scoring.DefaultRubric()
+	if _, err := scoring.WriteIterationScore(dir, r.Score(scoring.SignalSet{Iteration: 4, Verifier: scoring.PresentSignal(1.0, "")})); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScoreIteration(errWriter{}, dir, 4); err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreSession's --json branch propagates encoder errors.
+func TestRunScoreSessionJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	dir := t.TempDir()
+	if _, err := scoring.WriteSessionScore(dir, scoring.SessionScore{SessionID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScoreSession(errWriter{}, dir, "s"); err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreRun surfaces persist errors (WriteIterationScoreWithRecord /
+// WriteSessionScores). Trigger by replacing the iter-log dir with a
+// file BEFORE the write step — checkpoint + score succeed via existing
+// fixtures since runScoreRun reads from there first, but writing the
+// sidecar fails. Sequencing: the write happens AFTER LoadIterationLog
+// reads — we replace the file mid-test by stubbing the writer... no,
+// easier path: pass a dir that doesn't exist yet for iterLogDir but is
+// the same as the existing iter-1.yaml — already in the existing
+// happy-path fixture, the write succeeds. Skipping this branch — the
+// reachable persistence errors are out of test reach without a writer
+// seam. Documented via the persist.go [defensive-guards] entry already.
+// (Placeholder to keep test surface explicit.)
+var _ = errors.New
+
+// renderRunSummary covers the `len(sessions) == 0` branch when
+// AggregateSessions returns nothing (every iteration has empty
+// session_id). Confirms the per-iter table still renders.
+func TestRenderRunSummaryNoSessions(t *testing.T) {
+	r := scoring.DefaultRubric()
+	records := []scoring.IterationRecord{{Iteration: 1}}
+	scores := []scoring.Score{{Iteration: 1, Scored: true, Value: 0.5, Band: "fair"}}
+	var buf bytes.Buffer
+	renderRunSummary(&buf, r, records, scores, nil, true, "/tmp/x")
+	if !strings.Contains(buf.String(), "Iterations: 1") {
+		t.Errorf("missing iter row: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "SESSION") {
+		t.Errorf("session header rendered for empty sessions: %s", buf.String())
 	}
 }
 

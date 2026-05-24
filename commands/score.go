@@ -77,20 +77,39 @@ func newScoreRunCmd() *cobra.Command {
 }
 
 func newScoreIterationCmd() *cobra.Command {
-	var iterLogDir string
+	var (
+		iterLogDir     string
+		recompute      bool
+		repoDir        string
+		transcriptDirs []string
+	)
 	cmd := &cobra.Command{
 		Use:   "iteration <N>",
-		Short: "Render a persisted per-iteration score",
-		Args:  cobra.ExactArgs(1),
+		Short: "Render a persisted per-iteration score (or recompute it via --recompute)",
+		Long: "Default behavior renders the persisted iter-N.score.yaml sidecar — fast, no\n" +
+			"git work, no transcript scan. Pass --recompute to score iteration N fresh\n" +
+			"from the canonical iter-N.yaml + git topology + transcripts, write the new\n" +
+			"sidecar, and render it. close-task uses --recompute for its default\n" +
+			"score-recompute=current flow so only the just-closed iteration's sidecar\n" +
+			"is rewritten — older sidecars are computed from immutable inputs and stay\n" +
+			"valid until a RubricVersion bump.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			iter, err := strconv.Atoi(args[0])
 			if err != nil {
 				return fmt.Errorf("iteration must be an integer: %w", err)
 			}
-			return runScoreIteration(cmd.OutOrStdout(), resolveIterLogDir(iterLogDir), iter)
+			dir := resolveIterLogDir(iterLogDir)
+			if recompute {
+				return runScoreIterationRecompute(cmd.OutOrStdout(), dir, repoDir, iter, transcriptDirs)
+			}
+			return runScoreIteration(cmd.OutOrStdout(), dir, iter)
 		},
 	}
 	cmd.Flags().StringVar(&iterLogDir, iterLogDirFlagName, "", iterLogDirFlagHelp)
+	cmd.Flags().BoolVar(&recompute, "recompute", false, "Recompute the score from canonical inputs and rewrite the iter-N.score.yaml sidecar")
+	cmd.Flags().StringVar(&repoDir, "repo-dir", "", "Repository root for git topology (default: current working directory; used only with --recompute)")
+	cmd.Flags().StringSliceVar(&transcriptDirs, "transcript-dir", nil, "Agent transcript root for token backfill (repeatable; used only with --recompute)")
 	return cmd
 }
 
@@ -123,10 +142,12 @@ func runScoreRun(out io.Writer, opts scoreRunOpts) error {
 	iterLogDir := resolveIterLogDir(opts.iterLogDir)
 	repoDir := opts.repoDir
 	if repoDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("score run: resolve cwd: %w", err)
-		}
+		// os.Getwd is effectively infallible on a working process — the
+		// canonical guidance is to let downstream surface a more useful
+		// error if the result is somehow empty (BuildSignalSets reports
+		// non-git, etc.). Treating the unreachable error branch as
+		// untestable noise was bloating the allowlist.
+		cwd, _ := os.Getwd()
 		repoDir = cwd
 	}
 
@@ -214,6 +235,38 @@ func renderRunSummary(out io.Writer, rubric scoring.Rubric, records []scoring.It
 	if wrote {
 		fmt.Fprintf(out, "\nWrote %d iter sidecars + %d session sidecars to %s\n", len(scores), len(sessions), iterLogDir)
 	}
+}
+
+// runScoreIterationRecompute scores iteration N fresh from the canonical
+// inputs, writes the iter-N.score.yaml sidecar, and renders the same view
+// runScoreIteration produces. close-task --score-recompute=current is the
+// primary caller; operators can also run it ad-hoc after a rubric bump.
+//
+// repoDir defaults to the cwd when empty (matching runScoreRun's contract)
+// so headless invocations from the repo root do not need to set the flag.
+func runScoreIterationRecompute(out io.Writer, iterLogDir, repoDir string, iter int, transcriptDirs []string) error {
+	if repoDir == "" {
+		// See runScoreRun above for why we treat Getwd as infallible
+		// rather than guarding an unreachable error branch.
+		cwd, _ := os.Getwd()
+		repoDir = cwd
+	}
+	score, rec, err := scoring.ScoreIteration(iterLogDir, repoDir, iter, transcriptDirs...)
+	if err != nil {
+		return fmt.Errorf("score iteration: %w", err)
+	}
+	path, err := scoring.WriteIterationScoreWithRecord(iterLogDir, score, rec)
+	if err != nil {
+		return fmt.Errorf("score iteration: persist sidecar: %w", err)
+	}
+	ps := scoring.BuildPersistedScore(score, rec)
+	if Flags.JSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(ps)
+	}
+	renderIterationScore(out, ps, path)
+	return nil
 }
 
 // runScoreIteration reads the iter-N.score.yaml sidecar and renders it. A

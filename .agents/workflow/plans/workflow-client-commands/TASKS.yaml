@@ -3,7 +3,7 @@ plan_id: workflow-client-commands
 tasks:
     - id: iter-log-derive
       title: Auto-pick iteration N + role for `workflow checkpoint --log-to-iter`
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - score-current
@@ -13,27 +13,11 @@ tasks:
         - commands/workflow/iter_log_autoderive.go
         - commands/workflow/iter_log_autoderive_test.go
       verification_required: true
-      notes: >-
-        The iter-log writer already exists: `da workflow checkpoint
-        --log-to-iter N --log-to-iter-role impl|verifier|review`
-        composes the v2 schema entry, with loadOrInitIterLogEntry +
-        resolveAgentBlock + mergeIterLogTopLevelGit (wave/task_id/
-        commit/diff stat) + populateIterLogSessionTokens (token
-        telemetry) doing the derivation. What is missing is the
-        orchestration that picks (N, role) automatically so callers
-        do not need to pass them. This task adds a thin helper —
-        NextIterationNumber(iterLogDir) and a role-from-context
-        resolver — so close-task can invoke checkpoint --log-to-iter
-        without operator-supplied N. Without auto-pick, the writer
-        is technically available but never called in the close path,
-        and R1's downstream chain (signals → scorer → persist → cli)
-        has nothing to score on the next iteration after this PR
-        ships. The proposal's "the clearest gap" closes only when
-        the writer is wired into the close sequence by default.
+      notes: 'The iter-log writer already exists: `da workflow checkpoint --log-to-iter N --log-to-iter-role impl|verifier|review` composes the v2 schema entry, with loadOrInitIterLogEntry + resolveAgentBlock + mergeIterLogTopLevelGit (wave/task_id/ commit/diff stat) + populateIterLogSessionTokens (token telemetry) doing the derivation. What is missing is the orchestration that picks (N, role) automatically so callers do not need to pass them. This task adds a thin helper — NextIterationNumber(iterLogDir) and a role-from-context resolver — so close-task can invoke checkpoint --log-to-iter without operator-supplied N. Without auto-pick, the writer is technically available but never called in the close path, and R1''s downstream chain (signals → scorer → persist → cli) has nothing to score on the next iteration after this PR ships. The proposal''s "the clearest gap" closes only when the writer is wired into the close sequence by default.'
       app_type: go-cli
     - id: score-current
       title: Scope-narrowed scoring (--score-recompute current|recent-N|all)
-      status: pending
+      status: completed
       depends_on:
         - iter-log-derive
       blocks:
@@ -45,21 +29,11 @@ tasks:
         - commands/score.go
         - commands/score_test.go
       verification_required: true
-      notes: >-
-        Add a per-iteration entry point that BuildSignalSets +
-        ScoreAll currently lack — ScoreIteration(iterLogDir, repoDir,
-        N, transcriptDirs...) (Score, error) — so close-task does not
-        have to re-score the whole log to write one sidecar. Old
-        scores are computed from immutable inputs (iter-N.yaml +
-        commit SHA + frozen transcript window) so they stay valid
-        forever once written; only a RubricVersion bump or a signals
-        shape change warrants backfill. Surface the choice through
-        `da score run --recompute=current|recent-N|all` and through
-        close-task's --score-recompute=… flag.
+      notes: Add a per-iteration entry point that BuildSignalSets + ScoreAll currently lack — ScoreIteration(iterLogDir, repoDir, N, transcriptDirs...) (Score, error) — so close-task does not have to re-score the whole log to write one sidecar. Old scores are computed from immutable inputs (iter-N.yaml + commit SHA + frozen transcript window) so they stay valid forever once written; only a RubricVersion bump or a signals shape change warrants backfill. Surface the choice through `da score run --recompute=current|recent-N|all` and through close-task's --score-recompute=… flag.
       app_type: go-cli
     - id: close-task
-      title: 'da workflow close-task client command (end-of-iteration sequence)'
-      status: pending
+      title: da workflow close-task client command (end-of-iteration sequence)
+      status: completed
       depends_on:
         - iter-log-derive
         - score-current
@@ -72,30 +46,11 @@ tasks:
         - commands/workflow/close_task_test.go
         - commands/workflow/cmd.go
       verification_required: true
-      notes: >-
-        Cobra subcommand under `da workflow`. Sits in Tier 4
-        (Iteration close & persistence) of the workflow engine
-        diagram in docs/PROJECT_DIAGRAMS.md §5. Sequence: load last
-        verify record → checkpoint --log-to-iter N (N picked by
-        iter-log-derive helper, role inferred from context) →
-        ScoreIteration with --score-recompute scope → advance task
-        to completed → plan update --focus <next eligible> →
-        workflow commit (depends on workflow-commit-command's
-        primitive, not re-implemented here). Each downstream call's
-        failure surfaces a wrapped error that names which step blew.
-        Flags: --task (default = current focus), --score-recompute
-        (default = current), --no-commit (skip the workflow commit
-        for callers that batch), --next-focus (override the auto-
-        pick), --json (machine-friendly final-state snapshot). NEVER
-        touches code files; staging is scoped to the workflow-state
-        path-set derived by workflow-commit-command's
-        wc-path-derivation. For delegated workers the close path
-        ends at merge-back (Tier 3b), not advance — close-task
-        detects which tier the task is in and routes accordingly.
+      notes: 'Cobra subcommand under `da workflow`. Sits in Tier 4 (Iteration close & persistence) of the workflow engine diagram in docs/PROJECT_DIAGRAMS.md §5. Sequence: load last verify record → checkpoint --log-to-iter N (N picked by iter-log-derive helper, role inferred from context) → ScoreIteration with --score-recompute scope → advance task to completed → plan update --focus <next eligible> → workflow commit (depends on workflow-commit-command''s primitive, not re-implemented here). Each downstream call''s failure surfaces a wrapped error that names which step blew. Flags: --task (default = current focus), --score-recompute (default = current), --no-commit (skip the workflow commit for callers that batch), --next-focus (override the auto- pick), --json (machine-friendly final-state snapshot). NEVER touches code files; staging is scoped to the workflow-state path-set derived by workflow-commit-command''s wc-path-derivation. For delegated workers the close path ends at merge-back (Tier 3b), not advance — close-task detects which tier the task is in and routes accordingly.'
       app_type: go-cli
     - id: start-task
-      title: 'da workflow start-task client command'
-      status: pending
+      title: da workflow start-task client command
+      status: completed
       depends_on:
         - close-task
         - workflow-commit-command/wc-commit-subcommand
@@ -106,22 +61,11 @@ tasks:
         - commands/workflow/start_task_test.go
         - commands/workflow/cmd.go
       verification_required: true
-      notes: >-
-        Mirror of close-task on the start side. Sits in Tier 2
-        (Selection) of the workflow engine diagram, bridging into
-        Tier 3a (direct) or 3b (delegated). Sequence: plan update
-        --status active → plan update --focus T → plan derive-scope
-        T (write the evidence sidecar so the worker stage has a
-        contract) → workflow fanout if a bundle is appropriate
-        (flag-gated, default off; orchestrator typically wants to
-        decide explicitly between 3a and 3b) → workflow commit.
-        Flags: --task (required), --no-fanout (default),
-        --no-derive-scope (escape hatch when the operator wants to
-        hand-author the sidecar), --no-commit.
+      notes: 'Mirror of close-task on the start side. Sits in Tier 2 (Selection) of the workflow engine diagram, bridging into Tier 3a (direct) or 3b (delegated). Sequence: plan update --status active → plan update --focus T → plan derive-scope T (write the evidence sidecar so the worker stage has a contract) → workflow fanout if a bundle is appropriate (flag-gated, default off; orchestrator typically wants to decide explicitly between 3a and 3b) → workflow commit. Flags: --task (required), --no-fanout (default), --no-derive-scope (escape hatch when the operator wants to hand-author the sidecar), --no-commit.'
       app_type: go-cli
     - id: skill-iteration-close
       title: 'iteration-close skill: thin caller of close-task + render score'
-      status: pending
+      status: completed
       depends_on:
         - close-task
       blocks: []
@@ -129,22 +73,11 @@ tasks:
       write_scope:
         - .agents/skills/iteration-close/
       verification_required: true
-      notes: >-
-        Rewrite the iteration-close skill so its substantive body is
-        `da workflow close-task --json` followed by rendering the
-        returned score's per-signal breakdown to the operator. The
-        skill no longer needs to know about verify record / advance /
-        merge-back — those become close-task's internals. The
-        immediate-feedback loop completes inside the skill: operator
-        sees "iteration N → score 0.7 fair → here is which signal
-        moved it" the moment the iteration closes, while the context
-        is still hot. Preserve the existing merge-back vs direct-work
-        branching (delegated workers still call merge-back, not
-        advance).
+      notes: 'Rewrite the iteration-close skill so its substantive body is `da workflow close-task --json` followed by rendering the returned score''s per-signal breakdown to the operator. The skill no longer needs to know about verify record / advance / merge-back — those become close-task''s internals. The immediate-feedback loop completes inside the skill: operator sees "iteration N → score 0.7 fair → here is which signal moved it" the moment the iteration closes, while the context is still hot. Preserve the existing merge-back vs direct-work branching (delegated workers still call merge-back, not advance).'
       app_type: go-cli
     - id: tier-declarations
-      title: Declare tier:/calls: on commands + skill per skill-tiering-contract
-      status: pending
+      title: 'Declare tier: / calls: on commands + skill per skill-tiering-contract'
+      status: completed
       depends_on:
         - close-task
         - start-task
@@ -158,10 +91,8 @@ tasks:
         - commands/score.go
         - .agents/skills/iteration-close/
       verification_required: true
-      notes: >-
-        Adopt the .agents/workflow/specs/skill-tiering-contract/
-        vocabulary (T0 atom → T1 molecule → T2 compound → T3 cell)
-        as the load-bearing layer model. Concretely:
+      notes: |-
+        Adopt the .agents/workflow/specs/skill-tiering-contract/ vocabulary (T0 atom → T1 molecule → T2 compound → T3 cell) as the load-bearing layer model. Concretely:
           - The fine-grained primitives are T0 atoms:
             `workflow verify record`, `workflow advance`,
             `workflow plan update`, `workflow checkpoint --log-to-iter`,
@@ -179,13 +110,11 @@ tasks:
             + `calls: [close-task]`, plus a review_gate per the
             contract's compound invariants. Same for orchestrator-
             session-start (compound over molecule clients).
-        This task only adds the declarations + lint-passable
-        frontmatter; the actual lint enforcer is a separate work
-        stream owned by the skill-tiering-contract plan itself.
+        This task only adds the declarations + lint-passable frontmatter; the actual lint enforcer is a separate work stream owned by the skill-tiering-contract plan itself.
       app_type: go-cli
     - id: docs-and-help
       title: Doc the client-vs-primitive layering against the tier vocabulary
-      status: pending
+      status: completed
       depends_on:
         - tier-declarations
       blocks: []
@@ -195,11 +124,8 @@ tasks:
         - commands/workflow/close_task.go
         - commands/workflow/start_task.go
       verification_required: false
-      notes: >-
-        Articulate the client-vs-primitive layering using the
-        skill-tiering-contract tier names rather than coining new
-        ones. Show that the "composition rules" we want enforced
-        are restatements of the tier invariants:
+      notes: |-
+        Articulate the client-vs-primitive layering using the skill-tiering-contract tier names rather than coining new ones. Show that the "composition rules" we want enforced are restatements of the tier invariants:
           - "Client commands must be expressible as a pipeline of
             primitives" ≡ T1 molecule's "calls: lists the atoms it
             invokes; runtime agent judgment bounded to picking
@@ -212,13 +138,5 @@ tasks:
           - "Skills call clients when they exist, primitives
             otherwise" ≡ T2 compound preferring T1 molecules in
             its `calls:` list.
-        Each client command's --help carries an Example block that
-        prints the equivalent primitive pipeline, so operators see
-        the layer. Also cross-link to the existing workflow engine
-        diagram (docs/PROJECT_DIAGRAMS.md §5) so the tier vocabulary
-        (T0/T1/T2) and the operational tier diagram (Authoring /
-        Selection / Execution / Close / Archive) sit side by side
-        with their relationship made explicit — they are orthogonal
-        axes (composition tier vs lifecycle tier), not competing
-        models.
+        Each client command's --help carries an Example block that prints the equivalent primitive pipeline, so operators see the layer. Also cross-link to the existing workflow engine diagram (docs/PROJECT_DIAGRAMS.md §5) so the tier vocabulary (T0/T1/T2) and the operational tier diagram (Authoring / Selection / Execution / Close / Archive) sit side by side with their relationship made explicit — they are orthogonal axes (composition tier vs lifecycle tier), not competing models.
       app_type: go-cli

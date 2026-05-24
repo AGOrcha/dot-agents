@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/sys/execabs"
 )
 
 // trunkRef is the branch the `landed` signal measures survival into. The rubric
@@ -356,7 +357,7 @@ type tasksFile struct {
 // that is genuinely unexpected or just an absent signal.
 func runGit(repoDir string, args ...string) (string, error) {
 	full := append([]string{"-C", repoDir}, args...)
-	cmd := exec.Command("git", full...)
+	cmd := execabs.Command("git", full...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

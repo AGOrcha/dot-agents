@@ -115,6 +115,37 @@ func TestPreferences_BoolField(t *testing.T) {
 	}
 }
 
+// commit.disable is the new prefs key wc-prefs-optout introduced. Verify it
+// parses, applies, and lands in the merged result so `da workflow commit`
+// can read it from the resolved preferences.
+func TestPreferences_CommitDisableApplyAndMerge(t *testing.T) {
+	p := WorkflowPreferences{}
+	if err := applyPreferenceKey(&p, "commit.disable", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Commit.Disable == nil || *p.Commit.Disable != true {
+		t.Fatalf("Commit.Disable = %v, want *true", p.Commit.Disable)
+	}
+
+	// Merge: local should override defaults.
+	defaults := defaultWorkflowPreferences()
+	if defaults.Commit.Disable == nil || *defaults.Commit.Disable {
+		t.Errorf("default Commit.Disable should be false; got %v", defaults.Commit.Disable)
+	}
+	merged := mergePreferences(defaults, WorkflowPreferences{}, p)
+	if merged.Commit.Disable == nil || *merged.Commit.Disable != true {
+		t.Fatalf("merged Commit.Disable = %v, want *true (local overrides default)", merged.Commit.Disable)
+	}
+}
+
+// The key is in the validator registry so `da workflow prefs set
+// commit.disable true` accepts it (rather than emitting "unknown key").
+func TestPreferences_CommitDisableIsKnownKey(t *testing.T) {
+	if !isValidPreferenceKey("commit.disable") {
+		t.Fatal("commit.disable not in known-key registry")
+	}
+}
+
 func TestPreferences_ResolveWithSources(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	agentsHome := t.TempDir()

@@ -1,5 +1,13 @@
 # coverage-gate per-file exceptions allowlist
 #
+# === RATCHET ===
+# ratchet-max-entries: 37
+# The coverage gate fails if the allowlist grows above this number.
+# To add a new entry: prove there is no test-driven path to the threshold,
+# bump this line in the same commit, and include the rationale in PR review.
+# To shrink: drop a stale entry whose file now exceeds threshold and
+# decrement this number. The ratchet only tightens — never silently loosens.
+#
 # A file BELOW the per-file coverage threshold that is NOT pattern-excluded
 # must be listed here WITH A ONE-LINE RATIONALE, or the per-file gate
 # reports it as a violation (FAIL in enforce mode).
