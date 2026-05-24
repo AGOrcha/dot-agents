@@ -143,7 +143,7 @@ tasks:
         advance).
       app_type: go-cli
     - id: tier-declarations
-      title: Declare tier:/calls: on commands + skill per skill-tiering-contract
+      title: 'Declare tier: / calls: on commands + skill per skill-tiering-contract'
       status: pending
       depends_on:
         - close-task
