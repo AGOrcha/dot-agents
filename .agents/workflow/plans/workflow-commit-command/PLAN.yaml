@@ -4,8 +4,8 @@ title: da workflow commit — workflow-state/git coupling (Part 2)
 status: active
 summary: First-class da workflow commit subcommand + iteration-close auto-stage; deterministic scoped staging, headless-safe, prefs opt-out
 created_at: "2026-05-18T01:16:25Z"
-updated_at: "2026-05-24T01:50:00Z"
+updated_at: "2026-05-24T02:02:57Z"
 owner: dot-agents
 success_criteria: da workflow commit --dry-run lists only derived workflow-state paths (excludes submodule/pre-existing-untracked); idempotent no-op when clean; iteration-close leaves zero canonical-store drift; opt-out pref no-ops; coverage gate green
 verification_strategy: 'Unit + integration: dirty-worktree+submodule dry-run path-set assertion; plan/task/advance/checkpoint/archive sequence then assert clean; idempotency rerun; headless raw-da run; opt-out pref path'
-current_focus_task: wc-iteration-close
+current_focus_task: wc-verify-close

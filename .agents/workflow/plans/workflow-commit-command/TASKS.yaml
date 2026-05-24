@@ -60,7 +60,7 @@ tasks:
         elsewhere.
     - id: wc-iteration-close
       title: iteration-close atomic state-commit integration
-      status: pending
+      status: completed
       depends_on:
         - wc-commit-subcommand
         - wc-prefs-optout
