@@ -60,7 +60,7 @@ func TestKGCurationCycle_IngestThroughCompact(t *testing.T) {
 }
 
 func curationStepSetup(t *testing.T, st *curationState) {
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 	// Sanity-check baseline directory layout: notes subdirs + raw inbox.
@@ -166,13 +166,13 @@ func curationStepSeedBroken(t *testing.T, st *curationState) {
 		summary: "Has a dangling link.", status: "active", ts: st.now,
 		sourceRefs: []string{"src-curation-doc"}, links: []string{"missing-target"},
 	})
-	if err := createGraphNote(st.home, brokenNote, "## Body\nload-bearing body content.\n"); err != nil {
+	if err := createGraphNote(testIO(), st.home, brokenNote, "## Body\nload-bearing body content.\n"); err != nil {
 		t.Fatalf("createGraphNote dec-broken: %v", err)
 	}
 }
 
 func curationStepLintBroken(t *testing.T, st *curationState) {
-	report, err := runGraphLint(st.home)
+	report, err := runGraphLint(testIO(), st.home)
 	if err != nil {
 		t.Fatalf("runGraphLint #1: %v", err)
 	}
@@ -185,7 +185,7 @@ func curationStepLintBroken(t *testing.T, st *curationState) {
 }
 
 func curationStepReweave(t *testing.T, st *curationState) {
-	if err := runKGReweave(st.home); err != nil {
+	if err := runKGReweave(testIO(), st.home); err != nil {
 		t.Fatalf("runKGReweave: %v", err)
 	}
 	rewovenData, _ := os.ReadFile(filepath.Join(st.home, "notes", "decisions", "dec-broken.md"))
@@ -200,7 +200,7 @@ func curationStepReweave(t *testing.T, st *curationState) {
 }
 
 func curationStepLintPostReweave(t *testing.T, st *curationState) {
-	postReweaveReport, err := runGraphLint(st.home)
+	postReweaveReport, err := runGraphLint(testIO(), st.home)
 	if err != nil {
 		t.Fatalf("runGraphLint #2: %v", err)
 	}
@@ -217,13 +217,13 @@ func curationStepSeedStale(t *testing.T, st *curationState) {
 		summary: "Old entity from a previous era.", status: "active", ts: oldTS,
 		sourceRefs: []string{"src-curation-doc"},
 	})
-	if err := createGraphNote(st.home, staleNote, "stale body"); err != nil {
+	if err := createGraphNote(testIO(), st.home, staleNote, "stale body"); err != nil {
 		t.Fatalf("createGraphNote ent-stale-cycle: %v", err)
 	}
 }
 
 func curationStepLintStale(t *testing.T, st *curationState) {
-	staleReport, err := runGraphLint(st.home)
+	staleReport, err := runGraphLint(testIO(), st.home)
 	if err != nil {
 		t.Fatalf("runGraphLint #3: %v", err)
 	}
@@ -234,7 +234,7 @@ func curationStepLintStale(t *testing.T, st *curationState) {
 }
 
 func curationStepMarkStale(t *testing.T, st *curationState) {
-	if err := runKGMarkStale(st.home, 90*24*time.Hour); err != nil {
+	if err := runKGMarkStale(testIO(), st.home, 90*24*time.Hour); err != nil {
 		t.Fatalf("runKGMarkStale: %v", err)
 	}
 	staleData, _ := os.ReadFile(filepath.Join(st.home, "notes", "entities", "ent-stale-cycle.md"))
@@ -250,7 +250,7 @@ func curationStepMarkStale(t *testing.T, st *curationState) {
 func curationStepLintPostMark(t *testing.T, st *curationState) {
 	// mark-stale rewrites UpdatedAt to time.Now() before saving, so the
 	// note is no longer past the stale cutoff and should not be flagged.
-	postMarkReport, err := runGraphLint(st.home)
+	postMarkReport, err := runGraphLint(testIO(), st.home)
 	if err != nil {
 		t.Fatalf("runGraphLint #4: %v", err)
 	}
@@ -267,10 +267,10 @@ func curationStepCompact(t *testing.T, st *curationState) {
 		id: "dec-archived-cycle", typ: "decision", title: "Archived Cycle Decision",
 		summary: "Already in archived status.", status: "archived", ts: st.now,
 	})
-	if err := createGraphNote(st.home, archived, ""); err != nil {
+	if err := createGraphNote(testIO(), st.home, archived, ""); err != nil {
 		t.Fatalf("createGraphNote dec-archived-cycle: %v", err)
 	}
-	if err := runKGCompact(st.home); err != nil {
+	if err := runKGCompact(testIO(), st.home); err != nil {
 		t.Fatalf("runKGCompact: %v", err)
 	}
 	// The archived note must move under notes/_archived/ and be removed

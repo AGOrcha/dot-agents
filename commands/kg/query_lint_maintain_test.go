@@ -18,7 +18,7 @@ import (
 func curationKG(t *testing.T) (string, string) {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	return home, "2026-01-01T00:00:00Z"
@@ -37,7 +37,7 @@ func writeRawInbox(t *testing.T, home, id, title, body string) {
 		Status:        "pending",
 		CapturedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := recordRawSource(home, src, []byte(body)); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte(body)); err != nil {
 		t.Fatalf("recordRawSource %s: %v", id, err)
 	}
 }
@@ -138,7 +138,7 @@ func TestIngest_FromFile_FullPipeline(t *testing.T) {
 		t.Errorf("expected imported source at %s: %v", imported, err)
 	}
 	// Inbox should be empty.
-	pending, _ := listPendingRawSources(home)
+	pending, _ := listPendingRawSources(testIO(), home)
 	if len(pending) != 0 {
 		t.Errorf("expected empty inbox post-ingest, got %d items", len(pending))
 	}
@@ -268,7 +268,7 @@ func TestQuery_TextOutput_NoResults(t *testing.T) {
 // TestQuery_JSON_RoundTrip verifies the JSON marshalling path on runKGQuery.
 func TestQuery_JSON_RoundTrip(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-json-q", typ: "entity", title: "JSON Entity", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "ent-json-q", typ: "entity", title: "JSON Entity", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	deps := Deps{Flags: GlobalFlags{JSON: true}, ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") }}
@@ -294,14 +294,14 @@ func TestQuery_JSON_RoundTrip(t *testing.T) {
 // traversal from a given note ID).
 func TestExecuteQuery_RelatedNotes(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-target", typ: "entity", title: "Target", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "ent-target", typ: "entity", title: "Target", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-root", typ: "decision", title: "Root", summary: "S.", status: "active", ts: now, links: []string{"ent-target"}}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-root", typ: "decision", title: "Root", summary: "S.", status: "active", ts: now, links: []string{"ent-target"}}), ""); err != nil {
 		t.Fatal(err)
 	}
 
-	resp, err := executeQuery(home, GraphQuery{Intent: "related_notes", Query: "dec-root", Limit: 5})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "related_notes", Query: "dec-root", Limit: 5})
 	if err != nil {
 		t.Fatalf("executeQuery related_notes: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestExecuteQuery_RelatedNotes(t *testing.T) {
 // when the requested note does not exist.
 func TestExecuteQuery_RelatedNotes_MissingNote(t *testing.T) {
 	home, _ := curationKG(t)
-	_, err := executeQuery(home, GraphQuery{Intent: "related_notes", Query: "does-not-exist", Limit: 5})
+	_, err := executeQuery(testIO(), home, GraphQuery{Intent: "related_notes", Query: "does-not-exist", Limit: 5})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected 'not found' error, got: %v", err)
 	}
@@ -324,11 +324,11 @@ func TestExecuteQuery_RelatedNotes_MissingNote(t *testing.T) {
 // rather than causing the whole traversal to error.
 func TestSearchByLinks_BadLinkedIDs(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-keep", typ: "entity", title: "Keep", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "ent-keep", typ: "entity", title: "Keep", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
 	root := makeNote(noteSpec{id: "dec-mixed", typ: "decision", title: "Mixed Links", summary: "S.", status: "active", ts: now, links: []string{"ent-keep", "missing-target"}})
-	if err := createGraphNote(home, root, ""); err != nil {
+	if err := createGraphNote(testIO(), home, root, ""); err != nil {
 		t.Fatal(err)
 	}
 	results, err := searchByLinks(home, "dec-mixed")
@@ -344,10 +344,10 @@ func TestSearchByLinks_BadLinkedIDs(t *testing.T) {
 // while continuing to process the rest of the batch.
 func TestExecuteBatchQuery_PartialErrors(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-batch", typ: "entity", title: "Batch", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "ent-batch", typ: "entity", title: "Batch", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	responses, err := executeBatchQuery(home, []GraphQuery{
+	responses, err := executeBatchQuery(testIO(), home, []GraphQuery{
 		{Intent: "entity_context", Query: "Batch", Limit: 5},
 		{Intent: "bogus_intent", Query: "x", Limit: 5},
 	})
@@ -440,7 +440,7 @@ func seedLintAllIssues(t *testing.T) string {
 		makeNote(noteSpec{id: "ent-orphan-x", typ: "entity", title: "Orphan X", summary: "S.", status: "active", ts: now}),
 	}
 	for _, n := range notes {
-		if err := createGraphNote(home, n, "body"); err != nil {
+		if err := createGraphNote(testIO(), home, n, "body"); err != nil {
 			t.Fatalf("createGraphNote %s: %v", n.ID, err)
 		}
 	}
@@ -448,11 +448,11 @@ func seedLintAllIssues(t *testing.T) string {
 	// oversize_pages: write a real on-disk note exceeding defaultMaxNoteBytes (50 KB).
 	oversizeID := "ent-oversize"
 	oversize := makeNote(noteSpec{id: oversizeID, typ: "entity", title: "Oversize", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-stub"}})
-	if err := createGraphNote(home, oversize, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, oversize, "body"); err != nil {
 		t.Fatal(err)
 	}
 	bigBody := strings.Repeat("x", 60*1024)
-	if err := updateGraphNote(home, oversize, bigBody); err != nil {
+	if err := updateGraphNote(testIO(), home, oversize, bigBody); err != nil {
 		t.Fatal(err)
 	}
 
@@ -478,7 +478,7 @@ func seedLintAllIssues(t *testing.T) string {
 // fixture, ensuring the curation loop surfaces issues end-to-end.
 func TestRunGraphLint_DetectsAllSeededIssueTypes(t *testing.T) {
 	home := seedLintAllIssues(t)
-	report, err := runGraphLint(home)
+	report, err := runGraphLint(testIO(), home)
 	if err != nil {
 		t.Fatalf("runGraphLint: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestRunGraphLint_DetectsAllSeededIssueTypes(t *testing.T) {
 
 	// graph-health.json should have been promoted to status=error because of
 	// broken_links findings.
-	h, err := readGraphHealth(home)
+	h, err := readGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("readGraphHealth: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestRunKGLint_CheckFilter(t *testing.T) {
 		makeNote(noteSpec{id: "dec-only-yaml", typ: "decision", title: "Use YAML format config", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 		makeNote(noteSpec{id: "dec-only-json", typ: "decision", title: "Use JSON format config", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 	} {
-		if err := createGraphNote(home, n, ""); err != nil {
+		if err := createGraphNote(testIO(), home, n, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -612,15 +612,15 @@ func TestLintOversizePages_TriggersOnLargeBody(t *testing.T) {
 	home, now := curationKG(t)
 	id := "ent-big"
 	n := makeNote(noteSpec{id: id, typ: "entity", title: "Big", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}})
-	if err := createGraphNote(home, n, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, n, "body"); err != nil {
 		t.Fatal(err)
 	}
 	// Inflate the on-disk body to exceed the 50 KB default.
-	if err := updateGraphNote(home, n, strings.Repeat("y", 70*1024)); err != nil {
+	if err := updateGraphNote(testIO(), home, n, strings.Repeat("y", 70*1024)); err != nil {
 		t.Fatal(err)
 	}
 
-	_, notes, _ := buildLinkGraph(home)
+	_, notes, _ := buildLinkGraph(testIO(), home)
 	results := lintOversizePages(home, notes, defaultMaxNoteBytes)
 	hit := false
 	for _, r := range results {
@@ -644,8 +644,8 @@ func TestUpdateHealthFromLint_WarnOnlyPromotion(t *testing.T) {
 		},
 		WarnCount: 1,
 	}
-	updateHealthFromLint(home, report)
-	h, err := readGraphHealth(home)
+	updateHealthFromLint(testIO(), home, report)
+	h, err := readGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("readGraphHealth: %v", err)
 	}
@@ -662,11 +662,11 @@ func TestFindContradictions_ViaQueryIntent(t *testing.T) {
 		makeNote(noteSpec{id: "dec-cn-a", typ: "decision", title: "Pick Postgres for storage backend", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 		makeNote(noteSpec{id: "dec-cn-b", typ: "decision", title: "Pick SQLite for storage backend", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-x"}}),
 	} {
-		if err := createGraphNote(home, n, ""); err != nil {
+		if err := createGraphNote(testIO(), home, n, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: "", Limit: 5})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "contradictions", Query: "", Limit: 5})
 	if err != nil {
 		t.Fatalf("executeQuery contradictions: %v", err)
 	}
@@ -683,14 +683,14 @@ func TestFindContradictions_ViaQueryIntent(t *testing.T) {
 func TestRunKGReweave_AddsMissingSourceRefLinks(t *testing.T) {
 	home, now := curationKG(t)
 	// Source note that the entity references.
-	if err := createGraphNote(home, makeNote(noteSpec{id: "src-rw", typ: "source", title: "Reweave Source", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "src-rw", typ: "source", title: "Reweave Source", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote(noteSpec{id: "ent-rw", typ: "entity", title: "RW Entity", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-rw"}}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "ent-rw", typ: "entity", title: "RW Entity", summary: "S.", status: "active", ts: now, sourceRefs: []string{"src-rw"}}), ""); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := runKGReweave(home); err != nil {
+	if err := runKGReweave(testIO(), home); err != nil {
 		t.Fatalf("runKGReweave: %v", err)
 	}
 
@@ -714,10 +714,10 @@ func TestRunKGReweave_AddsMissingSourceRefLinks(t *testing.T) {
 // passes through reweave without errors.
 func TestRunKGReweave_NoChangesNeeded(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-clean", typ: "decision", title: "Clean", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-clean", typ: "decision", title: "Clean", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := runKGReweave(home); err != nil {
+	if err := runKGReweave(testIO(), home); err != nil {
 		t.Errorf("runKGReweave on clean graph: %v", err)
 	}
 }
@@ -728,17 +728,17 @@ func TestRunKGMarkStale_SkipsArchivedAndSuperseded(t *testing.T) {
 	home, _ := curationKG(t)
 	oldTS := time.Now().Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)
 
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-arch", typ: "decision", title: "Arch", summary: "S.", status: "archived", ts: oldTS}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-arch", typ: "decision", title: "Arch", summary: "S.", status: "archived", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-sup", typ: "decision", title: "Sup", summary: "S.", status: "superseded", ts: oldTS}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-sup", typ: "decision", title: "Sup", summary: "S.", status: "superseded", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-old-active", typ: "decision", title: "Old", summary: "S.", status: "active", ts: oldTS}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-old-active", typ: "decision", title: "Old", summary: "S.", status: "active", ts: oldTS}), ""); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := runKGMarkStale(home, 30*24*time.Hour); err != nil {
+	if err := runKGMarkStale(testIO(), home, 30*24*time.Hour); err != nil {
 		t.Fatalf("runKGMarkStale: %v", err)
 	}
 
@@ -769,11 +769,11 @@ func TestRunKGMarkStale_SkipsArchivedAndSuperseded(t *testing.T) {
 func TestRunKGMarkStale_NoStaleNotes(t *testing.T) {
 	home, _ := curationKG(t)
 	freshTS := time.Now().UTC().Format(time.RFC3339)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-fresh", typ: "decision", title: "Fresh", summary: "S.", status: "active", ts: freshTS}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-fresh", typ: "decision", title: "Fresh", summary: "S.", status: "active", ts: freshTS}), ""); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := runKGMarkStale(home, 30*24*time.Hour); err != nil {
+	if err := runKGMarkStale(testIO(), home, 30*24*time.Hour); err != nil {
 		t.Errorf("runKGMarkStale clean: %v", err)
 	}
 	data, _ := os.ReadFile(filepath.Join(home, "notes", "decisions", "dec-fresh.md"))
@@ -793,12 +793,12 @@ func TestRunKGCompact_HandlesMultipleNotesAndIndex(t *testing.T) {
 		makeNote(noteSpec{id: "dec-supersede-1", typ: "decision", title: "Old 2", summary: "S.", status: "superseded", ts: now}),
 		makeNote(noteSpec{id: "dec-keep", typ: "decision", title: "Keep", summary: "S.", status: "active", ts: now}),
 	} {
-		if err := createGraphNote(home, n, ""); err != nil {
+		if err := createGraphNote(testIO(), home, n, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if err := runKGCompact(home); err != nil {
+	if err := runKGCompact(testIO(), home); err != nil {
 		t.Fatalf("runKGCompact: %v", err)
 	}
 
@@ -829,10 +829,10 @@ func TestRunKGCompact_HandlesMultipleNotesAndIndex(t *testing.T) {
 // TestRunKGCompact_NoArchivedNotes exercises the empty-result path.
 func TestRunKGCompact_NoArchivedNotes(t *testing.T) {
 	home, now := curationKG(t)
-	if err := createGraphNote(home, makeNote(noteSpec{id: "dec-active", typ: "decision", title: "Active", summary: "S.", status: "active", ts: now}), ""); err != nil {
+	if err := createGraphNote(testIO(), home, makeNote(noteSpec{id: "dec-active", typ: "decision", title: "Active", summary: "S.", status: "active", ts: now}), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := runKGCompact(home); err != nil {
+	if err := runKGCompact(testIO(), home); err != nil {
 		t.Errorf("runKGCompact on clean graph: %v", err)
 	}
 	// dec-active untouched.
@@ -973,11 +973,11 @@ func TestPersistReweavedNote_PreservesBody(t *testing.T) {
 	home, now := curationKG(t)
 	id := "dec-fallback"
 	note := makeNote(noteSpec{id: id, typ: "decision", title: "Fallback", summary: "S.", status: "active", ts: now, links: []string{"missing-target"}})
-	if err := createGraphNote(home, note, "## Body\nimportant context.\n"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "## Body\nimportant context.\n"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := runKGReweave(home); err != nil {
+	if err := runKGReweave(testIO(), home); err != nil {
 		t.Fatalf("runKGReweave: %v", err)
 	}
 	data, _ := os.ReadFile(filepath.Join(home, "notes", "decisions", id+".md"))
@@ -1002,7 +1002,7 @@ func TestPersistReweavedNote_PreservesBody(t *testing.T) {
 // lint half of the chain by invoking it directly.
 func TestRunKGSync_ChainsLintAfterPull(t *testing.T) {
 	home := seedLintAllIssues(t)
-	report, err := runGraphLint(home)
+	report, err := runGraphLint(testIO(), home)
 	if err != nil {
 		t.Fatalf("runGraphLint after seed: %v", err)
 	}
@@ -1029,10 +1029,10 @@ func TestIntegrityManifest_NoteBodyHash_DeterministicAndUpdates(t *testing.T) {
 
 	home, _ := curationKG(t)
 	id := "ent-manifest"
-	if err := updateManifest(home, id, body); err != nil {
+	if err := updateManifest(testIO(), home, id, body); err != nil {
 		t.Fatalf("updateManifest: %v", err)
 	}
-	m, err := loadManifest(home)
+	m, err := loadManifest(testIO(), home)
 	if err != nil {
 		t.Fatalf("loadManifest: %v", err)
 	}
@@ -1049,7 +1049,7 @@ func TestIntegrityManifest_NoteBodyHash_DeterministicAndUpdates(t *testing.T) {
 // runKGQuery (query_lint_maintain.go ~364-366).
 func TestRunKGQuery_ExecuteQueryError(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -1065,10 +1065,10 @@ func TestRunKGQuery_ExecuteQueryError(t *testing.T) {
 // TestSearchNotes_DefaultLimit drives the limit <= 0 default branch.
 func TestSearchNotes_DefaultLimit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	results, err := searchNotes(home, "entity", "", 0)
+	results, err := searchNotes(testIO(), home, "entity", "", 0)
 	if err != nil {
 		t.Fatalf("searchNotes: %v", err)
 	}
@@ -1081,7 +1081,7 @@ func TestSearchNotes_DefaultLimit(t *testing.T) {
 // TestRunKGLint_HappyPath drives the success path with JSON output.
 func TestRunKGLint_HappyPath(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -1105,7 +1105,7 @@ func TestRunKGCompactCmd_NotInitialized(t *testing.T) {
 
 func TestSearchByLinks_NoteNotFound(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if _, err := searchByLinks(home, "no-such-id"); err == nil {
@@ -1115,10 +1115,10 @@ func TestSearchByLinks_NoteNotFound(t *testing.T) {
 
 func TestFindContradictions_EmptyGraph(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	results, err := findContradictions(home)
+	results, err := findContradictions(testIO(), home)
 	if err != nil {
 		t.Fatalf("findContradictions: %v", err)
 	}
@@ -1130,14 +1130,14 @@ func TestFindContradictions_EmptyGraph(t *testing.T) {
 // TestLoadManifest_MalformedJSON covers the json.Unmarshal error branch.
 func TestLoadManifest_MalformedJSON(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	path := integrityManifestPath(home)
 	if err := os.WriteFile(path, []byte("not-json"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadManifest(home); err == nil {
+	if _, err := loadManifest(testIO(), home); err == nil {
 		t.Error("expected unmarshal error for malformed manifest")
 	}
 }
@@ -1145,7 +1145,7 @@ func TestLoadManifest_MalformedJSON(t *testing.T) {
 // TestLoadManifest_NilNotesMapNormalized covers the Notes==nil normalization.
 func TestLoadManifest_NilNotesMapNormalized(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	path := integrityManifestPath(home)
@@ -1153,7 +1153,7 @@ func TestLoadManifest_NilNotesMapNormalized(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"schema_version":1,"notes":null}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	m, err := loadManifest(home)
+	m, err := loadManifest(testIO(), home)
 	if err != nil {
 		t.Fatalf("loadManifest: %v", err)
 	}
@@ -1185,14 +1185,14 @@ func TestLintStalePages_SkipsArchivedAndMalformed(t *testing.T) {
 
 func TestLintIndexDrift_FlagsMissingNotes(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
 	notes := map[string]*GraphNote{
 		"orphan-1": {ID: "orphan-1", Status: "active", Type: "entity"},
 	}
-	results := lintIndexDrift(home, notes)
+	results := lintIndexDrift(testIO(), home, notes)
 	found := false
 	for _, r := range results {
 		if r.NoteID == "orphan-1" && r.Check == "index_drift" {
@@ -1251,7 +1251,7 @@ func TestLintOrphanPages_DetectsIsolated(t *testing.T) {
 
 func TestLintOversizePages_FindsLargeNote(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -1261,7 +1261,7 @@ func TestLintOversizePages_FindsLargeNote(t *testing.T) {
 		CreatedAt: now, UpdatedAt: now,
 	}
 	bigBody := strings.Repeat("aaaaa\n", 200)
-	if err := createGraphNote(home, huge, bigBody); err != nil {
+	if err := createGraphNote(testIO(), home, huge, bigBody); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
 	notes := map[string]*GraphNote{"huge-1": huge}
@@ -1302,7 +1302,7 @@ func TestFilterLintResultsByCheck_BrokenLinksOnly(t *testing.T) {
 
 func TestRunKGQuery_MissingIntent(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := newQueryCmd("", "", 10)
@@ -1321,7 +1321,7 @@ func TestRunKGQuery_NotInitialized(t *testing.T) {
 
 func TestRunKGQuery_TextNoResults(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := newQueryCmd("entity_context", "", 10)
@@ -1342,7 +1342,7 @@ func TestWriteLintReport_HomeBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writeLintReport(home, &LintReport{})
+	writeLintReport(testIO(), home, &LintReport{})
 }
 
 func TestSaveManifest_HomeBlocked(t *testing.T) {
@@ -1351,7 +1351,7 @@ func TestSaveManifest_HomeBlocked(t *testing.T) {
 	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveManifest(home, &IntegrityManifest{SchemaVersion: 1}); err == nil {
+	if err := saveManifest(testIO(), home, &IntegrityManifest{SchemaVersion: 1}); err == nil {
 		t.Error("expected error when home is blocked")
 	}
 }

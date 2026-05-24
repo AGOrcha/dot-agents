@@ -17,7 +17,7 @@ import (
 // sequences (`/`, `.`, `..`) cannot survive into the filesystem path.
 func TestIngest_SrcIDPathTraversalSanitized(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestIngest_SrcIDPathTraversalSanitized(t *testing.T) {
 // rather than producing a bare "src-" path.
 func TestIngest_SrcIDAllPunctuationFallsBackToSourceID(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	inbox := filepath.Join(home, "raw", "inbox")

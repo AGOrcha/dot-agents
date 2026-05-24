@@ -193,11 +193,11 @@ func TestKGConfigRoundTrip(t *testing.T) {
 		AdaptersEnabled: []string{"mcp"},
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 
-	loaded, err := loadKGConfig()
+	loaded, err := loadKGConfig(testIO())
 	if err != nil {
 		t.Fatalf("loadKGConfig: %v", err)
 	}
@@ -297,14 +297,14 @@ func TestAppendLogEntry(t *testing.T) {
 	logPath := filepath.Join(home, "notes", "log.md")
 	_ = os.WriteFile(logPath, []byte("# Log\n"), 0644)
 
-	if err := appendLogEntry(home, "setup | initialized"); err != nil {
+	if err := appendLogEntry(testIO(), home, "setup | initialized"); err != nil {
 		t.Fatalf("appendLogEntry: %v", err)
 	}
-	if err := appendLogEntry(home, "ingest | source-001"); err != nil {
+	if err := appendLogEntry(testIO(), home, "ingest | source-001"); err != nil {
 		t.Fatalf("appendLogEntry: %v", err)
 	}
 
-	entries, err := readLogEntries(home, 0)
+	entries, err := readLogEntries(testIO(), home, 0)
 	if err != nil {
 		t.Fatalf("readLogEntries: %v", err)
 	}
@@ -320,10 +320,10 @@ func TestReadLogEntries_Limit(t *testing.T) {
 	_ = os.WriteFile(logPath, []byte("# Log\n"), 0644)
 
 	for i := 0; i < 5; i++ {
-		_ = appendLogEntry(home, "op | entry")
+		_ = appendLogEntry(testIO(), home, "op | entry")
 	}
 
-	entries, err := readLogEntries(home, 3)
+	entries, err := readLogEntries(testIO(), home, 3)
 	if err != nil {
 		t.Fatalf("readLogEntries: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestReadLogEntries_Limit(t *testing.T) {
 
 func TestReadLogEntries_MissingFile(t *testing.T) {
 	home := newTempKG(t)
-	entries, err := readLogEntries(home, 5)
+	entries, err := readLogEntries(testIO(), home, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestUpdateIndex_AddAndReplace(t *testing.T) {
 		Title:   "Use Go",
 		Summary: "We chose Go for the implementation.",
 	}
-	if err := updateIndex(home, note); err != nil {
+	if err := updateIndex(testIO(), home, note); err != nil {
 		t.Fatalf("updateIndex: %v", err)
 	}
 
@@ -370,7 +370,7 @@ func TestUpdateIndex_AddAndReplace(t *testing.T) {
 
 	// Update same entry with new title
 	note.Title = "Use Go 1.23+"
-	if err := updateIndex(home, note); err != nil {
+	if err := updateIndex(testIO(), home, note); err != nil {
 		t.Fatalf("updateIndex (update): %v", err)
 	}
 	data, _ = os.ReadFile(indexPath)
@@ -395,10 +395,10 @@ func TestReadIndex(t *testing.T) {
 		{ID: "dec-001", Type: "decision", Title: "Use YAML", Summary: "Chosen format"},
 	}
 	for _, n := range notes {
-		_ = updateIndex(home, n)
+		_ = updateIndex(testIO(), home, n)
 	}
 
-	entries, err := readIndex(home)
+	entries, err := readIndex(testIO(), home)
 	if err != nil {
 		t.Fatalf("readIndex: %v", err)
 	}
@@ -419,11 +419,11 @@ func TestGraphHealthWriteRead(t *testing.T) {
 		NoteCount:     5,
 		Status:        "healthy",
 	}
-	if err := writeGraphHealth(home, h); err != nil {
+	if err := writeGraphHealth(testIO(), home, h); err != nil {
 		t.Fatalf("writeGraphHealth: %v", err)
 	}
 
-	got, err := readGraphHealth(home)
+	got, err := readGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("readGraphHealth: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestGraphHealthWriteRead(t *testing.T) {
 
 func TestReadGraphHealth_Missing(t *testing.T) {
 	home := newTempKG(t)
-	got, err := readGraphHealth(home)
+	got, err := readGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestComputeGraphHealth_Empty(t *testing.T) {
 		_ = os.MkdirAll(filepath.Join(home, d), 0755)
 	}
 
-	h, err := computeGraphHealth(home)
+	h, err := computeGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("computeGraphHealth: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestComputeGraphHealth_WithNotes(t *testing.T) {
 	rendered2, _ := renderGraphNote(staleNote, "body")
 	_ = os.WriteFile(filepath.Join(home, "notes", "entities", "ent-001.md"), rendered2, 0644)
 
-	h, err := computeGraphHealth(home)
+	h, err := computeGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("computeGraphHealth: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestComputeGraphHealth_WithNotes(t *testing.T) {
 func TestKGSetup_CreatesAllDirs(t *testing.T) {
 	home := newTempKG(t)
 
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 
@@ -533,12 +533,12 @@ func TestKGSetup_CreatesAllDirs(t *testing.T) {
 func TestKGSetup_CreatesConfigAndIndex(t *testing.T) {
 	home := newTempKG(t)
 
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 
 	// Config should exist
-	cfg, err := loadKGConfig()
+	cfg, err := loadKGConfig(testIO())
 	if err != nil {
 		t.Fatalf("loadKGConfig after setup: %v", err)
 	}
@@ -552,7 +552,7 @@ func TestKGSetup_CreatesConfigAndIndex(t *testing.T) {
 	}
 
 	// Log should have setup entry
-	entries, _ := readLogEntries(home, 0)
+	entries, _ := readLogEntries(testIO(), home, 0)
 	if len(entries) == 0 {
 		t.Error("expected at least one log entry after setup")
 	}
@@ -561,11 +561,11 @@ func TestKGSetup_CreatesConfigAndIndex(t *testing.T) {
 func TestKGSetup_Idempotent(t *testing.T) {
 	newTempKG(t)
 
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("first runKGSetup: %v", err)
 	}
 	// Second run should not error
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("second runKGSetup (idempotent): %v", err)
 	}
 }
@@ -585,7 +585,7 @@ func TestKGHealth_NotInitialized(t *testing.T) {
 
 func TestKGHealth_AfterSetup(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if err := runKGHealth(testDeps(), &cobra.Command{}); err != nil {
@@ -969,11 +969,11 @@ func TestRecordRawSource_And_ListPending(t *testing.T) {
 		Status:        "pending",
 	}
 	content := []byte("# Test\n\nSome content.")
-	if err := recordRawSource(home, src, content); err != nil {
+	if err := recordRawSource(testIO(), home, src, content); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(testIO(), home)
 	if err != nil {
 		t.Fatalf("listPendingRawSources: %v", err)
 	}
@@ -992,13 +992,13 @@ func TestMoveToImported(t *testing.T) {
 	}
 
 	src := RawSource{SchemaVersion: 1, ID: "mv-001", Title: "T", SourceType: "markdown", Status: "pending"}
-	_ = recordRawSource(home, src, []byte("body"))
+	_ = recordRawSource(testIO(), home, src, []byte("body"))
 
-	if err := moveToImported(home, "mv-001"); err != nil {
+	if err := moveToImported(testIO(), home, "mv-001"); err != nil {
 		t.Fatalf("moveToImported: %v", err)
 	}
 	// Inbox empty
-	pending, _ := listPendingRawSources(home)
+	pending, _ := listPendingRawSources(testIO(), home)
 	if len(pending) != 0 {
 		t.Errorf("expected 0 pending after move, got %d", len(pending))
 	}
@@ -1075,7 +1075,7 @@ The team chose YAML for configuration.
 
 func TestCreateGraphNote_And_Update(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -1089,19 +1089,19 @@ func TestCreateGraphNote_And_Update(t *testing.T) {
 		CreatedAt:     "2026-01-01T00:00:00Z",
 		UpdatedAt:     "2026-01-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
 
 	// Duplicate creation should fail
-	if err := createGraphNote(home, note, "body"); err == nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err == nil {
 		t.Error("expected error for duplicate note creation")
 	}
 
 	// Update the note
 	note.Title = "Use YAML v2"
 	note.Summary = "Updated summary."
-	if err := updateGraphNote(home, note, "new body"); err != nil {
+	if err := updateGraphNote(testIO(), home, note, "new body"); err != nil {
 		t.Fatalf("updateGraphNote: %v", err)
 	}
 
@@ -1115,7 +1115,7 @@ func TestCreateGraphNote_And_Update(t *testing.T) {
 
 func TestNoteExists(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -1124,7 +1124,7 @@ func TestNoteExists(t *testing.T) {
 		Title: "T", Summary: "S", Status: "active",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	_ = createGraphNote(home, note, "")
+	_ = createGraphNote(testIO(), home, note, "")
 
 	if exists, _ := noteExists(home, "exist-test"); !exists {
 		t.Error("expected note to exist")
@@ -1138,7 +1138,7 @@ func TestNoteExists(t *testing.T) {
 
 func TestIngestSource_FullPipeline(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -1156,11 +1156,11 @@ This repo uses Claude Code and GitHub Actions for automation.
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte(content)); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte(content)); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 
-	result, err := ingestSource(home, "design-001")
+	result, err := ingestSource(testIO(), home, "design-001")
 	if err != nil {
 		t.Fatalf("ingestSource: %v", err)
 	}
@@ -1186,7 +1186,7 @@ This repo uses Claude Code and GitHub Actions for automation.
 	}
 
 	// Health should be updated
-	health, err := readGraphHealth(home)
+	health, err := readGraphHealth(testIO(), home)
 	if err != nil || health == nil {
 		t.Fatalf("readGraphHealth: %v", err)
 	}
@@ -1199,7 +1199,7 @@ This repo uses Claude Code and GitHub Actions for automation.
 
 func TestKGQueue_Empty(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if err := runKGQueue(testDeps()); err != nil {
@@ -1209,7 +1209,7 @@ func TestKGQueue_Empty(t *testing.T) {
 
 func TestKGQueue_WithItems(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -1218,10 +1218,10 @@ func TestKGQueue_WithItems(t *testing.T) {
 			SchemaVersion: 1, ID: id, Title: fmt.Sprintf("Source %d", i+1),
 			SourceType: "markdown", Status: "pending",
 		}
-		_ = recordRawSource(home, src, []byte("content"))
+		_ = recordRawSource(testIO(), home, src, []byte("content"))
 	}
 
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(testIO(), home)
 	if err != nil {
 		t.Fatalf("listPendingRawSources: %v", err)
 	}
@@ -1255,11 +1255,11 @@ func TestIsValidQueryIntent(t *testing.T) {
 func setupKGWithCustomNotes(t *testing.T, notes []*GraphNote) string {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	for _, n := range notes {
-		if err := createGraphNote(home, n, "note body for "+n.ID); err != nil {
+		if err := createGraphNote(testIO(), home, n, "note body for "+n.ID); err != nil {
 			t.Fatalf("createGraphNote %s: %v", n.ID, err)
 		}
 	}
@@ -1281,7 +1281,7 @@ func setupKGWithNotes(t *testing.T) string {
 func TestSearchNotes_ByType(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	results, err := searchNotes(home, "decision", "cobra", 10)
+	results, err := searchNotes(testIO(), home, "decision", "cobra", 10)
 	if err != nil {
 		t.Fatalf("searchNotes: %v", err)
 	}
@@ -1296,7 +1296,7 @@ func TestSearchNotes_ByType(t *testing.T) {
 func TestSearchNotes_AllTypes(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	results, err := searchNotes(home, "", "YAML", 10)
+	results, err := searchNotes(testIO(), home, "", "YAML", 10)
 	if err != nil {
 		t.Fatalf("searchNotes all: %v", err)
 	}
@@ -1309,7 +1309,7 @@ func TestSearchNotes_Limit(t *testing.T) {
 	home := setupKGWithNotes(t)
 
 	// Empty query should match all (score 0 via body)
-	results, err := searchNotes(home, "entity", "note body", 1)
+	results, err := searchNotes(testIO(), home, "entity", "note body", 1)
 	if err != nil {
 		t.Fatalf("searchNotes: %v", err)
 	}
@@ -1320,11 +1320,11 @@ func TestSearchNotes_Limit(t *testing.T) {
 
 func TestSearchNotes_Empty(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
-	results, err := searchNotes(home, "entity", "anything", 10)
+	results, err := searchNotes(testIO(), home, "entity", "anything", 10)
 	if err != nil {
 		t.Fatalf("searchNotes empty: %v", err)
 	}
@@ -1335,7 +1335,7 @@ func TestSearchNotes_Empty(t *testing.T) {
 
 func TestSearchByLinks(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -1346,7 +1346,7 @@ func TestSearchByLinks(t *testing.T) {
 		Title: "Linked Entity", Summary: "A linked note.", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	_ = createGraphNote(home, linked, "")
+	_ = createGraphNote(testIO(), home, linked, "")
 
 	root := &GraphNote{
 		SchemaVersion: 1, ID: "dec-root", Type: "decision",
@@ -1354,7 +1354,7 @@ func TestSearchByLinks(t *testing.T) {
 		Links:     []string{"ent-linked"},
 		CreatedAt: now, UpdatedAt: now,
 	}
-	_ = createGraphNote(home, root, "")
+	_ = createGraphNote(testIO(), home, root, "")
 
 	results, err := searchByLinks(home, "dec-root")
 	if err != nil {
@@ -1370,7 +1370,7 @@ func TestSearchByLinks(t *testing.T) {
 
 func TestSearchByLinks_NotFound(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_, err := searchByLinks(home, "does-not-exist")
@@ -1384,7 +1384,7 @@ func TestSearchByLinks_NotFound(t *testing.T) {
 func TestExecuteQuery_DecisionLookup(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	resp, err := executeQuery(home, GraphQuery{Intent: "decision_lookup", Query: "cobra", Limit: 10})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "decision_lookup", Query: "cobra", Limit: 10})
 	if err != nil {
 		t.Fatalf("executeQuery: %v", err)
 	}
@@ -1402,7 +1402,7 @@ func TestExecuteQuery_DecisionLookup(t *testing.T) {
 func TestExecuteQuery_GraphHealth(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	resp, err := executeQuery(home, GraphQuery{Intent: "graph_health", Query: ""})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "graph_health", Query: ""})
 	if err != nil {
 		t.Fatalf("executeQuery graph_health: %v", err)
 	}
@@ -1419,7 +1419,7 @@ func TestExecuteQuery_Contradictions_NoConflict(t *testing.T) {
 	// different enough topics that contradiction detection finds nothing.
 	home := setupKGWithNotes(t)
 
-	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: ""})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "contradictions", Query: ""})
 	if err != nil {
 		t.Fatalf("executeQuery contradictions: %v", err)
 	}
@@ -1435,7 +1435,7 @@ func TestExecuteQuery_Contradictions_NoConflict(t *testing.T) {
 func TestExecuteQuery_UnknownIntent(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	_, err := executeQuery(home, GraphQuery{Intent: "does_not_exist", Query: "x"})
+	_, err := executeQuery(testIO(), home, GraphQuery{Intent: "does_not_exist", Query: "x"})
 	if err == nil {
 		t.Error("expected error for unknown intent")
 	}
@@ -1444,9 +1444,9 @@ func TestExecuteQuery_UnknownIntent(t *testing.T) {
 func TestExecuteQuery_LogsEntry(t *testing.T) {
 	home := setupKGWithNotes(t)
 
-	_, _ = executeQuery(home, GraphQuery{Intent: "decision_lookup", Query: "yaml", Limit: 5})
+	_, _ = executeQuery(testIO(), home, GraphQuery{Intent: "decision_lookup", Query: "yaml", Limit: 5})
 
-	entries, err := readLogEntries(home, 0)
+	entries, err := readLogEntries(testIO(), home, 0)
 	if err != nil {
 		t.Fatalf("readLogEntries: %v", err)
 	}
@@ -1466,7 +1466,7 @@ func TestExecuteQuery_AllTypedIntents(t *testing.T) {
 
 	intents := []string{"source_lookup", "entity_context", "concept_context", "decision_lookup", "repo_context", "synthesis_lookup"}
 	for _, intent := range intents {
-		resp, err := executeQuery(home, GraphQuery{Intent: intent, Query: "anything", Limit: 5})
+		resp, err := executeQuery(testIO(), home, GraphQuery{Intent: intent, Query: "anything", Limit: 5})
 		if err != nil {
 			t.Errorf("executeQuery %s: %v", intent, err)
 			continue
@@ -1491,7 +1491,7 @@ func TestExecuteBatchQuery(t *testing.T) {
 		{Intent: "entity_context", Query: "yaml", Limit: 5},
 		{Intent: "graph_health", Query: ""},
 	}
-	responses, err := executeBatchQuery(home, queries)
+	responses, err := executeBatchQuery(testIO(), home, queries)
 	if err != nil {
 		t.Fatalf("executeBatchQuery: %v", err)
 	}
@@ -1509,10 +1509,10 @@ func TestExecuteBatchQuery(t *testing.T) {
 
 func TestBuildLinkGraph_Empty(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	adj, notes, err := buildLinkGraph(home)
+	adj, notes, err := buildLinkGraph(testIO(), home)
 	if err != nil {
 		t.Fatalf("buildLinkGraph: %v", err)
 	}
@@ -1523,16 +1523,16 @@ func TestBuildLinkGraph_Empty(t *testing.T) {
 
 func TestBuildLinkGraph_WithLinks(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
 	target := &GraphNote{SchemaVersion: 1, ID: "ent-target", Type: "entity", Title: "Target", Summary: "T", Status: "active", CreatedAt: now, UpdatedAt: now}
 	root := &GraphNote{SchemaVersion: 1, ID: "dec-root", Type: "decision", Title: "Root", Summary: "R", Status: "active", Links: []string{"ent-target"}, CreatedAt: now, UpdatedAt: now}
-	_ = createGraphNote(home, target, "")
-	_ = createGraphNote(home, root, "")
+	_ = createGraphNote(testIO(), home, target, "")
+	_ = createGraphNote(testIO(), home, root, "")
 
-	adj, notes, err := buildLinkGraph(home)
+	adj, notes, err := buildLinkGraph(testIO(), home)
 	if err != nil {
 		t.Fatalf("buildLinkGraph: %v", err)
 	}
@@ -1549,7 +1549,7 @@ func TestBuildLinkGraph_WithLinks(t *testing.T) {
 func setupLintFixture(t *testing.T) (string, map[string][]string, map[string]*GraphNote) {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -1560,11 +1560,11 @@ func setupLintFixture(t *testing.T) (string, map[string][]string, map[string]*Gr
 		{SchemaVersion: 1, ID: "dec-broken", Type: "decision", Title: "Broken Link", Summary: "Has broken link.", Status: "active", Links: []string{"does-not-exist"}, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, n := range notes {
-		if err := createGraphNote(home, n, "body"); err != nil {
+		if err := createGraphNote(testIO(), home, n, "body"); err != nil {
 			t.Fatalf("createGraphNote %s: %v", n.ID, err)
 		}
 	}
-	adj, noteMap, err := buildLinkGraph(home)
+	adj, noteMap, err := buildLinkGraph(testIO(), home)
 	if err != nil {
 		t.Fatalf("buildLinkGraph: %v", err)
 	}
@@ -1615,7 +1615,7 @@ func TestLintMissingSourceRefs(t *testing.T) {
 
 func TestLintStalePages(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	oldTime := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339)
@@ -1624,9 +1624,9 @@ func TestLintStalePages(t *testing.T) {
 		Title: "Old Entity", Summary: "Very old.", Status: "active",
 		CreatedAt: oldTime, UpdatedAt: oldTime,
 	}
-	_ = createGraphNote(home, staleNote, "")
+	_ = createGraphNote(testIO(), home, staleNote, "")
 
-	_, notes, _ := buildLinkGraph(home)
+	_, notes, _ := buildLinkGraph(testIO(), home)
 	results := lintStalePages(notes, 90*24*time.Hour)
 	if len(results) == 0 {
 		t.Error("expected stale_pages finding")
@@ -1638,12 +1638,12 @@ func TestLintStalePages(t *testing.T) {
 
 func TestLintIndexDrift(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
 	note := &GraphNote{SchemaVersion: 1, ID: "ent-drift", Type: "entity", Title: "Drift", Summary: "S", Status: "active", CreatedAt: now, UpdatedAt: now}
-	_ = createGraphNote(home, note, "")
+	_ = createGraphNote(testIO(), home, note, "")
 
 	// Manually remove from index to create drift
 	indexPath := filepath.Join(home, "notes", "index.md")
@@ -1657,8 +1657,8 @@ func TestLintIndexDrift(t *testing.T) {
 	}
 	_ = os.WriteFile(indexPath, []byte(strings.Join(kept, "\n")), 0644)
 
-	_, noteMap, _ := buildLinkGraph(home)
-	results := lintIndexDrift(home, noteMap)
+	_, noteMap, _ := buildLinkGraph(testIO(), home)
+	results := lintIndexDrift(testIO(), home, noteMap)
 	if len(results) == 0 {
 		t.Error("expected index_drift finding")
 	}
@@ -1670,7 +1670,7 @@ func TestLintContradictions(t *testing.T) {
 		{SchemaVersion: 1, ID: "dec-use-yaml", Type: "decision", Title: "Use YAML config format", Summary: "Use YAML.", Status: "active", CreatedAt: now, UpdatedAt: now},
 		{SchemaVersion: 1, ID: "dec-use-json", Type: "decision", Title: "Use JSON config format", Summary: "Use JSON.", Status: "active", CreatedAt: now, UpdatedAt: now},
 	})
-	_, noteMap, _ := buildLinkGraph(home)
+	_, noteMap, _ := buildLinkGraph(testIO(), home)
 	results := lintContradictions(noteMap)
 	if len(results) == 0 {
 		t.Error("expected contradiction finding between YAML and JSON config decisions")
@@ -1683,7 +1683,7 @@ func TestLintContradictions_NonConflicting(t *testing.T) {
 		{SchemaVersion: 1, ID: "dec-a", Type: "decision", Title: "Use cobra for CLI parsing", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
 		{SchemaVersion: 1, ID: "dec-b", Type: "decision", Title: "Deploy to production weekly", Summary: "S.", Status: "active", CreatedAt: now, UpdatedAt: now},
 	})
-	_, noteMap, _ := buildLinkGraph(home)
+	_, noteMap, _ := buildLinkGraph(testIO(), home)
 	results := lintContradictions(noteMap)
 	if len(results) != 0 {
 		t.Errorf("expected no contradictions for unrelated decisions, got: %v", results)
@@ -1695,7 +1695,7 @@ func TestLintContradictions_NonConflicting(t *testing.T) {
 func TestRunGraphLint_FullRun(t *testing.T) {
 	home, _, _ := setupLintFixture(t)
 
-	report, err := runGraphLint(home)
+	report, err := runGraphLint(testIO(), home)
 	if err != nil {
 		t.Fatalf("runGraphLint: %v", err)
 	}
@@ -1721,7 +1721,7 @@ func TestExecuteQuery_Contradictions_Live(t *testing.T) {
 		{SchemaVersion: 1, ID: "dec-toml", Type: "decision", Title: "Use TOML config format", Summary: "TOML.", Status: "active", CreatedAt: now, UpdatedAt: now},
 	})
 
-	resp, err := executeQuery(home, GraphQuery{Intent: "contradictions", Query: ""})
+	resp, err := executeQuery(testIO(), home, GraphQuery{Intent: "contradictions", Query: ""})
 	if err != nil {
 		t.Fatalf("executeQuery contradictions: %v", err)
 	}
@@ -1734,7 +1734,7 @@ func TestExecuteQuery_Contradictions_Live(t *testing.T) {
 
 func TestRunKGReweave_RemovesBrokenLinks(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -1744,9 +1744,9 @@ func TestRunKGReweave_RemovesBrokenLinks(t *testing.T) {
 		Links:     []string{"does-not-exist"},
 		CreatedAt: now, UpdatedAt: now,
 	}
-	_ = createGraphNote(home, note, "body")
+	_ = createGraphNote(testIO(), home, note, "body")
 
-	if err := runKGReweave(home); err != nil {
+	if err := runKGReweave(testIO(), home); err != nil {
 		t.Fatalf("runKGReweave: %v", err)
 	}
 
@@ -1760,7 +1760,7 @@ func TestRunKGReweave_RemovesBrokenLinks(t *testing.T) {
 
 func TestRunKGMarkStale(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	oldTime := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339)
@@ -1769,9 +1769,9 @@ func TestRunKGMarkStale(t *testing.T) {
 		Title: "Old", Summary: "S", Status: "active",
 		CreatedAt: oldTime, UpdatedAt: oldTime,
 	}
-	_ = createGraphNote(home, note, "body")
+	_ = createGraphNote(testIO(), home, note, "body")
 
-	if err := runKGMarkStale(home, 90*24*time.Hour); err != nil {
+	if err := runKGMarkStale(testIO(), home, 90*24*time.Hour); err != nil {
 		t.Fatalf("runKGMarkStale: %v", err)
 	}
 
@@ -1785,7 +1785,7 @@ func TestRunKGMarkStale(t *testing.T) {
 
 func TestRunKGCompact(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -1794,9 +1794,9 @@ func TestRunKGCompact(t *testing.T) {
 		Title: "Old Decision", Summary: "S", Status: "archived",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	_ = createGraphNote(home, note, "body")
+	_ = createGraphNote(testIO(), home, note, "body")
 
-	if err := runKGCompact(home); err != nil {
+	if err := runKGCompact(testIO(), home); err != nil {
 		t.Fatalf("runKGCompact: %v", err)
 	}
 
@@ -1862,7 +1862,7 @@ func TestLocalFileAdapter_Available(t *testing.T) {
 	if adapter.Available() {
 		t.Error("adapter should be unavailable before setup")
 	}
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if !adapter.Available() {
@@ -1939,7 +1939,7 @@ func TestExecuteBridgeQuery_PlanContext_Fanout(t *testing.T) {
 
 func TestWriteBridgeContract(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Setup already calls writeBridgeContract; verify file exists and is valid YAML
@@ -1960,10 +1960,10 @@ func TestWriteBridgeContract(t *testing.T) {
 
 func TestManifest_InitAndLoad(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	m, err := loadManifest(home)
+	m, err := loadManifest(testIO(), home)
 	if err != nil {
 		t.Fatalf("loadManifest: %v", err)
 	}
@@ -1977,15 +1977,15 @@ func TestManifest_InitAndLoad(t *testing.T) {
 
 func TestManifest_UpdatedOnCreate(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	note := &GraphNote{SchemaVersion: 1, ID: "ent-test-001", Type: "entity", Title: "Test", Status: "active", CreatedAt: "2026-04-10T00:00:00Z"}
 	body := "Test body content."
-	if err := createGraphNote(home, note, body); err != nil {
+	if err := createGraphNote(testIO(), home, note, body); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
-	m, err := loadManifest(home)
+	m, err := loadManifest(testIO(), home)
 	if err != nil {
 		t.Fatalf("loadManifest: %v", err)
 	}
@@ -2000,18 +2000,18 @@ func TestManifest_UpdatedOnCreate(t *testing.T) {
 
 func TestManifest_VersionIncrementOnUpdate(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	note := &GraphNote{SchemaVersion: 1, ID: "ent-v-001", Type: "entity", Title: "V Test", Status: "active", CreatedAt: "2026-04-10T00:00:00Z"}
-	if err := createGraphNote(home, note, "v0"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "v0"); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
 	if note.Version != 0 {
 		t.Errorf("version after create: want 0, got %d", note.Version)
 	}
 	note.Title = "V Test Updated"
-	if err := updateGraphNote(home, note, "v1"); err != nil {
+	if err := updateGraphNote(testIO(), home, note, "v1"); err != nil {
 		t.Fatalf("updateGraphNote: %v", err)
 	}
 	// Re-read from disk and check version
@@ -2025,11 +2025,11 @@ func TestManifest_VersionIncrementOnUpdate(t *testing.T) {
 
 func TestLintIntegrityViolations_CleanGraph(t *testing.T) {
 	home := setupKGWithNotes(t)
-	_, notes, err := buildLinkGraph(home)
+	_, notes, err := buildLinkGraph(testIO(), home)
 	if err != nil {
 		t.Fatalf("buildLinkGraph: %v", err)
 	}
-	results := lintIntegrityViolations(home, notes)
+	results := lintIntegrityViolations(testIO(), home, notes)
 	if len(results) != 0 {
 		t.Errorf("expected no integrity violations on clean graph, got %d", len(results))
 	}
@@ -2048,11 +2048,11 @@ func TestLintIntegrityViolations_DetectsOutOfBandEdit(t *testing.T) {
 	if err := os.WriteFile(notePath, []byte(modified), 0644); err != nil {
 		t.Fatalf("write note: %v", err)
 	}
-	_, notes, err := buildLinkGraph(home)
+	_, notes, err := buildLinkGraph(testIO(), home)
 	if err != nil {
 		t.Fatalf("buildLinkGraph: %v", err)
 	}
-	results := lintIntegrityViolations(home, notes)
+	results := lintIntegrityViolations(testIO(), home, notes)
 	found := false
 	for _, r := range results {
 		if r.NoteID == "ent-cobra" && r.Check == "integrity_violation" {
@@ -2068,7 +2068,7 @@ func TestLintIntegrityViolations_DetectsOutOfBandEdit(t *testing.T) {
 
 func TestRunKGSetup_InitializesWarmDB(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 	dbPath := graphstoreDBPath(home)
@@ -2168,7 +2168,7 @@ func TestRunKGWarm_ArchivedNotesIndexed(t *testing.T) {
 		Title: "Old Decision", Status: "archived",
 		CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-06-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, archivedNote, "This decision was superseded."); err != nil {
+	if err := createGraphNote(testIO(), home, archivedNote, "This decision was superseded."); err != nil {
 		t.Fatalf("createGraphNote archived: %v", err)
 	}
 	// Move it to _archived
@@ -2274,7 +2274,7 @@ func TestNoteSymbolLink_InvalidRemoveID(t *testing.T) {
 
 func TestRunKGBridgeQuery_MissingIntent(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 
@@ -2291,7 +2291,7 @@ func TestRunKGBridgeQuery_MissingIntent(t *testing.T) {
 
 func TestRunKGLinkAdd_UsageShape(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 
@@ -2363,7 +2363,7 @@ func TestComputeSparsityScore_ResultsFound(t *testing.T) {
 
 func TestCollectCodeBridgeResults_EmptyStore_SparsityWarning(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Warm store is freshly initialized — 0 code nodes imported
@@ -2409,7 +2409,7 @@ func TestRunKGSync_CopiesNotes(t *testing.T) {
 	// runKGSync is a thin wrapper around "git pull/push" inside the KG_HOME dir.
 	// We test that it requires an initialized KG and handles the push/pull path.
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -2549,7 +2549,7 @@ func TestRunKGLint_JSONOutput(t *testing.T) {
 
 func TestRunKGIngest_DryRun(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -2559,7 +2559,7 @@ func TestRunKGIngest_DryRun(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("# Dry Run\nSome content.")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("# Dry Run\nSome content.")); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 
@@ -2580,7 +2580,7 @@ func TestRunKGIngest_DryRun(t *testing.T) {
 	})
 
 	// Source should still be in inbox (not moved to imported)
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(testIO(), home)
 	if err != nil {
 		t.Fatalf("listPendingRawSources: %v", err)
 	}
@@ -2709,7 +2709,7 @@ func TestRunKGBridgeMapping_NoGraph(t *testing.T) {
 
 func TestRunKGBridgeHealth_CLIOutput(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_ = home
@@ -2765,7 +2765,7 @@ func TestNewKGCmd_ServeSubcommand(t *testing.T) {
 // cmd.go.
 func TestNewKGCmd_SubcommandRunEDispatch(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_ = home
@@ -3110,21 +3110,23 @@ func TestExtraFaultTest_FilepathSanity(t *testing.T) {
 // createGraphNote (~969-971) by injecting a write failure for the index.
 func TestCreateGraphNote_UpdateIndexError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == kgIndexFileName {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
+	io := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == kgIndexFileName {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
 	note := &GraphNote{
 		SchemaVersion: 1, ID: "e1", Type: "entity", Title: "T",
 		Summary: "s", Status: "draft",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, note, "body"); err == nil {
+	if err := createGraphNote(io, home, note, "body"); err == nil {
 		t.Fatal("expected updateIndex seam error")
 	}
 }
@@ -3133,7 +3135,7 @@ func TestCreateGraphNote_UpdateIndexError(t *testing.T) {
 // inside updateGraphNote (~999-1001).
 func TestUpdateGraphNote_WriteFileError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -3142,17 +3144,19 @@ func TestUpdateGraphNote_WriteFileError(t *testing.T) {
 		Summary: "s", Status: "draft",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if strings.HasSuffix(path, "e1.md") {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	if err := updateGraphNote(home, note, "body2"); err == nil {
+	io := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if strings.HasSuffix(path, "e1.md") {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	if err := updateGraphNote(io, home, note, "body2"); err == nil {
 		t.Fatal("expected write-file seam error")
 	}
 }
@@ -3161,7 +3165,7 @@ func TestUpdateGraphNote_WriteFileError(t *testing.T) {
 // updateGraphNote (~1002-1004) to fail.
 func TestUpdateGraphNote_UpdateIndexError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	note := &GraphNote{
@@ -3169,16 +3173,18 @@ func TestUpdateGraphNote_UpdateIndexError(t *testing.T) {
 		Summary: "s", Status: "draft",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == kgIndexFileName {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	if err := updateGraphNote(home, note, "body2"); err == nil {
+	io := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == kgIndexFileName {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	if err := updateGraphNote(io, home, note, "body2"); err == nil {
 		t.Fatal("expected updateIndex seam error on update")
 	}
 }
@@ -3188,7 +3194,7 @@ func TestUpdateGraphNote_UpdateIndexError(t *testing.T) {
 func TestReadIndex_MissingReturnsNil(t *testing.T) {
 	home := newTempKG(t)
 
-	entries, err := readIndex(home)
+	entries, err := readIndex(testIO(), home)
 	if err != nil {
 		t.Fatalf("readIndex on missing index: %v", err)
 	}
@@ -3218,7 +3224,7 @@ func TestLoadKGConfig_MalformedYAML(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("schema_version: not-a-number\n  : bad"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := loadKGConfig()
+	_, err := loadKGConfig(testIO())
 	if err == nil {
 		t.Fatalf("expected parse error from malformed YAML in %s", home)
 	}
@@ -3229,7 +3235,7 @@ func TestLoadKGConfig_MalformedYAML(t *testing.T) {
 func TestSaveKGConfig_CreatesDir(t *testing.T) {
 	home := newTempKG(t)
 	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "self", "config.yaml")); err != nil {
@@ -3246,7 +3252,7 @@ func TestNoteSubdir_UnknownTypePluralized(t *testing.T) {
 
 func TestWalkNoteFiles_MissingNotesDir(t *testing.T) {
 	dir := t.TempDir()
-	err := walkNoteFiles(dir, func(string, fs.DirEntry) error { return nil })
+	err := walkNoteFiles(testIO(), dir, func(string, fs.DirEntry) error { return nil })
 	if err == nil {
 		t.Error("expected ReadDir error for missing notes/")
 	}
@@ -3333,10 +3339,10 @@ func TestWriteAndReadGraphHealth_RoundTrip(t *testing.T) {
 		NoteCount: 7,
 		Warnings:  []string{"a warning"},
 	}
-	if err := writeGraphHealth(home, want); err != nil {
+	if err := writeGraphHealth(testIO(), home, want); err != nil {
 		t.Fatalf("writeGraphHealth: %v", err)
 	}
-	got, err := readGraphHealth(home)
+	got, err := readGraphHealth(testIO(), home)
 	if err != nil {
 		t.Fatalf("readGraphHealth: %v", err)
 	}
@@ -3355,7 +3361,7 @@ func TestReadGraphHealth_Malformed(t *testing.T) {
 	if err := os.WriteFile(healthPath, []byte("not-json"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readGraphHealth(home); err == nil {
+	if _, err := readGraphHealth(testIO(), home); err == nil {
 		t.Error("expected unmarshal error for non-JSON health file")
 	}
 }
@@ -3384,7 +3390,7 @@ func TestCountQueueEntries_IgnoresDirs(t *testing.T) {
 
 func TestRunKGHealth_JSONOutput(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -3413,7 +3419,7 @@ func TestRunKGQueue_NotInitialized(t *testing.T) {
 
 func TestRunKGQueue_EmptyInbox(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	out := captureStdout(t, func() {
@@ -3428,7 +3434,7 @@ func TestRunKGQueue_EmptyInbox(t *testing.T) {
 
 func TestRunKGQueue_WithPendingSources(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	src := RawSource{
@@ -3436,7 +3442,7 @@ func TestRunKGQueue_WithPendingSources(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("body")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("body")); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 
@@ -3453,7 +3459,7 @@ func TestRunKGQueue_WithPendingSources(t *testing.T) {
 
 func TestRunKGQueue_JSONOutput(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	src := RawSource{
@@ -3461,7 +3467,7 @@ func TestRunKGQueue_JSONOutput(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("body")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("body")); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 	deps := Deps{
@@ -3484,7 +3490,7 @@ func TestRunKGQueue_JSONOutput(t *testing.T) {
 
 func TestIngestEntityNotes_SkipsExisting(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3494,7 +3500,7 @@ func TestIngestEntityNotes_SkipsExisting(t *testing.T) {
 		Title: "Cobra CLI", Summary: "x", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := createGraphNote(home, preExisting, ""); err != nil {
+	if err := createGraphNote(testIO(), home, preExisting, ""); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -3503,7 +3509,7 @@ func TestIngestEntityNotes_SkipsExisting(t *testing.T) {
 	body := "Cobra CLI surface. Widget Manager rules. " +
 		"Other Entity exists. Another Thing here. Extra One too. Sixth Name done."
 	result := &IngestResult{}
-	ingestEntityNotes(home, src, srcNote, body, now, result)
+	ingestEntityNotes(testIO(), home, src, srcNote, body, now, result)
 
 	updatedHasCobra := false
 	for _, id := range result.NotesUpdated {
@@ -3521,7 +3527,7 @@ func TestIngestEntityNotes_SkipsExisting(t *testing.T) {
 
 func TestIngestDecisionNotes_CapsAtThree(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3535,7 +3541,7 @@ func TestIngestDecisionNotes_CapsAtThree(t *testing.T) {
 		"We will not skip tests.",
 	}, " ")
 	result := &IngestResult{}
-	ingestDecisionNotes(home, src, srcNote, body, now, result)
+	ingestDecisionNotes(testIO(), home, src, srcNote, body, now, result)
 	if len(result.NotesCreated) > 3 {
 		t.Errorf("expected at most 3 decision notes, got %d", len(result.NotesCreated))
 	}
@@ -3543,7 +3549,7 @@ func TestIngestDecisionNotes_CapsAtThree(t *testing.T) {
 
 func TestRunSingleIngest_TextSuccess(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	src := RawSource{
@@ -3552,7 +3558,7 @@ func TestRunSingleIngest_TextSuccess(t *testing.T) {
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
 	body := "We decided to ship a fix. The Widget class works."
-	if err := recordRawSource(home, src, []byte(body)); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte(body)); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 	out := captureStdout(t, func() {
@@ -3565,7 +3571,7 @@ func TestRunSingleIngest_TextSuccess(t *testing.T) {
 
 func TestRunSingleIngest_JSONSuccess(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	src := RawSource{
@@ -3573,7 +3579,7 @@ func TestRunSingleIngest_JSONSuccess(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("# x")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("# x")); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
 	deps := Deps{
@@ -3591,7 +3597,7 @@ func TestRunSingleIngest_JSONSuccess(t *testing.T) {
 
 func TestRunSingleIngest_MissingSourceWritesError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -3606,7 +3612,7 @@ func TestRunSingleIngest_MissingSourceWritesError(t *testing.T) {
 
 func TestResolveIngestSingle_PreviewBranch(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	srcPath := filepath.Join(t.TempDir(), "preview.md")
@@ -3614,7 +3620,7 @@ func TestResolveIngestSingle_PreviewBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		ids, done, err := resolveIngestSingle(home, []string{srcPath}, kgIngestOptions{
+		ids, done, err := resolveIngestSingle(testIO(), home, []string{srcPath}, kgIngestOptions{
 			dryRun: true, sourceType: "markdown",
 		})
 		if err != nil {
@@ -3631,10 +3637,10 @@ func TestResolveIngestSingle_PreviewBranch(t *testing.T) {
 
 func TestResolveIngestSingle_MissingFile(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	_, _, err := resolveIngestSingle(home, []string{"/tmp/nope-kg.md"}, kgIngestOptions{})
+	_, _, err := resolveIngestSingle(testIO(), home, []string{"/tmp/nope-kg.md"}, kgIngestOptions{})
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -3667,7 +3673,7 @@ func TestRunKGServe_StdinClosed(t *testing.T) {
 
 func TestListPendingRawSources_MultipleAndSorted(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	for _, id := range []string{"src-b", "src-a", "src-c"} {
@@ -3676,11 +3682,11 @@ func TestListPendingRawSources_MultipleAndSorted(t *testing.T) {
 			SourceType: "markdown", Status: "pending",
 			CapturedAt: "2026-01-01T00:00:00Z",
 		}
-		if err := recordRawSource(home, src, []byte("body")); err != nil {
+		if err := recordRawSource(testIO(), home, src, []byte("body")); err != nil {
 			t.Fatalf("record %s: %v", id, err)
 		}
 	}
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(testIO(), home)
 	if err != nil {
 		t.Fatalf("listPendingRawSources: %v", err)
 	}
@@ -3691,18 +3697,18 @@ func TestListPendingRawSources_MultipleAndSorted(t *testing.T) {
 
 func TestMoveToImported_MissingSource(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
-	if err := moveToImported(home, "missing-src"); err == nil {
+	if err := moveToImported(testIO(), home, "missing-src"); err == nil {
 		t.Skip("rename succeeded unexpectedly")
 	}
 }
 
 func TestIngestSource_RecordsEntitiesAndDecisions(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	body := "We decided to use Markdown. The Widget class is central. We chose YAML."
@@ -3711,10 +3717,10 @@ func TestIngestSource_RecordsEntitiesAndDecisions(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte(body)); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte(body)); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
-	res, err := ingestSource(home, "ing-1")
+	res, err := ingestSource(testIO(), home, "ing-1")
 	if err != nil {
 		t.Fatalf("ingestSource: %v", err)
 	}
@@ -3729,7 +3735,7 @@ func TestRunKGSetup_PartialSelfDirAlreadyExists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, "self"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 	if _, err := os.Stat(kgConfigPath()); err != nil {
@@ -3739,7 +3745,7 @@ func TestRunKGSetup_PartialSelfDirAlreadyExists(t *testing.T) {
 
 func TestTallyGraphNoteDir_StaleNoteCount(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3748,11 +3754,11 @@ func TestTallyGraphNoteDir_StaleNoteCount(t *testing.T) {
 		Title: "Stale", Summary: "s", Status: "stale",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := createGraphNote(home, stale, ""); err != nil {
+	if err := createGraphNote(testIO(), home, stale, ""); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
 	var h GraphHealth
-	if err := tallyGraphNoteDir(filepath.Join(home, "notes", "entities"), "entities", &h); err != nil {
+	if err := tallyGraphNoteDir(testIO(), filepath.Join(home, "notes", "entities"), "entities", &h); err != nil {
 		t.Fatalf("tallyGraphNoteDir: %v", err)
 	}
 	if h.NoteCount != 1 || h.StaleCount != 1 {
@@ -3762,7 +3768,7 @@ func TestTallyGraphNoteDir_StaleNoteCount(t *testing.T) {
 
 func TestIngestDecisionNotes_NoMatchingPattern(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3771,7 +3777,7 @@ func TestIngestDecisionNotes_NoMatchingPattern(t *testing.T) {
 
 	body := "Random text without decision markers."
 	result := &IngestResult{}
-	ingestDecisionNotes(home, src, srcNote, body, now, result)
+	ingestDecisionNotes(testIO(), home, src, srcNote, body, now, result)
 	if len(result.NotesCreated) != 0 {
 		t.Errorf("expected no decisions extracted, got %v", result.NotesCreated)
 	}
@@ -3786,14 +3792,14 @@ func TestWriteGraphHealth_HomeIsFile(t *testing.T) {
 	if err := os.WriteFile(home, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeGraphHealth(home, GraphHealth{}); err == nil {
+	if err := writeGraphHealth(testIO(), home, GraphHealth{}); err == nil {
 		t.Error("expected MkdirAll error when home is a file")
 	}
 }
 
 func TestMoveToImported_Success(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	src := RawSource{
@@ -3801,10 +3807,10 @@ func TestMoveToImported_Success(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("body")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("body")); err != nil {
 		t.Fatalf("recordRawSource: %v", err)
 	}
-	if err := moveToImported(home, "mv-1"); err != nil {
+	if err := moveToImported(testIO(), home, "mv-1"); err != nil {
 		t.Fatalf("moveToImported: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "raw", "imported", "mv-1.md")); err != nil {
@@ -3814,7 +3820,7 @@ func TestMoveToImported_Success(t *testing.T) {
 
 func TestCreateGraphNote_AlreadyExists(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3823,17 +3829,17 @@ func TestCreateGraphNote_AlreadyExists(t *testing.T) {
 		Title: "X", Summary: "s", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := createGraphNote(home, note, ""); err != nil {
+	if err := createGraphNote(testIO(), home, note, ""); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	if err := createGraphNote(home, note, ""); err == nil {
+	if err := createGraphNote(testIO(), home, note, ""); err == nil {
 		t.Error("expected already-exists error on second create")
 	}
 }
 
 func TestUpdateGraphNote_NotFound(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	note := &GraphNote{
@@ -3841,14 +3847,14 @@ func TestUpdateGraphNote_NotFound(t *testing.T) {
 		Title: "X", Summary: "s", Status: "active",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := updateGraphNote(home, note, ""); err == nil {
+	if err := updateGraphNote(testIO(), home, note, ""); err == nil {
 		t.Error("expected not-found error")
 	}
 }
 
 func TestUpdateGraphNote_VersionIncrement(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-01-01T00:00:00Z"
@@ -3857,13 +3863,13 @@ func TestUpdateGraphNote_VersionIncrement(t *testing.T) {
 		Title: "V1", Summary: "s", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	updated := *note
 	updated.Summary = "updated"
-	if err := updateGraphNote(home, &updated, "new body"); err != nil {
+	if err := updateGraphNote(testIO(), home, &updated, "new body"); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if updated.Version != 1 {
@@ -3873,7 +3879,7 @@ func TestUpdateGraphNote_VersionIncrement(t *testing.T) {
 
 func TestListPendingRawSources_SkipsMalformedFile(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	inboxDir := filepath.Join(home, "raw", "inbox")
@@ -3891,11 +3897,11 @@ func TestListPendingRawSources_SkipsMalformedFile(t *testing.T) {
 		SourceType: "markdown", Status: "pending",
 		CapturedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := recordRawSource(home, src, []byte("body")); err != nil {
+	if err := recordRawSource(testIO(), home, src, []byte("body")); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(testIO(), home)
 	if err != nil {
 		t.Fatalf("listPendingRawSources: %v", err)
 	}
@@ -3911,7 +3917,7 @@ func TestRecordRawSource_HomeBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := RawSource{ID: "x"}
-	if err := recordRawSource(home, src, []byte("body")); err == nil {
+	if err := recordRawSource(testIO(), home, src, []byte("body")); err == nil {
 		t.Error("expected MkdirAll error when home blocks the path")
 	}
 }
@@ -3932,10 +3938,10 @@ func TestExtractClaims_VariousLines(t *testing.T) {
 
 func TestIngestSource_MissingSourceFile(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	_, err := ingestSource(home, "does-not-exist")
+	_, err := ingestSource(testIO(), home, "does-not-exist")
 	if err == nil {
 		t.Error("expected error for missing source file")
 	}

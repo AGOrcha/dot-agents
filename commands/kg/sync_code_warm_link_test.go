@@ -399,7 +399,7 @@ func TestRunKGLinkRemove_MissingArg(t *testing.T) {
 func TestRunKGLinkRemove_NonExistent(t *testing.T) {
 	home := newTempKG(t)
 	_ = home
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := newKGLinkRemoveCmdForTest()
@@ -412,7 +412,7 @@ func TestRunKGLinkRemove_NonExistent(t *testing.T) {
 // not discoverable on the system.
 func TestRunKGWarmCodeImport_NoCRGBinary(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -461,7 +461,7 @@ func TestWarmNoteSubdirs(t *testing.T) {
 // (no remote configured in tempdir).
 func TestRunKGSync_PushNoRemote(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	initGitRepo(t, home)
@@ -530,7 +530,7 @@ func TestRunKGImpact_BridgeUnavailable(t *testing.T) {
 // preserves all the fields used by the bridge.
 func TestKGNoteFile_RoundTrip(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -591,12 +591,12 @@ func TestRenderImpactNodeSection_SkipsFileKind(t *testing.T) {
 // and archived flows, including the archive-timestamp adjust callback.
 func TestWarmActiveAndArchivedNotes(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	now := "2026-05-12T00:00:00Z"
 	// Active note in notes/decisions/
-	if err := createGraphNote(home, &GraphNote{
+	if err := createGraphNote(testIO(), home, &GraphNote{
 		SchemaVersion: 1, ID: "wd-1", Type: "decision", Title: "Warm Decision",
 		Summary: "warm", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}, "body"); err != nil {
@@ -631,11 +631,11 @@ func TestWarmActiveAndArchivedNotes(t *testing.T) {
 	defer store.Close()
 
 	subs, _ := warmNoteSubdirs("")
-	indexed, _ := warmActiveNotes(store, home, subs)
+	indexed, _ := warmActiveNotes(testIO(), store, home, subs)
 	if indexed < 1 {
 		t.Errorf("active notes: expected ≥1 indexed, got %d", indexed)
 	}
-	archIdx, archSkip := warmArchivedNotes(store, home)
+	archIdx, archSkip := warmArchivedNotes(testIO(), store, home)
 	if archIdx != 1 {
 		t.Errorf("archived: expected 1 indexed (wd-arch), got %d", archIdx)
 	}
@@ -657,7 +657,7 @@ func TestWarmActiveAndArchivedNotes(t *testing.T) {
 // when the directory does not exist.
 func TestWarmNotesInDir_MissingDirReturnsZero(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -665,7 +665,7 @@ func TestWarmNotesInDir_MissingDirReturnsZero(t *testing.T) {
 		t.Fatalf("openKGStore: %v", err)
 	}
 	defer store.Close()
-	indexed, skipped := warmNotesInDir(store, filepath.Join(home, "does-not-exist"), nil)
+	indexed, skipped := warmNotesInDir(testIO(), store, filepath.Join(home, "does-not-exist"), nil)
 	if indexed != 0 || skipped != 0 {
 		t.Errorf("expected 0/0 for missing dir, got indexed=%d skipped=%d", indexed, skipped)
 	}
@@ -675,7 +675,7 @@ func TestWarmNotesInDir_MissingDirReturnsZero(t *testing.T) {
 // on PATH, warmCodeLane returns an empty summary and emits a warning.
 func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -806,7 +806,7 @@ func TestRunKGWarmStats_OpenStoreError(t *testing.T) {
 // TestRunKGWarm_InvalidNoteType drives the warmNoteSubdirs error path.
 func TestRunKGWarm_InvalidNoteType(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_ = home
@@ -821,7 +821,7 @@ func TestRunKGWarm_InvalidNoteType(t *testing.T) {
 // TestRunKGWarm_HappyPath drives the success path with one seeded source note.
 func TestRunKGWarm_HappyPath(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -830,7 +830,7 @@ func TestRunKGWarm_HappyPath(t *testing.T) {
 		Summary: "s", Status: "draft",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("createGraphNote: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -844,7 +844,7 @@ func TestRunKGWarm_HappyPath(t *testing.T) {
 // TestRunKGWarmStats_HappyPath drives the success path of runKGWarmStats.
 func TestRunKGWarmStats_HappyPath(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -1224,7 +1224,7 @@ esac`, changesJSON))
 // no remote is configured.
 func TestRunKGSync_PullNoRemote(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	initGitRepo(t, home)
@@ -1253,7 +1253,7 @@ func TestRunKGWarmCodeImport_WithCRGNodes(t *testing.T) {
 	})
 
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1359,7 +1359,7 @@ func TestCRGStatusState_Empty(t *testing.T) {
 
 func TestRunKGSync_PushSuccess(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	initGitRepo(t, home)
@@ -1410,7 +1410,7 @@ func TestRunKGSync_PullSuccessRunsLint(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 
@@ -1714,7 +1714,7 @@ func TestRunKGWarmCodeImport_EmptyDB(t *testing.T) {
 	writeFakeCRGBinary(t, repo, "exit 0")
 
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1739,7 +1739,7 @@ func TestWarmCodeLane_EmptyDB(t *testing.T) {
 	t.Chdir(repo)
 
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1793,7 +1793,7 @@ func TestRunKGSync_PushSuccessReportsPushed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 	commitFile(t, home, "notes/sources/n1.md", "# n1\n", "add note")
@@ -1822,12 +1822,12 @@ func TestRunKGSync_PullSuccessLintReportsIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 	// A note that links to a non-existent note → lintBrokenLinks error.
 	now := "2026-05-12T00:00:00Z"
-	if err := createGraphNote(home, &GraphNote{
+	if err := createGraphNote(testIO(), home, &GraphNote{
 		SchemaVersion: 1, ID: "src-broken", Type: "source", Title: "Broken",
 		Summary: "s", Status: "active", CreatedAt: now, UpdatedAt: now,
 		SourceRefs: []string{"http://example.com"},
@@ -1851,7 +1851,9 @@ func TestRunKGSync_PullSuccessLintReportsIssues(t *testing.T) {
 
 // TestRunKGSync_PullLintErrorPropagates drives the post-pull lint error
 // branch (lines 69-71): the pull succeeds via git, then runGraphLint fails
-// because osReadDir is fault-injected for the notes walk.
+// because a fakeKGIO fault-injects ReadDir for the notes walk. The test
+// invokes runKGSyncIO directly (the interface-DI seam — runKGSync is the
+// Cobra wrapper that wires stdKGIO{}).
 func TestRunKGSync_PullLintErrorPropagates(t *testing.T) {
 	home, _ := cloneFromBareRemote(t)
 	t.Setenv("KG_HOME", home)
@@ -1860,21 +1862,21 @@ func TestRunKGSync_PullLintErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &KGConfig{SchemaVersion: 1, Name: "x", CreatedAt: "2026-01-01T00:00:00Z"}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(testIO(), cfg); err != nil {
 		t.Fatalf("SaveKGConfig: %v", err)
 	}
 
-	orig := osReadDir
-	t.Cleanup(func() { osReadDir = orig })
-	osReadDir = func(string) ([]os.DirEntry, error) {
-		return nil, fmt.Errorf("injected readdir failure")
+	fake := &fakeKGIO{
+		readDir: func(string) ([]os.DirEntry, error) {
+			return nil, fmt.Errorf("injected readdir failure")
+		},
 	}
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("push", false, "")
 
 	captureStdout(t, func() {
-		err := runKGSync(cmd, nil)
+		err := runKGSyncIO(fake, cmd, nil)
 		if err == nil {
 			t.Fatal("expected lint-after-sync error")
 		}
@@ -2061,7 +2063,7 @@ func TestRunKGWarmCodeImport_ReadEdgesError(t *testing.T) {
 	db.Close()
 
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -2086,7 +2088,7 @@ func TestRunKGWarmCodeImport_ReadEdgesError(t *testing.T) {
 // UpdatedAt.
 func TestWarmArchivedNotes_AdjustPopulatesArchivedAt(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	archDir := filepath.Join(home, "notes", "_archived")
@@ -2114,7 +2116,7 @@ func TestWarmArchivedNotes_AdjustPopulatesArchivedAt(t *testing.T) {
 	}
 	defer store.Close()
 
-	idx, _ := warmArchivedNotes(store, home)
+	idx, _ := warmArchivedNotes(testIO(), store, home)
 	if idx != 1 {
 		t.Fatalf("expected 1 archived note indexed, got %d", idx)
 	}
@@ -2131,7 +2133,7 @@ func TestWarmArchivedNotes_AdjustPopulatesArchivedAt(t *testing.T) {
 // "e.IsDir() || !strings.HasSuffix(.md)" continue branch (lines 662-663).
 func TestWarmNotesInDir_SkipsSubdirsAndNonMarkdown(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	dir := filepath.Join(home, "notes", "_scan")
@@ -2161,7 +2163,7 @@ func TestWarmNotesInDir_SkipsSubdirsAndNonMarkdown(t *testing.T) {
 	}
 	defer store.Close()
 
-	indexed, skipped := warmNotesInDir(store, dir, nil)
+	indexed, skipped := warmNotesInDir(testIO(), store, dir, nil)
 	if indexed != 1 {
 		t.Errorf("expected exactly the .md note indexed, got indexed=%d", indexed)
 	}
@@ -2199,7 +2201,7 @@ func breakKGTable(t *testing.T, home, table, replacement string) {
 func initWarmDBThenBreak(t *testing.T, table, replacement string) string {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -2216,7 +2218,7 @@ func initWarmDBThenBreak(t *testing.T, table, replacement string) string {
 // fails and the note is counted as skipped, not indexed.
 func TestWarmNotesInDir_UpsertKGNoteError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	dir := filepath.Join(home, "notes", "decisions")
@@ -2252,7 +2254,7 @@ func TestWarmNotesInDir_UpsertKGNoteError(t *testing.T) {
 		t.Fatalf("DROP TABLE kg_notes: %v", err)
 	}
 
-	indexed, skipped := warmNotesInDir(store, dir, nil)
+	indexed, skipped := warmNotesInDir(testIO(), store, dir, nil)
 	if indexed != 0 {
 		t.Errorf("expected 0 indexed when kg_notes is dropped, got %d", indexed)
 	}
