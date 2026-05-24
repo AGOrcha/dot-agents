@@ -69,7 +69,7 @@ tasks:
       notes: 1 func-var seam. Smallest leaf, fold in with a sibling if cheaper.
     - id: platform-pkg
       title: Convert internal/platform/seams.go to interface-DI
-      status: pending
+      status: in_progress
       depends_on:
         - convention-doc
       blocks: []

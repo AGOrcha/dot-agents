@@ -3,7 +3,7 @@ plan_id: root-command-decomposition
 tasks:
     - id: t01-design-subpackage-shape
       title: Design target subpackage shape + shared-symbol contract
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -61,7 +61,6 @@ tasks:
         external callers beyond commands/root.go and intra-package
         tests. Any external caller surfaced becomes an OD entry that
         must resolve before t13's shim deletion.
-
     - id: t02-introduce-lifecycle-skeleton
       title: Create commands/lifecycle/ skeleton
       status: pending
@@ -79,7 +78,6 @@ tasks:
         (Deps struct + NewDeps()). No command moves yet. go test ./...
         must stay green. This task exists so all subsequent move tasks
         have a settled target package and can run in parallel.
-
     - id: t03-move-install
       title: Move install command into commands/lifecycle/
       status: pending
@@ -105,7 +103,6 @@ tasks:
         lifecycle.NewInstallCmd directly. Run go test ./... and
         verify no new internal/projectsync or internal/platform
         imports appear in commands/install.go.
-
     - id: t04-move-add-remove
       title: Move add and remove commands into commands/lifecycle/
       status: pending
@@ -128,7 +125,6 @@ tasks:
         agentsrc_mutations_test.go. Keep that test in root for now
         (cross-cutting; relocated in t12). Same staging as t03 — root
         files remain in place until t13 strips them.
-
     - id: t05-move-init
       title: Move init command into commands/lifecycle/
       status: pending
@@ -147,7 +143,6 @@ tasks:
         and internal/scaffold/hooks. After this move, package commands
         should no longer import those at all. The importguard built
         in t14 enforces it permanently.
-
     - id: t06-move-import
       title: Move import command + import_plugins into commands/lifecycle/
       status: pending
@@ -170,7 +165,6 @@ tasks:
       notes: |-
         Heaviest move in the cluster (5 files). Same pattern as t03 —
         root files stay in place until t13.
-
     - id: t07-move-refresh
       title: Move refresh command into commands/lifecycle/
       status: pending
@@ -191,7 +185,6 @@ tasks:
         consume internal/testutil.WriteScopeFile. The move preserves
         those call sites — verify they still compile after the
         package change.
-
     - id: t08-move-status
       title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
       status: pending
@@ -215,7 +208,6 @@ tasks:
         have doctor.go (still in root before t09) import them. After
         t09 lands, the cross-package import collapses into intra-
         lifecycle calls.
-
     - id: t09-move-doctor
       title: Move doctor command into commands/lifecycle/
       status: pending
@@ -235,7 +227,6 @@ tasks:
         Depends on t08 because doctor uses the linkcount helpers that
         move with status. After this, the lifecycle cluster is
         complete.
-
     - id: t10pre-extract-canonical-cmd-helpers
       title: 'Precursor: lift canonicalCmdFlags + canonicalCmdExampleBlock into commands/internal/cmdutil'
       status: pending
@@ -272,7 +263,6 @@ tasks:
         This task MUST land before t10a/b/c. After it lands, each of
         the three subpackages can split cleanly and independently
         in parallel.
-
     - id: t10a-create-mcp-subpackage
       title: Move mcp command into commands/mcp/ (per agents/skills file convention)
       status: pending
@@ -338,7 +328,6 @@ tasks:
         After this task, commands/mcp.go is a thin shim wiring
         commands.NewMCPCmd() -> mcp.NewCmd(). That root shim is
         deleted in t13.
-
     - id: t10b-create-settings-subpackage
       title: Move settings command into commands/settings/ (per agents/skills file convention)
       status: pending
@@ -371,7 +360,6 @@ tasks:
         settings_test.go landed via t5 PR #49 — preserve every
         testutil call site through the move. findSettingsSpec stays
         package-private (used by TestFindSettingsSpecNotFound).
-
     - id: t10c-create-rules-subpackage
       title: Move rules command into commands/rules/ (per agents/skills file convention)
       status: pending
@@ -405,7 +393,6 @@ tasks:
         findRuleSpec stays package-private. rules_test.go landed
         via t5 PR #49 — preserve testutil call sites through the
         move.
-
     - id: t11-split-seams-tests
       title: Split commands/seams_test.go into per-cluster files
       status: pending
@@ -431,7 +418,6 @@ tasks:
         because each Test* name encodes its target. If any leftover
         tests target no specific cluster, leave them in root
         seams_test.go (or delete that file if empty).
-
     - id: t12-relocate-cross-cutting-tests
       title: 'Re-home cross-cutting tests: coverage / parity / wiring / hook-norm / agentsrc-mutations'
       status: pending
@@ -467,7 +453,6 @@ tasks:
         need them. Cross-package resource-parity tests likely need a
         new home or to be folded into resource-specific parity tests
         per subpackage.
-
     - id: t13-strip-root-shims
       title: Delete root re-export shims; switch root.go to subpackage constructors
       status: pending
@@ -502,7 +487,6 @@ tasks:
         commands.NewRootCommand()). Any external importer of
         commands.NewXxxCmd surfaced by t01's KG query must already
         have been addressed in that task's OD entries.
-
     - id: t14-import-graph-assertion
       title: Add CI assertion that package commands does not import banned internals
       status: pending
@@ -525,7 +509,6 @@ tasks:
         check). Alternative: an analysistest rule. Path names above
         are placeholders — t01 SHAPE.md may pick a different home
         (e.g. internal/architest).
-
     - id: t15-direct-followup-interface-di
       title: 'Direct follow-up: land interface-DI on the new lifecycle + mcp/settings/rules subpackages'
       status: pending
@@ -549,7 +532,6 @@ tasks:
         author as a sibling plan. Decide based on whether seam-
         interface-di's existing leaves (kg-pkg, skills-pkg, agents-
         pkg, platform-pkg) have shipped by the time this opens.
-
     - id: t16-update-docs
       title: Update docs to reflect new package layout
       status: pending

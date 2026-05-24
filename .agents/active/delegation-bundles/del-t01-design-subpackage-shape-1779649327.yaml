@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-t01-design-subpackage-shape-1779649327
+plan_id: root-command-decomposition
+task_id: t01-design-subpackage-shape
+owner: t01-design-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T19:02:07Z"
+    reason: t01 is pure docs; unblocks all 14 downstream move/skeleton tasks. Zero write-scope conflict with the other 4 workers this round.
+scope:
+    write_scope:
+        - .agents/workflow/plans/root-command-decomposition/design/SHAPE.md
+prompt:
+    inline:
+        - Produce SHAPE.md per the t01 task notes in TASKS.yaml. This is a research + design pass; the only write is the SHAPE.md document. Run KG queries (mcp__code-review-graph__semantic_search_nodes_tool
+        - get_impact_radius_tool) for the callers of commands.NewXxxCmd and commands.Run* symbols. Worktree at .agents/worktrees/t01-design off master; branch feature/root-decomp-shape-doc.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+        - .agents/workflow/plans/root-command-decomposition/PLAN.yaml
+        - .agents/proposals/root-command-decomposition.md
+verification:
+    feedback_goal: Does SHAPE.md cover all the items listed in t01 task notes — final subpackage list, cmdutil home, root symbols, per-command exports, DI handling decision, shim policy, commit cadence, KG-verified external-caller list — with concrete recommendations the move tasks can implement against?
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

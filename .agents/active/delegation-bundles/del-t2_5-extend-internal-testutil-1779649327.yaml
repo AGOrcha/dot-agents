@@ -1,0 +1,42 @@
+schema_version: 1
+delegation_id: del-t2_5-extend-internal-testutil-1779649327
+plan_id: go-test-fixture-extraction
+task_id: t2_5-extend-internal-testutil
+owner: t2_5-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T19:02:07Z"
+    reason: t2_5 unblocks t3 + t6 (Wave 4 of fixture-extraction plan). Signatures pinned in task notes from t5/t7 merge-back findings.
+scope:
+    write_scope:
+        - internal/testutil/testutil.go
+        - internal/testutil/testutil_test.go
+prompt:
+    inline:
+        - 'Add the two helpers described in TASKS.yaml t2_5 notes with the exact signatures pinned there: NewTempAgentsHome(t) (tmp'
+        - agentsHome string) and WriteScopeFilePath(t
+        - agentsHome
+        - bucket
+        - scope
+        - relPath string
+        - content []byte). Match the existing internal/testutil/testutil.go style. Add unit tests for both in testutil_test.go. Worktree at .agents/worktrees/t25 off master; branch feature/t25-testutil-extensions.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml
+        - internal/testutil/testutil.go
+        - .agents/history/archived-delegations/2026-05-23/t5-pr49-orphans/t5-extract-commands-root-tests.md
+verification:
+    feedback_goal: Are NewTempAgentsHome and WriteScopeFilePath added to internal/testutil with the pinned signatures, GoDocs, t.Helper() + t.Fatal style matching the existing helpers, and unit tests for both — with go test ./internal/testutil -race -count=1 green?
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

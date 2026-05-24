@@ -1,0 +1,34 @@
+schema_version: 1
+delegation_id: del-gcc3-bind-callers-1779649327
+plan_id: graphstore-concurrency-contract
+task_id: gcc3-bind-callers
+owner: gcc3-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T19:02:07Z"
+    reason: gcc3 is the propagation gcc1 was review-gated to protect. Blocks gcc4-regression-close-od1.
+scope:
+    write_scope:
+        - internal/graphstore/
+        - commands/
+prompt:
+    inline:
+        - Refactor all graphstore callers + the Deps holder to depend on the gcc1 contract per task notes. Use the contract types published in gcc1 (read internal/graphstore/ first to find them). Do NOT duplicate the di-refactor-rollout work — just establish the contract-bound boundary at the graphstore seam. Worktree at .agents/worktrees/gcc3 off master; branch feature/gcc3-bind-callers.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/graphstore-concurrency-contract/TASKS.yaml
+        - .agents/workflow/plans/graphstore-concurrency-contract/PLAN.yaml
+verification:
+    feedback_goal: Are all graphstore callers + the Deps holder bound to the gcc1 contract (typed handle whose provider owns concurrency) instead of concrete store types, with go test ./... -race -count=1 green and no behavior regression?
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

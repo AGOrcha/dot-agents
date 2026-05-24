@@ -1,0 +1,34 @@
+schema_version: 1
+delegation_id: del-platform-pkg-1779649327
+plan_id: seam-interface-di-migration
+task_id: platform-pkg
+owner: platform-pkg-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T19:02:07Z"
+    reason: platform-pkg is the only seam-DI leaf not conflicting with the gcc3 spawn this round (kg/skills/agents-pkg deferred until gcc3 lands).
+scope:
+    write_scope:
+        - internal/platform/
+prompt:
+    inline:
+        - Convert internal/platform/seams.go func-var seams to per-file interface-DI. Read docs/TEST_SEAMS.md (canonical convention from seam-interface-di-migration/convention-doc) AND commands/init.go + .agents/history/seam-interface-di-migration/pr40-artifacts/merge-back/seam-atomic-convergence.md for the proven shape. 3 seams in internal/platform/. Behavior-preserving conversion; tests green; coverage gate not regressed. Worktree at .agents/worktrees/platform-pkg off master; branch feature/platform-pkg-interface-di.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/seam-interface-di-migration/TASKS.yaml
+        - docs/TEST_SEAMS.md
+        - .agents/history/seam-interface-di-migration/pr40-artifacts/merge-back/seam-atomic-convergence.md
+verification:
+    feedback_goal: 'Were the 3 func-var seams in internal/platform/seams.go converted to interface-DI matching the convention (commands/init.go pilot, PR #40 atomic convergence), with package tests green and behavior preserved?'
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

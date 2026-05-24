@@ -1,0 +1,89 @@
+schema_version: 1
+id: del-t2_5-extend-internal-testutil-1779649327
+parent_plan_id: go-test-fixture-extraction
+parent_task_id: t2_5-extend-internal-testutil
+title: 'Extend internal/testutil: NewTempAgentsHome + WriteScopeFilePath'
+summary: Delegated from plan Extract internal/testutil to clear Cluster D test-fixture duplication
+write_scope:
+    - internal/testutil/testutil.go
+    - internal/testutil/testutil_test.go
+success_criteria: |-
+    Tier: T2 (additive helper extension).
+
+    Two new helpers, both surfaced by t5's merge-back narrative
+    (commands/refresh_test.go ×17, commands/import_test.go ×10)
+    and corroborated by t7's audit
+    (commands/skills/promote_test.go::TestPromoteSkillIn_Mirror...
+    site). Landing these BEFORE t3 and t6 prevents those workers
+    from hitting the same walls and re-surfacing the same finding
+    as t5.5 candidates.
+
+    Helper 1 — NewTempAgentsHome:
+
+      // NewTempAgentsHome creates a t.TempDir(), sets HOME and
+      // AGENTS_HOME envs (with .agents/ subdir under HOME), and
+      // returns (tmp, agentsHome).
+      //
+      // Lighter than NewTempProject when a test needs full env-
+      // var control but no project tree. Absorbs the recurring
+      // 5-line preamble:
+      //
+      //   tmp := t.TempDir()
+      //   t.Setenv("HOME", tmp)
+      //   agentsHome := filepath.Join(tmp, ".agents")
+      //   if err := os.MkdirAll(agentsHome, 0755); err != nil { t.Fatal(err) }
+      //   t.Setenv("AGENTS_HOME", agentsHome)
+      //
+      // Use NewTempProject when you also need a project dir +
+      // canonical agents tree; use this when you don't.
+      func NewTempAgentsHome(t *testing.T) (tmp, agentsHome string)
+
+    Helper 2 — WriteScopeFilePath:
+
+      // WriteScopeFilePath extends WriteScopeFile to accept a
+      // nested relative path under agentsHome/bucket/scope/, e.g.
+      // ".github/hooks/pre-tool.json". The relative path components
+      // are MkdirAll'd as needed.
+      //
+      // Equivalent to WriteScopeFile when relPath has no
+      // separator. Unlocks the seed loop in
+      // TestRestoreFromResourcesCounted_RestoresDirectoryBuckets
+      // and similar nested-path call sites surfaced in t5's
+      // merge-back.
+      func WriteScopeFilePath(t *testing.T, agentsHome, bucket, scope, relPath string, content []byte)
+
+    Implementation rules (per t2's design):
+      * t.Helper() first
+      * t.Fatal on prerequisite errors
+      * GoDoc on every exported function
+      * NewTempAgentsHome may call t.TempDir() internally
+        (different from t2's "no t.TempDir() inside helpers"
+        rule because the env-var setup wraps the temp dir; this
+        is the explicit purpose of the helper)
+      * No call-site migrations in this task — those happen in
+        t3/t6 (which already own the affected test files)
+
+    Hard test: go test ./internal/testutil -race -count=1 passes;
+    package builds clean.
+
+    Anti-scope: do NOT modify any consumer *_test.go in this
+    task. Just land the helpers + their unit tests. t3 / t6 / a
+    possible future cleanup pass consume them.
+
+    ISP routing:
+      mode: direct (single-package additive)
+      verifier: smoke (go test ./internal/testutil -race -count=1)
+      review: code review (small surface)
+      bundle-context (if fanout): t5 merge-back
+        (.agents/history/archived-delegations/2026-05-23/
+        t5-pr49-orphans/t5-extract-commands-root-tests.md) for
+        the exact call-site shape; t2's design doc for the
+        helper-style rules.
+      output contract: two new exported helpers + their unit
+        tests, ready for t3/t6 consumers.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t2_5-worker
+status: active
+created_at: "2026-05-24T19:02:07Z"
+updated_at: "2026-05-24T19:02:07Z"

@@ -46,7 +46,7 @@ tasks:
         ephemeral provider (transparent A->B swap later).
     - id: gcc3-bind-callers
       title: Bind all callers + Deps to the published contract
-      status: pending
+      status: in_progress
       depends_on:
         - gcc1-pin-store-contract
       blocks:

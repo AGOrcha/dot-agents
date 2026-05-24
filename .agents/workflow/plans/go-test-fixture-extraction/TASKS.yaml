@@ -96,7 +96,7 @@ tasks:
       app_type: code-fix
     - id: t2_5-extend-internal-testutil
       title: 'Extend internal/testutil: NewTempAgentsHome + WriteScopeFilePath'
-      status: pending
+      status: in_progress
       depends_on:
         - t2-create-internal-testutil
       blocks:
