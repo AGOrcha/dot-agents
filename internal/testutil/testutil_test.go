@@ -153,6 +153,91 @@ func TestWriteScopeFile_CreatesParentsAndWritesContent(t *testing.T) {
 	}
 }
 
+func TestWriteScopeFilePath_NestedRelPathCreatesIntermediateDirs(t *testing.T) {
+	tmp := t.TempDir()
+
+	testutil.WriteScopeFilePath(t, tmp, "hooks", "global", ".github/hooks/pre-tool.json", []byte(`{"hook":true}`))
+
+	full := filepath.Join(tmp, "hooks", "global", ".github", "hooks", "pre-tool.json")
+	got, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatalf("reading nested scope file: %v", err)
+	}
+	if string(got) != `{"hook":true}` {
+		t.Errorf("content = %q; want {\"hook\":true}", got)
+	}
+
+	// Intermediate directory should also exist as a directory (not just
+	// implicitly through the file write).
+	info, err := os.Stat(filepath.Join(tmp, "hooks", "global", ".github", "hooks"))
+	if err != nil {
+		t.Fatalf("stat intermediate dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("expected intermediate path to be a directory")
+	}
+}
+
+func TestWriteScopeFilePath_FlatRelPathMatchesWriteScopeFile(t *testing.T) {
+	tmp := t.TempDir()
+
+	// A relPath with no separator must behave the same as WriteScopeFile.
+	testutil.WriteScopeFilePath(t, tmp, "settings", "global", "claude.json", []byte(`{"x":1}`))
+	got, err := os.ReadFile(filepath.Join(tmp, "settings", "global", "claude.json"))
+	if err != nil {
+		t.Fatalf("reading scope file: %v", err)
+	}
+	if string(got) != `{"x":1}` {
+		t.Errorf("content = %q; want {\"x\":1}", got)
+	}
+}
+
+func TestNewTempAgentsHome_SetsEnvAndCreatesAgentsDir(t *testing.T) {
+	tmp, agentsHome := testutil.NewTempAgentsHome(t)
+
+	if tmp == "" {
+		t.Fatal("tmp returned empty")
+	}
+	if agentsHome != filepath.Join(tmp, ".agents") {
+		t.Errorf("agentsHome = %q; want %q", agentsHome, filepath.Join(tmp, ".agents"))
+	}
+	if got := os.Getenv("HOME"); got != tmp {
+		t.Errorf("HOME = %q; want %q", got, tmp)
+	}
+	if got := os.Getenv("AGENTS_HOME"); got != agentsHome {
+		t.Errorf("AGENTS_HOME = %q; want %q", got, agentsHome)
+	}
+	info, err := os.Stat(agentsHome)
+	if err != nil {
+		t.Fatalf("agentsHome not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("agentsHome is not a directory")
+	}
+}
+
+func TestNewTempAgentsHome_IsolatedAcrossCalls(t *testing.T) {
+	// Each subtest gets its own t.TempDir() and so its own tmp/agentsHome.
+	// This guards against an accidental package-level cache that would
+	// alias paths between callers.
+	tmpA, ahA := testutil.NewTempAgentsHome(t)
+
+	t.Run("inner", func(t *testing.T) {
+		tmpB, ahB := testutil.NewTempAgentsHome(t)
+		if tmpA == tmpB {
+			t.Errorf("expected distinct tmp dirs; got %q == %q", tmpA, tmpB)
+		}
+		if ahA == ahB {
+			t.Errorf("expected distinct agentsHome dirs; got %q == %q", ahA, ahB)
+		}
+		// Inner call should have rewritten the env vars to point at its
+		// own paths via t.Setenv.
+		if got := os.Getenv("AGENTS_HOME"); got != ahB {
+			t.Errorf("AGENTS_HOME = %q; want inner %q", got, ahB)
+		}
+	})
+}
+
 func TestInitGitRepo_CreatesCommittedTreeWithIdentity(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
