@@ -131,6 +131,55 @@ func WriteScopeFile(t *testing.T, agentsHome, bucket, scope, baseName string, co
 	}
 }
 
+// WriteScopeFilePath extends WriteScopeFile to accept a nested relative
+// path under agentsHome/bucket/scope/, e.g. ".github/hooks/pre-tool.json".
+// The relative path components are MkdirAll'd as needed. Equivalent to
+// WriteScopeFile when relPath has no separator.
+//
+// Unlocks the seed loop in
+// TestRestoreFromResourcesCounted_RestoresDirectoryBuckets and similar
+// nested-path call sites surfaced in t5's merge-back.
+func WriteScopeFilePath(t *testing.T, agentsHome, bucket, scope, relPath string, content []byte) {
+	t.Helper()
+	full := filepath.Join(agentsHome, bucket, scope, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// NewTempAgentsHome creates a t.TempDir() root, sets HOME and
+// AGENTS_HOME envs (with .agents/ subdir under HOME), and returns
+// (tmp, agentsHome).
+//
+// Lighter than NewTempProject when a test needs full env-var control
+// but no project tree or .agentsrc.json. Absorbs the recurring 5-line
+// preamble:
+//
+//	tmp := t.TempDir()
+//	t.Setenv("HOME", tmp)
+//	agentsHome := filepath.Join(tmp, ".agents")
+//	if err := os.MkdirAll(agentsHome, 0755); err != nil { t.Fatal(err) }
+//	t.Setenv("AGENTS_HOME", agentsHome)
+//
+// This helper intentionally calls t.TempDir() internally (the env-var
+// setup wraps the temp dir; the helper exists to bundle them). Use
+// NewTempProject when you also need a project directory + canonical
+// agents tree; use this when you don't.
+func NewTempAgentsHome(t *testing.T) (tmp, agentsHome string) {
+	t.Helper()
+	tmp = t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome = filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+	return tmp, agentsHome
+}
+
 // InitGitRepo runs `git init` in repoPath, sets test author/committer
 // identity (env + config), writes the supplied path→content map, then
 // `git add .` + `git commit -m "init"`. File paths in the map are
