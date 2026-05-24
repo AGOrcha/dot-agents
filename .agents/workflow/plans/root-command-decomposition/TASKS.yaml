@@ -236,68 +236,175 @@ tasks:
         move with status. After this, the lifecycle cluster is
         complete.
 
-    - id: t10a-create-mcp-subpackage
-      title: Move mcp command into commands/mcp/
+    - id: t10pre-extract-canonical-cmd-helpers
+      title: 'Precursor: lift canonicalCmdFlags + canonicalCmdExampleBlock into commands/internal/cmdutil'
       status: pending
       depends_on:
         - t01-design-subpackage-shape
+      blocks:
+        - t10a-create-mcp-subpackage
+        - t10b-create-settings-subpackage
+        - t10c-create-rules-subpackage
+      owner: dot-agents
+      write_scope:
+        - commands/internal/cmdutil/canonical_cmd.go
+        - commands/internal/cmdutil/canonical_cmd_test.go
+        - commands/rules.go
+        - commands/mcp.go
+        - commands/settings.go
+      verification_required: true
+      notes: |-
+        Today `canonicalCmdFlags` (struct) and
+        `canonicalCmdExampleBlock` (helper) live in commands/rules.go
+        (with a comment noting "rules was the first consumer; reused
+        from mcp.go and settings.go via the shared cmdutil pattern").
+        All three resource commands access them via same-package
+        scope. The moment any one of those three splits into its own
+        subpackage, that same-package access breaks.
+
+        Lift both into commands/internal/cmdutil as the new exported
+        `cmdutil.CanonicalCmdFlags` and
+        `cmdutil.CanonicalCmdExampleBlock`. Update the three root
+        call sites to use the cmdutil-qualified names. No behavior
+        change; tests in commands/{mcp,settings,rules}_test.go must
+        stay green.
+
+        This task MUST land before t10a/b/c. After it lands, each of
+        the three subpackages can split cleanly and independently
+        in parallel.
+
+    - id: t10a-create-mcp-subpackage
+      title: Move mcp command into commands/mcp/ (per agents/skills file convention)
+      status: pending
+      depends_on:
+        - t10pre-extract-canonical-cmd-helpers
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/mcp/doc.go
+        - commands/mcp/cmd.go
+        - commands/mcp/cmd_test.go
         - commands/mcp/deps.go
-        - commands/mcp/mcp.go
+        - commands/mcp/example.go
+        - commands/mcp/list.go
+        - commands/mcp/show.go
+        - commands/mcp/remove.go
+        - commands/mcp/seams.go
+        - commands/mcp/seams_test.go
+        - commands/mcp/coverage_test.go
         - commands/mcp/mcp_test.go
         - commands/mcp.go
         - commands/mcp_test.go
       verification_required: true
       notes: |-
-        Per user decision: three individual resource subpackages
-        matching the existing agents/skills/kg/hooks/sync/workflow
-        convention (NOT a grouped commands/resources/). cmdutil stays
-        at commands/internal/cmdutil; commands/mcp/ imports it via
-        the standard "github.com/.../commands/internal/cmdutil" path.
-        deps.go mirrors commands/agents/deps.go. mcp_test.go just
-        landed via t5 PR #49 — preserve its testutil call sites
-        through the move.
+        Mirror the existing agents/skills/sync file convention — NOT
+        a single mcp.go inside the subpackage. Target layout:
+
+          - cmd.go            — NewCmd() (was NewMCPCmd in root) +
+                                sub-command wiring (list/show/remove).
+                                Pattern: commands/skills/cmd.go.
+          - deps.go           — Deps struct + NewDeps() (was the root
+                                mcpDeps + mcpCommandDeps).
+                                Pattern: commands/agents/deps.go.
+          - example.go        — Example string blocks for cobra
+                                Example: fields.
+                                Pattern: commands/agents/example.go.
+          - list.go / show.go / remove.go — one file per sub-command,
+                                each holding the run* runner + the
+                                builder helper (was runMCPList /
+                                runMCPShow / runMCPRemove + the
+                                newMCPListCmd / newMCPShowCmd /
+                                newMCPRemoveCmd builders, plus
+                                mcpCanonicalSpec). Mirror commands/
+                                agents/{list,promote,new,remove}.go.
+          - seams.go + seams_test.go — package-var seams for os.* /
+                                projectsync.* hooks. Mirror commands/
+                                agents/seams.go.
+          - coverage_test.go  — file-level coverage assertions.
+                                Mirror commands/agents/coverage_test.go.
+          - mcp_test.go       — the test file from t5 PR #49
+                                (testutil-consuming refactor)
+                                re-homed here. PRESERVE every
+                                testutil.WriteScopeFile call site
+                                verbatim through the move; only the
+                                package decl changes.
+
+        cmdutil import: commands/mcp/ imports
+        "github.com/.../commands/internal/cmdutil" using the helpers
+        extracted in t10pre (CanonicalCmdFlags,
+        CanonicalCmdExampleBlock, RunCanonicalList / Show / Remove,
+        CanonicalFileSpec). findMCPSpec stays package-private (used
+        by TestFindMCPSpecNotFound).
+
+        After this task, commands/mcp.go is a thin shim wiring
+        commands.NewMCPCmd() -> mcp.NewCmd(). That root shim is
+        deleted in t13.
 
     - id: t10b-create-settings-subpackage
-      title: Move settings command into commands/settings/
+      title: Move settings command into commands/settings/ (per agents/skills file convention)
       status: pending
       depends_on:
-        - t01-design-subpackage-shape
+        - t10pre-extract-canonical-cmd-helpers
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/settings/doc.go
+        - commands/settings/cmd.go
+        - commands/settings/cmd_test.go
         - commands/settings/deps.go
-        - commands/settings/settings.go
+        - commands/settings/example.go
+        - commands/settings/list.go
+        - commands/settings/show.go
+        - commands/settings/remove.go
+        - commands/settings/seams.go
+        - commands/settings/seams_test.go
+        - commands/settings/coverage_test.go
         - commands/settings/settings_test.go
         - commands/settings.go
         - commands/settings_test.go
       verification_required: true
       notes: |-
-        Same pattern as t10a. settings_test.go landed via t5 PR #49 —
-        preserve testutil call sites through the move.
+        Same file convention as t10a — mirror commands/agents/ +
+        commands/skills/ layout (cmd.go / deps.go / example.go /
+        list.go / show.go / remove.go / seams.go / seams_test.go /
+        coverage_test.go / settings_test.go). cmdutil imports use
+        the helpers extracted in t10pre.
+
+        settings_test.go landed via t5 PR #49 — preserve every
+        testutil call site through the move. findSettingsSpec stays
+        package-private (used by TestFindSettingsSpecNotFound).
 
     - id: t10c-create-rules-subpackage
-      title: Move rules command into commands/rules/
+      title: Move rules command into commands/rules/ (per agents/skills file convention)
       status: pending
       depends_on:
-        - t01-design-subpackage-shape
+        - t10pre-extract-canonical-cmd-helpers
       blocks: []
       owner: dot-agents
       write_scope:
-        - commands/rules/doc.go
+        - commands/rules/cmd.go
+        - commands/rules/cmd_test.go
         - commands/rules/deps.go
-        - commands/rules/rules.go
+        - commands/rules/example.go
+        - commands/rules/list.go
+        - commands/rules/show.go
+        - commands/rules/remove.go
+        - commands/rules/seams.go
+        - commands/rules/seams_test.go
+        - commands/rules/coverage_test.go
         - commands/rules/rules_test.go
         - commands/rules.go
         - commands/rules_test.go
       verification_required: true
       notes: |-
-        Same pattern as t10a. rules_test.go landed via t5 PR #49 —
-        preserve testutil call sites through the move.
+        Same file convention as t10a/b — mirror commands/agents/ +
+        commands/skills/ layout. After t10pre, commands/rules.go no
+        longer hosts the shared canonical helpers; this subpackage
+        just imports them from cmdutil.
+
+        rulesShowFrontmatterExtra (file-scope helper in current
+        rules.go) belongs in show.go alongside the show runner.
+        findRuleSpec stays package-private. rules_test.go landed
+        via t5 PR #49 — preserve testutil call sites through the
+        move.
 
     - id: t11-split-seams-tests
       title: Split commands/seams_test.go into per-cluster files
