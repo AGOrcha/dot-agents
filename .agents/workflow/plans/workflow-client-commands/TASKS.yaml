@@ -65,7 +65,7 @@ tasks:
       app_type: go-cli
     - id: skill-iteration-close
       title: 'iteration-close skill: thin caller of close-task + render score'
-      status: pending
+      status: completed
       depends_on:
         - close-task
       blocks: []
@@ -77,7 +77,7 @@ tasks:
       app_type: go-cli
     - id: tier-declarations
       title: 'Declare tier: / calls: on commands + skill per skill-tiering-contract'
-      status: pending
+      status: completed
       depends_on:
         - close-task
         - start-task
