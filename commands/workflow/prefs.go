@@ -21,6 +21,14 @@ type WorkflowPreferences struct {
 	Planning     WorkflowPlanningPrefs     `json:"planning" yaml:"planning"`
 	Review       WorkflowReviewPrefs       `json:"review" yaml:"review"`
 	Execution    WorkflowExecutionPrefs    `json:"execution" yaml:"execution"`
+	Commit       WorkflowCommitPrefs       `json:"commit" yaml:"commit"`
+}
+
+// WorkflowCommitPrefs gates the `da workflow commit` and iteration-close
+// auto-commit behaviour. Disable=true short-circuits both to a documented
+// no-op for repos that manage workflow-state commits elsewhere.
+type WorkflowCommitPrefs struct {
+	Disable *bool `json:"disable,omitempty" yaml:"disable,omitempty"`
 }
 
 type WorkflowVerificationPrefs struct {
@@ -67,6 +75,7 @@ const (
 	preferenceKeyExecutionPackageManager                    = "execution.package_manager"
 	preferenceKeyExecutionFormatter                         = "execution.formatter"
 	preferenceKeyExecutionMaxParallelWorkers                = "execution.max_parallel_workers"
+	preferenceKeyCommitDisable                              = "commit.disable"
 
 	errExecutionMaxParallelWorkersRange = "execution.max_parallel_workers must be an integer between 1 and 8"
 )
@@ -99,8 +108,16 @@ func defaultWorkflowPreferences() WorkflowPreferences {
 			Formatter:          &formatter,
 			MaxParallelWorkers: &maxParallelWorkers,
 		},
+		Commit: WorkflowCommitPrefs{
+			// Default disable=false → auto-commit on (the spec's intended
+			// behaviour for the common case). Repos that manage state
+			// commits elsewhere flip this to true via `commit.disable`.
+			Disable: boolPtr(false),
+		},
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 func loadRepoPreferences(projectPath string) (*WorkflowPreferencesFile, error) {
 	path := filepath.Join(projectPath, ".agents", "workflow", "preferences.yaml")
@@ -140,10 +157,12 @@ func mergePreferences(defaults, repo, local WorkflowPreferences) WorkflowPrefere
 	mergePlanningPrefs(&out.Planning, repo.Planning)
 	mergeReviewPrefs(&out.Review, repo.Review)
 	mergeExecutionPrefs(&out.Execution, repo.Execution)
+	mergeCommitPrefs(&out.Commit, repo.Commit)
 	mergeVerificationPrefs(&out.Verification, local.Verification)
 	mergePlanningPrefs(&out.Planning, local.Planning)
 	mergeReviewPrefs(&out.Review, local.Review)
 	mergeExecutionPrefs(&out.Execution, local.Execution)
+	mergeCommitPrefs(&out.Commit, local.Commit)
 	return out
 }
 
@@ -189,6 +208,12 @@ func mergeExecutionPrefs(dst *WorkflowExecutionPrefs, src WorkflowExecutionPrefs
 	}
 }
 
+func mergeCommitPrefs(dst *WorkflowCommitPrefs, src WorkflowCommitPrefs) {
+	if src.Disable != nil {
+		dst.Disable = src.Disable
+	}
+}
+
 func resolvePreferences(projectPath, project string) (WorkflowPreferences, error) {
 	defaults := defaultWorkflowPreferences()
 	var repo WorkflowPreferences
@@ -221,6 +246,7 @@ var knownPreferenceKeys = map[string]struct{}{
 	preferenceKeyExecutionPackageManager:                    {},
 	preferenceKeyExecutionFormatter:                         {},
 	preferenceKeyExecutionMaxParallelWorkers:                {},
+	preferenceKeyCommitDisable:                              {},
 }
 
 func isValidPreferenceKey(key string) bool {
@@ -290,6 +316,7 @@ var preferenceAppliers = map[string]preferenceApplier{
 	preferenceKeyExecutionPackageManager:                    applyStringPref(func(p *WorkflowPreferences) **string { return &p.Execution.PackageManager }),
 	preferenceKeyExecutionFormatter:                         applyStringPref(func(p *WorkflowPreferences) **string { return &p.Execution.Formatter }),
 	preferenceKeyExecutionMaxParallelWorkers:                applyMaxParallelWorkers,
+	preferenceKeyCommitDisable:                              applyBoolPref(func(p *WorkflowPreferences) **bool { return &p.Commit.Disable }),
 }
 
 func applyPreferenceKey(p *WorkflowPreferences, key, value string) error {

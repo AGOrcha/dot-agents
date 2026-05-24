@@ -101,7 +101,16 @@ func newWorkflowCommitCmd() *cobra.Command {
 
 // runWorkflowCommit is the body — extracted from the cobra closure so tests
 // can drive it directly with a stub gitOps and an output buffer.
+//
+// If the per-project preference `commit.disable=true` is set the command
+// short-circuits to a documented no-op (clear status line, exit 0). Same
+// short-circuit fires from wc-iteration-close, so the opt-out applies to
+// both the standalone command and the iteration-close hook.
 func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string) error {
+	if disabled, reason := commitDisabled(); disabled {
+		fmt.Fprintf(out, "workflow commit: opt-out active (%s)\n", reason)
+		return nil
+	}
 	raw, err := git.Status()
 	if err != nil {
 		return fmt.Errorf("workflow commit: %w", err)
@@ -153,6 +162,33 @@ func buildCommitMessage(paths []string) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// commitDisabled resolves whether the workflow-commit auto-flow is opted out
+// for the current project. Default points at commitDisabledFromPrefs (the
+// real implementation); tests rebind it to a stub so they do not have to
+// reach for currentWorkflowProject / preferences-file plumbing.
+var commitDisabled = commitDisabledFromPrefs
+
+// commitDisabledFromPrefs is the production implementation: read the
+// resolved per-project preferences and return (true, reason) iff
+// `commit.disable` is set. If the project cannot be resolved (e.g. running
+// outside any managed project, or before `da workflow plan create`), the
+// safe default is "not disabled" so the operator still gets the staging
+// behaviour rather than a silent skip.
+func commitDisabledFromPrefs() (bool, string) {
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return false, ""
+	}
+	prefs, err := resolvePreferences(project.Path, project.Name)
+	if err != nil {
+		return false, ""
+	}
+	if prefs.Commit.Disable != nil && *prefs.Commit.Disable {
+		return true, "commit.disable=true in workflow preferences"
+	}
+	return false, ""
 }
 
 func indentMessage(s string) string {

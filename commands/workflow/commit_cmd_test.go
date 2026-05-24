@@ -230,6 +230,102 @@ func TestIndentMessagePreservesEmptyLines(t *testing.T) {
 	}
 }
 
+// commitDisabledFromPrefs (the production resolver) returns "not disabled"
+// when no project is set up — the safe default that prevents a silent skip
+// on the very first run before any preferences exist.
+func TestCommitDisabledFromPrefsNoProject(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	disabled, reason := commitDisabledFromPrefs()
+	if disabled {
+		t.Errorf("disabled = true outside any project, want false (reason=%q)", reason)
+	}
+}
+
+// A real project that has not opted out reports "not disabled" — the common
+// case for the vast majority of repos.
+func TestCommitDisabledFromPrefsDefaultFalse(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+	disabled, _ := commitDisabledFromPrefs()
+	if disabled {
+		t.Error("disabled = true with no commit.disable set, want false (default off)")
+	}
+}
+
+// A corrupted preferences.local.yaml is treated as "could not read prefs →
+// fall back to enabled" rather than crashing the command. Surfaces the
+// resolvePreferences-error branch.
+func TestCommitDisabledFromPrefsHandlesCorruptedPrefs(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Chdir(repo)
+	// Write garbage to the local prefs path so resolvePreferences errors.
+	// Path layout: $AGENTS_HOME/context/<project>/preferences.local.yaml.
+	localPath := filepath.Join(agentsHome, "context", "workflow-proj", "preferences.local.yaml")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localPath, []byte("not: [valid yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	disabled, _ := commitDisabledFromPrefs()
+	if disabled {
+		t.Error("disabled = true on corrupted prefs, want false (safe default)")
+	}
+}
+
+// With a real project + commit.disable=true persisted via setLocalPreference,
+// commitDisabledFromPrefs reports the opt-out and the human-readable reason.
+func TestCommitDisabledFromPrefsReadsPrefs(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Chdir(repo)
+
+	if err := setLocalPreference("workflow-proj", "commit.disable", "true"); err != nil {
+		t.Fatalf("setLocalPreference: %v", err)
+	}
+	disabled, reason := commitDisabledFromPrefs()
+	if !disabled {
+		t.Fatal("disabled = false, want true after commit.disable=true")
+	}
+	if !strings.Contains(reason, "commit.disable=true") {
+		t.Errorf("reason missing key name: %q", reason)
+	}
+}
+
+// The opt-out short-circuit: when commitDisabled reports true, runWorkflow
+// Commit prints a status line and returns nil without calling Status / Add
+// Paths / Commit. Verifies the spec's "documented no-op (status line states
+// opt-out active)" requirement.
+func TestCommitOptOutShortCircuit(t *testing.T) {
+	prior := commitDisabled
+	commitDisabled = func() (bool, string) { return true, "test opt-out" }
+	t.Cleanup(func() { commitDisabled = prior })
+
+	g := &fakeGit{
+		status: []byte("1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00"),
+	}
+	var buf bytes.Buffer
+	if err := runWorkflowCommit(&buf, g, false, nil); err != nil {
+		t.Fatalf("opt-out should be a no-op error-wise: %v", err)
+	}
+	if g.addCalls != 0 || g.commitCalls != 0 {
+		t.Errorf("opt-out leaked downstream calls: add=%d commit=%d", g.addCalls, g.commitCalls)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "opt-out active") {
+		t.Errorf("status line missing opt-out marker: %q", out)
+	}
+	if !strings.Contains(out, "test opt-out") {
+		t.Errorf("status line missing reason: %q", out)
+	}
+}
+
 // AddPaths is a no-op on an empty path slice — runWorkflowCommit short-
 // circuits before calling it, but the production wrapper still defensively
 // checks the input so a future caller cannot accidentally invoke `git add --`
