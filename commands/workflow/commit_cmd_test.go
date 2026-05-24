@@ -326,6 +326,78 @@ func TestCommitOptOutShortCircuit(t *testing.T) {
 	}
 }
 
+// execGit.Status surfaces an error wrapped with "git status" when git
+// fails. Triggered by running from a tempdir that is not a git repo —
+// real-git returns nonzero with "fatal: not a git repository".
+func TestExecGitStatusErrorOutsideRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Chdir(t.TempDir())
+	_, err := (execGit{}).Status()
+	if err == nil {
+		t.Fatal("expected git status error outside a repo, got nil")
+	}
+	if !strings.Contains(err.Error(), "git status") {
+		t.Errorf("error should mention the failing command: %v", err)
+	}
+}
+
+// execGit.AddPaths surfaces an error when git rejects the path set —
+// triggered by listing a path that does not exist in the repo. Real-git
+// returns "pathspec '...' did not match any files".
+func TestExecGitAddPathsErrorOnMissingPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@e"},
+		{"config", "user.name", "t"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Chdir(repo)
+	err := (execGit{}).AddPaths([]string{"definitely-not-a-real-path-12345"})
+	if err == nil {
+		t.Fatal("expected git add error on missing path, got nil")
+	}
+	if !strings.Contains(err.Error(), "git add") {
+		t.Errorf("error should mention the failing command: %v", err)
+	}
+}
+
+// execGit.Commit surfaces an error when there is nothing staged — the
+// canonical "nothing to commit" path real-git returns on a clean repo.
+func TestExecGitCommitErrorWhenNothingStaged(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@e"},
+		{"config", "user.name", "t"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Chdir(repo)
+	err := (execGit{}).Commit("test message\n")
+	if err == nil {
+		t.Fatal("expected git commit error on empty index, got nil")
+	}
+	if !strings.Contains(err.Error(), "git commit") {
+		t.Errorf("error should mention the failing command: %v", err)
+	}
+}
+
 // AddPaths is a no-op on an empty path slice — runWorkflowCommit short-
 // circuits before calling it, but the production wrapper still defensively
 // checks the input so a future caller cannot accidentally invoke `git add --`

@@ -100,6 +100,17 @@ type closeTaskOpts struct {
 	transcriptDirs []string
 }
 
+// closeTask*-prefixed function-var seams let tests trigger each step's
+// error path without standing up the fixture each primitive otherwise
+// needs (project bootstrap, plan validation, etc.). Defaults point at
+// the real primitives; tests rebind to stubs.
+var (
+	closeTaskCheckpoint     = runWorkflowCheckpointLogToIter
+	closeTaskResolveProject = currentWorkflowProject
+	closeTaskPlanUpdate     = runWorkflowPlanUpdate
+	closeTaskWriteSidecar   = scoring.WriteIterationScoreWithRecord
+)
+
 // runWorkflowCloseTask is the orchestration body. Each step's failure
 // surfaces as a "close-task: <step>: ..." error so log triage maps
 // directly to the chain position.
@@ -113,7 +124,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if opts.scoreRecompute != "current" {
 		return fmt.Errorf("close-task: --score-recompute=%q not yet implemented (only \"current\" supported in this slice)", opts.scoreRecompute)
 	}
-	project, err := currentWorkflowProject()
+	project, err := closeTaskResolveProject()
 	if err != nil {
 		return fmt.Errorf("close-task: resolve project: %w", err)
 	}
@@ -132,7 +143,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 		return fmt.Errorf("close-task: pick iteration N: %w", err)
 	}
 
-	if err := runWorkflowCheckpointLogToIter(n, DefaultIterationRole(), ""); err != nil {
+	if err := closeTaskCheckpoint(n, DefaultIterationRole(), ""); err != nil {
 		return fmt.Errorf("close-task: checkpoint --log-to-iter %d: %w", n, err)
 	}
 
@@ -140,7 +151,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if err != nil {
 		return fmt.Errorf("close-task: score iteration %d: %w", n, err)
 	}
-	sidecarPath, err := scoring.WriteIterationScoreWithRecord(iterDir, score, rec)
+	sidecarPath, err := closeTaskWriteSidecar(iterDir, score, rec)
 	if err != nil {
 		return fmt.Errorf("close-task: persist iter-%d sidecar: %w", n, err)
 	}
@@ -154,7 +165,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 		nextFocus = pickNextFocus(project.Path, opts.planID)
 	}
 	if nextFocus != "" {
-		if err := runWorkflowPlanUpdate(opts.planID, "", "", "", nextFocus, "", ""); err != nil {
+		if err := closeTaskPlanUpdate(opts.planID, "", "", "", nextFocus, "", ""); err != nil {
 			return fmt.Errorf("close-task: plan update --focus %s: %w", nextFocus, err)
 		}
 	}
@@ -177,7 +188,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 		NextFocus:      nextFocus,
 		WorkflowCommit: committed,
 	}
-	if deps.Flags.JSON != nil && deps.Flags.JSON() {
+	if deps.Flags.JSON() {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(result)

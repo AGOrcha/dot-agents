@@ -56,8 +56,15 @@ fi
 # Format, one per line: <file-path><whitespace># <rationale>
 # Blank lines and whole-line # comments ignored. A listed path with no
 # '# rationale' is a HARD error (rationale is not optional).
+#
+# Ratchet pragma (in the file's comment header):
+#   # ratchet-max-entries: N
+# The gate fails if the live entry count exceeds N. To add an allowlist
+# entry, prove there is no test-driven path to the threshold, bump the
+# pragma in the same commit, and include the rationale in PR review.
 ALLOW_TMP="$(mktemp)"
 trap 'rm -f "$ALLOW_TMP"' EXIT
+RATCHET_MAX=""
 if [[ -f "$EXCEPTIONS_FILE" ]]; then
   lineno=0
   while IFS= read -r raw || [[ -n "$raw" ]]; do
@@ -65,7 +72,13 @@ if [[ -f "$EXCEPTIONS_FILE" ]]; then
     line="${raw%$'\r'}"
     [[ -z "${line//[[:space:]]/}" ]] && continue
     trimmed="${line#"${line%%[![:space:]]*}"}"
-    [[ "$trimmed" == \#* ]] && continue
+    if [[ "$trimmed" == \#* ]]; then
+      # Pick up the ratchet pragma from any comment line.
+      if [[ "$trimmed" =~ ratchet-max-entries:[[:space:]]*([0-9]+) ]]; then
+        RATCHET_MAX="${BASH_REMATCH[1]}"
+      fi
+      continue
+    fi
     if [[ "$line" != *"# "* ]]; then
       echo "coverage-gate: $EXCEPTIONS_FILE:$lineno has no '# <rationale>' — rationale is mandatory" >&2
       exit 1
@@ -76,6 +89,14 @@ if [[ -f "$EXCEPTIONS_FILE" ]]; then
     [[ -z "$path" ]] && continue
     printf '%s\n' "$path" >> "$ALLOW_TMP"
   done < "$EXCEPTIONS_FILE"
+  if [[ -n "$RATCHET_MAX" ]]; then
+    actual=$(grep -c . "$ALLOW_TMP" 2>/dev/null || echo 0)
+    if (( actual > RATCHET_MAX )); then
+      echo "coverage-gate: allowlist has $actual entries; ratchet-max-entries is $RATCHET_MAX." >&2
+      echo "  Adding an entry requires bumping the ratchet pragma in $EXCEPTIONS_FILE in the same commit." >&2
+      exit 1
+    fi
+  fi
 fi
 
 awk -v threshold="$THRESHOLD" -v exclude_re="$EXCLUDE_RE" \

@@ -1,5 +1,13 @@
 # coverage-gate per-file exceptions allowlist
 #
+# === RATCHET ===
+# ratchet-max-entries: 42
+# The coverage gate fails if the allowlist grows above this number.
+# To add a new entry: prove there is no test-driven path to the threshold,
+# bump this line in the same commit, and include the rationale in PR review.
+# To shrink: drop a stale entry whose file now exceeds threshold and
+# decrement this number. The ratchet only tightens — never silently loosens.
+#
 # A file BELOW the per-file coverage threshold that is NOT pattern-excluded
 # must be listed here WITH A ONE-LINE RATIONALE, or the per-file gate
 # reports it as a violation (FAIL in enforce mode).
@@ -61,8 +69,3 @@ internal/globalflagcov/analyze.go                          # [defensive-guards] 
 internal/globalflagcov/static.go                           # [defensive-guards] 91.21% local; residue is malformed-AST/types guards (nil TypesInfo, non-*types.Func defs, packages.Load failure) that the real ./commands type-check pipeline never yields
 internal/scoring/objective_checks.go                       # [legacy-tail] 94.92%; pre-existing R1 carry-over (objective-checks task); cg6 ratchet-loop raises to >=95%
 internal/scoring/persist.go                                # [defensive-guards] 89.41% local; residue is writeYAMLAtomic's OS error branches (yaml.Marshal nil-input, os.CreateTemp/Write/Close/Rename failures) that the real fs path cannot trigger from a Go test without mocking
-commands/workflow/commit_cmd.go                            # [defensive-guards] 93.83% local; residue is execGit's shell-out error branches (git status/add/commit failures). Public-facing functions are 100% via fakeGit-stub tests; the production execGit wrapper has a separate end-to-end test (TestExecGitEndToEnd) covering the happy path.
-commands/score.go                                          # [defensive-guards] 94.92% local; residue is unreachable os.Getwd / WriteIterationScoreWithRecord / JSON-encode error branches in the recompute path. Public functions all 100%; happy paths covered by TestRunScoreIterationRecompute*.
-internal/scoring/score_iteration.go                        # [defensive-guards] 94.74% local; residue is the "signal set missing despite present record" invariant-breach branch — BuildSignalSets and LoadIterationLog are kept aligned by iteration number, so hitting it would mean a real upstream invariant breach rather than a normal failure mode.
-commands/workflow/close_task.go                            # [legacy-tail] 77.94% local; residue is the per-step error-wrap branches in the orchestration chain (cwd / NextIterationNumber / checkpoint / score / persist sidecar / advance / plan update / commit failures). Happy path + --no-commit + --json + reserved-recompute-scope rejection + cobra Execute all covered. Per-step error injection is the natural cg6 ratchet target once a richer DI seam over the underlying primitives lands.
-commands/workflow/start_task.go                             # [legacy-tail] 82.05% local; residue is the per-step error-wrap branches in the orchestration chain (plan update --status active / --focus / derive-scope / commit failures). Happy path + --no-commit + --no-derive-scope + --json + cobra Execute all covered. Same cg6 ratchet target as close_task.go.

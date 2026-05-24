@@ -85,6 +85,14 @@ func newWorkflowStartTaskCmd() *cobra.Command {
 	return cmd
 }
 
+// startTask*-prefixed function-var seams let tests trigger each step's
+// error path without standing up the fixture each primitive otherwise
+// needs. Defaults point at the real primitives; tests rebind to stubs.
+var (
+	startTaskPlanUpdate  = runWorkflowPlanUpdate
+	startTaskDeriveScope = runWorkflowPlanDeriveScope
+)
+
 type startTaskOpts struct {
 	planID        string
 	taskID        string
@@ -97,16 +105,16 @@ type startTaskOpts struct {
 // runWorkflowStartTask drives the chain. Each step's failure surfaces as
 // "start-task: <step>: ..." so log triage maps to the chain position.
 func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
-	if err := runWorkflowPlanUpdate(opts.planID, "active", "", "", "", "", ""); err != nil {
+	if err := startTaskPlanUpdate(opts.planID, "active", "", "", "", "", ""); err != nil {
 		return fmt.Errorf("start-task: plan update --status active: %w", err)
 	}
-	if err := runWorkflowPlanUpdate(opts.planID, "", "", "", opts.taskID, "", ""); err != nil {
+	if err := startTaskPlanUpdate(opts.planID, "", "", "", opts.taskID, "", ""); err != nil {
 		return fmt.Errorf("start-task: plan update --focus %s: %w", opts.taskID, err)
 	}
 
 	derived := false
 	if !opts.noDeriveScope {
-		if err := runWorkflowPlanDeriveScope(opts.planID, opts.taskID, opts.seedSymbols, opts.seedPaths); err != nil {
+		if err := startTaskDeriveScope(opts.planID, opts.taskID, opts.seedSymbols, opts.seedPaths); err != nil {
 			return fmt.Errorf("start-task: plan derive-scope: %w", err)
 		}
 		derived = true
@@ -128,7 +136,7 @@ func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
 		DerivedScope:   derived,
 		WorkflowCommit: committed,
 	}
-	if deps.Flags.JSON != nil && deps.Flags.JSON() {
+	if deps.Flags.JSON() {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(result)

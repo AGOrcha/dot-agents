@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -451,6 +452,103 @@ func TestScoreIterationSubcommandRecomputeExecute(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(iterLogDir, "iter-1.score.yaml")); err != nil {
 		t.Errorf("sidecar not written via cobra Execute: %v", err)
+	}
+}
+
+// errWriter returns an error on every Write. Used to trigger the json.
+// Encoder error branches in the score subcommands without standing up
+// a broken pipe or full-disk fixture.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write boom") }
+
+// runScoreRun's --json branch propagates json.Encoder.Encode errors.
+func TestRunScoreRunJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreRun(errWriter{}, scoreRunOpts{iterLogDir: iterLogDir, repoDir: repo, noWrite: true})
+	if err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreIterationRecompute's --json branch propagates encoder errors.
+func TestRunScoreIterationRecomputeJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreIterationRecompute(errWriter{}, iterLogDir, repo, 1, nil)
+	if err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreIteration's --json branch propagates encoder errors. Writes
+// a real sidecar first so the read path succeeds; the error is in the
+// encode step.
+func TestRunScoreIterationJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	dir := t.TempDir()
+	r := scoring.DefaultRubric()
+	if _, err := scoring.WriteIterationScore(dir, r.Score(scoring.SignalSet{Iteration: 4, Verifier: scoring.PresentSignal(1.0, "")})); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScoreIteration(errWriter{}, dir, 4); err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreSession's --json branch propagates encoder errors.
+func TestRunScoreSessionJSONEncodeError(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+
+	dir := t.TempDir()
+	if _, err := scoring.WriteSessionScore(dir, scoring.SessionScore{SessionID: "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runScoreSession(errWriter{}, dir, "s"); err == nil {
+		t.Fatal("expected JSON encode error, got nil")
+	}
+}
+
+// runScoreRun surfaces persist errors (WriteIterationScoreWithRecord /
+// WriteSessionScores). Trigger by replacing the iter-log dir with a
+// file BEFORE the write step — checkpoint + score succeed via existing
+// fixtures since runScoreRun reads from there first, but writing the
+// sidecar fails. Sequencing: the write happens AFTER LoadIterationLog
+// reads — we replace the file mid-test by stubbing the writer... no,
+// easier path: pass a dir that doesn't exist yet for iterLogDir but is
+// the same as the existing iter-1.yaml — already in the existing
+// happy-path fixture, the write succeeds. Skipping this branch — the
+// reachable persistence errors are out of test reach without a writer
+// seam. Documented via the persist.go [defensive-guards] entry already.
+// (Placeholder to keep test surface explicit.)
+var _ = errors.New
+
+// renderRunSummary covers the `len(sessions) == 0` branch when
+// AggregateSessions returns nothing (every iteration has empty
+// session_id). Confirms the per-iter table still renders.
+func TestRenderRunSummaryNoSessions(t *testing.T) {
+	r := scoring.DefaultRubric()
+	records := []scoring.IterationRecord{{Iteration: 1}}
+	scores := []scoring.Score{{Iteration: 1, Scored: true, Value: 0.5, Band: "fair"}}
+	var buf bytes.Buffer
+	renderRunSummary(&buf, r, records, scores, nil, true, "/tmp/x")
+	if !strings.Contains(buf.String(), "Iterations: 1") {
+		t.Errorf("missing iter row: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "SESSION") {
+		t.Errorf("session header rendered for empty sessions: %s", buf.String())
 	}
 }
 

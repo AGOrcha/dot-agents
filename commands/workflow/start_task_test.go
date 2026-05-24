@@ -3,10 +3,99 @@ package workflow
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 )
+
+// Each per-step error in runWorkflowStartTask wraps with "start-task:
+// <step>: ..." so log triage maps to the chain position. Tests stub the
+// startTask* function-var seams to trigger each branch.
+
+func TestStartTaskErrorWrapsActivate(t *testing.T) {
+	prior := startTaskPlanUpdate
+	startTaskPlanUpdate = func(string, string, string, string, string, string, string) error {
+		return errors.New("activate boom")
+	}
+	t.Cleanup(func() { startTaskPlanUpdate = prior })
+	err := runWorkflowStartTask(&bytes.Buffer{}, startTaskOpts{planID: "p", taskID: "t"})
+	if err == nil || !strings.Contains(err.Error(), "start-task: plan update --status active") {
+		t.Errorf("want activate-wrap, got: %v", err)
+	}
+}
+
+func TestStartTaskErrorWrapsFocus(t *testing.T) {
+	// First call (activate) succeeds, second call (focus) errors.
+	calls := 0
+	prior := startTaskPlanUpdate
+	startTaskPlanUpdate = func(string, string, string, string, string, string, string) error {
+		calls++
+		if calls == 2 {
+			return errors.New("focus boom")
+		}
+		return nil
+	}
+	t.Cleanup(func() { startTaskPlanUpdate = prior })
+	err := runWorkflowStartTask(&bytes.Buffer{}, startTaskOpts{planID: "p", taskID: "t"})
+	if err == nil || !strings.Contains(err.Error(), "start-task: plan update --focus") {
+		t.Errorf("want focus-wrap, got: %v", err)
+	}
+}
+
+func TestStartTaskErrorWrapsDeriveScope(t *testing.T) {
+	priorPU := startTaskPlanUpdate
+	startTaskPlanUpdate = func(string, string, string, string, string, string, string) error { return nil }
+	t.Cleanup(func() { startTaskPlanUpdate = priorPU })
+
+	priorDS := startTaskDeriveScope
+	startTaskDeriveScope = func(string, string, []string, []string) error {
+		return errors.New("derive boom")
+	}
+	t.Cleanup(func() { startTaskDeriveScope = priorDS })
+
+	err := runWorkflowStartTask(&bytes.Buffer{}, startTaskOpts{planID: "p", taskID: "t"})
+	if err == nil || !strings.Contains(err.Error(), "start-task: plan derive-scope") {
+		t.Errorf("want derive-scope-wrap, got: %v", err)
+	}
+}
+
+// renderStartTaskSummary's branch table: derive=true + commit=true must
+// land the corresponding "sidecar derived" + "committed" lines. The
+// orchestration tests cover the (false, true) and (false, false)
+// combinations; this pins the (true, true) row.
+func TestRenderStartTaskSummaryDerivedAndCommitted(t *testing.T) {
+	var buf bytes.Buffer
+	renderStartTaskSummary(&buf, startTaskResult{
+		PlanID: "p", TaskID: "t",
+		ActivatedPlan: true, FocusedTask: true,
+		DerivedScope: true, WorkflowCommit: true,
+	})
+	out := buf.String()
+	for _, frag := range []string{"sidecar derived", "workflow state committed"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("missing %q in:\n%s", frag, out)
+		}
+	}
+}
+
+func TestStartTaskErrorWrapsCommit(t *testing.T) {
+	priorPU := startTaskPlanUpdate
+	startTaskPlanUpdate = func(string, string, string, string, string, string, string) error { return nil }
+	t.Cleanup(func() { startTaskPlanUpdate = priorPU })
+
+	priorCommit := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+
+	// noDeriveScope=true so we skip the derive step that would also need stubbing.
+	err := runWorkflowStartTask(&bytes.Buffer{}, startTaskOpts{
+		planID: "p", taskID: "t", noDeriveScope: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "start-task: workflow commit") {
+		t.Errorf("want commit-wrap, got: %v", err)
+	}
+}
 
 // Happy-path start-task: flip status to active, set focus, derive scope
 // (the derive-scope call writes a placeholder sidecar since the test

@@ -3,12 +3,15 @@ package workflow
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/scoring"
 )
 
 // closeTaskTestRepo builds a tiny git repo with a single committed file plus
@@ -191,6 +194,240 @@ func TestCloseTaskNextFocusOverride(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "explicit-target") {
 		t.Errorf("summary should include the override target: %s", buf.String())
+	}
+}
+
+// Each per-step error in runWorkflowCloseTask wraps with "close-task:
+// <step>: ..." so log triage maps directly to the chain position. The
+// tests below trigger each step's failure with the most natural
+// mechanism available (bad inputs, malformed fixtures, or — for
+// checkpoint, which is otherwise difficult to make fail — the
+// closeTaskCheckpoint seam).
+
+func TestCloseTaskErrorWrapsCurrentProject(t *testing.T) {
+	prior := closeTaskResolveProject
+	closeTaskResolveProject = func() (workflowProjectRef, error) {
+		return workflowProjectRef{}, errors.New("no project")
+	}
+	t.Cleanup(func() { closeTaskResolveProject = prior })
+
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: "p", taskID: "t1", scoreRecompute: "current",
+	})
+	if err == nil {
+		t.Fatal("expected currentWorkflowProject error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: resolve project") {
+		t.Errorf("error not wrapped with the project step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsNextIterationNumber(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+	// Replace the iter-log dir with a regular file; ReadDir errors with
+	// ENOTDIR, NextIterationNumber wraps and returns it.
+	iterDir := filepath.Join(repo, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(filepath.Dir(iterDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(iterDir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected NextIterationNumber error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: pick iteration N") {
+		t.Errorf("error not wrapped with the pick-iteration step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsCheckpoint(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	prior := closeTaskCheckpoint
+	closeTaskCheckpoint = func(n int, role, verifierType string) error {
+		return errors.New("checkpoint boom")
+	}
+	t.Cleanup(func() { closeTaskCheckpoint = prior })
+
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected checkpoint error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: checkpoint --log-to-iter") {
+		t.Errorf("error not wrapped with the checkpoint step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsScoreIteration(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+	// Write a malformed iter-1.yaml BEFORE close-task runs, so
+	// NextIterationNumber picks N=2 (max+1) and ScoreIteration loads the
+	// log, finds iter-1 malformed, and errors at LoadIterationLog.
+	iterDir := filepath.Join(repo, ".agents", "active", "iteration-log")
+	if err := os.MkdirAll(iterDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(iterDir, "iter-1.yaml"), []byte("not: [valid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected ScoreIteration error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: score iteration") {
+		t.Errorf("error not wrapped with the score step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsWriteSidecar(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	prior := closeTaskWriteSidecar
+	closeTaskWriteSidecar = func(string, scoring.Score, scoring.IterationRecord) (string, error) {
+		return "", errors.New("sidecar boom")
+	}
+	t.Cleanup(func() { closeTaskWriteSidecar = prior })
+
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected sidecar persist error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: persist iter-") {
+		t.Errorf("error not wrapped with sidecar step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsAdvance(t *testing.T) {
+	repo, _, _ := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+	// Use a real plan but a non-existent task ID — advance errors with
+	// "task not found".
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: "p", taskID: "no-such-task", scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected advance error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: advance") {
+		t.Errorf("error not wrapped with the advance step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsPlanUpdate(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	priorCommit := iterationCloseCommit
+	iterationCloseCommit = func(out io.Writer) error { return nil }
+	t.Cleanup(func() { iterationCloseCommit = priorCommit })
+
+	// runWorkflowPlanUpdate is permissive about focus values; stub the
+	// seam so we can prove the wrap.
+	priorUpdate := closeTaskPlanUpdate
+	closeTaskPlanUpdate = func(planID, status, title, summary, focus, sc, vs string) error {
+		return errors.New("plan update boom")
+	}
+	t.Cleanup(func() { closeTaskPlanUpdate = priorUpdate })
+
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current",
+		nextFocus: "some-other-task", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected plan update error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: plan update --focus") {
+		t.Errorf("error not wrapped with the focus step: %v", err)
+	}
+}
+
+func TestCloseTaskErrorWrapsCommit(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(out io.Writer) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected commit error, got nil")
+	}
+	if !strings.Contains(err.Error(), "close-task: workflow commit") {
+		t.Errorf("error not wrapped with the commit step: %v", err)
+	}
+}
+
+// Empty repoDir triggers the cwd-fallback branch. Confirms that
+// runWorkflowCloseTask uses os.Getwd() as the implicit repo root when
+// the caller does not pass --repo-dir.
+func TestCloseTaskUsesCwdWhenRepoDirEmpty(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { return nil }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	var buf bytes.Buffer
+	if err := runWorkflowCloseTask(&buf, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current",
+		// repoDir intentionally empty — fall through to cwd.
+	}); err != nil {
+		t.Fatalf("runWorkflowCloseTask with cwd fallback: %v\n%s", err, buf.String())
+	}
+}
+
+// close-task's --json branch propagates json.Encoder.Encode errors so a
+// caller wedging the writer (broken pipe, full disk) sees the failure
+// rather than a silent zero-byte result.
+type closeTaskErrWriter struct{}
+
+func (closeTaskErrWriter) Write([]byte) (int, error) { return 0, errors.New("write boom") }
+
+func TestCloseTaskJSONEncodeError(t *testing.T) {
+	repo, planID, taskID := closeTaskTestRepo(t)
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	t.Chdir(repo)
+
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { return nil }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	priorJSON := deps.Flags.JSON
+	jsonOn := true
+	deps.Flags.JSON = func() bool { return jsonOn }
+	t.Cleanup(func() { deps.Flags.JSON = priorJSON })
+
+	err := runWorkflowCloseTask(closeTaskErrWriter{}, closeTaskOpts{
+		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
+	})
+	if err == nil {
+		t.Fatal("expected JSON encode error, got nil")
 	}
 }
 

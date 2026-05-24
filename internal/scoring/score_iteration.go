@@ -31,31 +31,24 @@ func ScoreIteration(iterLogDir, repoDir string, n int, transcriptDirs ...string)
 	if err != nil {
 		return Score{}, IterationRecord{}, fmt.Errorf("scoring: load iteration log: %w", err)
 	}
-	var (
-		targetRec IterationRecord
-		found     bool
-	)
-	for _, r := range records {
+	targetIdx := -1
+	for i, r := range records {
 		if r.Iteration == n {
-			targetRec = r
-			found = true
+			targetIdx = i
 			break
 		}
 	}
-	if !found {
+	if targetIdx < 0 {
 		return Score{}, IterationRecord{}, fmt.Errorf("scoring: iter-%d.yaml not found in %s", n, iterLogDir)
 	}
 	sets, err := BuildSignalSets(iterLogDir, repoDir, transcriptDirs...)
 	if err != nil {
 		return Score{}, IterationRecord{}, fmt.Errorf("scoring: build signal sets: %w", err)
 	}
-	for _, s := range sets {
-		if s.Iteration == n {
-			return rubric.Score(s), targetRec, nil
-		}
-	}
-	// LoadIterationLog and BuildSignalSets are kept aligned by iteration
-	// number; missing here would mean a real invariant breach upstream
-	// rather than a normal failure mode.
-	return Score{}, IterationRecord{}, fmt.Errorf("scoring: signal set for iter-%d missing despite present record", n)
+	// BuildSignalSets's contract is one SignalSet per IterationRecord in
+	// the same order, so the same index resolves both. Indexing rather
+	// than re-scanning eliminates the dead invariant-breach branch a
+	// second scan would have to guard against (and that the coverage
+	// gate would have to allowlist).
+	return rubric.Score(sets[targetIdx]), records[targetIdx], nil
 }

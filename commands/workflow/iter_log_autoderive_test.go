@@ -91,26 +91,19 @@ func TestNextIterationNumberIgnoresSubdirs(t *testing.T) {
 	}
 }
 
-// Permission-denied (or any other read error) surfaces wrapped so the
-// caller can log the source. Tested on POSIX via the testutil's
-// chmod-0 helper; skipped on Windows where the same construct does not
-// reliably prevent ReadDir.
+// A path that exists but is not a directory (a regular file) makes
+// os.ReadDir return ENOTDIR / "is not a directory" — both POSIX and
+// Windows surface this consistently, so the test does not need a
+// platform-specific guard the way the chmod-0 approach would.
 func TestNextIterationNumberReportsReadError(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root; POSIX mode bits do not deny read")
-	}
 	dir := t.TempDir()
-	subdir := filepath.Join(dir, "locked")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	notADir := filepath.Join(dir, "iter-log-file-not-dir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(subdir, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(subdir, 0o755) })
-	_, err := NextIterationNumber(subdir)
+	_, err := NextIterationNumber(notADir)
 	if err == nil {
-		t.Fatal("expected permission error, got nil")
+		t.Fatal("expected ReadDir error on a non-directory path, got nil")
 	}
 }
 
