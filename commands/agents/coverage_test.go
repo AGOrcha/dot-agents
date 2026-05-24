@@ -221,7 +221,7 @@ func TestEnsureImportRepoAgentsSlot_UnknownFileTypeReturnsError(t *testing.T) {
 	if err := os.WriteFile(repoLocal, []byte("plain"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ensureImportRepoAgentsSlot("weird", filepath.Join("/tmp", "fake-canon"), projectPath)
+	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "weird", filepath.Join("/tmp", "fake-canon"), projectPath)
 	if err == nil {
 		t.Fatal("expected error for unknown file type at repo-local slot")
 	}
@@ -246,7 +246,7 @@ func TestEnsureImportRepoAgentsSlot_AlreadyCorrectSymlink(t *testing.T) {
 	if err := os.Symlink(canonical, repoLocal); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureImportRepoAgentsSlot("agent-correct", canonical, projectPath); err != nil {
+	if err := ensureImportRepoAgentsSlot(stdReadlinker{}, "agent-correct", canonical, projectPath); err != nil {
 		t.Fatalf("expected no-op for correct symlink, got: %v", err)
 	}
 }
@@ -331,7 +331,7 @@ func TestCleanupManagedAgentRepoPath_MispointedSymlinkErrors(t *testing.T) {
 	if err := os.Symlink(other, target); err != nil {
 		t.Fatal(err)
 	}
-	err := cleanupManagedAgentRepoPath(d, target, agentsHome, "rogue")
+	err := cleanupManagedAgentRepoPath(d, stdReadlinker{}, target, agentsHome, "rogue")
 	if err == nil {
 		t.Error("expected error for mispointed symlink")
 	}
@@ -347,7 +347,7 @@ func TestCleanupManagedAgentRepoPath_PlainFileErrors(t *testing.T) {
 	if err := os.WriteFile(target, []byte("file"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := cleanupManagedAgentRepoPath(d, target, agentsHome, "plain")
+	err := cleanupManagedAgentRepoPath(d, stdReadlinker{}, target, agentsHome, "plain")
 	if err == nil {
 		t.Error("expected error for plain file at managed path")
 	}
@@ -524,7 +524,7 @@ func TestCleanupManagedAgentRepoPath_LstatPermissionError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-	err := cleanupManagedAgentRepoPath(d, target, agentsHome, "child")
+	err := cleanupManagedAgentRepoPath(d, stdReadlinker{}, target, agentsHome, "child")
 	if err == nil {
 		t.Skip("filesystem ignored chmod 000; Lstat error path not exercised")
 	}
@@ -609,7 +609,7 @@ func TestEnsureImportRepoAgentsSlot_LstatPermissionError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-	err := ensureImportRepoAgentsSlot("perm", "/canon", filepath.Join(tmp, "parent"))
+	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "perm", "/canon", filepath.Join(tmp, "parent"))
 	if err == nil {
 		t.Skip("filesystem ignored chmod; Lstat error path not exercised")
 	}
@@ -736,7 +736,7 @@ func TestEnsureImportRepoAgentsSlot_DanglingSymlink(t *testing.T) {
 	if err := os.Symlink("/nonexistent/foo", repoLocal); err != nil {
 		t.Fatal(err)
 	}
-	err := ensureImportRepoAgentsSlot("dangling", "/canon/path", projectPath)
+	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "dangling", "/canon/path", projectPath)
 	if err == nil {
 		t.Error("expected mispointed-symlink error for dangling link")
 	}
