@@ -50,29 +50,48 @@ func TestDerivePathSetMutationSurfaceOptsIn(t *testing.T) {
 	}
 }
 
-// Untracked entries are excluded unless the mutation surface claims them.
-// This is what implements the "pre-existing-untracked dirs" exclusion: any
-// untracked file the workflow did not just create is invisible to commit.
-func TestDerivePathSetPreExistingUntrackedExcluded(t *testing.T) {
+// Untracked entries OUTSIDE managed roots are excluded unless the mutation
+// surface claims them. This is the "pre-existing-untracked dirs" guard:
+// a stray node_modules/ or tmp/ that another tool created never sneaks in.
+func TestDerivePathSetUntrackedOutsideManagedExcluded(t *testing.T) {
 	status := []StatusEntry{
-		{XY: "??", Path: ".agents/workflow/plans/x/scratch.tmp", Untracked: true},
 		{XY: "??", Path: "tmp/notes.md", Untracked: true},
+		{XY: "??", Path: "node_modules/junk", Untracked: true},
 	}
 	got := DerivePathSet(status, nil)
 	if len(got) != 0 {
-		t.Errorf("untracked entries leaked: %v", got)
+		t.Errorf("untracked-outside-managed leaked: %v", got)
+	}
+}
+
+// Untracked entries UNDER a managed root ARE included — a fresh PLAN.yaml
+// from `da workflow plan create` is an untracked file on its first commit
+// pass, and excluding it would orphan every new plan from the very flow
+// this command exists to support.
+func TestDerivePathSetUntrackedUnderManagedIncluded(t *testing.T) {
+	status := []StatusEntry{
+		{XY: "??", Path: ".agents/workflow/plans/new-plan/PLAN.yaml", Untracked: true},
+		{XY: "??", Path: ".agents/history/old-plan/PLAN.yaml", Untracked: true},
+	}
+	got := DerivePathSet(status, nil)
+	want := []string{
+		".agents/history/old-plan/PLAN.yaml",
+		".agents/workflow/plans/new-plan/PLAN.yaml",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
 // An untracked file the mutation surface declared (e.g. a freshly-written
-// PLAN.yaml or merge-back.md) IS included — the surface is authoritative
-// about which untracked paths it just created.
-func TestDerivePathSetMutationSurfaceClaimsUntracked(t *testing.T) {
+// iter-N.yaml under .agents/active/) IS included even when it falls outside
+// the managed roots — the surface is authoritative for non-managed paths.
+func TestDerivePathSetMutationSurfaceClaimsUntrackedOutsideManaged(t *testing.T) {
 	status := []StatusEntry{
-		{XY: "??", Path: ".agents/workflow/plans/new-plan/PLAN.yaml", Untracked: true},
+		{XY: "??", Path: ".agents/active/iteration-log/iter-7.yaml", Untracked: true},
 	}
-	got := DerivePathSet(status, []string{".agents/workflow/plans/new-plan/PLAN.yaml"})
-	want := []string{".agents/workflow/plans/new-plan/PLAN.yaml"}
+	got := DerivePathSet(status, []string{".agents/active/iteration-log/iter-7.yaml"})
+	want := []string{".agents/active/iteration-log/iter-7.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

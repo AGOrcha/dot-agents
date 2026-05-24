@@ -40,17 +40,22 @@ type StatusEntry struct {
 // derivation rules (from the spec's Decisions §3 and the wc-path-derivation
 // task notes) are:
 //
-//   - Include any tracked change (modified, deleted, renamed, copied, added,
-//     unmerged) whose path is under one of the managed roots
-//     (.agents/workflow/, .agents/history/) OR is named in MutationSurface.
-//   - Include untracked (?) entries only when the caller named them in
-//     MutationSurface. This is what excludes pre-existing-untracked dirs:
-//     the workflow mutation surface is authoritative about which untracked
-//     paths it just created.
+//   - Include every entry whose path is under one of the managed roots
+//     (.agents/workflow/, .agents/history/) — both tracked changes AND
+//     untracked entries. Anything under those roots is by convention a
+//     workflow artifact (a fresh PLAN.yaml from `da workflow plan create`
+//     is untracked on its first commit pass, so excluding untracked would
+//     orphan new plans).
+//   - Include paths outside the managed roots only when the caller named
+//     them in MutationSurface. This is what implements the "pre-existing-
+//     untracked dirs" exclusion: the mutation surface is authoritative
+//     about which non-managed paths the session just touched, so an
+//     untracked `node_modules/` or `tmp/` that some other tool created
+//     never sneaks in.
 //   - Always exclude submodule-pointer entries even if they fall under a
-//     managed root. A submodule pointer change is a separate kind of commit
-//     (submodule bump) and conflating it with workflow state silently
-//     mutates an SCM relationship.
+//     managed root. A submodule pointer change is a separate kind of
+//     commit (submodule bump) and conflating it with workflow state
+//     silently mutates an SCM relationship.
 //   - For rename / copy entries, stage both the new path and the original
 //     path so git captures the rename intent (R) or deletion (the index
 //     entry the old path leaves behind).
@@ -64,14 +69,11 @@ func DerivePathSet(status []StatusEntry, mutationSurface []string) []string {
 	}
 
 	picked := make(map[string]struct{})
-	consider := func(path string, untracked, submodule bool) {
+	consider := func(path string, submodule bool) {
 		if path == "" || submodule {
 			return
 		}
 		_, inSurface := surface[path]
-		if untracked && !inSurface {
-			return
-		}
 		if !inManagedRoot(path) && !inSurface {
 			return
 		}
@@ -79,12 +81,12 @@ func DerivePathSet(status []StatusEntry, mutationSurface []string) []string {
 	}
 
 	for _, e := range status {
-		consider(e.Path, e.Untracked, e.Submodule)
+		consider(e.Path, e.Submodule)
 		// Rename / copy origin must also be staged so the unstaged
 		// deletion-of-old-path lands alongside the addition-of-new-path —
 		// otherwise the commit shows the new file as untracked and leaves
 		// the old one tracked-but-missing.
-		consider(e.OrigPath, false, e.Submodule)
+		consider(e.OrigPath, e.Submodule)
 	}
 
 	out := make([]string, 0, len(picked))
