@@ -17,7 +17,7 @@ tasks:
       app_type: go-cli
     - id: score-current
       title: Scope-narrowed scoring (--score-recompute current|recent-N|all)
-      status: pending
+      status: completed
       depends_on:
         - iter-log-derive
       blocks:
