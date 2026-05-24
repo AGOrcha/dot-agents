@@ -59,7 +59,7 @@ func TestRemoveManagedFile_SymlinkSkipped(t *testing.T) {
 	}
 	link := filepath.Join(tmp, "link.json")
 	linktest.Link(t, src, link)
-	if err := removeManagedFile(link, []byte("managed")); err != nil {
+	if err := removeManagedFile(stdPlatformIO{}, link, []byte("managed")); err != nil {
 		t.Fatalf("removeManagedFile symlink: %v", err)
 	}
 	if _, err := os.Lstat(link); err != nil {
@@ -68,7 +68,7 @@ func TestRemoveManagedFile_SymlinkSkipped(t *testing.T) {
 }
 
 func TestRemoveManagedFile_MissingTarget(t *testing.T) {
-	if err := removeManagedFile(filepath.Join(t.TempDir(), "no-such"), []byte("x")); err != nil {
+	if err := removeManagedFile(stdPlatformIO{}, filepath.Join(t.TempDir(), "no-such"), []byte("x")); err != nil {
 		t.Errorf("missing file should no-op, got %v", err)
 	}
 }
@@ -81,7 +81,7 @@ func TestRemoveManagedFileIf_SymlinkSkipped(t *testing.T) {
 	}
 	link := filepath.Join(tmp, "link.json")
 	linktest.Link(t, src, link)
-	if err := removeManagedFileIf(link, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := removeManagedFileIf(stdPlatformIO{}, link, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("symlink: %v", err)
 	}
 	if _, err := os.Lstat(link); err != nil {
@@ -98,7 +98,7 @@ func TestWriteManagedFile_ExistingSymlinkReplaced(t *testing.T) {
 	}
 	dst := filepath.Join(tmp, "dst")
 	linktest.Link(t, src, dst)
-	if err := writeManagedFile(dst, []byte("real")); err != nil {
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("real")); err != nil {
 		t.Fatalf("writeManagedFile: %v", err)
 	}
 	got, err := os.ReadFile(dst)
@@ -121,7 +121,7 @@ func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("stale\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCodexAgentTomlFile(dst, agent); err != nil {
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err != nil {
 		t.Fatalf("writeCodexAgentTomlFile: %v", err)
 	}
 	got, err := os.ReadFile(dst)
@@ -134,7 +134,7 @@ func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
 }
 
 func TestWriteCodexAgentTomlFile_BadAgentMD(t *testing.T) {
-	if err := writeCodexAgentTomlFile(filepath.Join(t.TempDir(), "x.toml"), "/no/such/agent.md"); err == nil {
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, filepath.Join(t.TempDir(), "x.toml"), "/no/such/agent.md"); err == nil {
 		t.Error("expected error for missing agent.md")
 	}
 }
@@ -216,7 +216,7 @@ func TestEmitRenderedHookFanout_MkdirFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	specs := []HookSpec{{Name: "p", When: "user_prompt_submit", Command: "/bin/true"}}
-	err := emitRenderedHookFanout(specs, filepath.Join(blocker, "sub"), renderCopilotHookFile)
+	err := emitRenderedHookFanout(stdPlatformIO{}, specs, filepath.Join(blocker, "sub"), renderCopilotHookFile)
 	if err == nil {
 		t.Error("expected mkdir error")
 	}
@@ -233,7 +233,7 @@ func TestEmitHookFanout_MkdirFails(t *testing.T) {
 	if err := os.WriteFile(specs[0].SourcePath, []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	err := emitHookFanout(specs, filepath.Join(blocker, "sub"),
+	err := emitHookFanout(stdPlatformIO{}, specs, filepath.Join(blocker, "sub"),
 		HookEmissionMode{Shape: HookShapeRenderFanout, Transport: HookTransportSymlink},
 		func(s HookSpec) (string, bool) { return s.Name + ".json", true })
 	if err == nil {
@@ -417,10 +417,10 @@ func TestSyncScopedFileSymlinks_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "dst")
-	if err := syncScopedFileSymlinks(tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
 		t.Fatalf("first sync: %v", err)
 	}
-	if err := syncScopedFileSymlinks(tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
 }
@@ -435,7 +435,7 @@ func TestEmitPreferredHookFile_LegacyBranch(t *testing.T) {
 	}
 	target := filepath.Join(tmp, "out", "settings.json")
 	spec := &HookSpec{Name: "legacy", SourcePath: src}
-	if err := emitPreferredHookFile(target, renderClaudeHookSettings, spec, directSymlinkHookMode, nil); err != nil {
+	if err := emitPreferredHookFile(stdPlatformIO{}, target, renderClaudeHookSettings, spec, directSymlinkHookMode, nil); err != nil {
 		t.Fatalf("emitPreferredHookFile legacy: %v", err)
 	}
 	if _, err := os.Lstat(target); err != nil {
@@ -457,7 +457,7 @@ func TestEmitPreferredHookFileToUserHomes_LegacyBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := &HookSpec{Name: "x", SourcePath: src}
-	if err := emitPreferredHookFileToUserHomes(".claude/settings.json",
+	if err := emitPreferredHookFileToUserHomes(stdPlatformIO{}, ".claude/settings.json",
 		renderClaudeHookSettings, spec, directSymlinkHookMode, nil); err != nil {
 		t.Fatalf("user-home legacy: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestEmitPreferredHookFileToUserHomes_LegacyBranch(t *testing.T) {
 // TestEmitPreferredHookFile_AllNilNoOp drives the case where no bundles, no
 // legacy, no removeRendered → returns nil.
 func TestEmitPreferredHookFile_AllNilNoOp(t *testing.T) {
-	if err := emitPreferredHookFile(filepath.Join(t.TempDir(), "x"),
+	if err := emitPreferredHookFile(stdPlatformIO{}, filepath.Join(t.TempDir(), "x"),
 		renderClaudeHookSettings, nil, directSymlinkHookMode, nil); err != nil {
 		t.Errorf("all-nil no-op: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestEmitPreferredHookFile_AllNilNoOp(t *testing.T) {
 
 func TestEmitPreferredHookFileToUserHomes_AllNilNoOp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := emitPreferredHookFileToUserHomes(".x/y",
+	if err := emitPreferredHookFileToUserHomes(stdPlatformIO{}, ".x/y",
 		renderClaudeHookSettings, nil, directSymlinkHookMode, nil); err != nil {
 		t.Errorf("user-home all-nil no-op: %v", err)
 	}

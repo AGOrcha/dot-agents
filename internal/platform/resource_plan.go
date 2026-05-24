@@ -188,7 +188,7 @@ func executeRenderSingleWrite(intent ResourceIntent, repoPath, agentsHome string
 			return err
 		}
 		dst := resolveIntentTargetPath(intent.TargetPath, repoPath)
-		return writeCodexAgentTomlFile(dst, src)
+		return writeCodexAgentTomlFile(stdPlatformIO{}, dst, src)
 	default:
 		return fmt.Errorf("unsupported materializer %q for render intent", intent.Materializer)
 	}

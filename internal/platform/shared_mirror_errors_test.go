@@ -192,7 +192,7 @@ func TestPruneManagedCodexAgentTomls_NonENOENTErrorPropagates(t *testing.T) {
 func TestSyncScopedDirSymlinks_MissingBucketIsNoop(t *testing.T) {
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "dst")
-	if err := syncScopedDirSymlinks(filepath.Join(tmp, "agents-home-missing"), "skills", "global", "SKILL.md", dst); err != nil {
+	if err := syncScopedDirSymlinks(stdPlatformIO{}, filepath.Join(tmp, "agents-home-missing"), "skills", "global", "SKILL.md", dst); err != nil {
 		t.Fatalf("ENOENT bucket must be a no-op: %v", err)
 	}
 }
@@ -211,7 +211,7 @@ func TestSyncScopedDirSymlinks_NonENOENTErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", filepath.Join(tmp, "dst")); err == nil {
+	if err := syncScopedDirSymlinks(stdPlatformIO{}, agentsHome, "skills", "global", "SKILL.md", filepath.Join(tmp, "dst")); err == nil {
 		t.Fatal("expected ENOTDIR-style error to propagate")
 	}
 }
@@ -229,7 +229,7 @@ func TestSyncScopedDirSymlinksTargets_NonENOENTErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := syncScopedDirSymlinksTargets(agentsHome, "agents", "proj", "AGENT.md", filepath.Join(tmp, "dst-a"), filepath.Join(tmp, "dst-b"))
+	err := syncScopedDirSymlinksTargets(stdPlatformIO{}, agentsHome, "agents", "proj", "AGENT.md", filepath.Join(tmp, "dst-a"), filepath.Join(tmp, "dst-b"))
 	if err == nil {
 		t.Fatal("expected ENOTDIR-style error to propagate")
 	}
@@ -248,7 +248,7 @@ func TestSyncScopedFileSymlinks_NonENOENTErrorPropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md")
+	err := syncScopedFileSymlinks(stdPlatformIO{}, agentsHome, "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md")
 	if err == nil {
 		t.Fatal("expected ENOTDIR-style error to propagate")
 	}
@@ -257,7 +257,7 @@ func TestSyncScopedFileSymlinks_NonENOENTErrorPropagates(t *testing.T) {
 // TestSyncScopedFileSymlinks_MissingBucketIsNoop asserts ENOENT no-ops cleanly.
 func TestSyncScopedFileSymlinks_MissingBucketIsNoop(t *testing.T) {
 	tmp := t.TempDir()
-	if err := syncScopedFileSymlinks(filepath.Join(tmp, "no-home"), "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md"); err != nil {
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, filepath.Join(tmp, "no-home"), "agents", "global", "AGENT.md", filepath.Join(tmp, "dst"), ".md"); err != nil {
 		t.Fatalf("ENOENT bucket must be a no-op: %v", err)
 	}
 }

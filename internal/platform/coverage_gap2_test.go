@@ -714,7 +714,7 @@ func TestSyncResourceDirEntries_MkdirError(t *testing.T) {
 	}
 	// dstRoot below a regular file → MkdirAll errors.
 	dst := filepath.Join(blocker, "child")
-	err := syncResourceDirEntries([]resourceDir{{Name: "x", Dir: "/no/where"}}, dst)
+	err := syncResourceDirEntries(stdPlatformIO{}, []resourceDir{{Name: "x", Dir: "/no/where"}}, dst)
 	if err == nil {
 		t.Error("expected mkdir error")
 	}

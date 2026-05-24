@@ -554,7 +554,7 @@ func TestRemoveManagedRenderedHookFileToUserHomes(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	// No-op when specs are empty.
-	if err := removeManagedRenderedHookFileToUserHomes(nil, ".claude/settings.json", renderClaudeHookSettings); err != nil {
+	if err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, nil, ".claude/settings.json", renderClaudeHookSettings); err != nil {
 		t.Errorf("nil specs should no-op, got %v", err)
 	}
 
@@ -577,7 +577,7 @@ func TestRemoveManagedRenderedHookFileToUserHomes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := removeManagedRenderedHookFileToUserHomes(specs, ".claude/settings.json", renderClaudeHookSettings); err != nil {
+	if err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, specs, ".claude/settings.json", renderClaudeHookSettings); err != nil {
 		t.Fatalf("removeManagedRenderedHookFileToUserHomes: %v", err)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
@@ -834,25 +834,25 @@ func TestResolveHookCommand_RelativeBundleResolution(t *testing.T) {
 
 // TestEmitHookSpec_NilNoOp keeps the early-return branch covered.
 func TestEmitHookSpec_NilNoOp(t *testing.T) {
-	if err := emitHookSpec(nil, "/dev/null", HookEmissionMode{}); err != nil {
+	if err := emitHookSpec(stdPlatformIO{}, nil, "/dev/null", HookEmissionMode{}); err != nil {
 		t.Errorf("nil spec should no-op, got %v", err)
 	}
-	if err := emitHookSpecToUserHomes(nil, ".x/y", HookEmissionMode{}); err != nil {
+	if err := emitHookSpecToUserHomes(stdPlatformIO{}, nil, ".x/y", HookEmissionMode{}); err != nil {
 		t.Errorf("nil spec to user homes should no-op, got %v", err)
 	}
 }
 
 func TestEmitHookSpec_UnknownShapeErrors(t *testing.T) {
-	if err := emitHookSpec(&HookSpec{}, "/tmp/x", HookEmissionMode{Shape: "wat"}); err == nil {
+	if err := emitHookSpec(stdPlatformIO{}, &HookSpec{}, "/tmp/x", HookEmissionMode{Shape: "wat"}); err == nil {
 		t.Error("expected error for unknown shape")
 	}
-	if err := emitHookSpec(&HookSpec{}, "/tmp/x", HookEmissionMode{Shape: HookShapeRenderSingle}); err == nil {
+	if err := emitHookSpec(stdPlatformIO{}, &HookSpec{}, "/tmp/x", HookEmissionMode{Shape: HookShapeRenderSingle}); err == nil {
 		t.Error("render shapes are not single-direct emission")
 	}
 }
 
 func TestEmitHookFile_UnknownTransportErrors(t *testing.T) {
-	if err := emitHookFile("/no/where", "/tmp/x", "weird"); err == nil {
+	if err := emitHookFile(stdPlatformIO{}, "/no/where", "/tmp/x", "weird"); err == nil {
 		t.Error("expected error for unknown transport")
 	}
 }
@@ -864,7 +864,7 @@ func TestEmitHookFile_WriteCopiesContent(t *testing.T) {
 	if err := os.WriteFile(src, []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := emitHookFile(src, dst, HookTransportWrite); err != nil {
+	if err := emitHookFile(stdPlatformIO{}, src, dst, HookTransportWrite); err != nil {
 		t.Fatalf("emitHookFile write: %v", err)
 	}
 	got, err := os.ReadFile(dst)
@@ -877,23 +877,23 @@ func TestEmitHookFile_WriteCopiesContent(t *testing.T) {
 }
 
 func TestEmitHookFile_WriteMissingSource(t *testing.T) {
-	if err := emitHookFile("/no/where", filepath.Join(t.TempDir(), "out"), HookTransportWrite); err == nil {
+	if err := emitHookFile(stdPlatformIO{}, "/no/where", filepath.Join(t.TempDir(), "out"), HookTransportWrite); err == nil {
 		t.Error("expected error reading missing source")
 	}
 }
 
 func TestEmitHookFanout_RejectsWrongShape(t *testing.T) {
-	err := emitHookFanout(nil, t.TempDir(), HookEmissionMode{Shape: HookShapeDirect}, func(HookSpec) (string, bool) { return "", false })
+	err := emitHookFanout(stdPlatformIO{}, nil, t.TempDir(), HookEmissionMode{Shape: HookShapeDirect}, func(HookSpec) (string, bool) { return "", false })
 	if err == nil {
 		t.Error("expected error for non-fanout shape")
 	}
 }
 
 func TestEmitRenderedHookFile_NilSpecsNoOp(t *testing.T) {
-	if err := emitRenderedHookFile(nil, "/tmp/x", renderClaudeHookSettings); err != nil {
+	if err := emitRenderedHookFile(stdPlatformIO{}, nil, "/tmp/x", renderClaudeHookSettings); err != nil {
 		t.Errorf("nil specs should no-op, got %v", err)
 	}
-	if err := emitRenderedHookFileToUserHomes(nil, ".x", renderClaudeHookSettings); err != nil {
+	if err := emitRenderedHookFileToUserHomes(stdPlatformIO{}, nil, ".x", renderClaudeHookSettings); err != nil {
 		t.Errorf("nil specs to user homes should no-op, got %v", err)
 	}
 }
@@ -901,7 +901,7 @@ func TestEmitRenderedHookFile_NilSpecsNoOp(t *testing.T) {
 func TestEmitPreferredHookFile_FallbackToRemove(t *testing.T) {
 	called := 0
 	remove := func(_ string) error { called++; return nil }
-	if err := emitPreferredHookFile("/tmp/x", renderClaudeHookSettings, nil, directSymlinkHookMode, remove); err != nil {
+	if err := emitPreferredHookFile(stdPlatformIO{}, "/tmp/x", renderClaudeHookSettings, nil, directSymlinkHookMode, remove); err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
 	if called != 1 {
@@ -911,7 +911,7 @@ func TestEmitPreferredHookFile_FallbackToRemove(t *testing.T) {
 	// canonicalSets present → render branch used (legacy not invoked).
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "out.json")
-	if err := emitPreferredHookFile(target, renderClaudeHookSettings, nil, directSymlinkHookMode, nil,
+	if err := emitPreferredHookFile(stdPlatformIO{}, target, renderClaudeHookSettings, nil, directSymlinkHookMode, nil,
 		[]HookSpec{{Name: "ping", When: "pre_tool_use", Command: "/bin/true"}}); err != nil {
 		t.Errorf("render branch: %v", err)
 	}
@@ -925,7 +925,7 @@ func TestEmitPreferredHookFileToUserHomes_FallbackBranches(t *testing.T) {
 	t.Setenv("HOME", home)
 	called := 0
 	remove := func(_ string) error { called++; return nil }
-	if err := emitPreferredHookFileToUserHomes(".claude/settings.json",
+	if err := emitPreferredHookFileToUserHomes(stdPlatformIO{}, ".claude/settings.json",
 		renderClaudeHookSettings, nil, directSymlinkHookMode, remove); err != nil {
 		t.Errorf("user-home remove branch: %v", err)
 	}
@@ -940,13 +940,13 @@ func TestEmitPreferredHookFileToUserHomes_FallbackBranches(t *testing.T) {
 func TestWriteManagedFile_Dedup(t *testing.T) {
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "f.json")
-	if err := writeManagedFile(dst, []byte("a")); err != nil {
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("a")); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if err := writeManagedFile(dst, []byte("a")); err != nil {
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("a")); err != nil {
 		t.Fatalf("second identical write: %v", err)
 	}
-	if err := writeManagedFile(dst, []byte("b")); err != nil {
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("b")); err != nil {
 		t.Fatalf("differing write: %v", err)
 	}
 	got, _ := os.ReadFile(dst)
@@ -961,7 +961,7 @@ func TestRemoveManagedFile_NoOpWhenContentDiffers(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("unrelated"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeManagedFile(dst, []byte("managed")); err != nil {
+	if err := removeManagedFile(stdPlatformIO{}, dst, []byte("managed")); err != nil {
 		t.Fatalf("removeManagedFile: %v", err)
 	}
 	if _, err := os.Stat(dst); err != nil {
@@ -975,7 +975,7 @@ func TestRemoveManagedFile_RemovesMatchingContent(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("managed"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeManagedFile(dst, []byte("managed")); err != nil {
+	if err := removeManagedFile(stdPlatformIO{}, dst, []byte("managed")); err != nil {
 		t.Fatalf("removeManagedFile: %v", err)
 	}
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
@@ -1026,14 +1026,14 @@ func TestEmitRenderedHookFanoutAndRemove(t *testing.T) {
 		{Name: "a", When: "user_prompt_submit", Command: "/bin/true"},
 		{Name: "b", When: "post_tool_use", Command: "/bin/true"}, // not in copilot switch → skipped
 	}
-	if err := emitRenderedHookFanout(specs, dstRoot, renderCopilotHookFile); err != nil {
+	if err := emitRenderedHookFanout(stdPlatformIO{}, specs, dstRoot, renderCopilotHookFile); err != nil {
 		t.Fatalf("emitRenderedHookFanout: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dstRoot, "a.json")); err != nil {
 		t.Errorf("expected a.json: %v", err)
 	}
 	// Remove fanout: matches content → removes a.json, dir becomes empty and is pruned.
-	if err := removeManagedRenderedHookFanout(specs, dstRoot, renderCopilotHookFile); err != nil {
+	if err := removeManagedRenderedHookFanout(stdPlatformIO{}, specs, dstRoot, renderCopilotHookFile); err != nil {
 		t.Fatalf("removeManagedRenderedHookFanout: %v", err)
 	}
 	if _, err := os.Stat(dstRoot); !os.IsNotExist(err) {
@@ -1042,13 +1042,13 @@ func TestEmitRenderedHookFanoutAndRemove(t *testing.T) {
 }
 
 func TestEmitRenderedHookFanout_NilSpecsNoOp(t *testing.T) {
-	if err := emitRenderedHookFanout(nil, "/tmp/x", renderCopilotHookFile); err != nil {
+	if err := emitRenderedHookFanout(stdPlatformIO{}, nil, "/tmp/x", renderCopilotHookFile); err != nil {
 		t.Errorf("nil specs no-op: %v", err)
 	}
-	if err := removeManagedRenderedHookFanout(nil, "/tmp/x", renderCopilotHookFile); err != nil {
+	if err := removeManagedRenderedHookFanout(stdPlatformIO{}, nil, "/tmp/x", renderCopilotHookFile); err != nil {
 		t.Errorf("nil specs no-op (remove): %v", err)
 	}
-	if err := emitHookFanout([]HookSpec{}, t.TempDir(),
+	if err := emitHookFanout(stdPlatformIO{}, []HookSpec{}, t.TempDir(),
 		HookEmissionMode{Shape: HookShapeRenderFanout, Transport: HookTransportSymlink},
 		func(HookSpec) (string, bool) { return "", false }); err != nil {
 		t.Errorf("empty specs fanout: %v", err)
@@ -1097,13 +1097,13 @@ func TestIsLikelyRenderedHookFileDetectors(t *testing.T) {
 // TestRemoveRenderedHelpers exercises the public remove* wrappers on missing
 // files (should no-op, not error).
 func TestRemoveRenderedHelpers_MissingFile(t *testing.T) {
-	if err := removeRenderedClaudeHookSettings("/no/file"); err != nil {
+	if err := removeRenderedClaudeHookSettings(stdPlatformIO{}, "/no/file"); err != nil {
 		t.Errorf("removeRenderedClaudeHookSettings missing: %v", err)
 	}
-	if err := removeRenderedCodexHookConfig("/no/file"); err != nil {
+	if err := removeRenderedCodexHookConfig(stdPlatformIO{}, "/no/file"); err != nil {
 		t.Errorf("removeRenderedCodexHookConfig missing: %v", err)
 	}
-	if err := removeRenderedCursorHookConfig("/no/file"); err != nil {
+	if err := removeRenderedCursorHookConfig(stdPlatformIO{}, "/no/file"); err != nil {
 		t.Errorf("removeRenderedCursorHookConfig missing: %v", err)
 	}
 }
@@ -1120,19 +1120,19 @@ func TestRemoveManagedFileIf(t *testing.T) {
 	if err := os.WriteFile(other, []byte(`{"unrelated":true}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeManagedFileIf(matching, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := removeManagedFileIf(stdPlatformIO{}, matching, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("removeManagedFileIf matching: %v", err)
 	}
 	if _, err := os.Stat(matching); !os.IsNotExist(err) {
 		t.Errorf("expected matching file removed")
 	}
-	if err := removeManagedFileIf(other, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := removeManagedFileIf(stdPlatformIO{}, other, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("removeManagedFileIf other: %v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Errorf("expected other file preserved")
 	}
-	if err := removeManagedFileIf(filepath.Join(tmp, "no-such"), isLikelyRenderedCursorHookConfig); err != nil {
+	if err := removeManagedFileIf(stdPlatformIO{}, filepath.Join(tmp, "no-such"), isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("removeManagedFileIf missing: %v", err)
 	}
 }
@@ -1158,7 +1158,7 @@ func TestPruneManagedRenderedFanoutExtras(t *testing.T) {
 	}
 
 	wanted := map[string]bool{"keep.json": true}
-	if err := pruneManagedRenderedFanoutExtras(dst, wanted, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, dst, wanted, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Fatalf("pruneManagedRenderedFanoutExtras: %v", err)
 	}
 	if _, err := os.Stat(keep); err != nil {
@@ -1176,12 +1176,12 @@ func TestPruneManagedRenderedFanoutExtras(t *testing.T) {
 	if err := os.MkdirAll(emptyDst, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := pruneManagedRenderedFanoutExtras(emptyDst, nil, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, emptyDst, nil, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("empty dir prune: %v", err)
 	}
 
 	// Missing dir is a no-op.
-	if err := pruneManagedRenderedFanoutExtras(filepath.Join(tmp, "nope"), nil, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, filepath.Join(tmp, "nope"), nil, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Errorf("missing dir prune: %v", err)
 	}
 }
@@ -2016,7 +2016,7 @@ func TestSyncScopedFileSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstRoot := filepath.Join(tmp, "out")
-	if err := syncScopedFileSymlinks(tmp, "agents", "global", "AGENT.md", dstRoot, ".md"); err != nil {
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dstRoot, ".md"); err != nil {
 		t.Fatalf("syncScopedFileSymlinks: %v", err)
 	}
 	link := filepath.Join(dstRoot, "reviewer.md")
@@ -2025,7 +2025,7 @@ func TestSyncScopedFileSymlinks(t *testing.T) {
 	}
 
 	// Missing source → no-op (no error).
-	if err := syncScopedFileSymlinks(tmp, "no-such-bucket", "global", "AGENT.md", t.TempDir(), ".md"); err != nil {
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "no-such-bucket", "global", "AGENT.md", t.TempDir(), ".md"); err != nil {
 		t.Errorf("missing bucket should be no-op, got %v", err)
 	}
 }
