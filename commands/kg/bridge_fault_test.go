@@ -16,9 +16,9 @@ import (
 
 // closedStore opens, seeds (optional), and immediately closes the warm-store
 // SQLiteStore so subsequent reader methods fail with a "database is closed"
-// error. The returned store still satisfies *graphstore.SQLiteStore so it can
+// error. The returned store still satisfies graphstore.Store so it can
 // be passed to the bridge collectors that exercise the error-return branches.
-func closedStore(t *testing.T) *graphstore.SQLiteStore {
+func closedStore(t *testing.T) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
@@ -67,7 +67,7 @@ func TestCollectNeighborResults_StoreClosedPropagatesError(t *testing.T) {
 
 // seedNeighborMatchFixture sets up a store with Caller→{Callee1,Callee2}
 // CALLS edges and returns the resolved caller node plus its outbound edges.
-func seedNeighborMatchFixture(t *testing.T) (*graphstore.SQLiteStore, *graphstore.GraphNode, []graphstore.GraphEdge) {
+func seedNeighborMatchFixture(t *testing.T) (graphstore.Store, *graphstore.GraphNode, []graphstore.GraphEdge) {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
@@ -404,7 +404,7 @@ func TestRunKGBridgeHealth_RendersLastQueryMetadata(t *testing.T) {
 // seedAndCloseStore initializes a kg home, opens the warm store, optionally
 // seeds via fn, then closes the store so subsequent reads fail with
 // "database is closed". Returns the closed store and the home dir.
-func seedAndCloseStore(t *testing.T, fn func(s *graphstore.SQLiteStore)) *graphstore.SQLiteStore {
+func seedAndCloseStore(t *testing.T, fn func(s graphstore.Store)) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {
@@ -426,7 +426,7 @@ func seedAndCloseStore(t *testing.T, fn func(s *graphstore.SQLiteStore)) *graphs
 // TestRunSymbolLookup_FindCodeNodesError drives the findCodeNodes error
 // return inside runSymbolLookup (~650).
 func TestRunSymbolLookup_FindCodeNodesError(t *testing.T) {
-	store := seedAndCloseStore(t, func(s *graphstore.SQLiteStore) {
+	store := seedAndCloseStore(t, func(s graphstore.Store) {
 		_, _ = s.UpsertNode(graphstore.NodeInfo{Kind: "Function", Name: "A", FilePath: "p.go"}, "h")
 	})
 	resp := &GraphQueryResponse{}
@@ -436,7 +436,7 @@ func TestRunSymbolLookup_FindCodeNodesError(t *testing.T) {
 }
 
 func TestRunImpactRadius_FindCodeNodesError(t *testing.T) {
-	store := seedAndCloseStore(t, func(s *graphstore.SQLiteStore) {
+	store := seedAndCloseStore(t, func(s graphstore.Store) {
 		_, _ = s.UpsertNode(graphstore.NodeInfo{Kind: "Function", Name: "A", FilePath: "p.go"}, "h")
 	})
 	resp := &GraphQueryResponse{}
@@ -446,7 +446,7 @@ func TestRunImpactRadius_FindCodeNodesError(t *testing.T) {
 }
 
 func TestRunTestsFor_FindCodeNodesError(t *testing.T) {
-	store := seedAndCloseStore(t, func(s *graphstore.SQLiteStore) {
+	store := seedAndCloseStore(t, func(s graphstore.Store) {
 		_, _ = s.UpsertNode(graphstore.NodeInfo{Kind: "Function", Name: "A", FilePath: "p.go"}, "h")
 	})
 	resp := &GraphQueryResponse{}
@@ -456,7 +456,7 @@ func TestRunTestsFor_FindCodeNodesError(t *testing.T) {
 }
 
 func TestRunNeighbors_FindCodeNodesError(t *testing.T) {
-	store := seedAndCloseStore(t, func(s *graphstore.SQLiteStore) {
+	store := seedAndCloseStore(t, func(s graphstore.Store) {
 		_, _ = s.UpsertNode(graphstore.NodeInfo{Kind: "Function", Name: "A", FilePath: "p.go"}, "h")
 	})
 	resp := &GraphQueryResponse{}
@@ -466,7 +466,7 @@ func TestRunNeighbors_FindCodeNodesError(t *testing.T) {
 }
 
 func TestRunSymbolDecisions_FindCodeNodesError(t *testing.T) {
-	store := seedAndCloseStore(t, func(s *graphstore.SQLiteStore) {
+	store := seedAndCloseStore(t, func(s graphstore.Store) {
 		_, _ = s.UpsertNode(graphstore.NodeInfo{Kind: "Function", Name: "A", FilePath: "p.go"}, "h")
 	})
 	resp := &GraphQueryResponse{}
@@ -512,7 +512,7 @@ func TestCollectCodeBridgeResults_WarmStoreDispatchError(t *testing.T) {
 // store still has a working `nodes` table (so findCodeNodes succeeds) but
 // queries against the dropped table return an error — exactly what's needed
 // to exercise the per-run* error-return branches.
-func halfBrokenStore(t *testing.T, dropTable string) *graphstore.SQLiteStore {
+func halfBrokenStore(t *testing.T, dropTable string) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
 	if err := runKGSetup(); err != nil {

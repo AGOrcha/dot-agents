@@ -494,8 +494,12 @@ func graphstoreDBPath(kgHomeDir string) string {
 	return filepath.Join(kgHomeDir, "ops", "graphstore.db")
 }
 
-// openKGStore opens (or creates) the warm-layer SQLite database.
-func openKGStore(kgHomeDir string) (*graphstore.SQLiteStore, error) {
+// openKGStore opens (or creates) the warm-layer SQLite database. It returns
+// the contract-typed graphstore.Store handle (gcc3 binding — callers depend
+// on the published contract, never on the concrete backend). The provider
+// behind the returned Store owns pooling/serialization per CONTRACT.md
+// guarantee #3; lifecycle stays explicit (callers Close when done) per #4.
+func openKGStore(kgHomeDir string) (graphstore.Store, error) {
 	return graphstore.OpenSQLite(graphstoreDBPath(kgHomeDir))
 }
 
@@ -519,8 +523,12 @@ func noteToKGNote(note *GraphNote, filePath string) graphstore.KGNote {
 }
 
 // runKGWarmCodeImport imports CRG code nodes and edges into the warm SQLite layer.
-// It reads directly from .code-review-graph/graph.db in the repo root.
-func runKGWarmCodeImport(store *graphstore.SQLiteStore, repoRoot string) (nodesImported, edgesImported int, err error) {
+// It reads directly from .code-review-graph/graph.db in the repo root. The
+// store parameter is the published contract type (gcc3 binding) — this
+// caller exercises both the Writer and a Closer-adjacent lifetime via its
+// outer scope, so it depends on the whole-store Store rather than a narrower
+// role.
+func runKGWarmCodeImport(store graphstore.Store, repoRoot string) (nodesImported, edgesImported int, err error) {
 	bridge, berr := graphstore.NewCRGBridge(repoRoot)
 	if berr != nil {
 		return 0, 0, fmt.Errorf("CRG not available: %w", berr)
@@ -628,8 +636,11 @@ func warmNoteSubdirs(noteTypeFilter string) ([]string, error) {
 }
 
 // warmActiveNotes upserts each note found under the given notes/ subdirs
-// into store and returns the indexed/skipped counters.
-func warmActiveNotes(store *graphstore.SQLiteStore, home string, subdirs []string) (indexed, skipped int) {
+// into store and returns the indexed/skipped counters. The store parameter
+// is the published contract (gcc3 binding); concretely this caller uses the
+// KGNoteStore role, but we keep the whole-store type to share the same
+// handle across the warm/code-import passes in runKGWarm.
+func warmActiveNotes(store graphstore.Store, home string, subdirs []string) (indexed, skipped int) {
 	for _, sub := range subdirs {
 		i, s := warmNotesInDir(store, filepath.Join(home, "notes", sub), nil)
 		indexed += i
@@ -640,8 +651,8 @@ func warmActiveNotes(store *graphstore.SQLiteStore, home string, subdirs []strin
 
 // warmArchivedNotes upserts the contents of notes/_archived, marking each
 // resulting KGNote as archived when the source frontmatter omits the
-// archive timestamp.
-func warmArchivedNotes(store *graphstore.SQLiteStore, home string) (indexed, skipped int) {
+// archive timestamp. store is the published contract (gcc3 binding).
+func warmArchivedNotes(store graphstore.Store, home string) (indexed, skipped int) {
 	return warmNotesInDir(store, filepath.Join(home, "notes", "_archived"), func(kn *graphstore.KGNote, note *GraphNote) {
 		if kn.ArchivedAt == "" {
 			kn.ArchivedAt = note.UpdatedAt
@@ -652,8 +663,9 @@ func warmArchivedNotes(store *graphstore.SQLiteStore, home string) (indexed, ski
 // warmNotesInDir reads every top-level .md file under dir, parses it as a
 // GraphNote, applies the optional adjust callback, and upserts the
 // resulting KGNote into store. Returns the indexed/skipped counters.
-// Missing directories are not counted as skips.
-func warmNotesInDir(store *graphstore.SQLiteStore, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
+// Missing directories are not counted as skips. store is the published
+// contract (gcc3 binding); only the KGNoteStore role is exercised here.
+func warmNotesInDir(store graphstore.Store, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
 	entries, err := osReadDir(dir)
 	if err != nil {
 		return 0, 0
@@ -688,7 +700,8 @@ func warmNotesInDir(store *graphstore.SQLiteStore, dir string, adjust func(*grap
 
 // warmCodeLane runs the optional code-lane import from CRG and returns a
 // summary line for inclusion in the SuccessBox body, or "" on failure.
-func warmCodeLane(store *graphstore.SQLiteStore) string {
+// store is the published contract (gcc3 binding).
+func warmCodeLane(store graphstore.Store) string {
 	repoRoot, _ := os.Getwd()
 	nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
 	if cerr != nil {
