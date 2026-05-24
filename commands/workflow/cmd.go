@@ -11,6 +11,7 @@ const (
 	workflowFlagVerifierType    = "verifier-type"
 	workflowFlagLogToIter       = "log-to-iter"
 	workflowFlagWriteScope      = "write-scope"
+	workflowFlagCommitState     = "commit-state"
 	cmdHintCanonicalPlanID      = "Pass a canonical plan ID from `da workflow plan`."
 	cmdFlagCanonicalPlanIDDescr = "Canonical plan ID (required)"
 )
@@ -546,7 +547,7 @@ func newWorkflowAdvanceCmd() *cobra.Command {
 	}
 	advanceCmd.Flags().StringVar(&advanceTask, "task", "", "Task ID to advance (required)")
 	advanceCmd.Flags().StringVar(&advanceStatus, "status", "", "New task status (required)")
-	advanceCmd.Flags().BoolVar(&advanceCommitState, "commit-state", false, "After advancing, stage + commit the workflow-state mutation (iteration-close integration)")
+	advanceCmd.Flags().BoolVar(&advanceCommitState, workflowFlagCommitState, false, "After advancing, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = advanceCmd.MarkFlagRequired("task")
 	_ = advanceCmd.MarkFlagRequired("status")
 	return advanceCmd
@@ -858,7 +859,7 @@ func newWorkflowMergeBackCmd() *cobra.Command {
 			if err := runWorkflowMergeBack(cmd, args); err != nil {
 				return err
 			}
-			commitState, _ := cmd.Flags().GetBool("commit-state")
+			commitState, _ := cmd.Flags().GetBool(workflowFlagCommitState)
 			if !commitState {
 				return nil
 			}
@@ -872,7 +873,7 @@ func newWorkflowMergeBackCmd() *cobra.Command {
 	mergeBackCmd.Flags().String("summary", "", "Summary of what was done (required)")
 	mergeBackCmd.Flags().String("verification-status", "unknown", "pass|fail|partial|unknown")
 	mergeBackCmd.Flags().String("integration-notes", "", "Guidance for the parent agent")
-	mergeBackCmd.Flags().Bool("commit-state", false, "After recording the merge-back, stage + commit the workflow-state mutation (iteration-close integration)")
+	mergeBackCmd.Flags().Bool(workflowFlagCommitState, false, "After recording the merge-back, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = mergeBackCmd.MarkFlagRequired("task")
 	_ = mergeBackCmd.MarkFlagRequired("summary")
 	return mergeBackCmd

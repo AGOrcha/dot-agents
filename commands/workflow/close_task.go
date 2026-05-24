@@ -122,73 +122,111 @@ var (
 // arrives once the skill needs them. Rejecting them up-front keeps the
 // contract honest.
 func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
-	if opts.scoreRecompute != "current" {
-		return fmt.Errorf("close-task: --score-recompute=%q not yet implemented (only \"current\" supported in this slice)", opts.scoreRecompute)
-	}
-	project, err := closeTaskResolveProject()
+	setup, err := resolveCloseTaskSetup(opts)
 	if err != nil {
-		return fmt.Errorf("close-task: resolve project: %w", err)
+		return err
 	}
-	repoDir := opts.repoDir
-	if repoDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("close-task: resolve cwd: %w", err)
-		}
-		repoDir = cwd
+	if err := closeTaskCheckpoint(setup.n, DefaultIterationRole(), ""); err != nil {
+		return fmt.Errorf("close-task: checkpoint --log-to-iter %d: %w", setup.n, err)
 	}
-
-	iterDir := IterationLogDir(project.Path)
-	n, err := closeTaskNextIter(iterDir)
+	score, rec, err := scoring.ScoreIteration(setup.iterDir, setup.repoDir, setup.n, opts.transcriptDirs...)
 	if err != nil {
-		return fmt.Errorf("close-task: pick iteration N: %w", err)
+		return fmt.Errorf("close-task: score iteration %d: %w", setup.n, err)
 	}
-
-	if err := closeTaskCheckpoint(n, DefaultIterationRole(), ""); err != nil {
-		return fmt.Errorf("close-task: checkpoint --log-to-iter %d: %w", n, err)
-	}
-
-	score, rec, err := scoring.ScoreIteration(iterDir, repoDir, n, opts.transcriptDirs...)
+	sidecarPath, err := closeTaskWriteSidecar(setup.iterDir, score, rec)
 	if err != nil {
-		return fmt.Errorf("close-task: score iteration %d: %w", n, err)
+		return fmt.Errorf("close-task: persist iter-%d sidecar: %w", setup.n, err)
 	}
-	sidecarPath, err := closeTaskWriteSidecar(iterDir, score, rec)
-	if err != nil {
-		return fmt.Errorf("close-task: persist iter-%d sidecar: %w", n, err)
-	}
-
 	if err := runWorkflowAdvance(opts.planID, opts.taskID, "completed"); err != nil {
 		return fmt.Errorf("close-task: advance: %w", err)
 	}
-
-	nextFocus := opts.nextFocus
-	if nextFocus == "" {
-		nextFocus = pickNextFocus(project.Path, opts.planID)
+	nextFocus, err := applyCloseTaskNextFocus(opts, setup.project.Path)
+	if err != nil {
+		return err
 	}
-	if nextFocus != "" {
-		if err := closeTaskPlanUpdate(opts.planID, "", "", "", nextFocus, "", ""); err != nil {
-			return fmt.Errorf("close-task: plan update --focus %s: %w", nextFocus, err)
-		}
+	committed, err := runCloseTaskCommit(out, opts)
+	if err != nil {
+		return err
 	}
-
-	committed := false
-	if !opts.noCommit {
-		if err := iterationCloseCommit(out); err != nil {
-			return fmt.Errorf("close-task: workflow commit: %w", err)
-		}
-		committed = true
-	}
-
-	result := closeTaskResult{
+	return emitCloseTaskResult(out, closeTaskResult{
 		PlanID:         opts.planID,
 		TaskID:         opts.taskID,
-		IterationN:     n,
+		IterationN:     setup.n,
 		SidecarPath:    sidecarPath,
 		ScoreValue:     score.Value,
 		ScoreBand:      score.Band,
 		NextFocus:      nextFocus,
 		WorkflowCommit: committed,
+	})
+}
+
+// closeTaskSetup bundles the four pieces of context the orchestration
+// chain needs: the resolved project, the effective repo dir (cwd
+// fallback), the canonical iter-log dir, and the next iteration number.
+// Extracted from runWorkflowCloseTask to keep its cognitive complexity
+// under the gate threshold.
+type closeTaskSetup struct {
+	project workflowProjectRef
+	repoDir string
+	iterDir string
+	n       int
+}
+
+func resolveCloseTaskSetup(opts closeTaskOpts) (closeTaskSetup, error) {
+	if opts.scoreRecompute != "current" {
+		return closeTaskSetup{}, fmt.Errorf("close-task: --score-recompute=%q not yet implemented (only \"current\" supported in this slice)", opts.scoreRecompute)
 	}
+	project, err := closeTaskResolveProject()
+	if err != nil {
+		return closeTaskSetup{}, fmt.Errorf("close-task: resolve project: %w", err)
+	}
+	repoDir := opts.repoDir
+	if repoDir == "" {
+		// See runScoreRun for why we treat Getwd as infallible.
+		cwd, _ := os.Getwd()
+		repoDir = cwd
+	}
+	iterDir := IterationLogDir(project.Path)
+	n, err := closeTaskNextIter(iterDir)
+	if err != nil {
+		return closeTaskSetup{}, fmt.Errorf("close-task: pick iteration N: %w", err)
+	}
+	return closeTaskSetup{project: project, repoDir: repoDir, iterDir: iterDir, n: n}, nil
+}
+
+// applyCloseTaskNextFocus picks (or accepts the override of) the next
+// focus task and updates the plan if non-empty. Returns the picked
+// nextFocus so the caller can include it in the result snapshot.
+func applyCloseTaskNextFocus(opts closeTaskOpts, projectPath string) (string, error) {
+	nextFocus := opts.nextFocus
+	if nextFocus == "" {
+		nextFocus = pickNextFocus(projectPath, opts.planID)
+	}
+	if nextFocus == "" {
+		return "", nil
+	}
+	if err := closeTaskPlanUpdate(opts.planID, "", "", "", nextFocus, "", ""); err != nil {
+		return "", fmt.Errorf("close-task: plan update --focus %s: %w", nextFocus, err)
+	}
+	return nextFocus, nil
+}
+
+// runCloseTaskCommit fires the workflow-state commit unless --no-commit
+// is set. Returns (didCommit, err) so the caller can record the outcome
+// in the result snapshot.
+func runCloseTaskCommit(out io.Writer, opts closeTaskOpts) (bool, error) {
+	if opts.noCommit {
+		return false, nil
+	}
+	if err := iterationCloseCommit(out); err != nil {
+		return false, fmt.Errorf("close-task: workflow commit: %w", err)
+	}
+	return true, nil
+}
+
+// emitCloseTaskResult renders or emits the structured result depending
+// on --json, matching the existing close-task contract.
+func emitCloseTaskResult(out io.Writer, result closeTaskResult) error {
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
