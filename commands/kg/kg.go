@@ -47,8 +47,8 @@ func ConfigPath() string {
 	return kgConfigPath()
 }
 
-func loadKGConfig() (*KGConfig, error) {
-	data, err := osReadFile(kgConfigPath())
+func loadKGConfig(io kgIO) (*KGConfig, error) {
+	data, err := io.ReadFile(kgConfigPath())
 	if err != nil {
 		return nil, err
 	}
@@ -60,17 +60,29 @@ func loadKGConfig() (*KGConfig, error) {
 }
 
 // SaveKGConfig writes cfg to KG_HOME/self/config.yaml.
+//
+// Exported helper: callers outside this package (e.g. commands/) that need to
+// persist the kg config call SaveKGConfig(cfg) and get the production IO
+// wired in automatically. Internal kg call sites pass an explicit kgIO via
+// saveKGConfigIO so a test fake threads through the same code path.
 func SaveKGConfig(cfg *KGConfig) error {
+	return saveKGConfigIO(stdKGIO{}, cfg)
+}
+
+// saveKGConfigIO is the threaded implementation of SaveKGConfig. The
+// exported wrapper calls it with stdKGIO{}; the internal kg setup path
+// passes the io threaded down from the Cobra handler.
+func saveKGConfigIO(io kgIO, cfg *KGConfig) error {
 	cfg.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	dir := filepath.Dir(kgConfigPath())
-	if err := osMkdirAll(dir, 0755); err != nil {
+	if err := io.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return osWriteFile(kgConfigPath(), data, 0644)
+	return io.WriteFile(kgConfigPath(), data, 0644)
 }
 
 // ── Graph note schema ─────────────────────────────────────────────────────────
@@ -164,9 +176,9 @@ type IndexEntry struct {
 	Path           string
 }
 
-func appendLogEntry(kgHomeDir, entry string) error {
+func appendLogEntry(io kgIO, kgHomeDir, entry string) error {
 	logPath := filepath.Join(kgHomeDir, "notes", kgLogFileName)
-	f, err := osOpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	f, err := io.OpenFile(logPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
@@ -175,9 +187,9 @@ func appendLogEntry(kgHomeDir, entry string) error {
 	return err
 }
 
-func readLogEntries(kgHomeDir string, limit int) ([]string, error) {
+func readLogEntries(io kgIO, kgHomeDir string, limit int) ([]string, error) {
 	logPath := filepath.Join(kgHomeDir, "notes", kgLogFileName)
-	data, err := osReadFile(logPath)
+	data, err := io.ReadFile(logPath)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -210,9 +222,9 @@ func readLogEntries(kgHomeDir string, limit int) ([]string, error) {
 }
 
 // updateIndex adds or replaces a note entry in notes/index.md.
-func updateIndex(kgHomeDir string, note *GraphNote) error {
+func updateIndex(io kgIO, kgHomeDir string, note *GraphNote) error {
 	indexPath := filepath.Join(kgHomeDir, "notes", kgIndexFileName)
-	data, err := osReadFile(indexPath)
+	data, err := io.ReadFile(indexPath)
 	if os.IsNotExist(err) {
 		data = []byte("# Knowledge Graph Index\n")
 	} else if err != nil {
@@ -224,7 +236,7 @@ func updateIndex(kgHomeDir string, note *GraphNote) error {
 	if !replaceIndexEntry(lines, fmt.Sprintf("- [%s]", note.ID), entryLine) {
 		lines = insertIndexEntry(lines, note.Type, entryLine)
 	}
-	return osWriteFile(indexPath, []byte(strings.Join(lines, "\n")), 0644)
+	return io.WriteFile(indexPath, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 // buildIndexEntryLine renders the markdown bullet entry for a note in
@@ -282,9 +294,9 @@ func indexOfTrimmed(lines []string, target string) int {
 }
 
 // readIndex parses entries from notes/index.md.
-func readIndex(kgHomeDir string) ([]IndexEntry, error) {
+func readIndex(io kgIO, kgHomeDir string) ([]IndexEntry, error) {
 	indexPath := filepath.Join(kgHomeDir, "notes", kgIndexFileName)
-	data, err := osReadFile(indexPath)
+	data, err := io.ReadFile(indexPath)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -375,14 +387,14 @@ type GraphHealth struct {
 	Warnings           []string `json:"warnings"`
 }
 
-func computeGraphHealth(kgHomeDir string) (GraphHealth, error) {
+func computeGraphHealth(io kgIO, kgHomeDir string) (GraphHealth, error) {
 	h := GraphHealth{
 		SchemaVersion: 1,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	for _, sub := range []string{"sources", "entities", "concepts", "synthesis", "decisions", "repos", "sessions"} {
-		if err := tallyGraphNoteDir(filepath.Join(kgHomeDir, "notes", sub), sub, &h); err != nil {
+		if err := tallyGraphNoteDir(io, filepath.Join(kgHomeDir, "notes", sub), sub, &h); err != nil {
 			return h, err
 		}
 	}
@@ -393,8 +405,8 @@ func computeGraphHealth(kgHomeDir string) (GraphHealth, error) {
 
 // tallyGraphNoteDir counts notes (and stale notes) under a single notes/<sub>/
 // directory, updating h in place. Missing directories are not an error.
-func tallyGraphNoteDir(dir, sub string, h *GraphHealth) error {
-	entries, err := osReadDir(dir)
+func tallyGraphNoteDir(io kgIO, dir, sub string, h *GraphHealth) error {
+	entries, err := io.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -409,7 +421,7 @@ func tallyGraphNoteDir(dir, sub string, h *GraphHealth) error {
 		if sub == "sources" {
 			h.SourceCount++
 		}
-		data, rerr := osReadFile(filepath.Join(dir, e.Name()))
+		data, rerr := io.ReadFile(filepath.Join(dir, e.Name()))
 		if rerr != nil {
 			continue
 		}
@@ -453,21 +465,21 @@ func deriveGraphHealthStatus(h *GraphHealth) {
 	}
 }
 
-func writeGraphHealth(kgHomeDir string, health GraphHealth) error {
+func writeGraphHealth(io kgIO, kgHomeDir string, health GraphHealth) error {
 	healthPath := filepath.Join(kgHomeDir, "ops", "health", "graph-health.json")
-	if err := osMkdirAll(filepath.Dir(healthPath), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(healthPath), 0755); err != nil {
 		return err
 	}
-	data, err := jsonMarshalIndent(health, "", "  ")
+	data, err := io.MarshalIndent(health, "", "  ")
 	if err != nil {
 		return err
 	}
-	return osWriteFile(healthPath, data, 0644)
+	return io.WriteFile(healthPath, data, 0644)
 }
 
-func readGraphHealth(kgHomeDir string) (*GraphHealth, error) {
+func readGraphHealth(io kgIO, kgHomeDir string) (*GraphHealth, error) {
 	healthPath := filepath.Join(kgHomeDir, "ops", "health", "graph-health.json")
-	data, err := osReadFile(healthPath)
+	data, err := io.ReadFile(healthPath)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -483,12 +495,12 @@ func readGraphHealth(kgHomeDir string) (*GraphHealth, error) {
 
 // ── kg setup ──────────────────────────────────────────────────────────────────
 
-func runKGSetup() error {
+func runKGSetup(io kgIO) error {
 	home := kgHome()
 
 	// Check if already initialized
 	if _, err := os.Stat(kgConfigPath()); err == nil {
-		cfg, _ := loadKGConfig()
+		cfg, _ := loadKGConfig(io)
 		name := ""
 		if cfg != nil {
 			name = cfg.Name
@@ -523,7 +535,7 @@ func runKGSetup() error {
 		"ops/integrity",
 	}
 	for _, d := range dirs {
-		if err := osMkdirAll(filepath.Join(home, d), 0755); err != nil {
+		if err := io.MkdirAll(filepath.Join(home, d), 0755); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}
@@ -537,41 +549,41 @@ func runKGSetup() error {
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
 		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := SaveKGConfig(cfg); err != nil {
+	if err := saveKGConfigIO(io, cfg); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
 	// Write initial index
 	indexPath := filepath.Join(home, "notes", kgIndexFileName)
 	indexContent := "# Knowledge Graph Index\n\nThis file is maintained automatically by da kg.\n"
-	if err := osWriteFile(indexPath, []byte(indexContent), 0644); err != nil {
+	if err := io.WriteFile(indexPath, []byte(indexContent), 0644); err != nil {
 		return fmt.Errorf("write index: %w", err)
 	}
 
 	// Write initial log
 	logPath := filepath.Join(home, "notes", kgLogFileName)
 	logContent := "# Knowledge Graph Operation Log\n\nAppend-only log of graph operations.\n"
-	if err := osWriteFile(logPath, []byte(logContent), 0644); err != nil {
+	if err := io.WriteFile(logPath, []byte(logContent), 0644); err != nil {
 		return fmt.Errorf("write log: %w", err)
 	}
 
 	// Compute and write initial health
-	health, err := computeGraphHealth(home)
+	health, err := computeGraphHealth(io, home)
 	if err != nil {
 		return fmt.Errorf("compute health: %w", err)
 	}
-	if err := writeGraphHealth(home, health); err != nil {
+	if err := writeGraphHealth(io, home, health); err != nil {
 		return fmt.Errorf("write health: %w", err)
 	}
 
 	// Write bridge contract schema
-	if err := writeBridgeContract(home); err != nil {
+	if err := writeBridgeContract(io, home); err != nil {
 		return fmt.Errorf("write bridge contract: %w", err)
 	}
 
 	// Phase 6A: initialize empty integrity manifest
 	emptyManifest := &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}
-	if err := saveManifest(home, emptyManifest); err != nil {
+	if err := saveManifest(io, home, emptyManifest); err != nil {
 		return fmt.Errorf("write integrity manifest: %w", err)
 	}
 
@@ -583,7 +595,7 @@ func runKGSetup() error {
 	warmStore.Close()
 
 	// Append setup event to log
-	if err := appendLogEntry(home, "setup | graph initialized"); err != nil {
+	if err := appendLogEntry(io, home, "setup | graph initialized"); err != nil {
 		return fmt.Errorf("append log: %w", err)
 	}
 
@@ -598,6 +610,7 @@ func runKGSetup() error {
 // ── kg health ─────────────────────────────────────────────────────────────────
 
 func runKGHealth(deps Deps, cmd *cobra.Command) error {
+	io := kgIOFrom(deps)
 	home := kgHome()
 
 	// Verify initialized
@@ -605,16 +618,16 @@ func runKGHealth(deps Deps, cmd *cobra.Command) error {
 		return fmt.Errorf("knowledge graph not initialized at %s — run 'da kg setup' first", home)
 	}
 
-	health, err := computeGraphHealth(home)
+	health, err := computeGraphHealth(io, home)
 	if err != nil {
 		return fmt.Errorf("compute health: %w", err)
 	}
-	if err := writeGraphHealth(home, health); err != nil {
+	if err := writeGraphHealth(io, home, health); err != nil {
 		return fmt.Errorf("write health: %w", err)
 	}
 
 	if commandJSON(cmd) {
-		data, err := jsonMarshalIndent(health, "", "  ")
+		data, err := io.MarshalIndent(health, "", "  ")
 		if err != nil {
 			return err
 		}
@@ -686,9 +699,9 @@ func runKGServe(_ *cobra.Command, _ []string) error {
 }
 
 // walkNoteFiles calls fn for every .md file under kgHomeDir/notes/*/.
-func walkNoteFiles(kgHomeDir string, fn func(path string, info fs.DirEntry) error) error {
+func walkNoteFiles(io kgIO, kgHomeDir string, fn func(path string, info fs.DirEntry) error) error {
 	notesDir := filepath.Join(kgHomeDir, "notes")
-	entries, err := osReadDir(notesDir)
+	entries, err := io.ReadDir(notesDir)
 	if err != nil {
 		return err
 	}
@@ -696,7 +709,7 @@ func walkNoteFiles(kgHomeDir string, fn func(path string, info fs.DirEntry) erro
 		if !sub.IsDir() {
 			continue
 		}
-		if err := walkNoteFilesIn(filepath.Join(notesDir, sub.Name()), fn); err != nil {
+		if err := walkNoteFilesIn(io, filepath.Join(notesDir, sub.Name()), fn); err != nil {
 			return err
 		}
 	}
@@ -706,8 +719,8 @@ func walkNoteFiles(kgHomeDir string, fn func(path string, info fs.DirEntry) erro
 // walkNoteFilesIn invokes fn for each top-level .md note file under subDir,
 // returning early on the first error returned by fn. Read errors on subDir
 // itself are treated as "no notes" rather than fatal.
-func walkNoteFilesIn(subDir string, fn func(path string, info fs.DirEntry) error) error {
-	files, err := osReadDir(subDir)
+func walkNoteFilesIn(io kgIO, subDir string, fn func(path string, info fs.DirEntry) error) error {
+	files, err := io.ReadDir(subDir)
 	if err != nil {
 		return nil
 	}
@@ -744,9 +757,9 @@ var validSourceTypes = map[string]bool{
 func isValidSourceType(t string) bool { return validSourceTypes[t] }
 
 // recordRawSource writes a raw source + its content to raw/inbox/<id>.md.
-func recordRawSource(kgHomeDir string, source RawSource, content []byte) error {
+func recordRawSource(io kgIO, kgHomeDir string, source RawSource, content []byte) error {
 	inboxDir := filepath.Join(kgHomeDir, "raw", "inbox")
-	if err := osMkdirAll(inboxDir, 0755); err != nil {
+	if err := io.MkdirAll(inboxDir, 0755); err != nil {
 		return err
 	}
 	fm, err := yaml.Marshal(source)
@@ -758,23 +771,23 @@ func recordRawSource(kgHomeDir string, source RawSource, content []byte) error {
 	buf.Write(fm)
 	buf.WriteString("---\n\n")
 	buf.Write(content)
-	return osWriteFile(filepath.Join(inboxDir, source.ID+".md"), buf.Bytes(), 0644)
+	return io.WriteFile(filepath.Join(inboxDir, source.ID+".md"), buf.Bytes(), 0644)
 }
 
 // moveToImported moves a raw source from inbox to imported.
-func moveToImported(kgHomeDir, sourceID string) error {
+func moveToImported(io kgIO, kgHomeDir, sourceID string) error {
 	src := filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md")
 	dst := filepath.Join(kgHomeDir, "raw", "imported", sourceID+".md")
-	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
-	return osRename(src, dst)
+	return io.Rename(src, dst)
 }
 
 // listPendingRawSources returns all sources in raw/inbox/.
-func listPendingRawSources(kgHomeDir string) ([]RawSource, error) {
+func listPendingRawSources(io kgIO, kgHomeDir string) ([]RawSource, error) {
 	inboxDir := filepath.Join(kgHomeDir, "raw", "inbox")
-	entries, err := osReadDir(inboxDir)
+	entries, err := io.ReadDir(inboxDir)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -786,7 +799,7 @@ func listPendingRawSources(kgHomeDir string) ([]RawSource, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		data, err := osReadFile(filepath.Join(inboxDir, e.Name()))
+		data, err := io.ReadFile(filepath.Join(inboxDir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -951,37 +964,37 @@ func noteExists(kgHomeDir, noteID string) (bool, string) {
 
 // createGraphNote writes a new note file, updates index, log, and integrity manifest.
 // Returns an error if a note with the same ID already exists.
-func createGraphNote(kgHomeDir string, note *GraphNote, body string) error {
+func createGraphNote(io kgIO, kgHomeDir string, note *GraphNote, body string) error {
 	if exists, _ := noteExists(kgHomeDir, note.ID); exists {
 		return fmt.Errorf("note %s already exists; use updateGraphNote instead", note.ID)
 	}
 	note.Version = 0 // Phase 6B: initialize version counter
 	dir := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type))
-	if err := osMkdirAll(dir, 0755); err != nil {
+	if err := io.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := renderGraphNote(note, body)
 	if err != nil {
 		return err
 	}
-	if err := osWriteFile(filepath.Join(dir, note.ID+".md"), data, 0644); err != nil {
+	if err := io.WriteFile(filepath.Join(dir, note.ID+".md"), data, 0644); err != nil {
 		return err
 	}
-	if err := updateIndex(kgHomeDir, note); err != nil {
+	if err := updateIndex(io, kgHomeDir, note); err != nil {
 		return err
 	}
 	// Phase 6A: update integrity manifest after write
-	_ = updateManifest(kgHomeDir, note.ID, body)
-	return appendLogEntry(kgHomeDir, fmt.Sprintf("create | %s (%s)", note.ID, note.Type))
+	_ = updateManifest(io, kgHomeDir, note.ID, body)
+	return appendLogEntry(io, kgHomeDir, fmt.Sprintf("create | %s (%s)", note.ID, note.Type))
 }
 
 // updateGraphNote updates an existing note's frontmatter, replaces body, updates index/log, and integrity manifest.
-func updateGraphNote(kgHomeDir string, note *GraphNote, body string) error {
+func updateGraphNote(io kgIO, kgHomeDir string, note *GraphNote, body string) error {
 	exists, path := noteExists(kgHomeDir, note.ID)
 	if !exists {
 		return fmt.Errorf("note %s not found", note.ID)
 	}
-	existing, err := osReadFile(path)
+	existing, err := io.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -997,15 +1010,15 @@ func updateGraphNote(kgHomeDir string, note *GraphNote, body string) error {
 	if err != nil {
 		return err
 	}
-	if err := osWriteFile(path, data, 0644); err != nil {
+	if err := io.WriteFile(path, data, 0644); err != nil {
 		return err
 	}
-	if err := updateIndex(kgHomeDir, note); err != nil {
+	if err := updateIndex(io, kgHomeDir, note); err != nil {
 		return err
 	}
 	// Phase 6A: update integrity manifest after write
-	_ = updateManifest(kgHomeDir, note.ID, body)
-	return appendLogEntry(kgHomeDir, fmt.Sprintf("update | %s (%s)", note.ID, note.Type))
+	_ = updateManifest(io, kgHomeDir, note.ID, body)
+	return appendLogEntry(io, kgHomeDir, fmt.Sprintf("update | %s (%s)", note.ID, note.Type))
 }
 
 // ── Phase 2: Ingest pipeline ──────────────────────────────────────────────────
@@ -1020,10 +1033,10 @@ type IngestResult struct {
 }
 
 // ingestSource processes one raw source from inbox: creates notes, updates index/log, moves to imported.
-func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
+func ingestSource(io kgIO, kgHomeDir, sourceID string) (*IngestResult, error) {
 	result := &IngestResult{SourceID: sourceID}
 
-	data, err := osReadFile(filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md"))
+	data, err := io.ReadFile(filepath.Join(kgHomeDir, "raw", "inbox", sourceID+".md"))
 	if err != nil {
 		return nil, fmt.Errorf("read inbox source: %w", err)
 	}
@@ -1031,20 +1044,20 @@ func ingestSource(kgHomeDir, sourceID string) (*IngestResult, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	srcNote := buildSourceNote(src, rawBody, now)
-	if err := createGraphNote(kgHomeDir, srcNote, rawBody); err != nil {
+	if err := createGraphNote(io, kgHomeDir, srcNote, rawBody); err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("source note: %v", err))
 	} else {
 		result.NotesCreated = append(result.NotesCreated, srcNote.ID)
 	}
 
-	ingestEntityNotes(kgHomeDir, src, srcNote, rawBody, now, result)
-	ingestDecisionNotes(kgHomeDir, src, srcNote, rawBody, now, result)
+	ingestEntityNotes(io, kgHomeDir, src, srcNote, rawBody, now, result)
+	ingestDecisionNotes(io, kgHomeDir, src, srcNote, rawBody, now, result)
 
-	if err := moveToImported(kgHomeDir, sourceID); err != nil {
+	if err := moveToImported(io, kgHomeDir, sourceID); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("move to imported: %v", err))
 	}
-	if health, err := computeGraphHealth(kgHomeDir); err == nil {
-		_ = writeGraphHealth(kgHomeDir, health)
+	if health, err := computeGraphHealth(io, kgHomeDir); err == nil {
+		_ = writeGraphHealth(io, kgHomeDir, health)
 	}
 	return result, nil
 }
@@ -1098,7 +1111,7 @@ func buildSourceNote(src RawSource, rawBody, now string) *GraphNote {
 
 // ingestEntityNotes extracts up to five entity references from rawBody and
 // creates a draft entity note for each new symbol.
-func ingestEntityNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
+func ingestEntityNotes(io kgIO, kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
 	for i, entity := range extractEntities(rawBody) {
 		if i >= 5 { // cap to 5 entities per source to avoid noise
 			break
@@ -1119,7 +1132,7 @@ func ingestEntityNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawB
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if err := createGraphNote(kgHomeDir, entNote, ""); err != nil {
+		if err := createGraphNote(io, kgHomeDir, entNote, ""); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("entity %s: %v", entity, err))
 			continue
 		}
@@ -1129,7 +1142,7 @@ func ingestEntityNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawB
 
 // ingestDecisionNotes extracts up to three decision-shaped sentences from
 // rawBody and creates a draft decision note for each.
-func ingestDecisionNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
+func ingestDecisionNotes(io kgIO, kgHomeDir string, src RawSource, srcNote *GraphNote, rawBody, now string, result *IngestResult) {
 	for i, dec := range extractDecisions(rawBody) {
 		if i >= 3 {
 			break
@@ -1146,7 +1159,7 @@ func ingestDecisionNotes(kgHomeDir string, src RawSource, srcNote *GraphNote, ra
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if err := createGraphNote(kgHomeDir, decNote, ""); err != nil {
+		if err := createGraphNote(io, kgHomeDir, decNote, ""); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("decision: %v", err))
 			continue
 		}
@@ -1191,6 +1204,7 @@ func truncate(s string, n int) string {
 // ── kg ingest subcommand ──────────────────────────────────────────────────────
 
 func runKGIngest(deps Deps, cmd *cobra.Command, args []string) error {
+	io := kgIOFrom(deps)
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
 		return fmt.Errorf("knowledge graph not initialized — run 'da kg setup' first")
@@ -1198,7 +1212,7 @@ func runKGIngest(deps Deps, cmd *cobra.Command, args []string) error {
 
 	opts := readIngestFlags(deps, cmd)
 
-	sourceIDs, done, err := resolveIngestSources(home, args, opts)
+	sourceIDs, done, err := resolveIngestSources(io, home, args, opts)
 	if err != nil || done {
 		return err
 	}
@@ -1244,18 +1258,18 @@ func readIngestFlags(deps Deps, cmd *cobra.Command) kgIngestOptions {
 // It returns done=true when the command has already produced its output
 // (inbox empty, or a single-file dry-run preview) and no further work
 // should run.
-func resolveIngestSources(home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
+func resolveIngestSources(io kgIO, home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
 	if opts.ingestAll {
-		ids, done, err := resolveIngestAll(home)
+		ids, done, err := resolveIngestAll(io, home)
 		return ids, done, err
 	}
-	return resolveIngestSingle(home, args, opts)
+	return resolveIngestSingle(io, home, args, opts)
 }
 
 // resolveIngestAll resolves the --all flow: gather every pending inbox source,
 // returning done=true when the inbox is empty so the caller short-circuits.
-func resolveIngestAll(home string) ([]string, bool, error) {
-	pending, err := listPendingRawSources(home)
+func resolveIngestAll(io kgIO, home string) ([]string, bool, error) {
+	pending, err := listPendingRawSources(io, home)
 	if err != nil {
 		return nil, false, fmt.Errorf("list inbox: %w", err)
 	}
@@ -1273,7 +1287,7 @@ func resolveIngestAll(home string) ([]string, bool, error) {
 // resolveIngestSingle handles the single-file ingest flow: validate args,
 // read the source, build the RawSource record, and either preview (dry-run)
 // or record it for the downstream loop.
-func resolveIngestSingle(home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
+func resolveIngestSingle(io kgIO, home string, args []string, opts kgIngestOptions) ([]string, bool, error) {
 	if len(args) == 0 {
 		return nil, false, fmt.Errorf("provide a file path to ingest or use --all")
 	}
@@ -1303,7 +1317,7 @@ func resolveIngestSingle(home string, args []string, opts kgIngestOptions) ([]st
 		previewSingleIngest(srcID, title, opts.sourceType, srcData)
 		return nil, true, nil
 	}
-	if err := recordRawSource(home, raw, srcData); err != nil {
+	if err := recordRawSource(io, home, raw, srcData); err != nil {
 		return nil, false, fmt.Errorf("record source: %w", err)
 	}
 	return []string{srcID}, false, nil
@@ -1327,7 +1341,8 @@ func previewSingleIngest(srcID, title, sourceType string, srcData []byte) {
 // (or JSON, when requested) without short-circuiting the caller's loop on
 // per-source errors.
 func runSingleIngest(deps Deps, home, sid string) {
-	result, err := ingestSource(home, sid)
+	io := kgIOFrom(deps)
+	result, err := ingestSource(io, home, sid)
 	if err != nil {
 		ui.Error(fmt.Sprintf("ingest %s: %v", sid, err))
 		return
@@ -1352,12 +1367,13 @@ func runSingleIngest(deps Deps, home, sid string) {
 // ── kg queue subcommand ───────────────────────────────────────────────────────
 
 func runKGQueue(deps Deps) error {
+	io := kgIOFrom(deps)
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
 		return fmt.Errorf("knowledge graph not initialized — run 'da kg setup' first")
 	}
 
-	pending, err := listPendingRawSources(home)
+	pending, err := listPendingRawSources(io, home)
 	if err != nil {
 		return fmt.Errorf("list inbox: %w", err)
 	}
