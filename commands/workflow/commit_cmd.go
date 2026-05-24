@@ -5,71 +5,169 @@
 package workflow
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"time"
 
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/execabs"
 )
+
+// gogitWorktree is the minimal go-git Worktree surface gogitImpl uses,
+// extracted into an interface so tests can inject a stub that exercises
+// the per-method error branches without standing up a corrupted real
+// repo for each one. *git.Worktree satisfies it natively.
+type gogitWorktree interface {
+	Status() (git.Status, error)
+	Add(path string) (plumbing.Hash, error)
+	Commit(msg string, opts *git.CommitOptions) (plumbing.Hash, error)
+	Submodules() (git.Submodules, error)
+}
 
 // gitOps is the minimal git surface `da workflow commit` needs. Interface-DI
 // (not a func-var) per the codebase's prefer-interface-di-over-funcvar-seams
-// lesson; tests inject a stub, production wires execGit{}.
+// lesson; tests inject a stub, production wires gogitImpl{}.
 type gitOps interface {
-	Status() ([]byte, error)
+	// Status returns the parsed status entries for the worktree. Status
+	// is the direct programmatic shape (rather than porcelain bytes)
+	// because go-git already produces a structured Status map — round-
+	// tripping through porcelain text would be a pure waste.
+	Status() ([]StatusEntry, error)
 	AddPaths(paths []string) error
 	Commit(message string) error
 }
 
-// execGit is the production implementation: shells out to git via
-// golang.org/x/sys/execabs, the official mitigation for the PATH-
-// substitution surface go:S4036 flags. execabs.Command resolves the
-// binary to an absolute path at construction time and refuses to fall
-// back to a PATH-relative lookup at exec time, so a malicious binary
-// planted in a writeable PATH entry cannot shadow the real git.
-// commands/workflow/state.go already uses execabs in its gitOutput
-// helper; this matches that established pattern.
-type execGit struct{}
-
-func (execGit) Status() ([]byte, error) {
-	// --untracked-files=all is required: git's default ("normal") collapses
-	// an entire untracked directory tree to a single directory entry, so a
-	// fresh `.agents/workflow/plans/<id>/PLAN.yaml` would never appear as
-	// its own path — only `.agents/` would. The derivation logic operates
-	// on file paths, not directory hints.
-	cmd := execabs.Command("git", "status", "--porcelain=v2", "-z", "--untracked-files=all")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git status: %w: %s", err, stderr.String())
-	}
-	return stdout.Bytes(), nil
+// gogitImpl is the production implementation: drives git operations via
+// go-git/v6 instead of shelling out. No syscall per command, no PATH
+// surface (the package-internal go-git code paths replace `git` on PATH),
+// no porcelain-text parsing on the hot path. Both the *Repository and
+// its *Worktree are resolved once at construction so the per-call
+// methods do not re-walk the same error branches each invocation —
+// reduces the wrapper surface coverage tests have to cover, too.
+type gogitImpl struct {
+	repo *git.Repository
+	wt   gogitWorktree
 }
 
-func (execGit) AddPaths(paths []string) error {
+// newGogitImpl opens the git repository at (or above) the current
+// working directory and resolves its worktree handle. DetectDotGit lets
+// an invocation from any subdirectory find the right repo, matching the
+// git CLI's behaviour. Surfaces a clear "open git repo" or "worktree"
+// error if either step fails so the operator sees the cause without a
+// stack trace.
+func newGogitImpl() (*gogitImpl, error) {
+	// os.Getwd is effectively infallible on a working process; an empty
+	// cwd would propagate naturally as a PlainOpenWithOptions error.
+	cwd, _ := os.Getwd()
+	repo, err := git.PlainOpenWithOptions(cwd, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return nil, fmt.Errorf("open git repo at %s: %w", cwd, err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("worktree: %w", err)
+	}
+	return &gogitImpl{repo: repo, wt: wt}, nil
+}
+
+func (g *gogitImpl) Status() ([]StatusEntry, error) {
+	status, err := g.wt.Status()
+	if err != nil {
+		return nil, fmt.Errorf("status: %w", err)
+	}
+	return statusToEntries(g.wt, status)
+}
+
+func (g *gogitImpl) AddPaths(paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	args := append([]string{"add", "--"}, paths...)
-	cmd := execabs.Command("git", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git add: %w: %s", err, out)
+	for _, p := range paths {
+		if _, err := g.wt.Add(p); err != nil {
+			return fmt.Errorf("git add %s: %w", p, err)
+		}
 	}
 	return nil
 }
 
-func (execGit) Commit(message string) error {
-	cmd := execabs.Command("git", "commit", "-F", "-")
-	cmd.Stdin = strings.NewReader(message)
-	out, err := cmd.CombinedOutput()
+func (g *gogitImpl) Commit(message string) error {
+	name, email, err := g.userIdentity()
 	if err != nil {
-		return fmt.Errorf("git commit: %w: %s", err, out)
+		return err
+	}
+	_, err = g.wt.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{Name: name, Email: email, When: time.Now()},
+	})
+	if err != nil {
+		return fmt.Errorf("git commit: %w", err)
 	}
 	return nil
+}
+
+// userIdentity walks the standard config scopes (local → global → system)
+// for user.name and user.email, matching what `git commit` reads. go-git
+// does not consult config automatically when populating commit signatures
+// the way the CLI does; without this lookup, commits would land with an
+// empty author and reviewers would lose attribution.
+//
+// The scope walk always completes (no early-return optimization) so the
+// function has a single success path — cheaper to test, no measurable
+// runtime cost since ConfigScoped reads are cached and bounded.
+func (g *gogitImpl) userIdentity() (string, string, error) {
+	var name, email string
+	for _, scope := range []config.Scope{config.LocalScope, config.GlobalScope, config.SystemScope} {
+		cfg, err := g.repo.ConfigScoped(scope)
+		if err != nil {
+			continue
+		}
+		if name == "" {
+			name = cfg.User.Name
+		}
+		if email == "" {
+			email = cfg.User.Email
+		}
+	}
+	if name == "" || email == "" {
+		return "", "", errors.New("git commit: user.name / user.email not configured (run `git config user.name` and `git config user.email`)")
+	}
+	return name, email, nil
+}
+
+// statusToEntries converts go-git's Worktree.Status() output into the
+// []StatusEntry shape DerivePathSet consumes. Submodule paths come from
+// repo.Submodules() (go-git's Status does not surface a submodule flag
+// per file) so the existing DerivePathSet exclusion rule still fires.
+//
+// Rename / copy entries have their previous path in FileStatus.Extra;
+// the adapter copies it into OrigPath so DerivePathSet can stage both
+// sides of the rename together — same contract the porcelain v2 parser
+// already established.
+func statusToEntries(wt gogitWorktree, status git.Status) ([]StatusEntry, error) {
+	subs, err := wt.Submodules()
+	if err != nil {
+		return nil, fmt.Errorf("submodules: %w", err)
+	}
+	isSubmodulePath := make(map[string]bool, len(subs))
+	for _, s := range subs {
+		isSubmodulePath[s.Config().Path] = true
+	}
+	entries := make([]StatusEntry, 0, len(status))
+	for path, fs := range status {
+		entries = append(entries, StatusEntry{
+			Path:      path,
+			OrigPath:  fs.Extra,
+			XY:        string([]byte{byte(fs.Staging), byte(fs.Worktree)}),
+			Submodule: isSubmodulePath[path],
+			Untracked: fs.Staging == git.Untracked || fs.Worktree == git.Untracked,
+		})
+	}
+	return entries, nil
 }
 
 // newWorkflowCommitCmd builds the cobra subcommand.
@@ -97,7 +195,11 @@ func newWorkflowCommitCmd() *cobra.Command {
 		),
 		Args: deps.NoArgsWithHints("Run workflow commit from inside the project repository."),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWorkflowCommit(cmd.OutOrStdout(), execGit{}, dryRun, includes)
+			gg, err := newGogitImpl()
+			if err != nil {
+				return fmt.Errorf("workflow commit: %w", err)
+			}
+			return runWorkflowCommit(cmd.OutOrStdout(), gg, dryRun, includes)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the path set + commit message; make no changes")
@@ -117,13 +219,9 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 		fmt.Fprintf(out, "workflow commit: opt-out active (%s)\n", reason)
 		return nil
 	}
-	raw, err := git.Status()
+	entries, err := git.Status()
 	if err != nil {
 		return fmt.Errorf("workflow commit: %w", err)
-	}
-	entries, err := ParseStatus(raw)
-	if err != nil {
-		return fmt.Errorf("workflow commit: parse status: %w", err)
 	}
 	paths := DerivePathSet(entries, includes)
 	if len(paths) == 0 {
@@ -178,7 +276,11 @@ func buildCommitMessage(paths []string) string {
 // real prefs) — the actual close-flow integration is exercised by
 // wc-verify-close.
 var iterationCloseCommit = func(out io.Writer) error {
-	return runWorkflowCommit(out, execGit{}, false, nil)
+	gg, err := newGogitImpl()
+	if err != nil {
+		return fmt.Errorf("workflow commit: %w", err)
+	}
+	return runWorkflowCommit(out, gg, false, nil)
 }
 
 // commitDisabled resolves whether the workflow-commit auto-flow is opted out

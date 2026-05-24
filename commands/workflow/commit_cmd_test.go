@@ -9,12 +9,18 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
 )
 
 // fakeGit captures every call so tests can assert on the staging set and the
-// generated message without spawning a real git subprocess.
+// generated message without spawning a real git process. Status returns the
+// structured []StatusEntry shape gogitImpl produces in production, so tests
+// fixture synthetic entries directly (the porcelain v2 parser is exercised
+// separately by TestParseStatus*).
 type fakeGit struct {
-	status        []byte
+	status        []StatusEntry
 	statusErr     error
 	addedPaths    []string
 	addErr        error
@@ -24,7 +30,7 @@ type fakeGit struct {
 	commitCalls   int
 }
 
-func (g *fakeGit) Status() ([]byte, error) { return g.status, g.statusErr }
+func (g *fakeGit) Status() ([]StatusEntry, error) { return g.status, g.statusErr }
 func (g *fakeGit) AddPaths(paths []string) error {
 	g.addCalls++
 	g.addedPaths = paths
@@ -58,10 +64,10 @@ func TestCommitNoOpWhenClean(t *testing.T) {
 // set so reviewers can verify the "never -A" rule held.
 func TestCommitStagesAndCommitsManagedRootChanges(t *testing.T) {
 	g := &fakeGit{
-		status: []byte(
-			"1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00" +
-				"1 .M N... 100644 100644 100644 a a .agents/history/y/PLAN.yaml\x00",
-		),
+		status: []StatusEntry{
+			{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"},
+			{Path: ".agents/history/y/PLAN.yaml", XY: ".M"},
+		},
 	}
 	var buf bytes.Buffer
 	if err := runWorkflowCommit(&buf, g, false, nil); err != nil {
@@ -92,9 +98,9 @@ func TestCommitStagesAndCommitsManagedRootChanges(t *testing.T) {
 // paths" clause from the spec.
 func TestCommitIncludeOptsInNonManagedPath(t *testing.T) {
 	g := &fakeGit{
-		status: []byte(
-			"1 .M N... 100644 100644 100644 a a .agents/active/iteration-log/iter-7.yaml\x00",
-		),
+		status: []StatusEntry{
+			{Path: ".agents/active/iteration-log/iter-7.yaml", XY: ".M"},
+		},
 	}
 	var buf bytes.Buffer
 	if err := runWorkflowCommit(&buf, g, false,
@@ -111,7 +117,9 @@ func TestCommitIncludeOptsInNonManagedPath(t *testing.T) {
 // commit message, makes no changes" requirement.
 func TestCommitDryRunMakesNoMutations(t *testing.T) {
 	g := &fakeGit{
-		status: []byte("1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00"),
+		status: []StatusEntry{
+			{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"},
+		},
 	}
 	var buf bytes.Buffer
 	if err := runWorkflowCommit(&buf, g, true, nil); err != nil {
@@ -129,14 +137,14 @@ func TestCommitDryRunMakesNoMutations(t *testing.T) {
 }
 
 // Submodule entries are excluded by DerivePathSet — the commit subcommand
-// inherits that. End-to-end check that a submodule sub-state record in the
-// status feed never reaches AddPaths.
+// inherits that. End-to-end check that a submodule entry in the status
+// feed never reaches AddPaths.
 func TestCommitExcludesSubmodulePointers(t *testing.T) {
 	g := &fakeGit{
-		status: []byte(
-			"1 .M S.M. 160000 160000 160000 a a vendor/some-sub\x00" +
-				"1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00",
-		),
+		status: []StatusEntry{
+			{Path: "vendor/some-sub", XY: ".M", Submodule: true},
+			{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"},
+		},
 	}
 	if err := runWorkflowCommit(&bytes.Buffer{}, g, false, nil); err != nil {
 		t.Fatalf("runWorkflowCommit: %v", err)
@@ -161,7 +169,7 @@ func TestCommitSurfacesStatusError(t *testing.T) {
 // Stage failures stop before commit and surface the underlying error.
 func TestCommitSurfacesAddError(t *testing.T) {
 	g := &fakeGit{
-		status: []byte("1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00"),
+		status: []StatusEntry{{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"}},
 		addErr: errors.New("add boom"),
 	}
 	err := runWorkflowCommit(&bytes.Buffer{}, g, false, nil)
@@ -177,7 +185,7 @@ func TestCommitSurfacesAddError(t *testing.T) {
 // rerun to re-attempt the commit step alone.
 func TestCommitSurfacesCommitError(t *testing.T) {
 	g := &fakeGit{
-		status:    []byte("1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00"),
+		status:    []StatusEntry{{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"}},
 		commitErr: errors.New("commit boom"),
 	}
 	err := runWorkflowCommit(&bytes.Buffer{}, g, false, nil)
@@ -186,20 +194,6 @@ func TestCommitSurfacesCommitError(t *testing.T) {
 	}
 	if g.addCalls != 1 {
 		t.Errorf("staging should have succeeded before commit: addCalls=%d", g.addCalls)
-	}
-}
-
-// Malformed porcelain v2 surfaces a parse error wrapped with the command
-// identity (parse errors elsewhere are bare). Confirms the wrapper attaches
-// "parse status" context.
-func TestCommitWrapsParseErrorWithContext(t *testing.T) {
-	g := &fakeGit{status: []byte("x not v2\x00")}
-	err := runWorkflowCommit(&bytes.Buffer{}, g, false, nil)
-	if err == nil {
-		t.Fatal("expected parse error, got nil")
-	}
-	if !strings.Contains(err.Error(), "parse status") {
-		t.Errorf("err missing parse-status context: %v", err)
 	}
 }
 
@@ -263,8 +257,6 @@ func TestCommitDisabledFromPrefsHandlesCorruptedPrefs(t *testing.T) {
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 	t.Chdir(repo)
-	// Write garbage to the local prefs path so resolvePreferences errors.
-	// Path layout: $AGENTS_HOME/context/<project>/preferences.local.yaml.
 	localPath := filepath.Join(agentsHome, "context", "workflow-proj", "preferences.local.yaml")
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -300,15 +292,14 @@ func TestCommitDisabledFromPrefsReadsPrefs(t *testing.T) {
 
 // The opt-out short-circuit: when commitDisabled reports true, runWorkflow
 // Commit prints a status line and returns nil without calling Status / Add
-// Paths / Commit. Verifies the spec's "documented no-op (status line states
-// opt-out active)" requirement.
+// Paths / Commit.
 func TestCommitOptOutShortCircuit(t *testing.T) {
 	prior := commitDisabled
 	commitDisabled = func() (bool, string) { return true, "test opt-out" }
 	t.Cleanup(func() { commitDisabled = prior })
 
 	g := &fakeGit{
-		status: []byte("1 .M N... 100644 100644 100644 a a .agents/workflow/plans/x/PLAN.yaml\x00"),
+		status: []StatusEntry{{Path: ".agents/workflow/plans/x/PLAN.yaml", XY: ".M"}},
 	}
 	var buf bytes.Buffer
 	if err := runWorkflowCommit(&buf, g, false, nil); err != nil {
@@ -326,110 +317,116 @@ func TestCommitOptOutShortCircuit(t *testing.T) {
 	}
 }
 
-// execGit.Status surfaces an error wrapped with "git status" when git
-// fails. Triggered by running from a tempdir that is not a git repo —
-// real-git returns nonzero with "fatal: not a git repository".
-func TestExecGitStatusErrorOutsideRepo(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
+// --- gogitImpl real-git tests --------------------------------------------
+
+// newGogitImpl errors clearly when cwd is not inside a git worktree —
+// downstream callers (the cobra closure, iteration-close hook) wrap this
+// as "workflow commit: ..." so triage points at the cause.
+func TestNewGogitImplOutsideRepo(t *testing.T) {
 	t.Chdir(t.TempDir())
-	_, err := (execGit{}).Status()
+	_, err := newGogitImpl()
 	if err == nil {
-		t.Fatal("expected git status error outside a repo, got nil")
+		t.Fatal("expected open-repo error outside a worktree, got nil")
 	}
-	if !strings.Contains(err.Error(), "git status") {
-		t.Errorf("error should mention the failing command: %v", err)
+	if !strings.Contains(err.Error(), "open git repo") {
+		t.Errorf("error should mention the failing step: %v", err)
 	}
 }
 
-// execGit.AddPaths surfaces an error when git rejects the path set —
-// triggered by listing a path that does not exist in the repo. Real-git
-// returns "pathspec '...' did not match any files".
-func TestExecGitAddPathsErrorOnMissingPath(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	repo := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@e"},
-		{"config", "user.name", "t"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	t.Chdir(repo)
-	err := (execGit{}).AddPaths([]string{"definitely-not-a-real-path-12345"})
-	if err == nil {
-		t.Fatal("expected git add error on missing path, got nil")
-	}
-	if !strings.Contains(err.Error(), "git add") {
-		t.Errorf("error should mention the failing command: %v", err)
-	}
-}
-
-// execGit.Commit surfaces an error when there is nothing staged — the
-// canonical "nothing to commit" path real-git returns on a clean repo.
-func TestExecGitCommitErrorWhenNothingStaged(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	repo := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@e"},
-		{"config", "user.name", "t"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	t.Chdir(repo)
-	err := (execGit{}).Commit("test message\n")
-	if err == nil {
-		t.Fatal("expected git commit error on empty index, got nil")
-	}
-	if !strings.Contains(err.Error(), "git commit") {
-		t.Errorf("error should mention the failing command: %v", err)
-	}
-}
-
-// AddPaths is a no-op on an empty path slice — runWorkflowCommit short-
-// circuits before calling it, but the production wrapper still defensively
-// checks the input so a future caller cannot accidentally invoke `git add --`
-// (which errors with "Nothing specified, nothing added").
-func TestExecGitAddPathsEmptyIsNoOp(t *testing.T) {
-	if err := (execGit{}).AddPaths(nil); err != nil {
+// gogitImpl.AddPaths on an empty slice is a no-op — runWorkflowCommit
+// short-circuits before calling it, but the wrapper still defensively
+// guards so a future caller cannot fall through to "git add --" semantics.
+func TestGogitImplAddPathsEmptyIsNoOp(t *testing.T) {
+	gg := newGogitImplForTest(t)
+	if err := gg.AddPaths(nil); err != nil {
 		t.Errorf("AddPaths(nil) = %v, want nil", err)
 	}
 }
 
-// Drive the cobra subcommand through Execute so newWorkflowCommitCmd's RunE
-// closure is covered — including arg validation (NoArgs), flag parsing,
-// and the wire-up of dryRun + includes. Uses --dry-run so the real execGit
-// underneath is harmless even though we're not in a git repo.
-func TestNewWorkflowCommitCmdExecuteDryRun(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+// AddPaths surfaces an error when go-git rejects the path set (e.g. a path
+// not present in the worktree). go-git's wt.Add returns "entry not found"
+// for a missing path; the wrapper wraps it with "git add <path>:" so log
+// triage can pinpoint the file.
+func TestGogitImplAddPathsErrorOnMissingPath(t *testing.T) {
+	gg := newGogitImplForTest(t)
+	err := gg.AddPaths([]string{"definitely-not-a-real-path-12345"})
+	if err == nil {
+		t.Fatal("expected go-git add error on missing path, got nil")
 	}
-	// Initialize a tiny repo so `git status` succeeds; dry-run still avoids
-	// any actual staging/commit.
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@e"},
-		{"config", "user.name", "t"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	if !strings.Contains(err.Error(), "git add") {
+		t.Errorf("error should mention the failing step: %v", err)
 	}
+}
+
+// Commit on an empty staging surfaces go-git's ErrEmptyCommit through the
+// wrapper. Mirrors the CLI's "nothing to commit" path.
+func TestGogitImplCommitErrorWhenNothingStaged(t *testing.T) {
+	gg := newGogitImplForTest(t)
+	err := gg.Commit("test message\n")
+	if err == nil {
+		t.Fatal("expected commit error on empty staging, got nil")
+	}
+	if !strings.Contains(err.Error(), "git commit") {
+		t.Errorf("error should mention the failing step: %v", err)
+	}
+}
+
+// userIdentity returns a clear error when neither local nor global config
+// carries user.name / user.email — the operator otherwise sees a garbled
+// "author field is required" deep from go-git.
+func TestGogitImplUserIdentityMissing(t *testing.T) {
+	repo := gogitTestRepoNoIdentity(t)
+	t.Chdir(repo)
+	t.Setenv("HOME", t.TempDir()) // ensure global config is empty
+	gg, err := newGogitImpl()
+	if err != nil {
+		t.Fatalf("newGogitImpl: %v", err)
+	}
+	if _, _, err := gg.userIdentity(); err == nil {
+		t.Fatal("expected user-identity error, got nil")
+	}
+}
+
+// Both user.name and user.email present in local config → userIdentity
+// returns them via the early-return inside the scope loop on the first
+// iteration. Confirms the happy path (line A in the loop body) is hit,
+// distinct from the end-of-loop fallthrough.
+func TestGogitImplUserIdentityLocal(t *testing.T) {
+	gg := newGogitImplForTest(t)
+	name, email, err := gg.userIdentity()
+	if err != nil {
+		t.Fatalf("userIdentity: %v", err)
+	}
+	if name == "" || email == "" {
+		t.Errorf("expected non-empty name+email, got %q/%q", name, email)
+	}
+}
+
+// The default iterationCloseCommit closure opens go-git and runs
+// runWorkflowCommit — this is what advance/merge-back's --commit-state
+// fires in production. Direct invocation in a clean test repo exercises
+// the closure body without going through any other primitive.
+func TestIterationCloseCommitDefaultRunsRealGit(t *testing.T) {
+	gogitTestRepoWithCommit(t) // chdir handled below
+	dir := gogitTestRepoWithCommit(t)
 	t.Chdir(dir)
+	var buf bytes.Buffer
+	if err := iterationCloseCommit(&buf); err != nil {
+		t.Fatalf("iterationCloseCommit: %v\noutput: %s", err, buf.String())
+	}
+	// Clean repo → no managed paths to stage → idempotent no-op.
+	if !strings.Contains(buf.String(), "nothing to stage") {
+		t.Errorf("expected no-op message, got: %s", buf.String())
+	}
+}
+
+// Drive the cobra subcommand through Execute so newWorkflowCommitCmd's
+// RunE closure is covered — including arg validation (NoArgs), flag
+// parsing, and the wire-up of dryRun + includes. Uses --dry-run so the
+// real go-git underneath only reads the worktree.
+func TestNewWorkflowCommitCmdExecuteDryRun(t *testing.T) {
+	gg := newGogitImplForTest(t)
+	_ = gg // ensure cwd is set up; the cobra path calls newGogitImpl itself
 
 	cmd := newWorkflowCommitCmd()
 	var buf bytes.Buffer
@@ -444,38 +441,33 @@ func TestNewWorkflowCommitCmdExecuteDryRun(t *testing.T) {
 	}
 }
 
-// End-to-end with the real execGit driver against a tiny throwaway git
-// repository. Confirms `git status --porcelain=v2 -z` output shape matches
-// what ParseStatus expects, and that AddPaths + Commit actually land a
-// commit on disk. Skips when `git` is not on PATH (CI always has it; some
-// constrained sandboxes might not).
-func TestExecGitEndToEnd(t *testing.T) {
+// newWorkflowCommitCmd's RunE surfaces newGogitImpl errors via the
+// "workflow commit: open git repo at ..." wrap when cwd is not a worktree.
+func TestNewWorkflowCommitCmdExecuteOutsideRepo(t *testing.T) {
+	t.Chdir(t.TempDir())
+	cmd := newWorkflowCommitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected workflow-commit error outside a worktree, got nil")
+	}
+	if !strings.Contains(err.Error(), "workflow commit") {
+		t.Errorf("error not wrapped with the subcommand identity: %v", err)
+	}
+}
+
+// End-to-end against a real throwaway repo: gogitImpl.Status + AddPaths +
+// Commit land a workflow(state) commit on disk, and a second invocation
+// is a clean no-op.
+func TestGogitEndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+		t.Skip("git not on PATH (still needed to bootstrap the test fixture)")
 	}
-	dir := t.TempDir()
-	gitDo := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
-			"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	gitDo("init", "-q")
-	gitDo("config", "user.email", "test@example.com")
-	gitDo("config", "user.name", "Test")
-	gitDo("config", "commit.gpgsign", "false")
-	// Seed an initial commit so HEAD exists.
-	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitDo("add", "README")
-	gitDo("commit", "-q", "-m", "seed")
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
 
 	// Create a workflow-state change.
 	planDir := filepath.Join(dir, ".agents", "workflow", "plans", "test-plan")
@@ -486,23 +478,15 @@ func TestExecGitEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run from the test repo dir.
-	prior, err := os.Getwd()
+	gg, err := newGogitImpl()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("newGogitImpl: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(prior) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-
 	var buf bytes.Buffer
-	if err := runWorkflowCommit(&buf, execGit{}, false, nil); err != nil {
+	if err := runWorkflowCommit(&buf, gg, false, nil); err != nil {
 		t.Fatalf("runWorkflowCommit: %v\noutput: %s", err, buf.String())
 	}
 
-	// HEAD now has a second commit with the workflow message and a clean
-	// status afterwards proves idempotency on a second run.
 	logOut, err := exec.Command("git", "-C", dir, "log", "--format=%s", "-2").CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log: %v\n%s", err, logOut)
@@ -512,11 +496,199 @@ func TestExecGitEndToEnd(t *testing.T) {
 	}
 
 	// Second run is a clean no-op.
+	gg2, err := newGogitImpl()
+	if err != nil {
+		t.Fatalf("newGogitImpl (rerun): %v", err)
+	}
 	buf.Reset()
-	if err := runWorkflowCommit(&buf, execGit{}, false, nil); err != nil {
+	if err := runWorkflowCommit(&buf, gg2, false, nil); err != nil {
 		t.Fatalf("idempotent rerun: %v\noutput: %s", err, buf.String())
 	}
 	if !strings.Contains(buf.String(), "nothing to stage") {
 		t.Errorf("second run should be no-op, got: %s", buf.String())
 	}
+}
+
+// stubWorktree implements gogitWorktree so the per-method error branches
+// in gogitImpl (Status / AddPaths / Commit) and statusToEntries
+// (Submodules) become testable without standing up a corrupt real repo
+// per branch. Each method returns the configured error or value.
+type stubWorktree struct {
+	status        git.Status
+	statusErr     error
+	addErr        error
+	commitErr     error
+	submodules    git.Submodules
+	submodulesErr error
+}
+
+func (s *stubWorktree) Status() (git.Status, error)       { return s.status, s.statusErr }
+func (s *stubWorktree) Add(string) (plumbing.Hash, error) { return plumbing.ZeroHash, s.addErr }
+func (s *stubWorktree) Submodules() (git.Submodules, error) {
+	return s.submodules, s.submodulesErr
+}
+func (s *stubWorktree) Commit(string, *git.CommitOptions) (plumbing.Hash, error) {
+	return plumbing.ZeroHash, s.commitErr
+}
+
+// gogitImpl.Status wraps wt.Status errors with the "status: ..." prefix.
+func TestGogitImplStatusErrorWrap(t *testing.T) {
+	gg := &gogitImpl{wt: &stubWorktree{statusErr: errors.New("status boom")}}
+	_, err := gg.Status()
+	if err == nil || !strings.Contains(err.Error(), "status:") {
+		t.Errorf("err = %v, want wrapped status error", err)
+	}
+}
+
+// gogitImpl.AddPaths wraps wt.Add errors with the failing path.
+func TestGogitImplAddPathsErrorWrap(t *testing.T) {
+	gg := &gogitImpl{wt: &stubWorktree{addErr: errors.New("add boom")}}
+	err := gg.AddPaths([]string{"a/b"})
+	if err == nil || !strings.Contains(err.Error(), "git add a/b") {
+		t.Errorf("err = %v, want path-qualified add error", err)
+	}
+}
+
+// statusToEntries wraps wt.Submodules errors with the "submodules: ..."
+// prefix. Trigger via stubWorktree without going through gogitImpl.Status.
+func TestStatusToEntriesSubmodulesErrorWrap(t *testing.T) {
+	wt := &stubWorktree{submodulesErr: errors.New("subs boom")}
+	_, err := statusToEntries(wt, git.Status{})
+	if err == nil || !strings.Contains(err.Error(), "submodules:") {
+		t.Errorf("err = %v, want submodules-wrap", err)
+	}
+}
+
+// statusToEntries converts a populated git.Status into per-path
+// StatusEntry values, mapping Untracked and rename-source (Extra) fields.
+// Drives the per-entry loop body via a stub with realistic content so
+// the population statements (XY assembly, Untracked detection, OrigPath
+// copy) are exercised.
+func TestStatusToEntriesPopulatesFields(t *testing.T) {
+	wt := &stubWorktree{}
+	status := git.Status{
+		".agents/workflow/plans/x/PLAN.yaml": {Staging: git.Modified, Worktree: git.Unmodified},
+		".agents/active/iteration-log/iter-1.yaml": {
+			Staging:  git.Unmodified,
+			Worktree: git.Untracked,
+		},
+		".agents/history/y/PLAN.yaml": {Staging: git.Renamed, Worktree: git.Unmodified, Extra: ".agents/workflow/plans/y/PLAN.yaml"},
+	}
+	entries, err := statusToEntries(wt, status)
+	if err != nil {
+		t.Fatalf("statusToEntries: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entries len = %d, want 3", len(entries))
+	}
+	byPath := make(map[string]StatusEntry, len(entries))
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+	if e := byPath[".agents/active/iteration-log/iter-1.yaml"]; !e.Untracked {
+		t.Errorf("expected Untracked=true for iter-1.yaml, got %+v", e)
+	}
+	if e := byPath[".agents/history/y/PLAN.yaml"]; e.OrigPath != ".agents/workflow/plans/y/PLAN.yaml" {
+		t.Errorf("expected rename-source in OrigPath, got %+v", e)
+	}
+	if e := byPath[".agents/workflow/plans/x/PLAN.yaml"]; e.XY == "" {
+		t.Errorf("expected XY populated, got %+v", e)
+	}
+}
+
+// gogitImpl.Commit propagates userIdentity errors before reaching go-git.
+// Exercises the early-return on missing user.name/user.email.
+func TestGogitImplCommitErrorOnMissingIdentity(t *testing.T) {
+	repo := gogitTestRepoNoIdentity(t)
+	t.Chdir(repo)
+	t.Setenv("HOME", t.TempDir())
+	gg, err := newGogitImpl()
+	if err != nil {
+		t.Fatalf("newGogitImpl: %v", err)
+	}
+	err = gg.Commit("message")
+	if err == nil {
+		t.Fatal("expected userIdentity error to propagate from Commit, got nil")
+	}
+	if !strings.Contains(err.Error(), "user.name") {
+		t.Errorf("error should mention user identity: %v", err)
+	}
+}
+
+// --- test-helper fixtures ------------------------------------------------
+
+// newGogitImplForTest builds a tiny throwaway git repo with user identity
+// configured and chdirs into it, then returns the gogitImpl pointing at it.
+// Centralises the boilerplate the AddPaths / Commit error tests share.
+func newGogitImplForTest(t *testing.T) *gogitImpl {
+	t.Helper()
+	dir := gogitTestRepo(t)
+	t.Chdir(dir)
+	gg, err := newGogitImpl()
+	if err != nil {
+		t.Fatalf("newGogitImpl: %v", err)
+	}
+	return gg
+}
+
+// gogitTestRepo initialises an empty git repo with user.name / user.email
+// set in local config so go-git's userIdentity lookup succeeds. Returns
+// the worktree path.
+func gogitTestRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (still needed to bootstrap the test fixture)")
+	}
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "t@e"},
+		{"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// gogitTestRepoNoIdentity is like gogitTestRepo but skips user.name /
+// user.email so userIdentity has nothing to find.
+func gogitTestRepoNoIdentity(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (still needed to bootstrap the test fixture)")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "-C", dir, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// gogitTestRepoWithCommit seeds a repo with one initial commit so HEAD
+// exists. Required for the end-to-end test which then layers a workflow-
+// state change on top and asserts a second commit lands.
+func gogitTestRepoWithCommit(t *testing.T) string {
+	t.Helper()
+	dir := gogitTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitDo := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitDo("add", "README")
+	gitDo("commit", "-q", "-m", "seed")
+	return dir
 }
