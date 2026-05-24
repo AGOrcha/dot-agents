@@ -164,6 +164,17 @@ func buildCommitMessage(paths []string) string {
 	return sb.String()
 }
 
+// iterationCloseCommit is the close-path entry point — called by `advance`
+// and `merge-back` when their `--commit-state` flag is set, so the iteration
+// log + verification log + plan-state mutation + the workflow-state commit
+// land together rather than as two separate operator steps. The function-
+// var seam keeps the advance / merge-back tests cheap (no real git, no
+// real prefs) — the actual close-flow integration is exercised by
+// wc-verify-close.
+var iterationCloseCommit = func(out io.Writer) error {
+	return runWorkflowCommit(out, execGit{}, false, nil)
+}
+
 // commitDisabled resolves whether the workflow-commit auto-flow is opted out
 // for the current project. Default points at commitDisabledFromPrefs (the
 // real implementation); tests rebind it to a stub so they do not have to

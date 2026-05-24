@@ -515,20 +515,36 @@ func newWorkflowCompleteCmd() *cobra.Command {
 }
 
 func newWorkflowAdvanceCmd() *cobra.Command {
-	var advanceTask, advanceStatus string
+	var (
+		advanceTask        string
+		advanceStatus      string
+		advanceCommitState bool
+	)
 	advanceCmd := &cobra.Command{
 		Use:   "advance <plan-id>",
 		Short: "Advance a task's status within a canonical plan",
 		Example: deps.ExampleBlock(
 			"  da workflow advance loop-orchestrator-layer --task phase-5 --status in_progress",
+			"  da workflow advance my-plan --task t1 --status completed --commit-state",
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowAdvance(args[0], advanceTask, advanceStatus)
+			if err := runWorkflowAdvance(args[0], advanceTask, advanceStatus); err != nil {
+				return err
+			}
+			if !advanceCommitState {
+				return nil
+			}
+			// Iteration-close integration: stage + commit the workflow-state
+			// mutation atomically with the status flip. The auto-commit honors
+			// the per-project commit.disable opt-out (handled inside the
+			// close-path runWorkflowCommit, not here).
+			return iterationCloseCommit(cmd.OutOrStdout())
 		},
 	}
 	advanceCmd.Flags().StringVar(&advanceTask, "task", "", "Task ID to advance (required)")
 	advanceCmd.Flags().StringVar(&advanceStatus, "status", "", "New task status (required)")
+	advanceCmd.Flags().BoolVar(&advanceCommitState, "commit-state", false, "After advancing, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = advanceCmd.MarkFlagRequired("task")
 	_ = advanceCmd.MarkFlagRequired("status")
 	return advanceCmd
@@ -833,14 +849,28 @@ func newWorkflowMergeBackCmd() *cobra.Command {
 		Short: "Record a sub-agent's completed work as a merge-back artifact",
 		Example: deps.ExampleBlock(
 			"  da workflow merge-back --task phase-5 --summary \"worker finished transport slice\" --verification-status pass",
+			"  da workflow merge-back --task t1 --summary \"...\" --commit-state",
 		),
 		Args: deps.NoArgsWithHints("Use `--task` and `--summary` flags instead of positional arguments."),
-		RunE: runWorkflowMergeBack,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := runWorkflowMergeBack(cmd, args); err != nil {
+				return err
+			}
+			commitState, _ := cmd.Flags().GetBool("commit-state")
+			if !commitState {
+				return nil
+			}
+			// Iteration-close integration for delegated workers: the merge-
+			// back artifact + the workflow-state commit land atomically. The
+			// auto-commit honors the per-project commit.disable opt-out.
+			return iterationCloseCommit(cmd.OutOrStdout())
+		},
 	}
 	mergeBackCmd.Flags().String("task", "", "Task ID that was delegated (required)")
 	mergeBackCmd.Flags().String("summary", "", "Summary of what was done (required)")
 	mergeBackCmd.Flags().String("verification-status", "unknown", "pass|fail|partial|unknown")
 	mergeBackCmd.Flags().String("integration-notes", "", "Guidance for the parent agent")
+	mergeBackCmd.Flags().Bool("commit-state", false, "After recording the merge-back, stage + commit the workflow-state mutation (iteration-close integration)")
 	_ = mergeBackCmd.MarkFlagRequired("task")
 	_ = mergeBackCmd.MarkFlagRequired("summary")
 	return mergeBackCmd
