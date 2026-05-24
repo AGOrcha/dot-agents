@@ -1,0 +1,81 @@
+# Workflow client commands
+
+`da workflow close-task` and `da workflow start-task` are the two **client commands** in the workflow surface — T1 molecules under the skill-tiering-contract that compose existing T0-atom primitives into the start-of-iteration and end-of-iteration sequences operators (and skills) repeat every cycle.
+
+## Layering against skill-tiering-contract
+
+The composition rules we want enforced are restatements of the tier invariants in `.agents/workflow/specs/skill-tiering-contract/design.md` §4. There is **no parallel "primitive vs client vs skill" axis** — every layer maps to a tier the contract already names.
+
+| Layer | Contract tier | Examples |
+|-------|---------------|----------|
+| Primitive | **T0 atom** | `workflow verify record`, `workflow advance`, `workflow plan update`, `workflow checkpoint --log-to-iter`, `workflow commit`, `workflow plan derive-scope`, `score iteration`, `score iteration --recompute` |
+| Client command | **T1 molecule** | `workflow close-task`, `workflow start-task` |
+| Skill | **T2 compound** | `iteration-close`, `orchestrator-session-start`, `isp` |
+
+`tier:` + `calls:` metadata lives in the package-doc comment of each T1 source file (see `commands/workflow/close_task.go` and `start_task.go`). A `TestTierDeclarationsPresent…` pin guards the markers so a refactor that strips them fails the suite immediately rather than silently breaking downstream lint.
+
+## Composition rules (= tier invariants)
+
+1. **A client command must be expressible as a pipeline of primitives.** Restates T1 molecule's invariant: *"`calls:` lists the atoms it invokes; runtime agent judgment bounded to picking among declared atoms"*. If a client command has secret state that cannot be mapped onto a primitive, it belongs in a new primitive.
+2. **Primitives stay machine-grade.** Restates T0 atom's invariant: *"~deterministic; output shape is schema-specified"*. JSON output is first-class, no interactive prompts. Client commands may be chattier (a human-readable summary; `--json` for structured output).
+3. **One direction of dependency.** Client → primitives, never the reverse. The tier number is also a dependency-direction marker — a lower tier never calls a higher one.
+4. **Skills call clients when they exist, primitives otherwise.** Restates T2 compound's invariant: *"`calls:` lists the molecules it orchestrates; may also call atoms directly (uncommon)"*. The migration path is: write the primitive → watch the call sequence repeat in sessions → promote the recurring sequence to a client command when the pattern is undeniable.
+
+## Relation to the workflow engine lifecycle diagram
+
+`docs/PROJECT_DIAGRAMS.md` §5 already shows the workflow engine in lifecycle tiers (Authoring → Selection → Execution 3a/3b → Close → Archive). The composition-tier model above is **orthogonal** to that lifecycle model:
+
+- A close-time client command (T1) lives in lifecycle Tier 4 (Close).
+- A start-time client command (T1) lives in lifecycle Tier 2 (Selection) plus the bridge into 3a/3b.
+- A T0 atom can live in any lifecycle tier — `verify record` is Tier 4, `plan derive-scope` is Tier 2, `workflow commit` is Tier 4.
+
+The two diagrams answer different questions. Composition tier: *what calls what?* Lifecycle tier: *when in the iteration does this run?*
+
+## Equivalent primitive pipelines
+
+Every client command's `--help` `Example` block shows the call. The expanded sequences are documented here once so callers can see the layer:
+
+### `workflow close-task`
+
+```text
+# What close-task does, expanded into the primitive pipeline it invokes:
+
+da workflow checkpoint --log-to-iter <N> --log-to-iter-role impl
+    # N picked by NextIterationNumber(iter-log-dir) — see iter_log_autoderive.go
+da score iteration <N> --recompute
+    # writes iter-N.score.yaml; same writer as workflow-client-commands score-current task
+da workflow advance <plan-id> --task <task> --status completed
+da workflow plan update <plan-id> --focus <next-eligible>
+    # next-eligible picked by selectAllEligibleTasks on the same plan
+da workflow commit
+    # honors commit.disable per-project opt-out
+```
+
+`--no-commit` skips the final step; `--next-focus` overrides the auto-pick.
+
+### `workflow start-task`
+
+```text
+# What start-task does:
+
+da workflow plan update <plan-id> --status active
+da workflow plan update <plan-id> --focus <task>
+da workflow plan derive-scope <plan-id> <task> [--seed-symbol …] [--seed-path …]
+da workflow commit
+```
+
+`--no-derive-scope` skips the sidecar derivation; `--no-commit` skips the final step. Fanout is intentionally **not** wired — the orchestrator typically decides direct-vs-delegated explicitly via `da workflow fanout` as a separate step.
+
+## Iteration-close skill update (deferred)
+
+The `iteration-close` skill — the T2 compound that wraps `close-task` — lives outside this repo at `~/.agents/skills/dot-agents/iteration-close/SKILL.md`. The rewrite as a thin `da workflow close-task --json` caller is staged for the next cross-repo update of the dot-agents skill pack. The proposed frontmatter:
+
+```yaml
+tier: compound
+calls:
+  - workflow-close-task
+review_gate: default
+attendance: unattended
+```
+
+The skill's body becomes: invoke `da workflow close-task --json` with the resolved plan/task, then render the returned `closeTaskResult` (iteration N, score value + band, sidecar path, next focus) back to the operator. The immediate-feedback loop closes inside the skill: the operator sees *"iteration N → score 0.7 fair → here is the breakdown"* the moment the iteration closes, while the context is still hot.
