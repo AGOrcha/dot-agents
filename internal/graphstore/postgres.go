@@ -164,7 +164,12 @@ func (s *PostgresStore) Commit() error { return nil }
 // ---------------------------------------------------------------------------
 
 func (s *PostgresStore) SetMetadata(key, value string) error {
-	_, err := s.pool.Exec(context.Background(),
+	// gcc4: route through provider-owned request timeout for cross-provider
+	// uniformity (CONTRACT.md guarantee #2). Path-A deadline applies to every
+	// pool operation, not only the long traversals.
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	_, err := s.pool.Exec(ctx,
 		`INSERT INTO metadata (key, value) VALUES ($1, $2)
 		 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
 		key, value,
@@ -173,8 +178,10 @@ func (s *PostgresStore) SetMetadata(key, value string) error {
 }
 
 func (s *PostgresStore) GetMetadata(key string) (string, error) {
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	var val string
-	err := s.pool.QueryRow(context.Background(),
+	err := s.pool.QueryRow(ctx,
 		"SELECT value FROM metadata WHERE key=$1", key,
 	).Scan(&val)
 	if err == pgx.ErrNoRows {
@@ -188,7 +195,8 @@ func (s *PostgresStore) GetMetadata(key string) (string, error) {
 // ---------------------------------------------------------------------------
 
 func (s *PostgresStore) UpsertNode(node NodeInfo, fileHash string) (int64, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	now := float64(time.Now().UnixNano()) / 1e9
 	qualified := makeQualified(node)
 	extra, err := encodeExtra(node.Extra)
@@ -225,7 +233,8 @@ func (s *PostgresStore) UpsertNode(node NodeInfo, fileHash string) (int64, error
 }
 
 func (s *PostgresStore) UpsertEdge(edge EdgeInfo) (int64, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	now := float64(time.Now().UnixNano()) / 1e9
 	extra, err := encodeExtra(edge.Extra)
 	if err != nil {
@@ -268,7 +277,8 @@ func (s *PostgresStore) UpsertEdge(edge EdgeInfo) (int64, error) {
 }
 
 func (s *PostgresStore) RemoveFileData(filePath string) error {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	if _, err := s.pool.Exec(ctx, "DELETE FROM nodes WHERE file_path=$1", filePath); err != nil {
 		return err
 	}
@@ -278,7 +288,8 @@ func (s *PostgresStore) RemoveFileData(filePath string) error {
 
 // StoreFileNodesEdges atomically replaces all nodes and edges for a file.
 func (s *PostgresStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edges []EdgeInfo, fileHash string) error {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("graphstore: begin tx: %w", err)
@@ -343,7 +354,8 @@ func (s *PostgresStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, e
 // ---------------------------------------------------------------------------
 
 func (s *PostgresStore) GetNode(qualifiedName string) (*GraphNode, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
 		       language, parent_name, params, return_type, modifiers, is_test,
@@ -357,7 +369,8 @@ func (s *PostgresStore) GetNode(qualifiedName string) (*GraphNode, error) {
 }
 
 func (s *PostgresStore) GetNodesByFile(filePath string) ([]GraphNode, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, name, qualified_name, file_path, line_start, line_end,
 		       language, parent_name, params, return_type, modifiers, is_test,
@@ -371,7 +384,8 @@ func (s *PostgresStore) GetNodesByFile(filePath string) ([]GraphNode, error) {
 }
 
 func (s *PostgresStore) GetEdgesBySource(qualifiedName string) ([]GraphEdge, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at
 		FROM edges WHERE source_qualified=$1`, qualifiedName)
@@ -383,7 +397,8 @@ func (s *PostgresStore) GetEdgesBySource(qualifiedName string) ([]GraphEdge, err
 }
 
 func (s *PostgresStore) GetEdgesByTarget(qualifiedName string) ([]GraphEdge, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, kind, source_qualified, target_qualified, file_path, line, extra, updated_at
 		FROM edges WHERE target_qualified=$1`, qualifiedName)
@@ -403,7 +418,8 @@ func (s *PostgresStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, err
 		qnSet[q] = true
 	}
 
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 
 	// Postgres supports $1 = ANY($2) for array membership — no batching needed.
 	rows, err := s.pool.Query(ctx, `
@@ -432,7 +448,8 @@ func (s *PostgresStore) GetEdgesAmong(qualifiedNames []string) ([]GraphEdge, err
 }
 
 func (s *PostgresStore) GetAllFiles() ([]string, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx, "SELECT DISTINCT file_path FROM nodes WHERE kind='File'")
 	if err != nil {
 		return nil, err
@@ -473,7 +490,8 @@ func (s *PostgresStore) SearchNodes(query string, limit int) ([]GraphNode, error
 }
 
 func (s *PostgresStore) GetStats() (GraphStats, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	var stats GraphStats
 
 	if err := s.scanStatsCounts(ctx, &stats); err != nil {
@@ -598,7 +616,8 @@ func (s *PostgresStore) GetImpactRadius(changedFiles []string, maxDepth, maxNode
 // ---------------------------------------------------------------------------
 
 func (s *PostgresStore) UpsertKGNote(note KGNote) error {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	now := float64(time.Now().UnixNano()) / 1e9
 	if note.IndexedAt == 0 {
 		note.IndexedAt = now
@@ -619,7 +638,8 @@ func (s *PostgresStore) UpsertKGNote(note KGNote) error {
 }
 
 func (s *PostgresStore) GetKGNote(id string) (*KGNote, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	note := &KGNote{}
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, title, note_type, status, summary, file_path, version, archived_at, indexed_at
@@ -652,7 +672,8 @@ func (s *PostgresStore) SearchKGNotes(query string, limit int) ([]KGNote, error)
 }
 
 func (s *PostgresStore) ListArchivedKGNotes() ([]KGNote, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, title, note_type, status, summary, file_path, version, archived_at, indexed_at
 		FROM kg_notes WHERE archived_at != '' ORDER BY archived_at DESC`,
@@ -669,7 +690,8 @@ func (s *PostgresStore) ListArchivedKGNotes() ([]KGNote, error) {
 // ---------------------------------------------------------------------------
 
 func (s *PostgresStore) UpsertNoteSymbolLink(link NoteSymbolLink) (int64, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	now := float64(time.Now().UnixNano()) / 1e9
 	if link.CreatedAt == 0 {
 		link.CreatedAt = now
@@ -695,7 +717,8 @@ func (s *PostgresStore) UpsertNoteSymbolLink(link NoteSymbolLink) (int64, error)
 }
 
 func (s *PostgresStore) GetLinksForNote(noteID string) ([]NoteSymbolLink, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx,
 		"SELECT id, note_id, qualified_name, link_kind, created_at FROM note_symbol_links WHERE note_id=$1",
 		noteID,
@@ -708,7 +731,8 @@ func (s *PostgresStore) GetLinksForNote(noteID string) ([]NoteSymbolLink, error)
 }
 
 func (s *PostgresStore) GetLinksForSymbol(qualifiedName string) ([]NoteSymbolLink, error) {
-	ctx := context.Background()
+	ctx, cancel := requestContext(nil)
+	defer cancel()
 	rows, err := s.pool.Query(ctx,
 		"SELECT id, note_id, qualified_name, link_kind, created_at FROM note_symbol_links WHERE qualified_name=$1",
 		qualifiedName,
@@ -721,7 +745,9 @@ func (s *PostgresStore) GetLinksForSymbol(qualifiedName string) ([]NoteSymbolLin
 }
 
 func (s *PostgresStore) DeleteNoteSymbolLink(id int64) error {
-	_, err := s.pool.Exec(context.Background(),
+	ctx, cancel := requestContext(nil)
+	defer cancel()
+	_, err := s.pool.Exec(ctx,
 		"DELETE FROM note_symbol_links WHERE id=$1", id,
 	)
 	return err
