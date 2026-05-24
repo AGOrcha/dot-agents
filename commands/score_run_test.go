@@ -375,6 +375,85 @@ func TestRunScoreRunUsesCwdWhenRepoDirEmpty(t *testing.T) {
 	}
 }
 
+// --recompute on the iteration subcommand drives the recompute path: it
+// scores iteration N fresh from the canonical inputs, writes the iter-N.
+// score.yaml sidecar, and renders the breakdown. close-task uses this as
+// its --score-recompute=current implementation.
+func TestRunScoreIterationRecomputeWritesSidecar(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, repo, 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(iterLogDir, "iter-1.score.yaml")); err != nil {
+		t.Errorf("sidecar not written: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Iteration 1") {
+		t.Errorf("missing iteration header: %s", buf.String())
+	}
+}
+
+// --recompute with --json emits the structured PersistedScore (same shape
+// as the read path) so callers can parse it without a write-vs-read branch.
+func TestRunScoreIterationRecomputeJSONOutput(t *testing.T) {
+	prior := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prior })
+	repo, iterLogDir := newScoreTestRepo(t)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, repo, 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+	var got scoring.PersistedScore
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, buf.String())
+	}
+	if got.Iteration != 1 {
+		t.Errorf("got iteration %d, want 1", got.Iteration)
+	}
+}
+
+// --recompute with empty repoDir falls back to cwd — headless invocations
+// from the repo root do not need to pass --repo-dir.
+func TestRunScoreIterationRecomputeUsesCwdWhenRepoDirEmpty(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	t.Chdir(repo)
+	var buf bytes.Buffer
+	if err := runScoreIterationRecompute(&buf, iterLogDir, "", 1, nil); err != nil {
+		t.Fatalf("runScoreIterationRecompute: %v\n%s", err, buf.String())
+	}
+}
+
+// A missing iteration surfaces a wrapped error rather than crashing.
+func TestRunScoreIterationRecomputeMissingIter(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	err := runScoreIterationRecompute(&bytes.Buffer{}, iterLogDir, repo, 99, nil)
+	if err == nil {
+		t.Fatal("expected error for missing iter, got nil")
+	}
+	if !strings.Contains(err.Error(), "score iteration") {
+		t.Errorf("error should carry the subcommand identity: %v", err)
+	}
+}
+
+// Drive the cobra subcommand through Execute with --recompute so the RunE
+// closure's recompute branch is covered. Asserts the sidecar is written
+// as a side effect.
+func TestScoreIterationSubcommandRecomputeExecute(t *testing.T) {
+	repo, iterLogDir := newScoreTestRepo(t)
+	cmd := newScoreIterationCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--iter-log-dir", iterLogDir, "--repo-dir", repo, "--recompute", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\n%s", err, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(iterLogDir, "iter-1.score.yaml")); err != nil {
+		t.Errorf("sidecar not written via cobra Execute: %v", err)
+	}
+}
+
 // newScoreIterationCmd / newScoreSessionCmd require exactly one positional arg
 // and expose the iter-log-dir flag.
 func TestNewScoreLookupCmdsArgsAndFlags(t *testing.T) {
