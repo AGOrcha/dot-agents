@@ -1,3 +1,570 @@
 schema_version: 1
 plan_id: root-command-decomposition
-tasks: []
+tasks:
+    - id: t01-design-subpackage-shape
+      title: Design target subpackage shape + shared-symbol contract
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/root-command-decomposition/design/SHAPE.md
+      verification_required: false
+      notes: |-
+        Read-mostly design pass. Produce SHAPE.md capturing:
+          - Final subpackage list: commands/lifecycle/ (8 deep
+            importers) + commands/mcp/, commands/settings/,
+            commands/rules/ (three individual subpackages per the
+            existing agents/skills/kg/hooks/sync/workflow convention).
+          - cmdutil home: keep at commands/internal/cmdutil for now
+            since the three new resource subpackages all sit under
+            commands/. Revisit promotion to commands/cmdutil only if
+            a cross-cluster consumer appears.
+          - Which root-level symbols stay exported and where (Flags,
+            ConfigureRootCommandUX, CLIError, ErrorWithHints,
+            UsageError, ExactArgsWithHints, RenderCommandError,
+            Version, linkcount helpers, plus the helper free
+            functions in status.go / install.go that seams_test.go
+            references).
+          - For each cluster command, the run* helpers and unexported
+            symbols that must become exported (or re-homed into a
+            shared lifecycle/internal helper) because seams_test.go
+            reaches them today: RunRefresh, RunRemove, RunStatus,
+            RunAdd, RegisterInstallProject, FindProjectByPath,
+            ProcessImportCandidate, BackupExistingConfigsList,
+            LinkResourceFromSources, CloneGitSource,
+            WriteKGMCPConfigFile, WriteKGMCPConfigs,
+            ScaffoldWorkflowAssets, RunInstall, RunInstallGenerate,
+            RunDoctor, RunInit, ReplaceImportContentCandidate,
+            ImportMissingContentCandidate,
+            ImportPreservedConflictCandidate,
+            WriteImportConflictReviewNote, ShouldUseCachedGitSource,
+            PrintSymlinkDirAudit, CountClaudeRules,
+            RestoreLegacyResourceFile.
+          - DI handling decision: PRESERVE current package-var seams
+            during the moves. Plain code move. A direct follow-up
+            (task t15) lands per-file interface-DI for the new
+            subpackages. Rationale: doing both at once doubles the
+            diff per move and entangles two plans; landing
+            decomposition first gives interface-DI a clean per-file
+            target.
+          - Root shim policy: DELETE root re-export shims as part of
+            t13. End-state: commands/root.go imports lifecycle.New*Cmd
+            and the three resource subpackages' constructors
+            directly. No backwards-compat shims kept. Justification:
+            single composition root, cleaner module boundary,
+            unambiguous import-graph assertion in t14.
+          - Per-cluster commit cadence: per-command commits inside
+            each cluster, one PR per cluster.
+        KG: query for callers of every commands.NewXxxCmd /
+        commands.Run* symbol via mcp__code-review-graph to confirm no
+        external callers beyond commands/root.go and intra-package
+        tests. Any external caller surfaced becomes an OD entry that
+        must resolve before t13's shim deletion.
+
+    - id: t02-introduce-lifecycle-skeleton
+      title: Create commands/lifecycle/ skeleton
+      status: pending
+      depends_on:
+        - t01-design-subpackage-shape
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/doc.go
+        - commands/lifecycle/deps.go
+      verification_required: true
+      notes: |-
+        Add empty package with doc.go and a deps.go that mirrors the
+        pattern in commands/agents/deps.go / commands/skills/deps.go
+        (Deps struct + NewDeps()). No command moves yet. go test ./...
+        must stay green. This task exists so all subsequent move tasks
+        have a settled target package and can run in parallel.
+
+    - id: t03-move-install
+      title: Move install command into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/install.go
+        - commands/lifecycle/install_test.go
+        - commands/install.go
+        - commands/install_test.go
+      verification_required: true
+      notes: |-
+        Pure move. install.go has no incoming cross-file calls from
+        other root commands EXCEPT seams_test.go's
+        TestRegisterInstallProject_*, TestRunInstall_GetwdError,
+        TestRunInstallGenerate_*, TestWriteKGMCPConfigs*,
+        TestScaffoldWorkflowAssets_*. seams_test.go split is deferred
+        to t11; this task does NOT touch it. For this task, leave
+        commands/install.go in place (still wiring NewInstallCmd) so
+        go test stays green; t13 deletes it and switches root.go to
+        lifecycle.NewInstallCmd directly. Run go test ./... and
+        verify no new internal/projectsync or internal/platform
+        imports appear in commands/install.go.
+
+    - id: t04-move-add-remove
+      title: Move add and remove commands into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/add.go
+        - commands/lifecycle/add_test.go
+        - commands/lifecycle/remove.go
+        - commands/lifecycle/remove_test.go
+        - commands/add.go
+        - commands/add_test.go
+        - commands/remove.go
+        - commands/remove_test.go
+      verification_required: true
+      notes: |-
+        Paired because remove.go's tests reference add helpers via
+        agentsrc_mutations_test.go. Keep that test in root for now
+        (cross-cutting; relocated in t12). Same staging as t03 — root
+        files remain in place until t13 strips them.
+
+    - id: t05-move-init
+      title: Move init command into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/init.go
+        - commands/lifecycle/init_test.go
+        - commands/init.go
+        - commands/init_test.go
+      verification_required: true
+      notes: |-
+        init.go is the only root file importing internal/scaffold/home
+        and internal/scaffold/hooks. After this move, package commands
+        should no longer import those at all. The importguard built
+        in t14 enforces it permanently.
+
+    - id: t06-move-import
+      title: Move import command + import_plugins into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/import.go
+        - commands/lifecycle/import_plugins.go
+        - commands/lifecycle/import_test.go
+        - commands/lifecycle/import_plugins_test.go
+        - commands/lifecycle/import_pure_test.go
+        - commands/import.go
+        - commands/import_plugins.go
+        - commands/import_test.go
+        - commands/import_plugins_test.go
+        - commands/import_pure_test.go
+      verification_required: true
+      notes: |-
+        Heaviest move in the cluster (5 files). Same pattern as t03 —
+        root files stay in place until t13.
+
+    - id: t07-move-refresh
+      title: Move refresh command into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/refresh.go
+        - commands/lifecycle/refresh_test.go
+        - commands/lifecycle/refresh_idempotency_test.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+        - commands/refresh_idempotency_test.go
+      verification_required: true
+      notes: |-
+        refresh_test.go was just refactored by t5 (PR #49 MERGED) to
+        consume internal/testutil.WriteScopeFile. The move preserves
+        those call sites — verify they still compile after the
+        package change.
+
+    - id: t08-move-status
+      title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t02-introduce-lifecycle-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/status.go
+        - commands/lifecycle/status_test.go
+        - commands/lifecycle/linkcount_unix.go
+        - commands/lifecycle/linkcount_windows.go
+        - commands/status.go
+        - commands/status_test.go
+        - commands/linkcount_unix.go
+        - commands/linkcount_windows.go
+      verification_required: true
+      notes: |-
+        Move linkcount_{unix,windows}.go alongside status — doctor.go
+        also uses them, so make the helpers exported in lifecycle and
+        have doctor.go (still in root before t09) import them. After
+        t09 lands, the cross-package import collapses into intra-
+        lifecycle calls.
+
+    - id: t09-move-doctor
+      title: Move doctor command into commands/lifecycle/
+      status: pending
+      depends_on:
+        - t08-move-status
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/doctor_test.go
+        - commands/lifecycle/doctor_repair_e2e_test.go
+        - commands/doctor.go
+        - commands/doctor_test.go
+        - commands/doctor_repair_e2e_test.go
+      verification_required: true
+      notes: |-
+        Depends on t08 because doctor uses the linkcount helpers that
+        move with status. After this, the lifecycle cluster is
+        complete.
+
+    - id: t10pre-extract-canonical-cmd-helpers
+      title: 'Precursor: lift canonicalCmdFlags + canonicalCmdExampleBlock into commands/internal/cmdutil'
+      status: pending
+      depends_on:
+        - t01-design-subpackage-shape
+      blocks:
+        - t10a-create-mcp-subpackage
+        - t10b-create-settings-subpackage
+        - t10c-create-rules-subpackage
+      owner: dot-agents
+      write_scope:
+        - commands/internal/cmdutil/canonical_cmd.go
+        - commands/internal/cmdutil/canonical_cmd_test.go
+        - commands/rules.go
+        - commands/mcp.go
+        - commands/settings.go
+      verification_required: true
+      notes: |-
+        Today `canonicalCmdFlags` (struct) and
+        `canonicalCmdExampleBlock` (helper) live in commands/rules.go
+        (with a comment noting "rules was the first consumer; reused
+        from mcp.go and settings.go via the shared cmdutil pattern").
+        All three resource commands access them via same-package
+        scope. The moment any one of those three splits into its own
+        subpackage, that same-package access breaks.
+
+        Lift both into commands/internal/cmdutil as the new exported
+        `cmdutil.CanonicalCmdFlags` and
+        `cmdutil.CanonicalCmdExampleBlock`. Update the three root
+        call sites to use the cmdutil-qualified names. No behavior
+        change; tests in commands/{mcp,settings,rules}_test.go must
+        stay green.
+
+        This task MUST land before t10a/b/c. After it lands, each of
+        the three subpackages can split cleanly and independently
+        in parallel.
+
+    - id: t10a-create-mcp-subpackage
+      title: Move mcp command into commands/mcp/ (per agents/skills file convention)
+      status: pending
+      depends_on:
+        - t10pre-extract-canonical-cmd-helpers
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/mcp/cmd.go
+        - commands/mcp/cmd_test.go
+        - commands/mcp/deps.go
+        - commands/mcp/example.go
+        - commands/mcp/list.go
+        - commands/mcp/show.go
+        - commands/mcp/remove.go
+        - commands/mcp/seams.go
+        - commands/mcp/seams_test.go
+        - commands/mcp/coverage_test.go
+        - commands/mcp/mcp_test.go
+        - commands/mcp.go
+        - commands/mcp_test.go
+      verification_required: true
+      notes: |-
+        Mirror the existing agents/skills/sync file convention — NOT
+        a single mcp.go inside the subpackage. Target layout:
+
+          - cmd.go            — NewCmd() (was NewMCPCmd in root) +
+                                sub-command wiring (list/show/remove).
+                                Pattern: commands/skills/cmd.go.
+          - deps.go           — Deps struct + NewDeps() (was the root
+                                mcpDeps + mcpCommandDeps).
+                                Pattern: commands/agents/deps.go.
+          - example.go        — Example string blocks for cobra
+                                Example: fields.
+                                Pattern: commands/agents/example.go.
+          - list.go / show.go / remove.go — one file per sub-command,
+                                each holding the run* runner + the
+                                builder helper (was runMCPList /
+                                runMCPShow / runMCPRemove + the
+                                newMCPListCmd / newMCPShowCmd /
+                                newMCPRemoveCmd builders, plus
+                                mcpCanonicalSpec). Mirror commands/
+                                agents/{list,promote,new,remove}.go.
+          - seams.go + seams_test.go — package-var seams for os.* /
+                                projectsync.* hooks. Mirror commands/
+                                agents/seams.go.
+          - coverage_test.go  — file-level coverage assertions.
+                                Mirror commands/agents/coverage_test.go.
+          - mcp_test.go       — the test file from t5 PR #49
+                                (testutil-consuming refactor)
+                                re-homed here. PRESERVE every
+                                testutil.WriteScopeFile call site
+                                verbatim through the move; only the
+                                package decl changes.
+
+        cmdutil import: commands/mcp/ imports
+        "github.com/.../commands/internal/cmdutil" using the helpers
+        extracted in t10pre (CanonicalCmdFlags,
+        CanonicalCmdExampleBlock, RunCanonicalList / Show / Remove,
+        CanonicalFileSpec). findMCPSpec stays package-private (used
+        by TestFindMCPSpecNotFound).
+
+        After this task, commands/mcp.go is a thin shim wiring
+        commands.NewMCPCmd() -> mcp.NewCmd(). That root shim is
+        deleted in t13.
+
+    - id: t10b-create-settings-subpackage
+      title: Move settings command into commands/settings/ (per agents/skills file convention)
+      status: pending
+      depends_on:
+        - t10pre-extract-canonical-cmd-helpers
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/settings/cmd.go
+        - commands/settings/cmd_test.go
+        - commands/settings/deps.go
+        - commands/settings/example.go
+        - commands/settings/list.go
+        - commands/settings/show.go
+        - commands/settings/remove.go
+        - commands/settings/seams.go
+        - commands/settings/seams_test.go
+        - commands/settings/coverage_test.go
+        - commands/settings/settings_test.go
+        - commands/settings.go
+        - commands/settings_test.go
+      verification_required: true
+      notes: |-
+        Same file convention as t10a — mirror commands/agents/ +
+        commands/skills/ layout (cmd.go / deps.go / example.go /
+        list.go / show.go / remove.go / seams.go / seams_test.go /
+        coverage_test.go / settings_test.go). cmdutil imports use
+        the helpers extracted in t10pre.
+
+        settings_test.go landed via t5 PR #49 — preserve every
+        testutil call site through the move. findSettingsSpec stays
+        package-private (used by TestFindSettingsSpecNotFound).
+
+    - id: t10c-create-rules-subpackage
+      title: Move rules command into commands/rules/ (per agents/skills file convention)
+      status: pending
+      depends_on:
+        - t10pre-extract-canonical-cmd-helpers
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/rules/cmd.go
+        - commands/rules/cmd_test.go
+        - commands/rules/deps.go
+        - commands/rules/example.go
+        - commands/rules/list.go
+        - commands/rules/show.go
+        - commands/rules/remove.go
+        - commands/rules/seams.go
+        - commands/rules/seams_test.go
+        - commands/rules/coverage_test.go
+        - commands/rules/rules_test.go
+        - commands/rules.go
+        - commands/rules_test.go
+      verification_required: true
+      notes: |-
+        Same file convention as t10a/b — mirror commands/agents/ +
+        commands/skills/ layout. After t10pre, commands/rules.go no
+        longer hosts the shared canonical helpers; this subpackage
+        just imports them from cmdutil.
+
+        rulesShowFrontmatterExtra (file-scope helper in current
+        rules.go) belongs in show.go alongside the show runner.
+        findRuleSpec stays package-private. rules_test.go landed
+        via t5 PR #49 — preserve testutil call sites through the
+        move.
+
+    - id: t11-split-seams-tests
+      title: Split commands/seams_test.go into per-cluster files
+      status: pending
+      depends_on:
+        - t03-move-install
+        - t04-move-add-remove
+        - t05-move-init
+        - t06-move-import
+        - t07-move-refresh
+        - t08-move-status
+        - t09-move-doctor
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/seams_test.go
+        - commands/seams_test.go
+      verification_required: true
+      notes: |-
+        Move every TestXxx in seams_test.go (873 LOC) that targets a
+        lifecycle symbol (install/import/refresh/remove/status/add/
+        doctor/init/kg-mcp-write helpers) into
+        commands/lifecycle/seams_test.go. The split is mechanical
+        because each Test* name encodes its target. If any leftover
+        tests target no specific cluster, leave them in root
+        seams_test.go (or delete that file if empty).
+
+    - id: t12-relocate-cross-cutting-tests
+      title: 'Re-home cross-cutting tests: coverage / parity / wiring / hook-norm / agentsrc-mutations'
+      status: pending
+      depends_on:
+        - t10a-create-mcp-subpackage
+        - t10b-create-settings-subpackage
+        - t10c-create-rules-subpackage
+        - t11-split-seams-tests
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/coverage_test.go
+        - commands/resource_parity_test.go
+        - commands/wiring_test.go
+        - commands/hook_normalization_roundtrip_test.go
+        - commands/agentsrc_mutations_test.go
+        - commands/lifecycle/coverage_test.go
+        - commands/lifecycle/agentsrc_mutations_test.go
+        - commands/lifecycle/hook_normalization_roundtrip_test.go
+        - commands/mcp/coverage_test.go
+        - commands/mcp/resource_parity_test.go
+        - commands/settings/coverage_test.go
+        - commands/settings/resource_parity_test.go
+        - commands/rules/coverage_test.go
+        - commands/rules/resource_parity_test.go
+      verification_required: true
+      notes: |-
+        For each file, split the table tests across the appropriate
+        subpackages. wiring_test.go (KG + Workflow) stays in root.
+        Prefer dropping tests rather than copy-paste duplicating
+        helpers; testutil_test.go's exports may need to be promoted
+        to a small commands/testutil package if multiple subpackages
+        need them. Cross-package resource-parity tests likely need a
+        new home or to be folded into resource-specific parity tests
+        per subpackage.
+
+    - id: t13-strip-root-shims
+      title: Delete root re-export shims; switch root.go to subpackage constructors
+      status: pending
+      depends_on:
+        - t12-relocate-cross-cutting-tests
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/root.go
+        - commands/add.go
+        - commands/doctor.go
+        - commands/import.go
+        - commands/import_plugins.go
+        - commands/init.go
+        - commands/install.go
+        - commands/refresh.go
+        - commands/remove.go
+        - commands/status.go
+        - commands/linkcount_unix.go
+        - commands/linkcount_windows.go
+        - commands/mcp.go
+        - commands/settings.go
+        - commands/rules.go
+      verification_required: true
+      notes: |-
+        Per user decision: DELETE root shims entirely. Per t01
+        SHAPE.md, root.go's AddCommand calls switch from
+        commands.NewInstallCmd / etc. to lifecycle.NewInstallCmd,
+        lifecycle.NewDoctorCmd, ..., mcp.NewCmd, settings.NewCmd,
+        rules.NewCmd. Verify cmd/dot-agents/main.go still compiles
+        unchanged (it should — it only calls
+        commands.NewRootCommand()). Any external importer of
+        commands.NewXxxCmd surfaced by t01's KG query must already
+        have been addressed in that task's OD entries.
+
+    - id: t14-import-graph-assertion
+      title: Add CI assertion that package commands does not import banned internals
+      status: pending
+      depends_on:
+        - t13-strip-root-shims
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - tools/importguard/main.go
+        - tools/importguard/main_test.go
+        - .github/workflows/test.yml
+      verification_required: true
+      notes: |-
+        Per PLAN.yaml verification_strategy: assert that package
+        commands no longer imports internal/links,
+        internal/projectsync, internal/scaffold/home, or
+        internal/scaffold/hooks. Implement as a tiny Go program that
+        walks `go list -json ./commands` and checks the import set,
+        plus a workflow step (or add to existing test.yml as a fast
+        check). Alternative: an analysistest rule. Path names above
+        are placeholders — t01 SHAPE.md may pick a different home
+        (e.g. internal/architest).
+
+    - id: t15-direct-followup-interface-di
+      title: 'Direct follow-up: land interface-DI on the new lifecycle + mcp/settings/rules subpackages'
+      status: pending
+      depends_on:
+        - t14-import-graph-assertion
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/lifecycle/
+        - commands/mcp/
+        - commands/settings/
+        - commands/rules/
+      verification_required: true
+      notes: |-
+        Per user decision: the move tasks (t02-t13) PRESERVE the
+        current package-var seams. This task lands the per-file
+        interface-DI shape (per the convention doc shipped with
+        seam-interface-di-migration) across the new subpackages as a
+        direct follow-up. Either fold into seam-interface-di-migration
+        as new tasks (preferred — single plan owns the shape) or
+        author as a sibling plan. Decide based on whether seam-
+        interface-di's existing leaves (kg-pkg, skills-pkg, agents-
+        pkg, platform-pkg) have shipped by the time this opens.
+
+    - id: t16-update-docs
+      title: Update docs to reflect new package layout
+      status: pending
+      depends_on:
+        - t14-import-graph-assertion
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/ARCHITECTURE.md
+        - docs/RESOURCE_COMMAND_CONTRACT.md
+        - CLAUDE.md
+      verification_required: false
+      notes: |-
+        Final mechanical task. Update any architecture diagrams or
+        boundary docs that still describe the old "root commands is
+        also lifecycle home" shape. Cross-link the proposal at
+        .agents/proposals/root-command-decomposition.md and mark it
+        resolved.
