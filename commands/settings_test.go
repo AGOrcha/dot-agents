@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
@@ -92,7 +93,7 @@ func TestFindSettingsSpec_EmptyName(t *testing.T) {
 
 func makeSettingsDeps(dryRun, yes, force bool) settingsDeps {
 	return settingsDeps{
-		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		maxArgsWithHints:   MaximumNArgsWithHints,
 		exactArgsWithHints: ExactArgsWithHints,
 	}

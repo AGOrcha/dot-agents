@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 )
 
 // TestResourceCommandParity exercises the list/show/remove triplet shared by
@@ -74,7 +76,7 @@ func resourceParityCases() []resourceParityCase {
 			},
 			runRemove: func(scope, name string, dryRun, yes, force bool) error {
 				deps := settingsDeps{
-					Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+					Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 					maxArgsWithHints:   MaximumNArgsWithHints,
 					exactArgsWithHints: ExactArgsWithHints,
 				}
@@ -189,7 +191,7 @@ func resourceDryRunCases() []resourceDryRunCase {
 			body:   `{}`,
 			runRemove: func(scope, name string, dryRun, yes, force bool) error {
 				deps := settingsDeps{
-					Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+					Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 					maxArgsWithHints:   MaximumNArgsWithHints,
 					exactArgsWithHints: ExactArgsWithHints,
 				}

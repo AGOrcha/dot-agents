@@ -10,14 +10,14 @@ import (
 )
 
 type settingsDeps struct {
-	Flags              canonicalCmdFlags
+	Flags              cmdutil.CanonicalCmdFlags
 	maxArgsWithHints   func(n int, hints ...string) cobra.PositionalArgs
 	exactArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 }
 
 func settingsCommandDeps() settingsDeps {
 	return settingsDeps{
-		Flags: canonicalCmdFlags{
+		Flags: cmdutil.CanonicalCmdFlags{
 			DryRun: Flags.DryRun,
 			Yes:    Flags.Yes,
 			Force:  Flags.Force,
@@ -41,7 +41,7 @@ Scopes are either global (~/.agents/settings/global/) or a managed project name
 Files include JSON/TOML/YAML configs (e.g. cursor.json, claude-code.json) and
 cursorignore. These are wired by add, import, refresh, install, and remove.
 Prefer editing canonical paths here, then run refresh or install.`,
-		Example: canonicalCmdExampleBlock(
+		Example: cmdutil.CanonicalCmdExampleBlock(
 			"  da settings list",
 			"  da settings list my-app",
 			"  da settings show global cursor.json",
@@ -58,7 +58,7 @@ func newSettingsListCmd(deps settingsDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [scope]",
 		Short: "List canonical settings files for a scope",
-		Example: canonicalCmdExampleBlock(
+		Example: cmdutil.CanonicalCmdExampleBlock(
 			"  da settings list",
 			"  da settings list billing-api",
 		),

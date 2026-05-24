@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
@@ -93,7 +94,7 @@ func TestFindMCPSpec_EmptyName(t *testing.T) {
 
 func makeMCPDeps(dryRun, yes, force bool) mcpDeps {
 	return mcpDeps{
-		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		maxArgsWithHints:   MaximumNArgsWithHints,
 		exactArgsWithHints: ExactArgsWithHints,
 	}

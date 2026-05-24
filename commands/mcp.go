@@ -10,14 +10,14 @@ import (
 )
 
 type mcpDeps struct {
-	Flags              canonicalCmdFlags
+	Flags              cmdutil.CanonicalCmdFlags
 	maxArgsWithHints   func(n int, hints ...string) cobra.PositionalArgs
 	exactArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 }
 
 func mcpCommandDeps() mcpDeps {
 	return mcpDeps{
-		Flags: canonicalCmdFlags{
+		Flags: cmdutil.CanonicalCmdFlags{
 			DryRun: Flags.DryRun,
 			Yes:    Flags.Yes,
 			Force:  Flags.Force,
@@ -41,7 +41,7 @@ Scopes are either global (~/.agents/mcp/global/) or a managed project name
 These files are what add, import, refresh, install, and remove wire into
 Cursor, Claude Code, Copilot, and related projections. Prefer editing canonical
 paths here, then run refresh or install for the project.`,
-		Example: canonicalCmdExampleBlock(
+		Example: cmdutil.CanonicalCmdExampleBlock(
 			"  da mcp list",
 			"  da mcp list my-app",
 			"  da mcp show global mcp.json",
@@ -58,7 +58,7 @@ func newMCPListCmd(deps mcpDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [scope]",
 		Short: "List canonical MCP config files for a scope",
-		Example: canonicalCmdExampleBlock(
+		Example: cmdutil.CanonicalCmdExampleBlock(
 			"  da mcp list",
 			"  da mcp list billing-api",
 		),
