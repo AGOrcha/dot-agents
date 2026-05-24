@@ -27,7 +27,7 @@ tasks:
         (snake_case, one scope per file: bundle.go, iter_log.go, ...).
     - id: wc-commit-subcommand
       title: da workflow commit subcommand (+ --dry-run, idempotent)
-      status: pending
+      status: completed
       depends_on:
         - wc-path-derivation
       blocks:
@@ -45,7 +45,7 @@ tasks:
         Headless-safe: raw `da`, no Claude Code hook dependency.
     - id: wc-prefs-optout
       title: Per-project opt-out via workflow prefs
-      status: pending
+      status: completed
       depends_on:
         - wc-commit-subcommand
       blocks: []
