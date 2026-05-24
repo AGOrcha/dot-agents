@@ -33,7 +33,7 @@ tasks:
       app_type: go-cli
     - id: close-task
       title: da workflow close-task client command (end-of-iteration sequence)
-      status: pending
+      status: completed
       depends_on:
         - iter-log-derive
         - score-current
