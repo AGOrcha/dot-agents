@@ -60,6 +60,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowBundleCmd(),
 		newWorkflowCommitCmd(),
 		newWorkflowCloseTaskCmd(),
+		newWorkflowStartTaskCmd(),
 	)
 	return cmd
 }
