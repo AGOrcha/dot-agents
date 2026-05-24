@@ -314,3 +314,47 @@ func TestRunWorkflowHealth_JSON_FromRepo(t *testing.T) {
 	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowHealth() },
 		`"status"`)
 }
+
+// TestRunWorkflowHealth_GetwdErrorPropagates drives the `if err != nil` branch
+// in runWorkflowHealth (health.go:87-89) by faulting the osGetwd seam so that
+// collectWorkflowState fails. The error must propagate verbatim with no
+// snapshot persisted.
+func TestRunWorkflowHealth_GetwdErrorPropagates(t *testing.T) {
+	sentinel := errSentinelHealthGetwd
+	saved := osGetwd
+	t.Cleanup(func() { osGetwd = saved })
+	osGetwd = func() (string, error) { return "", sentinel }
+
+	err := runWorkflowHealth()
+	if err == nil {
+		t.Fatal("expected getwd failure to propagate from collectWorkflowState")
+	}
+}
+
+// TestRunWorkflowHealth_RendersCompletedPlansPendingArchive verifies the
+// optional "completed plans pending archive: N" line in renderer
+// (health.go:119-121) appears when LocalDrift reports completed-but-not-
+// archived plans. We seed a repo with one PLAN.yaml whose status is
+// "completed" and execute the human-mode handler.
+func TestRunWorkflowHealth_RendersCompletedPlansPendingArchive(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", agentsHome)
+	// Seed a completed plan that triggers driftPlanScanPhase to populate
+	// LocalDrift.CompletedPlanIDs (and thus
+	// health.Workflow.CompletedPlansPendingArchive > 0).
+	plansDir := filepath.Join(repo, ".agents", "workflow", "plans", "stale-plan")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), []byte("status: completed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	captureStdoutWhileRunning(t, repo, func() error { return runWorkflowHealth() },
+		"completed plans pending archive:")
+}
+
+// errSentinelHealthGetwd lets the getwd-error test assert error chain identity.
+var errSentinelHealthGetwd = errorString("synthetic getwd failure for health test")

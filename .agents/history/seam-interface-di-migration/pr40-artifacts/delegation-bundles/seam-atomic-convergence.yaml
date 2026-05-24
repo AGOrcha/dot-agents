@@ -1,0 +1,232 @@
+delegation_id: seam-atomic-convergence
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  feature_thread: |
+    PR #40 has 9 interface-DI conversion commits landed and CI-green at
+    9cdf0d59. This commit is the convergence: flip stdAddDeps from
+    package-var delegation to direct calls, thread importDeps + addDeps
+    through the runRefresh path so the cross-file injection tests
+    keep working, and delete all 12 legacy seams.go vars + 12
+    seams_test.go with*Stub helpers.
+
+    Per maintainer ruling 2026-05-20: ONE big convergence commit
+    (option C), threading importDeps through runImportFromRefresh
+    properly (not deferring it).
+
+task:
+  id: seam-atomic-convergence
+  title: Atomic convergence — flip stdAddDeps, thread importDeps+addDeps through runRefresh, delete all legacy seams
+  stage: impl
+
+write_scope:
+  - commands/add.go
+  - commands/refresh.go
+  - commands/import.go
+  - commands/review.go
+  - commands/sync.go
+  - commands/refresh_test.go
+  - commands/refresh_idempotency_test.go
+  - commands/seams.go
+  - commands/seams_test.go
+
+forbidden_scope:
+  - commands/{init,status,doctor,remove,install}.go
+  - commands/{init,status,doctor,remove,install,add,import}_test.go
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      NEVER `cd` to the worktree. Use `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di`
+      for every git operation. Use `(cd <path> && go test ...)` subshells
+      only for build/test commands that need cwd.
+    severity: blocker
+
+  - description: |
+      Use ONLY explicit paths in git commands. Never `git add .`
+      or `git add -A`. Always:
+      `git -C <worktree> add -- commands/add.go commands/refresh.go ...`
+    severity: blocker
+
+  - description: |
+      The seams.go file currently has 12 package vars + 4 imports.
+      After this commit, ALL package vars are gone. The file is
+      reduced to either: (a) entirely empty (delete the file
+      altogether), or (b) a placeholder comment explaining the
+      migration is complete. Recommend (a) — `git rm` the file. If
+      you keep it, drop unused imports (os, config, projectsync).
+    severity: high
+
+  - description: |
+      The seams_test.go file currently has 12 with*Stub helpers
+      (lines 15-72 for the os.* ones; lines 509-538 for the
+      config/proposal/refresh ones). All 12 must be deleted. Tests
+      inside seams_test.go itself that call these stubs (lines
+      554, 859 use withConfigLoadStub; possibly more) must be
+      migrated. The file's content beyond the stubs (e.g.
+      TestRunRefresh_ConfigLoadError at :542,
+      TestRunRefresh_ProjectFilterNotFound at :847,
+      TestRunStatus_ConfigLoadError at :598, etc.) must be PRESERVED
+      with their stub calls removed and replaced with the new
+      injection shape (see below).
+    severity: high
+
+  - description: |
+      For seams_test.go lines 554 + 859 (the two
+      `withConfigLoadStub(t, ...)` calls in
+      TestRunRefresh_ConfigLoadError and
+      TestRunRefresh_ProjectFilterNotFound): the comment explains
+      they were needed because "runImportFromRefresh still uses the
+      package-level configLoad." After this convergence, that's no
+      longer true. The cleanest replacement: delete the
+      `withConfigLoadStub` call and BEFORE the runRefresh call,
+      write an empty config to disk so the real `config.Load()`
+      inside runImportFromRefresh's stdImportDeps succeeds:
+
+        emptyCfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+        if err := emptyCfg.Save(); err != nil { t.Fatal(err) }
+
+      Then runRefresh's NEW signature (see decision_locks) gets the
+      sentinel-failing fakeRefreshConfigLoader and the production
+      stdImportDeps{} / stdAddDeps{} (or fakes if needed).
+    severity: high
+
+  - description: |
+      For refresh_test.go:610 (TestRunRefresh_RestoreFailureDoesNotStampMetadata):
+      the test stubs `copyFile` to inject a copy failure during the
+      restore path. After this convergence, that var is gone.
+      Replacement: pass a fakeAddDeps to the new runRefresh signature
+      whose CopyFile method returns the injected failure. The rest
+      of the assertion (refresh returns error AND skips metadata
+      stamping) is preserved because runRefresh's restore path now
+      threads addDeps through to restoreFromResources →
+      restoreFromResourcesCountedWithDeps. This is the key reason
+      runRefresh's signature gains an addDeps parameter — without it,
+      this test cannot be preserved.
+    severity: high
+
+  - description: |
+      The add worker (commit 9cdf0d59) intentionally added "WithDeps"
+      twin entries (restoreFromResourcesCountedWithDeps,
+      mirrorBackupChecked, ensureProjectKGMCPConfigsWithDeps,
+      writeKGMCPConfigsWithDeps, writeKGMCPConfigFileWithDeps,
+      backupExistingConfigsListWithDeps, restoreLegacyResourceFileWithDeps)
+      and kept the legacy no-deps entries as convenience wrappers
+      that construct stdAddDeps{} internally. The CONVERGENCE COMMIT
+      may either keep these legacy entries (no callers in
+      forbidden_scope rely on them) OR delete them and migrate
+      callers to use WithDeps directly. Recommend KEEPING them — the
+      cross-file callers (refresh.go restoreFromResources,
+      init.go ensureGlobalKGMCPConfigs, import.go mirrorBackup,
+      etc.) read more naturally with the legacy entries, and the
+      cost of keeping them is one extra trivial function each.
+    severity: medium
+
+  - description: |
+      The 23 existing test callers of `runRefresh` all currently
+      pass just `(filter, stdRefreshConfigLoader{})`. After the
+      signature change to
+      `(filter, refreshConfigLoader, importDeps, addDeps)`,
+      every call site needs `(filter, stdRefreshConfigLoader{},
+      stdImportDeps{}, stdAddDeps{})`. Create a helper:
+
+        func defaultRefreshDeps() (refreshConfigLoader, importDeps, addDeps) {
+            return stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}
+        }
+
+      Place the helper in refresh_test.go (test-package-local). Then
+      every "happy path" caller becomes:
+        runRefresh(filter, defaultRefreshDeps())
+      via Go's multi-return spread (which doesn't work in Go!) —
+      scratch that, just expand:
+        loader, importD, addD := defaultRefreshDeps()
+        runRefresh(filter, loader, importD, addD)
+      OR keep the inline form everywhere. Recommend inline for
+      mechanical clarity; the helper is unnecessary indirection for
+      production sites.
+    severity: medium
+
+  - description: |
+      Pre-existing diagnostic noise to IGNORE (don't try to fix):
+      - install.go:1366 slicescontains nit
+      - import_plugins.go unused-parameter warnings (3)
+      - doctor.go/status.go unused-parameter warnings (~10)
+      - refresh.go:179 S1031 unnecessary nil check around range
+      None of these are introduced by this commit; leave them.
+    severity: low
+
+decision_locks:
+  - runRefresh signature becomes:
+      func runRefresh(projectFilter string, refreshLoader refreshConfigLoader, importDeps importDeps, addDeps addDeps) error
+    All callers updated to match.
+  - runImportFromRefresh signature becomes:
+      func runImportFromRefresh(projectFilter, scope string, deps importDeps) error
+    Caller in refresh.go passes the threaded importDeps; no other
+    callers.
+  - restoreFromResources (refresh.go:261) signature becomes:
+      func restoreFromResources(project, projectPath string, deps addDeps) error
+    Callers in refresh.go's runRefresh pass the threaded addDeps.
+    Callers OUTSIDE refresh.go (if any) — DO NOT change. Verify with
+    grep before touching.
+  - stdAddDeps methods (add.go:48-57) flipped to direct calls:
+      MkdirAll → os.MkdirAll, WriteFile → os.WriteFile,
+      Remove → os.Remove, Executable → os.Executable,
+      CopyFile → projectsync.CopyFile, LoadConfig → config.Load
+    Add `internal/projectsync` to add.go imports if not already present
+    (it is — verified at add.go:15).
+  - Delete from seams.go: ALL 12 package vars (osMkdirAll, osWriteFile,
+    osRemove, osRemoveAll, osExecutable, osGetwd, osSymlink, copyFile,
+    configLoad, applyProposalFn, archiveProposalFn, runRefreshFn) and
+    all 4 imports (os, internal/config, internal/projectsync). If the
+    file becomes empty, `git rm` it.
+  - Delete from seams_test.go: ALL 12 with*Stub helpers (withMkdirAllStub
+    at :15, withWriteFileStub :23, withCopyFileStub :31, withRemoveStub :39,
+    withRemoveAllStub :47, withExecutableStub :55, withGetwdStub :63,
+    withSymlinkStub :71, withConfigLoadStub :509, withApplyProposalStub :517,
+    withArchiveProposalStub :525, withRunRefreshStub :533). Preserve all
+    Test* functions in the file — only delete the helpers and migrate
+    the test bodies that USED helpers.
+  - Update commit message to reference the v6.1 wording fix landed on
+    PR #41 (d5881fe1) so the cross-PR context is captured.
+
+required_reads:
+  - commands/add.go (lines 1-60 for stdAddDeps; lines 680-700 for
+    restoreFromResourcesCounted/WithDeps shape)
+  - commands/refresh.go (lines 1-100 for refreshConfigLoader, NewRefreshCmd,
+    runRefresh; lines 257-264 for restoreFromResources)
+  - commands/import.go (lines 290-360 for runImportFromRefresh /
+    runImport / runImportInternal)
+  - commands/review.go (lines 35-55 for stdReviewDeps.RunRefresh)
+  - commands/sync.go (line 16 for the runRefresh caller)
+  - commands/refresh_test.go (lines 15-25 for fakeRefreshConfigLoader;
+    lines 595-660 for TestRunRefresh_RestoreFailureDoesNotStampMetadata)
+  - commands/refresh_idempotency_test.go (6 runRefresh call sites)
+  - commands/seams.go (whole file — only 38 lines)
+  - commands/seams_test.go (lines 1-75 for the os.* helpers, lines
+    509-540 for the config/proposal/refresh helpers, lines 540-590 for
+    TestRunRefresh_ConfigLoadError, lines 847-880 for
+    TestRunRefresh_ProjectFilterNotFound, plus any other test that
+    calls one of the 12 deleted helpers)
+  - commands/import_test.go (lines 15-50 for fakeImportDeps shape)
+
+merge_back:
+  artifact: .agents/active/delegation/seam-atomic-convergence.merge-back.md
+
+followups_to_record:
+  - "If seams.go and seams_test.go were both deleted entirely, note it in commit body — the seam migration is then fully complete and the legacy file shape no longer exists."
+  - "If TestRunRefresh_RestoreFailureDoesNotStampMetadata couldn't preserve the metadata-skip assertion, file a fold-back observation explaining why and what reduced coverage is acceptable."
+  - "Watch for the package-var-style seams pattern resurfacing in any new command; the migration spec at .agents/workflow/specs/seam-interface-di-migration/design.md is the authoritative anti-pattern doc."

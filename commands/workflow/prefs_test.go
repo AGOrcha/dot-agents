@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -800,5 +801,103 @@ func TestSetLocalPreference_WriteFails(t *testing.T) {
 
 	if err := setLocalPreference("p", "verification.test_command", "x"); !errors.Is(err, sentinel) {
 		t.Fatalf("expected marshal sentinel, got %v", err)
+	}
+}
+
+// TestResolvePreferences_RepoFileBranchCovered drives the `if repoFile != nil`
+// branch (prefs.go:199-201) in resolvePreferences (not the With-Sources
+// variant). Existing tests for resolvePreferences only exercise the
+// absent-file path; this one writes a valid preferences.yaml and asserts
+// the repo override survives the merge.
+func TestResolvePreferences_RepoFileBranchCovered(t *testing.T) {
+	repo := t.TempDir()
+	prefsDir := filepath.Join(repo, ".agents", "workflow")
+	if err := os.MkdirAll(prefsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prefsDir, "preferences.yaml"),
+		[]byte("schema_version: 1\nverification:\n  test_command: \"make repo-only-test\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	prefs, err := resolvePreferences(repo, "rfp-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strPtrVal(prefs.Verification.TestCommand) != "make repo-only-test" {
+		t.Fatalf("repo preferences.yaml override not applied; got %q", strPtrVal(prefs.Verification.TestCommand))
+	}
+}
+
+// TestResolvePreferences_LocalFileBranchCovered drives the `if localFile != nil`
+// branch (prefs.go:207-209) in resolvePreferences. A local preferences file
+// is seeded and the corresponding key must round-trip through the merge.
+func TestResolvePreferences_LocalFileBranchCovered(t *testing.T) {
+	repo := t.TempDir()
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	if err := setLocalPreference("lfp-proj", "execution.formatter", "prettier-only-local"); err != nil {
+		t.Fatal(err)
+	}
+
+	prefs, err := resolvePreferences(repo, "lfp-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strPtrVal(prefs.Execution.Formatter) != "prettier-only-local" {
+		t.Fatalf("local preferences override not applied; got %q", strPtrVal(prefs.Execution.Formatter))
+	}
+}
+
+// TestSetLocalPreference_MkdirAllError drives the `os.MkdirAll` failure
+// branch (prefs.go:246-248). MkdirAll fails when its parent path is a
+// regular file rather than a directory.
+func TestSetLocalPreference_MkdirAllError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file-as-dir blocker behaves differently on windows")
+	}
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	// Make the would-be parent of the preferences.local.yaml file a regular
+	// file so the MkdirAll inside setLocalPreference errors.
+	ctxParent := filepath.Join(tmp, "context")
+	if err := os.WriteFile(ctxParent, []byte("blocker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := setLocalPreference("any-proj", "verification.test_command", "x")
+	if err == nil {
+		t.Fatal("expected MkdirAll error when parent path is a file")
+	}
+}
+
+// TestSetLocalPreference_ReadFileNonNotExistError drives the
+// non-IsNotExist read-error branch (prefs.go:239-241). A pre-existing
+// preferences.local.yaml is chmod'd unreadable so os.ReadFile returns a
+// permission error that is NOT os.IsNotExist.
+func TestSetLocalPreference_ReadFileNonNotExistError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod unreadable not portable on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("chmod unreadable unreliable as root")
+	}
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	ctx := filepath.Join(tmp, "context", "locked-proj")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(ctx, "preferences.local.yaml")
+	if err := os.WriteFile(path, []byte("schema_version: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, path)
+
+	err := setLocalPreference("locked-proj", "verification.test_command", "x")
+	if err == nil {
+		t.Fatal("expected ReadFile permission error to propagate")
 	}
 }

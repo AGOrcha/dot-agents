@@ -91,7 +91,11 @@ func renderManifestHash(dst string) string {
 // hash. Best-effort: a manifest-write failure must not fail the render
 // (the file is already correct on disk); it only weakens future
 // provenance, which BackupBeforeOverwrite still makes safe.
-func recordRenderHash(dst, hash string) {
+//
+// io is the injected platform IO (production passes stdPlatformIO{}); the
+// two best-effort mkdir/write call sites that follow used to be the
+// osMkdirAll / osWriteFile func-var seams.
+func recordRenderHash(io platformIO, dst, hash string) {
 	m := loadRenderManifest()
 	m.Entries[manifestKey(dst)] = renderManifestEntry{
 		SHA256:     hash,
@@ -101,10 +105,10 @@ func recordRenderHash(dst, hash string) {
 	if err != nil {
 		return
 	}
-	if osMkdirAll(filepath.Dir(renderManifestPath()), 0755) != nil {
+	if io.MkdirAll(filepath.Dir(renderManifestPath()), 0755) != nil {
 		return
 	}
-	_ = osWriteFile(renderManifestPath(), append(data, '\n'), 0644)
+	_ = io.WriteFile(renderManifestPath(), append(data, '\n'), 0644)
 }
 
 // BackupBeforeOverwrite preserves an existing managed-file destination
@@ -113,15 +117,25 @@ func recordRenderHash(dst, hash string) {
 // backup convention, headless-safe, no layering inversion). The future
 // config-distribution / lock-file model can wire a richer mirror-backup
 // adapter through this seam without touching internal/platform.
-var BackupBeforeOverwrite = sidecarBackup
+//
+// This is a deliberate forward-compat extension point (NOT a test seam) —
+// see the docstring above. Tests swap it via the legacy func-var pattern
+// because that pattern matches its intended runtime-swap contract; the
+// seam-interface-di-migration plan does not target this var.
+var BackupBeforeOverwrite = func(dst string) error { return sidecarBackup(stdPlatformIO{}, dst) }
 
-func sidecarBackup(dst string) error {
+// sidecarBackup is the default BackupBeforeOverwrite impl. It is also the
+// production-side call when render_manifest internals invoke the backup
+// path; in either case the injected platformIO governs the WriteFile that
+// emits the backup sibling. Tests inject a fakePlatformIO whose WriteFile
+// returns a sentinel to exercise the write-fail branch.
+func sidecarBackup(io platformIO, dst string) error {
 	data, err := os.ReadFile(dst)
 	if err != nil {
 		return fmt.Errorf("read %s for backup: %w", dst, err)
 	}
 	bak := dst + ".dot-agents-backup"
-	if err := osWriteFile(bak, data, 0644); err != nil {
+	if err := io.WriteFile(bak, data, 0644); err != nil {
 		return fmt.Errorf("write backup %s: %w", bak, err)
 	}
 	return nil

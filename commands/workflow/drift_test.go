@@ -226,3 +226,120 @@ func TestDriftPlanScanPhase_NoPlansSkipped(t *testing.T) {
 		t.Errorf("expected no plans when MissingPlanStructure=true, got %v", rep.CompletedPlanIDs)
 	}
 }
+
+// TestDriftCheckpointPhase_MalformedYAML drives the early-return in
+// driftCheckpointPhase (drift.go:86-88) when the checkpoint file exists but
+// fails to unmarshal cleanly. The function must return silently — no warning
+// added, no panic — so the rest of drift detection continues.
+func TestDriftCheckpointPhase_MalformedYAML(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+
+	// Write a malformed checkpoint.yaml under the project's context dir.
+	ctx := filepath.Join(tmp, "context", "bad-cp")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "checkpoint.yaml"), []byte(":\n  - not valid yaml ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rep := &RepoDriftReport{CheckpointAgeDays: -1}
+	driftCheckpointPhase(rep, ManagedProject{Name: "bad-cp"}, 7)
+	// Malformed YAML must NOT count as MissingCheckpoint (the file did exist).
+	if rep.MissingCheckpoint {
+		t.Error("MissingCheckpoint should be false when file exists (even if malformed)")
+	}
+	// And must NOT set a stale-checkpoint warning since timestamp never resolved.
+	if rep.StaleCheckpoint {
+		t.Error("StaleCheckpoint should be false on malformed yaml")
+	}
+}
+
+// TestDriftCheckpointPhase_InvalidTimestamp drives the time.Parse error
+// branch (drift.go:90-92). Checkpoint unmarshals fine but the timestamp is
+// not RFC3339, so age computation is skipped and the function returns
+// silently.
+func TestDriftCheckpointPhase_InvalidTimestamp(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+
+	ctx := filepath.Join(tmp, "context", "bad-ts")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Valid YAML but bogus timestamp.
+	if err := os.WriteFile(filepath.Join(ctx, "checkpoint.yaml"), []byte("timestamp: 'not-a-date'\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rep := &RepoDriftReport{CheckpointAgeDays: -1}
+	driftCheckpointPhase(rep, ManagedProject{Name: "bad-ts"}, 7)
+	if rep.MissingCheckpoint {
+		t.Error("MissingCheckpoint should be false when file exists")
+	}
+	if rep.StaleCheckpoint {
+		t.Error("StaleCheckpoint should be false on invalid timestamp")
+	}
+	if rep.CheckpointAgeDays != -1 {
+		t.Errorf("CheckpointAgeDays should remain -1 when timestamp unparseable, got %d", rep.CheckpointAgeDays)
+	}
+}
+
+// TestDriftWorkflowDirPhase_WorkflowPresentPlansMissing drives the
+// `if !report.MissingWorkflowDir` branch (drift.go:127-129). The project has
+// .agents/workflow/ but no .agents/workflow/plans/ — the warning must mention
+// the missing plans subdir specifically and MissingPlanStructure must flip
+// without MissingWorkflowDir flipping.
+func TestDriftWorkflowDirPhase_WorkflowPresentPlansMissing(t *testing.T) {
+	target := t.TempDir()
+	// Create .agents/workflow but NOT .agents/workflow/plans
+	if err := os.MkdirAll(filepath.Join(target, ".agents", "workflow"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	rep := &RepoDriftReport{}
+	driftWorkflowDirPhase(rep, ManagedProject{Path: target})
+
+	if rep.MissingWorkflowDir {
+		t.Error("MissingWorkflowDir should be false when .agents/workflow/ exists")
+	}
+	if !rep.MissingPlanStructure {
+		t.Error("MissingPlanStructure should be true when plans/ is missing")
+	}
+	if len(rep.Warnings) != 1 {
+		t.Fatalf("expected exactly one warning, got %v", rep.Warnings)
+	}
+	if !strings.Contains(rep.Warnings[0], "no canonical plans") {
+		t.Errorf("expected canonical-plans warning, got %q", rep.Warnings[0])
+	}
+}
+
+// TestDriftPlanScanPhase_SkipsNonDirAndUnreadablePlanFile drives two
+// continue branches in driftPlanScanPhase: non-directory entries
+// (drift.go:154-155) and entries where PLAN.yaml cannot be read
+// (drift.go:159-160). Neither path should record any plan status drift.
+func TestDriftPlanScanPhase_SkipsNonDirAndUnreadablePlanFile(t *testing.T) {
+	repo := t.TempDir()
+	plansDir := filepath.Join(repo, ".agents", "workflow", "plans")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Non-dir entry inside plans/ — must be skipped.
+	if err := os.WriteFile(filepath.Join(plansDir, "stray-file.md"), []byte("not a plan dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Plan directory with NO PLAN.yaml — os.ReadFile must error and the entry
+	// must be skipped (no panic, no recorded status).
+	if err := os.MkdirAll(filepath.Join(plansDir, "no-plan-file"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := &RepoDriftReport{}
+	driftPlanScanPhase(rep, ManagedProject{Path: repo})
+	if len(rep.CompletedPlanIDs) != 0 {
+		t.Errorf("expected no completed plans recorded, got %v", rep.CompletedPlanIDs)
+	}
+	if len(rep.InconsistentArchivedPlanIDs) != 0 {
+		t.Errorf("expected no archived inconsistencies recorded, got %v", rep.InconsistentArchivedPlanIDs)
+	}
+}

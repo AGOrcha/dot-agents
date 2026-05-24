@@ -15,7 +15,9 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
-type codex struct{}
+type codex struct {
+	io platformIO
+}
 
 const (
 	codexAgentsDir      = ".agents"
@@ -25,7 +27,7 @@ const (
 	codexAgentMDFile    = "AGENT.md"
 )
 
-func NewCodex() Platform { return &codex{} }
+func NewCodex() Platform { return &codex{io: stdPlatformIO{}} }
 
 func (c *codex) ID() string          { return "codex" }
 func (c *codex) DisplayName() string { return "Codex CLI" }
@@ -189,7 +191,7 @@ func (c *codex) linkCodexAgentsMD(project, repoPath, agentsHome string) error {
 // .codex/config.toml with the scoped codex.toml when one resolves. Link
 // errors propagate unchanged.
 func (c *codex) linkCodexConfigToml(project, repoPath, agentsHome string) error {
-	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
@@ -208,7 +210,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, codexDir, "agents")
-		if err := osMkdirAll(userAgentsDir, 0755); err != nil {
+		if err := c.io.MkdirAll(userAgentsDir, 0755); err != nil {
 			continue
 		}
 		if err := c.writeCodexAgents(agentsHome, "global", userAgentsDir); err != nil {
@@ -221,7 +223,7 @@ func (c *codex) ensureUserAgents(agentsHome string) error {
 func (c *codex) ensureUserSkills(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
 		userSkillsDir := filepath.Join(homeRoot, codexAgentsDir, "skills")
-		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+		if err := syncScopedDirSymlinks(c.io, agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
 			return err
 		}
 	}
@@ -251,15 +253,16 @@ func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err != nil {
 		return err
 	}
-	if err := osMkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
+		c.io,
 		repoTarget,
 		renderCodexHookConfig,
 		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
 		directSymlinkHookMode,
-		removeRenderedCodexHookConfig,
+		func(p string) error { return removeRenderedCodexHookConfig(c.io, p) },
 		repoBundles,
 	)
 }
@@ -270,11 +273,12 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 		return err
 	}
 	return emitPreferredHookFileToUserHomes(
+		c.io,
 		filepath.Join(codexDir, codexHooksJSON),
 		renderCodexHookConfig,
 		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
 		directSymlinkHookMode,
-		removeRenderedCodexHookConfig,
+		func(p string) error { return removeRenderedCodexHookConfig(c.io, p) },
 		globalBundles,
 	)
 }
@@ -289,7 +293,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
-		_ = removeManagedRenderedHookFile(repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
+		_ = removeManagedRenderedHookFile(c.io, repoBundles, filepath.Join(repoPath, codexDir, codexHooksJSON), renderCodexHookConfig)
 	}
 	errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexHooksJSON), agentsHome))
 
@@ -387,31 +391,31 @@ func (c *codex) pruneManagedCodexAgentTomls(agentsHome, scope, dstRoot string) e
 		return err
 	}
 	for _, entry := range entries {
-		if err := osRemove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
+		if err := c.io.Remove(filepath.Join(dstRoot, entry.Name+".toml")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeCodexAgentTomlFile(dst, agentMD string) error {
+func writeCodexAgentTomlFile(io platformIO, dst, agentMD string) error {
 	content, err := renderCodexAgentToml(agentMD)
 	if err != nil {
 		return err
 	}
-	if err := osMkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		if err := osRemove(dst); err != nil {
+		if err := io.Remove(dst); err != nil {
 			return err
 		}
 	}
-	return osWriteFile(dst, content, 0644)
+	return io.WriteFile(dst, content, 0644)
 }
 
 func (c *codex) writeCodexAgentToml(dst, agentMD string) error {
-	return writeCodexAgentTomlFile(dst, agentMD)
+	return writeCodexAgentTomlFile(c.io, dst, agentMD)
 }
 
 func renderCodexAgentToml(agentMD string) ([]byte, error) {

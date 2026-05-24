@@ -1,0 +1,24 @@
+schema_version: 1
+task_id: t5-extract-commands-root-tests
+parent_plan_id: go-test-fixture-extraction
+verifier_type: merge-back
+status: pass
+summary: |-
+    Four findings the orchestrator should triage before advancing the plan:
+
+    1. [HIGH] bundle-authoring: write_scope listed commands/mcp_settings_test.go which does not exist. Update bundle templates / fan-out scripts to validate scope paths against the live tree before delegation.
+
+    2. [MEDIUM] testutil-extension wanted: the dominant remaining duplication is the 5-line tmp/HOME/agentsHome/Setenv/MkdirAll preamble repeated ~17x in refresh_test and ~10x in import_test. No existing helper covers it (NewTempProject overshoots). Recommend a t5.5 bundle that adds a NewTempAgentsHome(t) helper before t6/t7 land, otherwise those plans will hit the same wall.
+
+    3. [MEDIUM] WriteScopeFile is single-basename only; nested resource paths (e.g. resources/<project>/.github/hooks/pre-tool.json) need a WriteScopeFilePath variant. Same t5.5 candidate.
+
+    4. [LOW] commands/coverage_test.go still calls writeMCPConfig. Add to t8 sweep so the helper can be removed outright.
+
+    Decision needed: spawn t5.5 testutil-extension bundle, or accept partial dedup and let t6/t7 surface the same findings? PR #49 stands either way — its diff is minimal and clean.
+
+    Full per-file LOC deltas and finding details in:
+    .agents/active/verification/t5-extract-commands-root-tests/impl-handoff.yaml
+recorded_at: "2026-05-23T22:25:04Z"
+delegation_id: del-t5-extract-commands-root-tests-1779573181
+artifact_paths:
+    - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml

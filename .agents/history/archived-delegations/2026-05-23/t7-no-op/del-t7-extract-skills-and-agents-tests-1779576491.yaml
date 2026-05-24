@@ -1,0 +1,38 @@
+schema_version: 1
+delegation_id: del-t7-extract-skills-and-agents-tests-1779576491
+plan_id: go-test-fixture-extraction
+task_id: t7-extract-skills-and-agents-tests
+owner: t7-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-23T22:48:11Z"
+    reason: 'Parallel fanout: t7 is the now-eligible second task on go-test-fixture-extraction (surfaced once t5 acquired a bundle). Non-overlapping write_scope with t5 (commands/{agents,skills,kg}/ vs commands/ root). Approved by user 2026-05-23 for concurrent execution with t5-worker.'
+scope:
+    write_scope:
+        - commands/agents/agents_test.go
+        - commands/skills/promote_test.go
+        - commands/kg/kg_test.go
+prompt:
+    inline:
+        - 'Sequential per-file refactor (one commit per file). Read internal/testutil/testutil.go FIRST. Then read .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml (sibling pattern PR #44 MERGED) AND the just-completed t5 bundle at .agents/active/delegation-bundles/del-t5-extract-commands-root-tests-1779573181.yaml plus t5''s merge-back at .agents/active/merge-back/t5-extract-commands-root-tests.md (live findings about WriteScopeFile being single-basename-only and the missing NewTempAgentsHome helper). Tests-only — never touch production .go or internal/testutil itself. If you would benefit from a testutil extension to absorb a duplicated pattern STOP and report — t5 already flagged candidates for a t5.5 bundle. Worktree at .agents/worktrees/t7 off master; branch t7-extract-skills-and-agents-tests.'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml
+        - .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml
+        - .agents/active/merge-back/t5-extract-commands-root-tests.md
+        - internal/testutil/testutil.go
+verification:
+    feedback_goal: Were ~318 duplicated fixture lines across commands/{agents,skills,kg}/*_test.go genuinely deduplicated through internal/testutil helper calls (not preserved as helper-aliased duplicates), with each per-file commit green under go test for its focused package?
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

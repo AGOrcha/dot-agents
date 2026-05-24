@@ -59,7 +59,7 @@ func TestEmitHookFanoutSymlinksSelectedHookFiles(t *testing.T) {
 		t.Fatalf("listHookSpecs failed: %v", err)
 	}
 
-	err = emitHookFanout(specs, dstRoot, HookEmissionMode{
+	err = emitHookFanout(stdPlatformIO{}, specs, dstRoot, HookEmissionMode{
 		Shape:     HookShapeRenderFanout,
 		Transport: HookTransportSymlink,
 	}, func(spec HookSpec) (string, bool) {

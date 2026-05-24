@@ -1,0 +1,118 @@
+delegation_id: seam-add-convert
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  parallel_with: seam-review-convert  # another worker is converting review.go in parallel
+  feature_thread: |
+    Migrate the commands package from package-var func-seams to per-file
+    interface-DI Deps structs. PR #40 has 7 files converted (init,
+    status, doctor, refresh, remove, import, install). add.go and
+    review.go are the last two before the atomic-delete commit that
+    removes the legacy seams.go vars + seams_test.go stubs.
+
+task:
+  id: seam-add-convert
+  title: Convert commands/add.go to per-file addDeps interface
+  stage: impl
+  reference_pattern: commands/install.go (commit 356d3f69) — installDeps did the same set of os.* seams plus configLoad
+
+write_scope:
+  - commands/add.go
+  - commands/add_test.go
+
+forbidden_scope:
+  - commands/review.go         # parallel worker owns these
+  - commands/review_test.go    # parallel worker owns these
+  - commands/seams.go          # atomic-delete commit handles this AFTER both workers land
+  - commands/seams_test.go     # atomic-delete commit handles this AFTER both workers land
+  - commands/{init,status,doctor,refresh,remove,import,install}.go
+  - commands/{init,status,doctor,refresh,remove,import,install}_test.go
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s -run 'Add|add'
+  - go test ./commands -race -count=1 -timeout 240s    # full sweep at the end
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      A second worker (seam-review-convert) is operating in the SAME
+      worktree concurrently, but on disjoint files (review.go +
+      review_test.go). Their edits will appear in the working tree
+      as you work. That's expected — do NOT revert them, do NOT
+      restage them.
+    severity: blocker
+
+  - description: |
+      Use ONLY explicit paths in git commands. NEVER `git add .` or
+      `git add -A`. NEVER `git commit -a`. Always:
+      `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di commit -- commands/add.go commands/add_test.go`
+      This guarantees you don't accidentally stage the other worker's
+      in-flight changes.
+    severity: blocker
+
+  - description: |
+      On push, if you get a non-fast-forward error, the other worker
+      pushed first. Do:
+      `git -C ... fetch origin seam-interface-di`
+      `git -C ... rebase origin/seam-interface-di`
+      `git -C ... push origin seam-interface-di`
+      Your commit is on your own files, the rebase will apply cleanly
+      since the other worker touched disjoint files.
+    severity: high
+
+  - description: |
+      add.go consumes these seams from seams.go: osMkdirAll, osWriteFile,
+      osRemove, osExecutable, copyFile, configLoad. Define `addDeps`
+      with methods for each (mirror install.go's installDeps for
+      MkdirAll/WriteFile/Remove/configLoad; the new ones are
+      Executable and CopyFile). The default impl is `stdAddDeps struct{}`
+      whose methods forward to `os.Executable`, `projectsync.CopyFile`,
+      etc.
+    severity: medium
+
+  - description: |
+      seams_test.go has add-related stubs (`withMkdirAllStub`,
+      `withWriteFileStub`, etc) that some add_test.go tests still call.
+      Migrate the add_test.go tests to use a `fakeAddDeps` struct
+      (mirror install.go's `fakeInstallDeps` pattern). The stubs in
+      seams_test.go stay where they are; they may also be used by
+      review_test.go (the parallel worker) and the atomic-delete commit
+      will reap them after BOTH workers land.
+    severity: medium
+
+  - description: |
+      ALL git operations MUST use `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di`.
+      Do not `cd` to the worktree. pwd persistence in the Bash tool
+      will cross-wire branches if you do (see memory feedback_worktree-no-cd).
+    severity: blocker
+
+decision_locks:
+  - Interface name: `addDeps` (per-file `<command>Deps` convention)
+  - Interface defined inline at the top of add.go (not in seams.go)
+  - Default impl: `stdAddDeps struct{}` with methods forwarding to real os/projectsync/config functions
+  - Test impl: `fakeAddDeps struct{ ... }` mirroring install_test.go's `fakeInstallDeps`
+
+required_reads:
+  - commands/install.go       # canonical reference (commit 356d3f69)
+  - commands/install_test.go  # how to wire fakeInstallDeps in tests
+  - commands/seams.go         # current legacy glue (READ ONLY)
+  - commands/seams_test.go    # current legacy test glue (READ ONLY)
+
+merge_back:
+  artifact: .agents/active/delegation/seam-add-convert.merge-back.md
+
+followups_to_record:
+  - "review.go conversion is in parallel — confirm both land before atomic-delete"
+  - "atomic-delete commit removes: osMkdirAll, osWriteFile, osRemove, osRemoveAll, osExecutable, osGetwd, osSymlink, copyFile, configLoad, applyProposalFn, archiveProposalFn, runRefreshFn from seams.go AND every with*Stub helper from seams_test.go"
+  - "the internal/projectsync import in seams.go is the last consumer of copyFile from that file; drop it in atomic-delete"

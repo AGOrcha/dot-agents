@@ -15,7 +15,9 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
-type copilot struct{}
+type copilot struct {
+	io platformIO
+}
 
 const (
 	copilotMCPJSON           = "mcp.json"
@@ -26,7 +28,7 @@ const (
 	copilotVSCodeDir         = ".vscode"
 )
 
-func NewCopilot() Platform { return &copilot{} }
+func NewCopilot() Platform { return &copilot{io: stdPlatformIO{}} }
 
 func (c *copilot) ID() string          { return "copilot" }
 func (c *copilot) DisplayName() string { return "GitHub Copilot" }
@@ -242,7 +244,7 @@ func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) e
 	if src == "" {
 		return nil
 	}
-	if err := osMkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, copilotGitHubDir), 0755); err != nil {
 		return err
 	}
 	// Managed-replace at a fixed owned path (.github/copilot-instructions.md).
@@ -260,7 +262,7 @@ func (c *copilot) createAgentsLinks(project, repoPath, agentsHome string) error 
 
 func (c *copilot) createMCPLinks(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "mcp", project, "copilot.json", copilotMCPJSON); src != "" {
-		if err := osMkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
+		if err := c.io.MkdirAll(filepath.Join(repoPath, copilotVSCodeDir), 0755); err != nil {
 			return err
 		}
 		// Managed-replace at a fixed owned path (.vscode/mcp.json).
@@ -279,15 +281,16 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 	if err != nil {
 		return err
 	}
-	if err := osMkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
+	if err := c.io.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
 		return err
 	}
 	return emitPreferredHookFile(
+		c.io,
 		target,
 		renderClaudeHookSettings,
 		resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json"),
 		directSymlinkHookMode,
-		removeRenderedClaudeHookSettings,
+		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
 		globalBundles,
 	)
@@ -307,22 +310,22 @@ func (c *copilot) createProjectHookFiles(project, repoPath, agentsHome string) e
 }
 
 func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir string) error {
-	if err := emitRenderedHookFanout(specs, hooksDir, renderCopilotHookFile); err != nil {
+	if err := emitRenderedHookFanout(c.io, specs, hooksDir, renderCopilotHookFile); err != nil {
 		return err
 	}
 	wanted, err := renderedCopilotHookNames(specs)
 	if err != nil {
 		return err
 	}
-	return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+	return pruneManagedRenderedFanoutExtras(c.io, hooksDir, wanted, isLikelyRenderedCopilotHookFile)
 }
 
 func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
 	specs, err := ListHookSpecs(agentsHome, project)
 	if err != nil {
-		return pruneManagedRenderedFanoutExtras(hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
+		return pruneManagedRenderedFanoutExtras(c.io, hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
 	}
-	if err := emitHookFanout(specs, hooksDir, HookEmissionMode{
+	if err := emitHookFanout(c.io, specs, hooksDir, HookEmissionMode{
 		Shape:     HookShapeRenderFanout,
 		Transport: HookTransportSymlink,
 	}, func(spec HookSpec) (string, bool) {
@@ -334,7 +337,7 @@ func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir strin
 		return err
 	}
 	wanted := legacyCopilotHookNames(specs)
-	return pruneManagedRenderedFanoutExtras(hooksDir, wanted, isLikelyRenderedCopilotHookFile)
+	return pruneManagedRenderedFanoutExtras(c.io, hooksDir, wanted, isLikelyRenderedCopilotHookFile)
 }
 
 func renderedCopilotHookNames(specs []HookSpec) (map[string]bool, error) {
@@ -415,11 +418,11 @@ func copilotMCPSources(agentsHome, project string) []string {
 func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome string) error {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
-		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
+		_ = removeManagedRenderedHookFile(c.io, projectBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
 	} else {
 		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 		if globalErr == nil && len(globalBundles) > 0 {
-			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
+			_ = removeManagedRenderedHookFile(c.io, globalBundles, filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
 	return links.RemoveIfSymlinkUnder(filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON), agentsHome)
@@ -464,7 +467,7 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) error {
 	hooksDir := filepath.Join(repoPath, copilotGitHubDir, "hooks")
 	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(canonicalSpecs) > 0 {
-		_ = removeManagedRenderedHookFanout(canonicalSpecs, hooksDir, renderCopilotHookFile)
+		_ = removeManagedRenderedHookFanout(c.io, canonicalSpecs, hooksDir, renderCopilotHookFile)
 	}
 	entries, rdErr := os.ReadDir(hooksDir)
 	if rdErr != nil {

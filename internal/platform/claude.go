@@ -14,7 +14,9 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
-type claude struct{}
+type claude struct {
+	io platformIO
+}
 
 const (
 	claudeCodeJSON          = "claude-code.json"
@@ -24,7 +26,7 @@ const (
 	claudeAgentsBucketDir   = ".agents"
 )
 
-func NewClaude() Platform { return &claude{} }
+func NewClaude() Platform { return &claude{io: stdPlatformIO{}} }
 
 func (c *claude) ID() string          { return "claude" }
 func (c *claude) DisplayName() string { return "Claude Code" }
@@ -285,7 +287,7 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	if err := c.ensureUserSettings(agentsHome); err != nil {
 		return err
 	}
-	return osMkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
+	return c.io.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
 func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
@@ -299,11 +301,12 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 		return
 	}
 	_ = emitPreferredHookFile(
+		c.io,
 		target,
 		renderClaudeHookSettings,
 		findClaudeSettingsHookSpec(agentsHome, project),
 		directSymlinkHookMode,
-		removeRenderedClaudeHookSettings,
+		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
 		globalBundles,
 	)
@@ -379,7 +382,7 @@ func (c *claude) pruneProjectRuleLinks(rulesDir, project string, wanted ...map[s
 		if _, ok := keep[name]; ok {
 			continue
 		}
-		if err := osRemove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
+		if err := c.io.Remove(filepath.Join(rulesDir, name)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -402,7 +405,7 @@ func (c *claude) ensureUserAgents(agentsHome string) error {
 
 func (c *claude) ensureUserAgentsInHome(homeRoot, globalAgents string, entries []os.DirEntry) error {
 	userAgentsDir := filepath.Join(homeRoot, claudeDir, "agents")
-	if err := osMkdirAll(userAgentsDir, 0755); err != nil {
+	if err := c.io.MkdirAll(userAgentsDir, 0755); err != nil {
 		return err
 	}
 	for _, entry := range entries {
@@ -474,13 +477,13 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		return err
 	}
 	if len(globalBundles) > 0 {
-		return emitRenderedHookFileToUserHomes(globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
+		return emitRenderedHookFileToUserHomes(c.io, globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
 	}
 
 	spec := findClaudeSettingsHookSpec(agentsHome, "global")
 	if spec == nil {
 		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
+			_ = removeManagedFileIf(c.io, filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
 		}
 		return nil
 	}
@@ -489,7 +492,7 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		if isPreExistingManagedLink(target, spec.SourcePath) {
 			continue // already a managed link, leave it
 		}
-		_ = emitHookSpec(spec, target, HookEmissionMode{
+		_ = emitHookSpec(c.io, spec, target, HookEmissionMode{
 			Shape:     HookShapeDirect,
 			Transport: HookTransportSymlink,
 		})
@@ -500,7 +503,7 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 func (c *claude) ensureUserSkills(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
 		userSkillsDir := filepath.Join(homeRoot, claudeDir, "skills")
-		if err := syncScopedDirSymlinks(agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
+		if err := syncScopedDirSymlinks(c.io, agentsHome, "skills", "global", "SKILL.md", userSkillsDir); err != nil {
 			return err
 		}
 	}
@@ -511,7 +514,7 @@ func (c *claude) createAgentsLinks(project, repoPath, agentsHome string) error {
 	// Mirror ~/.agents/agents/<project>/<name>/ into the repo (same model as ensureUserSkills /
 	// syncScopedDirSymlinks). Shared-target projection may already create `.claude/agents/*`;
 	// this pass also ensures `.agents/agents/*` and heals incorrect symlinks idempotently.
-	return syncScopedDirSymlinksTargets(agentsHome, "agents", project, "AGENT.md",
+	return syncScopedDirSymlinksTargets(c.io, agentsHome, "agents", project, "AGENT.md",
 		filepath.Join(repoPath, claudeAgentsBucketDir, "agents"),
 		filepath.Join(repoPath, claudeDir, "agents"),
 	)
@@ -565,11 +568,11 @@ func (c *claude) removeProjectRuleLinks(project, repoPath, agentsHome string) er
 func (c *claude) removeProjectSettingsLink(project, repoPath, agentsHome string) error {
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err == nil && len(projectBundles) > 0 {
-		_ = removeManagedRenderedHookFile(projectBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
+		_ = removeManagedRenderedHookFile(c.io, projectBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 	} else {
 		globalBundles, globalErr := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 		if globalErr == nil && len(globalBundles) > 0 {
-			_ = removeManagedRenderedHookFile(globalBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
+			_ = removeManagedRenderedHookFile(c.io, globalBundles, filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), renderClaudeHookSettings)
 		}
 	}
 	return links.RemoveIfSymlinkUnder(filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON), agentsHome)

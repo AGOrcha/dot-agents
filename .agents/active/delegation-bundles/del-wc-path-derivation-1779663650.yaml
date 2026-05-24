@@ -1,0 +1,32 @@
+schema_version: 1
+delegation_id: del-wc-path-derivation-1779663650
+plan_id: workflow-commit-command
+task_id: wc-path-derivation
+owner: wc-path-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-24T23:00:50Z"
+    reason: 'Next-wave cross-plan parallel fanout post PR #55-#59 merges.'
+scope:
+    write_scope:
+        - commands/workflow/
+prompt:
+    inline:
+        - 'Execute task wc-path-derivation per its TASKS.yaml notes. Read internal/platform/io.go + io_test.go (PR #59) for the canonical interface-DI pattern if this is a seam conversion. Worktree at .agents/worktrees/wc-path-derivation off master; branch feature/wc-path-derivation. Use git -C never cd per [[worktree-no-cd]].'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/workflow-commit-command/TASKS.yaml
+verification:
+    feedback_goal: Round-2 wave task spawn; see TASKS.yaml notes for goal
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

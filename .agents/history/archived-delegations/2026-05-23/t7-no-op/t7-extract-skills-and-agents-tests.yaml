@@ -1,0 +1,41 @@
+schema_version: 1
+id: del-t7-extract-skills-and-agents-tests-1779576491
+parent_plan_id: go-test-fixture-extraction
+parent_task_id: t7-extract-skills-and-agents-tests
+title: Refactor commands/{agents,skills,kg}/*_test.go to use internal/testutil
+summary: Delegated from plan Extract internal/testutil to clear Cluster D test-fixture duplication
+write_scope:
+    - commands/agents/agents_test.go
+    - commands/skills/promote_test.go
+    - commands/kg/kg_test.go
+success_criteria: |-
+    Tier: T2 (compound — three files).
+
+    commands/agents/agents_test.go and commands/skills/promote_test.go
+    already use setupAgentsEnv/setupSkillsEnv per-file. After
+    projectsync.{ListBucket,PromoteResource} extraction landed
+    in PR#10, the bucket spec is uniform; per-file fixtures
+    should collapse cleanly to internal/testutil's bucket-aware
+    helpers (NewTempProject + WriteManifest variants).
+
+    commands/kg/kg_test.go's 91 dup lines spread across 11
+    blocks — many small repetitions; refactor may need
+    table-driven tests in addition to fixture extraction.
+
+    One commit per file. Hard test per commit:
+    go test ./commands/agents ./commands/skills ./commands/kg.
+
+    ISP routing:
+      mode: fanout-amenable (one subagent per file)
+      verifier: smoke (focused go test)
+      review: code review per file
+      bundle-context (if fanout): T1's signature table, T2's
+                                   API, projectsync.PromoteSpec
+                                   and BucketSpec field shapes
+      output contract: ~318 dup lines removed
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t7-worker
+status: completed
+created_at: "2026-05-23T22:48:11Z"
+updated_at: "2026-05-23T22:51:59Z"

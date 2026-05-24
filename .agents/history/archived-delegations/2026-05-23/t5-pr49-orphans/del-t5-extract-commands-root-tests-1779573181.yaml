@@ -1,0 +1,40 @@
+schema_version: 1
+delegation_id: del-t5-extract-commands-root-tests-1779573181
+plan_id: go-test-fixture-extraction
+task_id: t5-extract-commands-root-tests
+owner: t5-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-23T21:53:01Z"
+    reason: 'Only eligible task across non-r1 active plans (r1-outcome-scoring is owned by a parallel agent and excluded this session). evidence_confidence=none but rich sibling reference exists in PR #44 (t4) which mirrors this exact pattern.'
+scope:
+    write_scope:
+        - commands/refresh_test.go
+        - commands/import_test.go
+        - commands/mcp_settings_test.go
+        - commands/rules_test.go
+prompt:
+    inline:
+        - Sequential per-file refactor (one commit per file). Read internal/testutil/testutil.go first; then read the t4 sibling bundle at .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml for the canonical pattern. Tests-only — never touch production .go or internal/testutil itself; if either tempts you
+        - STOP and report. Worktree at .agents/worktrees/t5
+        - branch t5-extract-commands-root-tests off master.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml
+        - .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml
+        - internal/testutil/testutil.go
+verification:
+    feedback_goal: Were ~230 duplicated fixture lines across the 4 commands/ root test files genuinely deduplicated through internal/testutil helper calls (not preserved as helper-aliased duplicates), with all 4 files passing go test ./commands/ -race -count=1 after each per-file commit?
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

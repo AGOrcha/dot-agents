@@ -56,6 +56,7 @@ tasks:
       depends_on:
         - t1-audit-and-helper-design
       blocks:
+        - t2_5-extend-internal-testutil
         - t3-extract-platform-tests
         - t4-extract-workflow-tests
         - t5-extract-commands-root-tests
@@ -93,11 +94,100 @@ tasks:
           output contract: internal/testutil exists with helpers,
                            docs, tests; importable by any *_test.go
       app_type: code-fix
-    - id: t3-extract-platform-tests
-      title: Refactor internal/platform/*_test.go to use internal/testutil
-      status: pending
+    - id: t2_5-extend-internal-testutil
+      title: 'Extend internal/testutil: NewTempAgentsHome + WriteScopeFilePath'
+      status: completed
       depends_on:
         - t2-create-internal-testutil
+      blocks:
+        - t3-extract-platform-tests
+        - t6-extract-graphstore-tests
+      owner: ""
+      write_scope:
+        - internal/testutil/testutil.go
+        - internal/testutil/testutil_test.go
+      verification_required: true
+      notes: |-
+        Tier: T2 (additive helper extension).
+
+        Two new helpers, both surfaced by t5's merge-back narrative
+        (commands/refresh_test.go ×17, commands/import_test.go ×10)
+        and corroborated by t7's audit
+        (commands/skills/promote_test.go::TestPromoteSkillIn_Mirror...
+        site). Landing these BEFORE t3 and t6 prevents those workers
+        from hitting the same walls and re-surfacing the same finding
+        as t5.5 candidates.
+
+        Helper 1 — NewTempAgentsHome:
+
+          // NewTempAgentsHome creates a t.TempDir(), sets HOME and
+          // AGENTS_HOME envs (with .agents/ subdir under HOME), and
+          // returns (tmp, agentsHome).
+          //
+          // Lighter than NewTempProject when a test needs full env-
+          // var control but no project tree. Absorbs the recurring
+          // 5-line preamble:
+          //
+          //   tmp := t.TempDir()
+          //   t.Setenv("HOME", tmp)
+          //   agentsHome := filepath.Join(tmp, ".agents")
+          //   if err := os.MkdirAll(agentsHome, 0755); err != nil { t.Fatal(err) }
+          //   t.Setenv("AGENTS_HOME", agentsHome)
+          //
+          // Use NewTempProject when you also need a project dir +
+          // canonical agents tree; use this when you don't.
+          func NewTempAgentsHome(t *testing.T) (tmp, agentsHome string)
+
+        Helper 2 — WriteScopeFilePath:
+
+          // WriteScopeFilePath extends WriteScopeFile to accept a
+          // nested relative path under agentsHome/bucket/scope/, e.g.
+          // ".github/hooks/pre-tool.json". The relative path components
+          // are MkdirAll'd as needed.
+          //
+          // Equivalent to WriteScopeFile when relPath has no
+          // separator. Unlocks the seed loop in
+          // TestRestoreFromResourcesCounted_RestoresDirectoryBuckets
+          // and similar nested-path call sites surfaced in t5's
+          // merge-back.
+          func WriteScopeFilePath(t *testing.T, agentsHome, bucket, scope, relPath string, content []byte)
+
+        Implementation rules (per t2's design):
+          * t.Helper() first
+          * t.Fatal on prerequisite errors
+          * GoDoc on every exported function
+          * NewTempAgentsHome may call t.TempDir() internally
+            (different from t2's "no t.TempDir() inside helpers"
+            rule because the env-var setup wraps the temp dir; this
+            is the explicit purpose of the helper)
+          * No call-site migrations in this task — those happen in
+            t3/t6 (which already own the affected test files)
+
+        Hard test: go test ./internal/testutil -race -count=1 passes;
+        package builds clean.
+
+        Anti-scope: do NOT modify any consumer *_test.go in this
+        task. Just land the helpers + their unit tests. t3 / t6 / a
+        possible future cleanup pass consume them.
+
+        ISP routing:
+          mode: direct (single-package additive)
+          verifier: smoke (go test ./internal/testutil -race -count=1)
+          review: code review (small surface)
+          bundle-context (if fanout): t5 merge-back
+            (.agents/history/archived-delegations/2026-05-23/
+            t5-pr49-orphans/t5-extract-commands-root-tests.md) for
+            the exact call-site shape; t2's design doc for the
+            helper-style rules.
+          output contract: two new exported helpers + their unit
+            tests, ready for t3/t6 consumers.
+      app_type: code-fix
+    - id: t3-extract-platform-tests
+      title: Refactor internal/platform/*_test.go to use internal/testutil
+      status: in_progress
+      depends_on:
+        - t2-create-internal-testutil
+        - t2_5-extend-internal-testutil
       blocks: []
       owner: ""
       write_scope:
@@ -179,7 +269,7 @@ tasks:
       app_type: code-fix
     - id: t5-extract-commands-root-tests
       title: Refactor commands/*_test.go (root) to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []
@@ -204,18 +294,51 @@ tasks:
         One commit per file. Hard test per commit: go test ./commands/.
 
         ISP routing:
-          mode: fanout-amenable (one subagent per file)
+          mode: serialized single worker (4 files sequentially)
           verifier: smoke (go test ./commands/)
           review: code review per file
           bundle-context (if fanout): T1's signature table, T2's
                                        internal/testutil API
           output contract: ~230 dup lines removed
+
+        ---
+        Fanout briefing (2026-05-23 — orchestrator re-pickup):
+
+        Pre-existing in_progress status carries no in-flight worker,
+        no branch, no bundle; treat as a fresh spawn.
+
+        Required reads BEFORE touching any target file:
+          1. internal/testutil/testutil.go — the canonical helper API
+             shipped by t2 (NewTempProjectDir, fixture seeders, etc.).
+          2. .agents/history/archived-delegations/2026-05-23/t4-extract-workflow-tests.yaml
+             — the immediately preceding sibling bundle (t4, PR #44
+             MERGED) — same plan, same refactor pattern, same
+             forbidden_scope shape, same verification commands. Mirror
+             its commit-per-file rhythm.
+
+        Worktree: create at .agents/worktrees/t5 off master (matches
+        current repo convention; .claude/worktrees/ was cleaned up
+        2026-05-23 and is no longer used).
+
+        Branch: t5-extract-commands-root-tests off master. Fresh
+        branch, NOT stacked on any other plan's branch.
+
+        One-PR-in-flight: open PR after all 4 commits land on the
+        branch; do not merge — user gates.
+
+        Touch tests only — no production .go changes. If you find a
+        helper in internal/testutil that would benefit from a small
+        additive extension to absorb a duplicated pattern, STOP and
+        report (out of write_scope; do not silently modify the
+        shared package). Same rule for production code: report, do
+        not fix-and-pad.
       app_type: code-fix
     - id: t6-extract-graphstore-tests
       title: Refactor internal/graphstore/*_test.go to use internal/testutil
       status: pending
       depends_on:
         - t2-create-internal-testutil
+        - t2_5-extend-internal-testutil
       blocks: []
       owner: ""
       write_scope:
@@ -253,7 +376,7 @@ tasks:
       app_type: code-fix
     - id: t7-extract-skills-and-agents-tests
       title: Refactor commands/{agents,skills,kg}/*_test.go to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
       blocks: []

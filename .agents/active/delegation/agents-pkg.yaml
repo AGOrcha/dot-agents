@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-agents-pkg-1779663650
+parent_plan_id: seam-interface-di-migration
+parent_task_id: agents-pkg
+title: Convert commands/agents/seams.go to interface-DI
+summary: Delegated from plan Migrate func-var test seams to interface-DI
+write_scope:
+    - commands/agents/
+success_criteria: 1 func-var seam. Smallest leaf, fold in with a sibling if cheaper.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: agents-pkg-worker
+status: active
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:00:50Z"

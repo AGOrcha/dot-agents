@@ -1,0 +1,32 @@
+schema_version: 1
+id: del-gcc4-regression-close-od1-1779663650
+parent_plan_id: graphstore-concurrency-contract
+parent_task_id: gcc4-regression-close-od1
+title: Regression (hard-cap + cross-path parity + timeout); close maxNodes Low-1 & OD-1
+summary: Delegated from plan Graphstore concurrency contract (Path A)
+write_scope:
+    - internal/graphstore/
+success_criteria: |-
+    Regression tests prove: bounds hard cap enforced, native/CRG
+    cross-path parity, request timeout honored. Close maxNodes Low-1
+    *via* contract enforcement (folds in the standalone follow-up).
+    Record di-refactor-rollout OD-1 closure: the package-singleton is
+    justified ONLY as a holder of the contract-typed handle whose
+    provider owns concurrency — add that rationale comment to the
+    reference (commands/workflow/deps.go).
+    DEFERRED FROM gcc2 (PR #34, 2026-05-18): postgres.go uses raw
+    context.Background() at ~20 call sites and bypasses requestContext,
+    so the Path-A request-timeout chokepoint is NOT uniform across
+    providers. gcc2's fix pass deliberately did not rewrite this (real
+    parent ctx is wired by gcc3; uniform cross-provider timeout is
+    gcc4's charter). gcc4 MUST route postgres.go reads/execs through
+    the requestContext timeout boundary and prove cross-provider
+    timeout uniformity in the parity regression. requestContext(nil)
+    itself is correct (nil to Background, parent wired later) — do not
+    change that pattern.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: gcc4-worker
+status: active
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:00:50Z"

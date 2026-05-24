@@ -25,3 +25,4 @@ cause, rule, and how-to-apply.
 - [`concurrent-workers-one-worktree`](concurrent-workers-one-worktree/LESSON.md) — one active writer per worktree; workers must not self-arm CI waiters (orchestrator polls + relays).
 - [`prefer-interface-di-over-funcvar-seams`](prefer-interface-di-over-funcvar-seams/LESSON.md) — interface-DI is the preferred test seam; func-var `var osX = os.X` is legacy; prevalence ≠ sanctioned (audits must state descriptive vs prescriptive).
 - [`match-ci-test-flags-locally`](match-ci-test-flags-locally/LESSON.md) — verify concurrency changes with CI's exact flags (`-race -count=1`) before push; lazy WaitGroup.Add needs mutex+closed ordering vs Wait.
+- [`validate-bundle-against-head`](validate-bundle-against-head/LESSON.md) — TASKS.yaml status/notes/write_scope decay between snapshots; HEAD-validate write_scope paths AND task premise before `workflow fanout`, especially after history rewrites.

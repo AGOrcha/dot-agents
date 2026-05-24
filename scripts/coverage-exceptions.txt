@@ -40,12 +40,7 @@ commands/refresh.go                                        # [legacy-tail] 93.53
 commands/sync.go                                           # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
 commands/sync/pull.go                                      # [legacy-tail] 88.89%; cg6 ratchet-loop raises to >=95%
 commands/workflow/app_types.go                             # [legacy-tail] 94.12%; cg6 ratchet-loop raises to >=95%
-commands/workflow/prefs.go                                 # [legacy-tail] 94.53%; cg6 ratchet-loop raises to >=95%
 commands/workflow/delegation.go                            # [legacy-tail] 93.74%; cg6 ratchet-loop raises to >=95%
-commands/workflow/drift.go                                 # [legacy-tail] 94.30%; cg6 ratchet-loop raises to >=95%
-commands/workflow/fs.go                                    # [legacy-tail] 93.27%; cg6 ratchet-loop raises to >=95%
-commands/workflow/graph.go                                 # [legacy-tail] 93.28%; cg6 ratchet-loop raises to >=95%
-commands/workflow/health.go                                # [legacy-tail] 94.67%; cg6 ratchet-loop raises to >=95%
 commands/workflow/review_gate.go                           # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
 internal/config/config.go                                  # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
 internal/config/proposals.go                               # [legacy-tail] 92.92%; cg6 ratchet-loop raises to >=95%

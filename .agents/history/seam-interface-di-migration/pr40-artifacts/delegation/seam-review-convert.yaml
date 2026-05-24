@@ -1,0 +1,34 @@
+schema_version: 1
+id: del-seam-review-convert-2026-05-20
+parent_plan_id: seam-interface-di-migration
+parent_task_id: seam-review-convert
+title: Convert commands/review.go to per-file reviewDeps interface
+summary: |-
+    Migrate review.go from package-var func-seams (osMkdirAll, osWriteFile,
+    osRemove, applyProposalFn, archiveProposalFn, runRefreshFn) to a
+    per-file reviewDeps interface following install.go (commit 356d3f69)
+    for the os.* shape and refresh.go (commit 5bf0f2fc) for the
+    higher-order Fn shape. One interface covers both seam categories so
+    review's approve pipeline gets a single fault-injection surface.
+write_scope:
+    - commands/review.go
+    - commands/review_test.go
+    - commands/seams_test.go
+success_criteria: |-
+    review.go uses interface-DI per docs/TEST_SEAMS.md (reviewDeps,
+    stdReviewDeps, fakeReviewDeps with nil-delegates-to-real). RunRefresh
+    preserves the legacy wrap (threads stdRefreshConfigLoader{} into
+    runRefresh). All commands tests pass under -race; go build and go vet
+    clean. Legacy seams in seams.go remain in place because add.go still
+    consumes osMkdirAll/osWriteFile/osRemove — atomic delete is the final
+    commit on the branch after both review and add convert.
+verification_expectations: |-
+    go build ./...
+    go test ./commands -race -count=1 -timeout 240s -run 'Review|review'
+    go test ./commands -race -count=1 -timeout 240s
+    go vet ./...
+may_mutate_workflow_state: false
+owner: loop-worker
+status: completed
+created_at: "2026-05-20T00:00:00Z"
+updated_at: "2026-05-21T00:17:28Z"

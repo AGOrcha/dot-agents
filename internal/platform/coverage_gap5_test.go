@@ -269,7 +269,7 @@ func TestEmitHookSpec_DirectHardlink(t *testing.T) {
 	}
 	spec := &HookSpec{SourcePath: src}
 	dst := filepath.Join(tmp, "out", "x.json")
-	if err := emitHookSpec(spec, dst, directHardlinkHookMode); err != nil {
+	if err := emitHookSpec(stdPlatformIO{}, spec, dst, directHardlinkHookMode); err != nil {
 		// Hardlinks fail across some filesystems; tolerate that as long as no panic.
 		t.Logf("emitHookSpec hardlink: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestEmitHookFile_HardlinkBranch(t *testing.T) {
 	}
 	dst := filepath.Join(tmp, "dst.json")
 	// Best-effort; just exercise the branch.
-	_ = emitHookFile(src, dst, HookTransportHardlink)
+	_ = emitHookFile(stdPlatformIO{}, src, dst, HookTransportHardlink)
 }
 
 // TestEmitHookFile_SymlinkBranch drives the symlink case.
@@ -295,7 +295,7 @@ func TestEmitHookFile_SymlinkBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "dst.json")
-	if err := emitHookFile(src, dst, HookTransportSymlink); err != nil {
+	if err := emitHookFile(stdPlatformIO{}, src, dst, HookTransportSymlink); err != nil {
 		t.Errorf("symlink branch: %v", err)
 	}
 	if !links.IsManagedLink(dst, src) {
@@ -395,7 +395,7 @@ func TestEmitRenderedHookFile_RenderError(t *testing.T) {
 	tmp := t.TempDir()
 	// Use a spec that forces render error: required-on platform with no command.
 	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
-	err := emitRenderedHookFile([]HookSpec{spec}, filepath.Join(tmp, "out"), renderClaudeHookSettings)
+	err := emitRenderedHookFile(stdPlatformIO{}, []HookSpec{spec}, filepath.Join(tmp, "out"), renderClaudeHookSettings)
 	if err == nil {
 		t.Error("expected render error")
 	}
@@ -404,7 +404,7 @@ func TestEmitRenderedHookFile_RenderError(t *testing.T) {
 func TestEmitRenderedHookFileToUserHomes_RenderError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
-	err := emitRenderedHookFileToUserHomes([]HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
+	err := emitRenderedHookFileToUserHomes(stdPlatformIO{}, []HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
 	if err == nil {
 		t.Error("expected render error")
 	}
@@ -413,7 +413,7 @@ func TestEmitRenderedHookFileToUserHomes_RenderError(t *testing.T) {
 // TestRemoveManagedRenderedHookFile_RenderError drives the render-error branch.
 func TestRemoveManagedRenderedHookFile_RenderError(t *testing.T) {
 	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
-	err := removeManagedRenderedHookFile([]HookSpec{spec}, "/tmp/x", renderClaudeHookSettings)
+	err := removeManagedRenderedHookFile(stdPlatformIO{}, []HookSpec{spec}, "/tmp/x", renderClaudeHookSettings)
 	if err == nil {
 		t.Error("expected render error")
 	}
@@ -424,7 +424,7 @@ func TestRemoveManagedRenderedHookFile_RenderError(t *testing.T) {
 func TestRemoveManagedRenderedHookFileToUserHomes_RenderError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
-	err := removeManagedRenderedHookFileToUserHomes([]HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
+	err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, []HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
 	if err == nil {
 		t.Error("expected render error")
 	}
@@ -434,7 +434,7 @@ func TestRemoveManagedRenderedHookFileToUserHomes_RenderError(t *testing.T) {
 func TestEmitRenderedHookFanout_RenderError(t *testing.T) {
 	tmp := t.TempDir()
 	spec := HookSpec{Name: "x", When: "post_tool_use", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
-	err := emitRenderedHookFanout([]HookSpec{spec}, filepath.Join(tmp, "out"), renderCopilotHookFile)
+	err := emitRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, filepath.Join(tmp, "out"), renderCopilotHookFile)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -442,7 +442,7 @@ func TestEmitRenderedHookFanout_RenderError(t *testing.T) {
 
 func TestRemoveManagedRenderedHookFanout_RenderError(t *testing.T) {
 	spec := HookSpec{Name: "x", When: "post_tool_use", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
-	err := removeManagedRenderedHookFanout([]HookSpec{spec}, "/tmp/out", renderCopilotHookFile)
+	err := removeManagedRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, "/tmp/out", renderCopilotHookFile)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -474,7 +474,7 @@ func TestPruneManagedRenderedFanoutExtras_StaleEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// "wanted" does not include it; the detector matches; file is removed.
-	if err := pruneManagedRenderedFanoutExtras(dst, nil, isLikelyRenderedCursorHookConfig); err != nil {
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, dst, nil, isLikelyRenderedCursorHookConfig); err != nil {
 		t.Fatalf("prune: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -486,7 +486,7 @@ func TestPruneManagedRenderedFanoutExtras_StaleEntry(t *testing.T) {
 func TestSyncResourceDirEntries_Empty(t *testing.T) {
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "out")
-	if err := syncResourceDirEntries(nil, dst); err != nil {
+	if err := syncResourceDirEntries(stdPlatformIO{}, nil, dst); err != nil {
 		t.Errorf("empty entries: %v", err)
 	}
 	if _, err := os.Stat(dst); err != nil {

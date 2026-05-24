@@ -1,0 +1,148 @@
+delegation_id: seam-sonar-complexity-reduction
+created_at: 2026-05-20
+profile: loop-worker
+profile_path: /Users/nikashp/.agents/profiles/loop-worker.md
+
+context:
+  branch: seam-interface-di
+  pr: 40
+  worktree: /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di
+  upstream_base: origin/master
+  feature_thread: |
+    PR #40 is fully green locally + on CI (12 commits ahead of master).
+    SonarCloud flagged 8 NEW maintainability issues introduced by the
+    seam-DI conversion threading Deps parameters through the command
+    entry-point functions. Quality Gate is OK overall, but cognitive
+    complexity in 4 commands is severely over the 15-allowed threshold:
+    runDoctor 122, runRefresh 75, runAdd 74, runRemove 42.
+    Per maintainer (2026-05-20), commits land directly on PR #40 in
+    this worktree, NOT a separate follow-up PR.
+
+task:
+  id: seam-sonar-complexity-reduction
+  title: Reduce cognitive complexity on 4 command entry points + 4 lighter findings (Sonar S3776 + S107)
+  stage: impl
+
+write_scope:
+  - commands/doctor.go
+  - commands/refresh.go
+  - commands/add.go
+  - commands/remove.go
+  - commands/status.go
+  - commands/import.go
+  - commands/doctor_test.go
+  - commands/refresh_test.go
+  - commands/add_test.go
+  - commands/remove_test.go
+  - commands/status_test.go
+  - commands/import_test.go
+
+forbidden_scope:
+  - commands/{init,install,review}.go     # NOT in the Sonar finding set
+  - commands/{init,install,review}_test.go
+  - commands/seams_test.go                # already migrated; do not touch
+  - internal/**
+  - cmd/**
+  - .agents/workflow/**
+
+verification_required: true
+verification_commands:
+  - go build ./...
+  - go test ./commands -race -count=1 -timeout 240s
+  - go vet ./...
+
+known_gotchas:
+  - description: |
+      NEVER `cd` to the worktree. Always
+      `git -C /Users/nikashp/Documents/dot-agents/.claude/worktrees/seam-di <cmd>`.
+      NEVER `git add .` — explicit paths only.
+    severity: blocker
+
+  - description: |
+      The init.go pattern (commits c64d85bc and 655ed489 on this
+      branch) is the canonical reference for "Sonar findings + further
+      phase decomposition." Read both before starting. The pattern:
+      identify the entry function's natural phases (setup → validation
+      → loop body → cleanup → metadata stamping), extract each phase
+      into a private helper named `<command>Phase<N><Description>` or
+      `<verb><Object>For<Command>`, keep the entry function as a
+      pure orchestrator.
+    severity: high
+
+  - description: |
+      DO NOT change BEHAVIOR. Every Test* in the test files must
+      continue to pass with identical assertions. Decomposition is
+      mechanical: identify a contiguous block, extract to a function,
+      replace the block with a call. The block's local variables
+      become function parameters (be willing to pass 3-5 params per
+      helper — that is fine, the S3776 finding is about cognitive
+      complexity, not parameter count).
+    severity: blocker
+
+  - description: |
+      The S107 finding at import.go:752 (`replaceImportContentCandidate`)
+      has 8 parameters. Per the bundle-authoring lesson
+      (.agents/proposals/kg-crg-aware-bundle-authoring.md): grep
+      callers FIRST before changing signature. If the only caller is
+      `processImportCandidate` (line ~700), pick ONE of:
+        (a) Bundle (c, agentsHome, dest, content, srcInfo, destInfo)
+            into a single `replaceContext struct`. Cleanest.
+        (b) Inline the function back into processImportCandidate if
+            the extraction was premature.
+        (c) Pull `agentsHome` from a higher scope (it's a derived
+            value) instead of threading it.
+      Whichever, verify go build ./... passes after the signature
+      change BEFORE moving on.
+    severity: high
+
+  - description: |
+      Sonar's cognitive complexity score is NOT directly measurable
+      without running Sonar. Rule of thumb: each control-flow
+      construct (if/for/switch/case) adds 1; nesting adds +1 per
+      level beyond the first; chained && or || in a condition adds 1
+      each. After extraction, target each function visibly looking
+      like a clean orchestrator (one if-err return + a handful of
+      function calls + a return). The numbers don't have to be
+      exact, but each entry function MUST look smaller and flatter.
+    severity: medium
+
+  - description: |
+      For the 4 lighter findings (cognitive complexity 16-20 at
+      doctor.go:740, status.go:872, status.go:351), one well-chosen
+      extraction per function should drop the score under 15. Don't
+      over-decompose — these are just-over-threshold; one helper
+      each is usually sufficient.
+    severity: medium
+
+  - description: |
+      Each commit must keep tests green. Run `go test ./commands -race
+      -count=1 -timeout 240s` after EACH commit, not just at the end.
+      If a commit's tests fail, fix it in the next commit on the same
+      file (not amend); do NOT push broken state.
+    severity: blocker
+
+decision_locks:
+  - 5 commits expected, in this order:
+      1. refactor(commands/doctor): decompose runDoctor into phase helpers (Sonar S3776 122→<15)
+      2. refactor(commands/refresh): decompose runRefresh into phase helpers (S3776 75→<15)
+      3. refactor(commands/add): decompose runAdd into phase helpers (S3776 74→<15)
+      4. refactor(commands/remove): decompose runRemove into phase helpers (S3776 42→<15)
+      5. refactor(commands): trim residual S3776 + S107 findings (status.go 351+872, doctor.go 740, import.go 752)
+    If a function decomposes more naturally into 2 commits (extract phase 1, then phase 2), split into 2; do not pack a noisy 200-line diff into one commit.
+  - Phase helper naming: `<verb><Object>` is preferred over `<func>Phase<N>`. Read clearly to a fresh reader (e.g. `restoreProjectFromResources`, not `runRefreshPhase3`).
+  - Phase helpers stay file-private. Do NOT add them to a Deps interface unless they're test-injectable (S3776 is about complexity, not testability — most extractions won't need DI).
+  - After all 5 commits: push to `origin/seam-interface-di`. Do NOT open a new PR — these stack on PR #40.
+
+required_reads:
+  - commands/init.go (post-decomposition state at HEAD)
+  - commands/init.go at commit c64d85bc (the Sonar-fix commit)
+  - commands/init.go at commit 655ed489 (the further-phase-decomposition commit)
+  - Each of the 6 files in write_scope (the .go files; tests only when their helper signatures change)
+
+merge_back:
+  artifact: .agents/active/delegation/seam-sonar-complexity-reduction.merge-back.md
+
+followups_to_record:
+  - "Any function where decomposition couldn't drop cog complexity below 15 — flag for a deeper redesign discussion (not just shuffling code)"
+  - "Validation that PR #40's SonarCloud finding count drops from 8 to 0 after these commits land (requires post-push CI rerun on Sonar)"
+  - "If the import.go S107 fix introduces a new helper struct, note it for a possible promotion to internal/ if multiple files would benefit"

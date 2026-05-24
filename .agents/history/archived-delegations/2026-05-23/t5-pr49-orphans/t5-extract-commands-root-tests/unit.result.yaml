@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t5-extract-commands-root-tests
+parent_plan_id: go-test-fixture-extraction
+verifier_type: unit
+status: pass
+summary: 't5 impl: commands/ root tests pass after testutil refactor; 3 commits across 4 files; import_test.go unchanged (no testutil fit). Branch t5-extract-commands-root-tests; PR #49.'
+recorded_at: "2026-05-23T22:24:31Z"
+delegation_id: del-t5-extract-commands-root-tests-1779573181
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/ -race -count=1 -timeout 240s

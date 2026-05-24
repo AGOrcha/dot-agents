@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t7-extract-skills-and-agents-tests
+parent_plan_id: go-test-fixture-extraction
+verifier_type: unit
+status: pass
+summary: 'All three target packages green on master HEAD with zero new edits: agents 1.5s ok, skills 1.75s ok, kg 17.1s ok. go build ./... clean; go vet on the three packages clean; gofmt -l on the three target files empty. Dedup already on master via 1c6f3b76 (post 2026-05-22 history rewrite that folded c7f1780e test(agents,skills,kg): consume internal/testutil + collapse kg fixture into the base subpackage commit). Nothing further to commit without extending internal/testutil (forbidden by bundle).'
+recorded_at: "2026-05-23T22:51:24Z"
+delegation_id: del-t7-extract-skills-and-agents-tests-1779576491
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/agents ./commands/skills ./commands/kg -race -count=1 -timeout 240s

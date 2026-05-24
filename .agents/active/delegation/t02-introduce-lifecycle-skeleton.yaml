@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-t02-introduce-lifecycle-skeleton-1779663678
+parent_plan_id: root-command-decomposition
+parent_task_id: t02-introduce-lifecycle-skeleton
+title: Create commands/lifecycle/ skeleton
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/doc.go
+    - commands/lifecycle/deps.go
+success_criteria: |-
+    Add empty package with doc.go and a deps.go that mirrors the
+    pattern in commands/agents/deps.go / commands/skills/deps.go
+    (Deps struct + NewDeps()). No command moves yet. go test ./...
+    must stay green. This task exists so all subsequent move tasks
+    have a settled target package and can run in parallel.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t02-worker
+status: active
+created_at: "2026-05-24T23:01:18Z"
+updated_at: "2026-05-24T23:01:18Z"

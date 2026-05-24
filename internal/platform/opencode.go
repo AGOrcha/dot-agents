@@ -14,14 +14,16 @@ import (
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
-type opencode struct{}
+type opencode struct {
+	io platformIO
+}
 
 const (
 	opencodeJSON = "opencode.json"
 	opencodeDir  = ".opencode"
 )
 
-func NewOpenCode() Platform { return &opencode{} }
+func NewOpenCode() Platform { return &opencode{io: stdPlatformIO{}} }
 
 func (o *opencode) ID() string          { return "opencode" }
 func (o *opencode) DisplayName() string { return "OpenCode" }
@@ -140,7 +142,7 @@ func opencodeConfigSources(agentsHome, project string) []string {
 func (o *opencode) ensureUserAgents(agentsHome string) error {
 	for _, homeRoot := range config.UserHomeRoots() {
 		userAgentsDir := filepath.Join(homeRoot, opencodeDir, "agent")
-		if err := syncScopedFileSymlinks(agentsHome, "agents", "global", "AGENT.md", userAgentsDir, ".md"); err != nil {
+		if err := syncScopedFileSymlinks(o.io, agentsHome, "agents", "global", "AGENT.md", userAgentsDir, ".md"); err != nil {
 			return err
 		}
 	}

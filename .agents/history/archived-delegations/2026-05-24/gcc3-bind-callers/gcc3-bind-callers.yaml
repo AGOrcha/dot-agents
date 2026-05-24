@@ -1,0 +1,22 @@
+schema_version: 1
+id: del-gcc3-bind-callers-1779649327
+parent_plan_id: graphstore-concurrency-contract
+parent_task_id: gcc3-bind-callers
+title: Bind all callers + Deps to the published contract
+summary: Delegated from plan Graphstore concurrency contract (Path A)
+write_scope:
+    - internal/graphstore/
+    - commands/
+success_criteria: |-
+    Refactor all graphstore callers + the Deps holder to depend on the
+    gcc1 contract (typed handle whose provider owns concurrency), not
+    concrete store types. This is the propagation gcc1 was review-gated
+    to protect. Coordinate with di-refactor-rollout (this pins the
+    Deps shape it propagates x6) — do not duplicate that rollout here;
+    just establish the contract-bound boundary at the graphstore seam.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: gcc3-worker
+status: active
+created_at: "2026-05-24T19:02:07Z"
+updated_at: "2026-05-24T19:02:07Z"
