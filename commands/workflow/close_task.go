@@ -109,6 +109,7 @@ var (
 	closeTaskResolveProject = currentWorkflowProject
 	closeTaskPlanUpdate     = runWorkflowPlanUpdate
 	closeTaskWriteSidecar   = scoring.WriteIterationScoreWithRecord
+	closeTaskNextIter       = NextIterationNumber
 )
 
 // runWorkflowCloseTask is the orchestration body. Each step's failure
@@ -138,7 +139,7 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	}
 
 	iterDir := IterationLogDir(project.Path)
-	n, err := NextIterationNumber(iterDir)
+	n, err := closeTaskNextIter(iterDir)
 	if err != nil {
 		return fmt.Errorf("close-task: pick iteration N: %w", err)
 	}

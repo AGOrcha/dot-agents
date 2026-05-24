@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,19 +93,24 @@ func TestNextIterationNumberIgnoresSubdirs(t *testing.T) {
 	}
 }
 
-// A path that exists but is not a directory (a regular file) makes
-// os.ReadDir return ENOTDIR / "is not a directory" — both POSIX and
-// Windows surface this consistently, so the test does not need a
-// platform-specific guard the way the chmod-0 approach would.
+// Any non-IsNotExist error from os.ReadDir propagates wrapped with the
+// "scoring next iteration: read %s" context so log triage can find the
+// source. Drives the branch via the nextIterReadDir seam — fixturing a
+// real ReadDir error portably across POSIX (chmod-0 / ENOTDIR) and
+// Windows (which ignores chmod and treats files-as-dirs leniently) is
+// the case the seam exists for.
 func TestNextIterationNumberReportsReadError(t *testing.T) {
-	dir := t.TempDir()
-	notADir := filepath.Join(dir, "iter-log-file-not-dir")
-	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	prior := nextIterReadDir
+	nextIterReadDir = func(string) ([]os.DirEntry, error) {
+		return nil, errors.New("read boom")
 	}
-	_, err := NextIterationNumber(notADir)
+	t.Cleanup(func() { nextIterReadDir = prior })
+	_, err := NextIterationNumber("/anywhere")
 	if err == nil {
-		t.Fatal("expected ReadDir error on a non-directory path, got nil")
+		t.Fatal("expected wrapped ReadDir error, got nil")
+	}
+	if !strings.Contains(err.Error(), "scoring next iteration: read") {
+		t.Errorf("error not wrapped with the read context: %v", err)
 	}
 }
 

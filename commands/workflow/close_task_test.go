@@ -226,15 +226,13 @@ func TestCloseTaskErrorWrapsNextIterationNumber(t *testing.T) {
 	repo, planID, taskID := closeTaskTestRepo(t)
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	t.Chdir(repo)
-	// Replace the iter-log dir with a regular file; ReadDir errors with
-	// ENOTDIR, NextIterationNumber wraps and returns it.
-	iterDir := filepath.Join(repo, ".agents", "active", "iteration-log")
-	if err := os.MkdirAll(filepath.Dir(iterDir), 0o755); err != nil {
-		t.Fatal(err)
+
+	prior := closeTaskNextIter
+	closeTaskNextIter = func(string) (int, error) {
+		return 0, errors.New("next iter boom")
 	}
-	if err := os.WriteFile(iterDir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { closeTaskNextIter = prior })
+
 	err := runWorkflowCloseTask(&bytes.Buffer{}, closeTaskOpts{
 		planID: planID, taskID: taskID, scoreRecompute: "current", repoDir: repo,
 	})

@@ -22,6 +22,13 @@ import (
 // like high-N entries to a naive max-scan.
 var iterLogFileRE = regexp.MustCompile(`^iter-(\d+)\.yaml$`)
 
+// nextIterReadDir is the seam tests use to assert the read-error branch.
+// Default is os.ReadDir; tests rebind to a stub returning a synthetic
+// error (Windows's os.ReadDir does not reliably error on a non-directory
+// path, so a portable test cannot trigger the error branch by fixturing
+// the filesystem alone).
+var nextIterReadDir = os.ReadDir
+
 // NextIterationNumber returns the iteration number close-task should pass to
 // `workflow checkpoint --log-to-iter`. If the iter-log directory has no
 // existing iter-N.yaml entries (or does not exist yet), the next number is 1
@@ -33,7 +40,7 @@ var iterLogFileRE = regexp.MustCompile(`^iter-(\d+)\.yaml$`)
 // expected state for a brand-new project's first close. Only filesystem
 // errors (permission denied, parent missing, etc.) surface as errors.
 func NextIterationNumber(iterLogDir string) (int, error) {
-	entries, err := os.ReadDir(iterLogDir)
+	entries, err := nextIterReadDir(iterLogDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 1, nil
