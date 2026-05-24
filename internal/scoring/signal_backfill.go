@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/execabs"
 )
 
 // signal_backfill.go reconstructs token-efficiency and tool-error telemetry the
@@ -458,7 +459,7 @@ func commitTime(repoDir, sha string) (time.Time, bool) {
 	if strings.TrimSpace(sha) == "" {
 		return time.Time{}, false
 	}
-	cmd := exec.Command("git", "-C", repoDir, "show", "-s", "--format=%cI", sha)
+	cmd := execabs.Command("git", "-C", repoDir, "show", "-s", "--format=%cI", sha)
 	out, err := cmd.Output()
 	if err != nil {
 		return time.Time{}, false

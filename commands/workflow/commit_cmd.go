@@ -8,10 +8,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 // gitOps is the minimal git surface `da workflow commit` needs. Interface-DI
@@ -23,8 +23,14 @@ type gitOps interface {
 	Commit(message string) error
 }
 
-// execGit is the production implementation: shells out to git via os/exec.
-// `git status --porcelain=v2 -z` is the contract ParseStatus expects.
+// execGit is the production implementation: shells out to git via
+// golang.org/x/sys/execabs, the official mitigation for the PATH-
+// substitution surface go:S4036 flags. execabs.Command resolves the
+// binary to an absolute path at construction time and refuses to fall
+// back to a PATH-relative lookup at exec time, so a malicious binary
+// planted in a writeable PATH entry cannot shadow the real git.
+// commands/workflow/state.go already uses execabs in its gitOutput
+// helper; this matches that established pattern.
 type execGit struct{}
 
 func (execGit) Status() ([]byte, error) {
@@ -33,7 +39,7 @@ func (execGit) Status() ([]byte, error) {
 	// fresh `.agents/workflow/plans/<id>/PLAN.yaml` would never appear as
 	// its own path — only `.agents/` would. The derivation logic operates
 	// on file paths, not directory hints.
-	cmd := exec.Command("git", "status", "--porcelain=v2", "-z", "--untracked-files=all")
+	cmd := execabs.Command("git", "status", "--porcelain=v2", "-z", "--untracked-files=all")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -48,7 +54,7 @@ func (execGit) AddPaths(paths []string) error {
 		return nil
 	}
 	args := append([]string{"add", "--"}, paths...)
-	cmd := exec.Command("git", args...)
+	cmd := execabs.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git add: %w: %s", err, out)
@@ -57,7 +63,7 @@ func (execGit) AddPaths(paths []string) error {
 }
 
 func (execGit) Commit(message string) error {
-	cmd := exec.Command("git", "commit", "-F", "-")
+	cmd := execabs.Command("git", "commit", "-F", "-")
 	cmd.Stdin = strings.NewReader(message)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
