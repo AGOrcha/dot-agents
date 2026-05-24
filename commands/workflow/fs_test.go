@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -684,5 +685,111 @@ func TestRemoveAllWithRetry_OnFakeFile(t *testing.T) {
 
 	if err := removeAllWithRetry(filepath.Join(tmp, "f")); err != nil {
 		t.Fatalf("unexpected: %v", err)
+	}
+}
+
+// TestMergeWorkflowPlanDir_DryRunWalksSubdirs exercises the dryRun-on-directory
+// branch in mergeWorkflowPlanDir's WalkDir callback (fs.go:204-206). When dstDir
+// already exists we walk srcDir; encountering a subdirectory with dryRun=true
+// must return nil rather than attempting MkdirAll. Previously only the
+// non-dryRun MkdirAll path was exercised.
+func TestMergeWorkflowPlanDir_DryRunWalksSubdirs(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	if err := os.MkdirAll(filepath.Join(src, "evidence", "deep"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "evidence", "deep", "leaf.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// dst must exist so we take the walk branch (not the fast-rename branch).
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mergeWorkflowPlanDir("plan-x", src, dst, true); err != nil {
+		t.Fatalf("dry-run merge: %v", err)
+	}
+	// Dry-run must NOT have created the subdirectory at dst.
+	if _, err := os.Stat(filepath.Join(dst, "evidence")); err == nil {
+		t.Fatal("dry-run created destination subdirectory; expected no filesystem change")
+	}
+}
+
+// TestCopyWorkflowArtifact_DstCreateFailsWhenDstIsDir drives the os.Create
+// error branch (fs.go:25-27). Path resolution: MkdirAll succeeds because the
+// dst path is itself an existing directory; os.Create then fails with EISDIR
+// because Create cannot truncate-open a directory.
+func TestCopyWorkflowArtifact_DstCreateFailsWhenDstIsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("EISDIR semantics differ on windows")
+	}
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Create dst as a directory; copyWorkflowArtifact will MkdirAll(dst's
+	// parent) successfully, then os.Create(dst) must error because dst is a
+	// directory.
+	dst := filepath.Join(tmp, "dst-is-a-dir")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := copyWorkflowArtifact(src, dst)
+	if err == nil {
+		t.Fatal("expected os.Create error when dst is a directory")
+	}
+}
+
+// TestCopyWorkflowArtifact_IoCopyFailsForDirSource drives the io.Copy error
+// branch (fs.go:29-31). Opening a directory succeeds on POSIX, but reading
+// from it via io.Copy returns an error ("is a directory" / EISDIR).
+func TestCopyWorkflowArtifact_IoCopyFailsForDirSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("io.Copy from directory not portable on windows")
+	}
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src-as-dir")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "out.txt")
+	err := copyWorkflowArtifact(srcDir, dst)
+	if err == nil {
+		t.Fatal("expected io.Copy error when src is a directory")
+	}
+}
+
+// TestMergePlanDirCompareAndCopy_ShouldSkipErrorPropagates drives the
+// `if err != nil { return err }` branch (fs.go:118-120). The compare-and-copy
+// helper calls shouldSkipPlanDirCopy after stat(dst) succeeds; if the inner
+// helper errors (here: dst becomes unreadable mid-call so sha256File(dst)
+// fails), the outer must propagate that error verbatim.
+func TestMergePlanDirCompareAndCopy_ShouldSkipErrorPropagates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod unreadable not supported on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("chmod unreadable unreliable as root")
+	}
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.txt")
+	dst := filepath.Join(tmp, "dst.txt")
+	if err := os.WriteFile(src, []byte("source body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("dest body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Lock dst so sha256File(dst) inside shouldSkipPlanDirCopy errors.
+	chmodUnreadable(t, dst)
+	err := mergePlanDirCompareAndCopy(src, dst, "rel", false)
+	if err == nil {
+		t.Fatal("expected shouldSkipPlanDirCopy hash-dst error to propagate")
+	}
+	if !strings.Contains(err.Error(), "hash dst rel") {
+		t.Fatalf("expected wrapped hash-dst error, got %v", err)
 	}
 }
