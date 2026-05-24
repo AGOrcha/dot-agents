@@ -50,7 +50,7 @@ tasks:
       app_type: go-cli
     - id: start-task
       title: da workflow start-task client command
-      status: pending
+      status: completed
       depends_on:
         - close-task
         - workflow-commit-command/wc-commit-subcommand
