@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
@@ -169,7 +170,7 @@ func TestExtractRuleFrontmatterDescription_MissingFile(t *testing.T) {
 
 func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
 	return rulesDeps{
-		Flags:              canonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
+		Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
 		errorWithHints:     ErrorWithHints,
 		usageError:         UsageError,
 		maxArgsWithHints:   MaximumNArgsWithHints,
@@ -278,8 +279,8 @@ func TestNewRulesCmd_Metadata(t *testing.T) {
 }
 
 func TestCanonicalCmdExampleBlock_JoinsLines(t *testing.T) {
-	got := canonicalCmdExampleBlock("a", "b", "c")
+	got := cmdutil.CanonicalCmdExampleBlock("a", "b", "c")
 	if got != "a\nb\nc" {
-		t.Errorf("canonicalCmdExampleBlock = %q", got)
+		t.Errorf("cmdutil.CanonicalCmdExampleBlock = %q", got)
 	}
 }
