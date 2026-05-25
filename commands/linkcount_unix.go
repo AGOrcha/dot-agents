@@ -2,25 +2,14 @@
 
 package commands
 
-import (
-	"os"
-	"syscall"
-)
+import "github.com/NikashPrakash/dot-agents/commands/lifecycle"
 
-// hasMultipleHardLinks reports whether path has more than one directory entry
-// referencing its inode (link count > 1). A managed file link on Windows is a
-// hard link (no reparse point), so this distinguishes a managed hard-linked
-// file from a standalone regular file when no canonical source path is
-// available to compare against. On POSIX a managed reference is a symlink, so
-// this is a fallback that returns false for the common case.
+// hasMultipleHardLinks delegates to the canonical implementation in
+// commands/lifecycle. The build-tagged file moved with status.go in t08; this
+// thin shim keeps doctor.go and add.go (still in root) compiling without
+// requiring an out-of-scope edit to either. Per SHAPE.md OD-2 the export is
+// reversed in t09 once doctor.go lands in the lifecycle package; this shim is
+// deleted in t13 alongside the rest of the root lifecycle shims.
 func hasMultipleHardLinks(path string) bool {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return false
-	}
-	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return false
-	}
-	return st.Nlink > 1
+	return lifecycle.HasMultipleHardLinks(path)
 }
