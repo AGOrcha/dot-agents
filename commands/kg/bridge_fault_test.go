@@ -21,7 +21,7 @@ import (
 func closedStore(t *testing.T) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -70,7 +70,7 @@ func TestCollectNeighborResults_StoreClosedPropagatesError(t *testing.T) {
 func seedNeighborMatchFixture(t *testing.T) (graphstore.Store, *graphstore.GraphNode, []graphstore.GraphEdge) {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -170,7 +170,7 @@ func TestCollectSymbolDecisionResults_ClosedStoreError(t *testing.T) {
 
 func TestAppendDecisionLinkMatches_SeenAndLimitAndTypeSkip(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -306,7 +306,7 @@ func TestCollectCodeBridgeResults_OpenStoreError(t *testing.T) {
 // closing the underlying handle, exercising the dispatch-error return path.
 func TestCollectCodeBridgeResults_DispatchErrorPropagates(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Corrupt the DB file so the next open fails for tasks but the directory
@@ -330,7 +330,7 @@ func TestCollectCodeBridgeResults_DispatchErrorPropagates(t *testing.T) {
 // initialized graph.
 func TestRunKGBridgeQuery_ExecuteError(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -349,7 +349,7 @@ func TestRunKGBridgeQuery_ExecuteError(t *testing.T) {
 // bridge-sparse warning that exercises the ui.Warn loop (~948).
 func TestRunKGBridgeQuery_TextOutputWithWarning(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := &cobra.Command{}
@@ -382,7 +382,7 @@ func TestRunKGBridgeHealth_AdapterWarningEmitted(t *testing.T) {
 // metadata populated by running a query first.
 func TestRunKGBridgeHealth_RendersLastQueryMetadata(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	adapter := NewLocalFileAdapter(home)
@@ -407,7 +407,7 @@ func TestRunKGBridgeHealth_RendersLastQueryMetadata(t *testing.T) {
 func seedAndCloseStore(t *testing.T, fn func(s graphstore.Store)) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -492,7 +492,7 @@ func TestDispatchWarmStoreBridgeIntent_DecisionSymbolsError(t *testing.T) {
 // dispatch-error return (~609-611).
 func TestCollectCodeBridgeResults_WarmStoreDispatchError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// initSchema runs on every OpenSQLite, so dropping nodes via a side
@@ -515,7 +515,7 @@ func TestCollectCodeBridgeResults_WarmStoreDispatchError(t *testing.T) {
 func halfBrokenStore(t *testing.T, dropTable string) graphstore.Store {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -644,7 +644,7 @@ func TestRunKGWarmCodeImport_HappyPath(t *testing.T) {
 	)
 
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -674,7 +674,7 @@ func TestWarmCodeLane_Success(t *testing.T) {
 		[][2]string{},
 	)
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -694,7 +694,7 @@ func TestWarmCodeLane_Success(t *testing.T) {
 // file, exercising the warnings-append branch (~677-679).
 func TestRunImpactRadius_ImpactedFilesWarning(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -857,7 +857,7 @@ func TestCollectCommunityContextResults_EmptyResults(t *testing.T) {
 // return branch when appendDecisionLinkMatches reports done=true.
 func TestCollectSymbolDecisionResults_LimitHit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -889,7 +889,7 @@ func TestCollectSymbolDecisionResults_LimitHit(t *testing.T) {
 // closing the store before iterating.
 func TestCollectDecisionSymbolResults_LinksError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -909,7 +909,7 @@ func TestCollectDecisionSymbolResults_LinksError(t *testing.T) {
 // (~363-365) when appendDecisionSymbolMatches reports done=true.
 func TestCollectDecisionSymbolResults_LimitHit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -941,7 +941,7 @@ func TestCollectDecisionSymbolResults_LimitHit(t *testing.T) {
 // (~168-170) is exercised.
 func TestFindCodeNodes_GetNodesByFileBranch(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -982,7 +982,7 @@ func TestFindCodeNodes_GetNodesByFileBranch(t *testing.T) {
 // list and a seen-set rigged to force the loop into the append-error branch.
 func TestCollectNeighborResults_LimitHitReturnsEarly(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)

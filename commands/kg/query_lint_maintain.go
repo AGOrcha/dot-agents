@@ -103,7 +103,7 @@ type scoredNoteResult struct {
 	result GraphQueryResult
 }
 
-func searchNotes(kgHomeDir, noteType, query string, limit int) ([]GraphQueryResult, error) {
+func searchNotes(io kgIO, kgHomeDir, noteType, query string, limit int) ([]GraphQueryResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -113,7 +113,7 @@ func searchNotes(kgHomeDir, noteType, query string, limit int) ([]GraphQueryResu
 		return nil
 	}
 
-	if err := visitNoteFiles(kgHomeDir, noteType, walkFn); err != nil {
+	if err := visitNoteFiles(io, kgHomeDir, noteType, walkFn); err != nil {
 		return nil, err
 	}
 
@@ -163,13 +163,13 @@ func appendScoredNoteResult(scored *[]scoredNoteResult, kgHomeDir, path, query s
 // visitNoteFiles invokes walkFn for every .md note file. When noteType is
 // non-empty the walk is restricted to the matching subdirectory; otherwise
 // it spans the whole notes/ tree via walkNoteFiles.
-func visitNoteFiles(kgHomeDir, noteType string, walkFn func(string, fs.DirEntry) error) error {
+func visitNoteFiles(io kgIO, kgHomeDir, noteType string, walkFn func(string, fs.DirEntry) error) error {
 	if noteType == "" {
-		_ = walkNoteFiles(kgHomeDir, walkFn)
+		_ = walkNoteFiles(io, kgHomeDir, walkFn)
 		return nil
 	}
 	subDir := filepath.Join(kgHomeDir, "notes", noteSubdir(noteType))
-	entries, err := os.ReadDir(subDir)
+	entries, err := io.ReadDir(subDir)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -242,7 +242,7 @@ func searchByLinks(kgHomeDir, noteID string) ([]GraphQueryResult, error) {
 // ── Phase 3: Intent dispatch ──────────────────────────────────────────────────
 
 // executeQuery dispatches a GraphQuery to the appropriate search function.
-func executeQuery(kgHomeDir string, query GraphQuery) (GraphQueryResponse, error) {
+func executeQuery(io kgIO, kgHomeDir string, query GraphQuery) (GraphQueryResponse, error) {
 	resp := GraphQueryResponse{
 		SchemaVersion: 1,
 		Intent:        query.Intent,
@@ -273,13 +273,13 @@ func executeQuery(kgHomeDir string, query GraphQuery) (GraphQueryResponse, error
 	var err error
 	switch {
 	case intentToNoteType[query.Intent] != "":
-		resp.Results, err = searchNotes(kgHomeDir, intentToNoteType[query.Intent], query.Query, limit)
+		resp.Results, err = searchNotes(io, kgHomeDir, intentToNoteType[query.Intent], query.Query, limit)
 	case query.Intent == "related_notes":
 		resp.Results, err = searchByLinks(kgHomeDir, query.Query)
 	case query.Intent == "contradictions":
-		resp.Results, err = findContradictions(kgHomeDir)
+		resp.Results, err = findContradictions(io, kgHomeDir)
 	case query.Intent == "graph_health":
-		health, hErr := readGraphHealth(kgHomeDir)
+		health, hErr := readGraphHealth(io, kgHomeDir)
 		if hErr != nil {
 			err = hErr
 		} else if health != nil {
@@ -300,7 +300,7 @@ func executeQuery(kgHomeDir string, query GraphQuery) (GraphQueryResponse, error
 	}
 
 	// Log query event
-	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("query | %s: %s", query.Intent, query.Query))
+	_ = appendLogEntry(io, kgHomeDir, fmt.Sprintf("query | %s: %s", query.Intent, query.Query))
 
 	return resp, nil
 }
@@ -323,10 +323,10 @@ func sortedKeys(m map[string]bool) []string {
 }
 
 // executeBatchQuery runs multiple queries and returns all responses.
-func executeBatchQuery(kgHomeDir string, queries []GraphQuery) ([]GraphQueryResponse, error) {
+func executeBatchQuery(io kgIO, kgHomeDir string, queries []GraphQuery) ([]GraphQueryResponse, error) {
 	responses := make([]GraphQueryResponse, 0, len(queries))
 	for _, q := range queries {
-		resp, err := executeQuery(kgHomeDir, q)
+		resp, err := executeQuery(io, kgHomeDir, q)
 		if err != nil {
 			resp.Warnings = append(resp.Warnings, err.Error())
 		}
@@ -338,6 +338,7 @@ func executeBatchQuery(kgHomeDir string, queries []GraphQuery) ([]GraphQueryResp
 // ── kg query subcommand ───────────────────────────────────────────────────────
 
 func runKGQuery(deps Deps, cmd *cobra.Command, args []string) error {
+	io := kgIOFrom(deps)
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
 		return fmt.Errorf("knowledge graph not initialized: run 'da kg setup' first")
@@ -355,7 +356,7 @@ func runKGQuery(deps Deps, cmd *cobra.Command, args []string) error {
 		queryStr = strings.Join(args, " ")
 	}
 
-	resp, err := executeQuery(home, GraphQuery{
+	resp, err := executeQuery(io, home, GraphQuery{
 		Intent: intent,
 		Query:  queryStr,
 		Scope:  scope,
@@ -391,11 +392,11 @@ func runKGQuery(deps Deps, cmd *cobra.Command, args []string) error {
 // buildLinkGraph walks all notes and returns:
 //   - adjacency map: noteID -> []linked noteIDs
 //   - note map: noteID -> *GraphNote
-func buildLinkGraph(kgHomeDir string) (map[string][]string, map[string]*GraphNote, error) {
+func buildLinkGraph(io kgIO, kgHomeDir string) (map[string][]string, map[string]*GraphNote, error) {
 	adj := make(map[string][]string)
 	notes := make(map[string]*GraphNote)
 
-	err := walkNoteFiles(kgHomeDir, func(path string, _ fs.DirEntry) error {
+	err := walkNoteFiles(io, kgHomeDir, func(path string, _ fs.DirEntry) error {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil
@@ -432,8 +433,8 @@ func integrityManifestPath(kgHomeDir string) string {
 	return filepath.Join(kgHomeDir, "ops", "integrity", "manifest.json")
 }
 
-func loadManifest(kgHomeDir string) (*IntegrityManifest, error) {
-	data, err := osReadFile(integrityManifestPath(kgHomeDir))
+func loadManifest(io kgIO, kgHomeDir string) (*IntegrityManifest, error) {
+	data, err := io.ReadFile(integrityManifestPath(kgHomeDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}, nil
@@ -450,17 +451,17 @@ func loadManifest(kgHomeDir string) (*IntegrityManifest, error) {
 	return &m, nil
 }
 
-func saveManifest(kgHomeDir string, m *IntegrityManifest) error {
+func saveManifest(io kgIO, kgHomeDir string, m *IntegrityManifest) error {
 	m.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	p := integrityManifestPath(kgHomeDir)
-	if err := osMkdirAll(filepath.Dir(p), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		return err
 	}
-	data, err := jsonMarshalIndent(m, "", "  ")
+	data, err := io.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return osWriteFile(p, data, 0644)
+	return io.WriteFile(p, data, 0644)
 }
 
 // noteBodyHash computes SHA-256 of just the note body (excludes frontmatter).
@@ -470,8 +471,8 @@ func noteBodyHash(body string) string {
 }
 
 // updateManifest loads, sets the entry for noteID, and saves atomically.
-func updateManifest(kgHomeDir, noteID, body string) error {
-	m, err := loadManifest(kgHomeDir)
+func updateManifest(io kgIO, kgHomeDir, noteID, body string) error {
+	m, err := loadManifest(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
@@ -479,7 +480,7 @@ func updateManifest(kgHomeDir, noteID, body string) error {
 		Hash:      noteBodyHash(body),
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	return saveManifest(kgHomeDir, m)
+	return saveManifest(io, kgHomeDir, m)
 }
 
 // LintResult is one finding from a lint check.
@@ -574,8 +575,8 @@ func lintStalePages(notes map[string]*GraphNote, threshold time.Duration) []Lint
 	return results
 }
 
-func lintIndexDrift(kgHomeDir string, notes map[string]*GraphNote) []LintResult {
-	indexed, err := readIndex(kgHomeDir)
+func lintIndexDrift(io kgIO, kgHomeDir string, notes map[string]*GraphNote) []LintResult {
+	indexed, err := readIndex(io, kgHomeDir)
 	if err != nil {
 		return nil
 	}
@@ -687,8 +688,8 @@ func countSharedKeywords(a, b map[string]bool) int {
 // lintIntegrityViolations checks each note's body hash against ops/integrity/manifest.json.
 // Notes edited outside of kg commands (direct filesystem writes) will have a mismatched hash.
 // Notes not yet in the manifest are skipped (no hash on record → not a violation).
-func lintIntegrityViolations(kgHomeDir string, notes map[string]*GraphNote) []LintResult {
-	m, err := loadManifest(kgHomeDir)
+func lintIntegrityViolations(io kgIO, kgHomeDir string, notes map[string]*GraphNote) []LintResult {
+	m, err := loadManifest(io, kgHomeDir)
 	if err != nil {
 		return nil // manifest unreadable → skip check
 	}
@@ -735,13 +736,13 @@ type LintReport struct {
 const defaultStaleThreshold = 90 * 24 * time.Hour
 const defaultMaxNoteBytes = 50 * 1024 // 50 KB
 
-func runGraphLint(kgHomeDir string) (*LintReport, error) {
+func runGraphLint(io kgIO, kgHomeDir string) (*LintReport, error) {
 	report := &LintReport{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Results:   []LintResult{},
 	}
 
-	adj, notes, err := buildLinkGraph(kgHomeDir)
+	adj, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return nil, fmt.Errorf("build link graph: %w", err)
 	}
@@ -751,10 +752,10 @@ func runGraphLint(kgHomeDir string) (*LintReport, error) {
 		lintOrphanPages(adj, notes),
 		lintMissingSourceRefs(notes),
 		lintStalePages(notes, defaultStaleThreshold),
-		lintIndexDrift(kgHomeDir, notes),
+		lintIndexDrift(io, kgHomeDir, notes),
 		lintOversizePages(kgHomeDir, notes, defaultMaxNoteBytes),
 		lintContradictions(notes),
-		lintIntegrityViolations(kgHomeDir, notes), // Phase 6A
+		lintIntegrityViolations(io, kgHomeDir, notes), // Phase 6A
 	}
 	report.ChecksRun = len(checks)
 	for _, batch := range checks {
@@ -762,9 +763,9 @@ func runGraphLint(kgHomeDir string) (*LintReport, error) {
 	}
 	tallyLintSeverities(report)
 
-	writeLintReport(kgHomeDir, report)
-	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("lint | %d errors, %d warnings", report.ErrorCount, report.WarnCount))
-	updateHealthFromLint(kgHomeDir, report)
+	writeLintReport(io, kgHomeDir, report)
+	_ = appendLogEntry(io, kgHomeDir, fmt.Sprintf("lint | %d errors, %d warnings", report.ErrorCount, report.WarnCount))
+	updateHealthFromLint(io, kgHomeDir, report)
 
 	return report, nil
 }
@@ -786,23 +787,23 @@ func tallyLintSeverities(report *LintReport) {
 // writeLintReport persists report to ops/lint/lint-report.json. Errors are
 // best-effort: write failures are silently swallowed to match the previous
 // behavior.
-func writeLintReport(kgHomeDir string, report *LintReport) {
+func writeLintReport(io kgIO, kgHomeDir string, report *LintReport) {
 	reportPath := filepath.Join(kgHomeDir, "ops", "lint", "lint-report.json")
-	if err := osMkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+	if err := io.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
 		return
 	}
-	data, err := jsonMarshalIndent(report, "", "  ")
+	data, err := io.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = osWriteFile(reportPath, data, 0644)
+	_ = io.WriteFile(reportPath, data, 0644)
 }
 
 // updateHealthFromLint folds lint metrics back into graph-health.json,
 // promoting the status to "error" on broken links and to "warn" on any
 // other warnings.
-func updateHealthFromLint(kgHomeDir string, report *LintReport) {
-	health, err := computeGraphHealth(kgHomeDir)
+func updateHealthFromLint(io kgIO, kgHomeDir string, report *LintReport) {
+	health, err := computeGraphHealth(io, kgHomeDir)
 	if err != nil {
 		return
 	}
@@ -822,12 +823,12 @@ func updateHealthFromLint(kgHomeDir string, report *LintReport) {
 	} else if report.WarnCount > 0 && health.Status == "healthy" {
 		health.Status = "warn"
 	}
-	_ = writeGraphHealth(kgHomeDir, health)
+	_ = writeGraphHealth(io, kgHomeDir, health)
 }
 
 // findContradictions returns LintResults for contradiction detection (used by query intent).
-func findContradictions(kgHomeDir string) ([]GraphQueryResult, error) {
-	_, notes, err := buildLinkGraph(kgHomeDir)
+func findContradictions(io kgIO, kgHomeDir string) ([]GraphQueryResult, error) {
+	_, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -847,13 +848,14 @@ func findContradictions(kgHomeDir string) ([]GraphQueryResult, error) {
 // ── kg lint subcommand ────────────────────────────────────────────────────────
 
 func runKGLint(deps Deps, cmd *cobra.Command, _ []string) error {
+	io := kgIOFrom(deps)
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
 		return fmt.Errorf("knowledge graph not initialized: run 'da kg setup' first")
 	}
 
 	checkFilter, _ := cmd.Flags().GetString("check")
-	report, err := runGraphLint(home)
+	report, err := runGraphLint(io, home)
 	if err != nil {
 		return err
 	}
@@ -921,8 +923,8 @@ func renderLintReportText(report *LintReport) {
 
 // ── Phase 4: Maintenance operations ──────────────────────────────────────────
 
-func runKGReweave(kgHomeDir string) error {
-	adj, notes, err := buildLinkGraph(kgHomeDir)
+func runKGReweave(io kgIO, kgHomeDir string) error {
+	adj, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
@@ -936,7 +938,7 @@ func runKGReweave(kgHomeDir string) error {
 		}
 		note.Links = validLinks
 		note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		persistReweavedNote(kgHomeDir, id, note)
+		persistReweavedNote(io, kgHomeDir, id, note)
 	}
 	ui.Success(fmt.Sprintf("Reweave complete: %d broken links removed, %d source_ref links added", removed, added))
 	return nil
@@ -982,12 +984,12 @@ func containsLinkID(links []string, refID string) bool {
 // persistReweavedNote writes the repaired note back to disk while preserving
 // the existing note body. It reads the current body off disk and passes it
 // through to updateGraphNote so reweave only rewrites frontmatter (links).
-func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
+func persistReweavedNote(io kgIO, kgHomeDir, id string, note *GraphNote) {
 	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
 	// Intentional silence: this is a best-effort repair path. If the note
 	// can't be read or parsed there is nothing to preserve — skip rather
 	// than abort the reweave pass (a malformed note is surfaced by lint).
-	existing, readErr := osReadFile(path)
+	existing, readErr := io.ReadFile(path)
 	if readErr != nil {
 		return
 	}
@@ -995,11 +997,11 @@ func persistReweavedNote(kgHomeDir, id string, note *GraphNote) {
 	if parseErr != nil {
 		return
 	}
-	_ = updateGraphNote(kgHomeDir, note, body)
+	_ = updateGraphNote(io, kgHomeDir, note, body)
 }
 
-func runKGMarkStale(kgHomeDir string, threshold time.Duration) error {
-	_, notes, err := buildLinkGraph(kgHomeDir)
+func runKGMarkStale(io kgIO, kgHomeDir string, threshold time.Duration) error {
+	_, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
@@ -1007,7 +1009,7 @@ func runKGMarkStale(kgHomeDir string, threshold time.Duration) error {
 	cutoff := time.Now().UTC().Add(-threshold)
 	count := 0
 	for id, note := range notes {
-		if markNoteStale(kgHomeDir, id, note, cutoff) {
+		if markNoteStale(io, kgHomeDir, id, note, cutoff) {
 			count++
 		}
 	}
@@ -1018,7 +1020,7 @@ func runKGMarkStale(kgHomeDir string, threshold time.Duration) error {
 // markNoteStale promotes a single note to "stale" status when it is still
 // active and its UpdatedAt timestamp is before cutoff. Returns true on a
 // successful update.
-func markNoteStale(kgHomeDir, id string, note *GraphNote, cutoff time.Time) bool {
+func markNoteStale(io kgIO, kgHomeDir, id string, note *GraphNote, cutoff time.Time) bool {
 	if note.Status == "archived" || note.Status == "superseded" || note.Status == "stale" {
 		return false
 	}
@@ -1037,16 +1039,16 @@ func markNoteStale(kgHomeDir, id string, note *GraphNote, cutoff time.Time) bool
 	}
 	note.Status = "stale"
 	note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	return updateGraphNote(kgHomeDir, note, body) == nil
+	return updateGraphNote(io, kgHomeDir, note, body) == nil
 }
 
-func runKGCompact(kgHomeDir string) error {
+func runKGCompact(io kgIO, kgHomeDir string) error {
 	archiveDir := filepath.Join(kgHomeDir, "notes", "_archived")
-	if err := osMkdirAll(archiveDir, 0755); err != nil {
+	if err := io.MkdirAll(archiveDir, 0755); err != nil {
 		return err
 	}
 
-	_, notes, err := buildLinkGraph(kgHomeDir)
+	_, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
@@ -1057,7 +1059,7 @@ func runKGCompact(kgHomeDir string) error {
 			count++
 		}
 	}
-	_ = appendLogEntry(kgHomeDir, fmt.Sprintf("compact | archived %d notes", count))
+	_ = appendLogEntry(io, kgHomeDir, fmt.Sprintf("compact | archived %d notes", count))
 	ui.Success(fmt.Sprintf("Compacted %d notes to %s", count, archiveDir))
 	return nil
 }

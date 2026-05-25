@@ -1,7 +1,13 @@
 package kg
 
+// Seam-driven fault-injection tests for commands/kg. Each test builds a
+// fakeKGIO that overrides exactly one operation to return errSeam, then
+// passes that fake into the unit under test. This is the interface-DI
+// replacement for the legacy var osMkdirAll = os.MkdirAll-style func-var
+// seams formerly defined in seams.go (see docs/TEST_SEAMS.md and the
+// seam-interface-di-migration plan / pr40-artifacts atomic convergence).
+
 import (
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -12,66 +18,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// errSeam is a sentinel error returned from injected seam stubs.
-var errSeam = errors.New("seam: injected failure")
-
-// swapMkdirAll replaces osMkdirAll for the duration of t and restores it
-// afterwards.
-func swapMkdirAll(t *testing.T, fn func(string, os.FileMode) error) {
-	t.Helper()
-	orig := osMkdirAll
-	osMkdirAll = fn
-	t.Cleanup(func() { osMkdirAll = orig })
-}
-
-func swapWriteFile(t *testing.T, fn func(string, []byte, os.FileMode) error) {
-	t.Helper()
-	orig := osWriteFile
-	osWriteFile = fn
-	t.Cleanup(func() { osWriteFile = orig })
-}
-
-func swapReadFile(t *testing.T, fn func(string) ([]byte, error)) {
-	t.Helper()
-	orig := osReadFile
-	osReadFile = fn
-	t.Cleanup(func() { osReadFile = orig })
-}
-
-func swapOpenFile(t *testing.T, fn func(string, int, os.FileMode) (*os.File, error)) {
-	t.Helper()
-	orig := osOpenFile
-	osOpenFile = fn
-	t.Cleanup(func() { osOpenFile = orig })
-}
-
-func swapRename(t *testing.T, fn func(string, string) error) {
-	t.Helper()
-	orig := osRename
-	osRename = fn
-	t.Cleanup(func() { osRename = orig })
-}
-
-func swapReadDir(t *testing.T, fn func(string) ([]fs.DirEntry, error)) {
-	t.Helper()
-	orig := osReadDir
-	osReadDir = fn
-	t.Cleanup(func() { osReadDir = orig })
-}
-
-func swapMarshalIndent(t *testing.T, fn func(interface{}, string, string) ([]byte, error)) {
-	t.Helper()
-	orig := jsonMarshalIndent
-	jsonMarshalIndent = fn
-	t.Cleanup(func() { jsonMarshalIndent = orig })
-}
-
-// ── loadKGConfig: osReadFile error path (non-NotExist) ────────────────────────
+// ── loadKGConfig: ReadFile error path (non-NotExist) ──────────────────────────
 
 func TestLoadKGConfig_ReadFileError(t *testing.T) {
 	newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if _, err := loadKGConfig(); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if _, err := loadKGConfig(fake); !errors.Is(err, errSeam) {
 		t.Fatalf("expected seam error, got %v", err)
 	}
 }
@@ -80,8 +32,8 @@ func TestLoadKGConfig_ReadFileError(t *testing.T) {
 
 func TestSaveKGConfig_MkdirError(t *testing.T) {
 	newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	if err := SaveKGConfig(&KGConfig{SchemaVersion: 1, Name: "x"}); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	if err := saveKGConfigIO(fake, &KGConfig{SchemaVersion: 1, Name: "x"}); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
@@ -90,8 +42,8 @@ func TestSaveKGConfig_MkdirError(t *testing.T) {
 
 func TestSaveKGConfig_WriteError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
-	if err := SaveKGConfig(&KGConfig{SchemaVersion: 1, Name: "x"}); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
+	if err := saveKGConfigIO(fake, &KGConfig{SchemaVersion: 1, Name: "x"}); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -100,8 +52,8 @@ func TestSaveKGConfig_WriteError(t *testing.T) {
 
 func TestAppendLogEntry_OpenFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapOpenFile(t, func(string, int, os.FileMode) (*os.File, error) { return nil, errSeam })
-	if err := appendLogEntry(home, "x"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{openFile: func(string, int, fs.FileMode) (*os.File, error) { return nil, errSeam }}
+	if err := appendLogEntry(fake, home, "x"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected open seam error, got %v", err)
 	}
 }
@@ -110,8 +62,8 @@ func TestAppendLogEntry_OpenFileError(t *testing.T) {
 
 func TestReadLogEntries_ReadFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if _, err := readLogEntries(home, 0); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if _, err := readLogEntries(fake, home, 0); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
@@ -120,9 +72,9 @@ func TestReadLogEntries_ReadFileError(t *testing.T) {
 
 func TestUpdateIndex_ReadFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
 	note := &GraphNote{ID: "x", Type: "entity", Title: "t", Summary: "s"}
-	if err := updateIndex(home, note); !errors.Is(err, errSeam) {
+	if err := updateIndex(fake, home, note); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
@@ -131,9 +83,9 @@ func TestUpdateIndex_ReadFileError(t *testing.T) {
 
 func TestUpdateIndex_WriteFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
 	note := &GraphNote{ID: "x", Type: "entity", Title: "t", Summary: "s"}
-	if err := updateIndex(home, note); !errors.Is(err, errSeam) {
+	if err := updateIndex(fake, home, note); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -142,8 +94,8 @@ func TestUpdateIndex_WriteFileError(t *testing.T) {
 
 func TestWriteGraphHealth_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	if err := writeGraphHealth(home, GraphHealth{}); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	if err := writeGraphHealth(fake, home, GraphHealth{}); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
@@ -152,8 +104,8 @@ func TestWriteGraphHealth_MkdirError(t *testing.T) {
 
 func TestWriteGraphHealth_MarshalError(t *testing.T) {
 	home := newTempKG(t)
-	swapMarshalIndent(t, func(interface{}, string, string) ([]byte, error) { return nil, errSeam })
-	if err := writeGraphHealth(home, GraphHealth{}); !errors.Is(err, errSeam) {
+	fake := withMarshalIndentError(t)
+	if err := writeGraphHealth(fake, home, GraphHealth{}); !errors.Is(err, errSeam) {
 		t.Fatalf("expected marshal seam error, got %v", err)
 	}
 }
@@ -162,8 +114,8 @@ func TestWriteGraphHealth_MarshalError(t *testing.T) {
 
 func TestWriteGraphHealth_WriteError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
-	if err := writeGraphHealth(home, GraphHealth{}); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
+	if err := writeGraphHealth(fake, home, GraphHealth{}); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -172,8 +124,8 @@ func TestWriteGraphHealth_WriteError(t *testing.T) {
 
 func TestRunKGSetup_MkdirError(t *testing.T) {
 	newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	err := runKGSetup()
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
@@ -184,13 +136,15 @@ func TestRunKGSetup_MkdirError(t *testing.T) {
 // config.yaml.
 func TestRunKGSetup_SaveConfigError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "config.yaml" {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == "config.yaml" {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected save-config seam error, got %v", err)
 	}
@@ -199,13 +153,15 @@ func TestRunKGSetup_SaveConfigError(t *testing.T) {
 // TestRunKGSetup_WriteHealthError forces writeGraphHealth to fail (line ~562).
 func TestRunKGSetup_WriteHealthError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "graph-health.json" {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == "graph-health.json" {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected write-health seam error, got %v", err)
 	}
@@ -215,13 +171,15 @@ func TestRunKGSetup_WriteHealthError(t *testing.T) {
 // (line ~567).
 func TestRunKGSetup_BridgeContractError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "bridge-contract.yaml" {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == "bridge-contract.yaml" {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected bridge-contract seam error, got %v", err)
 	}
@@ -230,13 +188,15 @@ func TestRunKGSetup_BridgeContractError(t *testing.T) {
 // TestRunKGSetup_ManifestError forces saveManifest to fail (line ~573).
 func TestRunKGSetup_ManifestError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "manifest.json" {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == "manifest.json" {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected manifest seam error, got %v", err)
 	}
@@ -246,13 +206,15 @@ func TestRunKGSetup_ManifestError(t *testing.T) {
 // (line ~585) by injecting an OpenFile failure for log.md.
 func TestRunKGSetup_AppendLogError(t *testing.T) {
 	newTempKG(t)
-	swapOpenFile(t, func(path string, flag int, perm os.FileMode) (*os.File, error) {
-		if filepath.Base(path) == kgLogFileName {
-			return nil, errSeam
-		}
-		return os.OpenFile(path, flag, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		openFile: func(path string, flag int, perm fs.FileMode) (*os.File, error) {
+			if filepath.Base(path) == kgLogFileName {
+				return nil, errSeam
+			}
+			return os.OpenFile(path, flag, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected append-log seam error, got %v", err)
 	}
@@ -260,14 +222,15 @@ func TestRunKGSetup_AppendLogError(t *testing.T) {
 
 func TestRunKGSetup_WriteIndexError(t *testing.T) {
 	newTempKG(t)
-	// Force a write failure only for the index file. Real mkdirs succeed.
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == kgIndexFileName {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == kgIndexFileName {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected write-index seam error, got %v", err)
 	}
@@ -275,29 +238,33 @@ func TestRunKGSetup_WriteIndexError(t *testing.T) {
 
 func TestRunKGSetup_WriteLogError(t *testing.T) {
 	newTempKG(t)
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == kgLogFileName {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
-	err := runKGSetup()
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if filepath.Base(path) == kgLogFileName {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
+	err := runKGSetup(fake)
 	if err == nil || !errors.Is(err, errSeam) {
 		t.Fatalf("expected write-log seam error, got %v", err)
 	}
 }
 
-// ── runKGHealth: jsonMarshalIndent error ──────────────────────────────────────
+// ── runKGHealth: MarshalIndent error ──────────────────────────────────────────
 
 func TestRunKGHealth_MarshalError(t *testing.T) {
 	newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	swapMarshalIndent(t, func(interface{}, string, string) ([]byte, error) { return nil, errSeam })
+	fake := withMarshalIndentError(t)
+	deps := testDeps()
+	deps.IO = fake
 	cmd := &cobra.Command{}
 	cmd.Flags().Bool("json", true, "")
-	err := runKGHealth(testDeps(), cmd)
+	err := runKGHealth(deps, cmd)
 	if !errors.Is(err, errSeam) {
 		t.Fatalf("expected marshal seam error, got %v", err)
 	}
@@ -307,8 +274,8 @@ func TestRunKGHealth_MarshalError(t *testing.T) {
 
 func TestRecordRawSource_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	err := recordRawSource(home, RawSource{ID: "x", Title: "t", SourceType: "markdown"}, []byte("body"))
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	err := recordRawSource(fake, home, RawSource{ID: "x", Title: "t", SourceType: "markdown"}, []byte("body"))
 	if !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
@@ -316,8 +283,8 @@ func TestRecordRawSource_MkdirError(t *testing.T) {
 
 func TestRecordRawSource_WriteError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
-	err := recordRawSource(home, RawSource{ID: "x", Title: "t", SourceType: "markdown"}, []byte("body"))
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
+	err := recordRawSource(fake, home, RawSource{ID: "x", Title: "t", SourceType: "markdown"}, []byte("body"))
 	if !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
@@ -327,16 +294,16 @@ func TestRecordRawSource_WriteError(t *testing.T) {
 
 func TestMoveToImported_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	if err := moveToImported(home, "x"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	if err := moveToImported(fake, home, "x"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
 
 func TestMoveToImported_RenameError(t *testing.T) {
 	home := newTempKG(t)
-	swapRename(t, func(string, string) error { return errSeam })
-	if err := moveToImported(home, "x"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{rename: func(string, string) error { return errSeam }}
+	if err := moveToImported(fake, home, "x"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected rename seam error, got %v", err)
 	}
 }
@@ -345,22 +312,22 @@ func TestMoveToImported_RenameError(t *testing.T) {
 
 func TestCreateGraphNote_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, ""); !errors.Is(err, errSeam) {
+	if err := createGraphNote(fake, home, note, ""); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
 
 func TestCreateGraphNote_WriteError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, ""); !errors.Is(err, errSeam) {
+	if err := createGraphNote(fake, home, note, ""); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -373,11 +340,11 @@ func TestUpdateGraphNote_ReadError(t *testing.T) {
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("seed createGraphNote: %v", err)
 	}
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if err := updateGraphNote(home, note, "body2"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if err := updateGraphNote(fake, home, note, "body2"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
@@ -387,11 +354,11 @@ func TestUpdateGraphNote_WriteError(t *testing.T) {
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("seed createGraphNote: %v", err)
 	}
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
-	if err := updateGraphNote(home, note, "body2"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
+	if err := updateGraphNote(fake, home, note, "body2"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -400,16 +367,16 @@ func TestUpdateGraphNote_WriteError(t *testing.T) {
 
 func TestWriteBridgeContract_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	if err := writeBridgeContract(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	if err := writeBridgeContract(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
 
 func TestWriteBridgeContract_WriteError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
-	if err := writeBridgeContract(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
+	if err := writeBridgeContract(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -418,27 +385,27 @@ func TestWriteBridgeContract_WriteError(t *testing.T) {
 
 func TestSaveManifest_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
 	m := &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}
-	if err := saveManifest(home, m); !errors.Is(err, errSeam) {
+	if err := saveManifest(fake, home, m); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
 
 func TestSaveManifest_MarshalError(t *testing.T) {
 	home := newTempKG(t)
-	swapMarshalIndent(t, func(interface{}, string, string) ([]byte, error) { return nil, errSeam })
+	fake := withMarshalIndentError(t)
 	m := &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}
-	if err := saveManifest(home, m); !errors.Is(err, errSeam) {
+	if err := saveManifest(fake, home, m); !errors.Is(err, errSeam) {
 		t.Fatalf("expected marshal seam error, got %v", err)
 	}
 }
 
 func TestSaveManifest_WriteError(t *testing.T) {
 	home := newTempKG(t)
-	swapWriteFile(t, func(string, []byte, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{writeFile: func(string, []byte, fs.FileMode) error { return errSeam }}
 	m := &IntegrityManifest{SchemaVersion: 1, Notes: map[string]IntegrityManifestEntry{}}
-	if err := saveManifest(home, m); !errors.Is(err, errSeam) {
+	if err := saveManifest(fake, home, m); !errors.Is(err, errSeam) {
 		t.Fatalf("expected write seam error, got %v", err)
 	}
 }
@@ -447,8 +414,8 @@ func TestSaveManifest_WriteError(t *testing.T) {
 
 func TestLoadManifest_ReadError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if _, err := loadManifest(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if _, err := loadManifest(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
@@ -456,17 +423,17 @@ func TestLoadManifest_ReadError(t *testing.T) {
 // TestUpdateManifest_LoadError covers the load-error return in updateManifest.
 func TestUpdateManifest_LoadError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if err := updateManifest(home, "note-x", "body"); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if err := updateManifest(fake, home, "note-x", "body"); !errors.Is(err, errSeam) {
 		t.Fatalf("expected load seam error, got %v", err)
 	}
 }
 
-// TestWarmNotesInDir_ReadDirSeamMissing covers the early-return on a
-// ReadDir error (counts as "not counted as skips" — returns 0,0).
+// TestWarmNotesInDir_ReadDirError covers the early-return on a ReadDir error
+// (counts as "not counted as skips" — returns 0,0).
 func TestWarmNotesInDir_ReadDirError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -474,8 +441,8 @@ func TestWarmNotesInDir_ReadDirError(t *testing.T) {
 		t.Fatalf("openKGStore: %v", err)
 	}
 	defer store.Close()
-	swapReadDir(t, func(string) ([]fs.DirEntry, error) { return nil, errSeam })
-	indexed, skipped := warmNotesInDir(store, filepath.Join(home, "notes", "entities"), nil)
+	fake := &fakeKGIO{readDir: func(string) ([]os.DirEntry, error) { return nil, errSeam }}
+	indexed, skipped := warmNotesInDir(fake, store, filepath.Join(home, "notes", "entities"), nil)
 	if indexed != 0 || skipped != 0 {
 		t.Errorf("expected (0,0) on readdir error, got (%d,%d)", indexed, skipped)
 	}
@@ -486,14 +453,14 @@ func TestWarmNotesInDir_ReadDirError(t *testing.T) {
 // populated.
 func TestWarmNotesInDir_ReadFileError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Seed one entity note.
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("create note: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -501,8 +468,8 @@ func TestWarmNotesInDir_ReadFileError(t *testing.T) {
 		t.Fatalf("openKGStore: %v", err)
 	}
 	defer store.Close()
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	indexed, skipped := warmNotesInDir(store, filepath.Join(home, "notes", "entities"), nil)
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	indexed, skipped := warmNotesInDir(fake, store, filepath.Join(home, "notes", "entities"), nil)
 	if skipped == 0 || indexed != 0 {
 		t.Errorf("expected only skipped (>=1) on read-file error, got (%d,%d)", indexed, skipped)
 	}
@@ -512,8 +479,8 @@ func TestWarmNotesInDir_ReadFileError(t *testing.T) {
 
 func TestRunKGCompact_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
-	if err := runKGCompact(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
+	if err := runKGCompact(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected mkdir seam error, got %v", err)
 	}
 }
@@ -523,39 +490,39 @@ func TestRunKGCompact_MkdirError(t *testing.T) {
 
 func TestWriteLintReport_MkdirError(t *testing.T) {
 	home := newTempKG(t)
-	swapMkdirAll(t, func(string, os.FileMode) error { return errSeam })
+	fake := &fakeKGIO{mkdirAll: func(string, fs.FileMode) error { return errSeam }}
 	// Should not panic and should return without writing the report.
-	writeLintReport(home, &LintReport{Timestamp: "2026-01-01T00:00:00Z"})
+	writeLintReport(fake, home, &LintReport{Timestamp: "2026-01-01T00:00:00Z"})
 }
 
 func TestWriteLintReport_MarshalError(t *testing.T) {
 	home := newTempKG(t)
-	swapMarshalIndent(t, func(interface{}, string, string) ([]byte, error) { return nil, errSeam })
-	writeLintReport(home, &LintReport{Timestamp: "2026-01-01T00:00:00Z"})
+	fake := withMarshalIndentError(t)
+	writeLintReport(fake, home, &LintReport{Timestamp: "2026-01-01T00:00:00Z"})
 }
 
 // ── persistReweavedNote: read error (silent) ──────────────────────────────────
 
 func TestPersistReweavedNote_ReadError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	persistReweavedNote(home, "missing", &GraphNote{Type: "entity"})
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	persistReweavedNote(fake, home, "missing", &GraphNote{Type: "entity"})
 }
 
 // ── readIndex / readGraphHealth: non-NotExist ReadFile error ──────────────────
 
 func TestReadIndex_ReadFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if _, err := readIndex(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if _, err := readIndex(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
 
 func TestReadGraphHealth_ReadFileError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadFile(t, func(string) ([]byte, error) { return nil, errSeam })
-	if _, err := readGraphHealth(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+	if _, err := readGraphHealth(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected read seam error, got %v", err)
 	}
 }
@@ -563,9 +530,9 @@ func TestReadGraphHealth_ReadFileError(t *testing.T) {
 // ── tallyGraphNoteDir: ReadDir error (not NotExist) ───────────────────────────
 
 func TestTallyGraphNoteDir_ReadDirError(t *testing.T) {
-	swapReadDir(t, func(string) ([]fs.DirEntry, error) { return nil, errSeam })
+	fake := &fakeKGIO{readDir: func(string) ([]os.DirEntry, error) { return nil, errSeam }}
 	h := &GraphHealth{}
-	if err := tallyGraphNoteDir("/tmp/anywhere", "entities", h); !errors.Is(err, errSeam) {
+	if err := tallyGraphNoteDir(fake, "/tmp/anywhere", "entities", h); !errors.Is(err, errSeam) {
 		t.Fatalf("expected readdir seam error, got %v", err)
 	}
 }
@@ -574,8 +541,8 @@ func TestTallyGraphNoteDir_ReadDirError(t *testing.T) {
 
 func TestListPendingRawSources_ReadDirError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadDir(t, func(string) ([]fs.DirEntry, error) { return nil, errSeam })
-	if _, err := listPendingRawSources(home); !errors.Is(err, errSeam) {
+	fake := &fakeKGIO{readDir: func(string) ([]os.DirEntry, error) { return nil, errSeam }}
+	if _, err := listPendingRawSources(fake, home); !errors.Is(err, errSeam) {
 		t.Fatalf("expected readdir seam error, got %v", err)
 	}
 }
@@ -584,8 +551,8 @@ func TestListPendingRawSources_ReadDirError(t *testing.T) {
 
 func TestWalkNoteFiles_ReadDirError(t *testing.T) {
 	home := newTempKG(t)
-	swapReadDir(t, func(string) ([]fs.DirEntry, error) { return nil, errSeam })
-	err := walkNoteFiles(home, func(string, fs.DirEntry) error { return nil })
+	fake := &fakeKGIO{readDir: func(string) ([]os.DirEntry, error) { return nil, errSeam }}
+	err := walkNoteFiles(fake, home, func(string, fs.DirEntry) error { return nil })
 	if !errors.Is(err, errSeam) {
 		t.Fatalf("expected readdir seam error, got %v", err)
 	}
@@ -595,17 +562,17 @@ func TestWalkNoteFiles_ReadDirError(t *testing.T) {
 // walkNoteFilesIn (line ~717).
 func TestWalkNoteFilesIn_FnError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Create a note file in entities so the fn callback fires.
 	note := &GraphNote{SchemaVersion: 1, ID: "e1", Type: "entity", Title: "t",
 		Summary: "s", Status: "draft", CreatedAt: "2026-01-01T00:00:00Z",
 		UpdatedAt: "2026-01-01T00:00:00Z"}
-	if err := createGraphNote(home, note, "body"); err != nil {
+	if err := createGraphNote(testIO(), home, note, "body"); err != nil {
 		t.Fatalf("create note: %v", err)
 	}
-	err := walkNoteFiles(home, func(string, fs.DirEntry) error { return errSeam })
+	err := walkNoteFiles(testIO(), home, func(string, fs.DirEntry) error { return errSeam })
 	if !errors.Is(err, errSeam) {
 		t.Fatalf("expected fn-propagated seam error, got %v", err)
 	}
@@ -618,21 +585,23 @@ func TestWalkNoteFilesIn_FnError(t *testing.T) {
 // result.Warnings append branch.
 func TestIngestEntityNotes_CreateError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	// Allow setup writes already complete; from now on fail entity writes.
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if strings.Contains(path, filepath.Join("notes", "entities")) {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if strings.Contains(path, filepath.Join("notes", "entities")) {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
 	src := RawSource{ID: "x", Title: "t"}
 	srcNote := &GraphNote{ID: "src-x", Type: "source"}
 	result := &IngestResult{SourceID: "x"}
 	// Body contains backticked entities so extractEntities produces at least one.
-	ingestEntityNotes(home, src, srcNote, "Refer to `Alpha` and `Beta`.", "2026-01-01T00:00:00Z", result)
+	ingestEntityNotes(fake, home, src, srcNote, "Refer to `Alpha` and `Beta`.", "2026-01-01T00:00:00Z", result)
 	if len(result.Warnings) == 0 {
 		t.Fatalf("expected at least one warning from create-graph-note error")
 	}
@@ -640,34 +609,38 @@ func TestIngestEntityNotes_CreateError(t *testing.T) {
 
 func TestIngestDecisionNotes_CreateError(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	swapWriteFile(t, func(path string, data []byte, perm os.FileMode) error {
-		if strings.Contains(path, filepath.Join("notes", "decisions")) {
-			return errSeam
-		}
-		return os.WriteFile(path, data, perm)
-	})
+	fake := &fakeKGIO{
+		writeFile: func(path string, data []byte, perm fs.FileMode) error {
+			if strings.Contains(path, filepath.Join("notes", "decisions")) {
+				return errSeam
+			}
+			return os.WriteFile(path, data, perm)
+		},
+	}
 	src := RawSource{ID: "x", Title: "t"}
 	srcNote := &GraphNote{ID: "src-x", Type: "source"}
 	result := &IngestResult{SourceID: "x"}
 	// Decision-shaped sentence triggers extractDecisions (matches "decided").
-	ingestDecisionNotes(home, src, srcNote, "We decided to adopt the new schema.", "2026-01-01T00:00:00Z", result)
+	ingestDecisionNotes(fake, home, src, srcNote, "We decided to adopt the new schema.", "2026-01-01T00:00:00Z", result)
 	if len(result.Warnings) == 0 {
 		t.Fatalf("expected at least one warning from create-graph-note error")
 	}
 }
 
-// ── jsonMarshalIndent seam used by default ────────────────────────────────────
-
-func TestJSONMarshalIndentSeam_DefaultDelegatesToStdlib(t *testing.T) {
-	got, err := jsonMarshalIndent(map[string]int{"a": 1}, "", "  ")
+// TestStdKGIO_DefaultMarshalIndent verifies that the production stdKGIO's
+// MarshalIndent behaves identically to encoding/json's stdlib helper. This
+// replaces the legacy TestJSONMarshalIndentSeam_DefaultDelegatesToStdlib
+// that asserted the old package-level var defaulted to the stdlib.
+func TestStdKGIO_DefaultMarshalIndent(t *testing.T) {
+	io := stdKGIO{}
+	got, err := io.MarshalIndent(map[string]int{"a": 1}, "", "  ")
 	if err != nil {
-		t.Fatalf("default jsonMarshalIndent: %v", err)
+		t.Fatalf("stdKGIO.MarshalIndent: %v", err)
 	}
-	var round map[string]int
-	if err := json.Unmarshal(got, &round); err != nil || round["a"] != 1 {
-		t.Errorf("seam default behavior diverges from stdlib: %s", string(got))
+	if string(got) != "{\n  \"a\": 1\n}" {
+		t.Errorf("seam default diverges from stdlib: %s", string(got))
 	}
 }

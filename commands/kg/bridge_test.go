@@ -176,7 +176,7 @@ func TestExecuteBridgeQuery_UninitializedKG(t *testing.T) {
 // path via executeBridgeQuery (rather than the lower-level resolver).
 func TestExecuteBridgeQuery_UnknownIntent(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_, err := executeBridgeQuery(home, "bogus", "x")
@@ -281,7 +281,7 @@ func TestRunKGBridgeMapping_TextOutput(t *testing.T) {
 // TestRunKGBridgeHealth_JSONOutput exercises the JSON branch of bridge health.
 func TestRunKGBridgeHealth_JSONOutput(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	_ = home
@@ -360,7 +360,7 @@ func TestLocalFileAdapter_LastQueryStatus(t *testing.T) {
 // the symbol_lookup intent with a seeded SQLite store.
 func TestCollectCodeBridgeResults_WarmStoreHit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -391,7 +391,7 @@ func TestCollectCodeBridgeResults_WarmStoreHit(t *testing.T) {
 // inside dispatchWarmStoreBridgeIntent.
 func TestCollectCodeBridgeResults_UnknownCodeIntent(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -426,7 +426,7 @@ func withIsolatedCRGDiscovery(t *testing.T, fn func()) {
 // CRG-unavailable fallback for change_analysis.
 func TestCollectCodeBridgeResults_ChangeAnalysis_CRGUnavailable(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	withIsolatedCRGDiscovery(t, func() {
@@ -447,7 +447,7 @@ func TestCollectCodeBridgeResults_ChangeAnalysis_CRGUnavailable(t *testing.T) {
 // change_analysis fallback for community_context.
 func TestCollectCodeBridgeResults_CommunityContext_CRGUnavailable(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	withIsolatedCRGDiscovery(t, func() {
@@ -465,7 +465,7 @@ func TestCollectCodeBridgeResults_CommunityContext_CRGUnavailable(t *testing.T) 
 // verifies the "no matching code symbols found" warning is emitted.
 func TestRunImpactRadius_NoMatchingSymbols(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	resp, err := collectCodeBridgeResults(home, "impact_radius", "totallyAbsentSymbol", 5)
@@ -526,7 +526,7 @@ func neighborNodeInfo(qn string) graphstore.NodeInfo {
 func seedNeighborGraph(t *testing.T) (store graphstore.Store, caller, callee *graphstore.GraphNode) {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -589,7 +589,7 @@ func TestCollectNeighborResults_DirectionAndKind(t *testing.T) {
 // findCodeNodes on a whitespace-only query produces no results.
 func TestFindCodeNodes_EmptyQueryReturnsNil(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -609,7 +609,7 @@ func TestFindCodeNodes_EmptyQueryReturnsNil(t *testing.T) {
 // TestFindCodeNodes_DefaultLimit ensures a non-positive limit is normalised to 10.
 func TestFindCodeNodes_DefaultLimit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -728,7 +728,7 @@ func seedDecisionNote(t *testing.T, store graphstore.Store, id, noteType, title 
 // limit returns true once full.
 func TestAppendDecisionLinkMatches_FilterAndLimit(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -776,7 +776,7 @@ func TestAppendDecisionLinkMatches_FilterAndLimit(t *testing.T) {
 // exercises the symbol_decisions intent through the dispatcher.
 func TestCollectSymbolDecisionResults_EndToEnd(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -823,7 +823,7 @@ func TestCollectSymbolDecisionResults_EndToEnd(t *testing.T) {
 // decisionNoteCandidates (exact-hit and search-fallback).
 func TestDecisionNoteCandidates_ExactIDOverridesSearch(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -868,7 +868,7 @@ func TestDecisionNoteCandidates_ExactIDOverridesSearch(t *testing.T) {
 func seedDecisionSymbolFixture(t *testing.T) (graphstore.Store, string, graphstore.KGNote, []graphstore.NoteSymbolLink) {
 	t.Helper()
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -951,7 +951,7 @@ func TestAppendDecisionSymbolMatches_WithAndWithoutNode(t *testing.T) {
 // an empty slice without error.
 func TestCollectDecisionSymbolResults_NoMatches(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -973,7 +973,7 @@ func TestCollectDecisionSymbolResults_NoMatches(t *testing.T) {
 // the dispatcher and confirms the warm-store path returns a hit.
 func TestCollectCodeBridgeResults_DecisionSymbols(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1008,7 +1008,7 @@ func TestCollectCodeBridgeResults_DecisionSymbols(t *testing.T) {
 // fallback outbound branch in runTestsFor fires.
 func TestCollectCodeBridgeResults_TestsFor_FallbackPath(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1051,7 +1051,7 @@ func TestCollectCodeBridgeResults_TestsFor_FallbackPath(t *testing.T) {
 // files is appended.
 func TestRunImpactRadius_PopulatesResultsAndWarning(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1078,7 +1078,7 @@ func TestRunImpactRadius_PopulatesResultsAndWarning(t *testing.T) {
 // the public dispatcher.
 func TestRunSymbolLookup_PopulatesResults(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1105,7 +1105,7 @@ func TestRunSymbolLookup_PopulatesResults(t *testing.T) {
 // the local-file adapter.
 func TestExecuteBridgeQuery_CodeIntentRoutesToCollector(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1175,7 +1175,7 @@ func TestResolveBridgeQuery_PlanContextFansOut(t *testing.T) {
 // notes counter.
 func TestLocalFileAdapter_HealthShape(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	adapter := NewLocalFileAdapter(home)
@@ -1217,7 +1217,7 @@ func TestLocalFileAdapter_HealthMissingHome(t *testing.T) {
 // TestCollectAdapterHealth_WritesArtefact verifies the on-disk side effect.
 func TestCollectAdapterHealth_WritesArtefact(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	adapters := []KGAdapter{NewLocalFileAdapter(home)}
@@ -1255,7 +1255,7 @@ func TestNeighborQualifiedName_InboundOutbound(t *testing.T) {
 // (~411-417).
 func TestAppendDecisionSymbolMatches_LimitHitAndSeen(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1302,7 +1302,7 @@ esac`)
 // override branch (~419-420) by seeding a node with the same qn as a link.
 func TestAppendDecisionSymbolMatches_WithNode(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)
@@ -1334,7 +1334,7 @@ func TestAppendDecisionSymbolMatches_WithNode(t *testing.T) {
 
 func TestRunNeighbors_CallersAndCallees(t *testing.T) {
 	home := newTempKG(t)
-	if err := runKGSetup(); err != nil {
+	if err := runKGSetup(testIO()); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	store, err := openKGStore(home)

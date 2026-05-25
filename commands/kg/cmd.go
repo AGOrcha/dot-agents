@@ -14,6 +14,13 @@ const (
 )
 
 func NewKGCmd(deps Deps) *cobra.Command {
+	// Wire the production kgIO collaborator into deps so every handler that
+	// derives its io from kgIOFrom(deps) sees stdKGIO{} by default. Tests
+	// that need to fault-inject a seam construct their own Deps with a
+	// fakeKGIO assigned to IO directly before invoking the handler.
+	if deps.IO == nil {
+		deps.IO = stdKGIO{}
+	}
 	kgCmd := &cobra.Command{
 		Use:   "kg",
 		Short: "Manage the local knowledge graph",
@@ -31,7 +38,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Use:   "setup",
 		Short: "Initialize the knowledge graph at KG_HOME",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKGSetup()
+			return runKGSetup(kgIOFrom(deps))
 		},
 	}
 
@@ -98,7 +105,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Use:   "reweave",
 		Short: "Repair broken links and add missing source_ref links",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKGReweave(kgHome())
+			return runKGReweave(kgIOFrom(deps), kgHome())
 		},
 	}
 
@@ -107,7 +114,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Short: "Mark notes not updated beyond threshold as stale",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			days, _ := cmd.Flags().GetInt("days")
-			return runKGMarkStale(kgHome(), time.Duration(days)*24*time.Hour)
+			return runKGMarkStale(kgIOFrom(deps), kgHome(), time.Duration(days)*24*time.Hour)
 		},
 	}
 	kgMarkStaleCmd.Flags().Int("days", 90, "Age threshold in days (default 90)")
@@ -116,7 +123,7 @@ for structured project memory, bridge queries, and code-to-note context.`,
 		Use:   "compact",
 		Short: "Archive superseded and archived notes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runKGCompact(kgHome())
+			return runKGCompact(kgIOFrom(deps), kgHome())
 		},
 	}
 

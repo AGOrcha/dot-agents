@@ -814,7 +814,11 @@ func (a *LocalFileAdapter) Available() bool {
 }
 
 func (a *LocalFileAdapter) Query(query GraphQuery) (GraphQueryResponse, error) {
-	resp, err := executeQuery(a.kgHome, query)
+	// The LocalFileAdapter is the production bridge wrapper — no bridge test
+	// fault-injects executeQuery's seam-level reads, so stdKGIO{} is the
+	// correct production IO. (Tests that exercise executeQuery's fault
+	// branches call executeQuery directly with a fakeKGIO.)
+	resp, err := executeQuery(stdKGIO{}, a.kgHome, query)
 	a.lastQueryTime = time.Now().UTC().Format(time.RFC3339)
 	if err != nil {
 		a.lastStatus = "error"
@@ -835,8 +839,10 @@ func (a *LocalFileAdapter) Health() (KGAdapterHealth, error) {
 		h.Warnings = append(h.Warnings, "graph not initialized")
 		return h, nil
 	}
-	// Count notes
-	_ = walkNoteFiles(a.kgHome, func(_ string, _ fs.DirEntry) error {
+	// Count notes. The adapter does not own a kgIO collaborator (its tests
+	// use real notes on a tmp KG_HOME, so the production stdKGIO{} suffices
+	// for the readdir walk).
+	_ = walkNoteFiles(stdKGIO{}, a.kgHome, func(_ string, _ fs.DirEntry) error {
 		h.NoteCount++
 		return nil
 	})
@@ -890,9 +896,9 @@ func executeBridgeQuery(kgHomeDir, bridgeIntent, query string) (GraphQueryRespon
 // ── Phase 5: Bridge contract ──────────────────────────────────────────────────
 
 // writeBridgeContract writes KG_HOME/self/schema/bridge-contract.yaml.
-func writeBridgeContract(kgHomeDir string) error {
+func writeBridgeContract(io kgIO, kgHomeDir string) error {
 	schemaDir := filepath.Join(kgHomeDir, "self", "schema")
-	if err := osMkdirAll(schemaDir, 0755); err != nil {
+	if err := io.MkdirAll(schemaDir, 0755); err != nil {
 		return err
 	}
 	mappings := defaultBridgeMappings()
@@ -918,7 +924,7 @@ func writeBridgeContract(kgHomeDir string) error {
 	if err != nil {
 		return err
 	}
-	return osWriteFile(filepath.Join(schemaDir, "bridge-contract.yaml"), data, 0644)
+	return io.WriteFile(filepath.Join(schemaDir, "bridge-contract.yaml"), data, 0644)
 }
 
 // ── kg bridge subcommands ─────────────────────────────────────────────────────

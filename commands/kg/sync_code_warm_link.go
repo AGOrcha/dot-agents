@@ -30,7 +30,17 @@ const warmStoreOpenErrFmt = "open warm store: %w"
 
 // runKGSync is a thin wrapper: git pull (or push) followed by kg lint.
 // It does not implement a custom sync protocol — git provides the transport.
-func runKGSync(cmd *cobra.Command, _ []string) error {
+//
+// Cobra wires this via `RunE: runKGSync` (no Deps); the body delegates to
+// runKGSyncIO so tests can drive the post-pull lint-error branch with a
+// fakeKGIO that fault-injects the lint's underlying ReadDir.
+func runKGSync(cmd *cobra.Command, args []string) error {
+	return runKGSyncIO(stdKGIO{}, cmd, args)
+}
+
+// runKGSyncIO is the threaded implementation of runKGSync. Production wires
+// stdKGIO{} via runKGSync; tests construct a fakeKGIO and call this directly.
+func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 	home := kgHome()
 	if _, err := os.Stat(kgConfigPath()); os.IsNotExist(err) {
 		return fmt.Errorf("knowledge graph not initialized at %s: run 'da kg setup' first", home)
@@ -65,7 +75,7 @@ func runKGSync(cmd *cobra.Command, _ []string) error {
 
 	// After pull, run lint to surface any content drift
 	ui.Info("Running kg lint after pull ...")
-	report, err := runGraphLint(home)
+	report, err := runGraphLint(io, home)
 	if err != nil {
 		return fmt.Errorf("lint after sync: %w", err)
 	}
@@ -576,7 +586,13 @@ func runKGWarmCodeImport(store graphstore.Store, repoRoot string) (nodesImported
 }
 
 // runKGWarm syncs all hot filesystem notes into the warm SQLite layer.
+//
+// IO note: runKGWarm is wired into Cobra via the RunE: runKGWarm pointer (no
+// Deps), and its tests invoke it as runKGWarm(cmd, nil) without a fake. It
+// uses stdKGIO{} for the underlying warmNotesInDir walks; the per-operation
+// fault-injection tests call warmNotesInDir directly with a fakeKGIO.
 func runKGWarm(cmd *cobra.Command, _ []string) error {
+	io := stdKGIO{}
 	home := kgHome()
 	noteTypeFilter, _ := cmd.Flags().GetString("type")
 	includeCode, _ := cmd.Flags().GetBool("include-code")
@@ -592,8 +608,8 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	indexed, skipped := warmActiveNotes(store, home, subdirs)
-	archIndexed, archSkipped := warmArchivedNotes(store, home)
+	indexed, skipped := warmActiveNotes(io, store, home, subdirs)
+	archIndexed, archSkipped := warmArchivedNotes(io, store, home)
 	indexed += archIndexed
 	skipped += archSkipped
 
@@ -640,9 +656,9 @@ func warmNoteSubdirs(noteTypeFilter string) ([]string, error) {
 // is the published contract (gcc3 binding); concretely this caller uses the
 // KGNoteStore role, but we keep the whole-store type to share the same
 // handle across the warm/code-import passes in runKGWarm.
-func warmActiveNotes(store graphstore.Store, home string, subdirs []string) (indexed, skipped int) {
+func warmActiveNotes(io kgIO, store graphstore.Store, home string, subdirs []string) (indexed, skipped int) {
 	for _, sub := range subdirs {
-		i, s := warmNotesInDir(store, filepath.Join(home, "notes", sub), nil)
+		i, s := warmNotesInDir(io, store, filepath.Join(home, "notes", sub), nil)
 		indexed += i
 		skipped += s
 	}
@@ -652,8 +668,8 @@ func warmActiveNotes(store graphstore.Store, home string, subdirs []string) (ind
 // warmArchivedNotes upserts the contents of notes/_archived, marking each
 // resulting KGNote as archived when the source frontmatter omits the
 // archive timestamp. store is the published contract (gcc3 binding).
-func warmArchivedNotes(store graphstore.Store, home string) (indexed, skipped int) {
-	return warmNotesInDir(store, filepath.Join(home, "notes", "_archived"), func(kn *graphstore.KGNote, note *GraphNote) {
+func warmArchivedNotes(io kgIO, store graphstore.Store, home string) (indexed, skipped int) {
+	return warmNotesInDir(io, store, filepath.Join(home, "notes", "_archived"), func(kn *graphstore.KGNote, note *GraphNote) {
 		if kn.ArchivedAt == "" {
 			kn.ArchivedAt = note.UpdatedAt
 		}
@@ -665,8 +681,8 @@ func warmArchivedNotes(store graphstore.Store, home string) (indexed, skipped in
 // resulting KGNote into store. Returns the indexed/skipped counters.
 // Missing directories are not counted as skips. store is the published
 // contract (gcc3 binding); only the KGNoteStore role is exercised here.
-func warmNotesInDir(store graphstore.Store, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
-	entries, err := osReadDir(dir)
+func warmNotesInDir(io kgIO, store graphstore.Store, dir string, adjust func(*graphstore.KGNote, *GraphNote)) (indexed, skipped int) {
+	entries, err := io.ReadDir(dir)
 	if err != nil {
 		return 0, 0
 	}
@@ -675,7 +691,7 @@ func warmNotesInDir(store graphstore.Store, dir string, adjust func(*graphstore.
 			continue
 		}
 		fpath := filepath.Join(dir, e.Name())
-		data, err := osReadFile(fpath)
+		data, err := io.ReadFile(fpath)
 		if err != nil {
 			skipped++
 			continue

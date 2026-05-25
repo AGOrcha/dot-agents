@@ -20,8 +20,27 @@ type GlobalFlags struct {
 // handle is the deferred follow-up tracked on di-refactor OD-1 / the kg-pkg
 // task on seam-interface-di-migration). See internal/graphstore/CONTRACT.md
 // "Deps boundary".
+//
+// IO is the kgIO collaborator (interface-DI per docs/TEST_SEAMS.md) used
+// by every kg handler that needs filesystem / serialization IO. Production
+// wires stdKGIO{} via cmd.go; tests construct a fakeKGIO and assign it on
+// the Deps value before invoking the handler. When IO is the zero value
+// (e.g. legacy call sites that have not been updated), kgIOFrom(deps)
+// substitutes stdKGIO{} so the handlers never carry a nil collaborator.
 type Deps struct {
 	Flags        GlobalFlags
 	ExampleBlock func(lines ...string) string
 	Store        graphstore.Handle
+	IO           kgIO
+}
+
+// kgIOFrom returns deps.IO when set, otherwise the production stdKGIO{}.
+// Every kg handler / helper that needs to derive an io for downstream calls
+// uses this so the test fixtures and the Cobra wiring share one fallback
+// rule.
+func kgIOFrom(deps Deps) kgIO {
+	if deps.IO == nil {
+		return stdKGIO{}
+	}
+	return deps.IO
 }
