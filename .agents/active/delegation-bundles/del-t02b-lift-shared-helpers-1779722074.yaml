@@ -1,0 +1,46 @@
+schema_version: 1
+delegation_id: del-t02b-lift-shared-helpers-1779722074
+plan_id: root-command-decomposition
+task_id: t02b-lift-shared-helpers
+owner: t02b-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T15:14:34Z"
+    reason: Wave 4 fold-back precursor
+scope:
+    write_scope:
+        - commands/lifecycle/backup.go
+        - commands/lifecycle/backup_test.go
+        - commands/lifecycle/kgmcp.go
+        - commands/lifecycle/kgmcp_test.go
+        - commands/lifecycle/resource_map.go
+        - commands/lifecycle/resource_map_test.go
+        - commands/lifecycle/project.go
+        - commands/lifecycle/project_test.go
+        - commands/add.go
+        - commands/install.go
+        - commands/import.go
+        - commands/refresh.go
+        - commands/doctor.go
+        - commands/status.go
+prompt:
+    inline:
+        - Per t02b notes in TASKS.yaml
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: 15 shared lifecycle helpers exported; all callers updated; tests green; t04/t06/t07/t08/t09 unblocked.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
