@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/spf13/cobra"
 )
 
@@ -106,17 +107,18 @@ func TestCreateSkill_GlobalScopeCreatesUserSymlinks(t *testing.T) {
 		filepath.Join(fakeHome, ".agents", "skills", "link-skill"),
 		filepath.Join(fakeHome, ".claude", "skills", "link-skill"),
 	} {
-		fi, err := os.Lstat(target)
-		if err != nil {
-			t.Errorf("expected symlink at %s: %v", target, err)
+		// Use links.IsManagedLink rather than fi.Mode()&os.ModeSymlink:
+		// production creates a real symlink on POSIX but a junction on
+		// Windows (via stdSkillsIO.Symlink → internal/links.Symlink →
+		// createJunction). Go's os.Lstat doesn't always set ModeSymlink
+		// on a junction; IsManagedLink works for both shapes by
+		// consulting ManagedLinkTarget which understands junctions.
+		if _, err := os.Lstat(target); err != nil {
+			t.Errorf("expected managed link at %s: %v", target, err)
 			continue
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should be a symlink, got %v", target, fi.Mode())
-			continue
-		}
-		if got, _ := os.Readlink(target); got != expectedTarget {
-			t.Errorf("symlink target = %q, want %q", got, expectedTarget)
+		if !links.IsManagedLink(target, expectedTarget) {
+			t.Errorf("%s should be a managed link to %s", target, expectedTarget)
 		}
 	}
 }
@@ -517,11 +519,12 @@ func TestEnsureUserSkillLinks_OneTargetExistsOneCreated(t *testing.T) {
 	EnsureUserSkillLinks(agentsHome, skillName, skillDir)
 
 	target := filepath.Join(tmp, ".claude", "skills", skillName)
-	fi, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("expected ~/.claude/skills link: %v", err)
+	if _, err := os.Lstat(target); err != nil {
+		t.Fatalf("expected ~/.claude/skills managed link: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected symlink, got %v", fi.Mode())
+	// Junction-on-Windows / symlink-on-POSIX agnostic — same rationale
+	// as TestCreateSkill_GlobalScopeCreatesUserSymlinks above.
+	if !links.IsManagedLink(target, skillDir) {
+		t.Errorf("%s should be a managed link to %s", target, skillDir)
 	}
 }
