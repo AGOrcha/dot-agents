@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
@@ -33,28 +34,22 @@ type stdRefreshConfigLoader struct{}
 
 func (stdRefreshConfigLoader) LoadConfig() (*config.Config, error) { return config.Load() }
 
+// NewRefreshCmd is the root-package shim that wires the lifecycle
+// subpackage constructor with closures over the still-in-root runRefresh
+// body and package-var seams. Follows SHAPE.md §6 (root shim preserved
+// until t13 deletes it and switches root.go to lifecycle.NewRefreshCmd
+// directly). See .agents/active/fold-back/t07-refresh-body-deferred.md
+// for why the run body cannot move atomically with this PR (t04/t06 still
+// own addDeps / importDeps in the root package).
 func NewRefreshCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "refresh [project]",
-		Short: "Refresh managed setup in projects from ~/.agents/",
-		Long: `Re-applies links and config from ~/.agents/ into project directories.
-Use after pulling changes to ~/.agents/ or when a project's agent config is out of sync.`,
-		Example: ExampleBlock(
-			"  da refresh",
-			"  da refresh billing-api",
-			"  da refresh --import --dry-run",
-		),
-		Args: MaximumNArgsWithHints(1, "Optionally pass one managed project name to limit the refresh."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			filter := ""
-			if len(args) > 0 {
-				filter = args[0]
-			}
-			return runRefresh(filter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
+	return lifecycle.NewRefreshCmd(lifecycle.Deps{
+		ExampleBlock:          ExampleBlock,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		RunRefresh: func(projectFilter string, importAlso bool) error {
+			refreshImport = importAlso
+			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
-	}
-	cmd.Flags().BoolVar(&refreshImport, "import", false, "Also import global user configs into ~/.agents before relinking")
-	return cmd
+	})
 }
 
 func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDeps, addD addDeps) error {

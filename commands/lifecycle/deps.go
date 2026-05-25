@@ -26,4 +26,19 @@ type Deps struct {
 	MaximumNArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 	RangeArgsWithHints    func(min, max int, hints ...string) cobra.PositionalArgs
 	ExactArgsWithHints    func(n int, hints ...string) cobra.PositionalArgs
+
+	// ExampleBlock formats a multi-line cobra Example block. Mirrors the
+	// commands.ExampleBlock helper. Lifecycle subcommands use it for the
+	// cobra Example field at construction time.
+	ExampleBlock func(lines ...string) string
+
+	// RunRefresh is the back-edge into commands.runRefresh used by
+	// NewRefreshCmd's RunE. The actual run body, package-var seams
+	// (stdRefreshConfigLoader, stdImportDeps, stdAddDeps), and the helper
+	// fan-out (mapResourceRelToDest, restoreFromResources) remain in
+	// commands/ until t04 (add) and t06 (import) merge and the
+	// cross-cluster constants / interfaces (addDeps, importDeps,
+	// importScope*, rel*Dir) can be re-homed into lifecycle. See
+	// .agents/active/fold-back/t07-refresh-body-deferred.md.
+	RunRefresh func(projectFilter string, importAlso bool) error
 }
