@@ -86,6 +86,22 @@ func TestCopyStarterEntryRelDotSkips(t *testing.T) {
 // embedded read. The embedded tree has no .sh files of its own, so this
 // branch is otherwise unreachable.
 func TestCopyStarterEntryShSuffixSetsExecBit(t *testing.T) {
+	// POSIX-only: this test asserts the 0o755 exec-bit is set on copied
+	// `.sh` files. The POSIX exec bit has no Windows analog — NTFS does
+	// not encode per-user execute permission as a file mode bit, and Go's
+	// os.Stat on Windows synthesizes mode bits from file attributes
+	// (FILE_ATTRIBUTE_READONLY → 0o444 vs 0o666), never 0o755.
+	//
+	// Classification: [genuine-posix] (see
+	// .agents/workflow/plans/cross-platform-test-skips-audit/ and the
+	// catalogue findings.md entry for copy_test.go:89). This is NOT a
+	// shortcut that a testutil helper can paper over — the assertion
+	// itself is about a POSIX-only semantic. Do NOT try to "abstract"
+	// this skip away; doing so would change what the test asserts.
+	//
+	// The matching scaffolder behavior is intentionally a no-op on
+	// Windows (the exec-bit branch in copyStarterEntry has no effect on
+	// NTFS), so there is no Windows-side assertion to cover here.
 	if runtime.GOOS == "windows" {
 		t.Skip("file modes differ on windows")
 	}
