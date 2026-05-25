@@ -6,8 +6,9 @@
 
 ## Goal
 
-Refresh documented non-gate canonical event coverage after the critical stop
-mappings are available. This is parity work, not enforcement logic.
+Refresh documented canonical event coverage after the critical stop mappings
+are available. This task maps events and documents intended usage; P2 owns
+enforcement or advisory behavior.
 
 ## Required Reads
 
@@ -43,6 +44,11 @@ Update `docs/HOOKS.md` to explain:
 - Copilot stop renders as `agentStop`.
 - Cross-platform bundles use portable canonical values and cannot assume
   every vendor implements every non-critical event.
+- `PreToolUse`, `SubagentStart`, and `PreCompact` are approved runtime
+  lifecycle inputs only where P1c establishes the vendor contract; terminal
+  events remain authoritative for completed-artifact enforcement.
+- `PostToolUse` and `PostToolUseFailure` are candidates for observation and
+  feedback capture under R1.5, not implicit blocking hooks.
 
 ## Acceptance
 
@@ -52,5 +58,5 @@ Update `docs/HOOKS.md` to explain:
 
 ## Out of Scope
 
-- Stop gate scripts.
+- Gate scripts and lifecycle outcome policy.
 - Matcher support and multi-event HookSpec syntax, both owned by P1c.

@@ -8,14 +8,16 @@
 
 ## Summary
 
-Stop / SubagentStop hook enforcement for `iteration-close`, `isp`, and
-`loop-worker`; promote skills into the starter; close platform
-event-coverage gaps. Hooks read sentinel files written by the skills and
-validate that the discipline contracts (verify → checkpoint →
-merge-back; orchestrator stage gates; subagent write-scope confinement)
-were upheld before allowing stop. Hard violations request each platform's
-native continuation/remediation behavior; soft violations emit stderr
-advisories.
+Lifecycle hook discipline for `iteration-close`, `isp`, and `loop-worker`;
+promote skills into the starter; close platform event-coverage gaps.
+Stop / SubagentStop hooks read sentinel files written by the skills and
+validate that the discipline contracts (verify → checkpoint → merge-back;
+orchestrator stage gates; subagent write-scope confinement) were upheld
+before allowing stop. Approved non-terminal behavior adds deterministic
+`PreToolUse` prevention, `loop-worker` `SubagentStart` bootstrap, and
+`PreCompact` continuity advice without treating those events as
+completed-work proof. Hard violations request each platform's native
+continuation/remediation behavior; soft violations emit stderr advisories.
 
 ## Reading order
 
@@ -36,7 +38,7 @@ advisories.
 | --- | --- | --- |
 | `p0-sentinel-cli` | [`tasks/p0-sentinel-cli.contract.md`](tasks/p0-sentinel-cli.contract.md) | `workflow hook-sentinel`; archive to plan history |
 | `p1a-mapper-extensions` | [`tasks/p1a-mapper-extensions.contract.md`](tasks/p1a-mapper-extensions.contract.md) | gate-critical event mappings only |
-| `p1b-canonical-when-values` | [`tasks/p1b-canonical-when-values.contract.md`](tasks/p1b-canonical-when-values.contract.md) | non-gate documented parity |
+| `p1b-canonical-when-values` | [`tasks/p1b-canonical-when-values.contract.md`](tasks/p1b-canonical-when-values.contract.md) | documented parity and approved lifecycle event names |
 | `p1c-matcher-verification` | [`tasks/p1c-matcher-verification.contract.md`](tasks/p1c-matcher-verification.contract.md) | `when_events`, trace inputs, native outputs |
 | `p1d-claude-lifecycle-parity` | [`tasks/p1d-claude-lifecycle-parity.contract.md`](tasks/p1d-claude-lifecycle-parity.contract.md) | verified Claude wider lifecycle parity |
 | `p2-hook-scripts` | [`tasks/p2-hook-scripts.contract.md`](tasks/p2-hook-scripts.contract.md) | evidence-backed remediation; missing trace advises |
@@ -50,8 +52,9 @@ advisories.
 ## Phase-by-phase narrative
 
 The enforcement core ships through P5. P0 and P1a open parallel work on
-P1b, P1c, and P3; P2 follows P1c because its multi-event hook manifest
-uses the representation pinned there. P1d expands documented Claude
+P1b, P1c, and P3; P2 follows both P1b and P1c because its multi-event hook
+manifest consumes the mapped non-terminal events and representation pinned
+there. P1d expands documented Claude
 parity without changing the gate set. P3b assesses and scaffolds adjacent
 discipline skills. P6 migrates payout deliberately, and P7 is the final
 downstream legacy-override sweep.
@@ -96,20 +99,22 @@ of P1b/P1c — those refine but do not block this work.
 **Produces:** Canonical When values for Cursor's wider event surface
 (D3) and the May 2026 refresh deltas (D5: `post_compact`,
 `error_occurred`). Other platforms no-op for the Cursor-only values via
-D2 fall-through. A doc note in `docs/HOOKS.md` explaining the
-one-to-one principle (D2), non-gate parity, and the operator pattern
-for cross-platform coverage.
+D2 fall-through. A doc note in `docs/HOOKS.md` explains the one-to-one
+principle (D2), approved non-terminal behavior, observation-only candidates,
+and the operator pattern for cross-platform coverage.
 
 **Why ordered this way:** Depends on P1a so the mapper test scaffolding
-is in place and the doc page exists to extend. Does not block P2/P3/P4
-— the three gates themselves use only `stop` / `subagent_stop` /
-canonical when_events.
+is in place and the doc page exists to extend. It supplies event names used
+by approved non-terminal behavior; P1c still verifies event inputs/outputs
+before P2 can implement them.
 
 ### P1c — Input/matcher verification and `when_events` extension (`p1c-matcher-verification`)
 
 **Produces:** Per-vendor verification table for which events accept a
-`matcher` field and which Stop/SubagentStop-style inputs expose a
-readable transcript path (resolves spec Q5 / scoping D.6). A
+`matcher` field; which Stop/SubagentStop-style inputs expose a readable
+transcript path; and which `PreToolUse`, `SubagentStart`, `PreCompact`,
+`PostToolUse`, or `PostToolUseFailure` inputs/outputs support the bounded
+uses in D8/D9 (resolves spec Q5 / scoping D.6). A
 backward-compatible `when_events: []` schema extension lands here so
 `iteration-close-gate` ships as one HookSpec instead of two (resolves
 spec Q4 / scoping D.8).
@@ -134,12 +139,13 @@ already-critical stop events.
 
 **Produces:** Three bundles under `internal/scaffold/hooks/global/`:
 `iteration-close-gate/`, `isp-gate/`, `loop-worker-gate/`, each with
-HOOK.yaml + gate.sh. Gate scripts implement the two-tier violation
-matrix from spec R1/R2/R3, reading sentinels via the P0 CLI.
+HOOK.yaml + gate.sh. Gate scripts implement the terminal two-tier violation
+matrix from spec R1/R2/R3 together with D8 early prevention, worker
+bootstrap, and compaction-continuity behavior, reading sentinels via P0.
 
-**Why ordered this way:** Depends on P0 (CLI) and P1a (event names
-need to render on all four platforms), and on P1c for the multi-event
-HookSpec/input contract. It does not depend on P3 because hook scripts
+**Why ordered this way:** Depends on P0 (CLI), P1a (terminal event
+extensions), P1b (approved non-terminal event mappings), and P1c for the
+multi-event HookSpec/input contract. It does not depend on P3 because hook scripts
 ship in the scaffold tree separately from skill bundles. Rules that
 depend on command history request hard remediation only when a verified
 readable trace is present; lack of trace emits an advisory. Hard outcomes
@@ -169,8 +175,9 @@ parallel with P0 and P1a.
 ### P3b — Companion discipline skills (`p3b-companion-discipline-skills`)
 
 **Produces:** Complete starter-scaffold assets for `agent-handoff` and
-`delegation-lifecycle`, plus a written assessment of whether a stop-time
-hook can enforce a deterministic invariant for either skill.
+`delegation-lifecycle`, plus a written assessment of whether a lifecycle
+hook can enforce a deterministic invariant or provide bounded continuity
+advice for either skill.
 
 **Why ordered this way:** It follows P3's starter-copy pattern and P2's
 evidence boundary. If no observable hook contract exists, scaffolding and
@@ -196,10 +203,11 @@ single-shot edit.
 
 **Produces:** Shell smoke test at `tests/test-loop-discipline-stop-hooks.sh`
 following the repository's existing flat test convention. It exercises
-an artifact/write-scope hard outcome, a trace-backed forbidden-command
-hard outcome where verified input permits it, and advisory behavior for a
-soft issue or unavailable trace. It asserts JSON block payloads where
-documented and Cursor's native follow-up payload.
+an artifact/write-scope terminal hard outcome, a verified `PreToolUse`
+forbidden-command prevention, `SubagentStart`/`PreCompact` non-blocking
+behavior, a trace-backed outcome where verified input permits it, and
+advisory behavior for a soft issue or unavailable trace. It asserts JSON
+block payloads where documented and Cursor's native follow-up payload.
 
 **Why ordered this way:** Depends on P2 (scripts under test) and P4
 (skills must write sentinels). Final phase; landing this task closes
@@ -233,7 +241,8 @@ proven before replacing downstream variants.
 ```
 p0-sentinel-cli ──> p1a-mapper-extensions ──> p1b-canonical-when-values
 p1b-canonical-when-values ──> p1d-claude-lifecycle-parity ────────────────────────────────┐
-p0-sentinel-cli ──> p1a-mapper-extensions ──> p1c-matcher-verification ──> p2-hook-scripts ──> p5-e2e-integration
+p0-sentinel-cli ──> p1a-mapper-extensions ──> p1c-matcher-verification ──┐
+p0-sentinel-cli ──> p1a-mapper-extensions ──> p1b-canonical-when-values ─┼──> p2-hook-scripts ──> p5-e2e-integration
 p0-sentinel-cli ─────────────────────────────────────────────────────────> p2-hook-scripts
 p0-sentinel-cli ──> p4-sentinel-wiring ──────────────────────────────────> p5-e2e-integration
 p3-starter-promotion ──> p4-sentinel-wiring

@@ -39,7 +39,7 @@ tasks:
         - internal/platform/hooks_test.go
         - docs/HOOKS.md
       verification_required: true
-      notes: 'Add non-gate event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping and Copilot agentStop. Contract: tasks/p1b-canonical-when-values.contract.md.'
+      notes: 'Add event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping, Copilot agentStop, approved non-terminal behavior, and observation-only candidates. Contract: tasks/p1b-canonical-when-values.contract.md.'
     - id: p1c-matcher-verification
       title: Per-event input/matcher verification and when_events schema extension
       status: pending
@@ -53,7 +53,7 @@ tasks:
         - schemas/hook.schema.json
         - docs/HOOKS.md
       verification_required: true
-      notes: 'Add backward-compatible `when_events` after verifying inputs, matchers, and native remediation outputs from official docs; Cursor provides transcript fields but uses `followup_message`. Contract: tasks/p1c-matcher-verification.contract.md.'
+      notes: 'Add backward-compatible `when_events` after verifying inputs, matchers, native remediation outputs, and approved PreToolUse/SubagentStart/PreCompact capabilities from official docs; Cursor provides transcript fields but uses `followup_message`. Contract: tasks/p1c-matcher-verification.contract.md.'
     - id: p1d-claude-lifecycle-parity
       title: Claude documented lifecycle event parity beyond gate-critical events
       status: pending
@@ -74,6 +74,7 @@ tasks:
       depends_on:
         - p0-sentinel-cli
         - p1a-mapper-extensions
+        - p1b-canonical-when-values
         - p1c-matcher-verification
       blocks: []
       owner: dot-agents
@@ -83,7 +84,7 @@ tasks:
         - internal/scaffold/hooks/global/loop-worker-gate/
         - internal/scaffold/hooks/copy_test.go
       verification_required: true
-      notes: 'Add three canonical hook bundles and scaffold-copy assertions. Hard outcomes require observable artifact/git/verified-trace evidence and use platform-native remediation output; missing trace is advisory. Contract: tasks/p2-hook-scripts.contract.md.'
+      notes: 'Add three canonical hook bundles and scaffold-copy assertions. Ship terminal validation, deterministic PreToolUse prevention, loop-worker SubagentStart bootstrap, and PreCompact continuity advice; hard outcomes require observable evidence and native remediation output. Contract: tasks/p2-hook-scripts.contract.md.'
     - id: p3-starter-promotion
       title: Promote iteration-close, isp, loop-worker skills + AGENT.md + loop-worker profile into starter
       status: pending
@@ -113,7 +114,7 @@ tasks:
         - internal/scaffold/home/copy_test.go
         - .agents/history/loop-discipline-stop-hooks/additional-discipline-skill-assessment.md
       verification_required: true
-      notes: 'Ensure both companion skills ship complete starter assets and evaluate whether any evidence-backed stop hook is justified; do not add prose-only enforcement. Contract: tasks/p3b-companion-discipline-skills.contract.md.'
+      notes: 'Ensure both companion skills ship complete starter assets and evaluate whether any evidence-backed lifecycle hook or bounded continuity advice is justified; route post-tool observation questions to R1.5 and do not add prose-only enforcement. Contract: tasks/p3b-companion-discipline-skills.contract.md.'
     - id: p4-sentinel-wiring
       title: Wire 'da workflow hook-sentinel write' call into the three starter skills
       status: pending
@@ -139,7 +140,7 @@ tasks:
       write_scope:
         - tests/test-loop-discipline-stop-hooks.sh
       verification_required: true
-      notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert JSON block output where supported and Cursor followup output, plus advisory behavior. Contract: tasks/p5-e2e-integration.contract.md.'
+      notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert terminal and PreToolUse native remediation, SubagentStart/PreCompact non-blocking behavior, JSON block output where supported, Cursor followup output, and advisories. Contract: tasks/p5-e2e-integration.contract.md.'
     - id: p6-payout-backfill
       title: Explicit payout migration and active-loop readback
       status: pending

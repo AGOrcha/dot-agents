@@ -27,7 +27,13 @@ for this single workflow.
    instead and leave the hard-trace case pending with an explicit reason.
 3. Exercise a soft condition such as dirty-but-in-scope state or unavailable
    trace and assert success with explanatory stderr.
-4. Copy or refresh the embedded starter into a sandbox home and assert the
+4. Supply verified `PreToolUse` input for a forbidden loop-worker or
+   delegated-closeout workflow command and assert prevention through the
+   platform-native remediation response.
+5. Exercise `SubagentStart` for a loop-worker and `PreCompact` during an
+   active sentinel, asserting contextual/advisory output without a false
+   completed-work claim or compaction block.
+6. Copy or refresh the embedded starter into a sandbox home and assert the
    three skill bundles, loop-worker agent/profile, and three hook bundles are
    materialized without directory replacement warnings.
 
@@ -46,6 +52,8 @@ for this single workflow.
 - The test is runnable alongside the repository shell smoke suite.
 - The test distinguishes proof-backed blocking from advisory-only missing
   trace coverage; it must not label an inferred transcript rule as enforced.
+- The test distinguishes early prevention and continuity/bootstrap advice
+  from terminal success/remediation.
 
 ## Out of Scope
 

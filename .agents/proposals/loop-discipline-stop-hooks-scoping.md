@@ -28,6 +28,13 @@ authoritative:
 - Gate telemetry is tracked by follow-up plan
   `r1-5-hook-enforcement-telemetry`, since `r1-outcome-scoring` is already
   completed.
+- The promoted plan now includes bounded `PreToolUse` prevention,
+  `SubagentStart` bootstrap for `loop-worker`, and `PreCompact` continuity
+  advice. Terminal Stop/SubagentStop behavior remains the authoritative
+  artifact gate.
+- `PostToolUse` and `PostToolUseFailure` are explicitly evaluated by R1.5 as
+  possible non-blocking feedback signals; no blocking or scoring is implied
+  before that evaluation resolves privacy, noise, and deduplication.
 
 ## Goal
 

@@ -3,12 +3,13 @@
 - task: `p2-hook-scripts`
 - requirements: R1-R3, R5, D6, D7
 - dependencies: `p0-sentinel-cli`, `p1a-mapper-extensions`,
-  `p1c-matcher-verification`
+  `p1b-canonical-when-values`, `p1c-matcher-verification`
 
 ## Goal
 
 Ship three canonical hook bundles that enforce provable loop-discipline
-failures and advise for non-blocking or non-observable conditions.
+failures at terminal or verified pre-action boundaries, bootstrap the bounded
+worker at subagent start, and preserve active context before compaction.
 
 ## Bundle Layout
 
@@ -23,11 +24,17 @@ internal/scaffold/hooks/global/loop-worker-gate/HOOK.yaml
 internal/scaffold/hooks/global/loop-worker-gate/gate.sh
 ```
 
-All three manifests are enabled and required on Claude Code, Codex, Cursor,
-and GitHub Copilot. `iteration-close-gate` uses
-`when_events: [stop, subagent_stop]`; `isp-gate` uses `when: stop`;
-`loop-worker-gate` uses `when: subagent_stop` and self-filters by
-`agent_type` rather than a platform matcher.
+All three manifests target only events verified through P1c and use
+per-platform omission where a vendor cannot represent an event:
+
+| Bundle | Approved lifecycle events | Purpose |
+| --- | --- | --- |
+| `iteration-close-gate` | `pre_tool_use`, `pre_compact`, `stop`, `subagent_stop` | prevent delegated `advance`, advise before compaction, terminally verify closeout |
+| `isp-gate` | `pre_compact`, `stop` | preserve staged-runtime context, terminally verify parent gate |
+| `loop-worker-gate` | `subagent_start`, `pre_tool_use`, `pre_compact`, `subagent_stop` | bootstrap worker, prevent forbidden orchestration commands, preserve context, terminally verify scope/handoff |
+
+`loop-worker-gate` self-filters by `agent_type` rather than depending on a
+platform-specific terminal matcher.
 
 ## Gate Outcomes
 
@@ -41,6 +48,19 @@ Hard outcomes follow the vendor-supported native continuation contract:
 Claude Code, Codex, and Copilot emit documented block output; Cursor emits
 native `followup_message`. Advisory text is written to stderr and exits
 successfully.
+
+## Non-Terminal Outcomes
+
+| Bundle/event | Deterministic hard remediation | Non-blocking output |
+| --- | --- | --- |
+| `iteration-close-gate` / `pre_tool_use` | delegated sentinel plus attempted `workflow advance` | omit when input cannot establish command identity |
+| `loop-worker-gate` / `pre_tool_use` | active loop-worker sentinel plus attempted `workflow advance`, `orient`, `next`, or `status` | omit when input cannot establish command identity |
+| `loop-worker-gate` / `subagent_start` | none | bootstrap context and correlation hint only |
+| any active primary sentinel / `pre_compact` | none | unresolved obligation continuity advice only |
+
+`PostToolUse` and `PostToolUseFailure` do not ship behavioral handlers from
+P2. Their observation suitability is evaluated by R1.5 after P1c records
+vendor input constraints.
 
 ## Input and Portability Rules
 
@@ -60,9 +80,10 @@ successfully.
 ## Acceptance
 
 - Extend `internal/scaffold/hooks/copy_test.go` for all bundle files.
-- Add script-level fixtures or tests for one artifact hard outcome, one
-  sentinel-filter bypass, and one advisory path before P5 composes the full
-  smoke test.
+- Add script-level fixtures or tests for one terminal artifact hard outcome,
+  one deterministic `PreToolUse` hard outcome, one startup or compaction
+  non-blocking output, one sentinel-filter bypass, and one advisory path
+  before P5 composes the full smoke test.
 - Keep scripts fail-safe: malformed input must not silently approve a
   portable hard violation.
 

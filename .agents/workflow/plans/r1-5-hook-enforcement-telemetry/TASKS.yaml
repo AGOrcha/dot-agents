@@ -13,7 +13,7 @@ tasks:
         - commands/workflow/static/workflow-hook-outcome.schema.json
         - docs/OUTCOME_SCORING_RUBRIC.md
       verification_required: true
-      notes: Start only after loop-discipline stop-hook native output and sentinel archive contracts are stable; define allow/advise/remediate without transcript content.
+      notes: Start only after loop-discipline lifecycle-hook native output and sentinel archive contracts are stable; define allow/advise/remediate plus lifecycle/intervention classification without transcript content.
     - id: t1-capture-outcomes
       title: Persist hook gate outcomes alongside archived sentinel history
       status: pending
@@ -29,18 +29,30 @@ tasks:
         - internal/scaffold/hooks/global/loop-worker-gate/
       verification_required: true
       notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.
-    - id: t2-scoring-signal
-      title: Add objective hook-outcome signal to scoring
+    - id: t1b-post-tool-observation-evaluation
+      title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
       status: pending
       depends_on:
         - t1-capture-outcomes
       blocks: []
       owner: dot-agents
       write_scope:
+        - .agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Evaluate vendor payload stability, workflow-command filtering, redaction/privacy, and prevention/remediation deduplication before any observation contributes to scoring; observation is non-blocking by default.
+    - id: t2-scoring-signal
+      title: Add objective hook-outcome signal to scoring
+      status: pending
+      depends_on:
+        - t1b-post-tool-observation-evaluation
+      blocks: []
+      owner: dot-agents
+      write_scope:
         - internal/scoring
         - docs/OUTCOME_SCORING_RUBRIC.md
       verification_required: true
-      notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions.
+      notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions; score post-tool observation only if T1b explicitly approves an objective, deduplicated signal.
     - id: t3-cli-readback
       title: Render hook outcome contribution in score queries
       status: pending

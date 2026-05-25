@@ -6,9 +6,10 @@
 
 ## Goal
 
-Make one canonical hook bundle fire on multiple stop events without duplicate
-manifests, while recording exactly which platforms expose evidence usable by
-trace-dependent gate checks.
+Make one canonical hook bundle fire on its approved lifecycle events without
+duplicate manifests, while recording exactly which platforms expose inputs
+and outputs usable by prevention, continuity, or trace-dependent terminal
+checks.
 
 ## Source Verification
 
@@ -32,12 +33,25 @@ Claude Code, Codex, and Copilot document block/continuation decision
 output; Cursor native `stop` and `subagentStop` use `followup_message`.
 The renderer/gate contract must preserve those differences.
 
+For the approved lifecycle expansion, verify and document:
+
+- whether `PreToolUse` input identifies the attempted workflow command/tool
+  sufficiently for deterministic pre-action remediation;
+- what context/output each vendor permits at `SubagentStart`, used only for
+  `loop-worker` bootstrap and later correlation;
+- what context/output each vendor permits at `PreCompact`, used only for
+  non-blocking continuity advice;
+- whether `PostToolUse` or `PostToolUseFailure` provides bounded
+  workflow-command result metadata suitable for R1.5 observation without
+  transcript body persistence.
+
 ## `when_events` Contract
 
 Extend a canonical `HOOK.yaml` with:
 
 ```yaml
 when_events:
+  - pre_tool_use
   - stop
   - subagent_stop
 ```
@@ -55,9 +69,12 @@ Rules:
 ## Matcher Boundary
 
 Do not add an event to a renderer's matcher whitelist unless the official
-reference establishes matcher support for that event. The three stop gates do
+reference establishes matcher support for that event. The terminal gates do
 not require matchers: `loop-worker-gate` self-filters on sentinel
-`agent_type`.
+`agent_type`. A `PreToolUse` guard may use a matcher only when official
+documentation establishes that it narrows the same command surface the gate
+enforces; otherwise the script must parse verified input or omit that
+vendor/event behavior.
 
 ## Acceptance
 
@@ -70,5 +87,5 @@ not require matchers: `loop-worker-gate` self-filters on sentinel
 
 ## Out of Scope
 
-- Parsing hook stdin inside shell gates.
+- Implementing hook stdin parsing inside shell gates.
 - Expanding matcher or output support by analogy rather than documentation.

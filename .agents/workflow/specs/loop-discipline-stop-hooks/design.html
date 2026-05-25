@@ -176,7 +176,7 @@
 Design</h1>
 <ul>
 <li>spec-id: <code>loop-discipline-stop-hooks</code></li>
-<li>status: draft (promotion of
+<li>status: active (promotion of
 <code>.agents/proposals/loop-discipline-stop-hooks-scoping.md</code>)</li>
 <li>date: 2026-05-25</li>
 <li>owner: dot-agents</li>
@@ -203,18 +203,23 @@ the very lifecycle events (<code>SubagentStop</code>, Codex/Cursor stop
 variants, Copilot’s <code>agentStop</code>) any enforcement layer would
 need to attach to.</p>
 <h2 id="goal">Goal</h2>
-<p>Land Stop / SubagentStop hooks that enforce the discipline contracts
-of <code>iteration-close</code>, <code>isp</code>, and
-<code>loop-worker</code> by reading sentinel files written at skill
-entry and validating that expected workflow artifacts are present and
-consistent before the agent is allowed to stop. Violations split
-two-tier: <strong>hard</strong> = request platform-native
-continuation/remediation with an actionable reason;
-<strong>soft</strong> = stderr advisory, exit 0. Claude Code, Codex, and
-Copilot use documented block decisions; Cursor native hooks use
-<code>followup_message</code> to continue repair. Land every asset
-inside the dot-agents starter scaffold so any project inheriting the
-starter picks up both the skills and the enforcement together.</p>
+<p>Land lifecycle hooks anchored by Stop / SubagentStop enforcement for
+the discipline contracts of <code>iteration-close</code>,
+<code>isp</code>, and <code>loop-worker</code>. Sentinels written at
+skill entry let terminal hooks validate that expected workflow artifacts
+are present and consistent before the agent is allowed to stop. In
+addition, add narrowly bounded <code>PreToolUse</code> prevention for
+deterministically forbidden workflow commands,
+<code>SubagentStart</code> bootstrap context for
+<code>loop-worker</code>, and <code>PreCompact</code> continuity advice
+while governed work remains active. Violations split two-tier:
+<strong>hard</strong> = request platform-native continuation/remediation
+with an actionable reason; <strong>soft</strong> = stderr advisory, exit
+0. Claude Code, Codex, and Copilot use documented block decisions;
+Cursor native hooks use <code>followup_message</code> to continue
+repair. Land every asset inside the dot-agents starter scaffold so any
+project inheriting the starter picks up both the skills and the
+enforcement together.</p>
 <h2 id="decisions">Decisions</h2>
 <p>The following were settled in scoping (2026-05-25). The plan
 implements them; it does not relitigate them.</p>
@@ -333,6 +338,43 @@ for <code>agentStop</code>/<code>subagentStop</code>; Cursor documents
 <code>agent_transcript_path</code> for <code>subagentStop</code>. This
 keeps enforcement truthful while allowing stronger checks where the
 platform exposes the necessary evidence.</p>
+<h3
+id="d8.-approved-non-terminal-hooks-prevent-or-preserve-terminal-hooks-prove">D8.
+Approved non-terminal hooks prevent or preserve; terminal hooks
+prove</h3>
+<p><strong>Decision:</strong> Ship three non-terminal lifecycle uses in
+the primary bundles:</p>
+<ul>
+<li><code>PreToolUse</code> may hard-remediate only a deterministic
+command boundary that is already forbidden by the skill contract, such
+as a delegated <code>iteration-close</code> path attempting
+<code>workflow advance</code>, or a <code>loop-worker</code> attempting
+orchestrator-only workflow commands. It does not replace terminal
+artifact validation.</li>
+<li><code>SubagentStart</code> supplies <code>loop-worker</code>
+bootstrap context and correlation information for its later
+sentinel/stop evaluation. It is not evidence that the worker
+complied.</li>
+<li><code>PreCompact</code> emits continuity context or advice while an
+active sentinel still expects closeout work. It does not block
+compaction in v1.</li>
+</ul>
+<p><strong>Rationale:</strong> These events reduce preventable drift or
+loss of active context, while Stop/SubagentStop remain the portable
+proof point for final artifacts and archival state.</p>
+<h3
+id="d9.-post-tool-events-are-observation-candidates-not-assumed-gates">D9.
+Post-tool events are observation candidates, not assumed gates</h3>
+<p><strong>Decision:</strong> Evaluate <code>PostToolUse</code> and
+<code>PostToolUseFailure</code> as observation sources for
+workflow-command success/failure feedback and future telemetry. Do not
+ship blocking behavior from them in this plan unless a later task
+documents a deterministic invariant, portable vendor contract, and
+acceptable noise/privacy boundary. R1.5 owns the structured
+observation/outcome decision. <strong>Rationale:</strong> Failed fanout,
+checkpoint, merge-back, or closeout attempts are useful improvement
+evidence, but recording an error is not itself proof that the session
+should be blocked.</p>
 <h2 id="requirements-behavioral">Requirements (behavioral)</h2>
 <h3 id="r1.-iteration-close-gate">R1. iteration-close-gate</h3>
 <p>When the <code>iteration-close</code> skill has run during the
@@ -356,6 +398,15 @@ soft coverage advisory.</li>
 analogous heavy build) ran mid-iteration, emit a soft advisory.</li>
 <li>R1.7 If no sentinel is present, exit 0 silently — the skill did not
 run this turn and there is nothing to enforce.</li>
+<li>R1.8 On verified <code>PreToolUse</code> input, if a delegated
+closeout sentinel is active and the attempted command is
+<code>workflow advance</code>, hard-remediate before execution with the
+required <code>workflow merge-back</code> action. Other closeout
+sequencing remains terminally verified.</li>
+<li>R1.9 On <code>PreCompact</code>, when its sentinel is still active,
+emit advisory continuity context naming the unresolved
+verify/checkpoint/merge-back or advance obligation; do not block
+compaction.</li>
 </ul>
 <h3 id="r2.-isp-gate">R2. isp-gate</h3>
 <p>When the <code>isp</code> skill has run during the current turn, the
@@ -377,6 +428,10 @@ coverage advisory.</li>
 <li>R2.4 If <code>max_batch &gt; 1</code> was declared but only one
 bundle materialized, emit a soft advisory.</li>
 <li>R2.5 No-sentinel → exit 0.</li>
+<li>R2.6 On <code>PreCompact</code>, when an ISP sentinel remains
+active, emit advisory context naming the selected task/bundle and the
+next unresolved stage; do not infer stage completion or block
+compaction.</li>
 </ul>
 <h3 id="r3.-loop-worker-gate">R3. loop-worker-gate</h3>
 <p>When a subagent attempts to stop and a loop-worker sentinel is
@@ -403,6 +458,18 @@ a soft advisory.</li>
 advisory.</li>
 <li>R3.7 No-sentinel or <code>agent_type != "loop-worker"</code> → exit
 0.</li>
+<li>R3.8 On <code>SubagentStart</code>, supply the loop-worker bootstrap
+reminder and correlation context needed to load the bundle, honor
+<code>write_scope</code>, and use delegated
+<code>iteration-close</code>; this event does not mark compliance.</li>
+<li>R3.9 On verified <code>PreToolUse</code> input, hard-remediate an
+attempted <code>workflow advance</code>, <code>workflow orient</code>,
+<code>workflow next</code>, or <code>workflow status</code> while a
+loop-worker sentinel is active, before that forbidden worker action
+runs.</li>
+<li>R3.10 On <code>PreCompact</code>, when a loop-worker sentinel
+remains active, emit advisory continuity context naming the task, write
+scope, and required delegated closeout; do not block compaction.</li>
 </ul>
 <h3 id="r4.-sentinel-protocol">R4. Sentinel protocol</h3>
 <ul>
@@ -489,6 +556,13 @@ and documented in a dedicated parity task: <code>Setup</code>,
 <code>ElicitationResult</code>. These names were verified against
 current official documentation on 2026-05-25; the mappings do not
 broaden the three discipline gates themselves.</li>
+<li>R6.7 Gate behavior now uses non-terminal events only within D8:
+portable <code>PreToolUse</code> early prevention where vendor
+input/output verification supports the rule; <code>SubagentStart</code>
+bootstrap for <code>loop-worker</code>; and <code>PreCompact</code>
+continuity advice. <code>PostToolUse</code> and
+<code>PostToolUseFailure</code> remain parity/observation inputs pending
+the R1.5 evaluation in D9.</li>
 </ul>
 <h3 id="r7.-starter-scaffold-delivery">R7. Starter scaffold
 delivery</h3>
@@ -509,7 +583,9 @@ referenced by the skill (step 0 source).</li>
 <li>R7.4 The three hook bundles (<code>iteration-close-gate</code>,
 <code>isp-gate</code>, <code>loop-worker-gate</code>) MUST ship under
 <code>internal/scaffold/hooks/global/</code> with HOOK.yaml + gate.sh
-entries.</li>
+entries. Their manifests MAY cover multiple approved lifecycle events
+using the P1c multi-event representation; they are not limited to
+terminal events.</li>
 </ul>
 <h3 id="r8.-skill-wiring">R8. Skill wiring</h3>
 <ul>
@@ -526,8 +602,8 @@ Adjacent discipline skills and downstream adoption</h3>
 <li>R9.1 <code>agent-handoff</code> and
 <code>delegation-lifecycle</code> MUST be evaluated as discipline-skill
 companions. At minimum, complete starter assets ship for both; a hook is
-added only when a deterministic stop-time invariant and observable
-evidence are identified.</li>
+added only when a deterministic lifecycle invariant or bounded
+continuity purpose and observable evidence are identified.</li>
 <li>R9.2 The payout workspace MUST receive an explicit migration and
 readback task after enforcement verification. Silent inheritance via
 <code>da refresh</code> is not adequate for an active downstream loop:
@@ -554,7 +630,9 @@ Cursor-wider surface (D3), and the Copilot <code>agentStop</code>
 footgun.</li>
 <li>DC4 Three HOOK.yaml + gate.sh entries exist under
 <code>internal/scaffold/hooks/global/{iteration-close-gate,isp-gate,loop-worker-gate}/</code>,
-each enabled on all four platforms via D2 fall-through.</li>
+each enabled on applicable documented platform events via D2
+fall-through; fixtures cover terminal validation, approved early guards,
+worker startup, and compaction advice.</li>
 <li>DC5
 <code>internal/scaffold/home/starter/skills/global/{iteration-close,isp,loop-worker}/</code>
 exist with SKILL.md + instructions tree, and
@@ -589,6 +667,10 @@ artifacts.</li>
 <li>DC12 Legacy override migration inventory is completed last,
 recording each migrated or deliberately retained downstream
 override.</li>
+<li>DC13 R1.5 records an explicit decision for <code>PostToolUse</code>
+/ <code>PostToolUseFailure</code> observation potential, including
+whether failed workflow commands can be persisted as non-blocking
+feedback without transcript content.</li>
 </ul>
 <h2 id="open-questions-to-be-resolved-during-the-plan">Open questions
 (to be resolved during the plan)</h2>

@@ -1,7 +1,7 @@
 # Loop-Discipline Stop Hooks — Design
 
 - spec-id: `loop-discipline-stop-hooks`
-- status: draft (promotion of `.agents/proposals/loop-discipline-stop-hooks-scoping.md`)
+- status: active (promotion of `.agents/proposals/loop-discipline-stop-hooks-scoping.md`)
 - date: 2026-05-25
 - owner: dot-agents
 - predecessor: `.agents/proposals/loop-discipline-stop-hooks-scoping.md`
@@ -26,10 +26,14 @@ lifecycle events (`SubagentStop`, Codex/Cursor stop variants, Copilot's
 
 ## Goal
 
-Land Stop / SubagentStop hooks that enforce the discipline contracts of
-`iteration-close`, `isp`, and `loop-worker` by reading sentinel files
-written at skill entry and validating that expected workflow artifacts are
-present and consistent before the agent is allowed to stop. Violations
+Land lifecycle hooks anchored by Stop / SubagentStop enforcement for the
+discipline contracts of `iteration-close`, `isp`, and `loop-worker`.
+Sentinels written at skill entry let terminal hooks validate that expected
+workflow artifacts are present and consistent before the agent is allowed to
+stop. In addition, add narrowly bounded `PreToolUse` prevention for
+deterministically forbidden workflow commands, `SubagentStart` bootstrap
+context for `loop-worker`, and `PreCompact` continuity advice while governed
+work remains active. Violations
 split two-tier: **hard** = request platform-native continuation/remediation
 with an actionable reason; **soft** = stderr advisory, exit 0. Claude Code,
 Codex, and Copilot use documented block decisions; Cursor native hooks use
@@ -145,6 +149,36 @@ transcript paths for Stop/SubagentStop inputs; Copilot documents
 `subagentStop`. This keeps enforcement truthful while allowing stronger checks
 where the platform exposes the necessary evidence.
 
+### D8. Approved non-terminal hooks prevent or preserve; terminal hooks prove
+
+**Decision:** Ship three non-terminal lifecycle uses in the primary bundles:
+
+- `PreToolUse` may hard-remediate only a deterministic command boundary that
+  is already forbidden by the skill contract, such as a delegated
+  `iteration-close` path attempting `workflow advance`, or a `loop-worker`
+  attempting orchestrator-only workflow commands. It does not replace
+  terminal artifact validation.
+- `SubagentStart` supplies `loop-worker` bootstrap context and correlation
+  information for its later sentinel/stop evaluation. It is not evidence
+  that the worker complied.
+- `PreCompact` emits continuity context or advice while an active sentinel
+  still expects closeout work. It does not block compaction in v1.
+
+**Rationale:** These events reduce preventable drift or loss of active
+context, while Stop/SubagentStop remain the portable proof point for final
+artifacts and archival state.
+
+### D9. Post-tool events are observation candidates, not assumed gates
+
+**Decision:** Evaluate `PostToolUse` and `PostToolUseFailure` as observation
+sources for workflow-command success/failure feedback and future telemetry.
+Do not ship blocking behavior from them in this plan unless a later task
+documents a deterministic invariant, portable vendor contract, and acceptable
+noise/privacy boundary. R1.5 owns the structured observation/outcome decision.
+**Rationale:** Failed fanout, checkpoint, merge-back, or closeout attempts are
+useful improvement evidence, but recording an error is not itself proof that
+the session should be blocked.
+
 ## Requirements (behavioral)
 
 ### R1. iteration-close-gate
@@ -170,6 +204,13 @@ to stop, the gate MUST:
   build) ran mid-iteration, emit a soft advisory.
 - R1.7 If no sentinel is present, exit 0 silently — the skill did not
   run this turn and there is nothing to enforce.
+- R1.8 On verified `PreToolUse` input, if a delegated closeout sentinel is
+  active and the attempted command is `workflow advance`, hard-remediate
+  before execution with the required `workflow merge-back` action. Other
+  closeout sequencing remains terminally verified.
+- R1.9 On `PreCompact`, when its sentinel is still active, emit advisory
+  continuity context naming the unresolved verify/checkpoint/merge-back or
+  advance obligation; do not block compaction.
 
 ### R2. isp-gate
 
@@ -189,6 +230,9 @@ When the `isp` skill has run during the current turn, the gate MUST:
 - R2.4 If `max_batch > 1` was declared but only one bundle materialized,
   emit a soft advisory.
 - R2.5 No-sentinel → exit 0.
+- R2.6 On `PreCompact`, when an ISP sentinel remains active, emit advisory
+  context naming the selected task/bundle and the next unresolved stage; do
+  not infer stage completion or block compaction.
 
 ### R3. loop-worker-gate
 
@@ -211,6 +255,16 @@ When a subagent attempts to stop and a loop-worker sentinel is present
 - R3.6 If uncommitted changes remain at subagent stop, emit a soft
   advisory.
 - R3.7 No-sentinel or `agent_type != "loop-worker"` → exit 0.
+- R3.8 On `SubagentStart`, supply the loop-worker bootstrap reminder and
+  correlation context needed to load the bundle, honor `write_scope`, and
+  use delegated `iteration-close`; this event does not mark compliance.
+- R3.9 On verified `PreToolUse` input, hard-remediate an attempted
+  `workflow advance`, `workflow orient`, `workflow next`, or
+  `workflow status` while a loop-worker sentinel is active, before that
+  forbidden worker action runs.
+- R3.10 On `PreCompact`, when a loop-worker sentinel remains active, emit
+  advisory continuity context naming the task, write scope, and required
+  delegated closeout; do not block compaction.
 
 ### R4. Sentinel protocol
 
@@ -281,6 +335,11 @@ render the events the three gates depend on:
   `ElicitationResult`. These names were verified against current
   official documentation on 2026-05-25; the mappings do not broaden the
   three discipline gates themselves.
+- R6.7 Gate behavior now uses non-terminal events only within D8: portable
+  `PreToolUse` early prevention where vendor input/output verification
+  supports the rule; `SubagentStart` bootstrap for `loop-worker`; and
+  `PreCompact` continuity advice. `PostToolUse` and `PostToolUseFailure`
+  remain parity/observation inputs pending the R1.5 evaluation in D9.
 
 ### R7. Starter scaffold delivery
 
@@ -297,6 +356,8 @@ render the events the three gates depend on:
 - R7.4 The three hook bundles (`iteration-close-gate`, `isp-gate`,
   `loop-worker-gate`) MUST ship under
   `internal/scaffold/hooks/global/` with HOOK.yaml + gate.sh entries.
+  Their manifests MAY cover multiple approved lifecycle events using the
+  P1c multi-event representation; they are not limited to terminal events.
 
 ### R8. Skill wiring
 
@@ -311,8 +372,8 @@ render the events the three gates depend on:
 
 - R9.1 `agent-handoff` and `delegation-lifecycle` MUST be evaluated as
   discipline-skill companions. At minimum, complete starter assets ship
-  for both; a hook is added only when a deterministic stop-time
-  invariant and observable evidence are identified.
+  for both; a hook is added only when a deterministic lifecycle invariant
+  or bounded continuity purpose and observable evidence are identified.
 - R9.2 The payout workspace MUST receive an explicit migration and
   readback task after enforcement verification. Silent inheritance via
   `da refresh` is not adequate for an active downstream loop: its current
@@ -336,7 +397,9 @@ render the events the three gates depend on:
   Cursor-wider surface (D3), and the Copilot `agentStop` footgun.
 - DC4 Three HOOK.yaml + gate.sh entries exist under
   `internal/scaffold/hooks/global/{iteration-close-gate,isp-gate,loop-worker-gate}/`,
-  each enabled on all four platforms via D2 fall-through.
+  each enabled on applicable documented platform events via D2 fall-through;
+  fixtures cover terminal validation, approved early guards, worker startup,
+  and compaction advice.
 - DC5 `internal/scaffold/home/starter/skills/global/{iteration-close,isp,loop-worker}/`
   exist with SKILL.md + instructions tree, and
   `internal/scaffold/home/starter/agents/global/loop-worker/AGENT.md`
@@ -365,6 +428,10 @@ render the events the three gates depend on:
   active artifacts.
 - DC12 Legacy override migration inventory is completed last, recording
   each migrated or deliberately retained downstream override.
+- DC13 R1.5 records an explicit decision for `PostToolUse` /
+  `PostToolUseFailure` observation potential, including whether failed
+  workflow commands can be persisted as non-blocking feedback without
+  transcript content.
 
 ## Open questions (to be resolved during the plan)
 
