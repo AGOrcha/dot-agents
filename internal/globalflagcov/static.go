@@ -63,6 +63,7 @@ func loadCommandPackages(absDir string) ([]*packages.Package, error) {
 		"./commands/hooks",
 		"./commands/skills",
 		"./commands/kg",
+		"./commands/mcp",
 		"./commands/workflow",
 	)
 	if err != nil {
