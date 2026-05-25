@@ -47,10 +47,11 @@ func RemoveAgentIn(deps Deps, name, projectPath string, purge bool) error {
 		return agentUserError(deps, fmt.Sprintf("agent %q is not linked in this project", name), "Run `da agents list` to inspect the managed agents in this repository.")
 	}
 
-	if err := cleanupManagedAgentRepoPath(deps, repoAgents, agentsHome, name); err != nil {
+	rl := stdReadlinker{}
+	if err := cleanupManagedAgentRepoPath(deps, rl, repoAgents, agentsHome, name); err != nil {
 		return err
 	}
-	if err := cleanupManagedAgentRepoPath(deps, repoClaude, agentsHome, name); err != nil {
+	if err := cleanupManagedAgentRepoPath(deps, rl, repoClaude, agentsHome, name); err != nil {
 		return err
 	}
 
@@ -123,7 +124,7 @@ func removeAgentNameFromSlice(list []string, name string) []string {
 	return out
 }
 
-func cleanupManagedAgentRepoPath(deps Deps, path, agentsHome, name string) error {
+func cleanupManagedAgentRepoPath(deps Deps, rl readlinker, path, agentsHome, name string) error {
 	_ = links.RemoveIfSymlinkUnder(path, agentsHome)
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -133,7 +134,7 @@ func cleanupManagedAgentRepoPath(deps Deps, path, agentsHome, name string) error
 		return err
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		dest, rerr := osReadlink(path)
+		dest, rerr := rl.Readlink(path)
 		if rerr != nil {
 			return rerr
 		}

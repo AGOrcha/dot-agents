@@ -34,7 +34,7 @@ func ImportAgentIn(name, projectPath string) error {
 		return fmt.Errorf("agent %q: %w", name, err)
 	}
 
-	if err := ensureImportRepoAgentsSlot(name, canonicalPath, projectPath); err != nil {
+	if err := ensureImportRepoAgentsSlot(stdReadlinker{}, name, canonicalPath, projectPath); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func ImportAgentIn(name, projectPath string) error {
 	return nil
 }
 
-func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
+func ensureImportRepoAgentsSlot(rl readlinker, name, canonicalPath, projectPath string) error {
 	repoLocal := filepath.Join(projectPath, ".agents", "agents", name)
 	fi, err := os.Lstat(repoLocal)
 	if err != nil {
@@ -78,7 +78,7 @@ func ensureImportRepoAgentsSlot(name, canonicalPath, projectPath string) error {
 		return nil
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		existing, err := osReadlink(repoLocal)
+		existing, err := rl.Readlink(repoLocal)
 		if err != nil {
 			return fmt.Errorf("reading symlink for agent %q: %w", name, err)
 		}
