@@ -83,10 +83,10 @@ var skipDirs = map[string]bool{
 	".venv": true, "venv": true,
 }
 
-// isBackupArtifact reports whether a filename is a dot-agents backup artifact.
-func isBackupArtifact(name string) bool {
-	return strings.Contains(name, ".dot-agents-backup")
-}
+// isBackupArtifact is a thin var alias around lifecycle.IsBackupArtifact
+// (lifted in root-command-decomposition t02b). Kept so existing
+// in-package callers (add.go, import_plugins.go) stay unchanged.
+var isBackupArtifact = lifecycle.IsBackupArtifact
 
 // scanExistingAIConfigs walks projectPath and returns all AI config files found,
 // excluding *.dot-agents-backup artifacts.
@@ -141,58 +141,14 @@ func scanExistingAIConfigs(projectPath string) []string {
 	return results
 }
 
-func isManagedCursorRuleRel(project, rel string) bool {
-	if !strings.HasPrefix(rel, relCursorRulesDir) {
-		return false
-	}
-	name := filepath.Base(rel)
-	return strings.HasPrefix(name, "global--") || strings.HasPrefix(name, project+"--")
-}
-
-func isManagedProjectOutput(project, projectPath, filePath, agentsHome string) bool {
-	if isManagedSymlink(filePath, agentsHome) {
-		return true
-	}
-
-	rel, err := filepath.Rel(projectPath, filePath)
-	if err != nil {
-		return false
-	}
-	rel = filepath.ToSlash(rel)
-
-	// Managed Cursor rule names live in a reserved namespace and should never
-	// be re-imported or backed up as user-authored files.
-	if isManagedCursorRuleRel(project, rel) {
-		return true
-	}
-
-	destRel := mapResourceRelToDest(project, rel)
-	if destRel == "" {
-		return false
-	}
-	linked, err := links.AreHardlinked(filePath, filepath.Join(agentsHome, destRel))
-	return err == nil && linked
-}
-
-// isManagedHardlinkToCanonicalSource reports whether filePath is hard linked
-// to the canonical source under agentsHome that this candidate's repo-relative
-// path maps to for project. This is the target-identity proof
-// backupExistingConfigsList needs before dropping a multi-link file without a
-// mirror backup: a bare nlink>1 only means "shares an inode with something",
-// not "managed by da".
-func isManagedHardlinkToCanonicalSource(project, projectPath, filePath, agentsHome string) bool {
-	rel, err := filepath.Rel(projectPath, filePath)
-	if err != nil {
-		return false
-	}
-	destRel := mapResourceRelToDest(project, filepath.ToSlash(rel))
-	if destRel == "" {
-		return false
-	}
-	canonical := filepath.Join(agentsHome, destRel)
-	linked, err := links.AreHardlinked(filePath, canonical)
-	return err == nil && linked
-}
+// isManagedCursorRuleRel and isManagedProjectOutput are thin aliases
+// over the lifecycle exports (lifted in root-command-decomposition
+// t02b). Kept so existing in-package call sites in add.go,
+// import_plugins.go, and add_test.go stay unchanged.
+var (
+	isManagedCursorRuleRel = lifecycle.IsManagedCursorRuleRel
+	isManagedProjectOutput = lifecycle.IsManagedProjectOutput
+)
 
 // checkExistingConfigFiles returns root-level AI config files/entries that dot-agents would replace.
 // Excludes files already managed by dot-agents and backup artifacts.
@@ -679,230 +635,35 @@ func emitAddSuccessBox(projectName, projectPath string, hasDeprecated bool) {
 	ui.SuccessBox(fmt.Sprintf("Project '%s' added successfully!", projectName), nextSteps...)
 }
 
-// backupExistingConfigsList backs up the given files into ~/.agents/resources/<project>/...
-// and removes the originals from the project tree. No *.dot-agents-backup files are left
-// in the project. Returns count of files processed and a non-nil error if any required
-// backup copy failed. On backup failure the original is NOT removed (the user's only
-// copy is preserved) and the error aborts runAdd before any destructive removal.
-func backupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string, deps addDeps) (int, error) {
-	count := 0
-	for _, f := range files {
-		// Safety: never back up backup artifacts
-		if isBackupArtifact(filepath.Base(f)) {
-			continue
-		}
-		if _, err := os.Lstat(f); err != nil {
-			continue
-		}
-		// A PROVEN managed link (resolvable POSIX symlink / Windows junction
-		// whose target resolves under the canonical agents root) has no
-		// standalone content to preserve — remove it without a backup.
-		// A merely-resolvable link is NOT proof: a project-owned
-		// symlink/junction pointing at a real user file OUTSIDE dot-agents
-		// (the symlink twin of the unmanaged-hard-link case below) carries
-		// the user's only copy of that config. Dropping it without mirroring
-		// the resolved content destroys it while claiming a backup. Such an
-		// unmanaged link falls through to the normal mirror/backup path,
-		// which copies the resolved bytes before removal.
-		if links.IsManagedLinkUnder(f, agentsHome) {
-			os.Remove(f)
-			count++
-			continue
-		}
-		// A hard link is only safe to drop without a backup when it is PROVEN
-		// managed: its inode is shared with the canonical source this candidate
-		// maps to under agentsHome. A bare nlink>1 is NOT proof — an
-		// UNMANAGED hard-linked AGENTS.md/.mcp.json (e.g. the project hard
-		// links its real config elsewhere) also has nlink>1, and dropping it
-		// without a mirror backup destroys the project's real config while
-		// claiming it was backed up. Unknown/unmanaged hard links fall through
-		// to the normal backup/mirror path below.
-		if hasMultipleHardLinks(f) && isManagedHardlinkToCanonicalSource(project, projectPath, f, agentsHome) {
-			os.Remove(f)
-			count++
-			continue
-		}
-		// Regular file: copy into resources, then delete from project.
-		// The removal below is destructive — it deletes the user's only
-		// copy of an unmanaged config. Only proceed once the required
-		// backup copies have actually landed; otherwise abort so runAdd
-		// returns an error WITHOUT removing the original.
-		if err := mirrorBackupChecked(project, projectPath, f, timestamp, deps); err != nil {
-			return count, fmt.Errorf("backing up %s: %w", f, err)
-		}
-		if err := deps.Remove(f); err != nil {
-			continue
-		}
-		count++
-	}
-	return count, nil
-}
-
-// restoreFromResourcesCounted restores files from ~/.agents/resources/<project>/
-// and returns the number of files restored plus a non-nil error if any
-// directory walk, mkdir, write, or copy failed. Callers that stamp success
-// (e.g. refresh metadata) MUST observe this error: a partially-applied
-// restore that is reported as success makes retries and doctor/refresh
-// recovery ambiguous.
-// restoreFromResourcesCounted is the legacy entry point retained for
-// refresh.go's restoreFromResources wrapper. Delegates to the deps-aware
-// implementation with stdAddDeps. The atomic-delete commit can fold this into
-// a single deps-aware function once refresh.go is converted.
-func restoreFromResourcesCounted(project, projectPath string) (int, error) {
-	return restoreFromResourcesCountedWithDeps(project, projectPath, stdAddDeps{})
-}
-
-func restoreFromResourcesCountedWithDeps(project, projectPath string, deps addDeps) (int, error) {
-	agentsHome := config.AgentsHome()
-	resourcesDir := filepath.Join(agentsHome, "resources", project)
-	info, err := os.Stat(resourcesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// No resources to restore is not a failure.
-			return 0, nil
-		}
-		// A permission-denied / broken-symlink / other non-ENOENT stat
-		// error is NOT "nothing to restore": treating it as success makes
-		// refresh stamp fresh metadata over backed-up resource data that
-		// was never restored. Surface it so refresh.go's projectFailed
-		// path fires.
-		return 0, fmt.Errorf("stat resources dir %s: %w", resourcesDir, err)
-	}
-	if !info.IsDir() {
-		// A non-directory squatting the resources path cannot be walked;
-		// silently skipping it would also mask unrestored data.
-		return 0, fmt.Errorf("resources path %s is not a directory", resourcesDir)
-	}
-	count := 0
-	var restoreErr error
-	walkErr := filepath.WalkDir(resourcesDir, func(path string, d os.DirEntry, err error) error {
-		n, ferr := restoreResourceFileCount(project, resourcesDir, agentsHome, path, d, err, deps)
-		count += n
-		if ferr != nil && restoreErr == nil {
-			restoreErr = ferr
-		}
-		return nil
-	})
-	if walkErr != nil && restoreErr == nil {
-		restoreErr = fmt.Errorf("walking resources dir %s: %w", resourcesDir, walkErr)
-	}
-	return count, restoreErr
-}
-
-func restoreResourceFileCount(project, resourcesDir, agentsHome, path string, d os.DirEntry, walkErr error, deps addDeps) (int, error) {
-	if walkErr != nil {
-		return 0, fmt.Errorf("walking %s: %w", path, walkErr)
-	}
-	if d.IsDir() {
-		return 0, nil
-	}
-	relPath, err := filepath.Rel(resourcesDir, path)
-	if err != nil {
-		return 0, fmt.Errorf("resolving relative path for %s: %w", path, err)
-	}
-	relPath = filepath.ToSlash(relPath)
-	if strings.HasPrefix(relPath, "backups/") || isCanonicalResourceBackupRel(relPath) {
-		return 0, nil
-	}
-	canonicalCount, handled, canonErr := restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path, deps)
-	if handled {
-		return canonicalCount, canonErr
-	}
-	return restoreLegacyResourceFile(project, relPath, agentsHome, path, deps)
-}
-
-func isCanonicalResourceBackupRel(relPath string) bool {
-	for _, prefix := range []string{"rules/", "settings/", "mcp/", "skills/", "agents/", agentsHooksPrefix} {
-		if strings.HasPrefix(relPath, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func restoreCanonicalResourceFile(project, resourcesDir, agentsHome, path string, deps addDeps) (int, bool, error) {
-	candidate := importCandidate{
-		project:    project,
-		sourceRoot: resourcesDir,
-		sourcePath: path,
-	}
-	outputs, ok, canonErr := canonicalImportOutputs(candidate)
-	if !ok {
-		return 0, false, nil
-	}
-	if canonErr != nil {
-		return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
-	}
-	count := 0
-	for _, output := range outputs {
-		destPath := filepath.Join(agentsHome, output.destRel)
-		if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
-		}
-		if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
-			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
-		}
-		count++
-	}
-	return count, true, nil
-}
-
-func restoreLegacyResourceFile(project, relPath, agentsHome, path string, deps addDeps) (int, error) {
-	destRel := mapResourceRelToDest(project, relPath)
-	if destRel == "" {
-		return 0, nil
-	}
-	destPath := filepath.Join(agentsHome, destRel)
-	if err := deps.CopyFile(path, destPath); err != nil {
-		return 0, fmt.Errorf("restoring %s -> %s: %w", path, destPath, err)
-	}
-	return 1, nil
-}
-
-// mirrorBackup copies srcFile (original path, before deletion) into the
-// ~/.agents/resources/<project>/ tree using the file's original relative path.
-// No *.dot-agents-backup suffix is added anywhere.
+// Backup / restore helpers thin-aliased over commands/lifecycle/backup.go
+// (lifted in root-command-decomposition t02b). The hasMultipleHardLinks
+// platform-tagged helper is wired into lifecycle here because the
+// linkcount_unix.go / linkcount_windows.go build-constrained files
+// remain in package commands and the lifecycle subpackage cannot reach
+// them without re-introducing the platform tag tree.
 //
-// This is the errorless wrapper retained for import.go callers, whose own
-// failure handling keys off the subsequent CopyFile into the destination
-// (a mirror-backup failure there does not destroy the user's only copy
-// because import.go never removes the source after mirrorBackup). Callers
-// that delete the original after backing it up (backupExistingConfigsList)
-// MUST use mirrorBackupChecked so a failed backup aborts before the
-// destructive removal.
-func mirrorBackup(project, projectPath, srcFile, timestamp string) {
-	_ = mirrorBackupChecked(project, projectPath, srcFile, timestamp, stdAddDeps{})
+// restoreCanonicalResourceFile lives in this file (and via the
+// RestoreCanonicalResourceFileFn seam wired in import.go) because its
+// canonicalImportOutputs / importCandidate dependency tree stays in
+// commands/import.go until t06 moves the import command itself.
+func init() {
+	lifecycle.HasMultipleHardLinks = hasMultipleHardLinks
 }
 
-// mirrorBackupChecked performs the same copy as mirrorBackup but propagates
-// the CopyFile errors. backupExistingConfigsList relies on this: it removes
-// the user's only copy of an unmanaged config after backing it up, so a
-// silent backup failure (unwritable ~/.agents/resources, disk full,
-// unreadable source through a symlink) would destroy that config while
-// reporting a successful backup.
-func mirrorBackupChecked(project, projectPath, srcFile, timestamp string, deps addDeps) error {
-	agentsHome := config.AgentsHome()
-	relPath, err := filepath.Rel(projectPath, srcFile)
-	if err != nil || relPath == "." || strings.HasPrefix(relPath, "..") {
-		relPath = filepath.Base(srcFile)
-	}
+var (
+	mirrorBackup                        = lifecycle.MirrorBackup
+	mirrorBackupChecked                 = lifecycle.MirrorBackupChecked
+	backupExistingConfigsList           = lifecycle.BackupExistingConfigsList
+	restoreFromResourcesCountedWithDeps = lifecycle.RestoreFromResourcesCountedWithDeps
+	restoreLegacyResourceFile           = lifecycle.RestoreLegacyResourceFile
+	isCanonicalResourceBackupRel        = lifecycle.IsCanonicalResourceBackupRel
+)
 
-	// Active (latest) copy — overwritten on each backup run. This is the
-	// recoverable copy `da refresh` / restore reads back, so it is required.
-	activeTarget := filepath.Join(agentsHome, "resources", project, relPath)
-	if cpErr := deps.CopyFile(srcFile, activeTarget); cpErr != nil {
-		return fmt.Errorf("backing up %s -> %s: %w", srcFile, activeTarget, cpErr)
-	}
-
-	// Timestamped immutable copy — also required when a timestamp is given:
-	// it is the only point-in-time snapshot the user can recover from.
-	if timestamp != "" {
-		tsTarget := filepath.Join(agentsHome, "resources", project, "backups", timestamp, relPath)
-		if cpErr := deps.CopyFile(srcFile, tsTarget); cpErr != nil {
-			return fmt.Errorf("backing up %s -> %s: %w", srcFile, tsTarget, cpErr)
-		}
-	}
-	return nil
+// restoreFromResourcesCounted is the legacy entry point retained for
+// refresh.go's restoreFromResources wrapper. Delegates to the lifted
+// deps-aware implementation with stdAddDeps.
+func restoreFromResourcesCounted(project, projectPath string) (int, error) {
+	return lifecycle.RestoreFromResourcesCountedWithDeps(project, projectPath, lifecycle.StdAddDeps{})
 }
 
 // writeKGMCPConfigs / writeKGMCPConfigFile / ensureGlobalKGMCPConfigs

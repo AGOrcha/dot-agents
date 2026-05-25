@@ -945,6 +945,41 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	return canonicalImportOutputsNonPlugin(c, rel)
 }
 
+// init wires the canonical-resource branch of
+// lifecycle.RestoreFromResourcesCountedWithDeps. The lifted helper
+// loops over the resources tree but defers canonical-import handling
+// back here because canonicalImportOutputs and its 30+ hook-bundle
+// helpers still live in commands/import.go until t06 moves the import
+// command itself into commands/lifecycle/.
+func init() {
+	lifecycle.RestoreCanonicalResourceFileFn = func(project, resourcesDir, agentsHome, path string, deps lifecycle.AddDeps) (int, bool, error) {
+		candidate := importCandidate{
+			project:    project,
+			sourceRoot: resourcesDir,
+			sourcePath: path,
+		}
+		outputs, ok, canonErr := canonicalImportOutputs(candidate)
+		if !ok {
+			return 0, false, nil
+		}
+		if canonErr != nil {
+			return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
+		}
+		count := 0
+		for _, output := range outputs {
+			destPath := filepath.Join(agentsHome, output.destRel)
+			if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
+			}
+			if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
+				return count, true, fmt.Errorf("writing %s: %w", destPath, err)
+			}
+			count++
+		}
+		return count, true, nil
+	}
+}
+
 // canonicalImportOutputsNonPlugin handles hook/settings paths after package-plugin routing.
 func canonicalImportOutputsNonPlugin(c importCandidate, rel string) ([]importOutput, bool, error) {
 	switch rel {
