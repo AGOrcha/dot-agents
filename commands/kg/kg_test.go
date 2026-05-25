@@ -3243,6 +3243,21 @@ func TestSaveKGConfig_CreatesDir(t *testing.T) {
 	}
 }
 
+// TestSaveKGConfig_WrapperRoutesThroughStdIO covers the exported wrapper
+// (vs. saveKGConfigIO which the in-package tests exercise). Ensures the
+// wrapper's stdKGIO{} substitution stays live so external callers can rely
+// on it.
+func TestSaveKGConfig_WrapperRoutesThroughStdIO(t *testing.T) {
+	home := newTempKG(t)
+	cfg := &KGConfig{SchemaVersion: 1, Name: "wrapper", CreatedAt: "2026-01-01T00:00:00Z"}
+	if err := SaveKGConfig(cfg); err != nil {
+		t.Fatalf("SaveKGConfig: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "self", "config.yaml")); err != nil {
+		t.Errorf("expected config.yaml under self/, got: %v", err)
+	}
+}
+
 func TestNoteSubdir_UnknownTypePluralized(t *testing.T) {
 	got := noteSubdir("unknown")
 	if got != "unknowns" {
