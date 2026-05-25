@@ -1,6 +1,6 @@
 # Proposal: split container integration tests into a separate Go module
 
-Status: accepted-direction (user-directed 2026-05-17, from PR #16 review Medium-1)
+Status: accepted-direction (user-directed 2026-05-17, from PR #16 review Medium-1); **unblocked 2026-05-25** — pr3b / #16 has long since merged. Ready to scope into a canonical plan.
 Scope: project-local (this repo's module graph)
 
 ## Problem

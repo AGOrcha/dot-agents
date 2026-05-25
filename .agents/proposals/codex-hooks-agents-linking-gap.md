@@ -4,7 +4,7 @@
 
 
 - type: project-local audit / analysis proposal (read-only investigation)
-- status: draft / for-review
+- status: **accepted (2026-05-25)** — substantive recommendation implemented via plan `shared-target-projection-wiring` (stp1-wire-refresh, stp2-wire-install-add, stp-import-relink, stp-doctor-repair all completed 4/6). Remaining doc-reconcile work — including removal of the "known narrow gap" caveat that this proposal flagged — lives in stp4-doc-reconcile-close (already write-scoped to `docs/PLATFORM_DIRS_DOCS.md`); regression sweep in stp3-regression-parity. Proposal closes when plan archives.
 - date: 2026-05-18
 - scope: `internal/platform/` (codex.go, hooks.go, resource_plan.go),
   `commands/` (refresh.go, install.go, add.go), `docs/PLATFORM_DIRS_DOCS.md`

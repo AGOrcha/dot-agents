@@ -1,7 +1,7 @@
 # Proposal: Hook-wiring accuracy (#33 HOOKS.md) + OpenCode-plugin fit + HOOKS.md lifecycle completeness
 
 - type: project-local audit / analysis proposal (read-only investigation)
-- status: draft / for-review
+- status: **accepted (2026-05-25)** — Deliverable-1 doc edits landed via commits `af982a00` (hooks split) and `5a1b3a9d` (Codex projection correction); `docs/HOOKS.md:52` now reflects the proposal's exact replacement text. Deliverable-2 (OpenCode fit) was a "do not wire" recommendation — no plan needed. Confirmed as intentional plugins-vs-hooks split in `loop-discipline-stop-hooks-scoping.md` Thread D.7.
 - date: 2026-05-18
 - scope: `internal/platform/` (codex.go, copilot.go, cursor.go, opencode.go,
   hooks.go), `commands/` (refresh.go), `docs/HOOKS.md` (PR #33 / branch
