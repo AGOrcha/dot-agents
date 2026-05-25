@@ -1,3 +1,236 @@
 schema_version: 1
 plan_id: r5-review-labeling-access
-tasks: []
+tasks:
+    - id: design-doc
+      title: Resolve R5 open question (audit log format + retention) in design.md
+      status: completed
+      depends_on: []
+      blocks:
+        - rbac-identity
+        - label-model
+        - audit-log
+        - r1-integration
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/r5-review-labeling-access/design.md
+      verification_required: false
+      notes: |-
+        Landed via the R5 planner output 2026-05-25: D5.1 YAML sidecar
+        storage; D5.2 RubricVersion 3.0.0 bump with new human_label
+        signal (weight ~0.15); D5.3 Bearer-token RBAC via local users
+        file (Authenticator interface for OIDC swap-out); D5.4 JSON-
+        lines audit log with SHA-256 prev_hash chain, indefinite
+        retention; D5.5 5-route HTTP mount surface into R3; D5.6 only
+        R2 base shell needed (not real-time push).
+      app_type: research
+
+    - id: rbac-identity
+      title: RBAC identity layer (users file, token issuance, Authenticator interface)
+      status: pending
+      depends_on:
+        - design-doc
+      blocks:
+        - collection-endpoint
+        - audit-log
+        - review-ui
+        - admin-cli
+      owner: dot-agents
+      write_scope:
+        - internal/review/auth/
+      verification_required: true
+      notes: |-
+        Implement Authenticator interface + LocalUsersAuthenticator
+        backed by ~/.agents/review/users.yaml (bcrypt-hashed token,
+        role enum reviewer|admin|readonly). Token issuance helper.
+        No HTTP yet — pure package, unit-tested. Decision D5.3.
+      app_type: go-cli
+
+    - id: label-model
+      title: Label data model + persistence (iter-N.labels.yaml sidecars)
+      status: pending
+      depends_on:
+        - design-doc
+      blocks:
+        - collection-endpoint
+        - r1-integration
+      owner: dot-agents
+      write_scope:
+        - internal/review/labels/
+      verification_required: true
+      notes: |-
+        Define Label struct (structured fields per D5.4 deferred
+        decision + free_text), atomic YAML sidecar reader/writer
+        mirroring internal/scoring/persist.go style. Multi-label
+        per iteration; each label carries id (uuid), actor, role,
+        timestamps, edit-history. Pure package.
+      app_type: go-cli
+
+    - id: audit-log
+      title: Append-only chained JSON-lines audit log + verifier
+      status: pending
+      depends_on:
+        - rbac-identity
+      blocks:
+        - collection-endpoint
+        - admin-cli
+      owner: dot-agents
+      write_scope:
+        - internal/review/audit/
+      verification_required: true
+      notes: |-
+        Implements D5.4: JSON-lines under
+        .agents/active/review/audit.log.jsonl with prev_hash chaining
+        (SHA-256). Append + Verify. Yearly rotation hook. Pure file
+        IO; no HTTP yet.
+      app_type: go-cli
+
+    - id: collection-endpoint
+      title: HTTP route handlers + auth/audit middleware (mounts into R3 server)
+      status: pending
+      depends_on:
+        - rbac-identity
+        - label-model
+        - audit-log
+      blocks:
+        - review-ui
+        - e2e-smoke
+      owner: dot-agents
+      write_scope:
+        - internal/review/http/
+      verification_required: true
+      notes: |-
+        Defines an HTTPMount that R3 imports and mounts under /api.
+        Handlers: POST/PATCH /api/runs/:iteration/labels, GET
+        /api/runs/:iteration/labels, GET /api/review/audit (admin),
+        users CRUD (admin). AuthMiddleware reads Bearer token via
+        Authenticator; AuditMiddleware emits one record per mutating
+        call. R3 integration point is a single
+        `func Mount(r chi.Router, deps Deps)` (or equivalent — pick
+        R3's router). Per spec D2, the route ownership stays in this
+        package.
+
+        Cross-plan dep: R3 http-server (RegisterMount surface) must
+        ship before this can be wired in-process. Until then, this
+        package ships a standalone http.Handler usable in tests.
+      app_type: go-cli
+
+    - id: r1-integration
+      title: Human-label signal + RubricVersion 3.0.0 bump
+      status: pending
+      depends_on:
+        - label-model
+      blocks:
+        - e2e-smoke
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/signal_human_label.go
+        - internal/scoring/signal_human_label_test.go
+        - internal/scoring/rubric.go
+        - internal/scoring/signals.go
+        - internal/scoring/signals_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: |-
+        Per D5.2: add SignalHumanLabel (weight ~0.15, re-balance the
+        existing six down), extend SignalSet with HumanLabel
+        SignalValue, add ExtractHumanLabelSignals(iterLogDir, n)
+        reading iter-N.labels.yaml, wire it through
+        AssembleSignalSet and BuildSignalSets. Bump RubricVersion to
+        3.0.0 (major: signal set changed). Update
+        docs/OUTCOME_SCORING_RUBRIC.md with the new signal + new
+        weight table + rationale. Multi-label aggregation rule: mean
+        of latest-per-reviewer.
+
+        Note: this task touches R1's shipped surface area
+        (RubricVersion is global). Coordinate via the umbrella spec
+        before opening.
+      app_type: go-cli
+
+    - id: review-ui
+      title: Review surface in R2 (list, inspect, label form, role-aware controls)
+      status: pending
+      depends_on:
+        - collection-endpoint
+      blocks:
+        - e2e-smoke
+      owner: dot-agents
+      write_scope:
+        - web/dashboard/src/review/
+      verification_required: true
+      notes: |-
+        Two routes /review (filterable list, unlabeled-first sort) +
+        /review/:iteration (detail + label form). API client wraps
+        fetch to inject Bearer token from localStorage; 401/403
+        surfaces friendly errors. Role-aware: readonly hides label
+        form; admin sees /review/users + /review/audit subroutes.
+
+        Cross-plan dep: R2 must have shipped its base React app
+        skeleton + run-detail page (NOT R2's real-time push surface).
+        The exact write_scope path is locked once R2's frontend
+        layout exists.
+      app_type: web
+
+    - id: admin-cli
+      title: '`da review` CLI for user/audit administration'
+      status: pending
+      depends_on:
+        - rbac-identity
+        - audit-log
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/review_admin.go
+        - commands/review_admin_test.go
+        - commands/root.go
+      verification_required: true
+      notes: |-
+        Distinct from the existing `da review` (review-mode).
+        Sub-tree `da review users add|list|remove --role`,
+        `da review audit verify|prune --before`. Admin-only;
+        operates on local YAML/JSONL — no network. If name clash
+        with existing review.go is real, rename subgroup to
+        `da reviewer` or nest under `da workflow review-admin`.
+      app_type: go-cli
+
+    - id: e2e-smoke
+      title: End-to-end test — reviewer labels run, label feeds R1 on next recompute
+      status: pending
+      depends_on:
+        - collection-endpoint
+        - r1-integration
+        - review-ui
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - tests/review_e2e/
+      verification_required: true
+      notes: |-
+        Per umbrella verification: spin up R3 service in-process,
+        seed two users (reviewer + admin), POST a label via HTTP,
+        run scoring.ScoreIteration on the affected iteration, assert
+        PersistedScore.Breakdown contains a human_label row with the
+        expected value. Second case: readonly POST → 403. Third:
+        tamper with the audit log → `da review audit verify` reports
+        it.
+      app_type: go-cli
+
+    - id: docs
+      title: Documentation — REVIEW_LABELING_GUIDE.md, RBAC_AND_AUDIT.md, rubric v3 changelog
+      status: pending
+      depends_on:
+        - collection-endpoint
+        - r1-integration
+        - admin-cli
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/REVIEW_LABELING_GUIDE.md
+        - docs/REVIEW_RBAC_AND_AUDIT.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: false
+      notes: |-
+        Operator-facing: how to add a reviewer, how to issue a token,
+        label form semantics, how the label feeds the score, how to
+        verify the audit chain. Cross-reference from the umbrella
+        spec.
+      app_type: docs

@@ -1,3 +1,285 @@
 schema_version: 1
 plan_id: r3-background-worker-service
-tasks: []
+tasks:
+    - id: design-doc
+      title: Resolve R3 open questions in a per-plan design.md
+      status: completed
+      depends_on: []
+      blocks:
+        - scheduler-core
+        - event-bus
+        - http-server
+        - cobra-surface
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/r3-background-worker-service/design.md
+      verification_required: false
+      notes: |-
+        Landed via the R3 planner output 2026-05-25: hosting model =
+        `da service` cobra subcommand (R3-D1); task framework = minimal
+        in-process scheduler in internal/service/scheduler with fsnotify
+        triggers (R3-D2). See design.md for rejected alternatives
+        (asynq/river/cron-only/standalone-binary/sidecar) and the
+        per-task watermark protocol for restart-safe state.
+      app_type: research
+
+    - id: scheduler-core
+      title: In-process scheduler with interval + fsnotify triggers
+      status: pending
+      depends_on:
+        - design-doc
+      blocks:
+        - tasks-iterlog-ingester
+        - tasks-rescore
+        - cobra-surface
+      owner: dot-agents
+      write_scope:
+        - internal/service/scheduler/
+        - go.mod
+        - go.sum
+      verification_required: true
+      notes: |-
+        Build the scheduler primitive: Register(Task), Start(ctx),
+        Stop(timeout). Task has {Name, Trigger, RunFn(ctx) error,
+        Timeout}. Trigger interface with Interval and FSNotify
+        implementations (fsnotify dep is new — add to go.mod).
+        Scheduler tracks per-task last-run-at, next-run-at,
+        last-error, consecutive-failures; exposes them via State()
+        snapshot for the status CLI. Panics in RunFn are recovered
+        and recorded as last-error, NOT propagated. Stop() drains
+        in-flight runs up to timeout then cancels their context.
+        Anti-scope: NO http surface here, NO concrete tasks, NO
+        watermark logic (per-task in tasks/).
+        Reviewer verifies: race detector clean, panic recovery test,
+        Stop honors ctx cancellation, fsnotify coalesces rapid events.
+      app_type: go-cli
+
+    - id: event-bus
+      title: In-process pub/sub bus for task → consumer events
+      status: pending
+      depends_on:
+        - design-doc
+      blocks:
+        - tasks-iterlog-ingester
+        - http-server
+      owner: dot-agents
+      write_scope:
+        - internal/service/events/
+      verification_required: true
+      notes: |-
+        Bus.Publish(topic, payload), Bus.Subscribe(topic) returns
+        <-chan Event. Channel-based, bounded buffer per subscriber,
+        drop-oldest on slow consumer with a counter on dropped events.
+        Event{Topic, Timestamp, Payload any}. Topics defined as
+        constants: iteration.scored, rescore.done, task.error.
+
+        Cross-plan contract: Bus.Publish signature is the shape R2's
+        sse-broker (t04) and R5's collection-endpoint depend on. Keep
+        it tiny: `Publish(topic string, payload any)`. If async/
+        queue-backed is required later, that's a follow-up via a
+        sibling Publisher interface.
+
+        Anti-scope: NO durable storage (events are ephemeral — R2
+        reads canonical state from sidecars), NO cross-process IPC.
+        Reviewer verifies: drop-oldest semantics under back-pressure,
+        unsubscribe closes channel cleanly, race detector clean.
+      app_type: go-cli
+
+    - id: http-server
+      title: HTTP server with mount points for R2/R5 + /healthz + /api/tasks
+      status: pending
+      depends_on:
+        - design-doc
+        - scheduler-core
+        - event-bus
+      blocks:
+        - service-runtime
+      owner: dot-agents
+      write_scope:
+        - internal/service/http/
+      verification_required: true
+      notes: |-
+        net/http (no framework dep). Server{addr, mux, scheduler,
+        bus}. Built-in routes: GET /healthz (200 ok), GET /api/tasks
+        (scheduler.State() as JSON). RegisterMount(prefix, handler)
+        stitches a sub-handler under an arbitrary prefix — R2 calls
+        with "/api" + dashboard handler, R5 with "/api/reviews" +
+        review handler. Graceful shutdown via
+        http.Server.Shutdown(ctx) wired to the runtime ctx.
+        Anti-scope: NO R2 endpoints, NO R5 endpoints (only the mount
+        machinery + stub test that proves RegisterMount routes
+        correctly). NO authn/authz (R5 plan owns RBAC).
+        Reviewer verifies: /healthz returns 200, /api/tasks JSON shape
+        matches scheduler.State(), RegisterMount with overlapping
+        prefixes errors deterministically, graceful shutdown completes
+        within ctx deadline.
+      app_type: go-cli
+
+    - id: tasks-iterlog-ingester
+      title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event
+      status: pending
+      depends_on:
+        - scheduler-core
+        - event-bus
+      blocks:
+        - service-runtime
+      owner: dot-agents
+      write_scope:
+        - internal/service/tasks/ingest_iterlog.go
+        - internal/service/tasks/ingest_iterlog_test.go
+        - internal/service/state/
+      verification_required: true
+      notes: |-
+        FSNotify trigger on .agents/active/iteration-log/. On a new
+        or modified iter-N.yaml: call into internal/scoring (use
+        ScoreIteration which is the same entrypoint
+        commands/workflow/close_task.go calls — DO NOT duplicate that
+        pipeline), write the sidecar via
+        scoring.WriteIterationScoreWithRecord, publish
+        events.IterationScored{iter, score, band, sidecar_path} on
+        the bus, update watermark.
+        Cross-plan dep: depends on the r1-outcome-scoring/persist
+        sidecar shape (already shipped). If sidecar already current
+        per watermark, skip — idempotent.
+        Watermark sidecar at
+        .agents/active/service-state/iterlog-ingester.watermark.yaml
+        with {last_iter_processed, last_mtime, rubric_version}.
+        Atomic write (temp+rename), mirroring
+        internal/scoring/persist.go writeYAMLAtomic.
+        Anti-scope: NO new scoring logic (delegate to
+        internal/scoring), NO session-aggregate handling here.
+        Reviewer verifies: restart test (write iter-1, run, kill,
+        write iter-2, restart, assert only iter-2 is processed); drop
+        and coalesce of rapid fsnotify events; absent watermark on
+        first run.
+      app_type: go-cli
+
+    - id: tasks-rescore
+      title: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
+      status: pending
+      depends_on:
+        - scheduler-core
+        - event-bus
+      blocks:
+        - service-runtime
+      owner: dot-agents
+      write_scope:
+        - internal/service/tasks/rescore.go
+        - internal/service/tasks/rescore_test.go
+      verification_required: true
+      notes: |-
+        Interval trigger (default 60s, configurable). Reads watermark
+        .agents/active/service-state/rescore.watermark.yaml; compares
+        scoring.RubricVersion to the recorded value. If different,
+        invokes scoring.BuildSignalSets + rubric.ScoreAll for every
+        record, writes sidecars via scoring.WriteIterationScores +
+        WriteSessionScores, publishes events.RescoreDone{from_version,
+        to_version, iter_count} on the bus, updates watermark.
+        Anti-scope: DO NOT poll-rescore in the absent-watermark case
+        on every interval — that's quadratic and the per-iter task
+        already scores on ingest. Only act on version delta.
+        Reviewer verifies: no-op when version unchanged (most ticks);
+        rescore runs once per version bump; watermark persisted
+        before event publish to keep the bus eventually-consistent
+        with disk.
+      app_type: go-cli
+
+    - id: service-runtime
+      title: Service runtime that composes scheduler + http + bus + tasks
+      status: pending
+      depends_on:
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+      blocks:
+        - cobra-surface
+      owner: dot-agents
+      write_scope:
+        - internal/service/service.go
+        - internal/service/service_test.go
+        - internal/service/config.go
+        - internal/service/config_test.go
+      verification_required: true
+      notes: |-
+        Run(ctx, Config) wires everything: build bus, build scheduler,
+        register iterlog-ingester + rescore tasks (each receives the
+        bus), build http.Server (receives scheduler + bus),
+        scheduler.Start, server.Serve. On ctx.Done() cancel scheduler,
+        Shutdown server. Config: {Addr, IterLogDir, RepoDir,
+        RescoreInterval, EnabledTasks []string}. Sensible defaults
+        match the rest of the CLI (.agents/active/iteration-log; cwd
+        for repo).
+        Integration test: spin up Run in a goroutine against a temp
+        iter-log dir, drop iter-1.yaml, subscribe to bus, assert
+        iteration.scored event arrives within 2s and sidecar exists,
+        cancel ctx, assert Run returns within 5s.
+        Anti-scope: NO cobra here (that's the next task); NO os.Exit
+        — return clean errors so the cobra layer can render.
+        Reviewer verifies: clean shutdown, integration test green,
+        all goroutines exit (use goleak or manual wait).
+      app_type: go-cli
+
+    - id: cobra-surface
+      title: '`da service run|status|stop` cobra subcommand'
+      status: pending
+      depends_on:
+        - service-runtime
+      blocks:
+        - docs-and-verification
+      owner: dot-agents
+      write_scope:
+        - commands/service/
+        - commands/root.go
+      verification_required: true
+      notes: |-
+        Pattern after commands/score.go: NewServiceCmd() returns the
+        command group; wire into commands/root.go alongside
+        NewScoreCmd. Subcommands:
+          - `da service run`   — foreground; SIGINT/SIGTERM → graceful
+            shutdown. Flags: --addr (default :7878), --iter-log-dir,
+            --repo-dir, --rescore-interval, --task (repeatable
+            allow-list). --json prints startup banner as JSON.
+          - `da service status` — GET http://addr/api/tasks against
+            a running instance; renders the task table (mirror score
+            command's render style). --json passes through.
+          - `da service stop`  — POST /admin/stop (server registers
+            this internally, gated on loopback only) for clean
+            shutdown without sending a signal.
+        Anti-scope: NO daemonization (no double-fork, no PID file —
+        deployment is systemd/launchd's job, called out in design.md).
+        Reviewer verifies: --help text accurate; status renders;
+        SIGINT triggers graceful shutdown in <5s; root.go test still
+        passes.
+      app_type: go-cli
+
+    - id: docs-and-verification
+      title: Operator docs + umbrella verification (status, restart-preserves-state)
+      status: pending
+      depends_on:
+        - cobra-surface
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/SERVICE.md
+        - internal/service/service_integration_test.go
+      verification_required: true
+      notes: |-
+        Author docs/SERVICE.md: what the service does, how to
+        start/stop (foreground + systemd unit example + launchd
+        plist example), task list + what each does, mount contract
+        for R2/R5 plans to consume, event topics, watermark sidecar
+        layout + restart semantics, troubleshooting (how to read
+        /api/tasks, where logs go).
+        Add an end-to-end integration test demonstrating umbrella
+        verification: "da service status shows running tasks +
+        health; restart preserves in-flight task state; ingestion
+        + scoring tasks run on schedule and emit observable events
+        to a stubbed R2/R5 consumer." Stubbed R2 consumer = a test
+        handler RegisterMount'd at /api/test and asserted reachable;
+        stubbed R5 consumer = same pattern at /api/reviews/test.
+        Anti-scope: NO real R2/R5 endpoints, NO frontend code,
+        NO RBAC.
+        Reviewer verifies: docs are deployable; umbrella's three
+        verification clauses are proven by test assertions, not
+        just prose.
+      app_type: go-cli

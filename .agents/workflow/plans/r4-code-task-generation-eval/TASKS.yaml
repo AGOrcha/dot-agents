@@ -1,3 +1,367 @@
 schema_version: 1
 plan_id: r4-code-task-generation-eval
-tasks: []
+tasks:
+    - id: design-doc
+      title: Resolve R4 open questions (corpus, sandbox, languages) in design.md
+      status: completed
+      depends_on: []
+      blocks:
+        - taskspec-and-registry
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/r4-code-task-generation-eval/design.md
+      verification_required: false
+      notes: |-
+        Landed via R4 planner output 2026-05-25: D1 hybrid corpus
+        (synthetic-from-KG v1, benchmark-seed v2); D2 worktree sandbox
+        behind Sandbox interface; D3 Go/Python/TypeScript; D4 versioned
+        TaskSpec; D5 eval outcomes feed R1 unchanged; D6 sibling
+        sidecar persistence; D7 CLI-first.
+      app_type: research
+
+    - id: taskspec-and-registry
+      title: Define versioned TaskSpec, generator interface, language registry
+      status: pending
+      depends_on:
+        - design-doc
+      blocks:
+        - kg-query-layer
+        - generator-go
+        - sandbox-worktree
+        - scoring-bridge
+      owner: dot-agents
+      write_scope:
+        - internal/eval/taskspec.go
+        - internal/eval/taskspec_test.go
+        - internal/eval/registry.go
+        - internal/eval/registry_test.go
+        - internal/eval/doc.go
+      verification_required: true
+      notes: |-
+        Foundation: typed TaskSpec (v1), Generator interface, per-
+        language registry. Pure Go data + interfaces, no I/O.
+        Difficulty enum (easy|medium|hard) + difficulty_signals map.
+        YAML round-trip.
+      app_type: go-cli
+
+    - id: kg-query-layer
+      title: KG query helpers for the task generator
+      status: pending
+      depends_on:
+        - taskspec-and-registry
+      blocks:
+        - generator-go
+        - generator-python
+        - generator-typescript
+        - difficulty-derivation
+      owner: dot-agents
+      write_scope:
+        - internal/eval/kgquery/
+      verification_required: true
+      notes: |-
+        Adapter over graphstore.CodeGraphReader (narrow role):
+        SeedSymbols(lang, limit), NeighborhoodFor(qualifiedName, depth),
+        ComplexityProxy(symbol). Pure consumer of the published Store
+        contract; no writes. Mock-backed unit tests using a tiny
+        in-memory fake (existing testutil patterns).
+      app_type: go-cli
+
+    - id: difficulty-derivation
+      title: KG-derived difficulty signals + bucketing
+      status: pending
+      depends_on:
+        - kg-query-layer
+      blocks:
+        - generator-go
+      owner: dot-agents
+      write_scope:
+        - internal/eval/difficulty.go
+        - internal/eval/difficulty_test.go
+      verification_required: true
+      notes: |-
+        Pure function: neighborhood node/edge counts + cyclomatic
+        proxy → easy/medium/hard bucket + difficulty_signals map.
+        Table-driven tests pin the buckets so a future rubric change
+        is a deliberate diff. Documented as the canonical difficulty
+        contract.
+      app_type: go-cli
+
+    - id: generator-go
+      title: Go task generator (per-language adapter #1)
+      status: pending
+      depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+      blocks:
+        - verifier-go
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/gen/golang/
+      verification_required: true
+      notes: |-
+        First language adapter. Templates: impl-pure-fn,
+        refactor-extract, add-test-coverage. Each template runs a KG
+        query, picks a seed symbol, synthesizes a prompt + verification
+        cmd, returns a TaskSpec. Registers in the language registry.
+        Fixture-driven tests against a tiny seed KG.
+      app_type: go-cli
+
+    - id: generator-python
+      title: Python task generator (per-language adapter #2)
+      status: pending
+      depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+        - generator-go
+      blocks:
+        - verifier-python
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/gen/python/
+      verification_required: true
+      notes: |-
+        Same template surface as Go; Python-specific prompt synthesis
+        + pytest/unittest verification command. Reuses the registry.
+        The "Go-first then port" sequencing means a stable interface
+        and avoids retroactive churn on the registry.
+      app_type: go-cli
+
+    - id: generator-typescript
+      title: TypeScript task generator (per-language adapter #3)
+      status: pending
+      depends_on:
+        - kg-query-layer
+        - difficulty-derivation
+        - generator-go
+      blocks:
+        - verifier-typescript
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/gen/typescript/
+      verification_required: true
+      notes: |-
+        Third required language. Adds transpile step (tsc --noEmit) and
+        node --test or vitest invocation pattern. Same template
+        surface. Closes the spec's "≥3 languages" gate.
+      app_type: go-cli
+
+    - id: sandbox-worktree
+      title: Worktree sandbox primitive (Sandbox interface + v1 impl)
+      status: pending
+      depends_on:
+        - taskspec-and-registry
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/sandbox/
+      verification_required: true
+      notes: |-
+        Define Sandbox interface (Provision(TaskSpec)(workdir, cleanup,
+        error)). Ship worktreeSandbox: scratch repo + ephemeral branch
+        + tempdir HOME. Concurrent-isolation test: two Provisions
+        cannot see each other's writes. Documented as a provider swap
+        point; DockerSandbox + worktree-platform managed-worktree
+        provider can land later without caller change.
+      app_type: go-cli
+
+    - id: verifier-go
+      title: Go verifier (build + test) inside sandbox
+      status: pending
+      depends_on:
+        - sandbox-worktree
+        - generator-go
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/verifier/golang/
+      verification_required: true
+      notes: |-
+        Runs build_cmd + test_cmd from the TaskSpec inside the sandbox
+        workdir, captures pass/fail + stdout/stderr + duration, returns
+        a typed VerifyResult. Timeout enforced via context.
+      app_type: go-cli
+
+    - id: verifier-python
+      title: Python verifier
+      status: pending
+      depends_on:
+        - sandbox-worktree
+        - generator-python
+        - verifier-go
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/verifier/python/
+      verification_required: true
+      notes: |-
+        Mirrors verifier-go for pytest/unittest. Sequenced after
+        verifier-go so the VerifyResult shape stabilizes first.
+      app_type: go-cli
+
+    - id: verifier-typescript
+      title: TypeScript verifier
+      status: pending
+      depends_on:
+        - sandbox-worktree
+        - generator-typescript
+        - verifier-go
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/verifier/typescript/
+      verification_required: true
+      notes: |-
+        tsc --noEmit + node --test / vitest. Closes the per-language
+        verifier trio.
+      app_type: go-cli
+
+    - id: agent-runner
+      title: AgentRunner interface + claude / codex bindings
+      status: pending
+      depends_on:
+        - sandbox-worktree
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/runner/
+      verification_required: true
+      notes: |-
+        Abstraction over invoking a CLI agent (claude, codex, ...)
+        against a sandbox workdir with a prompt. Captures token/cache
+        usage via the existing platform-session telemetry hooks where
+        available. v1 ships a fakeRunner for tests + a clauderunner /
+        codexrunner that shells out; the per-platform binding mirrors
+        commands/agents/ conventions.
+      app_type: go-cli
+
+    - id: scoring-bridge
+      title: Emit R1-shaped iteration record + invoke scoring pipeline
+      status: pending
+      depends_on:
+        - taskspec-and-registry
+      blocks:
+        - harness-driver
+      owner: dot-agents
+      write_scope:
+        - internal/eval/scoringbridge/
+      verification_required: true
+      notes: |-
+        Translate an EvalRun (TaskSpec + VerifyResult + AgentRun
+        telemetry) into an IterationRecord + IterationObjectives
+        matching the workflow iter-log schema. Then call
+        scoring.AssembleSignalSet + Rubric.Score +
+        scoring.WriteIterationScore against an eval-namespaced
+        iter-log dir. Does NOT introduce a new rubric path or version.
+        Unit-tested via a tiny EvalRun fixture.
+      app_type: go-cli
+
+    - id: harness-driver
+      title: End-to-end harness wiring (gen → sandbox → run → verify → score)
+      status: pending
+      depends_on:
+        - generator-go
+        - verifier-go
+        - sandbox-worktree
+        - agent-runner
+        - scoring-bridge
+      blocks:
+        - cli-eval
+        - persistence
+      owner: dot-agents
+      write_scope:
+        - internal/eval/harness/
+      verification_required: true
+      notes: |-
+        Single Harness.Run(ctx, opts) entry point sequencing all five
+        stages and returning an EvalRun result. Pure orchestration;
+        all heavy lifting lives in the seam packages. Integration test
+        against fakeRunner + verifier-go on a fixture KG.
+      app_type: go-cli
+
+    - id: persistence
+      title: EvalRun + TaskSpec sidecar persistence
+      status: pending
+      depends_on:
+        - harness-driver
+      blocks:
+        - cli-eval
+        - r2-visibility-contract
+      owner: dot-agents
+      write_scope:
+        - internal/eval/store/
+      verification_required: true
+      notes: |-
+        Sidecar layout: .agents/eval/runs/<run-id>/{taskspec.yaml,
+        eval-run.yaml, iteration-log/iter-1.yaml,
+        iteration-log/iter-1.score.yaml}. WriteEvalRun is
+        atomic-rename. Tests pin the layout so R2 has a stable
+        contract.
+      app_type: go-cli
+
+    - id: cli-eval
+      title: '`da eval` CLI command tree'
+      status: pending
+      depends_on:
+        - harness-driver
+        - persistence
+      blocks:
+        - docs
+      owner: dot-agents
+      write_scope:
+        - commands/eval/
+        - commands/root.go
+      verification_required: true
+      notes: |-
+        `da eval gen --language <lang>` writes a TaskSpec; `da eval run
+        --language <lang> [--task <path>]` executes one task end-to-end
+        (generates if not given); `da eval ls` lists eval runs. Mirrors
+        the `da score` command surface idioms. The spec's verification
+        line (`da eval run --language go produces an R1-scored
+        outcome`) is the Hard Test.
+      app_type: go-cli
+
+    - id: r2-visibility-contract
+      title: R2 visibility contract — documented join + fixture
+      status: pending
+      depends_on:
+        - persistence
+      blocks:
+        - docs
+      owner: dot-agents
+      write_scope:
+        - docs/EVAL_HARNESS.md
+        - internal/eval/store/testdata/
+      verification_required: true
+      notes: |-
+        Documents the on-disk contract R2 consumes: how a dashboard
+        joins eval-run.yaml → iter-N.score.yaml → TaskSpec. Ships a
+        frozen fixture run R2 can build against without re-running
+        the harness. No code in R2 itself — that's R2's plan.
+      app_type: go-cli
+
+    - id: docs
+      title: 'docs/EVAL_HARNESS.md + rubric-cross-link'
+      status: pending
+      depends_on:
+        - cli-eval
+        - r2-visibility-contract
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/EVAL_HARNESS.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: false
+      notes: |-
+        Full user-facing doc: TaskSpec schema, language coverage,
+        sandbox model, how to add a fourth language, how eval outcomes
+        feed R1. Cross-link from OUTCOME_SCORING_RUBRIC.md noting
+        "eval-source" iterations are scored under the same rubric.
+      app_type: go-cli
