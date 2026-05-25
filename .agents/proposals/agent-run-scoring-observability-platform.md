@@ -1,6 +1,17 @@
 # Agent-run scoring & observability platform
 
-Status: proposed (2026-05-22)
+Status: **promoted (2026-05-25)** — accepted earlier this date and now promoted to a workflow spec + four plans.
+
+- **Spec:** `.agents/workflow/specs/agent-run-scoring-observability-platform/design.md` (umbrella; freezes decisions D1–D5, sequencing, done criteria).
+- **Plans (draft):**
+  - R1 — `r1-outcome-scoring` (✅ already completed before promotion)
+  - R2 — `r2-observability-dashboard`
+  - R3 — `r3-background-worker-service`
+  - R4 — `r4-code-task-generation-eval`
+  - R5 — `r5-review-labeling-access`
+
+The R2–R5 plans were created as canonical PLAN.yaml/TASKS.yaml stubs; per-plan task breakdown is deferred to a per-plan design pass (mirroring the t01-design-subpackage-shape pattern that fed the root-command-decomposition task list).
+
 Scope: project (dot-agents)
 
 ## What

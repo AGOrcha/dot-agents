@@ -1,0 +1,11 @@
+schema_version: 1
+id: r2-observability-dashboard
+title: 'R2: Real-time observability and evaluation dashboard'
+status: draft
+summary: Web dashboard (React/TS frontend + backend API) over session telemetry, loop-run metrics, and R1 scores; live run health, token cost, cache efficiency, outcome-score trends; drill-down to per-iteration detail.
+created_at: "2026-05-25T19:12:51Z"
+updated_at: "2026-05-25T19:12:51Z"
+owner: dot-agents
+success_criteria: Backend API serves telemetry + scores; React/TS UI renders live run health; real-time updates as runs progress (push-based, not polling); drill-down from aggregate view to single run's iterations and signals works end-to-end.
+verification_strategy: curl /api/runs returns JSON; UI loads + receives push event within 2s of iteration-log write; manual smoke against a live run; per-iteration drill-down test.
+current_focus_task: ""
