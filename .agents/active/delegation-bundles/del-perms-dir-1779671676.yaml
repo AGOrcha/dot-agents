@@ -1,0 +1,39 @@
+schema_version: 1
+delegation_id: del-perms-dir-1779671676
+plan_id: cross-platform-test-skips-audit
+task_id: perms-dir
+owner: perms-dir-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T01:14:36Z"
+    reason: Wave 3 cross-platform helper
+scope:
+    write_scope:
+        - internal/testutil/perms_dir.go
+        - internal/testutil/perms_dir_unix.go
+        - internal/testutil/perms_dir_windows.go
+        - internal/testutil/perms_dir_test.go
+prompt:
+    inline:
+        - Implement per task notes
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/cross-platform-test-skips-audit/TASKS.yaml
+        - internal/testutil/testutil.go
+verification:
+    feedback_goal: MakeDirUnreadable helper ready
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

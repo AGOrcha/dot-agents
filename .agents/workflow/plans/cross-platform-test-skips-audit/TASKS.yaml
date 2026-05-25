@@ -35,7 +35,7 @@ tasks:
       app_type: go-cli
     - id: perms-readonly
       title: Extend testutil with MakeFileReadOnly (works on both platforms)
-      status: pending
+      status: in_progress
       depends_on:
         - catalogue
       blocks:

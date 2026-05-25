@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-exec-bit-1779671676
+parent_plan_id: cross-platform-test-skips-audit
+parent_task_id: exec-bit
+title: Decide on exec-bit tests — POSIX-only behaviour, document deliberately
+summary: Delegated from plan Audit Windows test skips; replace OS-dependent shortcuts with cross-platform abstractions
+write_scope:
+    - internal/scaffold/home/copy_test.go
+success_criteria: 'internal/scaffold/home/copy_test.go (and any other exec-bit test) is testing the POSIX 0o755 mode bit semantics that have no Windows equivalent. This is the [genuine-posix] class — no abstraction can fix it without changing what the test asserts. Keep the skip but document why explicitly so a future reader does not try to "abstract" it. Output: the test gets a multi-line comment block linking back to this plan.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: exec-bit-worker
+status: active
+created_at: "2026-05-25T01:14:36Z"
+updated_at: "2026-05-25T01:14:36Z"

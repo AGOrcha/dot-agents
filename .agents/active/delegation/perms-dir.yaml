@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-perms-dir-1779671676
+parent_plan_id: cross-platform-test-skips-audit
+parent_task_id: perms-dir
+title: Extend testutil with MakeDirUnreadable (POSIX chmod + Windows ACL/DACL)
+summary: Delegated from plan Audit Windows test skips; replace OS-dependent shortcuts with cross-platform abstractions
+write_scope:
+    - internal/testutil/perms_dir.go
+    - internal/testutil/perms_dir_unix.go
+    - internal/testutil/perms_dir_windows.go
+    - internal/testutil/perms_dir_test.go
+success_criteria: 'Sibling to MakeFileUnreadable for directories — used by tests that need a "cannot stat / cannot list" assertion. POSIX path: chmod 0. Windows path: deny-DACL on the dir SID, or open with FILE_FLAG_BACKUP_SEMANTICS + share-none. Skip on root + on tmpfs/synthetic FS where DACL is not enforced. Test parity: os.ReadDir fails for the duration of the test, and cleanup restores access.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: perms-dir-worker
+status: active
+created_at: "2026-05-25T01:14:36Z"
+updated_at: "2026-05-25T01:14:36Z"

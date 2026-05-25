@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-perms-readonly-1779671676
+parent_plan_id: cross-platform-test-skips-audit
+parent_task_id: perms-readonly
+title: Extend testutil with MakeFileReadOnly (works on both platforms)
+summary: Delegated from plan Audit Windows test skips; replace OS-dependent shortcuts with cross-platform abstractions
+write_scope:
+    - internal/testutil/perms_readonly.go
+    - internal/testutil/perms_readonly_test.go
+success_criteria: 'Sibling to MakeFileUnreadable for the "write must fail" assertion. Implementation: os.Chmod(path, 0o444) on POSIX; on Windows the readonly file attribute is honoured for write operations, so a single cross-platform chmod 0o444 actually works (Go translates the W bit to FILE_ATTRIBUTE_READONLY). Verify the assertion both ways before declaring this is the cross-platform case.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: perms-readonly-worker
+status: active
+created_at: "2026-05-25T01:14:36Z"
+updated_at: "2026-05-25T01:14:36Z"

@@ -10,6 +10,6 @@ success_criteria: 'Walk `grep -rn ''runtime.GOOS == "windows"'' --include="*_tes
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: catalogue-worker
-status: active
+status: completed
 created_at: "2026-05-25T00:41:21Z"
-updated_at: "2026-05-25T00:41:21Z"
+updated_at: "2026-05-25T00:52:57Z"

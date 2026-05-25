@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-symlinks-1779671676
+parent_plan_id: cross-platform-test-skips-audit
+parent_task_id: symlinks
+title: testutil.SymlinkOrSkip — gate symlink tests on capability, not OS
+summary: Delegated from plan Audit Windows test skips; replace OS-dependent shortcuts with cross-platform abstractions
+write_scope:
+    - internal/testutil/symlink.go
+    - internal/testutil/symlink_test.go
+success_criteria: 'Several tests skip on Windows because os.Symlink requires SeCreateSymbolicLinkPrivilege. The right gate is "can this process create a symlink?", not "is this Windows?" — Windows 10 with Developer Mode enabled CAN create symlinks. Helper: attempt a probe os.Symlink in t.TempDir, t.Skip with a Windows-aware reason if it fails, return otherwise. Migration target: internal/links/symlink_remove_error_test.go and any sibling.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: symlinks-worker
+status: active
+created_at: "2026-05-25T01:14:36Z"
+updated_at: "2026-05-25T01:14:36Z"
