@@ -3,7 +3,6 @@ package commands
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
@@ -320,133 +319,8 @@ func restoreFromResources(project, projectPath string, deps addDeps) error {
 	return err
 }
 
-func mapResourceRelToDest(project, relPath string) string {
-	// Explicit repo-relative → ~/.agents-relative mappings.
-	// All platform MCP sources normalize into the same canonical mcp.json.
-	switch relPath {
-	case relCursorSettingsJSON:
-		return "settings/" + project + "/cursor.json"
-	case relCursorMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case relCursorHooksJSON:
-		return agentsHooksPrefix + project + "/cursor.json"
-	case relCursorIgnore:
-		return "settings/" + project + "/cursorignore"
-	case relCursorIndexingIgnore:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore")
-	case relClaudeSettingsLocal:
-		return "settings/" + project + "/claude-code.json"
-	case relMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case relVSCodeMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case relOpenCodeJSON:
-		return "settings/" + project + "/opencode.json"
-	case relAgentsMD:
-		return "rules/" + project + "/agents.md"
-	case relCodexInstructionsMD, relCodexRulesMD:
-		return "rules/" + project + "/agents.md"
-	case relCodexConfigTOML:
-		return "settings/" + project + "/codex.toml"
-	case relCodexHooksJSON:
-		return agentsHooksPrefix + project + "/codex.json"
-	case relCopilotInstructionsMD:
-		return "rules/" + project + "/copilot-instructions.md"
-	}
-
-	// Directory-bucket mappings. The relPath is a full walked file path like
-	// ".cursor/commands/foo.md"; the constants are directory prefixes ending
-	// in "/". These MUST be prefix matches (not exact-string switch cases) or
-	// the bucket files silently fall through and are dropped from recovery.
-	for _, m := range []struct {
-		prefix string
-		bucket platform.CanonicalBucket
-	}{
-		{relCursorCommandsDir, platform.CanonicalBucketCommands},
-		{relClaudeCommandsDir, platform.CanonicalBucketCommands},
-		{relOpenCodeCommandsDir, platform.CanonicalBucketCommands},
-		{relClaudeOutputStylesDir, platform.CanonicalBucketOutputStyles},
-		{relOpenCodeModesDir, platform.CanonicalBucketModes},
-		{relOpenCodeThemesDir, platform.CanonicalBucketThemes},
-		{relGitHubPromptsDir, platform.CanonicalBucketPrompts},
-	} {
-		if strings.HasPrefix(relPath, m.prefix) {
-			return platform.CanonicalBucketScopePath(m.bucket, project, strings.TrimPrefix(relPath, m.prefix))
-		}
-	}
-
-	// .cursor/rules/ → rules/
-	if strings.HasPrefix(relPath, relCursorRulesDir) {
-		name := filepath.Base(relPath)
-		if strings.HasPrefix(name, "global--") {
-			return "rules/global/" + strings.TrimPrefix(name, "global--")
-		} else if strings.HasPrefix(name, project+"--") {
-			return "rules/" + project + "/" + strings.TrimPrefix(name, project+"--")
-		} else if strings.HasSuffix(name, ".mdc") || strings.HasSuffix(name, ".md") {
-			return "rules/" + project + "/" + name
-		}
-		return ""
-	}
-
-	// .agents/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, relAgentsSkillsDir) {
-		rest := strings.TrimPrefix(relPath, relAgentsSkillsDir)
-		return "skills/" + project + "/" + rest
-	}
-	// .claude/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, relClaudeSkillsDir) {
-		rest := strings.TrimPrefix(relPath, relClaudeSkillsDir)
-		return "skills/" + project + "/" + rest
-	}
-
-	// .github/agents/<name>.agent.md → agents/<project>/<name>/AGENT.md
-	if strings.HasPrefix(relPath, relGitHubAgentsDir) && strings.HasSuffix(relPath, relAgentMarkdownSuffix) {
-		name := strings.TrimSuffix(filepath.Base(relPath), relAgentMarkdownSuffix)
-		return "agents/" + project + "/" + name + "/AGENT.md"
-	}
-
-	// .codex/agents/<name>/<path> → agents/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, relCodexAgentsDir) {
-		rest := strings.TrimPrefix(relPath, relCodexAgentsDir)
-		return "agents/" + project + "/" + rest
-	}
-
-	// .opencode/agent/<name>.md → agents/<project>/<name>/AGENT.md
-	if strings.HasPrefix(relPath, relOpenCodeAgentsDir) && strings.HasSuffix(relPath, ".md") {
-		name := strings.TrimSuffix(filepath.Base(relPath), ".md")
-		return "agents/" + project + "/" + name + "/AGENT.md"
-	}
-
-	// .github/hooks/<name>.json → hooks/<project>/<name>.json
-	if strings.HasPrefix(relPath, relGitHubHooksDir) && strings.HasSuffix(relPath, relJSONSuffix) {
-		name := strings.TrimSuffix(filepath.Base(relPath), relJSONSuffix)
-		return agentsHooksPrefix + project + "/" + name + "/HOOK.yaml"
-	}
-
-	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{
-		"rules/",
-		"settings/",
-		"mcp/",
-		"skills/",
-		"agents/",
-		agentsHooksPrefix,
-		string(platform.CanonicalBucketCommands) + "/",
-		string(platform.CanonicalBucketOutputStyles) + "/",
-		string(platform.CanonicalBucketIgnore) + "/",
-		string(platform.CanonicalBucketModes) + "/",
-		string(platform.CanonicalBucketPlugins) + "/",
-		string(platform.CanonicalBucketThemes) + "/",
-		string(platform.CanonicalBucketPrompts) + "/",
-	} {
-		if strings.HasPrefix(relPath, prefix) {
-			return relPath
-		}
-	}
-
-	// Root-level flat files → settings/<project>/
-	if !strings.Contains(relPath, "/") {
-		return "settings/" + project + "/" + relPath
-	}
-	return ""
-}
+// mapResourceRelToDest is a thin alias over lifecycle.MapResourceRelToDest
+// (lifted in root-command-decomposition t02b). Kept as a function-var
+// alias so existing call sites in refresh.go, add.go, and import.go stay
+// unchanged until those commands move.
+var mapResourceRelToDest = lifecycle.MapResourceRelToDest
