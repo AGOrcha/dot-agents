@@ -58,7 +58,7 @@ tasks:
       notes: 4 func-var seams. Behavior-preserving conversion.
     - id: agents-pkg
       title: Convert commands/agents/seams.go to interface-DI
-      status: in_progress
+      status: completed
       depends_on:
         - convention-doc
       blocks: []

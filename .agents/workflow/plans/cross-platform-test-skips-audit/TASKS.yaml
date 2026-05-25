@@ -3,7 +3,7 @@ plan_id: cross-platform-test-skips-audit
 tasks:
     - id: catalogue
       title: Catalogue every Windows skip and classify each
-      status: pending
+      status: in_progress
       depends_on: []
       blocks:
         - perms-dir
@@ -99,5 +99,5 @@ tasks:
       write_scope:
         - scripts/coverage-exceptions.txt
       verification_required: true
-      notes: 'After migrate-sites lifts Windows coverage on the affected files, the coverage-gate prints STALE-ALLOWLIST for any entry now at or above threshold. Prune those entries — that is the cg6 ratchet tightening. Cross-reference with the R1 carry-over entries this PR added (internal/scoring/persist.go [defensive-guards], internal/scoring/objective_checks.go [legacy-tail], commands/agents/cmd.go, commands/workflow/prefs.go).'
+      notes: After migrate-sites lifts Windows coverage on the affected files, the coverage-gate prints STALE-ALLOWLIST for any entry now at or above threshold. Prune those entries — that is the cg6 ratchet tightening. Cross-reference with the R1 carry-over entries this PR added (internal/scoring/persist.go [defensive-guards], internal/scoring/objective_checks.go [legacy-tail], commands/agents/cmd.go, commands/workflow/prefs.go).
       app_type: go-cli

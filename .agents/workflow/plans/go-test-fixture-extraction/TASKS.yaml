@@ -184,7 +184,7 @@ tasks:
       app_type: code-fix
     - id: t3-extract-platform-tests
       title: Refactor internal/platform/*_test.go to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
         - t2_5-extend-internal-testutil

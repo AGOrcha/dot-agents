@@ -10,6 +10,6 @@ success_criteria: 1 func-var seam. Smallest leaf, fold in with a sibling if chea
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: agents-pkg-worker
-status: active
+status: completed
 created_at: "2026-05-24T23:00:50Z"
-updated_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:08:26Z"

@@ -10,6 +10,6 @@ success_criteria: 7 func-var seams. Behavior-preserving conversion, tests green,
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: kg-pkg-worker
-status: active
+status: completed
 created_at: "2026-05-24T23:00:50Z"
-updated_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:31:51Z"

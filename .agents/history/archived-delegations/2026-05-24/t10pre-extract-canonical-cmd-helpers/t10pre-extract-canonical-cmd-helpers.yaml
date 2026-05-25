@@ -32,6 +32,6 @@ success_criteria: |-
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: t10pre-worker
-status: active
+status: completed
 created_at: "2026-05-24T23:00:50Z"
-updated_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:09:35Z"

@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-catalogue-1779669681
+parent_plan_id: cross-platform-test-skips-audit
+parent_task_id: catalogue
+title: Catalogue every Windows skip and classify each
+summary: Delegated from plan Audit Windows test skips; replace OS-dependent shortcuts with cross-platform abstractions
+write_scope:
+    - .agents/workflow/plans/cross-platform-test-skips-audit/findings.md
+success_criteria: 'Walk `grep -rn ''runtime.GOOS == "windows"'' --include="*_test.go"` and produce findings.md with: (file:line, test name, what the skip is for, classification). Classes: [shortcut-permission] (chmod-based unreadability that testutil.MakeFileUnreadable already solves), [shortcut-mode] (relies on POSIX mode bits for exec/RO state — needs a sibling helper), [shortcut-symlink] (uses os.Symlink without elevated-priv guard), [genuine-posix] (e.g. inode equivalence semantics that have no Windows analog). The classification drives which subsequent task picks up the site.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: catalogue-worker
+status: active
+created_at: "2026-05-25T00:41:21Z"
+updated_at: "2026-05-25T00:41:21Z"

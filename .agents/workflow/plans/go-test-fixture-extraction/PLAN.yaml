@@ -34,7 +34,7 @@ summary: |-
     recharacterised as in_progress (partial). Re-audit per-task before
     claiming completion next time.
 created_at: "2026-05-04T00:00:00Z"
-updated_at: "2026-05-24T22:58:47Z"
+updated_at: "2026-05-25T00:42:42Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate on the follow-up PR reports
@@ -58,4 +58,4 @@ verification_strategy: |-
 
     Plan archives when the follow-up PR merges. ADR-0008 is the cross
     reference linking this plan to PR#10's waiver.
-current_focus_task: Refactor internal/platform/*_test.go to use internal/testutil
+current_focus_task: Refactor internal/graphstore/*_test.go to use internal/testutil

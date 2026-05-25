@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-catalogue-1779669681
+plan_id: cross-platform-test-skips-audit
+task_id: catalogue
+owner: catalogue-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T00:41:21Z"
+    reason: research task
+scope:
+    write_scope:
+        - .agents/workflow/plans/cross-platform-test-skips-audit/findings.md
+prompt:
+    inline:
+        - Catalogue Windows skips per task notes
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/cross-platform-test-skips-audit/TASKS.yaml
+verification:
+    feedback_goal: findings.md complete
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
