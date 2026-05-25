@@ -1,0 +1,55 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+tasks:
+    - id: t0-outcome-contract
+      title: Define durable hook-outcome schema and archived-sentinel linkage
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md
+        - schemas/workflow-hook-outcome.schema.json
+        - commands/workflow/static/workflow-hook-outcome.schema.json
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Start only after loop-discipline stop-hook native output and sentinel archive contracts are stable; define allow/advise/remediate without transcript content.
+    - id: t1-capture-outcomes
+      title: Persist hook gate outcomes alongside archived sentinel history
+      status: pending
+      depends_on:
+        - t0-outcome-contract
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+      verification_required: true
+      notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.
+    - id: t2-scoring-signal
+      title: Add objective hook-outcome signal to scoring
+      status: pending
+      depends_on:
+        - t1-capture-outcomes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scoring
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions.
+    - id: t3-cli-readback
+      title: Render hook outcome contribution in score queries
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/score.go
+        - commands/score_test.go
+      verification_required: true
+      notes: Expose outcome source and rule identifiers without printing transcript contents.

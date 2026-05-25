@@ -1,0 +1,168 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+tasks:
+    - id: p0-sentinel-cli
+      title: 'Sentinel CLI: write/read/clear under ''da workflow hook-sentinel'''
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - commands/workflow/cmd.go
+        - commands/workflow/static/workflow-hook-sentinel.schema.json
+        - schemas/workflow-hook-sentinel.schema.json
+      verification_required: true
+      notes: 'Introduce sentinel JSON schema v1 and `da workflow hook-sentinel {write,read,clear}`; archive successful sentinels under durable plan history rather than active state. Contract and exact schema/CLI behavior: tasks/p0-sentinel-cli.contract.md.'
+    - id: p1a-mapper-extensions
+      title: 'Platform mapper extensions: Codex SubagentStop, Copilot agentStop, Cursor subagentStop'
+      status: pending
+      depends_on:
+        - p0-sentinel-cli
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+      verification_required: true
+      notes: 'Extend gate-critical mappings only - Codex SubagentStop, Copilot agentStop/subagentStop, Cursor subagentStop. Copilot stop is agentStop, not stop. Contract: tasks/p1a-mapper-extensions.contract.md.'
+    - id: p1b-canonical-when-values
+      title: New canonical HookSpec.When values from Cursor wider surface and May 2026 refresh
+      status: pending
+      depends_on:
+        - p1a-mapper-extensions
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - docs/HOOKS.md
+      verification_required: true
+      notes: 'Add non-gate event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping and Copilot agentStop. Contract: tasks/p1b-canonical-when-values.contract.md.'
+    - id: p1c-matcher-verification
+      title: Per-event input/matcher verification and when_events schema extension
+      status: pending
+      depends_on:
+        - p1a-mapper-extensions
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - schemas/hook.schema.json
+        - docs/HOOKS.md
+      verification_required: true
+      notes: 'Add backward-compatible `when_events` after verifying inputs, matchers, and native remediation outputs from official docs; Cursor provides transcript fields but uses `followup_message`. Contract: tasks/p1c-matcher-verification.contract.md.'
+    - id: p1d-claude-lifecycle-parity
+      title: Claude documented lifecycle event parity beyond gate-critical events
+      status: pending
+      depends_on:
+        - p1b-canonical-when-values
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - schemas/hook.schema.json
+        - docs/HOOKS.md
+      verification_required: true
+      notes: 'Bring the officially documented Claude wider lifecycle event surface into canonical HookSpec coverage without attaching new gates by implication. Contract: tasks/p1d-claude-lifecycle-parity.contract.md.'
+    - id: p2-hook-scripts
+      title: Three HOOK.yaml + gate.sh bundles under internal/scaffold/hooks/global/
+      status: pending
+      depends_on:
+        - p0-sentinel-cli
+        - p1a-mapper-extensions
+        - p1c-matcher-verification
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+        - internal/scaffold/hooks/copy_test.go
+      verification_required: true
+      notes: 'Add three canonical hook bundles and scaffold-copy assertions. Hard outcomes require observable artifact/git/verified-trace evidence and use platform-native remediation output; missing trace is advisory. Contract: tasks/p2-hook-scripts.contract.md.'
+    - id: p3-starter-promotion
+      title: Promote iteration-close, isp, loop-worker skills + AGENT.md + loop-worker profile into starter
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/iteration-close/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+        - internal/scaffold/home/starter/agents/global/loop-worker/
+        - internal/scaffold/home/starter/profiles/loop-worker.md
+        - internal/scaffold/home/copy_test.go
+      verification_required: true
+      notes: 'Copy the existing assets into the starter and extend `TestCopyMissingStarterAssetsCopiesStarterBundle`. `CopyMissingStarterAssets` already walks arbitrary nested tiers, including new `agents/` and `profiles/` content; no loader code is expected. Contract: tasks/p3-starter-promotion.contract.md.'
+    - id: p3b-companion-discipline-skills
+      title: Scaffold and assess agent-handoff and delegation-lifecycle discipline companions
+      status: pending
+      depends_on:
+        - p2-hook-scripts
+        - p3-starter-promotion
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/agent-handoff/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/copy_test.go
+        - .agents/history/loop-discipline-stop-hooks/additional-discipline-skill-assessment.md
+      verification_required: true
+      notes: 'Ensure both companion skills ship complete starter assets and evaluate whether any evidence-backed stop hook is justified; do not add prose-only enforcement. Contract: tasks/p3b-companion-discipline-skills.contract.md.'
+    - id: p4-sentinel-wiring
+      title: Wire 'da workflow hook-sentinel write' call into the three starter skills
+      status: pending
+      depends_on:
+        - p0-sentinel-cli
+        - p3-starter-promotion
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/iteration-close/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+      verification_required: true
+      notes: 'Add sentinel-write at skill entry after prerequisites needed to construct its arguments, before governed work begins; update gotchas. Contract: tasks/p4-sentinel-wiring.contract.md.'
+    - id: p5-e2e-integration
+      title: 'End-to-end integration test: native remediation and advisory behavior'
+      status: pending
+      depends_on:
+        - p2-hook-scripts
+        - p4-sentinel-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - tests/test-loop-discipline-stop-hooks.sh
+      verification_required: true
+      notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert JSON block output where supported and Cursor followup output, plus advisory behavior. Contract: tasks/p5-e2e-integration.contract.md.'
+    - id: p6-payout-backfill
+      title: Explicit payout migration and active-loop readback
+      status: pending
+      depends_on:
+        - p5-e2e-integration
+        - p3b-companion-discipline-skills
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/loop-discipline-stop-hooks/payout-migration-readback.md
+        - /Users/nikashp/Documents/payout/.agentsrc.json
+        - /Users/nikashp/Documents/payout/.agents/workflow/plans/loop-discipline-stop-hooks-backfill/
+      verification_required: true
+      notes: 'Payout currently opts out of hooks and does not declare `isp`/`loop-worker`; run an authorized configuration migration and persist readback without unrelated artifact loss. Contract: tasks/p6-payout-backfill.contract.md.'
+    - id: p7-legacy-override-migration
+      title: Final migration of legacy downstream discipline-skill overrides
+      status: pending
+      depends_on:
+        - p6-payout-backfill
+        - p1d-claude-lifecycle-parity
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/loop-discipline-stop-hooks/downstream-override-migration.md
+      verification_required: true
+      notes: 'Final plan task; inventory managed downstream legacy overrides, migrate compatible copies to starter inheritance, and record retained intentional project variants. Contract: tasks/p7-legacy-override-migration.contract.md.'
