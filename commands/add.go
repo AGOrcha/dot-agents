@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -18,41 +18,17 @@ import (
 )
 
 // addDeps is the multi-method collaborator runAdd and its backup / restore /
-// KG-MCP-config helpers need (interface-DI per docs/TEST_SEAMS.md). File-scoped
-// — do not share with other commands files. The six operations are the add
-// pipeline's fault-injectable touch points: filesystem materialization of
-// resource trees and MCP config parents (MkdirAll), the MCP config payload
-// itself (WriteFile), the destructive removal of an unmanaged config after a
-// successful backup (Remove), the dot-agents binary path used to build the KG
-// MCP server command (Executable), the resource copy used to back up and
-// restore unmanaged configs (CopyFile), and config.json load for project
-// registration lookups (LoadConfig).
-type addDeps interface {
-	MkdirAll(path string, perm os.FileMode) error
-	WriteFile(name string, data []byte, perm os.FileMode) error
-	Remove(name string) error
-	Executable() (string, error)
-	CopyFile(src, dst string) error
-	LoadConfig() (*config.Config, error)
-}
+// KG-MCP-config helpers need (interface-DI per docs/TEST_SEAMS.md). The
+// canonical definition lives in commands/lifecycle as lifecycle.AddDeps
+// after root-command-decomposition t02b lifted the shared helpers; the
+// alias here keeps existing commands/* call sites unchanged.
+type addDeps = lifecycle.AddDeps
 
 // stdAddDeps is the production addDeps backed by direct os / projectsync /
-// config calls. Cross-file fault injection now flows through the interface
-// (refresh.go threads addDeps into restoreFromResources, runRefresh threads
-// importDeps into runImportFromRefresh); the legacy package-level seams in
-// seams.go are gone and no longer mediate the production path.
-type stdAddDeps struct{}
-
-func (stdAddDeps) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
-func (stdAddDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
-	return os.WriteFile(name, data, perm)
-}
-func (stdAddDeps) Remove(name string) error            { return os.Remove(name) }
-func (stdAddDeps) Executable() (string, error)         { return os.Executable() }
-func (stdAddDeps) CopyFile(src, dst string) error      { return projectsync.CopyFile(src, dst) }
-func (stdAddDeps) LoadConfig() (*config.Config, error) { return config.Load() }
+// config calls. Re-aliased from lifecycle.StdAddDeps post-t02b so the
+// production wiring (NewAddCmd, mirrorBackup, ensureGlobalKGMCPConfigs)
+// and tests (stdAddDeps{} literals) keep compiling unchanged.
+type stdAddDeps = lifecycle.StdAddDeps
 
 // aiScanPatterns lists file/dir names to look for when scanning for AI configs.
 var aiScanPatterns = []string{
@@ -929,6 +905,24 @@ func mirrorBackupChecked(project, projectPath, srcFile, timestamp string, deps a
 	return nil
 }
 
+// writeKGMCPConfigs / writeKGMCPConfigFile / ensureGlobalKGMCPConfigs
+// are thin re-aliases over the canonical helpers in
+// commands/lifecycle/kgmcp.go (lifted in root-command-decomposition
+// t02b). Function-var aliases keep callers in init.go, seams_test.go,
+// and add_test.go unchanged until the parent command itself moves into
+// commands/lifecycle/ in t05 / t08, at which point these wrappers go
+// away in favor of direct package-qualified references.
+var (
+	writeKGMCPConfigs        = lifecycle.WriteKGMCPConfigs
+	writeKGMCPConfigFile     = lifecycle.WriteKGMCPConfigFile
+	ensureGlobalKGMCPConfigs = lifecycle.EnsureGlobalKGMCPConfigs
+	kgConfigPath             = lifecycle.KGConfigPath
+)
+
+// ensureProjectKGMCPConfigs writes per-project KG MCP configs when the
+// project's .agentsrc.json declares a KG section. The shared KG MCP
+// writers live in commands/lifecycle/kgmcp.go after t02b — this thin
+// wrapper retains the manifest-aware gate.
 func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string, deps addDeps) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
@@ -937,66 +931,5 @@ func ensureProjectKGMCPConfigs(projectName, projectPath, agentsHome string, deps
 	if rc.KG == nil {
 		return nil
 	}
-	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName), deps)
-}
-
-// kgConfigPath returns the path to KG_HOME/self/config.yaml without importing
-// the kg subpackage (deferred to PR3c).
-func kgConfigPath() string {
-	if v := os.Getenv("KG_HOME"); v != "" {
-		return filepath.Join(v, "self", "config.yaml")
-	}
-	home, _ := config.UserHomeDir()
-	return filepath.Join(home, "knowledge-graph", "self", "config.yaml")
-}
-
-func ensureGlobalKGMCPConfigs(agentsHome string) error {
-	if _, err := os.Stat(kgConfigPath()); err != nil {
-		return nil
-	}
-	return writeKGMCPConfigs(filepath.Join(agentsHome, "mcp", "global"), stdAddDeps{})
-}
-
-func writeKGMCPConfigs(scopeDir string, deps addDeps) error {
-	exe, err := deps.Executable()
-	if err != nil {
-		return err
-	}
-	if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
-		exe = resolved
-	}
-	server := map[string]any{
-		"command": exe,
-		"args":    []string{"kg", "serve"},
-		"type":    "stdio",
-	}
-	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
-		if err := writeKGMCPConfigFile(filepath.Join(scopeDir, name), server, deps); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeKGMCPConfigFile(path string, server map[string]any, deps addDeps) error {
-	configMap := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &configMap)
-	}
-	servers, _ := configMap["servers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	servers["dot-agents-kg"] = server
-	configMap["servers"] = servers
-
-	data, err := json.MarshalIndent(configMap, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if err := deps.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	return deps.WriteFile(path, data, 0644)
+	return lifecycle.WriteKGMCPConfigs(filepath.Join(agentsHome, "mcp", projectName), deps)
 }
