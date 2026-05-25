@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestListCanonicalRuleFiles(t *testing.T) {
@@ -11,9 +13,9 @@ func TestListCanonicalRuleFiles(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "g"
 
-	writeScopeFile(t, agentsHome, "rules", scope, "a.mdc", []byte("x"))
-	writeScopeFile(t, agentsHome, "rules", scope, "b.md", []byte("y"))
-	writeScopeFile(t, agentsHome, "rules", scope, "binary.bin", []byte("z"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "a.mdc", []byte("x"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "b.md", []byte("y"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "binary.bin", []byte("z"))
 	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", scope, "skipdir"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +37,7 @@ func TestEnsureUnderRulesScopeTree(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "global"
 
-	writeScopeFile(t, agentsHome, "rules", scope, "x.mdc", []byte("1"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "x.mdc", []byte("1"))
 	f := filepath.Join(agentsHome, "rules", scope, "x.mdc")
 
 	if err := EnsureUnderRulesScopeTree(agentsHome, scope, f); err != nil {
@@ -52,7 +54,7 @@ func TestResolveCanonicalRuleFile(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "p"
 
-	writeScopeFile(t, agentsHome, "rules", scope, "agents.mdc", []byte("---\n---\n"))
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "agents.mdc", []byte("---\n---\n"))
 	path := filepath.Join(agentsHome, "rules", scope, "agents.mdc")
 
 	got, err := ResolveCanonicalRuleFile(agentsHome, scope, "agents")

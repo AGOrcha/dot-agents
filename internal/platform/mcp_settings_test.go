@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestListResolveMCP(t *testing.T) {
@@ -11,7 +13,7 @@ func TestListResolveMCP(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "proj"
 
-	writeScopeFile(t, agentsHome, "mcp", scope, "mcp.json", []byte("{}"))
+	testutil.WriteScopeFile(t, agentsHome, "mcp", scope, "mcp.json", []byte("{}"))
 
 	specs, err := ListCanonicalMCPFiles(agentsHome, scope)
 	if err != nil {
@@ -34,8 +36,8 @@ func TestListResolveSettingsIncludesCursorignore(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "g"
 
-	writeScopeFile(t, agentsHome, "settings", scope, "cursorignore", []byte("*.log\n"))
-	writeScopeFile(t, agentsHome, "settings", scope, "cursor.json", []byte("{}"))
+	testutil.WriteScopeFile(t, agentsHome, "settings", scope, "cursorignore", []byte("*.log\n"))
+	testutil.WriteScopeFile(t, agentsHome, "settings", scope, "cursor.json", []byte("{}"))
 
 	specs, err := ListCanonicalSettingsFiles(agentsHome, scope)
 	if err != nil || len(specs) != 2 {
@@ -52,7 +54,7 @@ func TestEnsureUnderMCPScopeTree(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	scope := "p"
 
-	writeScopeFile(t, agentsHome, "mcp", scope, "x.json", []byte("{}"))
+	testutil.WriteScopeFile(t, agentsHome, "mcp", scope, "x.json", []byte("{}"))
 	f := filepath.Join(agentsHome, "mcp", scope, "x.json")
 
 	if err := EnsureUnderMCPScopeTree(agentsHome, scope, f); err != nil {
