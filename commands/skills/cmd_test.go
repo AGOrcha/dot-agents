@@ -1,14 +1,13 @@
 package skills
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/spf13/cobra"
 )
 
@@ -108,17 +107,18 @@ func TestCreateSkill_GlobalScopeCreatesUserSymlinks(t *testing.T) {
 		filepath.Join(fakeHome, ".agents", "skills", "link-skill"),
 		filepath.Join(fakeHome, ".claude", "skills", "link-skill"),
 	} {
-		fi, err := os.Lstat(target)
-		if err != nil {
-			t.Errorf("expected symlink at %s: %v", target, err)
+		// Use links.IsManagedLink rather than fi.Mode()&os.ModeSymlink:
+		// production creates a real symlink on POSIX but a junction on
+		// Windows (via stdSkillsIO.Symlink → internal/links.Symlink →
+		// createJunction). Go's os.Lstat doesn't always set ModeSymlink
+		// on a junction; IsManagedLink works for both shapes by
+		// consulting ManagedLinkTarget which understands junctions.
+		if _, err := os.Lstat(target); err != nil {
+			t.Errorf("expected managed link at %s: %v", target, err)
 			continue
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should be a symlink, got %v", target, fi.Mode())
-			continue
-		}
-		if got, _ := os.Readlink(target); got != expectedTarget {
-			t.Errorf("symlink target = %q, want %q", got, expectedTarget)
+		if !links.IsManagedLink(target, expectedTarget) {
+			t.Errorf("%s should be a managed link to %s", target, expectedTarget)
 		}
 	}
 }
@@ -449,26 +449,9 @@ func TestSkillsPromoteCmd_RunESuccessPath(t *testing.T) {
 	}
 }
 
-// TestCreateSkill_EnsureSkillMarkdownErrorPropagates covers the
-// `if err := EnsureSkillMarkdown(...); err != nil { return err }` branch
-// inside CreateSkill (line 104). MkdirAll succeeds so we reach
-// EnsureSkillMarkdown; osWriteFile then fails so EnsureSkillMarkdown errors.
-func TestCreateSkill_EnsureSkillMarkdownErrorPropagates(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
-
-	sentinel := errors.New("write boom")
-	withWriteFileStub(t, func(string, []byte, os.FileMode) error { return sentinel })
-
-	err := CreateSkill("err-skill", "global")
-	if err == nil || !strings.Contains(err.Error(), "creating SKILL.md") {
-		t.Fatalf("expected creating SKILL.md error from CreateSkill, got %v", err)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel, got %v", err)
-	}
-}
+// TestCreateSkill_EnsureSkillMarkdownErrorPropagates was migrated to
+// seams_test.go alongside the interface-DI seam conversion; it now drives the
+// branch through the IO-injected createSkill(fakeIO, ...) entry point.
 
 // TestAppendSkillToAgentsRC_SaveError covers the rc.Save failure branch
 // inside AppendSkillToAgentsRC (line 31). We make the project dir read-only
@@ -536,11 +519,12 @@ func TestEnsureUserSkillLinks_OneTargetExistsOneCreated(t *testing.T) {
 	EnsureUserSkillLinks(agentsHome, skillName, skillDir)
 
 	target := filepath.Join(tmp, ".claude", "skills", skillName)
-	fi, err := os.Lstat(target)
-	if err != nil {
-		t.Fatalf("expected ~/.claude/skills link: %v", err)
+	if _, err := os.Lstat(target); err != nil {
+		t.Fatalf("expected ~/.claude/skills managed link: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("expected symlink, got %v", fi.Mode())
+	// Junction-on-Windows / symlink-on-POSIX agnostic — same rationale
+	// as TestCreateSkill_GlobalScopeCreatesUserSymlinks above.
+	if !links.IsManagedLink(target, skillDir) {
+		t.Errorf("%s should be a managed link to %s", target, skillDir)
 	}
 }
