@@ -80,3 +80,57 @@ tasks:
         - internal/scaffold/hooks/global/delegation-closeout-gate/
       verification_required: true
       notes: 'External coordination: consume R1.5 structured outcome capture if it has shipped; hand off PostToolUse/PostToolUseFailure observation fixtures to R1.5 T1b and add no private telemetry format. Contract: tasks/t5-integration-and-outcome-compatibility.contract.md.'
+
+    # Added 2026-05-25 via Plan-agent review pass. The planner recommended
+    # splitting T0/T2/T3/T5 into 13-15 sub-tasks but that's deferred to a
+    # follow-up rewrite to keep this commit additive + reviewable.
+    # The two new tasks below address the most critical gaps surfaced:
+    # the missing cross-plan readback primitive and operator-facing docs.
+
+    - id: t-cross-plan-readback
+      title: Verify upstream loop-discipline P0/P1c/P2/P3/P3b have shipped before companion gates start
+      status: pending
+      depends_on: []
+      blocks:
+        - t1-companion-sentinel-operations
+        - t2-orchestrator-handoff-gate
+        - t3-delegation-closeout-gate
+      owner: dot-agents
+      write_scope:
+        - .agents/history/orchestration-companion-stop-hooks/upstream-readback.md
+      verification_required: true
+      notes: |-
+        No code. Read-only assertion: enumerate which upstream loop-
+        discipline tasks have status=completed in TASKS.yaml on the
+        same branch, with commit SHAs proving each gate is satisfied.
+        T1/T2/T3 depend on this readback existing and naming each
+        external gate met (workflow `depends_on` can't cross plans;
+        this is the in-plan workaround). Reviewer verifies SHAs match
+        origin tips for upstream P0 (sentinel CLI), P1c (matcher
+        verification), P2 (hook scripts), P3 (starter promotion), P3b
+        (companion-discipline-skills).
+      app_type: research
+
+    - id: t-operator-docs
+      title: Document orchestration-companion hook surface in docs/HOOKS.md and skill READMEs
+      status: pending
+      depends_on:
+        - t2-orchestrator-handoff-gate
+        - t3-delegation-closeout-gate
+        - t4-wave-picker-no-hook-assessment
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/HOOKS.md
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+      verification_required: true
+      notes: |-
+        Operator-facing: describe orchestrator-handoff-gate,
+        delegation-closeout-gate, the no-hook decision for
+        plan-wave-picker, and the sentinel discriminators
+        (fanout_handoff, existing_bundle_handoff, parent_closeout).
+        Cross-link to upstream HOOKS.md sections shipped by
+        loop-discipline p1b/p1c/p1d. Does not duplicate
+        loop-discipline-owned hook docs.
+      app_type: research

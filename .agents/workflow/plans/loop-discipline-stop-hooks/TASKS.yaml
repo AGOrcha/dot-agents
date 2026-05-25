@@ -167,3 +167,92 @@ tasks:
         - .agents/history/loop-discipline-stop-hooks/downstream-override-migration.md
       verification_required: true
       notes: 'Final plan task; inventory managed downstream legacy overrides, migrate compatible copies to starter inheritance, and record retained intentional project variants. Contract: tasks/p7-legacy-override-migration.contract.md.'
+
+    # Added 2026-05-25 via Plan-agent review pass. Per-task diff proposals
+    # (verdicts: OK/MINOR_TWEAK/NEEDS_REWORK per existing task) deferred to
+    # a follow-up commit to keep this expansion additive + reviewable.
+    # The 4 new tasks below address gaps the planner surfaced.
+
+    - id: p1e-docs-hooks-consistency
+      title: 'docs/HOOKS.md consistency pass after P1b/P1c/P1d additions'
+      status: pending
+      depends_on:
+        - p1b-canonical-when-values
+        - p1c-matcher-verification
+        - p1d-claude-lifecycle-parity
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/HOOKS.md
+      verification_required: true
+      notes: |-
+        Three tasks edit docs/HOOKS.md (P1b, P1c, P1d) but no task
+        verifies the final document is internally consistent. Final
+        pass: verify mapping table, when_events syntax examples,
+        per-platform native-output contracts, and Cursor-wider surface
+        section all reconcile after the three additions. Acceptance:
+        docs/HOOKS.md renders, tables are sorted/deduplicated, every
+        canonical When value appears in exactly one row.
+      app_type: research
+
+    - id: p3-pre-snapshot
+      title: 'Source-skill snapshot to prevent drift during P3/P3b/P4 implementation'
+      status: pending
+      depends_on: []
+      blocks:
+        - p3-starter-promotion
+        - p3b-companion-discipline-skills
+        - p4-sentinel-wiring
+      owner: dot-agents
+      write_scope:
+        - .agents/history/loop-discipline-stop-hooks/source-skill-snapshot-2026-05-25.md
+      verification_required: true
+      notes: |-
+        P3, P3b, P4 all assume ~/.agents/skills/dot-agents/{iteration-
+        close,isp,loop-worker,delegation-lifecycle}/ and
+        ~/.agents/skills/global/agent-handoff/ are stable across the
+        implementation window. If a maintainer edits the source skill
+        mid-flight, the starter copy drifts.
+        Record git SHAs of each source skill tree at task start; P3/
+        P3b/P4 must copy from the recorded snapshot, not the moving
+        head. No code change in this task — just the snapshot record.
+      app_type: research
+
+    - id: p6-rollback-plan
+      title: 'P6 payout-migration rollback documentation'
+      status: pending
+      depends_on:
+        - p6-payout-backfill
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/loop-discipline-stop-hooks/payout-migration-rollback.md
+      verification_required: false
+      notes: |-
+        If P6's payout migration breaks payout's active loop, what's
+        the recovery? Document a 1-command rollback (e.g.,
+        `git -C /Users/nikashp/Documents/payout checkout HEAD --
+        .agentsrc.json && da refresh`). Cross-link from the P6
+        readback artifact. Operator-facing.
+      app_type: research
+
+    - id: r1-5-t4-integration
+      title: 'r1-5 plan integration test (cross-plan coordination acknowledgment)'
+      status: pending
+      depends_on:
+        - p5-e2e-integration
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/loop-discipline-stop-hooks/r1-5-coordination.md
+      verification_required: false
+      notes: |-
+        r1-5-hook-enforcement-telemetry has no integration test task
+        analogous to loop-discipline's P5. This task is a coordination
+        artifact: document the handoff between loop-discipline P2's
+        gate.sh outcomes and r1-5's `iter-N.hook-outcomes.yaml`
+        sidecar write (via the new `da workflow hook-outcome write`
+        CLI primitive r1-5 adds). Reserve a clean exit-emit boundary
+        in P2's gate.sh so r1-5 can wrap the decision point with a
+        single outcome-emit call without restructuring gate logic.
+      app_type: research
