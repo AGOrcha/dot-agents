@@ -945,12 +945,16 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	return canonicalImportOutputsNonPlugin(c, rel)
 }
 
-// init wires the canonical-resource branch of
-// lifecycle.RestoreFromResourcesCountedWithDeps. The lifted helper
-// loops over the resources tree but defers canonical-import handling
-// back here because canonicalImportOutputs and its 30+ hook-bundle
-// helpers still live in commands/import.go until t06 moves the import
-// command itself into commands/lifecycle/.
+// init wires two lifecycle seams whose canonical-import internals
+// (canonicalImportOutputs + 30+ hook-bundle helpers, importCandidate
+// struct with unexported fields) still live in commands/import.go until
+// t06 moves the import command itself into commands/lifecycle/:
+//
+//   - RestoreCanonicalResourceFileFn: the canonical-resource branch of
+//     lifecycle.RestoreFromResourcesCountedWithDeps.
+//   - CanonicalImportOutputs: the lifecycle-facing entry point that
+//     converts a lifecycle.ImportCandidate into []lifecycle.ImportOutput
+//     by delegating to canonicalImportOutputs.
 func init() {
 	lifecycle.RestoreCanonicalResourceFileFn = func(project, resourcesDir, agentsHome, path string, deps lifecycle.AddDeps) (int, bool, error) {
 		candidate := importCandidate{
@@ -977,6 +981,28 @@ func init() {
 			count++
 		}
 		return count, true, nil
+	}
+
+	lifecycle.CanonicalImportOutputs = func(c lifecycle.ImportCandidate) ([]lifecycle.ImportOutput, bool, error) {
+		candidate := importCandidate{
+			project:    c.Project,
+			sourceRoot: c.SourceRoot,
+			sourcePath: c.SourcePath,
+			destRel:    c.DestRel,
+		}
+		outputs, ok, err := canonicalImportOutputs(candidate)
+		if !ok || err != nil {
+			return nil, ok, err
+		}
+		converted := make([]lifecycle.ImportOutput, 0, len(outputs))
+		for _, o := range outputs {
+			converted = append(converted, lifecycle.ImportOutput{
+				DestRel: o.destRel,
+				Content: o.content,
+				Origin:  o.Origin,
+			})
+		}
+		return converted, true, nil
 	}
 }
 
