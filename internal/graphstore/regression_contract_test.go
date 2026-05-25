@@ -167,6 +167,26 @@ func TestRegression_PostgresRoutesEveryMethodThroughRequestContext(t *testing.T)
 	if !ok {
 		return
 	}
+	f := parsePostgresGoForTest(t, path)
+	// Methods exempt from the "must use requestContext" rule (connection setup).
+	exempt := map[string]bool{
+		"OpenPostgres": true,
+		"initSchema":   true,
+	}
+	for _, fd := range postgresStoreMethods(f) {
+		if exempt[fd.Name.Name] {
+			continue
+		}
+		if methodUsesContextBackground(fd) {
+			t.Errorf("(*PostgresStore).%s uses context.Background() — must route through requestContext (gcc4 OD-1 cross-provider timeout uniformity)", fd.Name.Name)
+		}
+	}
+}
+
+// parsePostgresGoForTest reads + parses postgres.go for the AST-walking
+// regression tests. Fails the test on read or parse error.
+func parsePostgresGoForTest(t *testing.T, path string) *ast.File {
+	t.Helper()
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read postgres.go: %v", err)
@@ -176,20 +196,16 @@ func TestRegression_PostgresRoutesEveryMethodThroughRequestContext(t *testing.T)
 	if err != nil {
 		t.Fatalf("parse postgres.go: %v", err)
 	}
+	return f
+}
 
-	// Methods exempt from the "must use requestContext" rule (connection setup).
-	exempt := map[string]bool{
-		"OpenPostgres": true,
-		"initSchema":   true,
-	}
-
+// postgresStoreMethods returns the *PostgresStore method declarations in
+// f, skipping free helpers, type defs, and methods on other receivers.
+func postgresStoreMethods(f *ast.File) []*ast.FuncDecl {
+	var methods []*ast.FuncDecl
 	for _, decl := range f.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		// Only check methods on *PostgresStore (skip free helpers, scan funcs).
-		if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 {
 			continue
 		}
 		star, ok := fd.Recv.List[0].Type.(*ast.StarExpr)
@@ -200,29 +216,35 @@ func TestRegression_PostgresRoutesEveryMethodThroughRequestContext(t *testing.T)
 		if !ok || ident.Name != "PostgresStore" {
 			continue
 		}
-		if exempt[fd.Name.Name] {
-			continue
-		}
-		// Walk the body and flag any context.Background() call.
-		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			pkg, ok := sel.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if pkg.Name == "context" && sel.Sel.Name == "Background" {
-				t.Errorf("(*PostgresStore).%s uses context.Background() — must route through requestContext (gcc4 OD-1 cross-provider timeout uniformity)", fd.Name.Name)
-			}
-			return true
-		})
+		methods = append(methods, fd)
 	}
+	return methods
+}
+
+// methodUsesContextBackground reports whether fd's body contains a
+// `context.Background()` call. Used by the AST regression assertions.
+func methodUsesContextBackground(fd *ast.FuncDecl) bool {
+	var found bool
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if pkg.Name == "context" && sel.Sel.Name == "Background" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // TestRegression_PostgresHasNoRawContextBackground is the file-level smoke
