@@ -1,0 +1,39 @@
+schema_version: 1
+delegation_id: del-t08-move-status-1779717269
+plan_id: root-command-decomposition
+task_id: t08-move-status
+owner: t08-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T13:54:29Z"
+    reason: Wave 4
+scope:
+    write_scope:
+        - commands/lifecycle/status.go
+        - commands/lifecycle/status_test.go
+        - commands/lifecycle/linkcount_unix.go
+        - commands/lifecycle/linkcount_windows.go
+        - commands/status.go
+        - commands/status_test.go
+        - commands/linkcount_unix.go
+        - commands/linkcount_windows.go
+prompt:
+    inline:
+        - Per TASKS.yaml t08 notes
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: status+linkcount moved
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-t04-move-add-remove-1779717269
+parent_plan_id: root-command-decomposition
+parent_task_id: t04-move-add-remove
+title: Move add and remove commands into commands/lifecycle/
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/add.go
+    - commands/lifecycle/add_test.go
+    - commands/lifecycle/remove.go
+    - commands/lifecycle/remove_test.go
+    - commands/add.go
+    - commands/add_test.go
+    - commands/remove.go
+    - commands/remove_test.go
+success_criteria: |-
+    Paired because remove.go's tests reference add helpers via
+    agentsrc_mutations_test.go. Keep that test in root for now
+    (cross-cutting; relocated in t12). Same staging as t03 — root
+    files remain in place until t13 strips them.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t04-worker
+status: active
+created_at: "2026-05-25T13:54:29Z"
+updated_at: "2026-05-25T13:54:29Z"

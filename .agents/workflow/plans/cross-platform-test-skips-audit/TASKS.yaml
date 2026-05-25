@@ -74,6 +74,56 @@ tasks:
       verification_required: true
       notes: 'internal/scaffold/home/copy_test.go (and any other exec-bit test) is testing the POSIX 0o755 mode bit semantics that have no Windows equivalent. This is the [genuine-posix] class — no abstraction can fix it without changing what the test asserts. Keep the skip but document why explicitly so a future reader does not try to "abstract" it. Output: the test gets a multi-line comment block linking back to this plan.'
       app_type: go-cli
+    - id: fsops-windows-tests
+      title: Add internal/fsops/fsops_windows_test.go (6 untested Windows-build-tagged functions)
+      status: in_progress
+      depends_on:
+        - perms-dir
+      blocks:
+        - cg6-prune
+      owner: dot-agents
+      write_scope:
+        - internal/fsops/fsops_windows_test.go
+      verification_required: true
+      notes: |-
+        Surfaced by the catalogue worker (PR #68) as a separate
+        action item. internal/fsops/fsops_windows.go declares six
+        Windows-build-tagged functions (`systemExe`, `MkdirAll`,
+        `mkdirAllComponents`, `WriteFile`, `Remove`, `RemoveAll`)
+        with NO matching test file. internal/fsops/fsops_default_test.go
+        is `//go:build !windows`, so Windows coverage is 0% on those
+        functions today.
+
+        Author `internal/fsops/fsops_windows_test.go` with
+        `//go:build windows` tag and:
+          - Happy-path round-trip (mirrors TestFsopsDefault_RoundTrip)
+            covering MkdirAll → WriteFile → Remove → RemoveAll.
+          - `mkdirAllComponents` boundary cases (the Windows variant
+            walks path components individually).
+          - `systemExe` returns the right Windows exe-prefix.
+          - Negative paths using `testutil.MakeDirUnreadable` from
+            perms-dir (PR #72 — provides the Windows DACL fixture for
+            "cannot stat / cannot list" assertions) to drive the
+            error branches that fsops_windows.go's defensive guards
+            need to hit.
+
+        Depends on perms-dir because the negative paths need the
+        DACL fixture. cg6-prune can prune the `internal/fsops/*`
+        allowlist entries once this lands (currently
+        `internal/fsops/fsops_windows.go [platform-tag] 0.00%` per
+        the allowlist).
+
+        Anti-scope: do NOT modify any *.go production file in
+        internal/fsops/. Test-only addition.
+
+        ISP routing:
+          mode: direct (single new test file)
+          verifier: smoke (go test ./internal/fsops on Windows CI)
+          review: code review
+          bundle-context (if fanout): catalogue findings.md +
+                                       internal/testutil/perms_dir*.go
+          output contract: internal/fsops Windows coverage > 0
+      app_type: go-cli
     - id: migrate-sites
       title: Migrate every shortcut-class skip to the new helpers
       status: pending

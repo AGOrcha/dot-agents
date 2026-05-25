@@ -1,0 +1,24 @@
+schema_version: 1
+id: del-t07-move-refresh-1779717269
+parent_plan_id: root-command-decomposition
+parent_task_id: t07-move-refresh
+title: Move refresh command into commands/lifecycle/
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/refresh.go
+    - commands/lifecycle/refresh_test.go
+    - commands/lifecycle/refresh_idempotency_test.go
+    - commands/refresh.go
+    - commands/refresh_test.go
+    - commands/refresh_idempotency_test.go
+success_criteria: |-
+    refresh_test.go was just refactored by t5 (PR #49 MERGED) to
+    consume internal/testutil.WriteScopeFile. The move preserves
+    those call sites — verify they still compile after the
+    package change.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t07-worker
+status: active
+created_at: "2026-05-25T13:54:29Z"
+updated_at: "2026-05-25T13:54:29Z"

@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-t05-move-init-1779717270
+plan_id: root-command-decomposition
+task_id: t05-move-init
+owner: t05-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T13:54:30Z"
+    reason: Wave 4
+scope:
+    write_scope:
+        - commands/lifecycle/init.go
+        - commands/lifecycle/init_test.go
+        - commands/init.go
+        - commands/init_test.go
+prompt:
+    inline:
+        - Per TASKS.yaml t05 notes
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: init moved
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

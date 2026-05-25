@@ -80,7 +80,7 @@ tasks:
         have a settled target package and can run in parallel.
     - id: t03-move-install
       title: Move install command into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -105,7 +105,7 @@ tasks:
         imports appear in commands/install.go.
     - id: t04-move-add-remove
       title: Move add and remove commands into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -127,7 +127,7 @@ tasks:
         files remain in place until t13 strips them.
     - id: t05-move-init
       title: Move init command into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -145,7 +145,7 @@ tasks:
         in t14 enforces it permanently.
     - id: t06-move-import
       title: Move import command + import_plugins into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -167,7 +167,7 @@ tasks:
         root files stay in place until t13.
     - id: t07-move-refresh
       title: Move refresh command into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -187,7 +187,7 @@ tasks:
         package change.
     - id: t08-move-status
       title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -265,7 +265,7 @@ tasks:
         in parallel.
     - id: t10a-create-mcp-subpackage
       title: Move mcp command into commands/mcp/ (per agents/skills file convention)
-      status: pending
+      status: in_progress
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []
@@ -330,7 +330,7 @@ tasks:
         deleted in t13.
     - id: t10b-create-settings-subpackage
       title: Move settings command into commands/settings/ (per agents/skills file convention)
-      status: pending
+      status: in_progress
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []
@@ -362,7 +362,7 @@ tasks:
         package-private (used by TestFindSettingsSpecNotFound).
     - id: t10c-create-rules-subpackage
       title: Move rules command into commands/rules/ (per agents/skills file convention)
-      status: pending
+      status: in_progress
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []

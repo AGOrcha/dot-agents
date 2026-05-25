@@ -10,6 +10,6 @@ success_criteria: 'internal/scaffold/home/copy_test.go (and any other exec-bit t
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: exec-bit-worker
-status: active
+status: completed
 created_at: "2026-05-25T01:14:36Z"
-updated_at: "2026-05-25T01:14:36Z"
+updated_at: "2026-05-25T01:18:19Z"

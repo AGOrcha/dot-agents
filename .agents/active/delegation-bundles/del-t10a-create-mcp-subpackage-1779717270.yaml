@@ -1,0 +1,45 @@
+schema_version: 1
+delegation_id: del-t10a-create-mcp-subpackage-1779717270
+plan_id: root-command-decomposition
+task_id: t10a-create-mcp-subpackage
+owner: t10a-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T13:54:30Z"
+    reason: Wave 4 resource move
+scope:
+    write_scope:
+        - commands/mcp/cmd.go
+        - commands/mcp/cmd_test.go
+        - commands/mcp/deps.go
+        - commands/mcp/example.go
+        - commands/mcp/list.go
+        - commands/mcp/show.go
+        - commands/mcp/remove.go
+        - commands/mcp/seams.go
+        - commands/mcp/seams_test.go
+        - commands/mcp/coverage_test.go
+        - commands/mcp/mcp_test.go
+        - commands/mcp.go
+        - commands/mcp_test.go
+prompt:
+    inline:
+        - Per TASKS.yaml t10a notes - agents/skills file convention
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+        - commands/agents/cmd.go
+verification:
+    feedback_goal: mcp subpackage
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

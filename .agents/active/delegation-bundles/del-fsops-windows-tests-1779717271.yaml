@@ -1,0 +1,36 @@
+schema_version: 1
+delegation_id: del-fsops-windows-tests-1779717271
+plan_id: cross-platform-test-skips-audit
+task_id: fsops-windows-tests
+owner: fsops-windows-tests-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-25T13:54:31Z"
+    reason: Wave 4 - fsops Windows coverage gap
+scope:
+    write_scope:
+        - internal/fsops/fsops_windows_test.go
+prompt:
+    inline:
+        - Per TASKS.yaml fsops-windows-tests notes
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/cross-platform-test-skips-audit/TASKS.yaml
+        - internal/fsops/fsops_windows.go
+verification:
+    feedback_goal: fsops_windows_test.go covers 6 functions
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

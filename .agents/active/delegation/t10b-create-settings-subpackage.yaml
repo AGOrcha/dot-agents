@@ -1,0 +1,36 @@
+schema_version: 1
+id: del-t10b-create-settings-subpackage-1779717270
+parent_plan_id: root-command-decomposition
+parent_task_id: t10b-create-settings-subpackage
+title: Move settings command into commands/settings/ (per agents/skills file convention)
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/settings/cmd.go
+    - commands/settings/cmd_test.go
+    - commands/settings/deps.go
+    - commands/settings/example.go
+    - commands/settings/list.go
+    - commands/settings/show.go
+    - commands/settings/remove.go
+    - commands/settings/seams.go
+    - commands/settings/seams_test.go
+    - commands/settings/coverage_test.go
+    - commands/settings/settings_test.go
+    - commands/settings.go
+    - commands/settings_test.go
+success_criteria: |-
+    Same file convention as t10a — mirror commands/agents/ +
+    commands/skills/ layout (cmd.go / deps.go / example.go /
+    list.go / show.go / remove.go / seams.go / seams_test.go /
+    coverage_test.go / settings_test.go). cmdutil imports use
+    the helpers extracted in t10pre.
+
+    settings_test.go landed via t5 PR #49 — preserve every
+    testutil call site through the move. findSettingsSpec stays
+    package-private (used by TestFindSettingsSpecNotFound).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t10b-worker
+status: active
+created_at: "2026-05-25T13:54:30Z"
+updated_at: "2026-05-25T13:54:30Z"
