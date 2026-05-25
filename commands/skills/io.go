@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 // skillsIO is the narrow filesystem + config-loader collaborator the skills
@@ -45,8 +46,15 @@ func (stdSkillsIO) WriteFile(name string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(name, data, perm)
 }
 
+// Symlink routes through internal/links.Symlink so the managed-link
+// fallback chain applies on Windows: POSIX gets a real os.Symlink, Windows
+// gets a directory junction (for dir targets) or hard link (for file
+// targets), neither of which requires SeCreateSymbolicLinkPrivilege /
+// Developer Mode. Matches the existing commands/agents/import.go pattern;
+// fixes the EnsureUserSkillLinks path which previously raw-called
+// os.Symlink and silently no-op'd on stock Windows.
 func (stdSkillsIO) Symlink(oldname, newname string) error {
-	return os.Symlink(oldname, newname)
+	return links.Symlink(oldname, newname)
 }
 
 func (stdSkillsIO) ConfigLoad() (*config.Config, error) {
