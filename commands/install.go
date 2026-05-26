@@ -1,592 +1,134 @@
 package commands
 
-import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"time"
+// Transitional shim for the install command — t03 of root-command-decomposition.
+//
+// The implementation moved to commands/lifecycle/install.go in this task. This
+// file remains as a thin wiring shim because:
+//
+//  1. seams_test.go (split deferred to t11) reaches the install pipeline
+//     through unexported names in package commands: runInstall,
+//     runInstallGenerate, registerInstallProject, findProjectByPath,
+//     linkResourceFromSources, plus the installDeps interface and
+//     stdInstallDeps zero-value type. The lower-cased forwarders below
+//     keep those compile-time references valid until seams_test.go is
+//     re-homed.
+//
+//  2. root.go still imports commands.NewInstallCmd; the switch to
+//     lifecycle.NewInstallCmd directly happens in t13 when this file is
+//     deleted entirely.
+//
+//  3. The lifecycle package mirrors the commands-package globals (Flags,
+//     Version, Commit, Describe, ErrorWithHintsFn) as parallel package
+//     vars per the t01 SHAPE.md decision to "PRESERVE current package-var
+//     seams during the moves". This file is the single sync point between
+//     the two packages — see syncLifecycleGlobals below.
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/platform"
-	"github.com/NikashPrakash/dot-agents/internal/projectsync"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+import (
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/spf13/cobra"
 )
 
-// installDeps is the multi-method collaborator runInstall, runInstallGenerate,
-// and their helpers need (interface-DI per docs/TEST_SEAMS.md). File-scoped —
-// do not share with other commands files. The four operations are the install
-// pipeline's fault-injectable touch points: working-directory resolution
-// (Getwd), filesystem materialization of resource link parents and git cache
-// roots (MkdirAll), the resource symlink itself (Symlink), and config.json
-// load (LoadConfig) for project registration and lookup.
-type installDeps interface {
-	Getwd() (string, error)
-	MkdirAll(path string, perm os.FileMode) error
-	Symlink(oldname, newname string) error
-	LoadConfig() (*config.Config, error)
+// installDeps aliases lifecycle.InstallDeps so seams_test.go's fakeInstallDeps
+// (which already implements the four-method interface) continues to satisfy
+// the parameter type expected by the lower-cased forwarders below.
+type installDeps = lifecycle.InstallDeps
+
+// stdInstallDeps aliases lifecycle.StdInstallDeps so test sites that
+// construct stdInstallDeps{} keep compiling.
+type stdInstallDeps = lifecycle.StdInstallDeps
+
+// syncLifecycleGlobals copies the current commands-package globals into
+// the lifecycle package's parallel package vars. Called from every
+// commands-side entry point that crosses into lifecycle so the moved
+// helpers (which read lifecycle.Flags / lifecycle.Version /
+// lifecycle.ErrorWithHintsFn directly) observe live state. Once t13
+// removes the shim, RunE will sync once at the boundary and the
+// forwarders disappear.
+func syncLifecycleGlobals() {
+	lifecycle.Flags = lifecycle.GlobalFlags{
+		DryRun:  Flags.DryRun,
+		Force:   Flags.Force,
+		Verbose: Flags.Verbose,
+		Yes:     Flags.Yes,
+	}
+	lifecycle.Version = Version
+	lifecycle.Commit = Commit
+	lifecycle.Describe = Describe
+	lifecycle.ErrorWithHintsFn = ErrorWithHints
 }
 
-// stdInstallDeps is the production installDeps backed by the os package and
-// config.Load.
-type stdInstallDeps struct{}
-
-func (stdInstallDeps) Getwd() (string, error)                       { return os.Getwd() }
-func (stdInstallDeps) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
-func (stdInstallDeps) Symlink(oldname, newname string) error        { return os.Symlink(oldname, newname) }
-func (stdInstallDeps) LoadConfig() (*config.Config, error)          { return config.Load() }
-
-func NewInstallCmd() *cobra.Command {
-	var generate bool
-	var strict bool
-
-	cmd := &cobra.Command{
-		Use:   "install",
-		Short: "Set up project from .agentsrc.json manifest",
-		Long: `Reads .agentsrc.json in the current directory, materializes declared skills and
-agents into ~/.agents/ from configured sources, then applies the manifest to each
-installed platform (rules, hooks, MCP configs, settings) with the same link pass
-as da refresh.
-
-Commit .agentsrc.json to git so any contributor can run 'da install'
-after cloning — no manual init or sync required.
-
-Use --generate to create or refresh .agentsrc.json from the current ~/.agents/ state.
-If a manifest already exists, generated skill and platform lists replace stale values,
-but existing source entries (for example git remotes), a non-empty project name, and
-unknown JSON keys are preserved.`,
-		Example: ExampleBlock(
-			"  da install",
-			"  da install --strict",
-			"  da install --generate",
-			"  da install --generate --force",
-		),
-		Args: NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if generate {
-				return runInstallGenerate(stdInstallDeps{})
-			}
-			return runInstall(strict, stdInstallDeps{})
+// lifecycleDeps builds the Deps struct passed to lifecycle.NewInstallCmd.
+// Mirrors agentsDeps() / skillsDeps() in the same directory.
+func lifecycleDeps() lifecycle.Deps {
+	return lifecycle.Deps{
+		Flags: lifecycle.GlobalFlags{
+			DryRun:  Flags.DryRun,
+			Force:   Flags.Force,
+			Verbose: Flags.Verbose,
+			Yes:     Flags.Yes,
 		},
+		ErrorWithHints:        ErrorWithHints,
+		UsageError:            UsageError,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		RangeArgsWithHints:    RangeArgsWithHints,
+		ExactArgsWithHints:    ExactArgsWithHints,
+		NoArgsWithHints:       NoArgsWithHints,
+		ExampleBlock:          ExampleBlock,
 	}
-	cmd.Flags().BoolVar(&generate, "generate", false, "Create .agentsrc.json from current ~/.agents/ state")
-	cmd.Flags().BoolVar(&strict, "strict", false, "Fail if any declared resource is not found")
+}
+
+// NewInstallCmd wires the install command tree. Thin shim preserved for
+// t03; root.go switches to lifecycle.NewInstallCmd in t13.
+func NewInstallCmd() *cobra.Command {
+	cmd := lifecycle.NewInstallCmd(lifecycleDeps())
+	// Wrap RunE so we sync commands-package globals into the lifecycle
+	// package vars right before the moved implementation reads them. The
+	// inner RunE is the one assigned by lifecycle.NewInstallCmd.
+	innerRunE := cmd.RunE
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		syncLifecycleGlobals()
+		return innerRunE(c, args)
+	}
 	return cmd
 }
 
-// ─── runInstall ──────────────────────────────────────────────────────────────
+// ─── seams_test.go-facing forwarders ─────────────────────────────────────────
+//
+// These lower-case wrappers exist so the deferred seams_test.go split (t11)
+// keeps compiling. Each forwarder syncs the lifecycle globals first so the
+// moved helpers see live commands-package state, then delegates.
 
 func runInstall(strict bool, deps installDeps) error {
-	projectPath, err := deps.Getwd()
-	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
-	}
-
-	ui.Header("da install")
-
-	rc, err := loadInstallManifest(projectPath)
-	if err != nil {
-		return err
-	}
-	if err := ensureAgentsHomeInitialized(); err != nil {
-		return err
-	}
-
-	projectName := installProjectName(rc.Project, projectPath)
-	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
-	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
-
-	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
-	if err != nil {
-		return err
-	}
-	if err := linkInstallResources(projectName, rc, resolvedSources, strict, deps); err != nil {
-		return err
-	}
-	if err := ensureInstallProjectDirs(projectName); err != nil {
-		return err
-	}
-	if err := registerInstallProject(projectName, projectPath, deps); err != nil {
-		return err
-	}
-
-	createInstallPlatformLinks(projectName, projectPath)
-	finalizeInstall(projectName, projectPath)
-
-	ui.SuccessBox(
-		fmt.Sprintf("Project '%s' installed successfully!", projectName),
-		"Check links: da status --audit",
-		"Update manifest: da install --generate",
-	)
-	return nil
+	syncLifecycleGlobals()
+	return lifecycle.RunInstall(strict, deps)
 }
 
-func loadInstallManifest(projectPath string) (*config.AgentsRC, error) {
-	rc, err := config.LoadAgentsRC(projectPath)
-	if err == nil {
-		return rc, nil
-	}
-	if os.IsNotExist(err) {
-		return nil, ErrorWithHints(
-			config.AgentsRCFile+" not found in current directory",
-			"Run `da install --generate` to create one from the current shared state.",
-			"If this project is not managed yet, run `da add .` first.",
-		)
-	}
-	return nil, fmt.Errorf("reading %s: %w", config.AgentsRCFile, err)
-}
-
-func ensureAgentsHomeInitialized() error {
-	if _, err := os.Stat(filepath.Join(config.AgentsHome(), "config.json")); err != nil {
-		return ErrorWithHints(
-			"~/.agents/ not initialized",
-			"Run `da init` once on this machine before using install.",
-		)
-	}
-	return nil
-}
-
-func installProjectName(manifestProject, projectPath string) string {
-	if manifestProject != "" {
-		return manifestProject
-	}
-	return filepath.Base(projectPath)
-}
-
-func resolveInstallSources(sources []config.Source, strict bool, deps installDeps) ([]string, error) {
-	ui.Section("Resolving sources")
-	resolvedSources, err := resolveSources(sources, deps)
-	if err != nil && strict {
-		return nil, err
-	}
-	return resolvedSources, nil
-}
-
-func linkInstallResources(projectName string, rc *config.AgentsRC, resolvedSources []string, strict bool, deps installDeps) error {
-	sources := resolvedSources
-	if len(sources) == 0 {
-		// Manifest may omit explicit sources while listing skills/agents that already exist
-		// under ~/.agents/<bucket>/<project>/ (e.g. after promote). Resolve from canonical home.
-		sources = []string{config.AgentsHome()}
-	}
-	if err := linkInstallResourceList("skills", "skill", rc.Skills, projectName, sources, strict, deps); err != nil {
-		return err
-	}
-	return linkInstallResourceList("agents", "agent", rc.Agents, projectName, sources, strict, deps)
-}
-
-func linkInstallResourceList(resourceType, label string, names []string, projectName string, sources []string, strict bool, deps installDeps) error {
-	for _, name := range names {
-		if err := linkResourceFromSources(resourceType, name, projectName, sources, deps); err != nil {
-			msg := fmt.Sprintf("%s '%s' not found in any source", label, name)
-			if strict {
-				return fmt.Errorf("%s (--strict mode)", msg)
-			}
-			ui.Bullet("warn", msg+" — skipping")
-		}
-	}
-	return nil
-}
-
-func ensureInstallProjectDirs(projectName string) error {
-	if Flags.DryRun {
-		ui.DryRun("create ~/.agents/ directories for '" + projectName + "'")
-		return nil
-	}
-	if err := projectsync.CreateProjectDirs(projectName); err != nil {
-		return err
-	}
-	ui.Bullet("ok", "Ensured ~/.agents/ project directories")
-	return nil
+func runInstallGenerate(deps installDeps) error {
+	syncLifecycleGlobals()
+	return lifecycle.RunInstallGenerate(deps)
 }
 
 func registerInstallProject(projectName, projectPath string, deps installDeps) error {
-	cfg, err := deps.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-	if cfg.GetProjectPath(projectName) != "" {
-		ui.Bullet("skip", "Already registered in config.json")
-		return nil
-	}
-	if Flags.DryRun {
-		ui.DryRun("register '" + projectName + "' in config.json")
-		return nil
-	}
-	cfg.AddProject(projectName, projectPath)
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-	ui.Bullet("ok", "Registered '"+projectName+"' in config.json")
-	return nil
+	syncLifecycleGlobals()
+	return lifecycle.RegisterInstallProject(projectName, projectPath, deps)
 }
 
-func createInstallPlatformLinks(projectName, projectPath string) {
-	ui.Section("Creating platform links")
-	config.SetWindowsMirrorContext(projectPath)
-
-	runInstallSharedTargets(projectName, projectPath)
-
-	for _, p := range platform.All() {
-		createInstallPlatformLink(p, projectName, projectPath)
-	}
+func findProjectByPath(projectPath string, deps installDeps) string {
+	syncLifecycleGlobals()
+	return lifecycle.FindProjectByPath(projectPath, deps)
 }
 
-// runInstallSharedTargets runs the shared-target projection across all
-// installed platforms and surfaces the resulting plan or warning lines.
-func runInstallSharedTargets(projectName, projectPath string) {
-	var installed []platform.Platform
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			installed = append(installed, p)
-		}
-	}
-	lines, err := platform.RunSharedTargetProjection(projectName, projectPath, installed, Flags.DryRun)
-	if err != nil {
-		if Flags.DryRun {
-			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
-		} else {
-			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
-		}
-		return
-	}
-	for _, line := range lines {
-		ui.DryRun(line)
-	}
-}
-
-// createInstallPlatformLink refreshes (or skips) the link bundle for a
-// single platform during install, honoring verbose / dry-run flags.
-func createInstallPlatformLink(p platform.Platform, projectName, projectPath string) {
-	if !p.IsInstalled() {
-		if Flags.Verbose {
-			ui.Skip(p.DisplayName() + " (not installed)")
-		}
-		return
-	}
-	if Flags.DryRun {
-		ui.DryRun("refresh " + p.DisplayName() + " links")
-		return
-	}
-	if err := p.CreateLinks(projectName, projectPath); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
-		return
-	}
-	ui.Bullet("ok", p.DisplayName()+" links created")
-}
-
-func finalizeInstall(projectName, projectPath string) {
-	if Flags.DryRun {
-		return
-	}
-	if err := projectsync.WriteRefreshToAgentsRC(projectName, projectPath, Version, Commit, Describe); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
-		return
-	}
-	ui.Bullet("ok", "Updated .agentsrc.json refresh details")
-}
-
-// ─── runInstallGenerate ──────────────────────────────────────────────────────
-
-func runInstallGenerate(deps installDeps) error {
-	projectPath, err := deps.Getwd()
-	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
-	}
-
-	ui.Header("da install --generate")
-
-	// Derive project name from config.json or directory name
-	projectName := findProjectByPath(projectPath, deps)
-	if projectName == "" {
-		projectName = filepath.Base(projectPath)
-		ui.Info("Project not registered — using directory name: " + projectName)
-	}
-
-	rc, err := config.GenerateAgentsRC(projectName, projectPath)
-	if err != nil {
-		return fmt.Errorf("generating manifest: %w", err)
-	}
-
-	manifestPath := filepath.Join(projectPath, config.AgentsRCFile)
-	if _, statErr := os.Stat(manifestPath); statErr == nil {
-		existing, loadErr := config.LoadAgentsRC(projectPath)
-		if loadErr != nil {
-			return fmt.Errorf("loading existing %s: %w", config.AgentsRCFile, loadErr)
-		}
-		rc = config.MergeGenerateAgentsRC(existing, rc)
-	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("accessing %s: %w", config.AgentsRCFile, statErr)
-	}
-
-	if Flags.DryRun {
-		ui.DryRun(fmt.Sprintf("Would write %s with:", config.AgentsRCFile))
-		ui.DryRun(fmt.Sprintf("  project:  %s", rc.Project))
-		ui.DryRun(fmt.Sprintf("  sources:  %d entries", len(rc.Sources)))
-		ui.DryRun(fmt.Sprintf("  skills:   %v", rc.Skills))
-		ui.DryRun(fmt.Sprintf("  rules:    %v", rc.Rules))
-		ui.DryRun(fmt.Sprintf("  agents:   %v", rc.Agents))
-		ui.DryRun(fmt.Sprintf("  hooks:    %v", rc.Hooks))
-		ui.DryRun(fmt.Sprintf("  mcp:      %v", rc.MCP))
-		ui.DryRun(fmt.Sprintf("  settings: %v", rc.Settings))
-		return nil
-	}
-
-	if err := rc.Save(projectPath); err != nil {
-		return fmt.Errorf("writing %s: %w", config.AgentsRCFile, err)
-	}
-
-	ui.Success("Generated " + config.AgentsRCFile)
-	fmt.Fprintf(os.Stdout, "  %sSkills: %d, Rules: %d, Agents: %d%s\n",
-		ui.Dim, len(rc.Skills), len(rc.Rules), len(rc.Agents), ui.Reset)
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, "Next steps:")
-	fmt.Fprintf(os.Stdout, "  1. Review:  cat %s\n", config.AgentsRCFile)
-	fmt.Fprintf(os.Stdout, "  2. Commit:  git add %s && git commit -m 'Add da manifest'\n", config.AgentsRCFile)
-	fmt.Fprintln(os.Stdout, "  3. Others:  da install   (after cloning)")
-	return nil
-}
-
-// ─── source resolution ───────────────────────────────────────────────────────
-
-// resolveSources resolves each source to a local root directory.
-func resolveSources(sources []config.Source, deps installDeps) ([]string, error) {
-	var resolved []string
-	var firstErr error
-
-	for _, src := range sources {
-		root, err := resolveSourceRoot(src, deps)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if root == "" {
-			continue
-		}
-		resolved = append(resolved, root)
-	}
-	return resolved, firstErr
-}
-
-func resolveSourceRoot(src config.Source, deps installDeps) (string, error) {
-	switch src.Type {
-	case "local":
-		root := config.AgentsHome()
-		if src.Path != "" {
-			root = config.ExpandPath(src.Path)
-		}
-		ui.Bullet("ok", "Local source: "+config.DisplayPath(root))
-		return root, nil
-	case "git":
-		if src.URL == "" {
-			ui.Bullet("warn", "Git source missing 'url' — skipping")
-			return "", nil
-		}
-		cacheDir, err := fetchGitSource(src.URL, src.Ref, deps)
-		if err != nil {
-			ui.Bullet("warn", fmt.Sprintf("Failed to fetch %s — skipping", src.URL))
-			return "", err
-		}
-		ui.Bullet("ok", "Git source: "+src.URL)
-		return cacheDir, nil
-	default:
-		ui.Bullet("warn", fmt.Sprintf("Unknown source type '%s' — skipping", src.Type))
-		return "", nil
-	}
-}
-
-// fetchGitSource clones or updates a git repository to the cache.
-func fetchGitSource(url, ref string, deps installDeps) (string, error) {
-	gitBin, err := exec.LookPath("git")
-	if err != nil {
-		return "", fmt.Errorf("git not installed")
-	}
-
-	cacheDir := config.GitSourceCacheDir(url)
-	if hasCachedGitSource(cacheDir) {
-		if shouldUseCachedGitSource(cacheDir, url) {
-			return cacheDir, nil
-		}
-		if Flags.DryRun {
-			ui.DryRun("git -C " + cacheDir + " pull")
-			return cacheDir, nil
-		}
-		updateCachedGitSource(gitBin, cacheDir, url)
-		return cacheDir, nil
-	}
-
-	if Flags.DryRun {
-		ui.DryRun(gitCloneDryRunCommand(url, ref, cacheDir))
-		return cacheDir, nil
-	}
-	return cloneGitSource(gitBin, url, ref, cacheDir, deps)
-}
-
-func hasCachedGitSource(cacheDir string) bool {
-	_, err := os.Stat(filepath.Join(cacheDir, ".git"))
-	return err == nil
-}
-
-func shouldUseCachedGitSource(cacheDir, url string) bool {
-	if Flags.Force {
-		return false
-	}
-	lastFetch := filepath.Join(cacheDir, ".last-fetch")
-	info, err := os.Stat(lastFetch)
-	if err != nil || time.Since(info.ModTime()) >= time.Hour {
-		return false
-	}
-	if Flags.Verbose {
-		ui.Info("Using cached source (< 1h old): " + url)
-	}
-	return true
-}
-
-func updateCachedGitSource(gitBin, cacheDir, url string) {
-	if Flags.Verbose {
-		ui.Info("Updating cached source: " + url)
-	}
-	// "--" separator prevents an attacker-controlled remote/branch from being
-	// parsed as a git flag (CVE-2017-1000117 class). git pull treats subsequent
-	// positional args as <repository> <refspec>...
-	cmd := exec.Command(gitBin, "-C", cacheDir, "pull", "-q", "--")
-	if err := cmd.Run(); err != nil {
-		ui.Bullet("warn", "Could not update cached source — using existing copy")
-		return
-	}
-	touchLastFetch(cacheDir)
-}
-
-func gitCloneDryRunCommand(url, ref, cacheDir string) string {
-	args := "git clone --depth 1"
-	if ref != "" {
-		args += " --branch " + ref
-	}
-	// "--" mirrors the real argv built by cloneGitSource so the dry-run
-	// preview matches what would actually execute.
-	return args + " -- " + url + " " + cacheDir
+func linkResourceFromSources(resourceType, name, project string, sources []string, deps installDeps) error {
+	syncLifecycleGlobals()
+	return lifecycle.LinkResourceFromSources(resourceType, name, project, sources, deps)
 }
 
 func cloneGitSource(gitBin, url, ref, cacheDir string, deps installDeps) (string, error) {
-	if Flags.Verbose {
-		ui.Info("Cloning source: " + url)
-	}
-	if err := deps.MkdirAll(cacheDir, 0755); err != nil {
-		return "", err
-	}
-	args := []string{"clone", "--depth", "1"}
-	if ref != "" {
-		args = append(args, "--branch", ref)
-	}
-	// "--" separator forces git to treat url/cacheDir as positionals, even if
-	// url starts with "-" or "--upload-pack=…" (CVE-2017-1000117 class).
-	args = append(args, "--", url, cacheDir)
-	cmd := exec.Command(gitBin, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(cacheDir)
-		return "", fmt.Errorf("git clone failed: %s", string(out))
-	}
-	touchLastFetch(cacheDir)
-	return cacheDir, nil
+	syncLifecycleGlobals()
+	return lifecycle.CloneGitSource(gitBin, url, ref, cacheDir, deps)
 }
 
-func touchLastFetch(cacheDir string) {
-	f := filepath.Join(cacheDir, ".last-fetch")
-	_ = os.WriteFile(f, []byte(time.Now().Format(time.RFC3339)), 0644)
-}
-
-// linkResourceFromSources symlinks a resource from the first matching source
-// into ~/.agents/{resourceType}/{project}/{name}/.
-func linkResourceFromSources(resourceType, name, project string, sources []string, deps installDeps) error {
-	destDir := filepath.Join(config.AgentsHome(), resourceType, project, name)
-	markerFile := resourceMarkerFile(resourceType)
-	candidate, srcRoot, found := firstResourceCandidate(resourceType, name, markerFile, project, sources)
-	if !found {
-		return fmt.Errorf("not found in any source")
-	}
-
-	if Flags.DryRun {
-		ui.DryRun(fmt.Sprintf("link %s/%s → %s", resourceType, name, config.DisplayPath(candidate)))
-		return nil
-	}
-	if shouldSkipLinkDestination(destDir) {
-		return nil
-	}
-	if err := deps.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
-		return err
-	}
-	if err := deps.Symlink(candidate, destDir); err != nil {
-		return fmt.Errorf("symlinking %s: %w", name, err)
-	}
-	if Flags.Verbose {
-		ui.Bullet("ok", fmt.Sprintf("Linked %s/%s from %s", resourceType, name, config.DisplayPath(srcRoot)))
-	}
-	return nil
-}
-
-func resourceMarkerFile(resourceType string) string {
-	switch resourceType {
-	case "skills":
-		return "SKILL.md"
-	case "agents":
-		return "AGENT.md"
-	default:
-		return ""
-	}
-}
-
-func firstResourceCandidate(resourceType, name, markerFile, project string, sources []string) (string, string, bool) {
-	for _, srcRoot := range sources {
-		// Prefer project-scoped canonical dirs (~/.agents/skills/<project>/…), then global/.
-		candidates := []string{
-			filepath.Join(srcRoot, resourceType, project, name),
-			filepath.Join(srcRoot, resourceType, "global", name),
-		}
-		for _, candidate := range candidates {
-			if resourceCandidateIsValid(candidate, markerFile) {
-				return candidate, srcRoot, true
-			}
-		}
-	}
-	return "", "", false
-}
-
-func resourceCandidateIsValid(candidate, markerFile string) bool {
-	info, err := os.Stat(candidate)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	if markerFile == "" {
-		return true
-	}
-	_, err = os.Stat(filepath.Join(candidate, markerFile))
-	return err == nil
-}
-
-func shouldSkipLinkDestination(destDir string) bool {
-	if _, err := os.Lstat(destDir); err != nil {
-		return false
-	}
-	if !Flags.Force {
-		return true
-	}
-	_ = os.RemoveAll(destDir)
-	return false
-}
-
-// findProjectByPath looks up the registered project name for a given path.
-func findProjectByPath(projectPath string, deps installDeps) string {
-	cfg, err := deps.LoadConfig()
-	if err != nil {
-		return ""
-	}
-	for _, name := range cfg.ListProjects() {
-		if cfg.GetProjectPath(name) == projectPath {
-			return name
-		}
-	}
-	return ""
+func shouldUseCachedGitSource(cacheDir, url string) bool {
+	syncLifecycleGlobals()
+	return lifecycle.ShouldUseCachedGitSource(cacheDir, url)
 }
