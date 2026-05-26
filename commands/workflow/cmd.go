@@ -62,6 +62,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowCommitCmd(),
 		newWorkflowCloseTaskCmd(),
 		newWorkflowStartTaskCmd(),
+		newWorkflowHookSentinelCmd(),
 	)
 	return cmd
 }
