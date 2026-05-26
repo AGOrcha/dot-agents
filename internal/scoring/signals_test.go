@@ -117,7 +117,7 @@ func TestAssembleSignalSet(t *testing.T) {
 	rec := IterationRecord{Iteration: 5, SchemaVersion: 2}
 	il, gs, bf := fullPartials()
 
-	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{})
+	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{}, AbsentSignal("no sidecar"))
 
 	if set.Iteration != 5 {
 		t.Errorf("Iteration = %d, want 5", set.Iteration)
@@ -152,7 +152,7 @@ func TestAssembleScopePrefersObjective(t *testing.T) {
 	il, gs, bf := fullPartials()
 	gs.ScopeObserved = PresentSignal(0.6, "3/5 files in scope")
 
-	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{})
+	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{}, AbsentSignal("no sidecar"))
 	if set.Scope.Detail != "3/5 files in scope" {
 		t.Errorf("Scope = %+v, want the objective git measurement", set.Scope)
 	}
@@ -162,7 +162,7 @@ func TestAssembleIntegrityRolesV2(t *testing.T) {
 	rec := IterationRecord{Iteration: 5, SchemaVersion: 2}
 	il, gs, bf := fullPartials()
 
-	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{})
+	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{}, AbsentSignal("no sidecar"))
 	roles := make(map[SignalID]AgentRole)
 	for _, o := range set.Integrity {
 		roles[o.Signal] = o.Role
@@ -179,7 +179,7 @@ func TestAssembleIntegrityRolesV1(t *testing.T) {
 	rec := IterationRecord{Iteration: 5, SchemaVersion: 1}
 	il, gs, bf := fullPartials()
 
-	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{})
+	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{}, AbsentSignal("no sidecar"))
 	for _, o := range set.Integrity {
 		if o.Role != RoleImpl {
 			t.Errorf("v1 observation for %q has role %q, want impl — v1 entries are flat", o.Signal, o.Role)
@@ -200,7 +200,7 @@ func TestAssembleIntegritySkipsEmptyPairs(t *testing.T) {
 	gs := GitSignals{LandedObserved: AbsentSignal("x"), ScopeObserved: AbsentSignal("x")}
 	bf := BackfillSignals{Iteration: 9, TokenEfficiency: AbsentSignal("x")}
 
-	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{})
+	set := AssembleSignalSet(rec, il, gs, bf, IterationObjectives{}, AbsentSignal("no sidecar"))
 	if len(set.Integrity) != 0 {
 		t.Errorf("Integrity has %d observations, want 0 when every pair is empty", len(set.Integrity))
 	}
@@ -217,6 +217,7 @@ func TestSignalSetValue(t *testing.T) {
 		Tests:              PresentSignal(0.3, "tests"),
 		CorrectionPressure: PresentSignal(0.4, "correction"),
 		Scope:              PresentSignal(0.5, "scope"),
+		HookOutcomes:       PresentSignal(0.7, "hooks"),
 		TokenEfficiency:    PresentSignal(0.6, "token"),
 	}
 	for id, want := range map[SignalID]float64{
@@ -225,6 +226,7 @@ func TestSignalSetValue(t *testing.T) {
 		SignalTests:              0.3,
 		SignalCorrectionPressure: 0.4,
 		SignalScope:              0.5,
+		SignalHookOutcomes:       0.7,
 		SignalTokenEfficiency:    0.6,
 	} {
 		if got := set.Value(id); got.SubScore != want {

@@ -1,7 +1,7 @@
 # Outcome-Scoring Rubric
 
 **Status:** active
-**Rubric version:** 2.0.2
+**Rubric version:** 2.1.0
 **Owners:** dot-agents
 **Go source:** [`internal/scoring/rubric.go`](../internal/scoring/rubric.go)
 **Related:** [`agent-run-scoring-observability-platform.md`](../.agents/proposals/agent-run-scoring-observability-platform.md) (R1, the requirement this rubric serves); [ADR-0004](adr/0004-execution-telemetry-schema-seed.md) (the execution-telemetry pillar the input signals come from); [`workflow-iter-log.schema.json`](../commands/workflow/static/workflow-iter-log.schema.json) (the iteration-log schema the signals are read from)
@@ -136,7 +136,7 @@ a first-class state — see [Combination](#combination). Sub-score
 extraction itself is the `signals` and `scorer` tasks; this section is
 the contract those tasks implement.
 
-### 1. `landed` — Landed on master (weight 0.22, two-way)
+### 1. `landed` — Landed on master (weight 0.20, two-way)
 
 Did the iteration's work survive into the trunk.
 
@@ -154,7 +154,7 @@ Did the iteration's work survive into the trunk.
 - **Why the highest weight:** surviving in `master` is the truest
   outcome there is — it is ground truth, not self-report.
 
-### 2. `verifier` — Verifier results (weight 0.20, two-way)
+### 2. `verifier` — Verifier results (weight 0.18, two-way)
 
 Did the iteration's verification gates pass.
 
@@ -169,7 +169,7 @@ Did the iteration's verification gates pass.
   `pass → 1.0`, `partial → 0.5`, `fail → 0.0`.
 - **Absent when:** no verifier evidence of any kind exists for the entry.
 
-### 3. `tests` — Test outcomes (weight 0.18, two-way)
+### 3. `tests` — Test outcomes (weight 0.17, two-way)
 
 Did the iteration's tests pass.
 
@@ -183,7 +183,7 @@ Did the iteration's tests pass.
 - **Note:** test *volume* (`tests_added`) is not scored — adding tests is
   good practice but not an outcome. It rides in the breakdown as context.
 
-### 4. `correction_pressure` — Correction pressure (weight 0.15)
+### 4. `correction_pressure` — Correction pressure (weight 0.13)
 
 How little the iteration had to be corrected. A new signal: it is the
 most informative thing the previous rubric left unweighted.
@@ -200,7 +200,7 @@ most informative thing the previous rubric left unweighted.
 - **Not two-way:** it is a composite of weakly-self-reported and
   objective inputs with no single clean claimed/observed pair.
 
-### 5. `scope` — Scope adherence (weight 0.15, two-way)
+### 5. `scope` — Scope adherence (weight 0.13, two-way)
 
 Did the iteration stay within its declared write-scope.
 
@@ -218,7 +218,72 @@ Did the iteration stay within its declared write-scope.
 - **Absent when:** neither a `write_scope` nor a usable `scope_note`
   exists.
 
-### 6. `token_efficiency` — Token & cache efficiency (weight 0.10)
+### 6. `hook_outcomes` — Hook-gate outcomes (weight 0.10, R1.5)
+
+Did the iteration's hook gates allow, advise, or remediate. Objective
+evidence from the per-iteration sidecar
+`.agents/active/iteration-log/iter-N.hook-outcomes.yaml` written by
+`da workflow hook-outcome write` (R1.5 t1, PR #91); the extractor lives
+in [`internal/scoring/signal_hook_outcomes.go`](../internal/scoring/signal_hook_outcomes.go).
+
+- **Source:** `iter-N.hook-outcomes.yaml` records whose
+  `intervention_class` is `prevent_before_action` or `remediate_at_stop`.
+- **Mapping (per R1.5 design D3):**
+  - any collapsed record at `remediate` → sub-score = `0.0`
+  - all collapsed records at `advise`, no `remediate` → sub-score = `0.6`
+  - all collapsed records at `allow`, no `advise` or `remediate` →
+    sub-score = `1.0`
+- **D4 dedup:** a `prevent_before_action` and a `remediate_at_stop` record
+  sharing the same `correlation_id` and `rule_id` collapse to one record
+  at the more severe result (remediate > advise > allow). The persisted
+  sidecar keeps both rows (audit value); the scorer collapses them in
+  memory so a prevented-then-remediated intent does not double-count.
+- **Absent when:** no sidecar exists for the iteration, the sidecar is
+  unreadable / malformed, or it contains no in-scope records. Absent
+  drops the signal from the vote per the renormalizing combination — an
+  iteration with no hook activity neither inflates nor deflates the
+  score.
+- **One-way (objective only):** the gate is the objective source; there
+  is no self-report counterpart, so this signal does not contribute to
+  the integrity track.
+- **Per-rule contribution:** the rule IDs that drove the band are
+  rendered in the signal's `Detail` so the explainable breakdown names
+  which gates fired (e.g. `remediate: iteration-close.R1.1`).
+
+#### Approved rules feeding the v1 sub-score (per R1.5 design D6)
+
+Only rule IDs in the following families, when they emit a verifiable
+outcome at terminal time, currently contribute to the sub-score:
+
+- **Acceptance-criteria adherence** — `iteration-close.R1.1` /
+  `iteration-close.R1.2` (declared expected artifacts present;
+  verify-record exists).
+- **Scope respect** — `loop-worker.R3.1` (write-scope adherence),
+  `loop-worker.R3.3` (loop-state.md untouched).
+- **Closeout discipline** — `iteration-close.R1.3` (no merge-back on
+  rejected self-review), `loop-worker.R3.4` (merge-back artifact
+  exists), `delegation-closeout.R4.1`–`R4.3` (history archive valid).
+- **Orchestration boundary** — `iteration-close.R1.8`, `loop-worker.R3.9`,
+  `orchestrator-handoff.R3.1`–`R3.3` (forbidden workflow-command
+  prevention; bundle/sentinel agreement).
+
+Records persisted but **excluded** from the v1 sub-score (deferred to
+R1.5.1 — see the [post-tool observation evaluation](#post-tool-observation-evaluation-r15-t1b)
+section below):
+
+- Soft advisories tied to unverified traces (`*.coverage-advisory`
+  rule_ids) — they record absence of evidence, not failure.
+- All `continuity_advice` records (`pre_compact`, per D4 — observational
+  only; deferred to R1.5.1 per t1b PR #97).
+- All `observe_tool_result` records (post-tool, per t1b PR #97 — the
+  four boundary criteria in R1.5 spec R3.2 did not all clear v1).
+
+The extractor enforces these exclusions in code
+(`filterScoredHookOutcomes` in `signal_hook_outcomes.go`): any future
+addition of a class to the sub-score is a deliberate edit, not silent
+inclusion.
+
+### 7. `token_efficiency` — Token & cache efficiency (weight 0.09)
 
 How efficiently the iteration used the model.
 
@@ -232,19 +297,25 @@ How efficiently the iteration used the model.
 
 ### Weight summary
 
-| Signal                | Weight | Kind        | Two-way |
-|-----------------------|-------:|-------------|:-------:|
-| `landed`              |   0.22 | correctness | yes     |
-| `verifier`            |   0.20 | correctness | yes     |
-| `tests`               |   0.18 | correctness | yes     |
-| `correction_pressure` |   0.15 | process     | no      |
-| `scope`               |   0.15 | process     | yes     |
-| `token_efficiency`    |   0.10 | efficiency  | no      |
-| **Total**             | **1.00** |           |         |
+| Signal                | Weight | Kind        | Two-way | Notes                                |
+|-----------------------|-------:|-------------|:-------:|--------------------------------------|
+| `landed`              |   0.20 | correctness | yes     |                                      |
+| `verifier`            |   0.18 | correctness | yes     |                                      |
+| `tests`               |   0.17 | correctness | yes     |                                      |
+| `correction_pressure` |   0.13 | process     | no      |                                      |
+| `scope`               |   0.13 | process     | yes     |                                      |
+| `hook_outcomes`       |   0.10 | process     | no      | added at 2.1.0 (R1.5); scores only `prevent_before_action` + `remediate_at_stop` — see [post-tool deferral](#post-tool-observation-evaluation-r15-t1b) |
+| `token_efficiency`    |   0.09 | efficiency  | no      |                                      |
+| **Total**             | **1.00** |          |         |                                      |
 
-Correctness signals total 0.60; process signals total 0.30; efficiency
-0.10. The weighting is deliberate: a run is scored first on whether it
-worked and landed.
+Correctness signals total 0.55; process signals total 0.36; efficiency
+0.09. The 2.0.2 → 2.1.0 rebalance preserves the correctness /
+process / efficiency shape: correctness still dominates (was 0.60,
+now 0.55), process grows by 0.06 to absorb the new objective hook
+signal (was 0.30, now 0.36 with `hook_outcomes` carrying 0.10),
+efficiency is trimmed by 0.01 (was 0.10, now 0.09) so its relative
+position is unchanged. The weighting is deliberate: a run is scored
+first on whether it worked and landed.
 
 ## Combination
 
@@ -284,35 +355,43 @@ A numeric score is also reported as a human-readable band:
 
 ## Worked examples
 
-**A clean iteration, no token telemetry.** Landed on master, verifier
-passed, tests passed, no corrections, scope on-target; the entry predates
-`session_tokens` and no backfill was possible, so `token_efficiency` is
-absent.
+**A clean iteration, no token telemetry, no hook activity.** Landed on
+master, verifier passed, tests passed, no corrections, scope on-target;
+the entry predates `session_tokens` and no backfill was possible, so
+`token_efficiency` is absent; no hook sentinel was active so
+`hook_outcomes` is absent too.
 
 | Signal                | Present | Sub-score | Weight | Eff. weight | Contribution |
 |-----------------------|---------|----------:|-------:|------------:|-------------:|
-| `landed`              | yes     | 1.00      | 0.22   | 0.244       | 0.244        |
-| `verifier`            | yes     | 1.00      | 0.20   | 0.222       | 0.222        |
-| `tests`               | yes     | 1.00      | 0.18   | 0.200       | 0.200        |
-| `correction_pressure` | yes     | 1.00      | 0.15   | 0.167       | 0.167        |
-| `scope`               | yes     | 1.00      | 0.15   | 0.167       | 0.167        |
-| `token_efficiency`    | no      | —         | 0.10   | —           | —            |
+| `landed`              | yes     | 1.00      | 0.20   | 0.247       | 0.247        |
+| `verifier`            | yes     | 1.00      | 0.18   | 0.222       | 0.222        |
+| `tests`               | yes     | 1.00      | 0.17   | 0.210       | 0.210        |
+| `correction_pressure` | yes     | 1.00      | 0.13   | 0.160       | 0.160        |
+| `scope`               | yes     | 1.00      | 0.13   | 0.160       | 0.160        |
+| `hook_outcomes`       | no      | —         | 0.10   | —           | —            |
+| `token_efficiency`    | no      | —         | 0.09   | —           | —            |
 
-Present weights sum to 0.90; `score = 0.90 / 0.90 = 1.00` → **excellent**.
+Present weights sum to 0.81; `score = 0.81 / 0.81 = 1.00` → **excellent**.
 
-**A struggling iteration.** Did not land, verifier failed, tests failed,
-three retries, scope partial, cache hit rate 0.60.
+**A struggling iteration with a remediation.** Did not land, verifier
+failed, tests failed, three retries, scope partial, cache hit rate 0.60,
+and the iteration-close gate remediated for a missing verification
+artifact (`iteration-close.R1.1` → result `remediate`).
 
 | Signal                | Present | Sub-score | Weight | Contribution |
 |-----------------------|---------|----------:|-------:|-------------:|
-| `landed`              | yes     | 0.00      | 0.22   | 0.000        |
-| `verifier`            | yes     | 0.00      | 0.20   | 0.000        |
-| `tests`               | yes     | 0.00      | 0.18   | 0.000        |
-| `correction_pressure` | yes     | 0.25      | 0.15   | 0.0375       |
-| `scope`               | yes     | 0.50      | 0.15   | 0.075        |
-| `token_efficiency`    | yes     | 0.60      | 0.10   | 0.060        |
+| `landed`              | yes     | 0.00      | 0.20   | 0.000        |
+| `verifier`            | yes     | 0.00      | 0.18   | 0.000        |
+| `tests`               | yes     | 0.00      | 0.17   | 0.000        |
+| `correction_pressure` | yes     | 0.25      | 0.13   | 0.0325       |
+| `scope`               | yes     | 0.50      | 0.13   | 0.065        |
+| `hook_outcomes`       | yes     | 0.00      | 0.10   | 0.000        |
+| `token_efficiency`    | yes     | 0.60      | 0.09   | 0.054        |
 
-All signals present (weights sum to 1.00); `score ≈ 0.173` → **poor**.
+All signals present (weights sum to 1.00); `score ≈ 0.152` → **poor**.
+The new `hook_outcomes = 0.00` row makes the gate remediation visible in
+the explainable breakdown without changing the overall band the existing
+correctness failures already earned.
 
 ## Data note
 
@@ -330,14 +409,16 @@ populated `commit` SHA, so a commit-timestamp window over the Claude
 on) session logs reconstructs token/cache telemetry the iteration log
 never recorded.
 
-## Hook-outcome sidecar retention (forward-looking, R1.5)
+## Hook-outcome sidecar retention (R1.5)
 
 The R1.5 plan (`r1-5-hook-enforcement-telemetry`) introduces a new
 per-iteration sidecar `.agents/active/iteration-log/iter-N.hook-outcomes.yaml`
-that the upcoming `hook_outcomes` signal extractor reads. The retention
-policy for these sidecars — locked in by the `t-archival-policy` task —
-is **indefinite retention, no automatic pruning**, mirroring R5's audit
-log policy (`specs/r5-review-labeling-access/design.md` D5.4).
+that the `hook_outcomes` signal extractor reads
+([`signal_hook_outcomes.go`](../internal/scoring/signal_hook_outcomes.go),
+shipped at RubricVersion 2.1.0). The retention policy for these sidecars
+— locked in by the `t-archival-policy` task — is **indefinite retention,
+no automatic pruning**, mirroring R5's audit log policy
+(`specs/r5-review-labeling-access/design.md` D5.4).
 
 The rule is identical to R5's reasoning applied to hook outcomes: a
 re-score under a future `RubricVersion` must read the original sidecar to
@@ -369,12 +450,12 @@ record at
 [`r1-5-hook-enforcement-telemetry/design.md`](../.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md)
 under "Q3 — Hook-outcome sidecar retention and archival policy".
 
-This section will be folded into the broader R1.5-driven doc delta by
-the `t-docs` task alongside the new signal spec, weight rebalance table,
-RubricVersion ordering policy, and approved-rule list. Until R1.5
-lands (RubricVersion 2.1.0 or 3.1.0 per the ordering decided at task
-time), this policy is a forward-looking contract only — no
-`iter-N.hook-outcomes.yaml` files yet exist under RubricVersion 2.0.2.
+The new-signal spec and weight rebalance table are documented in the
+[`hook_outcomes` section above](#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+and the [weight summary](#weight-summary). The RubricVersion ordering
+policy and the full approved-rule list are folded in by the `t2c-rubric-version-coordination`
+and `t-docs` tasks of the same plan; until those land, this section is
+authoritative on retention only.
 
 ## Post-tool observation evaluation (R1.5 T1b)
 
@@ -385,12 +466,16 @@ candidates, not gates) qualify as an objective signal feeding the
 upcoming `hook_outcomes` sub-score.
 
 **Decision: deferred to R1.5.1. Post-tool observation is NOT admitted
-to v1 scoring.** The `hook_outcomes` signal that R1.5 introduces is fed
-**only** by terminal-gate (`remediate_at_stop`) and pre-action
-(`prevent_before_action`) records; `pre_compact` continuity-advice
-records remain observational per the spec D4. The post-tool surface
-emits no `iter-N.hook-outcomes.yaml` records under v1 and contributes
-nothing to the sub-score.
+to v1 scoring.** The `hook_outcomes` signal shipped at RubricVersion
+2.1.0 is fed **only** by terminal-gate (`remediate_at_stop`) and
+pre-action (`prevent_before_action`) records; `pre_compact`
+continuity-advice records remain observational per the spec D4. The
+post-tool surface emits no `iter-N.hook-outcomes.yaml` records that
+score under v1 and contributes nothing to the sub-score. The deferral
+is enforced in code by `filterScoredHookOutcomes` in
+[`internal/scoring/signal_hook_outcomes.go`](../internal/scoring/signal_hook_outcomes.go),
+which drops both `continuity_advice` and `observe_tool_result` records
+before sub-score folding so a future schema addition cannot vote silently.
 
 The four boundary criteria the R1.5 spec R3.2 requires resolved
 **before** any post-tool observation can contribute to scoring did not
@@ -414,17 +499,31 @@ The full assessment (criteria, evidence, rejected alternatives, and
 the bounded R1.5.1 reopen path) lives in the plan-side decision record
 at
 [`.agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md`](../.agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md).
-This section, like the retention section above, will be folded into the
-broader R1.5-driven doc delta by the `t-docs` task when R1.5 ships
-under RubricVersion 2.1.0 or 3.1.0. Until then, this assessment is a
-forward-looking contract that constrains `t2-scoring-signal`: that
-task MUST implement the `hook_outcomes` signal without consuming
-post-tool records, and any later reopening MUST land the C1–C4 follow-up
-work documented in the assessment doc before a single post-tool record
-enters the sub-score.
+The shipped extractor (`signal_hook_outcomes.go` at RubricVersion 2.1.0)
+implements this deferral by construction; the next ship of post-tool
+observation MUST land the C1–C4 follow-up work documented in the
+assessment doc before a single post-tool record enters the sub-score —
+the code change required is a single new case in
+`filterScoredHookOutcomes` and a matching rubric-version bump.
 
 ## Changelog
 
+- **2.1.0** — Adds the `hook_outcomes` signal (weight 0.10, one-way) and
+  rebalances every other weight proportionally (`landed` 0.22→0.20,
+  `verifier` 0.20→0.18, `tests` 0.18→0.17, `correction_pressure`
+  0.15→0.13, `scope` 0.15→0.13, `token_efficiency` 0.10→0.09). Source is
+  the R1.5 per-iteration sidecar `iter-N.hook-outcomes.yaml` written by
+  `da workflow hook-outcome write` (PR #91). The signal scores only
+  `prevent_before_action` and `remediate_at_stop` records per t1b PR #97;
+  `continuity_advice` (pre_compact) and `observe_tool_result` (post-tool)
+  remain in the sidecar as audit-only observations and are deferred to
+  R1.5.1 — see the [post-tool observation evaluation](#post-tool-observation-evaluation-r15-t1b)
+  section. Pre-action and terminal-remediation records sharing the same
+  `(correlation_id, rule_id)` collapse to one record at the more severe
+  result per R1.5 design D4. Combination method unchanged
+  (`weighted_mean_renormalized`); existing signal IDs are stable; the
+  Go `SignalSet` struct gains a `HookOutcomes` field and `SignalSet.Value`
+  gains a new switch arm — minor bump per the policy.
 - **2.0.2** — Documents the structured-claims layer: the
   `tests_added_by_kind` and `linked_traces` named-list fields replacing
   two rubber-stamped booleans, and the schema deprecation of two more

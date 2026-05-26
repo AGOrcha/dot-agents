@@ -65,7 +65,7 @@ func TestRunScoreRunWritesSidecarsAndRenders(t *testing.T) {
 		t.Fatalf("runScoreRun: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"Outcome scoring", "rubric 2.0.2", "Iterations: 1", "Wrote 1 iter sidecars"} {
+	for _, want := range []string{"Outcome scoring", "rubric 2.1.0", "Iterations: 1", "Wrote 1 iter sidecars"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
