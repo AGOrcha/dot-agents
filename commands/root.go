@@ -5,8 +5,61 @@ import (
 	"os"
 	"strings"
 
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+	"github.com/NikashPrakash/dot-agents/commands/mcp"
+	"github.com/NikashPrakash/dot-agents/commands/rules"
+	"github.com/NikashPrakash/dot-agents/commands/settings"
 	"github.com/spf13/cobra"
 )
+
+// rootMCPDeps builds the mcp.Deps passed to mcp.NewCmd. Inlined here after
+// t13a deleted commands/mcp.go's mcpCommandDeps helper.
+func rootMCPDeps() mcp.Deps {
+	return mcp.Deps{
+		Flags: cmdutil.CanonicalCmdFlags{
+			DryRun: Flags.DryRun,
+			Yes:    Flags.Yes,
+			Force:  Flags.Force,
+		},
+		MaxArgsWithHints:   MaximumNArgsWithHints,
+		ExactArgsWithHints: ExactArgsWithHints,
+		ErrorWithHints:     ErrorWithHints,
+		UsageError:         UsageError,
+	}
+}
+
+// rootSettingsDeps builds the settings.Deps passed to settings.NewCmd.
+// Inlined here after t13a deleted commands/settings.go's
+// settingsCommandDeps + toSettingsSubpackageDeps helpers.
+func rootSettingsDeps() settings.Deps {
+	return settings.Deps{
+		Flags: settings.GlobalFlags{
+			DryRun: Flags.DryRun,
+			Yes:    Flags.Yes,
+			Force:  Flags.Force,
+		},
+		ErrorWithHints:        ErrorWithHints,
+		UsageError:            UsageError,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		ExactArgsWithHints:    ExactArgsWithHints,
+	}
+}
+
+// rootRulesDeps builds the rules.Deps passed to rules.NewRulesCmd. Inlined
+// here after t13a deleted commands/rules.go's rulesCommandDeps helper.
+func rootRulesDeps() rules.Deps {
+	return rules.Deps{
+		Flags: rules.GlobalFlags{
+			DryRun: Flags.DryRun,
+			Yes:    Flags.Yes,
+			Force:  Flags.Force,
+		},
+		ErrorWithHints:        ErrorWithHints,
+		UsageError:            UsageError,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		ExactArgsWithHints:    ExactArgsWithHints,
+	}
+}
 
 // NewRootCommand builds the root cobra command with persistent global flags and all
 // subcommands. It mirrors cmd/dot-agents/main.go so tooling (e.g. global flag coverage)
@@ -52,9 +105,9 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewSkillsCmd())
 	root.AddCommand(NewAgentsCmd())
 	root.AddCommand(NewHooksCmd())
-	root.AddCommand(NewRulesCmd())
-	root.AddCommand(NewMCPCmd())
-	root.AddCommand(NewSettingsCmd())
+	root.AddCommand(rules.NewRulesCmd(rootRulesDeps()))
+	root.AddCommand(mcp.NewCmd(rootMCPDeps()))
+	root.AddCommand(settings.NewCmd(rootSettingsDeps()))
 	root.AddCommand(NewReviewCmd())
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())
