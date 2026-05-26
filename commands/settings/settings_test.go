@@ -180,3 +180,68 @@ func TestRunSettingsRemove_Force_DeletesFile(t *testing.T) {
 		t.Fatalf("expected file removed; stat err = %v", err)
 	}
 }
+
+// TestSettingsErrorWithHints_FallbackUnwired covers the no-Deps path through
+// settingsErrorWithHints: when Deps.ErrorWithHints is nil, the helper must
+// degrade to fmt.Errorf, with and without a hint payload. Both branches were
+// uncovered by the existing tests (which always wire stubDeps) and pulled the
+// file below the 95% per-file gate.
+func TestSettingsErrorWithHints_FallbackUnwired(t *testing.T) {
+	t.Run("no_hints", func(t *testing.T) {
+		err := settingsErrorWithHints(Deps{}, "boom")
+		if err == nil || err.Error() != "boom" {
+			t.Fatalf("expected plain message, got %v", err)
+		}
+	})
+	t.Run("with_hints", func(t *testing.T) {
+		err := settingsErrorWithHints(Deps{}, "boom", "first hint", "second hint")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "first hint") {
+			t.Fatalf("expected message+first hint, got %v", err)
+		}
+	})
+}
+
+// TestSettingsUsageError_FallbackUnwired mirrors the above for the usage-error
+// helper: when Deps.UsageError is nil, returns a plain fmt.Errorf (with or
+// without hint).
+func TestSettingsUsageError_FallbackUnwired(t *testing.T) {
+	t.Run("no_hints", func(t *testing.T) {
+		err := settingsUsageError(Deps{}, "bad usage")
+		if err == nil || err.Error() != "bad usage" {
+			t.Fatalf("expected plain message, got %v", err)
+		}
+	})
+	t.Run("with_hints", func(t *testing.T) {
+		err := settingsUsageError(Deps{}, "bad usage", "try --help")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "bad usage") || !strings.Contains(err.Error(), "try --help") {
+			t.Fatalf("expected message+hint, got %v", err)
+		}
+	})
+}
+
+// TestFindSettingsSpec_EmptyName_FallbackUnwired confirms the empty-name
+// branch of findSettingsSpec degrades cleanly when Deps carries no helpers —
+// this is the only caller of settingsUsageError today, so the fallback path
+// must be reachable end-to-end.
+func TestFindSettingsSpec_EmptyName_FallbackUnwired(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	_, err := findSettingsSpec(Deps{}, agentsHome, "global", "   ")
+	if err == nil {
+		t.Fatal("expected error for empty/whitespace name")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected 'empty' in error, got %v", err)
+	}
+}
