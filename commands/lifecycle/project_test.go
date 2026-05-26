@@ -49,16 +49,13 @@ func TestImportOutput_FieldsAssign(t *testing.T) {
 // The default CanonicalImportOutputs (when commands/import.go's init
 // has not run, e.g. in a pure lifecycle test binary) returns
 // (nil, false, nil) so callers know to fall back to legacy restore.
+//
+// This test exercises the LITERAL default closure declared in
+// project.go (line 40). The lifecycle test binary does not import
+// commands/, so the package-level var keeps its declared default —
+// invoking CanonicalImportOutputs directly (without replacing it) hits
+// that closure and produces the coverage stmt the file needs.
 func TestCanonicalImportOutputs_DefaultIsNotHandled(t *testing.T) {
-	// Save and restore the package-level seam so other tests are
-	// unaffected (this test only verifies the default shape).
-	saved := CanonicalImportOutputs
-	defer func() { CanonicalImportOutputs = saved }()
-
-	CanonicalImportOutputs = func(c ImportCandidate) ([]ImportOutput, bool, error) {
-		return nil, false, nil
-	}
-
 	outputs, ok, err := CanonicalImportOutputs(ImportCandidate{Project: "p"})
 	if err != nil {
 		t.Fatalf("default seam should not error: %v", err)

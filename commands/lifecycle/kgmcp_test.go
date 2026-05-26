@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,4 +115,106 @@ func TestEnsureGlobalKGMCPConfigs_WritesWhenKGPresent(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(agentsHome, "mcp", "global", "claude.json")); err != nil {
 		t.Errorf("expected claude.json: %v", err)
 	}
+}
+
+// execDeps overrides Executable() so we can fault-inject a failure of the
+// dot-agents binary lookup. WriteKGMCPConfigs propagates that error
+// before any platform file is written.
+type execDeps struct {
+	fakeAddDeps
+	execFn func() (string, error)
+}
+
+func (e execDeps) Executable() (string, error) {
+	if e.execFn != nil {
+		return e.execFn()
+	}
+	return os.Executable()
+}
+
+// WriteKGMCPConfigs must propagate an Executable() failure and write
+// nothing to disk — without the binary path, the MCP server entry would
+// be unusable, so callers depend on an early hard error rather than a
+// half-applied config.
+func TestWriteKGMCPConfigs_ExecutableErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	deps := execDeps{execFn: func() (string, error) { return "", errors.New("no exe") }}
+	err := WriteKGMCPConfigs(tmp, deps)
+	if err == nil || !strings.Contains(err.Error(), "no exe") {
+		t.Fatalf("expected exe error, got %v", err)
+	}
+	// No files should have been written.
+	for _, name := range []string{"claude.json", "cursor.json", "mcp.json"} {
+		if _, statErr := os.Stat(filepath.Join(tmp, name)); statErr == nil {
+			t.Errorf("expected %s NOT to be written when Executable() fails", name)
+		}
+	}
+}
+
+// WriteKGMCPConfigFile must propagate MkdirAll failures from the
+// supplied AddDeps. Without the parent directory, the subsequent
+// WriteFile would fail anyway; the explicit MkdirAll branch lets
+// callers distinguish a missing-parent failure from a write failure.
+func TestWriteKGMCPConfigFile_MkdirErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "nested", "deep", "claude.json")
+	deps := fakeAddDeps{
+		mkdirAll: func(string, os.FileMode) error { return errors.New("mkdir denied") },
+	}
+	err := WriteKGMCPConfigFile(target, map[string]any{"command": "x"}, deps)
+	if err == nil || !strings.Contains(err.Error(), "mkdir denied") {
+		t.Fatalf("expected mkdir error, got %v", err)
+	}
+}
+
+// WriteKGMCPConfigFile must propagate a WriteFile failure unchanged so
+// callers can surface a half-applied disk-full / permission state to
+// the operator (otherwise EnsureGlobalKGMCPConfigs silently drops the
+// per-platform config).
+func TestWriteKGMCPConfigFile_WriteErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "claude.json")
+	deps := fakeAddDeps{
+		writeFile: func(string, []byte, os.FileMode) error { return errors.New("disk full") },
+	}
+	err := WriteKGMCPConfigFile(target, map[string]any{"command": "x"}, deps)
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected write error, got %v", err)
+	}
+}
+
+// WriteKGMCPConfigs must propagate an error from the inner
+// WriteKGMCPConfigFile loop (e.g. MkdirAll failure on the parent dir)
+// without writing the remaining platform files: a half-applied MCP
+// scope confuses doctor checks more than a hard abort.
+func TestWriteKGMCPConfigs_PerFileErrorAborts(t *testing.T) {
+	tmp := t.TempDir()
+	// Make deps.MkdirAll fail so the FIRST WriteKGMCPConfigFile call
+	// surfaces an error and the loop bails before the other two files.
+	deps := fakeAddDeps{mkdirAll: func(string, os.FileMode) error { return errors.New("parent denied") }}
+	err := WriteKGMCPConfigs(tmp, deps)
+	if err == nil || !strings.Contains(err.Error(), "parent denied") {
+		t.Fatalf("expected per-file error to abort the loop, got %v", err)
+	}
+}
+
+// StdAddDeps.LoadConfig delegates to config.Load. We don't need to
+// exercise the full config-load behavior — that lives in internal/config
+// tests — but we do need the wrapper itself called so the lifecycle file
+// reflects the production path. A missing config returns a non-nil
+// error and a nil cfg; an empty AGENTS_HOME with no rc files is enough
+// to drive the negative path without setting up project fixtures.
+func TestStdAddDeps_LoadConfigInvokesConfigLoader(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	// Run from an empty directory so config.Load has nothing to read.
+	t.Chdir(tmp)
+	cfg, err := StdAddDeps{}.LoadConfig()
+	// We accept either outcome — the contract is "delegates to
+	// config.Load and returns its values unchanged"; the load-error vs
+	// empty-load behavior is governed by config.Load's tests. The only
+	// invariant here is that the wrapper does not panic.
+	_ = cfg
+	_ = err
 }

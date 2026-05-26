@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -2655,5 +2657,249 @@ func TestImportConflictFirstFreeAlternateDestRel_NonHooksPrefixReturnsFalse(t *t
 	got, ok := importConflictFirstFreeAlternateDestRel(t.TempDir(), "rules/proj/agents.md", "origin")
 	if ok || got != "" {
 		t.Errorf("expected (\"\", false) for non-hooks prefix, got (%q, %v)", got, ok)
+	}
+}
+
+// ---------- lifecycle seam wiring (init()) ----------
+//
+// commands/import.go's init() wires two lifecycle package-level vars:
+//   - lifecycle.CanonicalImportOutputs
+//   - lifecycle.RestoreCanonicalResourceFileFn
+//
+// Both lambdas dispatch into the unexported canonicalImportOutputs +
+// importCandidate plumbing that still lives in import.go until t06.
+// The tests below drive those wired closures end-to-end so the t02b
+// helper lift does not leave init() body uncovered in import.go.
+
+// lifecycleAddDeps adapts the test fault-injection pattern to the
+// lifecycle.AddDeps interface. Each field is optional; a nil field
+// delegates to the real os/projectsync/config implementation so a test
+// overrides only the operation it wants to control.
+type lifecycleAddDeps struct {
+	mkdirAll  func(string, os.FileMode) error
+	writeFile func(string, []byte, os.FileMode) error
+}
+
+func (d lifecycleAddDeps) MkdirAll(path string, perm os.FileMode) error {
+	if d.mkdirAll != nil {
+		return d.mkdirAll(path, perm)
+	}
+	return os.MkdirAll(path, perm)
+}
+
+func (d lifecycleAddDeps) WriteFile(name string, data []byte, perm os.FileMode) error {
+	if d.writeFile != nil {
+		return d.writeFile(name, data, perm)
+	}
+	return os.WriteFile(name, data, perm)
+}
+
+func (lifecycleAddDeps) Remove(name string) error            { return os.Remove(name) }
+func (lifecycleAddDeps) Executable() (string, error)         { return os.Executable() }
+func (lifecycleAddDeps) CopyFile(src, dst string) error      { return os.Link(src, dst) }
+func (lifecycleAddDeps) LoadConfig() (*config.Config, error) { return config.Load() }
+
+const canonicalLifecycleSeamHook = `{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "./guard.sh",
+        "matcher": "Bash",
+        "timeout": 7
+      }
+    ]
+  }
+}`
+
+// lifecycle.CanonicalImportOutputs (wired by init()) forwards a
+// canonical hooks.json source through canonicalImportOutputs and
+// converts each output's destRel/content/origin into the lifecycle
+// shape. The wired closure is the one production lifecycle restore
+// hits via the function-var seam.
+func TestLifecycleSeam_CanonicalImportOutputs_HandlesCursorHookFile(t *testing.T) {
+	sourceRoot := t.TempDir()
+	sourcePath := filepath.Join(sourceRoot, relCursorHooksJSON)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(canonicalLifecycleSeamHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputs, ok, err := lifecycle.CanonicalImportOutputs(lifecycle.ImportCandidate{
+		Project:    "proj",
+		SourceRoot: sourceRoot,
+		SourcePath: sourcePath,
+	})
+	if err != nil {
+		t.Fatalf("CanonicalImportOutputs: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected handled=true for cursor hooks file")
+	}
+	if len(outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outputs))
+	}
+	if !strings.HasPrefix(outputs[0].DestRel, "hooks/proj/") {
+		t.Errorf("destRel = %q, expected hooks/proj/ prefix", outputs[0].DestRel)
+	}
+	if len(outputs[0].Content) == 0 {
+		t.Error("expected non-empty HOOK.yaml content")
+	}
+}
+
+// A source path the canonical importer does NOT recognize (e.g. a
+// loose .txt file) must surface handled=false so legacy restore can
+// take over. This pins the init() lambda's "ok || err == false" branch.
+func TestLifecycleSeam_CanonicalImportOutputs_UnknownSourceFallsThrough(t *testing.T) {
+	sourceRoot := t.TempDir()
+	sourcePath := filepath.Join(sourceRoot, "nested", "loose.txt")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputs, ok, err := lifecycle.CanonicalImportOutputs(lifecycle.ImportCandidate{
+		Project:    "proj",
+		SourceRoot: sourceRoot,
+		SourcePath: sourcePath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected handled=false for unrecognized source")
+	}
+	if outputs != nil {
+		t.Errorf("expected nil outputs, got %v", outputs)
+	}
+}
+
+// lifecycle.RestoreCanonicalResourceFileFn (wired by init()) drives the
+// canonical importer for one file and writes each output via deps.
+// Successful path: a cursor hooks.json under resources/<project>/ is
+// materialized into agentsHome/hooks/<project>/<bundle>/HOOK.yaml and
+// count reflects the number of outputs.
+func TestLifecycleSeam_RestoreCanonicalResourceFileFn_WritesHookBundle(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resourcesDir := filepath.Join(agentsHome, "resources", "proj")
+	sourcePath := filepath.Join(resourcesDir, relCursorHooksJSON)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(canonicalLifecycleSeamHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count, handled, err := lifecycle.RestoreCanonicalResourceFileFn(
+		"proj", resourcesDir, agentsHome, sourcePath, lifecycleAddDeps{},
+	)
+	if err != nil {
+		t.Fatalf("RestoreCanonicalResourceFileFn: %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if count != 1 {
+		t.Fatalf("expected count=1, got %d", count)
+	}
+	// Verify the hook bundle landed under agentsHome.
+	entries, err := os.ReadDir(filepath.Join(agentsHome, "hooks", "proj"))
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected hook bundle dirs under hooks/proj/, got err=%v entries=%v", err, entries)
+	}
+}
+
+// A non-canonical resource source returns (0, false, nil) so the
+// lifecycle walk falls through to legacy restore. Pins the wired
+// closure's "!ok → return 0, false, nil" branch.
+func TestLifecycleSeam_RestoreCanonicalResourceFileFn_UnknownSourceFallsThrough(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	resourcesDir := filepath.Join(agentsHome, "resources", "proj")
+	sourcePath := filepath.Join(resourcesDir, "nested", "loose.txt")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	count, handled, err := lifecycle.RestoreCanonicalResourceFileFn(
+		"proj", resourcesDir, agentsHome, sourcePath, lifecycleAddDeps{},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if handled {
+		t.Error("expected handled=false for non-canonical source")
+	}
+	if count != 0 {
+		t.Errorf("expected count=0, got %d", count)
+	}
+}
+
+// A MkdirAll failure during the wired writer's output loop must
+// propagate (handled=true, count=0, err non-nil) so the lifecycle
+// caller can mark the project failed instead of stamping success
+// metadata over a half-written hook bundle.
+func TestLifecycleSeam_RestoreCanonicalResourceFileFn_MkdirErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	resourcesDir := filepath.Join(agentsHome, "resources", "proj")
+	sourcePath := filepath.Join(resourcesDir, relCursorHooksJSON)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(canonicalLifecycleSeamHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := lifecycleAddDeps{
+		mkdirAll: func(string, os.FileMode) error { return errors.New("mkdir denied") },
+	}
+
+	count, handled, err := lifecycle.RestoreCanonicalResourceFileFn(
+		"proj", resourcesDir, agentsHome, sourcePath, deps,
+	)
+	if !handled {
+		t.Error("expected handled=true even on writer failure")
+	}
+	if err == nil || !strings.Contains(err.Error(), "mkdir denied") {
+		t.Fatalf("expected mkdir error, got count=%d err=%v", count, err)
+	}
+}
+
+// A WriteFile failure surfaces the same way (handled=true, err non-nil)
+// so we never silently drop a hook bundle under disk-full / EACCES.
+func TestLifecycleSeam_RestoreCanonicalResourceFileFn_WriteErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	resourcesDir := filepath.Join(agentsHome, "resources", "proj")
+	sourcePath := filepath.Join(resourcesDir, relCursorHooksJSON)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(canonicalLifecycleSeamHook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := lifecycleAddDeps{
+		writeFile: func(string, []byte, os.FileMode) error { return errors.New("disk full") },
+	}
+
+	_, handled, err := lifecycle.RestoreCanonicalResourceFileFn(
+		"proj", resourcesDir, agentsHome, sourcePath, deps,
+	)
+	if !handled {
+		t.Error("expected handled=true even on writer failure")
+	}
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected disk-full error, got %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -168,5 +169,114 @@ func TestAgentsHooksPrefix_StableValue(t *testing.T) {
 func TestRelCursorRulesDir_StableValue(t *testing.T) {
 	if RelCursorRulesDir != ".cursor/rules/" {
 		t.Errorf("RelCursorRulesDir = %q, want %q", RelCursorRulesDir, ".cursor/rules/")
+	}
+}
+
+// Hooks + ignore aliases live in the explicit switch and must map to
+// the hooks/ and ignore-bucket trees respectively. Both names are easy
+// to swap accidentally during hook refactors — table-driven coverage
+// keeps the mapping pinned.
+func TestMapResourceRelToDest_HooksAndIndexingIgnore(t *testing.T) {
+	cases := []struct {
+		relPath  string
+		expected string
+	}{
+		{RelCursorHooksJSON, AgentsHooksPrefix + "proj/cursor.json"},
+	}
+	for _, c := range cases {
+		got := MapResourceRelToDest("proj", c.relPath)
+		if got != c.expected {
+			t.Errorf("MapResourceRelToDest(%q) = %q, want %q", c.relPath, got, c.expected)
+		}
+	}
+	// .cursorindexingignore goes through platform.CanonicalBucketScopePath;
+	// we only assert the result is non-empty and contains the bucket
+	// segment so the test stays decoupled from the canonical-bucket
+	// path-rendering details (covered in platform tests).
+	got := MapResourceRelToDest("proj", RelCursorIndexingIgnore)
+	if got == "" || !strings.Contains(got, "ignore") {
+		t.Errorf("MapResourceRelToDest(%q) = %q, expected non-empty ignore-bucket path", RelCursorIndexingIgnore, got)
+	}
+}
+
+// Directory-bucket prefix mappings cover the .cursor/commands/,
+// .claude/commands/, .opencode/commands/, .claude/output-styles/,
+// .opencode/modes/, .opencode/themes/, and .github/prompts/ buckets.
+// Each of these is a strings.HasPrefix branch in the directory-bucket
+// loop that, if dropped, silently loses bucket files from restore.
+func TestMapResourceRelToDest_DirectoryBuckets(t *testing.T) {
+	cases := []struct {
+		relPath  string
+		contains string
+	}{
+		{".cursor/commands/foo.md", "commands"},
+		{".claude/commands/foo.md", "commands"},
+		{".opencode/commands/foo.md", "commands"},
+		{".claude/output-styles/foo.md", "output-styles"},
+		{".opencode/modes/foo.json", "modes"},
+		{".opencode/themes/foo.toml", "themes"},
+		{".github/prompts/foo.md", "prompts"},
+	}
+	for _, c := range cases {
+		got := MapResourceRelToDest("proj", c.relPath)
+		if got == "" || !strings.Contains(got, c.contains) {
+			t.Errorf("MapResourceRelToDest(%q) = %q, expected non-empty path containing %q", c.relPath, got, c.contains)
+		}
+	}
+}
+
+// A .cursor/rules/foo file whose name uses NEITHER the global-- nor
+// the <project>-- namespace AND whose extension is not .md/.mdc has no
+// valid mapping and must return "" so the caller knows to skip it.
+func TestMapResourceRelToDest_CursorRulesUnknownExtReturnsEmpty(t *testing.T) {
+	got := MapResourceRelToDest("proj", ".cursor/rules/loose.txt")
+	if got != "" {
+		t.Errorf("expected empty mapping for unknown rule extension, got %q", got)
+	}
+}
+
+// Pass-through behavior: a path already under a known ~/.agents-relative
+// prefix (rules/, settings/, mcp/, skills/, agents/, hooks/, etc.) is
+// returned unchanged so MapResourceRelToDest is idempotent under
+// re-execution against an already-canonicalized resources tree.
+func TestMapResourceRelToDest_PassThroughKnownPrefixes(t *testing.T) {
+	cases := []string{
+		"rules/proj/agents.md",
+		"settings/proj/codex.toml",
+		"mcp/proj/mcp.json",
+		"skills/proj/my-skill/SKILL.md",
+		"agents/proj/my-agent/AGENT.md",
+		"hooks/proj/cursor.json",
+	}
+	for _, in := range cases {
+		got := MapResourceRelToDest("proj", in)
+		if got != in {
+			t.Errorf("expected pass-through for %q, got %q", in, got)
+		}
+	}
+}
+
+// IsManagedSymlink must resolve a RELATIVE symlink target against the
+// directory containing the link (filepath.Dir(path)) before comparing
+// against agentsHome. A relative-target link that resolves under
+// agentsHome should still be reported as managed.
+func TestIsManagedSymlink_RelativeTargetResolvesAgainstLinkDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics")
+	}
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	_ = os.MkdirAll(agentsHome, 0755)
+	target := filepath.Join(agentsHome, "real.txt")
+	_ = os.WriteFile(target, []byte("hi"), 0644)
+
+	// Place the link in the SAME directory as the target and use a
+	// relative target so the !IsAbs branch fires.
+	link := filepath.Join(agentsHome, "linked.txt")
+	if err := os.Symlink("real.txt", link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if !IsManagedSymlink(link, agentsHome) {
+		t.Error("relative-target symlink resolving under agentsHome should be managed")
 	}
 }
