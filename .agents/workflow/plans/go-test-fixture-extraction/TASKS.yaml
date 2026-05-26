@@ -468,7 +468,7 @@ tasks:
       app_type: code-fix
     - id: t6c-graphstore-tests-storetest-migrate
       title: Migrate sqlite_test.go + postgres_test.go onto extended storetest runners
-      status: pending
+      status: in_progress
       depends_on:
         - t6b-extend-storetest
       blocks:
@@ -536,3 +536,86 @@ tasks:
           output contract: history dir populated; ADR-0008 linked
                            from PR description
       app_type: workflow
+
+    - id: t3b-relocate-platform-coverage-gap-tests
+      title: Relocate internal/platform/coverage_gap*_test.go into topic-named test files
+      status: pending
+      depends_on:
+        - t3-extract-platform-tests
+      blocks:
+        - t8-archive
+      owner: dot-agents
+      write_scope:
+        - internal/platform/coverage_gap_test.go
+        - internal/platform/coverage_gap2_test.go
+        - internal/platform/coverage_gap3_test.go
+        - internal/platform/coverage_gap4_test.go
+        - internal/platform/coverage_gap5_test.go
+        - internal/platform/plugins_test.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - internal/platform/resource_plan_test.go
+        - internal/platform/hooks_test.go
+        - internal/platform/mcp_settings_test.go
+        - internal/platform/rules_test.go
+      verification_required: true
+      notes: |-
+        Follow-up surfaced by p1b fold-back
+        (.agents/active/fold-back/p1b-coverage-gap-test-pins-deprecated-fall-throughs.md):
+        the original fixture-extraction sweep banned non-descriptive
+        test filenames and was supposed to relocate the
+        coverage_gap*_test.go quintet into topic-named files. t3
+        only ported resource_plan / mcp_settings / rules tests; the
+        five coverage_gap files (~4,476 lines, 210 tests total)
+        were missed.
+
+        Surface:
+          coverage_gap_test.go   - 2149 lines, 104 tests - broad: CLI
+                                   version probes via fake PATH, session-
+                                   file resolvers, hook-rendered fanout
+                                   removals, dead-code helpers.
+          coverage_gap2_test.go  -  721 lines,  29 tests - plugin scope,
+                                   cursor SQLite stats, ResourceIntent
+                                   enum validation, CreateLinks branches.
+          coverage_gap3_test.go  -  671 lines,  38 tests - detector
+                                   errors, remove-helper missing-file
+                                   branches, per-platform CreateLinks
+                                   leftovers.
+          coverage_gap4_test.go  -  207 lines,   5 tests - one
+                                   "everything wired" CreateLinks +
+                                   shared-target + RemoveLinks fixture.
+          coverage_gap5_test.go  -  728 lines,  34 tests - pre-existing-
+                                   symlink, CLAUDE.md, legacy hook
+                                   fixtures, repeat-run branches.
+
+        Destination map (file-by-file commits encouraged):
+          plugin tests           -> plugins_test.go
+          cursor SQLite/stats    -> cursor_test.go
+          claude branches        -> claude_test.go
+          codex branches         -> codex_test.go
+          copilot branches       -> copilot_test.go
+          opencode branches      -> opencode_test.go
+          ResourceIntent enum    -> resource_plan_test.go (existing)
+          hook fanout removal    -> hooks_test.go (existing)
+          mcp branches           -> mcp_settings_test.go (existing)
+          rules branches         -> rules_test.go (existing)
+
+        Per-test placement is judgment - keep related tests
+        adjacent (e.g. all plugin tests in one block) rather
+        than literally per-test. Where no clean home exists,
+        create a new topic file rather than retain coverage_gap*.
+
+        Hard gate per commit: go test ./internal/platform -race
+        -count=1 green; coverage stays above 95% on per-file gate
+        (do NOT allowlist per [[no-lazy-allowlist-tech-debt]];
+        relocations don't change line counts, only file placement).
+        Delete all 5 source files at the end (empty source = delete).
+
+        Anti-scope: do not modify any production file in
+        internal/platform/ - this is a pure test-file move. If a
+        test reveals a prod bug or seam need, fold back rather
+        than fix in this PR.
+      app_type: code-fix
