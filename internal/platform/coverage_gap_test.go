@@ -637,9 +637,12 @@ func TestRenderCodexHookConfig_RequiredUnrepresentableErrors(t *testing.T) {
 }
 
 func TestRenderCursorHookConfig_RequiredUnrepresentableErrors(t *testing.T) {
+	// P1b note: post_tool_use is now representable on cursor (R6.3); use
+	// error_occurred which p1b scopes to copilot only, so it remains
+	// unrepresentable on cursor and exercises the same fall-through path.
 	specs := []HookSpec{{
 		Name:       "x",
-		When:       "post_tool_use", // not in cursor switch
+		When:       "error_occurred", // not in cursor switch
 		Command:    "/bin/true",
 		RequiredOn: []string{"cursor"},
 	}}
@@ -649,9 +652,12 @@ func TestRenderCursorHookConfig_RequiredUnrepresentableErrors(t *testing.T) {
 }
 
 func TestRenderCopilotHookFile_RequiredUnrepresentableErrors(t *testing.T) {
+	// P1b note: post_tool_use is now representable on copilot (R6.2); use
+	// a canonical When value that no platform mapper handles to exercise
+	// the same fall-through path.
 	_, _, _, err := renderCopilotHookFile(HookSpec{
 		Name:       "x",
-		When:       "post_tool_use", // not in copilot switch
+		When:       "no_such_canonical_event", // not in copilot switch
 		Command:    "/bin/true",
 		RequiredOn: []string{"copilot"},
 	})
