@@ -106,3 +106,61 @@ func TestFindMCPSpec_NotFoundFallbackWithoutDeps(t *testing.T) {
 		t.Errorf("error = %q; want the not-found message", err.Error())
 	}
 }
+
+// TestFindMCPSpec_EmptyNameRoutesThroughUsageError covers the
+// deps.UsageError seam: when the parent supplies a UsageError
+// constructor, findMCPSpec must route the empty-name failure through it
+// (carrying a hint that points users at `da mcp list`). Mirrors the
+// ErrorWithHints test above but exercises the usage-error branch the
+// parent commands.UsageError helper backs in production.
+func TestFindMCPSpec_EmptyNameRoutesThroughUsageError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	deps := Deps{
+		UsageError: func(message string, hints ...string) error {
+			return &hintBearingError{Message: message, Hints: hints}
+		},
+	}
+	_, err := findMCPSpec(deps, agentsHome, "global", "")
+	if err == nil {
+		t.Fatal("expected empty-name usage error")
+	}
+	var hintErr *hintBearingError
+	if !errors.As(err, &hintErr) {
+		t.Fatalf("expected *hintBearingError, got %T", err)
+	}
+	if !strings.Contains(hintErr.Message, "empty") {
+		t.Errorf("missing empty hint in message: %q", hintErr.Message)
+	}
+	if !strings.Contains(strings.Join(hintErr.Hints, " "), "da mcp list") {
+		t.Errorf("missing hint pointing at `da mcp list`: %v", hintErr.Hints)
+	}
+}
+
+// TestFormatFallback_NoHints covers the len(hints) == 0 branch of
+// formatFallback. Neither callsite in this package invokes the helper
+// without hints today, but the branch is reachable via direct call and
+// future seam consumers may pass an empty variadic. Locking it in keeps
+// per-file coverage at 100% and documents the fmt.Errorf shape.
+func TestFormatFallback_NoHints(t *testing.T) {
+	err := formatFallback("bare message", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "bare message" {
+		t.Errorf("error = %q; want \"bare message\"", err.Error())
+	}
+
+	err = formatFallback("with hint", []string{"first hint"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "first hint") {
+		t.Errorf("error = %q; want hint in message", err.Error())
+	}
+}
