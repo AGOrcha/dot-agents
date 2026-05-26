@@ -898,7 +898,7 @@ tasks:
       app_type: code-fix
     - id: t13a-pre-lifecycle-constructors
       title: 'Precursor for t13b: land lifecycle.NewInitCmd + absorb syncLifecycleGlobals into Deps threading'
-      status: pending
+      status: in_progress
       depends_on:
         - t13a-strip-resource-subpackage-shims
       blocks:
@@ -972,6 +972,7 @@ tasks:
       status: pending
       depends_on:
         - t13a-strip-resource-subpackage-shims
+        - t13a-pre-lifecycle-constructors
       blocks:
         - t14-import-graph-assertion
       owner: dot-agents
@@ -982,15 +983,11 @@ tasks:
         - commands/init.go
         - commands/status.go
         - commands/seams_test.go
-        - commands/add_test.go
+        - commands/install_test.go
         - commands/doctor_test.go
         - commands/init_test.go
-        - commands/install_test.go
-        - commands/refresh_test.go
-        - commands/refresh_idempotency_test.go
-        - commands/remove_test.go
-        - commands/import_test.go
-        - commands/review_test.go
+        - commands/coverage_test.go
+        - commands/status_test.go
       verification_required: true
       notes: |-
         Second half of t13 split per worker fold-back
