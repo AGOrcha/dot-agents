@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/commands/mcp"
 	"github.com/NikashPrakash/dot-agents/commands/rules"
 	"github.com/NikashPrakash/dot-agents/commands/settings"
@@ -61,6 +62,53 @@ func rootRulesDeps() rules.Deps {
 	}
 }
 
+// buildLifecycleDeps builds the lifecycle.Deps passed to lifecycle.NewInstallCmd /
+// NewDoctorCmd / NewInitCmd / NewStatusCmd. Inlined here after t13b deleted the
+// per-command shim files (install.go/doctor.go/init.go/status.go) along with
+// their lifecycleDeps / lifecycleDoctorDeps / lifecycleStatusDeps helpers.
+//
+// FlagsFn is a closure (not a value snapshot) so applyDepsToGlobals — invoked
+// by NewInstallCmd / NewDoctorCmd / NewInitCmd's RunE wrapper — observes
+// commands.Flags at RunE time (cobra parses persistent flags AFTER the
+// constructor returns, so a value snapshot taken at construction would be
+// stale). NewStatusCmd does not call applyDepsToGlobals — its moved helpers
+// do not read the lifecycle package globals — but receiving the same Deps
+// shape keeps the per-constructor wiring uniform.
+//
+// Version/Commit/Describe carry build-info into the install pipeline's
+// finalizeInstall helper. RunRefresh is intentionally nil here: only
+// lifecycle.NewRefreshCmd reads it, and that constructor is wired separately
+// through commands/refresh.go's shim until t07 collapses the refresh body
+// into lifecycle.
+func buildLifecycleDeps() lifecycle.Deps {
+	return lifecycle.Deps{
+		Flags: lifecycle.GlobalFlags{
+			DryRun:  Flags.DryRun,
+			Force:   Flags.Force,
+			Verbose: Flags.Verbose,
+			Yes:     Flags.Yes,
+		},
+		FlagsFn: func() lifecycle.GlobalFlags {
+			return lifecycle.GlobalFlags{
+				DryRun:  Flags.DryRun,
+				Force:   Flags.Force,
+				Verbose: Flags.Verbose,
+				Yes:     Flags.Yes,
+			}
+		},
+		ErrorWithHints:        ErrorWithHints,
+		UsageError:            UsageError,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		RangeArgsWithHints:    RangeArgsWithHints,
+		ExactArgsWithHints:    ExactArgsWithHints,
+		NoArgsWithHints:       NoArgsWithHints,
+		ExampleBlock:          ExampleBlock,
+		Version:               Version,
+		Commit:                Commit,
+		Describe:              Describe,
+	}
+}
+
 // NewRootCommand builds the root cobra command with persistent global flags and all
 // subcommands. It mirrors cmd/dot-agents/main.go so tooling (e.g. global flag coverage)
 // can inspect the live command tree without importing package main.
@@ -95,13 +143,13 @@ func NewRootCommand() *cobra.Command {
 	root.PersistentFlags().BoolVarP(&Flags.Yes, "yes", "y", false, "Auto-confirm prompts")
 	root.PersistentFlags().BoolVar(&Flags.JSON, "json", false, "Output as JSON")
 
-	root.AddCommand(NewInitCmd())
+	root.AddCommand(lifecycle.NewInitCmd(buildLifecycleDeps()))
 	root.AddCommand(NewAddCmd())
 	root.AddCommand(NewRemoveCmd())
 	root.AddCommand(NewRefreshCmd())
 	root.AddCommand(NewImportCmd())
-	root.AddCommand(NewStatusCmd())
-	root.AddCommand(NewDoctorCmd())
+	root.AddCommand(lifecycle.NewStatusCmd(buildLifecycleDeps(), func() bool { return Flags.JSON }))
+	root.AddCommand(lifecycle.NewDoctorCmd(buildLifecycleDeps()))
 	root.AddCommand(NewSkillsCmd())
 	root.AddCommand(NewAgentsCmd())
 	root.AddCommand(NewHooksCmd())
@@ -111,7 +159,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewReviewCmd())
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())
-	root.AddCommand(NewInstallCmd())
+	root.AddCommand(lifecycle.NewInstallCmd(buildLifecycleDeps()))
 	root.AddCommand(NewSessionCmd())
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewKGCmd())
