@@ -47,12 +47,13 @@ var workflowHookSentinelSchemaJSON []byte
 // the otherwise unreachable error branches (rename failure mid-publish,
 // stat collision races, malformed time fields read from disk, etc.).
 var (
-	osStat          = os.Stat
-	osReadFile      = os.ReadFile
-	osReadDir       = os.ReadDir
-	osRename        = os.Rename
-	osRemove        = os.Remove
-	hookSentinelNow = func() time.Time { return time.Now() }
+	osStat                     = os.Stat
+	osReadFile                 = os.ReadFile
+	osReadDir                  = os.ReadDir
+	osRename                   = os.Rename
+	osRemove                   = os.Remove
+	hookSentinelNow            = func() time.Time { return time.Now() }
+	hookSentinelResolveProject = currentWorkflowProject
 )
 
 var (
@@ -424,7 +425,7 @@ func buildHookSentinelDoc(projectPath string, in hookSentinelWriteInputs) (*Hook
 
 // runHookSentinelWrite is the cobra handler body for `write`.
 func runHookSentinelWrite(in hookSentinelWriteInputs) error {
-	project, err := currentWorkflowProject()
+	project, err := hookSentinelResolveProject()
 	if err != nil {
 		return err
 	}
@@ -452,7 +453,7 @@ func runHookSentinelWrite(in hookSentinelWriteInputs) error {
 
 // runHookSentinelRead is the cobra handler body for `read`.
 func runHookSentinelRead(skill, runID string, latest, asJSON bool) error {
-	project, err := currentWorkflowProject()
+	project, err := hookSentinelResolveProject()
 	if err != nil {
 		return err
 	}
@@ -498,7 +499,7 @@ func runHookSentinelRead(skill, runID string, latest, asJSON bool) error {
 
 // runHookSentinelClear is the cobra handler body for `clear`.
 func runHookSentinelClear(skill, runID string) error {
-	project, err := currentWorkflowProject()
+	project, err := hookSentinelResolveProject()
 	if err != nil {
 		return err
 	}

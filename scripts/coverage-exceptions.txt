@@ -1,7 +1,7 @@
 # coverage-gate per-file exceptions allowlist
 #
 # === RATCHET ===
-# ratchet-max-entries: 36
+# ratchet-max-entries: 35
 # The coverage gate fails if the allowlist grows above this number.
 # To add a new entry: prove there is no test-driven path to the threshold,
 # bump this line in the same commit, and include the rationale in PR review.
@@ -38,7 +38,6 @@ commands/sync/pull.go                                      # [legacy-tail] 88.89
 commands/workflow/app_types.go                             # [legacy-tail] 94.12%; cg6 ratchet-loop raises to >=95%
 commands/workflow/delegation.go                            # [legacy-tail] 93.74%; cg6 ratchet-loop raises to >=95%
 commands/workflow/review_gate.go                           # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
-commands/workflow/hook_sentinel.go                         # [legacy-tail] 84.91%; introduced by p0-sentinel-cli (PR #83); cg6 ratchet-loop raises to >=95%
 internal/config/config.go                                  # [legacy-tail] 93.18%; cg6 ratchet-loop raises to >=95%
 internal/config/proposals.go                               # [legacy-tail] 92.92%; cg6 ratchet-loop raises to >=95%
 internal/fsops/fsops_windows.go                            # [platform-tag] 0.00% on merged profile; cg6 confirm-or-raise
