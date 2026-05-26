@@ -51,42 +51,12 @@ func TestOpenPostgres_Idempotent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata
+// Metadata — RoundTrip / MissingKey / Overwrite collapsed into a single
+// invocation of the shared runner (t6c). See internal/storetest.
 // ---------------------------------------------------------------------------
 
-func TestPG_Metadata_RoundTrip(t *testing.T) {
-	s := openPGTestStore(t)
-	if err := s.SetMetadata("pg_test_key", "pg_value"); err != nil {
-		t.Fatalf("SetMetadata: %v", err)
-	}
-	val, err := s.GetMetadata("pg_test_key")
-	if err != nil {
-		t.Fatalf("GetMetadata: %v", err)
-	}
-	if val != "pg_value" {
-		t.Errorf("want 'pg_value', got %q", val)
-	}
-}
-
-func TestPG_Metadata_MissingKey(t *testing.T) {
-	s := openPGTestStore(t)
-	val, err := s.GetMetadata("nonexistent_pg_key_xyz")
-	if err != nil {
-		t.Fatalf("GetMetadata missing key: %v", err)
-	}
-	if val != "" {
-		t.Errorf("expected empty string for missing key, got %q", val)
-	}
-}
-
-func TestPG_Metadata_Overwrite(t *testing.T) {
-	s := openPGTestStore(t)
-	_ = s.SetMetadata("pg_overwrite_key", "v1")
-	_ = s.SetMetadata("pg_overwrite_key", "v2")
-	val, _ := s.GetMetadata("pg_overwrite_key")
-	if val != "v2" {
-		t.Errorf("want v2, got %q", val)
-	}
+func TestPG_Metadata(t *testing.T) {
+	storetest.RunMetadataRoundTrip(t, openPGTestStore(t), "pg-meta-")
 }
 
 // ---------------------------------------------------------------------------
@@ -158,28 +128,11 @@ func TestPG_GetNodesByFile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPG_UpsertEdge_Create(t *testing.T) {
-	s := openPGTestStore(t)
-	id, err := s.UpsertEdge(makeEdge("pg_pkg::A", "pg_pkg::B", graphstore.EdgeKindCalls))
-	if err != nil {
-		t.Fatalf("UpsertEdge: %v", err)
-	}
-	if id == 0 {
-		t.Error("expected non-zero edge ID")
-	}
+	storetest.RunEdgeUpsertCreate(t, openPGTestStore(t), "pg-edge-create-")
 }
 
 func TestPG_UpsertEdge_Update(t *testing.T) {
-	s := openPGTestStore(t)
-	e := makeEdge("pg_src_E", "pg_tgt_E", graphstore.EdgeKindCalls)
-	id1, _ := s.UpsertEdge(e)
-	e.Line = 99
-	id2, err := s.UpsertEdge(e)
-	if err != nil {
-		t.Fatalf("UpsertEdge update: %v", err)
-	}
-	if id1 != id2 {
-		t.Errorf("expected same id on update: id1=%d id2=%d", id1, id2)
-	}
+	storetest.RunEdgeUpsertUpdate(t, openPGTestStore(t), "pg-edge-update-")
 }
 
 func TestPG_GetEdgesBySource(t *testing.T) {
@@ -402,52 +355,11 @@ func TestPG_ListArchivedKGNotes(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPG_NoteSymbolLink_RoundTrip(t *testing.T) {
-	s := openPGTestStore(t)
-	link := graphstore.NoteSymbolLink{
-		NoteID: "pg-decision-001", QualifiedName: "pg_pkg::Store", LinkKind: "documents",
-	}
-	id, err := s.UpsertNoteSymbolLink(link)
-	if err != nil {
-		t.Fatalf("UpsertNoteSymbolLink: %v", err)
-	}
-	if id == 0 {
-		t.Error("expected non-zero link ID")
-	}
-
-	links, err := s.GetLinksForNote("pg-decision-001")
-	if err != nil {
-		t.Fatalf("GetLinksForNote: %v", err)
-	}
-	found := false
-	for _, l := range links {
-		if l.QualifiedName == "pg_pkg::Store" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("link not found in results: %+v", links)
-	}
+	storetest.RunNoteSymbolLinkRoundTrip(t, openPGTestStore(t), "pg-link-rt-")
 }
 
 func TestPG_NoteSymbolLink_Idempotent(t *testing.T) {
-	s := openPGTestStore(t)
-	link := graphstore.NoteSymbolLink{NoteID: "pg-n1-idem", QualifiedName: "pg_pkg::Fn", LinkKind: "mentions"}
-	id1, _ := s.UpsertNoteSymbolLink(link)
-	id2, _ := s.UpsertNoteSymbolLink(link)
-	if id1 != id2 {
-		t.Errorf("expected idempotent insert, got id1=%d id2=%d", id1, id2)
-	}
-
-	links, _ := s.GetLinksForNote("pg-n1-idem")
-	count := 0
-	for _, l := range links {
-		if l.QualifiedName == "pg_pkg::Fn" && l.LinkKind == "mentions" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected 1 link after idempotent upsert, got %d", count)
-	}
+	storetest.RunNoteSymbolLinkIdempotent(t, openPGTestStore(t), "pg-link-idem-")
 }
 
 func TestPG_GetLinksForSymbol(t *testing.T) {
