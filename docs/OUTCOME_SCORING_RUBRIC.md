@@ -330,6 +330,52 @@ populated `commit` SHA, so a commit-timestamp window over the Claude
 on) session logs reconstructs token/cache telemetry the iteration log
 never recorded.
 
+## Hook-outcome sidecar retention (forward-looking, R1.5)
+
+The R1.5 plan (`r1-5-hook-enforcement-telemetry`) introduces a new
+per-iteration sidecar `.agents/active/iteration-log/iter-N.hook-outcomes.yaml`
+that the upcoming `hook_outcomes` signal extractor reads. The retention
+policy for these sidecars — locked in by the `t-archival-policy` task —
+is **indefinite retention, no automatic pruning**, mirroring R5's audit
+log policy (`specs/r5-review-labeling-access/design.md` D5.4).
+
+The rule is identical to R5's reasoning applied to hook outcomes: a
+re-score under a future `RubricVersion` must read the original sidecar to
+re-derive the signal explainably. Auto-pruning at any age would silently
+convert "rescored under new rubric" into "absent signal does not vote" —
+the failure mode is invisible in the output and fatal to longitudinal
+comparison. The sidecars carry no transcript content (per R1.5 spec D2)
+and the per-iteration footprint is in the kilobytes, so neither privacy
+nor disk pressure earns automatic expiry.
+
+An admin-only manual pruning command spec is reserved for operator-driven
+compaction:
+
+```
+da workflow hook-outcome prune --before <YYYY-MM-DD> [--dry-run] [--yes]
+```
+
+Implementation is deferred until an operator request emerges. When it
+ships, the command will gate on the same R5 admin-role mechanism that
+gates `da review audit prune`, will write one record per prune action to
+R5's tamper-evident audit chain (`.agents/active/review/audit.log.jsonl`),
+will never auto-run on a timer or hook, and will touch hook-outcome
+sidecars only — not iteration records, score sidecars, or sentinel
+history.
+
+The full design (alternatives rejected, command behavior contract,
+audit-trail integration) lives in the resolving plan-side decision
+record at
+[`r1-5-hook-enforcement-telemetry/design.md`](../.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md)
+under "Q3 — Hook-outcome sidecar retention and archival policy".
+
+This section will be folded into the broader R1.5-driven doc delta by
+the `t-docs` task alongside the new signal spec, weight rebalance table,
+RubricVersion ordering policy, and approved-rule list. Until R1.5
+lands (RubricVersion 2.1.0 or 3.1.0 per the ordering decided at task
+time), this policy is a forward-looking contract only — no
+`iter-N.hook-outcomes.yaml` files yet exist under RubricVersion 2.0.2.
+
 ## Changelog
 
 - **2.0.2** — Documents the structured-claims layer: the
