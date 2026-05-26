@@ -16,6 +16,7 @@ func TestScoreAllPresentMax(t *testing.T) {
 		Tests:              PresentSignal(1.0, ""),
 		CorrectionPressure: PresentSignal(1.0, ""),
 		Scope:              PresentSignal(1.0, ""),
+		HookOutcomes:       PresentSignal(1.0, ""),
 		TokenEfficiency:    PresentSignal(1.0, ""),
 	}
 
@@ -53,7 +54,7 @@ func TestScoreAllPresentMax(t *testing.T) {
 // contributions still sum exactly to Value.
 func TestScoreSomeAbsentRenormalizes(t *testing.T) {
 	r := DefaultRubric()
-	// Only verifier (.20) and scope (.15) present — present sum = .35.
+	// Only verifier (.18) and scope (.13) present — present sum = .31.
 	set := SignalSet{
 		Verifier: PresentSignal(1.0, ""),
 		Scope:    PresentSignal(0.5, ""),
@@ -62,7 +63,8 @@ func TestScoreSomeAbsentRenormalizes(t *testing.T) {
 	if !got.Scored {
 		t.Fatal("Scored = false, want true")
 	}
-	want := (0.20*1.0 + 0.15*0.5) / (0.20 + 0.15)
+	const presentSum = 0.18 + 0.13
+	want := (0.18*1.0 + 0.13*0.5) / presentSum
 	if !approxEq(got.Value, want) {
 		t.Errorf("Value = %g, want %g", got.Value, want)
 	}
@@ -71,7 +73,7 @@ func TestScoreSomeAbsentRenormalizes(t *testing.T) {
 	for _, row := range got.Breakdown {
 		sum += row.Contribution
 		if row.Present {
-			wantEff := row.NominalWeight / 0.35
+			wantEff := row.NominalWeight / presentSum
 			if !approxEq(row.EffectiveWeight, wantEff) {
 				t.Errorf("%q eff = %g, want %g", row.Signal, row.EffectiveWeight, wantEff)
 			}

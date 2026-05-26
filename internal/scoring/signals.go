@@ -17,6 +17,7 @@ type SignalSet struct {
 	Tests              SignalValue
 	CorrectionPressure SignalValue
 	Scope              SignalValue
+	HookOutcomes       SignalValue
 	TokenEfficiency    SignalValue
 
 	// Integrity holds one observation per two-way signal that had at least one
@@ -46,6 +47,8 @@ func (s SignalSet) Value(id SignalID) SignalValue {
 		return s.CorrectionPressure
 	case SignalScope:
 		return s.Scope
+	case SignalHookOutcomes:
+		return s.HookOutcomes
 	case SignalTokenEfficiency:
 		return s.TokenEfficiency
 	default:
@@ -148,13 +151,17 @@ func integrityObservations(rec IterationRecord, il IterlogSignals, gs GitSignals
 // AssembleSignalSet joins the extractor partials for one iteration into the
 // rubric's typed input set. It is pure — the scorer task consumes its output.
 //
-// landed and token_efficiency are objective-only. verifier and tests come from
-// the iteration log and its verification artifacts. scope prefers the objective
-// git measurement and falls back to the self-reported scope_note.
-// correction_pressure is composed from retries, user corrections, and the
-// transcript error rate. The IterationObjectives are recorded as observational
-// facts on the result; they do not enter the score directly.
-func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals, obj IterationObjectives) SignalSet {
+// landed, token_efficiency, and hook_outcomes are objective-only. verifier
+// and tests come from the iteration log and its verification artifacts. scope
+// prefers the objective git measurement and falls back to the self-reported
+// scope_note. correction_pressure is composed from retries, user corrections,
+// and the transcript error rate. The IterationObjectives are recorded as
+// observational facts on the result; they do not enter the score directly.
+//
+// hookOutcomes is folded from the iter-N.hook-outcomes.yaml sidecar (R1.5);
+// pass AbsentSignal("...") when no sidecar exists or the iteration predates
+// R1.5 — the renormalizing combination then drops it from the vote.
+func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals, obj IterationObjectives, hookOutcomes SignalValue) SignalSet {
 	return SignalSet{
 		Iteration:          rec.Iteration,
 		Landed:             gs.LandedObserved,
@@ -162,6 +169,7 @@ func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf
 		Tests:              il.TestsClaimed,
 		CorrectionPressure: correctionPressure(il.Retries, il.UserCorrections, bf.ToolErrorRate, bf.ToolErrorRatePresent),
 		Scope:              coalesce(gs.ScopeObserved, il.ScopeClaimed),
+		HookOutcomes:       hookOutcomes,
 		TokenEfficiency:    bf.TokenEfficiency,
 		Integrity:          integrityObservations(rec, il, gs),
 		Objective:          obj,
@@ -203,7 +211,8 @@ func BuildSignalSets(iterLogDir, repoDir string, transcriptDirs ...string) ([]Si
 			return nil, fmt.Errorf("scoring: git signals for iteration %d: %w", rec.Iteration, err)
 		}
 		obj := ExtractIterationObjectives(rec, windows[rec.Iteration], transcriptDirs...)
-		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration], obj))
+		ho := ExtractHookOutcomesSignal(iterLogDir, rec.Iteration)
+		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration], obj, ho))
 	}
 	return sets, nil
 }
