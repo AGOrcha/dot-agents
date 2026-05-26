@@ -1,0 +1,231 @@
+schema_version: 1
+id: t13a-respawn-lifecycle-shims-not-passthroughs
+plan_id: root-command-decomposition
+task_id: t13a-strip-resource-subpackage-shims
+observation: |-
+    t13a re-spawn (del-t13a-strip-resource-subpackage-shims-1779827022)
+    expanded scope to include commands/root.go and asked for a "FULL
+    root.go AddCommand rewire — all 7 calls: install/doctor/init/status
+    switch to lifecycle.NewXxxCmd; mcp/settings/rules switch to
+    mcp.NewCmd / settings.NewCmd / rules.NewCmd". The mcp/settings/rules
+    half is achievable. The install/doctor/init/status half collides with
+    two facts at HEAD that the bundle's premise overlooked. Folding back
+    per [[validate-bundle-against-head]]. NO CODE CHANGES MADE; worktree
+    feature/t13a-strip-resource-subpackage-shims is clean at base
+    f94813bf.
+
+    VALIDATION AT HEAD (master @ f94813bf, worktree branched cleanly):
+
+    FACT 1 — lifecycle.NewInitCmd DOES NOT EXIST.
+      commands/lifecycle/ exports NewInstallCmd (install.go:45),
+      NewDoctorCmd (doctor.go:56), NewStatusCmd (status.go:184), but
+      NOT NewInitCmd. The init command's cobra.Command literal is
+      constructed in commands/init.go:22 using lifecycle helpers
+      (lifecycle.SetInitFlags, lifecycle.InitUsageErrorFn,
+      lifecycle.InitCmdUse/Short/Long/Example, lifecycle.InitNoArgs,
+      lifecycle.RunInit) plus a package-var seam dance:
+
+        lifecycle.SetInitFlags(
+          func() bool { return Flags.Force },
+          func() bool { return Flags.DryRun },
+          func() bool { return Flags.Yes },
+        )
+        lifecycle.InitUsageErrorFn = UsageError
+        cmd := &cobra.Command{ Use: lifecycle.InitCmdUse, ... }
+
+      The init.go shim is documented as deleted in t13 "once
+      commands/root.go switches to lifecycle's constructors directly and
+      globalflagcov's package list is extended to include
+      commands/lifecycle." That's the long-form contract — but t13a's
+      bundle says "switch root.go to lifecycle.NewInitCmd" which is a
+      function that does not yet exist.
+
+      Two ways out, both outside t13a's anti-scope:
+        a) Create lifecycle.NewInitCmd in commands/lifecycle/init.go —
+           touches lifecycle/init.go (not in write_scope; bundle anti-
+           scope: "do NOT touch install.go/doctor.go/init.go/status.go
+           shim wiring (t13b owns)" — anti-scope appears intended for
+           the PARENT init.go but the lifecycle/init.go change is also
+           outside the 7-file write_scope, so equally excluded).
+        b) Inline the SetInitFlags + cobra.Command literal directly in
+           root.go (kept in scope) — duplicates the 20-line construction
+           that init.go owns, including the seam-setter calls. This is
+           the same code the parent init.go owns today, just relocated;
+           it makes root.go materially fatter (~25 lines of init wiring)
+           and forks the "single composition root" goal of t13b.
+
+    FACT 2 — install/doctor/status parent shims do nontrivial RunE work.
+      The parent-package shims for install (install.go:82), doctor
+      (doctor.go:63), and status (status.go:36) are NOT pure passthroughs
+      to lifecycle.NewXxxCmd. Each one wraps the cobra.Command's RunE
+      with additional logic that root.go would have to absorb:
+
+        install.go:82-93 — calls lifecycle.NewInstallCmd(deps), then
+          captures innerRunE := cmd.RunE and reassigns cmd.RunE to a
+          closure that runs syncLifecycleGlobals() BEFORE innerRunE.
+          syncLifecycleGlobals (install.go:47) copies the live
+          commands.Flags / Version / Commit / Describe / ErrorWithHints
+          into lifecycle.Flags / lifecycle.Version / lifecycle.Commit /
+          lifecycle.Describe / lifecycle.ErrorWithHintsFn package vars
+          that lifecycle's moved helpers read directly. Without this
+          sync, lifecycle observes zero-value package vars at runtime —
+          install RunE silently behaves as DryRun=false Force=false
+          Yes=false regardless of CLI flags.
+
+        doctor.go:63-71 — same pattern: wraps RunE with
+          syncLifecycleGlobals() prefix. Same silent-broken outcome
+          without the wrap.
+
+        status.go:36-51 — wraps RunE differently: it OVERRIDES the inner
+          RunE entirely with a closure that reads audit/agent flags
+          locally and routes the JSON flag through jsonFlag() (a closure
+          over commands.Flags.JSON) so the globalflagcov static analyzer
+          — which loads ./commands but NOT ./commands/lifecycle — can
+          see the Flags.JSON read for handler coverage. The status.go
+          docstring (lines 30-35) is explicit: "The RunE closure is
+          intentionally re-bound here (rather than inherited from
+          lifecycle.NewStatusCmd) so the globalflagcov static analyzer
+          ... can resolve the Flags.JSON read it requires for handler
+          coverage. After t13 strips the shim, the analyzer's load set
+          should be widened to include ./commands/lifecycle (tracked as
+          a follow-up in the t13 PR description)." That follow-up
+          (widening globalflagcov's load set) is NOT in t13a's bundle.
+
+      To switch root.go to lifecycle.NewInstallCmd / NewDoctorCmd /
+      NewStatusCmd directly without behavior regression, root.go would
+      need to:
+        - Define lifecycleDeps / lifecycleDoctorDeps / lifecycleStatusDeps
+          helpers (currently in install.go / doctor.go / status.go).
+        - Define syncLifecycleGlobals helper (currently in install.go).
+        - Wrap install's RunE and doctor's RunE with the sync prefix.
+        - Wrap status's RunE with the jsonFlag closure trick OR widen
+          globalflagcov's load set to include ./commands/lifecycle and
+          let lifecycle.NewStatusCmd's native RunE stand.
+      That's a re-home of ~120 lines of shim wiring into root.go (or
+      into a new helper file). It also defers the globalflagcov load-set
+      widening that the status.go docstring promised t13 would handle.
+
+    FACT 3 — install/doctor/status RunE wrappers are gated by the
+      lifecycle subpackage's parallel-package-var model (Flags, Version,
+      Commit, Describe, ErrorWithHintsFn). That model exists because
+      lifecycle cannot import commands (import cycle). The clean fix is
+      to thread those values through the lifecycle.Deps struct (or a
+      new lifecycle.Init() seed call) so lifecycle no longer reads from
+      package vars at all. That's a lifecycle-package refactor — well
+      out of t13a scope, and a natural t13b prerequisite or a t15
+      DI-migration task.
+
+    SUMMARY OF THE GAP:
+    The bundle's "rewire ALL 7 AddCommand calls" instruction treats the
+    7 parent shims as semantically equivalent. They are not:
+
+      - mcp.go / settings.go / rules.go  → near-pure delegators. The
+        NewXxxCmd shim is `return mcp.NewCmd(buildDeps())`, no RunE
+        wrapping, no package-var sync. Safe to rewire root.go directly
+        to mcp.NewCmd(buildDeps) without behavior loss.
+
+      - install.go / doctor.go           → RunE-wrapping shims that
+        syncLifecycleGlobals before the moved RunE. Direct rewire
+        SILENTLY breaks the lifecycle's package-var reads.
+
+      - status.go                        → RunE-overriding shim that
+        keeps globalflagcov coverage of Flags.JSON. Direct rewire breaks
+        the static analyzer's handler-coverage check (build still
+        passes; coverage gate fails on next run).
+
+      - init.go                          → No lifecycle constructor
+        exists. Direct rewire is impossible at the call site.
+
+    The original t13a (resource-subpackage-only) was the right cut for
+    "thin shims with no RunE work." The re-expansion conflated that with
+    the lifecycle cluster, which is fundamentally different.
+
+    OPTIONS FOR THE ORCHESTRATOR:
+
+    OPTION A (RECOMMENDED — narrow t13a back to its original axis):
+      Restrict t13a to mcp/settings/rules and root.go rewire of THOSE
+      THREE AddCommand calls only. install/doctor/init/status stay
+      pointed at the parent shims; t13b handles them when it also
+      strips the lifecycle-cluster shim wiring (which is the place that
+      naturally absorbs syncLifecycleGlobals into either Deps-threading
+      or a one-shot lifecycle.Init() call).
+
+      Revised write_scope: keep all 7 files in scope; revised intent:
+        commands/mcp.go        — DELETE entirely.
+        commands/settings.go   — DELETE entirely.
+        commands/rules.go      — DELETE entirely.
+        commands/root.go       — rewire 3 calls only:
+          line 55: NewRulesCmd()   → rules.NewRulesCmd(buildRulesDeps())
+          line 56: NewMCPCmd()     → mcp.NewCmd(buildMCPDeps())
+          line 57: NewSettingsCmd()→ settings.NewCmd(buildSettingsDeps())
+          Lines 45-54, 58-66 (install/doctor/init/status/skills/agents/
+          hooks/review/sync/explain/install/session/workflow/kg/score)
+          STAY untouched.
+        commands/resource_parity_test.go — DELETE entirely.
+        commands/coverage_test.go        — strip mcp/rules/settings RunE
+                                           blocks only.
+        commands/mcp_test.go             — DELETE entirely (TestNewMCPCmd_
+                                           ShimReturnsCobraTree is covered
+                                           by mcp/cmd_test.go's
+                                           TestNewCmd_Metadata; helpers
+                                           are only used by t13a-deleted
+                                           tests).
+
+      The buildRulesDeps / buildMCPDeps / buildSettingsDeps helpers
+      have no other caller after the shims die; either inline them into
+      root.go (~30 lines added) or put them in a new tiny file like
+      commands/root_deps_resource.go (in scope as a new file? — bundle
+      doesn't enumerate new files, so prefer inlining into root.go to
+      keep the change inside the existing write_scope verbatim).
+
+      End-state after t13a (Option A): root.go imports mcp, settings,
+      rules subpackages directly for resource cluster; still calls
+      commands.NewInstallCmd / NewDoctorCmd / NewInitCmd / NewStatusCmd
+      for lifecycle cluster. t13b deletes those four parent shims and
+      either (a) widens globalflagcov's load set + threads
+      sync-required state through lifecycle.Deps, or (b) reabsorbs the
+      sync logic into root.go inline.
+
+    OPTION B (do the full rewire as the bundle asks — bigger blast
+    radius):
+      Expand t13a's intent to also touch the RunE wrapping in root.go
+      AND make commands/lifecycle expose a NewInitCmd. That requires
+      adding commands/lifecycle/init.go and commands/lifecycle/{install,
+      doctor,status}.go to write_scope (Deps-threading the sync values)
+      and ~150 lines of net change. Effectively it merges t13a and
+      t13b. Recommend against — the t13a/t13b split was created
+      specifically to keep these two clusters separate.
+
+    OPTION C (accept a behavior regression for the lifecycle half):
+      Do the rewire as the bundle literally says (six of seven; init
+      stays as NewInitCmd() — the only impossible one), and let the
+      install/doctor/status runtime regressions land for the t13a→t13b
+      window. Hard NO — that's a user-visible regression on the
+      shipping CLI.
+
+    RECOMMENDATION: OPTION A. It honors the bundle's spirit (delete the
+    resource-cluster shims + rewire root.go for that cluster) without
+    pretending the lifecycle-cluster shims are passthroughs. The change
+    in intent from "rewire ALL 7" to "rewire the 3 resource calls" is
+    small and matches the t13a/t13b split's original axis (resource
+    cluster first, lifecycle cluster second). t13b's existing scope
+    note already covers the lifecycle root.go rewire and lifecycle
+    shim deletion as a single co-commit, which is the right place to
+    handle the RunE-wrapping fold-in.
+
+    SECONDARY OBSERVATION (lesson candidate):
+    Two consecutive t13a fold-backs have caught the same kind of
+    premise gap: t13a-round-1 missed that mcp/settings/rules.go each
+    own a public NewXxxCmd consumed by root.go (caller-boundary issue);
+    t13a-round-2 misses that install/doctor/status/init parent shims
+    do nontrivial RunE work that root.go must absorb to switch
+    constructors (semantics-of-shim issue). Both are downstream of the
+    same root cause: the bundle author treated structurally-similar
+    files as semantically-equivalent. Lesson to record once a third
+    instance lands (or proactively now): "before authoring a bundle
+    that says 'delete the shim files in cluster X', READ the shim
+    bodies, not just the file paths — confirm each is either a pure
+    re-export or has a documented absorption path in the same bundle."
+classification: small
+routed_to: task_note:root-command-decomposition/t13a-strip-resource-subpackage-shims
+created_at: "2026-05-26T20:45:00Z"
