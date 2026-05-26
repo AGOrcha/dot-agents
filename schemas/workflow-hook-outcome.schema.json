@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-hook-outcome.schema.json",
+  "title": "da workflow hook outcome sidecar",
+  "description": "Schema for .agents/active/iteration-log/iter-N.hook-outcomes.yaml (schema_version 1). One file per iteration containing an ordered list of HookOutcome records — one per evaluated sentinel-anchored hook invocation in the iteration window. Defined by r1-5-hook-enforcement-telemetry design D2. Records are bounded telemetry: transcript text, raw tool input/output, command bodies, and unbounded failure messages are explicitly disallowed (see Boundary section of the spec).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. v1 is the initial contract per D2."
+    },
+    "records": {
+      "type": "array",
+      "description": "Ordered list of HookOutcome records appended in iteration order. Append idempotency is keyed on (sentinel_id, rule_id, lifecycle_point, intervention_class) per R2.3.",
+      "items": {
+        "$ref": "#/$defs/hookOutcome"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "hookOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A single hook-outcome record. Fields are per D2; disallowed fields (transcript_excerpt, tool_input, tool_output, stdout, stderr, command_args, failure_message beyond bounded classification) are excluded by additionalProperties=false and reinforced by the propertyNames check below.",
+      "required": [
+        "schema_version",
+        "sentinel_id",
+        "skill",
+        "lifecycle_point",
+        "intervention_class",
+        "result",
+        "rule_id",
+        "platform",
+        "ts",
+        "correlation_id"
+      ],
+      "propertyNames": {
+        "not": {
+          "enum": [
+            "transcript_excerpt",
+            "tool_input",
+            "tool_output",
+            "stdout",
+            "stderr",
+            "command_args",
+            "failure_message"
+          ]
+        }
+      },
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Per-record schema version; mirrors the top-level value so a record copied out of the sidecar (e.g. for CLI readback) is self-describing."
+        },
+        "sentinel_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier of the form <skill>-<run-id> that joins this record to the archived sentinel under .agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/."
+        },
+        "skill": {
+          "type": "string",
+          "enum": [
+            "iteration-close",
+            "isp",
+            "loop-worker",
+            "orchestrator-session-start",
+            "delegation-lifecycle"
+          ],
+          "description": "Skill whose sentinel this outcome is anchored to."
+        },
+        "lifecycle_point": {
+          "type": "string",
+          "enum": [
+            "pre_tool_use",
+            "stop",
+            "subagent_stop",
+            "subagent_start",
+            "pre_compact",
+            "post_tool_use",
+            "post_tool_use_failure"
+          ],
+          "description": "Platform lifecycle event at which this record was emitted. Required together with intervention_class per R1.3."
+        },
+        "intervention_class": {
+          "type": "string",
+          "enum": [
+            "prevent_before_action",
+            "remediate_at_stop",
+            "continuity_advice",
+            "observe_tool_result"
+          ],
+          "description": "Classification of the gate's intervention semantics. Required together with lifecycle_point per R1.3; the pair distinguishes a single (sentinel_id, rule_id) record from any other emission for the same intent."
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "advise",
+            "remediate"
+          ],
+          "description": "Gate outcome severity. allow = no action needed; advise = non-blocking guidance recorded; remediate = enforced correction."
+        },
+        "rule_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]*(?:\\.[A-Za-z0-9]+(?:\\.[A-Za-z0-9]+)*)+$",
+          "description": "Stable rule identifier such as iteration-close.R1.1 or loop-worker.R3.1. The namespace prefix groups by gate; the suffix is the spec-defined rule code."
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "copilot",
+            "cursor"
+          ],
+          "description": "Agent platform that produced the sentinel."
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$",
+          "description": "RFC3339 timestamp at which the gate evaluated the outcome."
+        },
+        "archived_sentinel_path": {
+          "type": "string",
+          "description": "POSIX path relative to the repo root pointing at the archived sentinel. Empty string for pre_tool_use records written before the sentinel archives.",
+          "default": ""
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Groups pre-action and terminal records emitted for the same intent (per D4). Defaults to sentinel_id when only one record exists for the intent."
+        }
+      },
+      "allOf": [
+        {
+          "description": "R1.3: lifecycle_point and intervention_class must appear together. Enforced via required, but restated here to make the cross-field invariant explicit for tooling.",
+          "anyOf": [
+            {
+              "required": [
+                "lifecycle_point",
+                "intervention_class"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
