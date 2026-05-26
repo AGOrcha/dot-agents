@@ -112,3 +112,198 @@ func RunKGNoteSearch(t *testing.T, open OpenStore) {
 		t.Errorf("want at least 2 'graph' notes, got %d", len(results))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Prefix-parameterized runners
+//
+// The runners below take a string prefix that is composed into every row
+// key the runner writes. This isolation contract lets each consumer
+// (sqlite_test.go, postgres_test.go) pass a backend-unique prefix so that
+// the shared Postgres testcontainer — which is re-used across all
+// PG-tagged tests in one process — never sees row collisions between
+// the SQLite-side and PG-side invocations of the same runner, nor
+// between two PG-tagged tests that happen to invoke the same runner.
+//
+// Callers should pick prefixes that include both a backend tag and a
+// per-runner discriminator, e.g. "sqlite-meta-rt-", "pg-meta-ov-". The
+// runners do not generate the prefix themselves; the caller owns
+// uniqueness so the prefix can be greppable in failure traces.
+// ---------------------------------------------------------------------------
+
+// RunMetadataRoundTrip exercises SetMetadata → GetMetadata across three
+// scenarios: a basic round trip, a missing key (must return ""), and an
+// overwrite (later Set wins). All metadata keys are namespaced by
+// keyPrefix so two concurrent invocations against the same backend do
+// not interfere. Replaces the mirrored bodies at
+// sqlite_test.go:64/78/89 ↔ postgres_test.go:57/71/82.
+func RunMetadataRoundTrip(t *testing.T, store graphstore.Store, keyPrefix string) {
+	t.Helper()
+
+	// Round trip.
+	rtKey := keyPrefix + "rt"
+	if err := store.SetMetadata(rtKey, "v-rt"); err != nil {
+		t.Fatalf("SetMetadata round-trip: %v", err)
+	}
+	got, err := store.GetMetadata(rtKey)
+	if err != nil {
+		t.Fatalf("GetMetadata round-trip: %v", err)
+	}
+	if got != "v-rt" {
+		t.Errorf("round-trip: want %q, got %q", "v-rt", got)
+	}
+
+	// Missing key — must return empty string, no error.
+	missing, err := store.GetMetadata(keyPrefix + "missing-xyz-not-set")
+	if err != nil {
+		t.Fatalf("GetMetadata missing: %v", err)
+	}
+	if missing != "" {
+		t.Errorf("missing key: expected empty string, got %q", missing)
+	}
+
+	// Overwrite — second Set wins.
+	ovKey := keyPrefix + "ov"
+	if err := store.SetMetadata(ovKey, "v1"); err != nil {
+		t.Fatalf("SetMetadata overwrite v1: %v", err)
+	}
+	if err := store.SetMetadata(ovKey, "v2"); err != nil {
+		t.Fatalf("SetMetadata overwrite v2: %v", err)
+	}
+	ov, err := store.GetMetadata(ovKey)
+	if err != nil {
+		t.Fatalf("GetMetadata overwrite: %v", err)
+	}
+	if ov != "v2" {
+		t.Errorf("overwrite: want v2, got %q", ov)
+	}
+}
+
+// RunEdgeUpsertCreate exercises UpsertEdge on a fresh edge and asserts a
+// non-zero ID is returned. Source/Target are prefixed by idPrefix so
+// distinct invocations cannot collide on the (source, target, kind)
+// uniqueness key. Replaces the mirrored body at
+// sqlite_test.go:183 ↔ postgres_test.go:160.
+func RunEdgeUpsertCreate(t *testing.T, store graphstore.Store, idPrefix string) {
+	t.Helper()
+	edge := graphstore.EdgeInfo{
+		Kind:     graphstore.EdgeKindCalls,
+		Source:   idPrefix + "A",
+		Target:   idPrefix + "B",
+		FilePath: idPrefix + "edge.go",
+		Line:     1,
+	}
+	id, err := store.UpsertEdge(edge)
+	if err != nil {
+		t.Fatalf("UpsertEdge: %v", err)
+	}
+	if id == 0 {
+		t.Error("expected non-zero edge ID")
+	}
+}
+
+// RunEdgeUpsertUpdate exercises UpsertEdge twice with the same
+// (source, target, kind) tuple and asserts the returned ID is stable —
+// i.e. the second call updates rather than inserts. Source/Target are
+// prefixed by idPrefix to keep two invocations of this runner against
+// the same backend independent. Replaces the mirrored body at
+// sqlite_test.go:194 ↔ postgres_test.go:171.
+func RunEdgeUpsertUpdate(t *testing.T, store graphstore.Store, idPrefix string) {
+	t.Helper()
+	edge := graphstore.EdgeInfo{
+		Kind:     graphstore.EdgeKindCalls,
+		Source:   idPrefix + "src",
+		Target:   idPrefix + "tgt",
+		FilePath: idPrefix + "edge.go",
+		Line:     1,
+	}
+	id1, err := store.UpsertEdge(edge)
+	if err != nil {
+		t.Fatalf("UpsertEdge first: %v", err)
+	}
+	edge.Line = 42
+	id2, err := store.UpsertEdge(edge)
+	if err != nil {
+		t.Fatalf("UpsertEdge second: %v", err)
+	}
+	if id1 != id2 {
+		t.Errorf("expected same id on update: id1=%d id2=%d", id1, id2)
+	}
+}
+
+// RunNoteSymbolLinkRoundTrip exercises UpsertNoteSymbolLink →
+// GetLinksForNote and asserts the link is read back with the expected
+// QualifiedName. NoteID and QualifiedName are namespaced by namePrefix
+// so distinct invocations cannot share rows. Replaces the mirrored body
+// at sqlite_test.go:546 ↔ postgres_test.go:404.
+func RunNoteSymbolLinkRoundTrip(t *testing.T, store graphstore.Store, namePrefix string) {
+	t.Helper()
+	noteID := namePrefix + "decision-rt"
+	qualified := namePrefix + "pkg::Store"
+	link := graphstore.NoteSymbolLink{
+		NoteID:        noteID,
+		QualifiedName: qualified,
+		LinkKind:      "documents",
+	}
+	id, err := store.UpsertNoteSymbolLink(link)
+	if err != nil {
+		t.Fatalf("UpsertNoteSymbolLink: %v", err)
+	}
+	if id == 0 {
+		t.Error("expected non-zero link ID")
+	}
+	links, err := store.GetLinksForNote(noteID)
+	if err != nil {
+		t.Fatalf("GetLinksForNote: %v", err)
+	}
+	found := false
+	for _, l := range links {
+		if l.QualifiedName == qualified {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("link not found in results: %+v", links)
+	}
+}
+
+// RunNoteSymbolLinkIdempotent exercises UpsertNoteSymbolLink twice with
+// the same (NoteID, QualifiedName, LinkKind) tuple and asserts the
+// returned ID is stable AND only one link exists for the note (filtered
+// to the prefix-owned QualifiedName so unrelated rows in a shared
+// testcontainer cannot inflate the count). Replaces the mirrored body
+// at sqlite_test.go:568 ↔ postgres_test.go:432.
+func RunNoteSymbolLinkIdempotent(t *testing.T, store graphstore.Store, namePrefix string) {
+	t.Helper()
+	noteID := namePrefix + "n1-idem"
+	qualified := namePrefix + "pkg::Fn"
+	link := graphstore.NoteSymbolLink{
+		NoteID:        noteID,
+		QualifiedName: qualified,
+		LinkKind:      "mentions",
+	}
+	id1, err := store.UpsertNoteSymbolLink(link)
+	if err != nil {
+		t.Fatalf("UpsertNoteSymbolLink first: %v", err)
+	}
+	id2, err := store.UpsertNoteSymbolLink(link)
+	if err != nil {
+		t.Fatalf("UpsertNoteSymbolLink second: %v", err)
+	}
+	if id1 != id2 {
+		t.Errorf("expected idempotent insert, got id1=%d id2=%d", id1, id2)
+	}
+	links, err := store.GetLinksForNote(noteID)
+	if err != nil {
+		t.Fatalf("GetLinksForNote: %v", err)
+	}
+	count := 0
+	for _, l := range links {
+		if l.QualifiedName == qualified && l.LinkKind == "mentions" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 link after idempotent upsert, got %d", count)
+	}
+}
