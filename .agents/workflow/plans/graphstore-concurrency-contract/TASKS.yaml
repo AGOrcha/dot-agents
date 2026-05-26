@@ -65,7 +65,7 @@ tasks:
         just establish the contract-bound boundary at the graphstore seam.
     - id: gcc4-regression-close-od1
       title: Regression (hard-cap + cross-path parity + timeout); close maxNodes Low-1 & OD-1
-      status: in_progress
+      status: completed
       depends_on:
         - gcc2-path-a-impl
         - gcc3-bind-callers

@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-p0-sentinel-cli-1779795346
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p0-sentinel-cli
+title: 'Sentinel CLI: write/read/clear under ''da workflow hook-sentinel'''
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - commands/workflow/hook_sentinel.go
+    - commands/workflow/hook_sentinel_test.go
+    - schemas/workflow-hook-sentinel.schema.json
+    - commands/workflow/static/workflow-hook-sentinel.schema.json
+    - commands/workflow/static/schemas.go
+    - commands/workflow/static/schemas_test.go
+success_criteria: 'Introduce sentinel JSON schema v1 and `da workflow hook-sentinel {write,read,clear}`; archive successful sentinels under durable plan history rather than active state. Contract and exact schema/CLI behavior: tasks/p0-sentinel-cli.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: p0-worker
+status: active
+created_at: "2026-05-26T11:35:46Z"
+updated_at: "2026-05-26T11:35:46Z"

@@ -3,7 +3,7 @@ plan_id: cross-platform-test-skips-audit
 tasks:
     - id: catalogue
       title: Catalogue every Windows skip and classify each
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - perms-dir
@@ -19,7 +19,7 @@ tasks:
       app_type: go-cli
     - id: perms-dir
       title: Extend testutil with MakeDirUnreadable (POSIX chmod + Windows ACL/DACL)
-      status: pending
+      status: completed
       depends_on:
         - catalogue
       blocks:
@@ -35,7 +35,7 @@ tasks:
       app_type: go-cli
     - id: perms-readonly
       title: Extend testutil with MakeFileReadOnly (works on both platforms)
-      status: in_progress
+      status: completed
       depends_on:
         - catalogue
       blocks:
@@ -49,7 +49,7 @@ tasks:
       app_type: go-cli
     - id: symlinks
       title: testutil.SymlinkOrSkip — gate symlink tests on capability, not OS
-      status: pending
+      status: completed
       depends_on:
         - catalogue
       blocks:
@@ -63,7 +63,7 @@ tasks:
       app_type: go-cli
     - id: exec-bit
       title: Decide on exec-bit tests — POSIX-only behaviour, document deliberately
-      status: pending
+      status: completed
       depends_on:
         - catalogue
       blocks:
@@ -76,7 +76,7 @@ tasks:
       app_type: go-cli
     - id: fsops-windows-tests
       title: Add internal/fsops/fsops_windows_test.go (6 untested Windows-build-tagged functions)
-      status: in_progress
+      status: completed
       depends_on:
         - perms-dir
       blocks:

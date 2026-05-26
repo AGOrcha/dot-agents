@@ -3,7 +3,7 @@ plan_id: loop-discipline-stop-hooks
 tasks:
     - id: p0-sentinel-cli
       title: 'Sentinel CLI: write/read/clear under ''da workflow hook-sentinel'''
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -167,14 +167,8 @@ tasks:
         - .agents/history/loop-discipline-stop-hooks/downstream-override-migration.md
       verification_required: true
       notes: 'Final plan task; inventory managed downstream legacy overrides, migrate compatible copies to starter inheritance, and record retained intentional project variants. Contract: tasks/p7-legacy-override-migration.contract.md.'
-
-    # Added 2026-05-25 via Plan-agent review pass. Per-task diff proposals
-    # (verdicts: OK/MINOR_TWEAK/NEEDS_REWORK per existing task) deferred to
-    # a follow-up commit to keep this expansion additive + reviewable.
-    # The 4 new tasks below address gaps the planner surfaced.
-
     - id: p1e-docs-hooks-consistency
-      title: 'docs/HOOKS.md consistency pass after P1b/P1c/P1d additions'
+      title: docs/HOOKS.md consistency pass after P1b/P1c/P1d additions
       status: pending
       depends_on:
         - p1b-canonical-when-values
@@ -194,9 +188,8 @@ tasks:
         docs/HOOKS.md renders, tables are sorted/deduplicated, every
         canonical When value appears in exactly one row.
       app_type: research
-
     - id: p3-pre-snapshot
-      title: 'Source-skill snapshot to prevent drift during P3/P3b/P4 implementation'
+      title: Source-skill snapshot to prevent drift during P3/P3b/P4 implementation
       status: pending
       depends_on: []
       blocks:
@@ -217,9 +210,8 @@ tasks:
         P3b/P4 must copy from the recorded snapshot, not the moving
         head. No code change in this task — just the snapshot record.
       app_type: research
-
     - id: p6-rollback-plan
-      title: 'P6 payout-migration rollback documentation'
+      title: P6 payout-migration rollback documentation
       status: pending
       depends_on:
         - p6-payout-backfill
@@ -235,9 +227,8 @@ tasks:
         .agentsrc.json && da refresh`). Cross-link from the P6
         readback artifact. Operator-facing.
       app_type: research
-
     - id: r1-5-t4-integration
-      title: 'r1-5 plan integration test (cross-plan coordination acknowledgment)'
+      title: r1-5 plan integration test (cross-plan coordination acknowledgment)
       status: pending
       depends_on:
         - p5-e2e-integration

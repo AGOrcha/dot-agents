@@ -3,7 +3,7 @@ plan_id: r1-5-hook-enforcement-telemetry
 tasks:
     - id: t0-outcome-contract
       title: Define durable hook-outcome schema and archived-sentinel linkage
-      status: pending
+      status: in_progress
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -65,14 +65,6 @@ tasks:
         - commands/score_test.go
       verification_required: true
       notes: Expose outcome source and rule identifiers without printing transcript contents.
-
-    # Added 2026-05-25 via Plan-agent review pass (see design.md expansion).
-    # Below are the new tasks the planner surfaced. Existing tasks above
-    # are kept intact for the codex PR review; recommended in-task tweaks
-    # (split t2-scoring-signal into t2a+t2b, drop hook_sentinel.go from
-    # t1-capture-outcomes write_scope, etc.) are deferred to a follow-up
-    # to keep this expansion additive and reviewable.
-
     - id: t-schema-validator-wiring
       title: Wire hook-outcome schema into the workflow validator pipeline
       status: pending
@@ -92,7 +84,6 @@ tasks:
         the validator change can land independently of the CLI primitive
         in t1.
       app_type: go-cli
-
     - id: t2c-rubric-version-coordination
       title: Resolve RubricVersion ordering with r5-review-labeling-access
       status: pending
@@ -115,7 +106,6 @@ tasks:
         OUTCOME_SCORING_RUBRIC.md under a new "RubricVersion ordering
         for concurrent plans" section.
       app_type: research
-
     - id: t2d-companion-gate-compatibility
       title: Verify companion gates emit R1.5-compatible records without schema change
       status: pending
@@ -137,7 +127,6 @@ tasks:
         companion-plan code; that plan's own implementation tasks
         consume these fixtures as a contract test.
       app_type: go-cli
-
     - id: t-archival-policy
       title: Decide hook-outcome sidecar retention and archival
       status: pending
@@ -156,7 +145,6 @@ tasks:
         command spec (implementation deferred unless an operator
         request emerges). No code in this task — design + docs only.
       app_type: research
-
     - id: t-e2e-integration-test
       title: End-to-end test exercising sentinel → gate → sidecar → score
       status: pending
@@ -177,7 +165,6 @@ tasks:
         expected rule_id and "remediate" result. Mirror pattern of
         existing tests/test-* integration scripts.
       app_type: go-cli
-
     - id: t-docs
       title: Update OUTCOME_SCORING_RUBRIC.md and HOOKS.md for R1.5
       status: pending

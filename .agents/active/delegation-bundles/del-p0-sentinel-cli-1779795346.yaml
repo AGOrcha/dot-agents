@@ -1,0 +1,37 @@
+schema_version: 1
+delegation_id: del-p0-sentinel-cli-1779795346
+plan_id: loop-discipline-stop-hooks
+task_id: p0-sentinel-cli
+owner: p0-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T11:35:46Z"
+    reason: Wave 5
+scope:
+    write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - schemas/workflow-hook-sentinel.schema.json
+        - commands/workflow/static/workflow-hook-sentinel.schema.json
+        - commands/workflow/static/schemas.go
+        - commands/workflow/static/schemas_test.go
+prompt:
+    inline:
+        - Per p0 notes + contract
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml
+verification:
+    feedback_goal: hook-sentinel CLI
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

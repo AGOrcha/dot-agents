@@ -4,7 +4,7 @@ title: Audit Windows test skips; replace OS-dependent shortcuts with cross-platf
 status: active
 summary: 'The codebase has ~30 `if runtime.GOOS == "windows" { t.Skip(...) }` sites that silently lower Windows coverage. Some are genuine platform-only behaviour (POSIX-only symlink semantics, Unix-only exec bit). Others are shortcuts where the test author used a POSIX trick (chmod 0o000, umask reasoning, parent-dir mode bits) that does not work on Windows ACLs and reached for t.Skip instead of an abstraction. R1''s persist task already built the precedent: internal/testutil.MakeFileUnreadable handles the unreadable-file case with platform-native mechanisms (chmod on POSIX, exclusive FILE_SHARE_NONE handle on Windows). This plan catalogues the remaining skip sites, classifies each (genuine platform-only vs. shortcut), and migrates the shortcuts to abstractions in internal/testutil/.'
 created_at: "2026-05-23T21:08:58Z"
-updated_at: "2026-05-25T00:40:41Z"
+updated_at: "2026-05-26T11:31:48Z"
 owner: dot-agents
 success_criteria: Every runtime.GOOS == "windows" skip in *_test.go either (a) uses a testutil abstraction that exercises an equivalent assertion on Windows, or (b) carries an in-line comment explaining why the case is genuinely platform-only and cannot be abstracted. Windows-runner coverage for the formerly-skipped tests rises measurably; the cg6 ratchet picks up any file whose Windows coverage rises above the threshold.
 verification_strategy: |-
@@ -15,4 +15,4 @@ verification_strategy: |-
       - internal/scoring/signal_iterlog_test.go:409 — go:S3776 cog 17.
       - internal/scoring/iterlog_test.go:80 — go:S3776 cog 16.
     All three are from earlier R1 tasks (objective-checks / signals-iterlog); refactor as a follow-up slice or alongside the perms migrations.
-current_focus_task: catalogue
+current_focus_task: Migrate every shortcut-class skip to the new helpers

@@ -1,0 +1,37 @@
+schema_version: 1
+delegation_id: del-t09-move-doctor-1779795320
+plan_id: root-command-decomposition
+task_id: t09-move-doctor
+owner: t09-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T11:35:20Z"
+    reason: Wave 5
+scope:
+    write_scope:
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/doctor_test.go
+        - commands/lifecycle/doctor_repair_e2e_test.go
+        - commands/doctor.go
+        - commands/doctor_test.go
+        - commands/doctor_repair_e2e_test.go
+prompt:
+    inline:
+        - Per t09 notes - pure move post-t08
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: doctor moved
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

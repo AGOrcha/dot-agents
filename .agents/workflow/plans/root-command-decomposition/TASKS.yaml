@@ -214,7 +214,7 @@ tasks:
       app_type: code-fix
     - id: t03-move-install
       title: Move install command into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -239,7 +239,7 @@ tasks:
         imports appear in commands/install.go.
     - id: t04-move-add-remove
       title: Move add and remove commands into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -261,7 +261,7 @@ tasks:
         files remain in place until t13 strips them.
     - id: t05-move-init
       title: Move init command into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -279,7 +279,7 @@ tasks:
         in t14 enforces it permanently.
     - id: t06-move-import
       title: Move import command + import_plugins into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -302,7 +302,7 @@ tasks:
         - (fb:t06-import-helper-coupling) t06 import move blocks on cross-file helper coupling not declared in TASKS.yaml depends_on. commands/import.go calls mirrorBackup, isBackupArtifact, isManagedProjectOutput (all from add.go, owned by t04) and mapResourceRelToDest (from refresh.go, owned by t07). Lifecycle subpackage cannot reach these unexported root helpers without a cycle (commands/import.go shim imports commands/lifecycle, so commands/lifecycle cannot import commands/). lifecycle.Deps (commands/lifecycle/deps.go) does not carry these helpers, and deps.go is outside t06 write_scope. Three viable resolutions: (a) extend lifecycle.Deps with mirrorBackup/isManagedProjectOutput/isBackupArtifact/mapResourceRelToDest function fields (cleanest; matches Deps pattern but expands t02 deliverable), (b) duplicate the four helpers into commands/lifecycle/import.go as private copies until t04+t07 land (OD-2-style transitional duplication), (c) re-order: gate t06 on completion of t04 AND t07, then have lifecycle/import.go call the freshly-moved lifecycle.mirrorBackup etc. Worker stopped before any edits to avoid scope expansion.
     - id: t07-move-refresh
       title: Move refresh command into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -322,7 +322,7 @@ tasks:
         package change.
     - id: t08-move-status
       title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks: []
@@ -345,7 +345,7 @@ tasks:
         lifecycle calls.
     - id: t09-move-doctor
       title: Move doctor command into commands/lifecycle/
-      status: pending
+      status: in_progress
       depends_on:
         - t08-move-status
       blocks: []
@@ -400,7 +400,7 @@ tasks:
         in parallel.
     - id: t10a-create-mcp-subpackage
       title: Move mcp command into commands/mcp/ (per agents/skills file convention)
-      status: in_progress
+      status: completed
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []
@@ -465,7 +465,7 @@ tasks:
         deleted in t13.
     - id: t10b-create-settings-subpackage
       title: Move settings command into commands/settings/ (per agents/skills file convention)
-      status: in_progress
+      status: completed
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []
@@ -497,7 +497,7 @@ tasks:
         package-private (used by TestFindSettingsSpecNotFound).
     - id: t10c-create-rules-subpackage
       title: Move rules command into commands/rules/ (per agents/skills file convention)
-      status: in_progress
+      status: completed
       depends_on:
         - t10pre-extract-canonical-cmd-helpers
       blocks: []

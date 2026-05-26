@@ -1,0 +1,37 @@
+schema_version: 1
+delegation_id: del-t6-extract-graphstore-tests-1779795271
+plan_id: go-test-fixture-extraction
+task_id: t6-extract-graphstore-tests
+owner: t6-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T11:34:31Z"
+    reason: Wave 5; closes Cluster D fixture extraction plan
+scope:
+    write_scope:
+        - internal/graphstore/sqlite_test.go
+        - internal/graphstore/postgres_test.go
+        - internal/graphstore/mcp_server_test.go
+prompt:
+    inline:
+        - 'Per TASKS.yaml t6 notes. Use internal/testutil including the t2_5-added NewTempAgentsHome + WriteScopeFilePath helpers. Sibling pattern: t3 (PR #62'
+        - merged) for internal/platform tests is the closest reference.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml
+        - internal/testutil/testutil.go
+verification:
+    feedback_goal: graphstore tests migrate to internal/testutil including t2_5 helpers
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -335,7 +335,7 @@ tasks:
       app_type: code-fix
     - id: t6-extract-graphstore-tests
       title: Refactor internal/graphstore/*_test.go to use internal/testutil
-      status: pending
+      status: in_progress
       depends_on:
         - t2-create-internal-testutil
         - t2_5-extend-internal-testutil
