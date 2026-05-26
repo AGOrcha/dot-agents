@@ -1,0 +1,72 @@
+schema_version: 1
+id: t12-cross-cutting-shim-coverage
+plan_id: root-command-decomposition
+task_id: t12-relocate-cross-cutting-tests
+observation: |-
+  Full re-homing of the cross-cutting test families
+  (commands/resource_parity_test.go and the mcp/rules/settings RunE blocks
+  in commands/coverage_test.go) regresses the commands-package per-file
+  coverage gate for the same shim-coverage reason recorded in
+  t11-shim-coverage-defers-full-split.yaml.
+
+  Concretely: commands/mcp.go, commands/rules.go, and commands/settings.go
+  each contain test-only shim forwarders
+  (newMCPListCmd/newRulesListCmd/newSettingsListCmd,
+  makeRulesDeps, settingsCommandDeps, toSettingsSubpackageDeps, the
+  run{MCP,Rules,Settings}{List,Show,Remove} helpers). The only callers
+  of those forwarders are the cross-cutting tests being moved. Removing
+  the call sites drops the three shim files to 22-33 percent coverage
+  (well below the 95 percent per-file gate), which the bundle's
+  STOP-and-fold-back rule explicitly forbids allowlisting around.
+
+  Resolution chosen for this PR (mirrors the t11 pattern exactly):
+
+    - Keep commands/resource_parity_test.go and the mcp/rules/settings
+      blocks in commands/coverage_test.go in place. Their reason-for-
+      being is now narrowly scoped: shim coverage only, deleted with the
+      shim files in t13.
+    - Add the bundle-promised per-subpackage parity coverage on TOP of
+      the legacy root tests, so the parity contract exists in its
+      end-state home before t13:
+        - commands/mcp/resource_parity_test.go  (created)
+        - commands/settings/resource_parity_test.go  (created)
+        - commands/rules/resource_parity_test.go  (created)
+    - Leave the lifecycle-side files in the bundle's write_scope
+      uncreated:
+        - commands/lifecycle/coverage_test.go — NewInstallCmd /
+          NewDoctorCmd / NewInitCmd / NewRefreshCmd RunE coverage is
+          already comprehensively provided by the existing lifecycle
+          *_test.go files (TestNewInstallCmd_RunEDispatchesGenerate /
+          TestNewInstallCmd_RunEDispatchesInstall /
+          TestNewDoctorCmd_RunEClosureWiresStdDeps /
+          TestNewInitCmd_RunEClosureWiresStdDeps /
+          TestNewRefreshCmd_RunE*). Creating a new coverage_test.go
+          would duplicate, not add coverage.
+        - commands/lifecycle/agentsrc_mutations_test.go — the
+          production symbols exercised by the root file
+          (createSkill, createAgent in commands/skills.go +
+          commands/agents.go) live in the root commands package, not
+          lifecycle. The doctor-manifest helper tests are
+          pure-function replicas of test-local logic with no lifecycle
+          equivalent.
+        - commands/lifecycle/hook_normalization_roundtrip_test.go —
+          canonicalImportOutputs and the rel{Cursor,Codex,Claude,
+          GitHub}* fixture constants all live in commands/import.go
+          and commands/import_plugins.go. The lifecycle-side seam
+          (lifecycle.CanonicalImportOutputs) defaults to (nil, false,
+          nil) when commands/import.go's init() has not wired it, and
+          lifecycle cannot import commands without creating a cycle.
+          The seam's contract is already covered by
+          commands/lifecycle/project_test.go's
+          TestCanonicalImportOutputs_DefaultIsNotHandled /
+          TestCanonicalImportOutputs_ForwardsToWiredImpl.
+
+  Follow-up: after t13 deletes the mcp.go / rules.go / settings.go
+  shims, the cross-cutting tests in commands/resource_parity_test.go
+  and the mcp/rules/settings blocks in commands/coverage_test.go
+  become dead callers of deleted symbols and must be deleted in the
+  same PR. The per-subpackage parity coverage added by this task is
+  the end-state replacement.
+classification: small
+routed_to: task_note:root-command-decomposition/t12-relocate-cross-cutting-tests
+created_at: "2026-05-26T18:30:00Z"
