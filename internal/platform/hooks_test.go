@@ -1322,3 +1322,23 @@ func TestValidateHookWhenEvents_BackwardCompat(t *testing.T) {
 		t.Errorf("expected nil events on backward-compat path, got %v", events)
 	}
 }
+
+// TestRenderCursorHookEntry_TimeoutClampMinimum exercises the timeout clamp
+// branch when TimeoutMS / 1000 == 0 (relocated from coverage_gap2_test.go).
+func TestRenderCursorHookEntry_TimeoutClampMinimum(t *testing.T) {
+	event, entry, ok, err := renderCursorHookEntry(HookSpec{
+		Name:      "tiny",
+		When:      "pre_tool_use",
+		Command:   "/bin/true",
+		TimeoutMS: 500, // < 1s after integer division → should clamp to 1
+	})
+	if err != nil {
+		t.Fatalf("renderCursorHookEntry: %v", err)
+	}
+	if !ok || event != "preToolUse" {
+		t.Fatalf("unexpected event/ok: %q %v", event, ok)
+	}
+	if entry.Timeout != 1 {
+		t.Errorf("Timeout = %d, want clamped to 1", entry.Timeout)
+	}
+}

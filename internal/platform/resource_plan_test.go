@@ -1054,3 +1054,148 @@ func executeSkillPlan(t *testing.T, repo, agentsHome string) error {
 	}
 	return plan.Execute(repo, agentsHome)
 }
+
+// ---------------------------------------------------------------------------
+// ResourceIntent / ResourceSourceRef validate-enum coverage (relocated from
+// coverage_gap2_test.go).
+// ---------------------------------------------------------------------------
+
+// TestResourceIntentValidateEnums_AllBadVariants drives each enum-mismatch
+// branch in validateEnums.
+func TestResourceIntentValidateEnums_AllBadVariants(t *testing.T) {
+	good := validSharedSkillIntent(".agents/skills/review", "test")
+	if err := good.Validate(); err != nil {
+		t.Fatalf("baseline valid: %v", err)
+	}
+	cases := []struct {
+		name string
+		bad  func(ResourceIntent) ResourceIntent
+		want string
+	}{
+		{"empty-ownership", func(r ResourceIntent) ResourceIntent { r.Ownership = ""; return r }, "ownership"},
+		{"bad-ownership", func(r ResourceIntent) ResourceIntent { r.Ownership = "weird"; return r }, "ownership"},
+		{"empty-shape", func(r ResourceIntent) ResourceIntent { r.Shape = ""; return r }, "shape"},
+		{"bad-shape", func(r ResourceIntent) ResourceIntent { r.Shape = "weird"; return r }, "shape"},
+		{"empty-transport", func(r ResourceIntent) ResourceIntent { r.Transport = ""; return r }, "transport"},
+		{"bad-transport", func(r ResourceIntent) ResourceIntent { r.Transport = "weird"; return r }, "transport"},
+		{"empty-replace", func(r ResourceIntent) ResourceIntent { r.ReplacePolicy = ""; return r }, "replace_policy"},
+		{"bad-replace", func(r ResourceIntent) ResourceIntent { r.ReplacePolicy = "weird"; return r }, "replace_policy"},
+		{"empty-prune", func(r ResourceIntent) ResourceIntent { r.PrunePolicy = ""; return r }, "prune_policy"},
+		{"bad-prune", func(r ResourceIntent) ResourceIntent { r.PrunePolicy = "weird"; return r }, "prune_policy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := tc.bad(good)
+			err := intent.Validate()
+			if err == nil {
+				t.Fatalf("expected error mentioning %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err %v missing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestResourceSourceRefValidate_AllCases exhausts the kind switch.
+func TestResourceSourceRefValidate_AllCases(t *testing.T) {
+	base := ResourceSourceRef{
+		Scope:        "proj",
+		Bucket:       "skills",
+		RelativePath: "x",
+		Kind:         ResourceSourceCanonicalDir,
+	}
+	for _, kind := range []ResourceSourceKind{
+		ResourceSourceCanonicalFile, ResourceSourceCanonicalDir, ResourceSourceCanonicalBundle,
+	} {
+		ref := base
+		ref.Kind = kind
+		if err := ref.Validate(); err != nil {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+	bad := base
+	bad.Kind = "weird"
+	if err := bad.Validate(); err == nil {
+		t.Error("expected error for unknown kind")
+	}
+	bad.Kind = ""
+	if err := bad.Validate(); err == nil {
+		t.Error("expected error for empty kind")
+	}
+	for _, missing := range []ResourceSourceRef{
+		{Bucket: "x", RelativePath: "y", Kind: ResourceSourceCanonicalDir},
+		{Scope: "x", RelativePath: "y", Kind: ResourceSourceCanonicalDir},
+		{Scope: "x", Bucket: "y", Kind: ResourceSourceCanonicalDir},
+	} {
+		if err := missing.Validate(); err == nil {
+			t.Errorf("expected error for missing field in %+v", missing)
+		}
+	}
+}
+
+// TestResourceIntentValidate_MissingMaterializer covers the empty-materializer branch.
+func TestResourceIntentValidate_MissingMaterializer(t *testing.T) {
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	intent.Materializer = ""
+	if err := intent.Validate(); err == nil || !strings.Contains(err.Error(), "materializer") {
+		t.Errorf("expected materializer error, got %v", err)
+	}
+}
+
+// TestResourceIntentValidate_BadSourceRef propagates from SourceRef.Validate.
+func TestResourceIntentValidate_BadSourceRef(t *testing.T) {
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	intent.SourceRef.Kind = ""
+	if err := intent.Validate(); err == nil {
+		t.Error("expected propagated source_ref error")
+	}
+}
+
+// TestValidateEnum_Direct exercises the helper with both success and failure paths.
+func TestValidateEnum_Direct(t *testing.T) {
+	if err := validateEnum("color", "red", []string{"red", "blue"}); err != nil {
+		t.Errorf("valid: %v", err)
+	}
+	if err := validateEnum("color", "", []string{"red"}); err == nil {
+		t.Error("expected required error for empty value")
+	}
+	if err := validateEnum("color", "green", []string{"red", "blue"}); err == nil {
+		t.Error("expected unsupported error for unknown value")
+	}
+}
+
+// TestSameStrings_Differences ensures the helper is symmetric on shuffles and
+// rejects mismatched slices.
+func TestSameStrings_Differences(t *testing.T) {
+	cases := []struct {
+		a, b []string
+		want bool
+	}{
+		{nil, nil, true},
+		{[]string{"a", "b"}, []string{"b", "a"}, true},
+		{[]string{"a"}, []string{}, false},
+		{[]string{"a", "b"}, []string{"a", "c"}, false},
+	}
+	for i, tc := range cases {
+		if got := sameStrings(tc.a, tc.b); got != tc.want {
+			t.Errorf("[%d] sameStrings(%v, %v) = %v, want %v", i, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestSyncResourceDirEntries_HardError drives the mkdir error branch.
+func TestSyncResourceDirEntries_MkdirError(t *testing.T) {
+	// Try to use a path that contains a regular file as parent dir.
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// dstRoot below a regular file → MkdirAll errors.
+	dst := filepath.Join(blocker, "child")
+	err := syncResourceDirEntries(stdPlatformIO{}, []resourceDir{{Name: "x", Dir: "/no/where"}}, dst)
+	if err == nil {
+		t.Error("expected mkdir error")
+	}
+}

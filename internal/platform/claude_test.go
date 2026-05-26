@@ -110,3 +110,100 @@ func TestClaudeScanSessionTokens_SumsUsageWithinTimeWindow(t *testing.T) {
 		t.Errorf("CacheHitRate = %v, want %v", got.CacheHitRate, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Claude CreateLinks full fixture + session branch-extraction coverage
+// (relocated from coverage_gap2_test.go).
+// ---------------------------------------------------------------------------
+
+// setupClaudeFullFixture provisions the full fixture used by the Claude
+// CreateLinks test: rules, mcp, legacy hook, agent dir, skill dir, global rule.
+func setupClaudeFullFixture(t *testing.T, agentsHome string) {
+	t.Helper()
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "proj", "rule.md"), "# rule\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("mcp", "proj", "claude.json"), "{}")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("hooks", "proj", "claude-code.json"), `{"hooks":{}}`)
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("agents", "proj", "reviewer", "AGENT.md"), "---\nname: reviewer\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("skills", "global", "tidy", "SKILL.md"), "---\nname: tidy\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "global", "claude-code.md"), "# global\n")
+}
+
+func TestClaudeCreateLinks_FullFixture(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	setupClaudeFullFixture(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mustMkdirAllT(t, repo)
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	// Project rule should be linked.
+	if _, err := os.Lstat(filepath.Join(repo, ".claude", "rules", "proj--rule.md")); err != nil {
+		t.Errorf("project rule symlink missing: %v", err)
+	}
+	// .mcp.json symlink.
+	if _, err := os.Lstat(filepath.Join(repo, ".mcp.json")); err != nil {
+		t.Errorf(".mcp.json missing: %v", err)
+	}
+	// Legacy hook settings.local.json symlink to legacy file.
+	if _, err := os.Lstat(filepath.Join(repo, ".claude", "settings.local.json")); err != nil {
+		t.Errorf("settings.local.json missing: %v", err)
+	}
+}
+
+// TestClaudeExtractBranchSession_UUIDFallback hits the sid-from-uuid branch.
+func TestClaudeExtractBranchSession_UUIDFallback(t *testing.T) {
+	line := `{"uuid":"uuid-xyz","timestamp":"2026-05-11T10:00:00Z","gitBranch":"main"}`
+	sid, ts := claudeExtractBranchSession(line, "main")
+	if sid != "uuid-xyz" {
+		t.Errorf("sid = %q, want uuid-xyz", sid)
+	}
+	if ts == "" {
+		t.Error("expected non-empty timestamp")
+	}
+}
+
+func TestClaudeExtractBranchSession_NoSessionOrUUID(t *testing.T) {
+	line := `{"timestamp":"2026-05-11T10:00:00Z","gitBranch":"main"}`
+	sid, _ := claudeExtractBranchSession(line, "main")
+	if sid != "" {
+		t.Errorf("expected empty sid, got %q", sid)
+	}
+}
+
+func TestClaudeExtractBranchSession_BadJSON(t *testing.T) {
+	sid, _ := claudeExtractBranchSession("not-json", "main")
+	if sid != "" {
+		t.Errorf("expected empty for bad json, got %q", sid)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_AssistantCountReflectsLineHits adds an
+// assistant-counting test case to drive the assistantLines++ branch.
+func TestClaudeScanJSONLForBranch_AssistantCount(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/example"
+	sess := "count-test"
+	target := "main"
+	lines := []string{
+		`{"type":"assistant","sessionId":"count-test","gitBranch":"main","timestamp":"2026-05-11T10:00:00Z","message":{"content":""}}`,
+		`{"type":"assistant","sessionId":"count-test","gitBranch":"main","timestamp":"2026-05-11T11:00:00Z","message":{"content":""}}`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+	slug := strings.ReplaceAll(project, "/", "-")
+	path := filepath.Join(home, ".claude", "projects", slug, sess+".jsonl")
+	marker := `"gitBranch":"` + target + `"`
+	got := claudeScanJSONLForBranch(path, marker, target)
+	if got == nil {
+		t.Fatal("expected match")
+	}
+	if got.MessageCount < 2 {
+		t.Errorf("MessageCount = %d, want >= 2", got.MessageCount)
+	}
+}

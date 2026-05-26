@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
 const codexAgentMarkdownFile = "AGENT.md"
@@ -146,5 +148,106 @@ func assertCodexPathNotExists(t *testing.T, path, message string) {
 	t.Helper()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("%s, got %v", message, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Codex CreateLinks + SharedTargetIntents + hook rendering coverage
+// (relocated from coverage_gap2_test.go).
+// ---------------------------------------------------------------------------
+
+// TestCodexCreateLinks_FullRulesAndSettings drives the rules→AGENTS.md and
+// settings→config.toml branches of (*codex).CreateLinks.
+func TestCodexCreateLinks_FullRulesAndSettings(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed global rules and project override.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", "global"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "rules", "global", "agents.md"), []byte("# global\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "rules", "proj", "agents.md"), []byte("# proj\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Seed settings/codex.toml.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "settings", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "settings", "proj", "codex.toml"), []byte("model = \"x\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+
+	// AGENTS.md should be linked (project override wins).
+	if !links.IsManagedLink(filepath.Join(repo, "AGENTS.md"), filepath.Join(agentsHome, "rules", "proj", "agents.md")) {
+		t.Error("AGENTS.md should be a managed link to the project override")
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".codex", "config.toml")); err != nil {
+		t.Errorf("config.toml missing: %v", err)
+	}
+}
+
+// TestCodexSharedTargetIntentsPopulated drives skills + codex-agent-toml intents.
+func TestCodexSharedTargetIntents_Populated(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	for _, p := range [][]string{
+		{"skills", "proj", "alpha", "SKILL.md"},
+		{"agents", "proj", "reviewer", "AGENT.md"},
+	} {
+		dir := filepath.Join(append([]string{agentsHome}, p[:3]...)...)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p[3]), []byte("body"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	intents, err := NewCodex().SharedTargetIntents("proj")
+	if err != nil {
+		t.Fatalf("SharedTargetIntents: %v", err)
+	}
+	if len(intents) == 0 {
+		t.Error("expected non-zero intents")
+	}
+}
+
+// TestRenderCodexHookConfigMatcherBranches covers session_start/pre_tool_use/
+// post_tool_use which take the matcherForSpec branch versus stop which uses
+// empty matcher.
+func TestRenderCodexHookConfig_MatcherBranches(t *testing.T) {
+	specs := []HookSpec{
+		{Name: "a", When: "stop", Command: "/bin/x"},
+		{Name: "b", When: "pre_tool_use", Command: "/bin/y", MatchExpression: "Bash"},
+	}
+	content, err := renderCodexHookConfig(specs)
+	if err != nil {
+		t.Fatalf("renderCodexHookConfig: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "Stop") {
+		t.Errorf("expected Stop event: %s", got)
+	}
+	if !strings.Contains(got, `"matcher": "Bash"`) {
+		t.Errorf("expected Bash matcher: %s", got)
 	}
 }
