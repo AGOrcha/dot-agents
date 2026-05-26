@@ -1,0 +1,146 @@
+schema_version: 1
+id: t13-write-scope-missing-test-files
+plan_id: root-command-decomposition
+task_id: t13-strip-root-shims
+observation: |-
+    t13-strip-root-shims bundle write_scope is incomplete and forces a
+    co-commit violation that the t11 + t12 fold-backs explicitly warned
+    about. Folding back without partial-landing per [[no-lazy-allowlist-tech-debt]]
+    and [[validate-bundle-against-head]].
+
+    CURRENT BUNDLE WRITE_SCOPE (15 entries, root commands/*.go files only):
+      commands/root.go, add.go, doctor.go, import.go, import_plugins.go,
+      init.go, install.go, refresh.go, remove.go, status.go,
+      linkcount_unix.go, linkcount_windows.go, mcp.go, settings.go, rules.go
+
+    VALIDATION FINDINGS AT HEAD (master @ 9ba4f429):
+
+    1. Two files in write_scope no longer exist in commands/:
+       - commands/linkcount_unix.go and commands/linkcount_windows.go were
+         already moved into commands/lifecycle/ during t08-move-status.
+         Deleting non-existent files is harmless but indicates the bundle
+         write_scope was authored against a stale snapshot.
+
+    2. Five files in write_scope are NOT pure shims — they hold production
+       code that has not been moved to a subpackage:
+       - commands/add.go: NewAddCmd, runAdd, scanExistingAIConfigs,
+         checkExistingConfigFiles, resolveAddTarget, announceAddTarget,
+         printAddPreview, addPlatformPreviews, backupAddExistingFiles,
+         scaffoldAddProjectDirs, createAddLinks, registerAddedProject,
+         emitAddSuccessBox, ensureProjectKGMCPConfigs (plus 6 var-aliases
+         used by other commands files: mirrorBackup, mirrorBackupChecked,
+         backupExistingConfigsList, restoreFromResourcesCountedWithDeps,
+         restoreLegacyResourceFile, writeKGMCPConfigs, writeKGMCPConfigFile,
+         ensureGlobalKGMCPConfigs, kgConfigPath, isBackupArtifact,
+         isManagedCursorRuleRel, isManagedProjectOutput)
+       - commands/import.go: importCandidate type, importResult,
+         importOutput, importConflictReviewNote type, plus the entire
+         processImportCandidate / replaceImportContentCandidate /
+         importMissingContentCandidate / importPreservedConflictCandidate /
+         writeImportConflictReviewNote pipeline. Has NOT been moved into
+         lifecycle (t06 deferred per t06-import-helper-coupling fold-back).
+       - commands/import_plugins.go: supportsCanonicalImportPath,
+         supportsCanonicalImportPathNonPlugin, packagePluginLayout, plus
+         the importedPackagePluginManifest type tree. Not a shim at all.
+       - commands/remove.go: removeDeps interface, stdRemoveDeps, NewRemoveCmd,
+         runRemove, removeProjectDirs. Not yet moved to lifecycle.
+       - commands/refresh.go: Version/Commit/Describe package-vars, NewRefreshCmd
+         wiring closure, plus the runRefresh body itself (deferred per
+         t07-refresh-body-deferred.md).
+
+       These five files cannot be deleted; only the shim wiring inside them
+       (re-export var blocks, syncLifecycleGlobals, lifecycleDeps,
+       lifecycleStatusDeps, lifecycleDoctorDeps) plus the lowercased
+       forwarders (runInstall, runInstallGenerate, registerInstallProject,
+       findProjectByPath, linkResourceFromSources, cloneGitSource,
+       shouldUseCachedGitSource, runDoctor, runInit, runStatus,
+       printSymlinkDirAudit, countClaudeRules, scaffoldWorkflowAssets,
+       plus the type aliases installDeps, stdInstallDeps,
+       doctorConfigLoader, stdDoctorConfigLoader, mcpDeps, settingsDeps,
+       rulesDeps, newMCPListCmd, newMCPShowCmd, newMCPRemoveCmd,
+       newRulesListCmd, newRulesShowCmd, newRulesRemoveCmd,
+       newSettingsListCmd, newSettingsShowCmd, newSettingsRemoveCmd,
+       runRulesList) can be removed.
+
+    3. THE CO-COMMIT WALL. Deleting those shim symbols breaks compilation
+       of THIRTEEN test files outside the bundle's write_scope. The user's
+       bundle prompt called out three (seams_test.go, resource_parity_test.go,
+       coverage_test.go) and said expand scope OR fold back. HEAD-validation
+       surfaces ten more:
+         commands/seams_test.go            — 90+ uses of runInstall,
+           runInstallGenerate, registerInstallProject, findProjectByPath,
+           linkResourceFromSources, cloneGitSource, shouldUseCachedGitSource,
+           runDoctor, runInit, runStatus, runAdd, runRefresh, runRemove,
+           printSymlinkDirAudit, countClaudeRules, scaffoldWorkflowAssets,
+           processImportCandidate, replaceImportContentCandidate,
+           importMissingContentCandidate, importPreservedConflictCandidate,
+           writeImportConflictReviewNote, backupExistingConfigsList,
+           restoreLegacyResourceFile, writeKGMCPConfigs,
+           writeKGMCPConfigFile, plus the installDeps / stdInstallDeps /
+           stdAddDeps / stdImportDeps / stdRemoveDeps / doctorConfigLoader
+           type aliases.
+         commands/resource_parity_test.go  — runRemove + mcpDeps /
+           settingsDeps / rulesDeps shim references (case-table driven).
+         commands/coverage_test.go         — NewMCPListCmd / NewMCPShowCmd /
+           NewMCPRemoveCmd / NewRulesListCmd / NewRulesShowCmd /
+           NewRulesRemoveCmd / NewSettingsListCmd / NewSettingsShowCmd /
+           NewSettingsRemoveCmd / NewInstallCmd / NewImportCmd / NewRemoveCmd
+           RunE wiring tests.
+         commands/add_test.go              — stdAddDeps + helper aliases
+         commands/doctor_test.go           — doctorConfigLoader /
+           stdDoctorConfigLoader + runDoctor
+         commands/init_test.go             — runInit + writeKGMCPConfigs
+         commands/install_test.go          — installDeps / stdInstallDeps /
+           runInstall / runInstallGenerate
+         commands/mcp_test.go              — mcpDeps + newMCP*Cmd shims
+         commands/import_test.go           — stdImportDeps + processImportCandidate
+         commands/refresh_idempotency_test.go — runRefresh + stdRefreshConfigLoader
+         commands/remove_test.go           — runRemove + stdRemoveDeps
+         commands/refresh_test.go          — runRefresh + stdImportDeps + stdAddDeps
+         commands/review_test.go           — minor; verify if needed
+
+    4. Three files in scope (mcp.go, settings.go, rules.go) carry the
+       t12 fold-back's explicit instruction: 'after t13 deletes the
+       mcp.go / rules.go / settings.go shims, the cross-cutting tests in
+       commands/resource_parity_test.go and the mcp/rules/settings blocks
+       in commands/coverage_test.go become dead callers of deleted
+       symbols and MUST be deleted in the same PR.' The bundle authors
+       read this fold-back but did not add resource_parity_test.go or
+       coverage_test.go to write_scope.
+
+    REQUIRED WRITE_SCOPE EXPANSION (for re-spawn):
+      Add to scope:
+        commands/seams_test.go            (delete entirely or strip to coverage_test reusable cases)
+        commands/resource_parity_test.go  (delete; replaced by per-subpkg parity tests landed in t12)
+        commands/coverage_test.go         (strip mcp/rules/settings/install/import/remove RunE blocks; keep review block)
+        commands/add_test.go              (rewire to lifecycle.AddDeps / lifecycle.StdAddDeps imports)
+        commands/doctor_test.go           (rewire to lifecycle.DoctorConfigLoader / StdDoctorConfigLoader)
+        commands/init_test.go             (rewire to lifecycle.RunInit / lifecycle.WriteKGMCPConfigs)
+        commands/install_test.go          (rewire to lifecycle.InstallDeps / RunInstall / RunInstallGenerate)
+        commands/mcp_test.go              (rewire to mcp.Deps + mcp.NewListCmd / NewShowCmd / NewRemoveCmd)
+        commands/import_test.go           (most pipeline stays in commands/import.go; rewire stdImportDeps if relocated)
+        commands/refresh_idempotency_test.go (rewire to lifecycle.RunRefresh + lifecycle config-loader)
+        commands/remove_test.go           (keep with remove.go which is not moving)
+        commands/refresh_test.go          (rewire to lifecycle.RunRefresh + lifecycle deps)
+        commands/review_test.go           (audit; likely needs minor adjustment)
+
+      Remove from scope (don't exist):
+        commands/linkcount_unix.go
+        commands/linkcount_windows.go
+
+    ALTERNATIVE STAGING (more conservative):
+      Split t13 into t13a (delete the three resource-subpackage shims
+      mcp.go/settings.go/rules.go + dead callers in resource_parity_test.go
+      and coverage_test.go) and t13b (delete the lifecycle-cluster shim
+      wiring inside install.go/doctor.go/init.go/status.go + dead callers
+      in seams_test.go and the per-command *_test.go files). t13a is
+      mechanically smaller (3 files moved out as whole subpackages,
+      3 shim files + 2 test files in scope) and unblocks t14's
+      import-graph assertion partially; t13b finishes the job.
+
+    NO CODE CHANGES MADE. Worktree feature/t13-strip-root-shims is clean
+    at base 9ba4f429. Branch should be deleted after the bundle is
+    re-authored.
+classification: small
+routed_to: task_note:root-command-decomposition/t13-strip-root-shims
+created_at: "2026-05-26T20:11:07Z"
