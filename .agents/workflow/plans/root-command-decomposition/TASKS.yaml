@@ -824,10 +824,9 @@ tasks:
         also lifecycle home" shape. Cross-link the proposal at
         .agents/proposals/root-command-decomposition.md and mark it
         resolved.
-
     - id: t13a-strip-resource-subpackage-shims
       title: Delete mcp/settings/rules root shims + dead callers in cross-cutting tests
-      status: pending
+      status: in_progress
       depends_on:
         - t12-relocate-cross-cutting-tests
       blocks:
@@ -876,7 +875,6 @@ tasks:
         cascades into other test files, FOLD BACK rather than expand
         scope unilaterally.
       app_type: code-fix
-
     - id: t13b-strip-lifecycle-cluster-shims
       title: Strip lifecycle-cluster shim wiring + rewire root.go + per-command test files
       status: pending

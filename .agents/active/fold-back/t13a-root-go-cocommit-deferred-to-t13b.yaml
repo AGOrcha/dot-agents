@@ -1,0 +1,160 @@
+schema_version: 1
+id: t13a-root-go-cocommit-deferred-to-t13b
+plan_id: root-command-decomposition
+task_id: t13a-strip-resource-subpackage-shims
+observation: |-
+    t13a re-spawn (del-t13a-strip-resource-subpackage-shims-1779826591) hits
+    the SAME write_scope cocommit problem the original t13 fold-back
+    (t13-write-scope-missing-test-files.yaml) identified, but at a smaller
+    scale: deleting commands/{mcp,settings,rules}.go cascades into
+    commands/root.go which is OUT of t13a's write_scope and OWNED by t13b.
+    Folding back per [[validate-bundle-against-head]] and the bundle's own
+    anti-scope rule ("if a deletion cascades into other [files], FOLD BACK
+    rather than expand scope unilaterally"). NO CODE CHANGES MADE; worktree
+    feature/t13a-strip-resource-subpackage-shims is clean at base
+    a2946027.
+
+    VALIDATION AT HEAD (master @ a2946027):
+
+    1. commands/mcp.go, commands/settings.go, commands/rules.go each
+       define a public constructor still wired from commands/root.go:
+         commands/root.go:55  root.AddCommand(NewRulesCmd())
+         commands/root.go:56  root.AddCommand(NewMCPCmd())
+         commands/root.go:57  root.AddCommand(NewSettingsCmd())
+       Deleting the three files removes NewMCPCmd / NewRulesCmd /
+       NewSettingsCmd as symbols. Build fails with three "undefined"
+       errors (verified by trial deletion + `go build ./...`):
+         commands/root.go:55:18: undefined: NewRulesCmd
+         commands/root.go:56:18: undefined: NewMCPCmd
+         commands/root.go:57:18: undefined: NewSettingsCmd
+
+    2. The bundle prompt explicitly excludes root.go: "DO NOT touch
+       commands/root.go (t13b owns the lifecycle rewire and will do the
+       mcp/settings/rules constructor switch in the same pass as
+       install/doctor/init/status)." This was a conscious bundle-author
+       decision to keep this PR small, but it leaves the build broken
+       between t13a landing and t13b landing — an invalid intermediate
+       state on master.
+
+    3. The other five files in scope are fine to act on independently:
+       - commands/resource_parity_test.go: pure dead-caller; per-subpkg
+         replacements landed at commands/{mcp,settings,rules}/
+         resource_parity_test.go via t12 (PR #96). Safe to delete.
+       - commands/mcp_test.go: TestNewMCPCmd_ShimReturnsCobraTree is
+         duplicated by commands/mcp/cmd_test.go:TestNewCmd_Metadata
+         (same Use="mcp" + list/show/remove subcommand assertion). The
+         makeMCPDeps / writeMCPConfig helpers are only used by the
+         coverage_test.go blocks that t13a also strips. Safe to delete
+         IF the public constructor stays alive long enough for root.go.
+       - commands/coverage_test.go: the mcp/rules/settings RunE blocks
+         (TestNewMCPListCmd_RunE through TestNewSettingsRemoveCmd_RunE)
+         only call the lowercased shim constructors / helpers that t13a
+         removes. Per-subpkg coverage tests already cover these in
+         commands/{mcp,rules,settings}/coverage_test.go. Safe to strip
+         that block in isolation; the install/import/remove/review
+         blocks (t13b's scope) stay untouched.
+
+    THE STRUCTURAL ISSUE:
+    The t13 → t13a/t13b split assumed the three resource-subpackage shim
+    files were independently removable. They are not — each one exports a
+    public constructor (NewMCPCmd / NewRulesCmd / NewSettingsCmd) that
+    root.go consumes. To fully delete those three files, root.go's
+    three AddCommand calls (lines 55-57) MUST switch to mcp.NewCmd /
+    rules.NewRulesCmd / settings.NewCmd in the same commit. There is no
+    safe intermediate state that drops the parent-package symbols
+    without rewiring the caller.
+
+    The split's "keep it small" motivation conflicts with the build
+    requirement. The two options are equivalent in surface area to the
+    bundle author; choose whichever the orchestrator prefers:
+
+    OPTION A (RECOMMENDED — minimal re-author): Expand t13a's write_scope
+    to include commands/root.go for a 3-line edit. The lifecycle-cluster
+    constructor switch in root.go (NewInstallCmd → lifecycle.NewInstallCmd,
+    etc.) stays in t13b's scope; only the three resource-subpackage
+    AddCommand lines change here. This honors the t13a/t13b split's
+    spirit (resource cluster first, lifecycle cluster second) without
+    leaving the build broken between PRs.
+      Write_scope addition: commands/root.go
+      Edit: lines 55-57 — NewRulesCmd → rules.NewRulesCmd(buildRulesDeps),
+                          NewMCPCmd  → mcp.NewCmd(buildMCPDeps),
+                          NewSettingsCmd → settings.NewCmd(buildSettingsDeps)
+      buildXxxDeps helpers would need a home; the natural place is
+      somewhere t13b also touches, but they can live in root.go itself
+      (small inline functions) since the only caller is root.go after
+      the shims are gone. Total root.go diff: ~3-30 lines depending on
+      whether the deps-build helpers stay inline or move.
+
+    OPTION B (more conservative — keep public constructors in t13a):
+    Strip t13a to ONLY the test-only shim symbols + test file deletions.
+    Keep NewMCPCmd / NewRulesCmd / NewSettingsCmd alive as thin wrappers
+    in mcp.go / rules.go / settings.go. t13b then deletes those three
+    files outright in the same commit as the root.go rewire. This honors
+    "DO NOT touch root.go" but means t13a does NOT actually delete the
+    three shim files — it only strips them down to one public function
+    each. The file-deletion outcome the bundle promises moves to t13b.
+      Write_scope (revised): keep all 6 entries as-is.
+      Edits per file:
+        commands/mcp.go        — keep NewMCPCmd + mcpCommandDeps;
+                                 delete mcpDeps alias, newMCPListCmd,
+                                 newMCPShowCmd, newMCPRemoveCmd,
+                                 runMCPList, runMCPShow, runMCPRemove.
+        commands/settings.go   — keep NewSettingsCmd + settingsCommandDeps
+                                 + toSettingsSubpackageDeps; delete
+                                 settingsDeps struct, newSettingsListCmd,
+                                 newSettingsShowCmd, newSettingsRemoveCmd,
+                                 runSettingsList, runSettingsShow,
+                                 runSettingsRemove.
+        commands/rules.go      — keep NewRulesCmd + rulesCommandDeps;
+                                 delete rulesDeps alias, newRulesListCmd,
+                                 newRulesShowCmd, newRulesRemoveCmd,
+                                 runRulesList, runRulesShow,
+                                 runRulesRemove, makeRulesDeps.
+        commands/resource_parity_test.go  — delete entirely.
+        commands/mcp_test.go              — delete entirely (or keep ONLY
+                                            TestNewMCPCmd_ShimReturnsCobraTree
+                                            since its NewMCPCmd target
+                                            still exists; recommend delete
+                                            since mcp/cmd_test.go
+                                            TestNewCmd_Metadata fully
+                                            covers it).
+        commands/coverage_test.go         — strip mcp/rules/settings RunE
+                                            blocks (TestNewMCPListCmd_RunE
+                                            through TestNewSettingsRemoveCmd_RunE).
+                                            Keep install/import/remove/review
+                                            blocks (t13b's scope).
+
+    OPTION B preserves the t13a/t13b ownership boundary the bundle drew
+    around root.go. The cost is that the three shim files survive t13a's
+    pass (renamed in spirit from "test-only re-exports" to "single-call
+    public wrappers"). t13b's PR then becomes the one that actually
+    "deletes mcp.go / settings.go / rules.go" alongside the root.go
+    rewire — a cleaner co-commit because root.go's switch and the file
+    deletions land in the same diff.
+
+    RECOMMENDATION:
+    OPTION B is the smaller, safer re-author — no scope expansion, just
+    a more accurate task description. The bundle prompt's "DELETE
+    commands/mcp.go..." line should become "STRIP commands/mcp.go to
+    only the public constructor + its deps builder; delete the test-only
+    shim symbols." t13b's note already says it owns the root.go rewire
+    of mcp/settings/rules constructors, so this naturally chains: t13a
+    strips the test surface, t13b deletes the wrapper files and rewires
+    root.go in one commit.
+
+    SECONDARY OBSERVATION (low-priority lesson candidate):
+    The original t13 fold-back enumerated "the co-commit wall" exactly
+    once, then the split into t13a/t13b accidentally re-created the same
+    wall at a smaller scale because the orchestrator drew the t13a/t13b
+    line on PACKAGE BOUNDARIES (resource vs lifecycle) instead of on
+    CALLER BOUNDARIES (everything root.go calls together). For future
+    "strip shim layer" tasks, the splitting axis should be: "what calls
+    this symbol from outside the file?" not "what subpackage does it
+    re-export to?" If the answer to the first question includes a file
+    outside the write_scope, the split has to either include that caller
+    or keep the public symbol alive. Both t13 and t13a hit this same
+    pattern — promote a lesson once the second occurrence is in the
+    record.
+classification: small
+routed_to: task_note:root-command-decomposition/t13a-strip-resource-subpackage-shims
+created_at: "2026-05-26T20:30:00Z"
