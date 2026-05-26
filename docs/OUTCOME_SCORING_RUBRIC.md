@@ -376,6 +376,53 @@ lands (RubricVersion 2.1.0 or 3.1.0 per the ordering decided at task
 time), this policy is a forward-looking contract only — no
 `iter-N.hook-outcomes.yaml` files yet exist under RubricVersion 2.0.2.
 
+## Post-tool observation evaluation (R1.5 T1b)
+
+The R1.5 plan's `t1b-post-tool-observation-evaluation` task evaluates
+whether `PostToolUse` and `PostToolUseFailure` hook events (mapped today
+per the upstream `loop-discipline-stop-hooks` D9 as observation
+candidates, not gates) qualify as an objective signal feeding the
+upcoming `hook_outcomes` sub-score.
+
+**Decision: deferred to R1.5.1. Post-tool observation is NOT admitted
+to v1 scoring.** The `hook_outcomes` signal that R1.5 introduces is fed
+**only** by terminal-gate (`remediate_at_stop`) and pre-action
+(`prevent_before_action`) records; `pre_compact` continuity-advice
+records remain observational per the spec D4. The post-tool surface
+emits no `iter-N.hook-outcomes.yaml` records under v1 and contributes
+nothing to the sub-score.
+
+The four boundary criteria the R1.5 spec R3.2 requires resolved
+**before** any post-tool observation can contribute to scoring did not
+all clear v1:
+
+| Criterion | v1 status |
+|---|---|
+| Vendor payload stability across Claude, Codex, Copilot, Cursor | Partial — event names mapped on all four platforms; payload field shapes not pinned by golden fixtures, and Codex lacks a dedicated `PostToolUseFailure` event (success/failure conflated in `PostToolUse`). |
+| Workflow-command filter regex with named approved commands | Reserved but not enabled — filter requires payload-field stability first. |
+| Redaction strategy for failure messages | Not solvable in v1 without either expanding `gate.sh` scope with a new classifier or relaxing the D2 disallowed-fields contract (`stderr`, `tool_output`, `failure_message`, free-text). Required form when reopened: bounded enum `{exit_nonzero, timeout_exceeded, permission_denied, vendor_error, unknown}`. |
+| Deduplication against terminal remediation for the same workflow command | Safe (no false double-count: successful post-tool records do not overlap with `remediate_at_stop` records) but low-value — the marginal signal over the existing "no remediate ⇒ allow" path is near zero for successful commands; failure records depend on the prior three criteria. |
+| Noise-budget cap | Reserved for R1.5.1: max 20 post-tool records per `iter-N.hook-outcomes.yaml` with silent back-pressure beyond the cap and one stderr advisory. |
+
+The deferral preserves the spec Boundary clause — "a post-tool
+observation must not be counted separately when it merely records the
+same prevention or terminal remediation outcome" — by ensuring no
+post-tool record contributes to scoring until both attribution and
+redaction are settled.
+
+The full assessment (criteria, evidence, rejected alternatives, and
+the bounded R1.5.1 reopen path) lives in the plan-side decision record
+at
+[`.agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md`](../.agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md).
+This section, like the retention section above, will be folded into the
+broader R1.5-driven doc delta by the `t-docs` task when R1.5 ships
+under RubricVersion 2.1.0 or 3.1.0. Until then, this assessment is a
+forward-looking contract that constrains `t2-scoring-signal`: that
+task MUST implement the `hook_outcomes` signal without consuming
+post-tool records, and any later reopening MUST land the C1–C4 follow-up
+work documented in the assessment doc before a single post-tool record
+enters the sub-score.
+
 ## Changelog
 
 - **2.0.2** — Documents the structured-claims layer: the
