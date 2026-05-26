@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
@@ -1602,5 +1603,171 @@ func TestEmitPreferredHookFileToUserHomes_AllNilNoOp(t *testing.T) {
 	if err := emitPreferredHookFileToUserHomes(stdPlatformIO{}, ".x/y",
 		renderClaudeHookSettings, nil, directSymlinkHookMode, nil); err != nil {
 		t.Errorf("user-home all-nil no-op: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Hook emit/render error + transport coverage (relocated from coverage_gap5).
+// ---------------------------------------------------------------------------
+
+// TestEmitHookSpec_DirectHardlink drives the direct-hardlink transport branch.
+func TestEmitHookSpec_DirectHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.json")
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	spec := &HookSpec{SourcePath: src}
+	dst := filepath.Join(tmp, "out", "x.json")
+	if err := emitHookSpec(stdPlatformIO{}, spec, dst, directHardlinkHookMode); err != nil {
+		// Hardlinks fail across some filesystems; tolerate that as long as no panic.
+		t.Logf("emitHookSpec hardlink: %v", err)
+	}
+}
+
+// TestEmitHookFile_HardlinkBranch drives the HookTransportHardlink case.
+func TestEmitHookFile_HardlinkBranch(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.json")
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst.json")
+	// Best-effort; just exercise the branch.
+	_ = emitHookFile(stdPlatformIO{}, src, dst, HookTransportHardlink)
+}
+
+// TestEmitHookFile_SymlinkBranch drives the symlink case.
+func TestEmitHookFile_SymlinkBranch(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src.json")
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst.json")
+	if err := emitHookFile(stdPlatformIO{}, src, dst, HookTransportSymlink); err != nil {
+		t.Errorf("symlink branch: %v", err)
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Error("expected managed link to src")
+	}
+}
+
+// TestParseJSONLTimestamp_BareDate makes sure the non-matching branch is hit.
+func TestParseJSONLTimestamp_BareDateNotAccepted(t *testing.T) {
+	if _, ok := parseJSONLTimestamp("2026-04-01"); ok {
+		t.Error("bare date should not parse")
+	}
+}
+
+// TestRemoveDirIfEmpty_NotEmpty covers the "len(entries) > 0" branch.
+func TestRemoveDirIfEmpty_HasEntries(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "d")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDirIfEmpty(dir); err != nil {
+		t.Errorf("removeDirIfEmpty: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Error("non-empty dir should be preserved")
+	}
+}
+
+// TestEmitRenderedHookFile_RenderError drives the render-error branch.
+func TestEmitRenderedHookFile_RenderError(t *testing.T) {
+	tmp := t.TempDir()
+	// Use a spec that forces render error: required-on platform with no command.
+	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
+	err := emitRenderedHookFile(stdPlatformIO{}, []HookSpec{spec}, filepath.Join(tmp, "out"), renderClaudeHookSettings)
+	if err == nil {
+		t.Error("expected render error")
+	}
+}
+
+func TestEmitRenderedHookFileToUserHomes_RenderError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
+	err := emitRenderedHookFileToUserHomes(stdPlatformIO{}, []HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
+	if err == nil {
+		t.Error("expected render error")
+	}
+}
+
+// TestRemoveManagedRenderedHookFile_RenderError drives the render-error branch.
+func TestRemoveManagedRenderedHookFile_RenderError(t *testing.T) {
+	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
+	err := removeManagedRenderedHookFile(stdPlatformIO{}, []HookSpec{spec}, "/tmp/x", renderClaudeHookSettings)
+	if err == nil {
+		t.Error("expected render error")
+	}
+}
+
+// TestRemoveManagedRenderedHookFileToUserHomes_RenderError drives the error
+// path under user homes.
+func TestRemoveManagedRenderedHookFileToUserHomes_RenderError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	spec := HookSpec{Name: "x", When: "pre_tool_use", RequiredOn: []string{"claude"}}
+	err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, []HookSpec{spec}, ".claude/settings.json", renderClaudeHookSettings)
+	if err == nil {
+		t.Error("expected render error")
+	}
+}
+
+// TestEmitRenderedHookFanout_RenderError drives the fanout render-error branch.
+// P1b: post_tool_use is now representable on copilot (R6.2); use
+// no_such_canonical_event which no platform mapper supports.
+func TestEmitRenderedHookFanout_RenderError(t *testing.T) {
+	tmp := t.TempDir()
+	spec := HookSpec{Name: "x", When: "no_such_canonical_event", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
+	err := emitRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, filepath.Join(tmp, "out"), renderCopilotHookFile)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestRemoveManagedRenderedHookFanout_RenderError(t *testing.T) {
+	spec := HookSpec{Name: "x", When: "no_such_canonical_event", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
+	err := removeManagedRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, "/tmp/out", renderCopilotHookFile)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+// TestRenderedCopilotHookNames_RenderError drives the propagation branch.
+func TestRenderedCopilotHookNames_RenderError(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "x",
+		When:       "no_such_canonical_event",
+		Command:    "/bin/true",
+		RequiredOn: []string{"copilot"},
+	}}
+	if _, err := renderedCopilotHookNames(specs); err == nil {
+		t.Error("expected error")
+	}
+}
+
+// TestPruneManagedRenderedFanoutExtras_RemovePermissionsRespected covers the
+// continue-on-IsNotExist branch when concurrent removal already cleared it.
+func TestPruneManagedRenderedFanoutExtras_StaleEntry(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "hooks")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dst, "stale.json")
+	if err := os.WriteFile(stale, []byte(`{"version":1,"hooks":{"x":[]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// "wanted" does not include it; the detector matches; file is removed.
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, dst, nil, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("stale removed")
 	}
 }

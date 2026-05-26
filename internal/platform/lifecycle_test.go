@@ -3,6 +3,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -370,5 +371,80 @@ func TestExecuteSharedSkillMirrorPlan_MultipleRoots(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(repo, p)); err != nil {
 			t.Errorf("expected mirror at %s: %v", p, err)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared-target intents + dry-run formatter coverage (relocated from
+// coverage_gap5_test.go).
+// ---------------------------------------------------------------------------
+
+// TestSharedTargetIntents_AllPlatformsPopulated provides coverage of the
+// concatenation paths for each platform's SharedTargetIntents.
+func TestSharedTargetIntents_AllPlatformsCoverConcat(t *testing.T) {
+	agentsHome, home := fullyPopulatedAgentsHome(t, "proj")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	for _, p := range All() {
+		intents, err := p.SharedTargetIntents("proj")
+		if err != nil {
+			t.Errorf("%s SharedTargetIntents: %v", p.ID(), err)
+		}
+		if len(intents) == 0 {
+			t.Errorf("%s expected intents", p.ID())
+		}
+	}
+}
+
+// TestFormatSharedTargetPlanForDryRun_AllVariants exercises each formatter
+// branch (DirectDir, DirectFile, RenderSingle, default).
+func TestFormatSharedTargetPlanForDryRun_RenderVariant(t *testing.T) {
+	agentsHome, home := fullyPopulatedAgentsHome(t, "proj")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+	lines, err := DryRunSharedTargetPlanLines("proj", repo, []Platform{NewCodex()})
+	if err != nil {
+		t.Fatalf("DryRunSharedTargetPlanLines: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("expected dry-run lines")
+	}
+	// At least one line should mention "write" for codex agent toml.
+	gotWrite := false
+	for _, l := range lines {
+		if strings.Contains(l, "write") {
+			gotWrite = true
+			break
+		}
+	}
+	if !gotWrite {
+		t.Errorf("expected write line in %+v", lines)
+	}
+}
+
+// TestFormatSharedTargetPlanForDryRun_FileVariant drives the DirectFile branch
+// (BuildSharedAgentFileSymlinkIntents → copilot/opencode).
+func TestFormatSharedTargetPlanForDryRun_FileVariant(t *testing.T) {
+	agentsHome, home := fullyPopulatedAgentsHome(t, "proj")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+	lines, err := DryRunSharedTargetPlanLines("proj", repo, []Platform{NewCopilot()})
+	if err != nil {
+		t.Fatalf("DryRunSharedTargetPlanLines: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("expected dry-run lines")
+	}
+	gotFile := false
+	for _, l := range lines {
+		if strings.Contains(l, "symlink file") {
+			gotFile = true
+			break
+		}
+	}
+	if !gotFile {
+		t.Errorf("expected symlink-file line in %+v", lines)
 	}
 }

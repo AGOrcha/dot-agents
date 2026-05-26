@@ -1343,3 +1343,63 @@ func TestPrepareIntentTargetForReplacement_UnknownReplacePolicyForDir(t *testing
 		t.Error("expected error for unknown replace policy")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Resource intent prepare-replace coverage (relocated from coverage_gap5).
+// ---------------------------------------------------------------------------
+
+// TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved drives the
+// AllowlistedImportedDirOnly + regular-file branch when target IS allowlisted.
+// The ownership contract authorizes this policy to replace only a proven
+// imported/managed DIRECTORY; a regular file must be left in place (not
+// pre-removed) so links.Symlink can apply the unmanaged-file contract instead
+// of this code silently deleting user data.
+func TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "blocking")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Fatalf("allowlisted file prepare: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("expected regular file preserved (links.Symlink applies the contract), got: %v", err)
+	}
+}
+
+// TestPrepareIntentTargetForReplacement_DefaultReplaceForFile drives the
+// "default → os.Remove" branch (e.g. IfManaged on file).
+func TestPrepareIntentTargetForReplacement_IfManagedFile(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "f")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceIfManaged,
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Fatalf("IfManaged file replace: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("expected file removed")
+	}
+}
+
+// TestSyncResourceDirEntries_NoEntries handles the empty-input branch.
+func TestSyncResourceDirEntries_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "out")
+	if err := syncResourceDirEntries(stdPlatformIO{}, nil, dst); err != nil {
+		t.Errorf("empty entries: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Error("expected dst dir created")
+	}
+}

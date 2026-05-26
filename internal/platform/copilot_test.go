@@ -64,3 +64,21 @@ func TestRenderCopilotHookFile_TimeoutClampMinimum(t *testing.T) {
 		t.Errorf("renderCopilotHookFile clamp: %v", err)
 	}
 }
+
+// TestCopilotCreateMCPLinks_NoSource drives the no-source early-return branch
+// (relocated from coverage_gap5_test.go).
+func TestCopilotCreateMCPLinks_NoSource(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCopilot().(*copilot)
+	if err := c.createMCPLinks("proj", repo, filepath.Join(tmp, ".agents")); err != nil {
+		t.Errorf("createMCPLinks no source: %v", err)
+	}
+	// .vscode/mcp.json should NOT exist.
+	if _, err := os.Lstat(filepath.Join(repo, ".vscode", "mcp.json")); !os.IsNotExist(err) {
+		t.Error("expected no mcp.json")
+	}
+}

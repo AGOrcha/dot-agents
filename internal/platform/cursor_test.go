@@ -285,3 +285,45 @@ func TestCursorRemoveAgentLinks_MissingDir(t *testing.T) {
 	c.removeAgentLinks(filepath.Join(t.TempDir(), "no-such"), filepath.Join(t.TempDir(), ".agents"))
 	// no panic = pass
 }
+
+// TestCursorCreateLinks_SecondRunIdempotent drives the second-pass execution
+// of cursor CreateLinks where target files already exist (relocated from
+// coverage_gap5_test.go).
+func TestCursorCreateLinks_SecondRunIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	if err := os.MkdirAll(filepath.Join(tmp, "home"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Rule.
+	ruleSrc := filepath.Join(agentsHome, "rules", "proj", "x.md")
+	if err := os.MkdirAll(filepath.Dir(ruleSrc), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ruleSrc, []byte("# rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Settings.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "settings", "proj"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "settings", "proj", "cursor.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cur := NewCursor()
+	for i := 0; i < 2; i++ {
+		if err := cur.CreateLinks("proj", repo); err != nil {
+			t.Fatalf("CreateLinks pass %d: %v", i, err)
+		}
+	}
+	if err := cur.RemoveLinks("proj", repo); err != nil {
+		t.Errorf("RemoveLinks: %v", err)
+	}
+}

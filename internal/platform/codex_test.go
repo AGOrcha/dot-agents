@@ -385,3 +385,63 @@ func TestPruneCodexRepoAgentTomls_NoEntries(t *testing.T) {
 		t.Errorf("expected no error for missing agents bucket, got %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Codex CreateLinks + scan session error coverage (relocated from coverage_gap5).
+// ---------------------------------------------------------------------------
+
+// TestCodexCreateLinks_GlobalRuleOnly drives the global-rules path when
+// project override is absent.
+func TestCodexCreateLinks_GlobalRuleOnly(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(agentsHome, "rules", "global"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "rules", "global", "rules.md"), []byte("# rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, "AGENTS.md")); err != nil {
+		t.Errorf("AGENTS.md missing: %v", err)
+	}
+}
+
+// TestCodexScanSessionTokens_OpenError exercises the os.Open failure branch
+// when findCodexSessionFile returns a path that cannot be opened (e.g. it
+// resolves to a directory instead of a regular file).
+func TestCodexScanSessionTokens_OpenError(t *testing.T) {
+	home := t.TempDir()
+	sessID := "open-err-id"
+	// Create the expected daily directory and place a *directory* at the
+	// rollout filename — findCodexSessionFile globs by suffix and will pick
+	// it up, but os.Open succeeds on directories on Unix. To trigger an
+	// open error we instead seed an unreadable file.
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-2026-05-11-"+sessID+".jsonl")
+	if err := os.WriteFile(path, []byte("ignored"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	// On macOS running as root, mode 0o000 may still be readable; treat the
+	// success path as acceptable too — what matters is that the function
+	// returns without panicking.
+	got := codexScanSessionTokens(home, sessID, "")
+	_ = got
+}
