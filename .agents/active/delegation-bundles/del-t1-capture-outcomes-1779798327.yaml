@@ -1,0 +1,37 @@
+schema_version: 1
+delegation_id: del-t1-capture-outcomes-1779798327
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t1-capture-outcomes
+owner: t1-capture-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 R1.5 capture
+scope:
+    write_scope:
+        - commands/workflow/hook_outcome.go
+        - commands/workflow/hook_outcome_test.go
+        - internal/scaffold/hooks/global/iteration-close-gate/gate.sh
+        - internal/scaffold/hooks/global/isp-gate/gate.sh
+        - internal/scaffold/hooks/global/loop-worker-gate/gate.sh
+prompt:
+    inline:
+        - 'Per t1 notes. New da workflow hook-outcome write CLI per R2.1 (gates MUST call CLI not direct write). Wire into 3 gate.sh templates. Anti-scope: do NOT modify hook_sentinel.go (p0 owns; already landed).'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/TASKS.yaml
+        - .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md
+verification:
+    feedback_goal: da workflow hook-outcome write CLI + gate.sh integration
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
