@@ -29,7 +29,7 @@ tasks:
       notes: 'Extend gate-critical mappings only - Codex SubagentStop, Copilot agentStop/subagentStop, Cursor subagentStop. Copilot stop is agentStop, not stop. Contract: tasks/p1a-mapper-extensions.contract.md.'
     - id: p1b-canonical-when-values
       title: New canonical HookSpec.When values from Cursor wider surface and May 2026 refresh
-      status: pending
+      status: in_progress
       depends_on:
         - p1a-mapper-extensions
       blocks: []
@@ -42,7 +42,7 @@ tasks:
       notes: 'Add event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping, Copilot agentStop, approved non-terminal behavior, and observation-only candidates. Contract: tasks/p1b-canonical-when-values.contract.md.'
     - id: p1c-matcher-verification
       title: Per-event input/matcher verification and when_events schema extension
-      status: pending
+      status: in_progress
       depends_on:
         - p1a-mapper-extensions
       blocks: []

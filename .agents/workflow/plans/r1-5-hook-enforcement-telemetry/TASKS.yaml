@@ -31,7 +31,7 @@ tasks:
       notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.
     - id: t1b-post-tool-observation-evaluation
       title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
-      status: pending
+      status: in_progress
       depends_on:
         - t1-capture-outcomes
       blocks: []
@@ -129,7 +129,7 @@ tasks:
       app_type: go-cli
     - id: t-archival-policy
       title: Decide hook-outcome sidecar retention and archival
-      status: pending
+      status: in_progress
       depends_on:
         - t1-capture-outcomes
       blocks: []

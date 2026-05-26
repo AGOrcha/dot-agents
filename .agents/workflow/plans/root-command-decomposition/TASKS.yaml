@@ -826,7 +826,7 @@ tasks:
         resolved.
     - id: t13a-strip-resource-subpackage-shims
       title: Delete mcp/settings/rules root shims + full root.go AddCommand rewire + dead callers
-      status: pending
+      status: in_progress
       depends_on:
         - t12-relocate-cross-cutting-tests
       blocks:
