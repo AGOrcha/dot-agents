@@ -10,13 +10,19 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
 
-// HasMultipleHardLinks is the platform-tagged hard-link counter wired
-// at init time by commands/add.go (which can import the
-// build-constrained linkcount_unix.go / linkcount_windows.go that the
-// lifecycle subpackage cannot reach without re-introducing the platform
-// tag tree). Returns false by default so the lifecycle package builds
-// standalone; production callers always supply the real implementation.
-var HasMultipleHardLinks = func(path string) bool { return false }
+// HasMultipleHardLinks is the platform-tagged hard-link counter seam.
+// Backed by defaultHasMultipleHardLinks from linkcount_unix.go /
+// linkcount_windows.go (now co-located in this package after t08 moved
+// the build-constrained files into commands/lifecycle/). Declared as a
+// package-level func variable so backup_test.go can override the
+// link-count behavior without invoking real syscalls.
+//
+// Exported during the t08→t09 window per SHAPE.md OD-2 so doctor.go
+// (still in root before t09) can keep importing the helper via
+// lifecycle.HasMultipleHardLinks. Once t09 lands doctor.go in this same
+// package the cross-package consumer disappears and the seam can be
+// lowercased back to package-private.
+var HasMultipleHardLinks = defaultHasMultipleHardLinks
 
 // RestoreCanonicalResourceFileFn is the canonical-import branch wired at
 // init time by commands/import.go (canonicalImportOutputs and its hook

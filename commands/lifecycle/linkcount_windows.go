@@ -4,18 +4,16 @@ package lifecycle
 
 import "syscall"
 
-// HasMultipleHardLinks reports whether path has more than one directory entry
-// referencing its file index (NumberOfLinks > 1). On Windows a managed file
-// link is a hard link with no reparse point, so this is how a managed
+// defaultHasMultipleHardLinks reports whether path has more than one directory
+// entry referencing its file index (NumberOfLinks > 1). On Windows a managed
+// file link is a hard link with no reparse point, so this is how a managed
 // hard-linked file is distinguished from a standalone regular file when no
 // canonical source path is available to compare against.
 //
-// Exported during the t08→t09 window per SHAPE.md OD-2 so doctor.go (still in
-// root before t09) can keep importing the helper via lifecycle.HasMultipleHardLinks.
-// Once t09 lands doctor.go in this same package, the cross-package consumer
-// disappears and this becomes the only call site — at which point t09 can
-// lowercase the name back to package-private.
-func HasMultipleHardLinks(path string) bool {
+// Wired into the HasMultipleHardLinks func-var seam in backup.go so
+// backup_test.go can override the link-count behavior without touching the
+// real syscalls.
+func defaultHasMultipleHardLinks(path string) bool {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return false

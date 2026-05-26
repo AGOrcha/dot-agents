@@ -34,11 +34,18 @@ func lifecycleStatusDeps() lifecycle.Deps {
 // shim, the analyzer's load set should be widened to include
 // ./commands/lifecycle (tracked as a follow-up in the t13 PR description).
 func NewStatusCmd() *cobra.Command {
-	cmd := lifecycle.NewStatusCmd(lifecycleStatusDeps(), func() bool { return Flags.JSON })
+	jsonFlag := func() bool { return Flags.JSON }
+	cmd := lifecycle.NewStatusCmd(lifecycleStatusDeps(), jsonFlag)
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		audit, _ := c.Flags().GetBool("audit")
 		agentFilter, _ := c.Flags().GetString("agent")
-		return lifecycle.RunStatusDefault(audit, agentFilter, Flags.JSON)
+		// Route the JSON read through jsonFlag() so the globalflagcov
+		// static analyzer sees the Flags.JSON load on ./commands (it
+		// does not load ./commands/lifecycle yet — see t13 follow-up).
+		// Without this hop the closure passed to lifecycle.NewStatusCmd
+		// would be unreferenced from any executed path (its RunE is
+		// overridden here), leaving the Flags.JSON read uncovered.
+		return lifecycle.RunStatusDefault(audit, agentFilter, jsonFlag())
 	}
 	return cmd
 }

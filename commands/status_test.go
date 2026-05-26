@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -57,5 +59,36 @@ func TestNewStatusCmdShim_LifecycleDepsWiringPopulated(t *testing.T) {
 	}
 	if deps.ExactArgsWithHints == nil {
 		t.Error("lifecycleStatusDeps.ExactArgsWithHints is nil")
+	}
+}
+
+// TestNewStatusCmdShim_RunEClosureFires exercises the RunE closure the shim
+// rebinds (the lifecycle.NewStatusCmd default closure is replaced so the
+// globalflagcov static analyzer can resolve Flags.JSON on ./commands).
+// Without this test the closure body (audit/agent flag parse +
+// lifecycle.RunStatusDefault dispatch) shows as 0% local coverage and
+// NewStatusCmd drops below the per-file gate.
+func TestNewStatusCmdShim_RunEClosureFires(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatalf("mkdir agentsHome: %v", err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Hermetic empty config so lifecycle.RunStatusDefault has nothing to
+	// iterate but still exercises the JSON-off code path.
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+
+	cmd := NewStatusCmd()
+	cmd.SetArgs([]string{})
+	cmd.SetOut(os.Stderr)
+	cmd.SetErr(os.Stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("NewStatusCmd Execute: %v", err)
 	}
 }

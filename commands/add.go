@@ -636,19 +636,16 @@ func emitAddSuccessBox(projectName, projectPath string, hasDeprecated bool) {
 }
 
 // Backup / restore helpers thin-aliased over commands/lifecycle/backup.go
-// (lifted in root-command-decomposition t02b). The hasMultipleHardLinks
-// platform-tagged helper is wired into lifecycle here because the
-// linkcount_unix.go / linkcount_windows.go build-constrained files
-// remain in package commands and the lifecycle subpackage cannot reach
-// them without re-introducing the platform tag tree.
+// (lifted in root-command-decomposition t02b). After t08 moved the
+// build-constrained linkcount_{unix,windows}.go files into the lifecycle
+// subpackage, that package owns the real platform-tagged
+// HasMultipleHardLinks implementation directly — no init-time wiring
+// from commands/add.go is required.
 //
 // restoreCanonicalResourceFile lives in this file (and via the
 // RestoreCanonicalResourceFileFn seam wired in import.go) because its
 // canonicalImportOutputs / importCandidate dependency tree stays in
 // commands/import.go until t06 moves the import command itself.
-func init() {
-	lifecycle.HasMultipleHardLinks = hasMultipleHardLinks
-}
 
 var (
 	mirrorBackup                        = lifecycle.MirrorBackup
