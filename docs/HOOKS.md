@@ -95,6 +95,43 @@ mark such a hook `required_on` that vendor, the renderer errors).
 | `permission_request`          | `PermissionRequest`| `PermissionRequest` |                         | `permissionRequest`    |
 | `error_occurred`              |                    |                     |                         | `errorOccurred`        |
 
+### Claude-wider surface (Claude-only canonical values)
+
+Claude Code documents a wider lifecycle event surface than the
+gate-critical core (P1d, R6.6). These events are promoted to canonical
+`HookSpec.When` values so an operator who wants to attach a hook to
+one of them does not need to bypass the canonical model with a
+`platform_overrides.event` escape hatch. Other platforms have no
+documented equivalent today; their mappers no-op for these values per
+D2 (no semantic-equivalence inference).
+
+Adding these to the canonical mapper does **not** attach any gate. The
+loop-discipline gate scripts (`p2-hook-scripts`) and the
+`workflow hook-sentinel` write paths (`p4-sentinel-wiring`) listen on
+their own pre-existing events. Promoting an entry here to a gate
+requires its own task with a documented invariant.
+
+| Canonical `When`              | Claude Code           |
+|-------------------------------|-----------------------|
+| `setup`                       | `Setup`               |
+| `user_prompt_expansion`       | `UserPromptExpansion` |
+| `post_tool_batch`             | `PostToolBatch`       |
+| `permission_denied`           | `PermissionDenied`    |
+| `stop_failure`                | `StopFailure`         |
+| `teammate_idle`               | `TeammateIdle`        |
+| `task_created`                | `TaskCreated`         |
+| `task_completed`              | `TaskCompleted`       |
+| `worktree_create`             | `WorktreeCreate`      |
+| `worktree_remove`             | `WorktreeRemove`      |
+| `file_changed`                | `FileChanged`         |
+| `config_change`               | `ConfigChange`        |
+| `cwd_changed`                 | `CwdChanged`          |
+| `instructions_loaded`         | `InstructionsLoaded`  |
+| `elicitation`                 | `Elicitation`         |
+| `elicitation_result`          | `ElicitationResult`   |
+
+Source: <https://code.claude.com/docs/en/hooks> (verified 2026-05-26).
+
 ### Cursor-wider surface (Cursor-only canonical values)
 
 Cursor publishes a fine-grained event surface that no other vendor
