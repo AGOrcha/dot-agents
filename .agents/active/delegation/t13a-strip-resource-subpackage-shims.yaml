@@ -1,0 +1,63 @@
+schema_version: 1
+id: del-t13a-strip-resource-subpackage-shims-1779827022
+parent_plan_id: root-command-decomposition
+parent_task_id: t13a-strip-resource-subpackage-shims
+title: Delete mcp/settings/rules root shims + full root.go AddCommand rewire + dead callers
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/mcp.go
+    - commands/settings.go
+    - commands/rules.go
+    - commands/root.go
+    - commands/resource_parity_test.go
+    - commands/coverage_test.go
+    - commands/mcp_test.go
+success_criteria: |-
+    Re-shaped per t13a worker fold-back
+    (.agents/active/fold-back/t13a-root-go-cocommit-deferred-to-t13b.yaml):
+    the original t13a/t13b split drew the boundary on subpackages
+    but the co-commit wall is on callers. Adopting Option A from
+    the fold-back: include commands/root.go in t13a's scope and
+    do the FULL root.go AddCommand rewire here (all 7 calls:
+    install/doctor/init/status switch to lifecycle.NewXxxCmd;
+    mcp/settings/rules switch to mcp.NewCmd / settings.NewCmd /
+    rules.NewCmd).
+
+    The lifecycle shims inside install.go / doctor.go / init.go /
+    status.go become dead-but-compilable after t13a (root.go no
+    longer calls commands.NewInstallCmd / etc.; lifecycle subpkg
+    owns the constructors). t13b deletes those dead shims + the
+    per-command test rewires.
+
+    File-by-file:
+      * commands/mcp.go        — DELETE entirely (re-export only).
+      * commands/settings.go   — DELETE entirely.
+      * commands/rules.go      — DELETE entirely.
+      * commands/root.go       — rewire ALL 7 AddCommand calls.
+      * commands/resource_parity_test.go — DELETE entirely (t12
+                                 landed per-subpkg parity tests).
+      * commands/coverage_test.go — strip mcp/rules/settings RunE
+                                 wiring blocks ONLY (keep install/
+                                 import/remove/review blocks for
+                                 t13b).
+      * commands/mcp_test.go   — rewire to mcp.Deps + mcp.NewListCmd
+                                 / NewShowCmd / NewRemoveCmd (or
+                                 delete if duplicated by
+                                 commands/mcp/cmd_test.go).
+
+    Hard gate: go build ./... clean BEFORE go test (last fold-back
+    caught the issue at build); go test ./... -race -count=1
+    green; per-file coverage gate stays clean (do NOT allowlist
+    per [[no-lazy-allowlist-tech-debt]]).
+
+    Anti-scope: do NOT touch lifecycle-cluster shim wiring inside
+    install.go / doctor.go / init.go / status.go (that's t13b).
+    Do NOT touch the per-command *_test.go files for those
+    lifecycle commands (t13b). If a deletion cascades into a test
+    file not listed here, FOLD BACK.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T20:23:42Z"
+updated_at: "2026-05-26T20:23:42Z"
