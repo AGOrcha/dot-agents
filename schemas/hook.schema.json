@@ -6,6 +6,10 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["run"],
+  "oneOf": [
+    { "required": ["when"], "not": { "required": ["when_events"] } },
+    { "required": ["when_events"], "not": { "required": ["when"] } }
+  ],
   "properties": {
     "name": {
       "type": "string",
@@ -18,7 +22,17 @@
     "when": {
       "type": "string",
       "minLength": 1,
-      "description": "Canonical lifecycle event. Common values include pre_tool_use, post_tool_use, session_start, user_prompt_submit, stop. Platform overrides may supply native event names."
+      "description": "Canonical lifecycle event. Common values include pre_tool_use, post_tool_use, session_start, user_prompt_submit, stop. Platform overrides may supply native event names. A manifest must specify exactly one of `when` or `when_events`."
+    },
+    "when_events": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Canonical lifecycle events for a multi-event hook. One HookSpec expands into an action per canonical event on each platform that documents it. Duplicates and unknown canonical values are rejected at load time. Mutually exclusive with `when`."
     },
     "match": {
       "type": "object",

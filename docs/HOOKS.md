@@ -166,6 +166,128 @@ proof that the session should be blocked. Any future blocking use must
 document a deterministic invariant, a portable vendor contract, and an
 acceptable noise / privacy boundary.
 
+## `when_events` — multi-event hook bundles
+
+A `HOOK.yaml` manifest may target several lifecycle events with a single
+bundle by replacing the scalar `when` field with a `when_events` array:
+
+```yaml
+# ~/.agents/hooks/global/loop-worker-gate/HOOK.yaml
+name: loop-worker-gate
+description: Terminal validation for delegated loop-worker sessions.
+when_events:
+  - pre_tool_use
+  - stop
+  - subagent_stop
+run:
+  command: ./gate.sh
+  timeout_ms: 5000
+```
+
+Loader / render rules (enforced in
+[`internal/platform/hooks.go`](../internal/platform/hooks.go)):
+
+- The scalar `when` field is still supported and behaves exactly as
+  before; existing manifests need no change.
+- A manifest must specify **exactly one** of `when` or a non-empty
+  `when_events`. Setting both is rejected at load time.
+- `when_events` entries must be **canonical** event names (the
+  snake_case strings in the mapping tables above). Unknown values
+  are rejected so typos cannot silently no-op on every platform.
+- Duplicate entries inside `when_events` are rejected.
+- At render time the bundle expands into one action per canonical
+  event the target platform documents. Events the platform does not
+  document are omitted silently (unless the platform appears in
+  `required_on`, which keeps the explicit-opt-in error surface).
+- Copilot's per-event JSON fanout disambiguates filenames by
+  appending the canonical event name (e.g.
+  `loop-worker-gate-stop.json`, `loop-worker-gate-subagent_stop.json`).
+  Scalar `when` bundles keep their pre-P1c `<name>.json` filename.
+
+## Per-event input and native-remediation reference
+
+The tables below record the vendor-documented input and output surface
+each canonical event exposes. They are the evidence base for which
+events can support deterministic prevention, continuity advice, or
+trace-dependent terminal validation. Sources:
+
+- Claude Code hooks: <https://code.claude.com/docs/en/hooks>
+- Codex hooks: <https://developers.openai.com/codex/hooks>
+- GitHub Copilot hooks: <https://docs.github.com/en/copilot/reference/hooks-configuration>
+- Cursor hooks: <https://cursor.com/docs/hooks.md>
+
+### Trace / transcript input
+
+| Vendor          | Event                                | Trace field name                | Notes                                                              |
+|-----------------|--------------------------------------|---------------------------------|--------------------------------------------------------------------|
+| Claude Code     | every hook                           | `transcript_path`               | Common hook input; available to all events.                        |
+| Codex           | every hook                           | `transcript_path`               | Common hook input; available to all events.                        |
+| GitHub Copilot  | `agentStop`, `subagentStop`          | `transcriptPath`                | Camel-cased per Copilot reference; absent on other events.         |
+| Cursor          | every agent hook                     | `transcript_path`               | Common agent input.                                                |
+| Cursor          | `subagentStop`                       | `agent_transcript_path`         | Sibling field on the subagent terminal event; readable when present. |
+
+Trace-dependent terminal checks (R1.5 evidence reads, sentinel
+trace-replay) can rely on the trace field on every vendor's terminal
+event. On `PreToolUse` the trace field is available on Claude / Codex /
+Cursor but not on Copilot.
+
+### Native hard-remediation output
+
+| Vendor          | Stop / SubagentStop / Stop-equivalent | Output mechanism documented            |
+|-----------------|----------------------------------------|-----------------------------------------|
+| Claude Code     | `Stop`, `SubagentStop`                 | JSON block / continuation decision (`{"decision": "block", "reason": "..."}`) |
+| Codex           | `Stop`, `SubagentStop`                 | JSON block / continuation decision      |
+| GitHub Copilot  | `agentStop`, `subagentStop`            | JSON block / continuation decision      |
+| Cursor          | `stop`, `subagentStop`                 | `followup_message` field (NOT a JSON block / decision) |
+
+The renderer and gate-script contract preserves this difference:
+Claude / Codex / Copilot gates emit a JSON block decision; Cursor
+gates emit a `followup_message`. They are not interchangeable, and the
+gate-script template under task `p2-hook-scripts` keeps the per-vendor
+output paths distinct.
+
+### Matcher support (which renderer emits a non-empty matcher)
+
+A matcher is only set when the vendor reference documents matcher
+narrowing for that event. The Codex matcher whitelist is encoded in
+`codexMatcherWhitelist` in
+[`internal/platform/hooks.go`](../internal/platform/hooks.go); the
+P1c verification round (May 2026) reviewed the Codex hooks reference
+and confirmed the per-event matcher surface below.
+
+| Vendor          | Events that render a matcher                          | Events that render `matcher=""` (and gate scripts must parse input instead) |
+|-----------------|-------------------------------------------------------|-----------------------------------------------------------------------------|
+| Claude Code     | every documented event                                | n/a — Claude matcher applies to every event in the table                    |
+| Codex           | `PermissionRequest`, `PostCompact`, `PostToolUse`, `PreCompact`, `PreToolUse`, `SessionStart`, `SubagentStart`, `SubagentStop` | `Stop`, `UserPromptSubmit` (vendor docs: matcher explicitly ignored)        |
+| Cursor          | per-spec `match.expression` is rendered when set; vendor defaults applied otherwise | n/a — Cursor renderer emits the configured matcher verbatim                |
+| GitHub Copilot  | none — Copilot single-event files do not accept matcher narrowing in the documented schema; bundles with matchers are skipped | every event                                                                |
+
+Codex matcher semantics per event (from the Codex hooks reference):
+
+| Codex event          | What matcher filters       | Value examples                                |
+|----------------------|----------------------------|-----------------------------------------------|
+| `PermissionRequest`  | tool name                  | `Bash`, `^apply_patch$`, `mcp__filesystem__.*`|
+| `PostToolUse`        | tool name                  | `Bash`, `Edit\|Write`, `mcp__filesystem__.*`  |
+| `PostCompact`        | compaction trigger         | `manual`, `auto`, `manual\|auto`              |
+| `PreCompact`         | compaction trigger         | `manual`, `auto`, `manual\|auto`              |
+| `PreToolUse`         | tool name                  | `Bash`, `^apply_patch$`, `mcp__filesystem__.*`|
+| `SessionStart`       | start source               | `startup`, `resume`, `clear`, `compact`       |
+| `SubagentStart`      | subagent type              | depends on the subagent that starts           |
+| `SubagentStop`       | subagent type              | depends on the subagent that stops            |
+| `Stop`               | (matcher ignored by Codex) | `""`                                          |
+| `UserPromptSubmit`   | (matcher ignored by Codex) | `""`                                          |
+
+For `apply_patch`, matcher values can also use `Edit` or `Write`.
+
+### Approved non-terminal lifecycle capabilities (verified)
+
+| Canonical event   | What each vendor input enables (verified)                                                                                                                                                                                          |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `pre_tool_use`    | Claude / Codex / Cursor expose tool name + tool input to the hook; deterministic command-boundary remediation is possible by parsing input. Copilot exposes `preToolUse` but documents no matcher surface, so gates must parse input. |
+| `subagent_start`  | Claude / Codex / Cursor / Copilot all expose subagent identity / agent_type input. Used only for `loop-worker` bootstrap and later correlation; output is non-blocking. |
+| `pre_compact`     | Claude / Codex / Cursor / Copilot expose hook input but no block-the-compaction contract; used only for non-blocking continuity advice. |
+| `post_tool_use` / `post_tool_use_failure` | Bounded result metadata is documented on Claude / Cursor / Copilot (`post_tool_use` and `post_tool_use_failure`); Codex exposes `post_tool_use` only. Suitable for R1.5 observation hooks — **not** transcript body persistence. |
+
 [d2]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
 [d3]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
 [d8]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md

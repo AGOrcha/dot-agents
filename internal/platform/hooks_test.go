@@ -580,14 +580,14 @@ func assertCopilotHookFileRenders(t *testing.T, spec HookSpec, wantName string, 
 // unsupported value must be omitted entirely without raising an error
 // when the hook is not RequiredOn that platform (fall-through per D2).
 func TestCanonicalWhenEventMappingRenders(t *testing.T) {
-	t.Run("codex subagent_start renders under SubagentStart", func(t *testing.T) {
-		// Per R6.5 the Codex matcher whitelist for SubagentStart is NOT
-		// extended in p1b — verify the rendered matcher is empty.
+	t.Run("codex subagent_start renders under SubagentStart with matcher", func(t *testing.T) {
+		// Codex docs document SubagentStart matcher narrowing on subagent
+		// type — codexMatcherWhitelist includes it post-PR-#98 review.
 		assertCodexConfigRenders(t,
 			[]HookSpec{{Name: "bootstrap", When: "subagent_start", Command: "/tmp/bootstrap.sh"}},
 			map[string]string{
 				"hooks.SubagentStart.0.hooks.0.command": "/tmp/bootstrap.sh",
-				"hooks.SubagentStart.0.matcher":         "",
+				"hooks.SubagentStart.0.matcher":         "*",
 			},
 		)
 	})
@@ -727,5 +727,399 @@ run:
 	wantResolved := filepath.Join(globalRoot, "graph-precommit", "graph-precommit.sh")
 	if got := ResolveHookCommand(*gotPre); got != wantResolved {
 		t.Fatalf("ResolveHookCommand = %q, want %q", got, wantResolved)
+	}
+}
+
+// --- P1c: when_events schema extension + matcher boundary tests ---
+
+// loadSingleHookBundle is a P1c helper that materializes a single
+// canonical bundle on disk and returns the loaded HookSpec (or a load
+// error). It removes the boilerplate from each table-driven case below.
+func loadSingleHookBundle(t *testing.T, manifest string) (HookSpec, error) {
+	t.Helper()
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)
+	writeTextFile(t, filepath.Join(agentsHome, "hooks", "global", "p1c-bundle", "HOOK.yaml"), manifest)
+	specs, err := ListHookSpecs(agentsHome, "global")
+	if err != nil {
+		return HookSpec{}, err
+	}
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs))
+	}
+	return specs[0], nil
+}
+
+// TestLoadHookBundleAcceptsScalarWhenForBackwardCompatibility pins the
+// P1c contract rule that pre-existing scalar `when` manifests load
+// unchanged: WhenEvents stays empty and When carries the canonical
+// event so every renderer behaves as it did before P1c.
+func TestLoadHookBundleAcceptsScalarWhenForBackwardCompatibility(t *testing.T) {
+	spec, err := loadSingleHookBundle(t, `name: legacy
+when: pre_tool_use
+run:
+  command: /tmp/run.sh
+`)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if spec.When != "pre_tool_use" {
+		t.Fatalf("When = %q, want pre_tool_use", spec.When)
+	}
+	if len(spec.WhenEvents) != 0 {
+		t.Fatalf("WhenEvents = %v, want empty for scalar `when`", spec.WhenEvents)
+	}
+}
+
+// TestLoadHookBundleAcceptsWhenEventsArray covers the new multi-event
+// path: WhenEvents is preserved verbatim, scalar When stays empty, and
+// expandHookSpecEvents reports the per-event view shape downstream
+// renderers consume.
+func TestLoadHookBundleAcceptsWhenEventsArray(t *testing.T) {
+	spec, err := loadSingleHookBundle(t, `name: multi
+when_events:
+  - pre_tool_use
+  - stop
+  - subagent_stop
+run:
+  command: /tmp/run.sh
+`)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if spec.When != "" {
+		t.Fatalf("When = %q, want empty when when_events is set", spec.When)
+	}
+	if got := spec.WhenEvents; len(got) != 3 || got[0] != "pre_tool_use" || got[1] != "stop" || got[2] != "subagent_stop" {
+		t.Fatalf("WhenEvents = %v, want [pre_tool_use stop subagent_stop]", got)
+	}
+	views := expandHookSpecEvents(spec)
+	if len(views) != 3 {
+		t.Fatalf("expandHookSpecEvents returned %d views, want 3", len(views))
+	}
+	for i, want := range []string{"pre_tool_use", "stop", "subagent_stop"} {
+		if views[i].When != want {
+			t.Fatalf("view[%d].When = %q, want %q", i, views[i].When, want)
+		}
+		if len(views[i].WhenEvents) != 0 {
+			t.Fatalf("view[%d].WhenEvents should be cleared after expansion", i)
+		}
+	}
+}
+
+// TestLoadHookBundleRejectsBothWhenAndWhenEvents enforces the
+// mutual-exclusion clause of the when_events contract: setting both
+// fields is a misconfiguration that must fail loudly at load time.
+func TestLoadHookBundleRejectsBothWhenAndWhenEvents(t *testing.T) {
+	_, err := loadSingleHookBundle(t, `name: bad
+when: stop
+when_events:
+  - stop
+  - subagent_stop
+run:
+  command: /tmp/run.sh
+`)
+	if err == nil {
+		t.Fatal("expected error when both `when` and `when_events` are set")
+	}
+	if !strings.Contains(err.Error(), "both") {
+		t.Fatalf("error %v should mention `both`", err)
+	}
+}
+
+// TestLoadHookBundleRejectsDuplicateWhenEvents protects against a typo
+// silently doubling the rendered actions: duplicate canonical events
+// inside `when_events` are rejected.
+func TestLoadHookBundleRejectsDuplicateWhenEvents(t *testing.T) {
+	_, err := loadSingleHookBundle(t, `name: dup
+when_events:
+  - stop
+  - stop
+run:
+  command: /tmp/run.sh
+`)
+	if err == nil {
+		t.Fatal("expected error for duplicate canonical event in when_events")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("error %v should mention `duplicate`", err)
+	}
+}
+
+// TestLoadHookBundleRejectsUnknownWhenEvent ensures unknown canonical
+// values (e.g. typos like `stoop`) are caught at load time rather than
+// silently no-op'ing on every platform mapper.
+func TestLoadHookBundleRejectsUnknownWhenEvent(t *testing.T) {
+	_, err := loadSingleHookBundle(t, `name: typo
+when_events:
+  - stop
+  - stoop
+run:
+  command: /tmp/run.sh
+`)
+	if err == nil {
+		t.Fatal("expected error for unknown canonical event in when_events")
+	}
+	if !strings.Contains(err.Error(), "unknown canonical event") {
+		t.Fatalf("error %v should mention `unknown canonical event`", err)
+	}
+}
+
+// TestRenderClaudeHookSettingsExpandsWhenEvents asserts that a single
+// multi-event HookSpec fans out into one Claude entry per documented
+// event, preserving the canonical command, matcher, and ordering. This
+// is the Claude-side render contract.
+func TestRenderClaudeHookSettingsExpandsWhenEvents(t *testing.T) {
+	spec := HookSpec{
+		Name:       "gate",
+		WhenEvents: []string{"pre_tool_use", "stop", "subagent_stop"},
+		Command:    "/tmp/gate.sh",
+	}
+	assertClaudeSettingsRenders(t, []HookSpec{spec}, map[string]string{
+		"hooks.PreToolUse.0.hooks.0.command":   "/tmp/gate.sh",
+		"hooks.Stop.0.hooks.0.command":         "/tmp/gate.sh",
+		"hooks.SubagentStop.0.hooks.0.command": "/tmp/gate.sh",
+		"hooks.PreToolUse.0.matcher":           "*",
+		"hooks.Stop.0.matcher":                 "*",
+		"hooks.SubagentStop.0.matcher":         "*",
+	})
+}
+
+// TestRenderCodexHookConfigExpandsWhenEventsAndHonorsMatcherWhitelist
+// is the load-bearing matcher-boundary regression: a multi-event hook
+// containing matcher-supported events (PreToolUse, SubagentStart,
+// SubagentStop per Codex docs) and matcher-unsupported events (Stop,
+// UserPromptSubmit per Codex docs) must render with matcher="*" for the
+// supported set and matcher="" for the unsupported set. This guards the
+// initial P1b worker note (PR #95) that committed an incomplete
+// whitelist of {SessionStart, PreToolUse, PostToolUse} and the broader
+// P1c verification surface from the Codex hooks reference.
+func TestRenderCodexHookConfigExpandsWhenEventsAndHonorsMatcherWhitelist(t *testing.T) {
+	spec := HookSpec{
+		Name:       "gate",
+		WhenEvents: []string{"pre_tool_use", "subagent_start", "stop", "subagent_stop", "user_prompt_submit"},
+		Command:    "/tmp/gate.sh",
+	}
+	assertCodexConfigRenders(t, []HookSpec{spec}, map[string]string{
+		"hooks.PreToolUse.0.hooks.0.command":       "/tmp/gate.sh",
+		"hooks.PreToolUse.0.matcher":               "*",
+		"hooks.SubagentStart.0.hooks.0.command":    "/tmp/gate.sh",
+		"hooks.SubagentStart.0.matcher":            "*",
+		"hooks.SubagentStop.0.hooks.0.command":     "/tmp/gate.sh",
+		"hooks.SubagentStop.0.matcher":             "*",
+		"hooks.Stop.0.hooks.0.command":             "/tmp/gate.sh",
+		"hooks.Stop.0.matcher":                     "",
+		"hooks.UserPromptSubmit.0.hooks.0.command": "/tmp/gate.sh",
+		"hooks.UserPromptSubmit.0.matcher":         "",
+	})
+}
+
+// TestRenderCursorHookConfigExpandsWhenEvents asserts the Cursor render
+// path expands a multi-event spec across the documented Cursor surface
+// and omits the events Cursor does not document (e.g. `error_occurred`).
+func TestRenderCursorHookConfigExpandsWhenEventsAndSkipsUnmappedEvents(t *testing.T) {
+	spec := HookSpec{
+		Name:       "gate",
+		WhenEvents: []string{"pre_tool_use", "stop", "error_occurred"},
+		Command:    "/tmp/gate.sh",
+	}
+	content, err := renderCursorHookConfig([]HookSpec{spec})
+	if err != nil {
+		t.Fatalf("renderCursorHookConfig: %v", err)
+	}
+	var payload cursorRenderedHooks
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	if _, ok := payload.Hooks["preToolUse"]; !ok {
+		t.Fatalf("expected preToolUse entry in cursor render, got %v", payload.Hooks)
+	}
+	if _, ok := payload.Hooks["stop"]; !ok {
+		t.Fatalf("expected stop entry in cursor render, got %v", payload.Hooks)
+	}
+	// error_occurred is Copilot-only; Cursor mapper must omit it
+	// silently because the spec did not name cursor in RequiredOn.
+	if _, ok := payload.Hooks["errorOccurred"]; ok {
+		t.Fatalf("expected errorOccurred to be omitted from cursor render")
+	}
+}
+
+// TestRenderCopilotHookFileFanoutExpandsWhenEvents drives the Copilot
+// per-file fanout: a multi-event HookSpec must produce one file per
+// documented event with a deterministic suffix (no clobbering). Events
+// Copilot does not document are omitted silently.
+func TestRenderCopilotHookFileFanoutExpandsWhenEvents(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "out")
+	spec := HookSpec{
+		Name:       "gate",
+		WhenEvents: []string{"stop", "subagent_stop", "post_compact"},
+		Command:    "/tmp/gate.sh",
+	}
+	if err := emitRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, dstRoot, renderCopilotHookFile); err != nil {
+		t.Fatalf("emitRenderedHookFanout: %v", err)
+	}
+	// `stop` -> agentStop and `subagent_stop` -> subagentStop on
+	// Copilot; `post_compact` is undocumented on Copilot and must be
+	// omitted silently (no file).
+	for _, want := range []string{"gate-stop.json", "gate-subagent_stop.json"} {
+		if _, err := os.Stat(filepath.Join(dstRoot, want)); err != nil {
+			t.Fatalf("expected %s to be emitted: %v", want, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dstRoot, "gate-post_compact.json")); err == nil {
+		t.Fatal("expected gate-post_compact.json to be omitted (Copilot does not document PostCompact)")
+	}
+}
+
+// TestRenderCopilotHookFileFanoutPreservesSingleEventFilename ensures
+// the per-event filename suffix is only applied to multi-event hooks;
+// pre-P1c single-event hooks keep their `<name>.json` layout so
+// downstream wiring (settings.json patches, fanout removal) is unchanged.
+func TestRenderCopilotHookFileFanoutPreservesSingleEventFilename(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "out")
+	spec := HookSpec{
+		Name:    "gate",
+		When:    "stop",
+		Command: "/tmp/gate.sh",
+	}
+	if err := emitRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, dstRoot, renderCopilotHookFile); err != nil {
+		t.Fatalf("emitRenderedHookFanout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstRoot, "gate.json")); err != nil {
+		t.Fatalf("expected gate.json for scalar `when` hook: %v", err)
+	}
+}
+
+// TestCodexMatcherWhitelistIsConstrainedToDocumentedEvents pins the
+// Codex matcher boundary per the Codex hooks reference:
+// PermissionRequest / PostCompact / PostToolUse / PreCompact /
+// PreToolUse / SessionStart / SubagentStart / SubagentStop are in;
+// Stop and UserPromptSubmit are explicitly matcher-ignored by Codex.
+// Locally-mirrors codexMatcherWhitelist so a future drift between the
+// two surfaces fails this test before the renderer fails the docs.
+func TestCodexMatcherWhitelistIsConstrainedToDocumentedEvents(t *testing.T) {
+	whitelisted := map[string]bool{
+		"PermissionRequest": true,
+		"PostCompact":       true,
+		"PostToolUse":       true,
+		"PreCompact":        true,
+		"PreToolUse":        true,
+		"SessionStart":      true,
+		"SubagentStart":     true,
+		"SubagentStop":      true,
+	}
+	for canonical, codexEvent := range codexEventTable {
+		spec := HookSpec{Name: "probe", When: canonical, Command: "/tmp/probe.sh"}
+		content, err := renderCodexHookConfig([]HookSpec{spec})
+		if err != nil {
+			t.Fatalf("renderCodexHookConfig %q: %v", canonical, err)
+		}
+		var payload codexRenderedHooks
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+		}
+		entries, ok := payload.Hooks[codexEvent]
+		if !ok || len(entries) != 1 {
+			t.Fatalf("%s -> %s: expected one entry, got %v", canonical, codexEvent, payload.Hooks)
+		}
+		gotMatcher := entries[0].Matcher
+		wantMatcher := ""
+		if whitelisted[codexEvent] {
+			wantMatcher = "*"
+		}
+		if gotMatcher != wantMatcher {
+			t.Fatalf("codex event %s matcher = %q, want %q (whitelist=%v)", codexEvent, gotMatcher, wantMatcher, whitelisted[codexEvent])
+		}
+	}
+}
+
+// TestRenderCodexHookEntry_NoCommand covers the two empty-command
+// branches in renderCodexHookEntry: RequiredOn codex → error; not
+// RequiredOn → silent fall-through (include=false). These are the
+// PR #98 review-fix new lines that pushed file coverage below 95%.
+func TestRenderCodexHookEntry_NoCommand(t *testing.T) {
+	t.Run("required-on codex errors", func(t *testing.T) {
+		_, _, include, err := renderCodexHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "", RequiredOn: []string{"codex"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "no command for codex") {
+			t.Fatalf("expected 'no command for codex' error, got err=%v include=%v", err, include)
+		}
+	})
+	t.Run("not required-on falls through", func(t *testing.T) {
+		_, _, include, err := renderCodexHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "",
+		})
+		if err != nil {
+			t.Fatalf("expected no error on fall-through, got %v", err)
+		}
+		if include {
+			t.Fatal("expected include=false on empty-command fall-through")
+		}
+	})
+}
+
+// TestRenderCursorHookEntry_NoCommand mirrors TestRenderCodexHookEntry_NoCommand
+// for the Cursor renderer (PR #98 review-fix new lines).
+func TestRenderCursorHookEntry_NoCommand(t *testing.T) {
+	t.Run("required-on cursor errors", func(t *testing.T) {
+		_, _, include, err := renderCursorHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "", RequiredOn: []string{"cursor"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "no command for cursor") {
+			t.Fatalf("expected 'no command for cursor' error, got err=%v include=%v", err, include)
+		}
+	})
+	t.Run("not required-on falls through", func(t *testing.T) {
+		_, _, include, err := renderCursorHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "",
+		})
+		if err != nil {
+			t.Fatalf("expected no error on fall-through, got %v", err)
+		}
+		if include {
+			t.Fatal("expected include=false on empty-command fall-through")
+		}
+	})
+}
+
+// TestRenderClaudeHookEntry_NoCommand mirrors the same shape for
+// renderClaudeHookEntry — extracted helper from the PR #98 Sonar
+// cog-reduction commit; cover its empty-command branches too.
+func TestRenderClaudeHookEntry_NoCommand(t *testing.T) {
+	t.Run("required-on claude errors", func(t *testing.T) {
+		_, _, include, err := renderClaudeHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "", RequiredOn: []string{"claude"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "no command for claude") {
+			t.Fatalf("expected 'no command for claude' error, got err=%v include=%v", err, include)
+		}
+	})
+	t.Run("not required-on falls through", func(t *testing.T) {
+		_, _, include, err := renderClaudeHookEntry(HookSpec{
+			Name: "gate", When: "pre_tool_use", Command: "",
+		})
+		if err != nil {
+			t.Fatalf("expected no error on fall-through, got %v", err)
+		}
+		if include {
+			t.Fatal("expected include=false on empty-command fall-through")
+		}
+	})
+}
+
+// TestValidateHookWhenEvents_BackwardCompat covers the L587-592 branch:
+// a manifest with neither `when` nor `when_events` is accepted (returns
+// nil, nil) because many existing hooks rely on platform_overrides.event
+// rather than canonical When. This branch was previously uncovered.
+func TestValidateHookWhenEvents_BackwardCompat(t *testing.T) {
+	events, err := validateHookWhenEvents("HOOK.yaml", hookManifest{})
+	if err != nil {
+		t.Fatalf("expected nil error for empty when + empty when_events, got %v", err)
+	}
+	if events != nil {
+		t.Errorf("expected nil events on backward-compat path, got %v", events)
 	}
 }

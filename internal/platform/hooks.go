@@ -54,13 +54,20 @@ type HookPlatformOverride struct {
 }
 
 type HookSpec struct {
-	Name              string
-	Scope             string
-	SourcePath        string
-	SourceBucket      string
-	SourceKind        HookSourceKind
-	Description       string
-	When              string
+	Name         string
+	Scope        string
+	SourcePath   string
+	SourceBucket string
+	SourceKind   HookSourceKind
+	Description  string
+	When         string
+	// WhenEvents, when non-empty, declares a multi-event hook. The
+	// loader rejects manifests that set both `when` and `when_events`
+	// (mutual exclusion) and manifests with duplicate or unknown
+	// canonical events (P1c contract `when_events` rules). At render
+	// time the spec is expanded into one rendered action per canonical
+	// event the target platform documents.
+	WhenEvents        []string
 	MatchTools        []string
 	MatchExpression   string
 	Command           string
@@ -74,6 +81,7 @@ type hookManifest struct {
 	Name              string                          `yaml:"name"`
 	Description       string                          `yaml:"description"`
 	When              string                          `yaml:"when"`
+	WhenEvents        []string                        `yaml:"when_events"`
 	Match             hookMatchManifest               `yaml:"match"`
 	Run               hookRunManifest                 `yaml:"run"`
 	EnabledOn         []string                        `yaml:"enabled_on"`
@@ -427,16 +435,18 @@ func emitRenderedHookFanout(io platformIO, specs []HookSpec, dstRoot string, ren
 	if err := io.MkdirAll(dstRoot, 0755); err != nil {
 		return err
 	}
-	for _, spec := range specs {
-		name, content, ok, err := render(spec)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		if err := writeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
-			return err
+	for _, parent := range specs {
+		for _, spec := range expandHookSpecForFanout(parent) {
+			name, content, ok, err := render(spec)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if err := writeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -446,19 +456,39 @@ func removeManagedRenderedHookFanout(io platformIO, specs []HookSpec, dstRoot st
 	if len(specs) == 0 {
 		return nil
 	}
-	for _, spec := range specs {
-		name, content, ok, err := render(spec)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		if err := removeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
-			return err
+	for _, parent := range specs {
+		for _, spec := range expandHookSpecForFanout(parent) {
+			name, content, ok, err := render(spec)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if err := removeManagedFile(io, filepath.Join(dstRoot, name), content); err != nil {
+				return err
+			}
 		}
 	}
 	return removeDirIfEmpty(dstRoot)
+}
+
+// expandHookSpecForFanout is the per-file flavor of expandHookSpecEvents:
+// when a spec declares multiple `when_events`, each rendered file must
+// land at a distinct path. We disambiguate by appending the canonical
+// event to the spec Name so the per-spec render functions produce one
+// file per event (e.g. `gate-pre_tool_use.json`, `gate-stop.json`).
+// Single-event and scalar `when` hooks are returned untouched so their
+// existing filename layout is preserved.
+func expandHookSpecForFanout(spec HookSpec) []HookSpec {
+	views := expandHookSpecEvents(spec)
+	if len(views) <= 1 {
+		return views
+	}
+	for i := range views {
+		views[i].Name = spec.Name + "-" + views[i].When
+	}
+	return views
 }
 
 func emitHookFile(io platformIO, src, dst string, transport HookTransport) error {
@@ -499,6 +529,11 @@ func loadHookBundleSpec(root, scope, dirName string) (HookSpec, bool, error) {
 		return HookSpec{}, false, fmt.Errorf("parse %s: %w", manifestPath, err)
 	}
 
+	whenEvents, err := validateHookWhenEvents(manifestPath, manifest)
+	if err != nil {
+		return HookSpec{}, false, err
+	}
+
 	spec := HookSpec{
 		Name:              strings.TrimSpace(manifest.Name),
 		Scope:             scope,
@@ -507,6 +542,7 @@ func loadHookBundleSpec(root, scope, dirName string) (HookSpec, bool, error) {
 		SourceKind:        HookSourceCanonicalBundle,
 		Description:       strings.TrimSpace(manifest.Description),
 		When:              strings.TrimSpace(manifest.When),
+		WhenEvents:        whenEvents,
 		MatchTools:        append([]string{}, manifest.Match.Tools...),
 		MatchExpression:   strings.TrimSpace(manifest.Match.Expression),
 		Command:           strings.TrimSpace(manifest.Run.Command),
@@ -519,6 +555,91 @@ func loadHookBundleSpec(root, scope, dirName string) (HookSpec, bool, error) {
 		spec.Name = dirName
 	}
 	return spec, true, nil
+}
+
+// validateHookWhenEvents enforces the P1c when_events contract:
+//   - exactly one of `when` (scalar) or `when_events` (non-empty array)
+//     must be present;
+//   - duplicate entries inside `when_events` are rejected;
+//   - unknown canonical events (not in any per-platform mapper table) are
+//     rejected so typos do not silently become no-ops on every platform.
+//
+// Returns the normalized whenEvents slice (trimmed, may be nil/empty when
+// the manifest uses scalar `when`).
+func validateHookWhenEvents(manifestPath string, manifest hookManifest) ([]string, error) {
+	whenScalar := strings.TrimSpace(manifest.When)
+
+	// Trim and drop blank strings from when_events for validation.
+	trimmedEvents := make([]string, 0, len(manifest.WhenEvents))
+	for _, raw := range manifest.WhenEvents {
+		if v := strings.TrimSpace(raw); v != "" {
+			trimmedEvents = append(trimmedEvents, v)
+		}
+	}
+
+	hasScalar := whenScalar != ""
+	hasEvents := len(trimmedEvents) > 0
+
+	if hasScalar && hasEvents {
+		return nil, fmt.Errorf("parse %s: hook may not set both `when` and `when_events`", manifestPath)
+	}
+	if !hasScalar && !hasEvents {
+		// Allow a hook with neither when nor when_events to remain
+		// supported for backward compatibility — many existing hooks
+		// rely on platform_overrides.event instead. Only enforce the
+		// mutual-exclusion + duplicate / unknown rules when when_events
+		// is explicitly used.
+		return nil, nil
+	}
+	if !hasEvents {
+		return nil, nil
+	}
+
+	seen := make(map[string]bool, len(trimmedEvents))
+	for _, event := range trimmedEvents {
+		if seen[event] {
+			return nil, fmt.Errorf("parse %s: hook `when_events` contains duplicate canonical event %q", manifestPath, event)
+		}
+		seen[event] = true
+		if !isKnownCanonicalEvent(event) {
+			return nil, fmt.Errorf("parse %s: hook `when_events` lists unknown canonical event %q (not documented on any platform mapper)", manifestPath, event)
+		}
+	}
+	return trimmedEvents, nil
+}
+
+// isKnownCanonicalEvent reports whether name is registered in at least one
+// per-platform mapper table. The mapper tables are the documentation
+// authority for which canonical When values exist; if no platform can
+// render the event, the load must fail loudly rather than silently emit
+// nothing on every platform.
+func isKnownCanonicalEvent(name string) bool {
+	for _, table := range []map[string]string{claudeEventTable, codexEventTable, cursorEventTable, copilotEventTable} {
+		if _, ok := table[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// expandHookSpecEvents returns the per-event HookSpec views the renderers
+// iterate. For a scalar `when` hook (or one with neither when nor
+// when_events) the result is a single-element slice containing spec
+// itself. For a `when_events` hook, each entry yields a copy of spec with
+// `When` set to that event and `WhenEvents` cleared so downstream code
+// sees the same shape it did pre-P1c.
+func expandHookSpecEvents(spec HookSpec) []HookSpec {
+	if len(spec.WhenEvents) == 0 {
+		return []HookSpec{spec}
+	}
+	out := make([]HookSpec, 0, len(spec.WhenEvents))
+	for _, event := range spec.WhenEvents {
+		view := spec
+		view.When = event
+		view.WhenEvents = nil
+		out = append(out, view)
+	}
+	return out
 }
 
 func hookEnabledOnPlatform(spec HookSpec, platformID string) bool {
@@ -731,63 +852,129 @@ func renderClaudeHookSettings(specs []HookSpec) ([]byte, error) {
 		Schema: "https://json.schemastore.org/claude-code-settings.json",
 		Hooks:  map[string][]claudeRenderedEntry{},
 	}
-	for _, spec := range specs {
-		event, ok := claudeEventName(spec)
-		if !ok {
-			if hookRequiredOnPlatform(spec, "claude") {
-				return nil, fmt.Errorf("hook %q is not representable for claude event %q", spec.Name, spec.When)
+	for _, parent := range specs {
+		for _, spec := range expandHookSpecEvents(parent) {
+			event, entry, include, err := renderClaudeHookEntry(spec)
+			if err != nil {
+				return nil, err
 			}
-			continue
-		}
-		command := ResolveHookCommand(spec)
-		if command == "" {
-			if hookRequiredOnPlatform(spec, "claude") {
-				return nil, fmt.Errorf("hook %q has no command for claude", spec.Name)
+			if !include {
+				continue
 			}
-			continue
+			out.Hooks[event] = append(out.Hooks[event], entry)
 		}
-		out.Hooks[event] = append(out.Hooks[event], claudeRenderedEntry{
-			Matcher: matcherForSpec(spec, "claude", "*"),
-			Hooks: []claudeRenderedAction{{
-				Type:    "command",
-				Command: command,
-			}},
-		})
 	}
 	return marshalJSON(out)
 }
 
+// renderClaudeHookEntry resolves the per-spec event mapping + command
+// resolution for Claude. Returns include=false when the spec falls
+// through (not RequiredOn claude); returns a non-nil error only when
+// the spec IS RequiredOn claude but cannot be represented or has no
+// command. Extracted from renderClaudeHookSettings to keep the outer
+// fanout loop under Sonar's cog-complexity gate.
+func renderClaudeHookEntry(spec HookSpec) (string, claudeRenderedEntry, bool, error) {
+	event, ok := claudeEventName(spec)
+	if !ok {
+		if hookRequiredOnPlatform(spec, "claude") {
+			return "", claudeRenderedEntry{}, false, fmt.Errorf("hook %q is not representable for claude event %q", spec.Name, spec.When)
+		}
+		return "", claudeRenderedEntry{}, false, nil
+	}
+	command := ResolveHookCommand(spec)
+	if command == "" {
+		if hookRequiredOnPlatform(spec, "claude") {
+			return "", claudeRenderedEntry{}, false, fmt.Errorf("hook %q has no command for claude", spec.Name)
+		}
+		return "", claudeRenderedEntry{}, false, nil
+	}
+	return event, claudeRenderedEntry{
+		Matcher: matcherForSpec(spec, "claude", "*"),
+		Hooks: []claudeRenderedAction{{
+			Type:    "command",
+			Command: command,
+		}},
+	}, true, nil
+}
+
+// codexMatcherWhitelist enumerates the Codex events whose official
+// documentation establishes matcher narrowing. P1c verification reviewed
+// the Codex hooks reference (https://developers.openai.com/codex/hooks);
+// the surface is broader than the original P1b-deferred trio per the docs:
+//
+//	Event             What matcher filters       Notes
+//	PermissionRequest tool name                   Bash, apply_patch, MCP tool names
+//	PostToolUse       tool name                   Bash, apply_patch, MCP tool names
+//	PostCompact       compaction trigger          manual | auto
+//	PreCompact        compaction trigger          manual | auto
+//	PreToolUse        tool name                   Bash, apply_patch, MCP tool names
+//	SessionStart      start source                startup | resume | clear | compact
+//	SubagentStart     subagent type               depends on subagent
+//	SubagentStop      subagent type               depends on subagent
+//
+// UserPromptSubmit and Stop explicitly do NOT support matcher — any value
+// is ignored by Codex. Events outside this map render with matcher="" per
+// the contract's "Matcher Boundary" rule so gate scripts parse the
+// vendor-provided input rather than rely on matcher narrowing.
+var codexMatcherWhitelist = map[string]bool{
+	"PermissionRequest": true,
+	"PostCompact":       true,
+	"PostToolUse":       true,
+	"PreCompact":        true,
+	"PreToolUse":        true,
+	"SessionStart":      true,
+	"SubagentStart":     true,
+	"SubagentStop":      true,
+}
+
 func renderCodexHookConfig(specs []HookSpec) ([]byte, error) {
 	out := codexRenderedHooks{Hooks: map[string][]claudeRenderedEntry{}}
-	for _, spec := range specs {
-		event, ok := codexEventName(spec)
-		if !ok {
-			if hookRequiredOnPlatform(spec, "codex") {
-				return nil, fmt.Errorf("hook %q is not representable for codex event %q", spec.Name, spec.When)
+	for _, parent := range specs {
+		for _, spec := range expandHookSpecEvents(parent) {
+			event, entry, include, err := renderCodexHookEntry(spec)
+			if err != nil {
+				return nil, err
 			}
-			continue
-		}
-		command := ResolveHookCommand(spec)
-		if command == "" {
-			if hookRequiredOnPlatform(spec, "codex") {
-				return nil, fmt.Errorf("hook %q has no command for codex", spec.Name)
+			if !include {
+				continue
 			}
-			continue
+			out.Hooks[event] = append(out.Hooks[event], entry)
 		}
-		matcher := ""
-		switch event {
-		case "SessionStart", "PreToolUse", "PostToolUse":
-			matcher = matcherForSpec(spec, "codex", "*")
-		}
-		out.Hooks[event] = append(out.Hooks[event], claudeRenderedEntry{
-			Matcher: matcher,
-			Hooks: []claudeRenderedAction{{
-				Type:    "command",
-				Command: command,
-			}},
-		})
 	}
 	return marshalJSON(out)
+}
+
+// renderCodexHookEntry mirrors renderClaudeHookEntry for Codex, with one
+// extra step: matcher narrowing is only emitted for events in
+// codexMatcherWhitelist (per P1c verification of the Codex hooks
+// reference). Other events render with matcher="" so gate scripts parse
+// the vendor-provided input instead.
+func renderCodexHookEntry(spec HookSpec) (string, claudeRenderedEntry, bool, error) {
+	event, ok := codexEventName(spec)
+	if !ok {
+		if hookRequiredOnPlatform(spec, "codex") {
+			return "", claudeRenderedEntry{}, false, fmt.Errorf("hook %q is not representable for codex event %q", spec.Name, spec.When)
+		}
+		return "", claudeRenderedEntry{}, false, nil
+	}
+	command := ResolveHookCommand(spec)
+	if command == "" {
+		if hookRequiredOnPlatform(spec, "codex") {
+			return "", claudeRenderedEntry{}, false, fmt.Errorf("hook %q has no command for codex", spec.Name)
+		}
+		return "", claudeRenderedEntry{}, false, nil
+	}
+	matcher := ""
+	if codexMatcherWhitelist[event] {
+		matcher = matcherForSpec(spec, "codex", "*")
+	}
+	return event, claudeRenderedEntry{
+		Matcher: matcher,
+		Hooks: []claudeRenderedAction{{
+			Type:    "command",
+			Command: command,
+		}},
+	}, true, nil
 }
 
 func renderCursorHookConfig(specs []HookSpec) ([]byte, error) {
@@ -795,15 +982,17 @@ func renderCursorHookConfig(specs []HookSpec) ([]byte, error) {
 		Version: 1,
 		Hooks:   map[string][]cursorRenderedEntry{},
 	}
-	for _, spec := range specs {
-		event, entry, include, err := renderCursorHookEntry(spec)
-		if err != nil {
-			return nil, err
+	for _, parent := range specs {
+		for _, spec := range expandHookSpecEvents(parent) {
+			event, entry, include, err := renderCursorHookEntry(spec)
+			if err != nil {
+				return nil, err
+			}
+			if !include {
+				continue
+			}
+			out.Hooks[event] = append(out.Hooks[event], entry)
 		}
-		if !include {
-			continue
-		}
-		out.Hooks[event] = append(out.Hooks[event], entry)
 	}
 	return marshalJSON(out)
 }
