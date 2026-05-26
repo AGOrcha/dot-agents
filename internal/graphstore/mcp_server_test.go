@@ -118,6 +118,37 @@ func runMCPServeOnce(t *testing.T, srv *MCPServer, req string) rpcResponse {
 	return resp
 }
 
+// runMCPCallExpectErrorCode dispatches req through the server and
+// asserts the response carries a non-nil JSON-RPC error with the given
+// code. Collapses the duplicated 3-line "resp := runMCPServeOnce; if
+// resp.Error == nil || resp.Error.Code != X" pattern present at 7+
+// call sites in this file (invalid-params -32602, method-not-found
+// -32601, parse-error -32700).
+func runMCPCallExpectErrorCode(t *testing.T, srv *MCPServer, req string, wantCode int) {
+	t.Helper()
+	resp := runMCPServeOnce(t, srv, req)
+	if resp.Error == nil || resp.Error.Code != wantCode {
+		t.Fatalf("expected error code %d, got %+v", wantCode, resp.Error)
+	}
+}
+
+// decodeResultMap marshals resp.Result back to JSON and unmarshals it
+// into a generic map for assertions. Collapses the duplicated 3-line
+// "rb, _ := json.Marshal(resp.Result); var p map[string]any; _ =
+// json.Unmarshal(rb, &p)" pattern present at 4 call sites in this file.
+func decodeResultMap(t *testing.T, resp rpcResponse) map[string]any {
+	t.Helper()
+	rb, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var p map[string]any
+	if err := json.Unmarshal(rb, &p); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	return p
+}
+
 func TestKGServeToolsList(t *testing.T) {
 	srv := &MCPServer{}
 	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
@@ -227,11 +258,8 @@ func TestKGServeGetImpactRadius(t *testing.T) {
 func TestKGServeUnknownTool(t *testing.T) {
 	srv := &MCPServer{}
 	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"does_not_exist","arguments":{}}}`)
-	if resp.Error == nil {
-		t.Fatal("expected JSON-RPC error")
-	}
-	if resp.Error.Code != -32601 {
-		t.Fatalf("unexpected error code: %+v", resp.Error)
+	if resp.Error == nil || resp.Error.Code != -32601 {
+		t.Fatalf("expected -32601, got %+v", resp.Error)
 	}
 	if !strings.Contains(resp.Error.Message, "method not found") {
 		t.Fatalf("unexpected error message: %+v", resp.Error)
@@ -309,10 +337,7 @@ func TestHandleGetReviewContext_BusyGraphReturnsError(t *testing.T) {
 // -32601 method-not-found error.
 func TestKGServeUnknownMethod(t *testing.T) {
 	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"foo/bar","params":{}}`)
-	if resp.Error == nil || resp.Error.Code != -32601 {
-		t.Fatalf("expected -32601, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"foo/bar","params":{}}`, -32601)
 }
 
 // TestKGServeParseError verifies that malformed JSON returns a -32700 parse
@@ -360,10 +385,7 @@ func TestKGServeNotificationNoResponse(t *testing.T) {
 func TestKGServeInvalidToolsCallParams(t *testing.T) {
 	srv := &MCPServer{}
 	// params is a string instead of a tool-call object
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"oops"}`)
-	if resp.Error == nil || resp.Error.Code != -32602 {
-		t.Fatalf("expected -32602, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"oops"}`, -32602)
 }
 
 // TestKGServeBuildOrUpdateGraph_ChoosesUpdateWhenReady verifies the dispatcher
@@ -416,9 +438,7 @@ func TestKGServeEmbedGraph_Error(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected RPC error: %+v", resp.Error)
 	}
-	rb, _ := json.Marshal(resp.Result)
-	var p map[string]any
-	_ = json.Unmarshal(rb, &p)
+	p := decodeResultMap(t, resp)
 	if p["status"] != "error" {
 		t.Errorf("expected status=error, got %v", p)
 	}
@@ -428,10 +448,7 @@ func TestKGServeEmbedGraph_Error(t *testing.T) {
 // path for empty query.
 func TestKGServeSemanticSearch_MissingQuery(t *testing.T) {
 	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"semantic_search_nodes_tool","arguments":{"query":""}}}`)
-	if resp.Error == nil || resp.Error.Code != -32602 {
-		t.Fatalf("expected -32602, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"semantic_search_nodes_tool","arguments":{"query":""}}}`, -32602)
 }
 
 // TestKGServeSemanticSearch_DefaultLimit verifies that limit<=0 falls back to
@@ -448,10 +465,7 @@ func TestKGServeSemanticSearch_DefaultLimit(t *testing.T) {
 // for empty symbol.
 func TestKGServeGetImpactRadius_MissingSymbol(t *testing.T) {
 	srv := &MCPServer{bridge: &fakeMCPBridge{}}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":""}}}`)
-	if resp.Error == nil || resp.Error.Code != -32602 {
-		t.Fatalf("expected -32602 for empty symbol, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_impact_radius_tool","arguments":{"symbol":""}}}`, -32602)
 }
 
 // TestKGServeGetImpactRadius_DepthDefault verifies depth<=0 falls back to 2.
@@ -471,20 +485,14 @@ func TestKGServeGetImpactRadius_DepthDefault(t *testing.T) {
 // for empty files list.
 func TestKGServeGetReviewContext_MissingFiles(t *testing.T) {
 	srv := &MCPServer{bridge: &fakeMCPBridge{}}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":[]}}}`)
-	if resp.Error == nil || resp.Error.Code != -32602 {
-		t.Fatalf("expected -32602, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_review_context_tool","arguments":{"files":[]}}}`, -32602)
 }
 
 // TestKGServeGetDocsSection_MissingSection verifies invalid-params error
 // for empty section.
 func TestKGServeGetDocsSection_MissingSection(t *testing.T) {
 	srv := &MCPServer{}
-	resp := runMCPServeOnce(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docs_section_tool","arguments":{"section":""}}}`)
-	if resp.Error == nil || resp.Error.Code != -32602 {
-		t.Fatalf("expected -32602, got %+v", resp.Error)
-	}
+	runMCPCallExpectErrorCode(t, srv, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docs_section_tool","arguments":{"section":""}}}`, -32602)
 }
 
 // TestKGServeGetDocsSection_NotFound verifies empty payload when section is
@@ -495,9 +503,7 @@ func TestKGServeGetDocsSection_NotFound(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-	rb, _ := json.Marshal(resp.Result)
-	var p map[string]any
-	_ = json.Unmarshal(rb, &p)
+	p := decodeResultMap(t, resp)
 	if p["content"] != "" || p["source"] != "" {
 		t.Errorf("expected empty content/source, got %v", p)
 	}
@@ -517,9 +523,7 @@ func TestKGServeGetDocsSection_Found(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-	rb, _ := json.Marshal(resp.Result)
-	var p map[string]any
-	_ = json.Unmarshal(rb, &p)
+	p := decodeResultMap(t, resp)
 	if !strings.Contains(p["content"].(string), "Target Section") {
 		t.Errorf("expected section to contain heading, got %v", p)
 	}
@@ -541,9 +545,7 @@ func TestKGServeQueryGraph_UnknownIntent(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-	rb, _ := json.Marshal(resp.Result)
-	var p map[string]any
-	_ = json.Unmarshal(rb, &p)
+	p := decodeResultMap(t, resp)
 	if p["warnings"] == nil {
 		t.Errorf("expected warnings field for unsupported intent, got %v", p)
 	}
