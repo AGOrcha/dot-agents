@@ -1,0 +1,29 @@
+schema_version: 1
+delegation_id: del-t2d-companion-gate-compatibility-1779836268
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t2d-companion-gate-compatibility
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T22:57:48Z"
+scope:
+    write_scope:
+        - internal/scoring/signal_hook_outcomes_test.go
+        - tests/fixtures/r1-5-hook-outcomes/companion-gates/
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

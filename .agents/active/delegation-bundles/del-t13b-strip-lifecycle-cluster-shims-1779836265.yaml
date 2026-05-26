@@ -1,0 +1,40 @@
+schema_version: 1
+delegation_id: del-t13b-strip-lifecycle-cluster-shims-1779836265
+plan_id: root-command-decomposition
+task_id: t13b-strip-lifecycle-cluster-shims
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T22:57:45Z"
+scope:
+    write_scope:
+        - commands/root.go
+        - commands/install.go
+        - commands/doctor.go
+        - commands/init.go
+        - commands/status.go
+        - commands/seams_test.go
+        - commands/add_test.go
+        - commands/doctor_test.go
+        - commands/init_test.go
+        - commands/install_test.go
+        - commands/refresh_test.go
+        - commands/refresh_idempotency_test.go
+        - commands/remove_test.go
+        - commands/import_test.go
+        - commands/review_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -1,0 +1,40 @@
+schema_version: 1
+delegation_id: del-t3b-relocate-platform-coverage-gap-tests-1779836266
+plan_id: go-test-fixture-extraction
+task_id: t3b-relocate-platform-coverage-gap-tests
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T22:57:46Z"
+scope:
+    write_scope:
+        - internal/platform/coverage_gap_test.go
+        - internal/platform/coverage_gap2_test.go
+        - internal/platform/coverage_gap3_test.go
+        - internal/platform/coverage_gap4_test.go
+        - internal/platform/coverage_gap5_test.go
+        - internal/platform/plugins_test.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - internal/platform/resource_plan_test.go
+        - internal/platform/hooks_test.go
+        - internal/platform/mcp_settings_test.go
+        - internal/platform/rules_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
