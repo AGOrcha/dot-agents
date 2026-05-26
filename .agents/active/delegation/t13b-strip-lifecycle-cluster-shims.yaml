@@ -1,0 +1,72 @@
+schema_version: 1
+id: del-t13b-strip-lifecycle-cluster-shims-1779836763
+parent_plan_id: root-command-decomposition
+parent_task_id: t13b-strip-lifecycle-cluster-shims
+title: Strip lifecycle-cluster shim wiring + rewire root.go + per-command test files
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/root.go
+    - commands/install.go
+    - commands/doctor.go
+    - commands/init.go
+    - commands/status.go
+    - commands/seams_test.go
+    - commands/install_test.go
+    - commands/doctor_test.go
+    - commands/init_test.go
+    - commands/coverage_test.go
+    - commands/status_test.go
+success_criteria: |-
+    Second half of t13 split per worker fold-back
+    (.agents/active/fold-back/t13-write-scope-missing-test-files.yaml).
+    Strip the lifecycle-cluster shim wiring (re-export var blocks,
+    syncLifecycleGlobals, lifecycleDeps, lifecycleStatusDeps,
+    lifecycleDoctorDeps) plus the lowercased forwarders
+    (runInstall, runInstallGenerate, registerInstallProject,
+    findProjectByPath, linkResourceFromSources, cloneGitSource,
+    shouldUseCachedGitSource, runDoctor, runInit, runStatus,
+    printSymlinkDirAudit, countClaudeRules, scaffoldWorkflowAssets)
+    plus the type aliases (installDeps, stdInstallDeps,
+    doctorConfigLoader, stdDoctorConfigLoader) from
+    install.go/doctor.go/init.go/status.go.
+
+    Switch commands/root.go's install/doctor/init/status
+    AddCommand calls to lifecycle.NewInstallCmd / NewDoctorCmd /
+    NewInitCmd / NewStatusCmd (t13a already did mcp/settings/rules).
+
+    Rewire 9 test files outside the lifecycle dir to import the
+    new homes:
+      * seams_test.go: strip lifecycle-related test entries OR
+        re-target the surviving ones at lifecycle.RunInstall /
+        etc. (the t11 partial-split left 22 tests covering the
+        shim forwarders — most of those should now be deleted
+        since the per-subpkg coverage tests landed in t12 cover
+        the same surface).
+      * add_test.go: rewire to lifecycle.AddDeps / StdAddDeps.
+      * doctor_test.go: rewire to lifecycle.DoctorConfigLoader.
+      * init_test.go: rewire to lifecycle.RunInit / WriteKGMCPConfigs.
+      * install_test.go: rewire to lifecycle.InstallDeps / RunInstall.
+      * refresh_test.go + refresh_idempotency_test.go: rewire to
+        lifecycle.RunRefresh + lifecycle config-loader.
+      * remove_test.go: keep with remove.go which is NOT moving.
+      * import_test.go: most pipeline stays in commands/import.go;
+        rewire stdImportDeps if relocated.
+      * review_test.go: audit; likely minor adjustment.
+
+    Anti-scope (per fold-back finding #2): do NOT delete
+    commands/{add,import,import_plugins,refresh,remove}.go — those
+    hold substantial production code that has not been moved to a
+    subpackage. ONLY strip shim wiring from those files (if any
+    remains after t13a's pass). The production-code MOVES for
+    those files are tracked under the t04/t06/t07 fold-back chain
+    and are out of scope here.
+
+    Hard gate: go test ./... -race -count=1 green; per-file
+    coverage stays clean. cmd/dot-agents/main.go must compile
+    unchanged.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T23:06:03Z"
+updated_at: "2026-05-26T23:06:03Z"
