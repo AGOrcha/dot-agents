@@ -1,0 +1,28 @@
+schema_version: 1
+delegation_id: del-p1d-claude-lifecycle-parity-1779834047
+plan_id: loop-discipline-stop-hooks
+task_id: p1d-claude-lifecycle-parity
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T22:20:47Z"
+scope:
+    write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - schemas/hook.schema.json
+        - docs/HOOKS.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p1d-claude-lifecycle-parity-1779834047
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p1d-claude-lifecycle-parity
+title: Claude documented lifecycle event parity beyond gate-critical events
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/platform/hooks.go
+    - internal/platform/hooks_test.go
+    - schemas/hook.schema.json
+    - docs/HOOKS.md
+success_criteria: 'Bring the officially documented Claude wider lifecycle event surface into canonical HookSpec coverage without attaching new gates by implication. Contract: tasks/p1d-claude-lifecycle-parity.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T22:20:47Z"
+updated_at: "2026-05-26T22:20:47Z"
