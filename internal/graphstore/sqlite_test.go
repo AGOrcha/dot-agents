@@ -58,42 +58,12 @@ func TestOpenSQLite_Idempotent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata
+// Metadata — RoundTrip / MissingKey / Overwrite collapsed into a single
+// invocation of the shared runner (t6c). See internal/storetest.
 // ---------------------------------------------------------------------------
 
-func TestMetadata_RoundTrip(t *testing.T) {
-	s := openTestStore(t)
-	if err := s.SetMetadata("last_updated", "2026-04-11"); err != nil {
-		t.Fatalf("SetMetadata: %v", err)
-	}
-	val, err := s.GetMetadata("last_updated")
-	if err != nil {
-		t.Fatalf("GetMetadata: %v", err)
-	}
-	if val != "2026-04-11" {
-		t.Errorf("want 2026-04-11, got %q", val)
-	}
-}
-
-func TestMetadata_MissingKey(t *testing.T) {
-	s := openTestStore(t)
-	val, err := s.GetMetadata("nonexistent")
-	if err != nil {
-		t.Fatalf("GetMetadata missing key: %v", err)
-	}
-	if val != "" {
-		t.Errorf("expected empty string for missing key, got %q", val)
-	}
-}
-
-func TestMetadata_Overwrite(t *testing.T) {
-	s := openTestStore(t)
-	_ = s.SetMetadata("k", "v1")
-	_ = s.SetMetadata("k", "v2")
-	val, _ := s.GetMetadata("k")
-	if val != "v2" {
-		t.Errorf("want v2, got %q", val)
-	}
+func TestMetadata(t *testing.T) {
+	storetest.RunMetadataRoundTrip(t, openTestStore(t), "sqlite-meta-")
 }
 
 // ---------------------------------------------------------------------------
@@ -181,28 +151,11 @@ func makeEdge(src, tgt, kind string) graphstore.EdgeInfo {
 }
 
 func TestUpsertEdge_Create(t *testing.T) {
-	s := openTestStore(t)
-	id, err := s.UpsertEdge(makeEdge("pkg::A", "pkg::B", graphstore.EdgeKindCalls))
-	if err != nil {
-		t.Fatalf("UpsertEdge: %v", err)
-	}
-	if id == 0 {
-		t.Error("expected non-zero edge ID")
-	}
+	storetest.RunEdgeUpsertCreate(t, openTestStore(t), "sqlite-edge-create-")
 }
 
 func TestUpsertEdge_Update(t *testing.T) {
-	s := openTestStore(t)
-	e := makeEdge("A", "B", graphstore.EdgeKindCalls)
-	id1, _ := s.UpsertEdge(e)
-	e.Line = 42
-	id2, err := s.UpsertEdge(e)
-	if err != nil {
-		t.Fatalf("UpsertEdge update: %v", err)
-	}
-	if id1 != id2 {
-		t.Errorf("expected same id on update: id1=%d id2=%d", id1, id2)
-	}
+	storetest.RunEdgeUpsertUpdate(t, openTestStore(t), "sqlite-edge-update-")
 }
 
 func TestGetEdgesBySource(t *testing.T) {
@@ -544,40 +497,11 @@ func TestListArchivedKGNotes(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNoteSymbolLink_RoundTrip(t *testing.T) {
-	s := openTestStore(t)
-	link := graphstore.NoteSymbolLink{
-		NoteID: "decision-001", QualifiedName: "pkg::Store", LinkKind: "documents",
-	}
-	id, err := s.UpsertNoteSymbolLink(link)
-	if err != nil {
-		t.Fatalf("UpsertNoteSymbolLink: %v", err)
-	}
-	if id == 0 {
-		t.Error("expected non-zero link ID")
-	}
-
-	links, err := s.GetLinksForNote("decision-001")
-	if err != nil {
-		t.Fatalf("GetLinksForNote: %v", err)
-	}
-	if len(links) != 1 || links[0].QualifiedName != "pkg::Store" {
-		t.Errorf("unexpected links: %+v", links)
-	}
+	storetest.RunNoteSymbolLinkRoundTrip(t, openTestStore(t), "sqlite-link-rt-")
 }
 
 func TestNoteSymbolLink_Idempotent(t *testing.T) {
-	s := openTestStore(t)
-	link := graphstore.NoteSymbolLink{NoteID: "n1", QualifiedName: "pkg::Fn", LinkKind: "mentions"}
-	id1, _ := s.UpsertNoteSymbolLink(link)
-	id2, _ := s.UpsertNoteSymbolLink(link)
-	if id1 != id2 {
-		t.Errorf("expected idempotent insert, got id1=%d id2=%d", id1, id2)
-	}
-
-	links, _ := s.GetLinksForNote("n1")
-	if len(links) != 1 {
-		t.Errorf("expected 1 link after idempotent upsert, got %d", len(links))
-	}
+	storetest.RunNoteSymbolLinkIdempotent(t, openTestStore(t), "sqlite-link-idem-")
 }
 
 func TestGetLinksForSymbol(t *testing.T) {
