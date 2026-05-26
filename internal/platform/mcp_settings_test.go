@@ -68,3 +68,11 @@ func TestEnsureUnderMCPScopeTree(t *testing.T) {
 		t.Fatal("expected refusal")
 	}
 }
+
+// TestResolveCanonicalSettingsFile_NotFound exercises the error branch
+// (relocated from coverage_gap3_test.go).
+func TestResolveCanonicalSettingsFile_NotFound(t *testing.T) {
+	if _, err := ResolveCanonicalSettingsFile(t.TempDir(), "proj", "missing"); err == nil {
+		t.Error("expected error for missing file")
+	}
+}

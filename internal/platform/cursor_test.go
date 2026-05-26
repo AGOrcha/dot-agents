@@ -203,3 +203,85 @@ func TestCursorCreateLinks_FullFixture(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Cursor rule/agent + deprecation detection coverage (relocated from
+// coverage_gap3_test.go).
+// ---------------------------------------------------------------------------
+
+// TestCollectRuleEntry_NonRuleFile drives the isCursorRuleFile guard.
+func TestCollectRuleEntry_NonRuleFile(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "ignore.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	desired := map[string]string{}
+	c := NewCursor().(*cursor)
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		c.collectRuleEntry(entry, tmp, "prefix--", desired)
+	}
+	if len(desired) != 0 {
+		t.Errorf("expected 0 entries, got %d (%+v)", len(desired), desired)
+	}
+}
+
+// TestHasDeprecatedFormatAndDetails covers the matching branch of each
+// platform's deprecation detector (the not-matching branch is exercised by the
+// contract test). Spans both claude and cursor since both are
+// per-platform detectors used identically.
+func TestHasDeprecatedFormat_Detected(t *testing.T) {
+	tmp := t.TempDir()
+	// Claude deprecated marker.
+	repoC := filepath.Join(tmp, "claude-repo")
+	if err := os.MkdirAll(repoC, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoC, ".claude.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cp := NewClaude()
+	if !cp.HasDeprecatedFormat(repoC) {
+		t.Error("expected claude deprecated detection")
+	}
+	if cp.DeprecatedDetails(repoC) == "" {
+		t.Error("expected non-empty deprecated details")
+	}
+
+	// Cursor deprecated marker.
+	repoCur := filepath.Join(tmp, "cursor-repo")
+	if err := os.MkdirAll(repoCur, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoCur, ".cursorrules"), []byte("rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	curp := NewCursor()
+	if !curp.HasDeprecatedFormat(repoCur) {
+		t.Error("expected cursor deprecated detection")
+	}
+	if curp.DeprecatedDetails(repoCur) == "" {
+		t.Error("expected non-empty deprecated details")
+	}
+}
+
+// TestRulePrune_MissingDir covers the err==nil return-nil branch.
+func TestCursorPruneRuleLinks_MissingDir(t *testing.T) {
+	c := NewCursor().(*cursor)
+	if err := c.pruneRuleLinks(filepath.Join(t.TempDir(), "no-such"), "proj", nil); err != nil {
+		t.Errorf("missing dir should no-op, got %v", err)
+	}
+}
+
+// TestCursorRemoveAgentLinks_MissingDir covers the err==nil return branch.
+func TestCursorRemoveAgentLinks_MissingDir(t *testing.T) {
+	c := NewCursor().(*cursor)
+	c.removeAgentLinks(filepath.Join(t.TempDir(), "no-such"), filepath.Join(t.TempDir(), ".agents"))
+	// no panic = pass
+}

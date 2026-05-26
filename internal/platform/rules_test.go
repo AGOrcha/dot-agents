@@ -75,3 +75,14 @@ func TestResolveCanonicalRuleFile(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// TestEnsureUnderRulesScopeTree_DotPath exercises filepath.Rel with same dir
+// (relocated from coverage_gap3_test.go).
+func TestEnsureUnderRulesScopeTree_RootItself(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "rules", "global")
+	// Same path == root → rel is "." → not "..", so accepted.
+	if err := EnsureUnderRulesScopeTree(tmp, "global", root); err != nil {
+		t.Errorf("expected root itself to validate, got %v", err)
+	}
+}

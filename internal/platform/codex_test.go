@@ -251,3 +251,137 @@ func TestRenderCodexHookConfig_MatcherBranches(t *testing.T) {
 		t.Errorf("expected Bash matcher: %s", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Codex agent-toml + session model resolution coverage (relocated from
+// coverage_gap3_test.go).
+// ---------------------------------------------------------------------------
+
+// TestWriteCodexAgentTomlFile_ExistingFileReplaced drives the Lstat→Remove branch.
+func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
+	tmp := t.TempDir()
+	agent := filepath.Join(tmp, "AGENT.md")
+	if err := os.WriteFile(agent, []byte("---\nname: x\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "x.toml")
+	if err := os.WriteFile(dst, []byte("stale\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err != nil {
+		t.Fatalf("writeCodexAgentTomlFile: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `name = "x"`) {
+		t.Errorf("file content not refreshed: %q", got)
+	}
+}
+
+func TestWriteCodexAgentTomlFile_BadAgentMD(t *testing.T) {
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, filepath.Join(t.TempDir(), "x.toml"), "/no/such/agent.md"); err == nil {
+		t.Error("expected error for missing agent.md")
+	}
+}
+
+// TestRemoveSharedTargets_RenderedTomlPath drives the codex-agent-toml remove
+// path.
+func TestRemoveManagedIntentTarget_CodexTomlPath(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "out.toml")
+	if err := os.WriteFile(target, []byte("dummy"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: codexAgentTomlMaterializer,
+		TargetPath:   "out.toml",
+	}
+	if err := removeManagedIntentTarget(intent, tmp, t.TempDir()); err != nil {
+		t.Fatalf("removeManagedIntentTarget: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("expected target removed")
+	}
+}
+
+// TestExecuteRenderSingleWrite_CodexAgentToml drives the codex-agent-toml
+// happy-path branch via Execute.
+func TestExecuteRenderSingleWrite_CodexAgentToml(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "agents", "proj", "reviewer", "AGENT.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("---\nname: reviewer\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		IntentID:    "codex.proj.reviewer.toml",
+		Project:     "proj",
+		Bucket:      "agents",
+		LogicalName: "reviewer",
+		TargetPath:  filepath.Join(".codex/agents", "reviewer.toml"),
+		Ownership:   ResourceOwnershipSharedRepo,
+		SourceRef: ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "agents",
+			RelativePath: "reviewer/AGENT.md",
+			Kind:         ResourceSourceCanonicalFile,
+		},
+		Shape:         ResourceShapeRenderSingle,
+		Transport:     ResourceTransportWrite,
+		Materializer:  codexAgentTomlMaterializer,
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   ResourcePruneTarget,
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".codex/agents/reviewer.toml")); err != nil {
+		t.Errorf("expected toml file: %v", err)
+	}
+}
+
+// TestResolveCodexModelFromJSONL_NoResponseLine drives the empty-result branch
+// (model in JSONL is "").
+func TestResolveCodexModelFromJSONL_NoModel(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessID := "no-model"
+	path := filepath.Join(dir, "rollout-"+sessID+".jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"task_started"}}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveCodexModelFromJSONL(home, sessID); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// TestPruneCodexRepoAgentTomls_NoEntries covers the early no-entries branch.
+func TestPruneCodexRepoAgentTomls_NoEntries(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// agentsHome with no agents bucket → listScopedResourceDirs errors → nil.
+	if err := pruneCodexRepoAgentTomls("proj", repo, filepath.Join(tmp, "missing")); err != nil {
+		t.Errorf("expected no error for missing agents bucket, got %v", err)
+	}
+}

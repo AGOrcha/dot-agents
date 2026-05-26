@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeClaudeProjectJSONL creates ~/.claude/projects/<slug>/<sessionID>.jsonl
@@ -205,5 +206,47 @@ func TestClaudeScanJSONLForBranch_AssistantCount(t *testing.T) {
 	}
 	if got.MessageCount < 2 {
 		t.Errorf("MessageCount = %d, want >= 2", got.MessageCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude assistant-entry accumulator + MCP missing-source coverage
+// (relocated from coverage_gap3_test.go).
+// ---------------------------------------------------------------------------
+
+// TestClaudeLinkProjectMCPMissing drives the missing-source branch (just to
+// hit the early-return).
+func TestClaudeLinkProjectMCP_MissingSource(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude().(*claude)
+	c.linkProjectMCP("proj", repo, agentsHome)
+	// no symlink created
+	if _, err := os.Lstat(filepath.Join(repo, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no .mcp.json link: %v", err)
+	}
+}
+
+// TestClaudeAccumulateAssistantEntry_BadJSON drives the unmarshal-error branch.
+func TestClaudeAccumulateAssistantEntry_BadJSON(t *testing.T) {
+	var m SessionTokenMetrics
+	claudeAccumulateAssistantEntry([]byte("garbage"), time.Time{}, &m)
+	if m.InputTokens != 0 {
+		t.Errorf("expected zero, got %+v", m)
+	}
+}
+
+func TestClaudeAccumulateAssistantEntry_AfterCutoffSkipped(t *testing.T) {
+	line := `{"type":"assistant","timestamp":"2026-05-11T10:00:00Z","message":{"usage":{"input_tokens":99}}}`
+	var m SessionTokenMetrics
+	claudeAccumulateAssistantEntry([]byte(line), time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC), &m)
+	if m.InputTokens != 0 {
+		t.Errorf("expected zero (before cutoff), got %+v", m)
 	}
 }

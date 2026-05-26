@@ -1199,3 +1199,147 @@ func TestSyncResourceDirEntries_MkdirError(t *testing.T) {
 		t.Error("expected mkdir error")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Resource plan + intent execute coverage (relocated from coverage_gap3).
+// ---------------------------------------------------------------------------
+
+// TestRemoveSharedTargetPlanEmpty drives the no-platform branch.
+func TestRemoveSharedTargetPlan_NoPlatforms(t *testing.T) {
+	if err := RemoveSharedTargetPlan("proj", t.TempDir(), nil); err != nil {
+		t.Errorf("RemoveSharedTargetPlan with no platforms: %v", err)
+	}
+}
+
+// TestRemoveManagedIntentTarget_UnknownShapeNoop drives the default (no-op)
+// branch for unknown shape/transport combos.
+func TestRemoveManagedIntentTarget_UnknownShape(t *testing.T) {
+	intent := ResourceIntent{Shape: "weird", Transport: "weird"}
+	if err := removeManagedIntentTarget(intent, t.TempDir(), t.TempDir()); err != nil {
+		t.Errorf("unknown shape should no-op, got %v", err)
+	}
+}
+
+// TestSyncScopedFileSymlinks_ExistingTargetMaintained drives the link.Symlink
+// idempotency branch.
+func TestSyncScopedFileSymlinks_Idempotent(t *testing.T) {
+	tmp := t.TempDir()
+	agentDir := filepath.Join(tmp, "agents", "global", "x")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst")
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+}
+
+// TestEnsureFileSymlinkIntent_TargetIsRegularFileBlocked drives the
+// !info.IsDir + ReplaceNever rejection.
+func TestEnsureFileSymlinkIntent_RegularFileNever(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".agents/skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-place a regular file at the target.
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.WriteFile(target, []byte("blocking"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceNever
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected error when target is regular file with Never policy")
+	}
+}
+
+// TestEnsureFileSymlinkIntent_TargetDirIfManagedRefused covers the dir+IfManaged refusal branch.
+func TestEnsureFileSymlinkIntent_DirIfManagedRefused(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceIfManaged
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected refusal for IfManaged on directory")
+	}
+}
+
+// TestEnsureFileSymlinkIntent_DirNeverRefused covers the dir+Never branch.
+func TestEnsureFileSymlinkIntent_DirNeverRefused(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceNever
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected refusal for Never on directory")
+	}
+}
+
+// TestPrepareIntentTargetForReplacement_UnknownReplaceForDir drives the
+// "unsupported replace policy" default case.
+func TestPrepareIntentTargetForReplacement_UnknownReplacePolicyForDir(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "d")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: "weird-policy",
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err == nil {
+		t.Error("expected error for unknown replace policy")
+	}
+}
