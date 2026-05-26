@@ -314,6 +314,352 @@ func mustParseHookIndex(t *testing.T, s string) int64 {
 	return n
 }
 
+// TestCanonicalWhenEventMapping is the table-driven verification for P1b:
+// each new canonical HookSpec.When value introduced in p1a/p1b must map to
+// the documented vendor event name on every supported platform, and must
+// fall through (return false) on platforms whose vendor surface does not
+// document the event. The expected-empty string column documents
+// fall-through omissions per D2 (one canonical When → at most one
+// documented event per platform).
+func TestCanonicalWhenEventMapping(t *testing.T) {
+	cases := []struct {
+		name    string
+		when    string
+		claude  string // "" means: mapper must return ok=false
+		codex   string
+		cursor  string
+		copilot string
+	}{
+		// Baseline coverage (p1a + pre-existing) for regression protection.
+		{
+			name:    "pre_tool_use",
+			when:    "pre_tool_use",
+			claude:  "PreToolUse",
+			codex:   "PreToolUse",
+			cursor:  "preToolUse",
+			copilot: "preToolUse",
+		},
+		{
+			name:    "stop",
+			when:    "stop",
+			claude:  "Stop",
+			codex:   "Stop",
+			cursor:  "stop",
+			copilot: "agentStop", // P1a footgun
+		},
+		{
+			name:    "subagent_stop",
+			when:    "subagent_stop",
+			claude:  "SubagentStop",
+			codex:   "SubagentStop",
+			cursor:  "subagentStop",
+			copilot: "subagentStop",
+		},
+		// P1b additions: Codex parity (R6.1).
+		{
+			name:    "subagent_start",
+			when:    "subagent_start",
+			claude:  "SubagentStart",
+			codex:   "SubagentStart",
+			cursor:  "subagentStart",
+			copilot: "subagentStart",
+		},
+		{
+			name:    "pre_compact",
+			when:    "pre_compact",
+			claude:  "PreCompact",
+			codex:   "PreCompact",
+			cursor:  "preCompact",
+			copilot: "preCompact",
+		},
+		{
+			name:    "post_compact",
+			when:    "post_compact",
+			claude:  "PostCompact",
+			codex:   "PostCompact",
+			cursor:  "", // not in Cursor wider surface for this plan
+			copilot: "", // not on Copilot's published surface
+		},
+		{
+			name:    "permission_request",
+			when:    "permission_request",
+			claude:  "PermissionRequest",
+			codex:   "PermissionRequest",
+			cursor:  "", // not on Cursor's published surface
+			copilot: "permissionRequest",
+		},
+		// P1b additions: Copilot parity (R6.2) + Cursor parity (R6.3).
+		{
+			name:    "session_end",
+			when:    "session_end",
+			claude:  "SessionEnd",
+			codex:   "", // Codex does not document SessionEnd
+			cursor:  "sessionEnd",
+			copilot: "sessionEnd",
+		},
+		{
+			name:    "post_tool_use",
+			when:    "post_tool_use",
+			claude:  "PostToolUse",
+			codex:   "PostToolUse",
+			cursor:  "postToolUse",
+			copilot: "postToolUse",
+		},
+		{
+			name:    "post_tool_use_failure",
+			when:    "post_tool_use_failure",
+			claude:  "PostToolUseFailure",
+			codex:   "", // not on Codex's published surface
+			cursor:  "postToolUseFailure",
+			copilot: "postToolUseFailure",
+		},
+		{
+			name:    "notification",
+			when:    "notification",
+			claude:  "Notification",
+			codex:   "", // not on Codex's published surface
+			cursor:  "", // not on Cursor's published surface
+			copilot: "notification",
+		},
+		// P1b new canonical When values (R6.4).
+		{
+			name:    "error_occurred",
+			when:    "error_occurred",
+			claude:  "", // Claude does not document ErrorOccurred
+			codex:   "", // Codex does not document this event
+			cursor:  "", // Cursor does not document this event
+			copilot: "errorOccurred",
+		},
+		// Cursor-wider surface (D3 + R6.3): canonical values that today
+		// resolve only for Cursor. Other platforms fall through per D2.
+		{
+			name:   "before_shell_execution",
+			when:   "before_shell_execution",
+			cursor: "beforeShellExecution",
+		},
+		{
+			name:   "after_shell_execution",
+			when:   "after_shell_execution",
+			cursor: "afterShellExecution",
+		},
+		{
+			name:   "before_mcp_execution",
+			when:   "before_mcp_execution",
+			cursor: "beforeMCPExecution",
+		},
+		{
+			name:   "after_mcp_execution",
+			when:   "after_mcp_execution",
+			cursor: "afterMCPExecution",
+		},
+		{
+			name:   "before_read_file",
+			when:   "before_read_file",
+			cursor: "beforeReadFile",
+		},
+		{
+			name:   "after_file_edit",
+			when:   "after_file_edit",
+			cursor: "afterFileEdit",
+		},
+		{
+			name:   "after_agent_response",
+			when:   "after_agent_response",
+			cursor: "afterAgentResponse",
+		},
+		{
+			name:   "after_agent_thought",
+			when:   "after_agent_thought",
+			cursor: "afterAgentThought",
+		},
+		{
+			name:   "workspace_open",
+			when:   "workspace_open",
+			cursor: "workspaceOpen",
+		},
+		{
+			name:   "before_tab_file_read",
+			when:   "before_tab_file_read",
+			cursor: "beforeTabFileRead",
+		},
+		{
+			name:   "after_tab_file_edit",
+			when:   "after_tab_file_edit",
+			cursor: "afterTabFileEdit",
+		},
+		// Negative case: an entirely unknown canonical value must fall
+		// through on every platform (D2 fall-through behavior).
+		{
+			name: "unsupported_value_falls_through",
+			when: "this_event_is_not_documented_by_any_vendor",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			spec := HookSpec{Name: "t", When: tc.when, Command: "/tmp/x.sh"}
+			claudeGot, claudeOK := claudeEventName(spec)
+			assertWhenMaps(t, "claude", claudeGot, claudeOK, tc.claude)
+			codexGot, codexOK := codexEventName(spec)
+			assertWhenMaps(t, "codex", codexGot, codexOK, tc.codex)
+			cursorGot, cursorOK := cursorEventName(spec)
+			assertWhenMaps(t, "cursor", cursorGot, cursorOK, tc.cursor)
+			copilotGot, copilotOK := copilotEventName(spec)
+			assertWhenMaps(t, "copilot", copilotGot, copilotOK, tc.copilot)
+		})
+	}
+}
+
+// TestCanonicalWhenEventMappingRenders is the render-path assertion: each
+// new mapped canonical event must produce a rendered entry under the
+// expected vendor key in the per-platform configuration shape, and each
+// unsupported value must be omitted entirely without raising an error
+// when the hook is not RequiredOn that platform (fall-through per D2).
+func TestCanonicalWhenEventMappingRenders(t *testing.T) {
+	t.Run("codex subagent_start renders under SubagentStart", func(t *testing.T) {
+		specs := []HookSpec{{
+			Name:    "bootstrap",
+			When:    "subagent_start",
+			Command: "/tmp/bootstrap.sh",
+		}}
+		content, err := renderCodexHookConfig(specs)
+		if err != nil {
+			t.Fatalf("renderCodexHookConfig: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+		}
+		assertHookJSONPathEquals(t, payload, "hooks.SubagentStart.0.hooks.0.command", "/tmp/bootstrap.sh")
+		// Per R6.5 the Codex matcher whitelist for SubagentStart is NOT
+		// extended in p1b — verify the rendered matcher is empty.
+		assertHookJSONPathEquals(t, payload, "hooks.SubagentStart.0.matcher", "")
+	})
+
+	t.Run("cursor before_shell_execution renders under beforeShellExecution", func(t *testing.T) {
+		specs := []HookSpec{{
+			Name:    "bash-guard",
+			When:    "before_shell_execution",
+			Command: "/tmp/guard.sh",
+		}}
+		content, err := renderCursorHookConfig(specs)
+		if err != nil {
+			t.Fatalf("renderCursorHookConfig: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+		}
+		assertHookJSONPathEquals(t, payload, "hooks.beforeShellExecution.0.command", "/tmp/guard.sh")
+	})
+
+	t.Run("copilot error_occurred renders under errorOccurred", func(t *testing.T) {
+		name, content, ok, err := renderCopilotHookFile(HookSpec{
+			Name:    "error-log",
+			When:    "error_occurred",
+			Command: "/tmp/log.sh",
+		})
+		if err != nil {
+			t.Fatalf("renderCopilotHookFile: %v", err)
+		}
+		if !ok {
+			t.Fatal("expected copilot render to include error_occurred")
+		}
+		if name != "error-log.json" {
+			t.Fatalf("file name = %q, want error-log.json", name)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+		}
+		assertHookJSONPathEquals(t, payload, "hooks.errorOccurred.0.bash", "/tmp/log.sh")
+	})
+
+	t.Run("claude post_compact renders under PostCompact", func(t *testing.T) {
+		specs := []HookSpec{{
+			Name:    "post-compact-log",
+			When:    "post_compact",
+			Command: "/tmp/post.sh",
+		}}
+		content, err := renderClaudeHookSettings(specs)
+		if err != nil {
+			t.Fatalf("renderClaudeHookSettings: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+		}
+		assertHookJSONPathEquals(t, payload, "hooks.PostCompact.0.hooks.0.command", "/tmp/post.sh")
+	})
+
+	t.Run("cursor wider-surface value is omitted from codex and copilot renders", func(t *testing.T) {
+		// after_file_edit is Cursor-only; renders for other platforms
+		// must omit the spec entirely (no fall-through forced because
+		// nothing in RequiredOn names them).
+		spec := HookSpec{
+			Name:    "edit-watch",
+			When:    "after_file_edit",
+			Command: "/tmp/watch.sh",
+		}
+		codex, err := renderCodexHookConfig([]HookSpec{spec})
+		if err != nil {
+			t.Fatalf("renderCodexHookConfig: %v", err)
+		}
+		var codexPayload codexRenderedHooks
+		if err := json.Unmarshal(codex, &codexPayload); err != nil {
+			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
+		}
+		if len(codexPayload.Hooks) != 0 {
+			t.Fatalf("expected codex render to be empty for cursor-only event, got %v", codexPayload.Hooks)
+		}
+		_, _, ok, err := renderCopilotHookFile(spec)
+		if err != nil {
+			t.Fatalf("renderCopilotHookFile: %v", err)
+		}
+		if ok {
+			t.Fatal("expected copilot render to omit cursor-only event after_file_edit")
+		}
+	})
+
+	t.Run("required-on platform errors when canonical value unsupported", func(t *testing.T) {
+		// Sanity: if an operator marks a Cursor-only event RequiredOn
+		// codex, the render must error per D2's explicit-opt-in posture.
+		spec := HookSpec{
+			Name:       "edit-watch",
+			When:       "after_file_edit",
+			Command:    "/tmp/watch.sh",
+			RequiredOn: []string{"codex"},
+		}
+		_, err := renderCodexHookConfig([]HookSpec{spec})
+		if err == nil {
+			t.Fatal("expected error when cursor-only event is required on codex")
+		}
+		if !strings.Contains(err.Error(), "not representable for codex") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// assertWhenMaps validates a single mapper result against the expected
+// vendor event name. Empty expected string means the mapper must return
+// ok=false (fall-through per D2).
+func assertWhenMaps(t *testing.T, platform string, gotName string, gotOK bool, expected string) {
+	t.Helper()
+	if expected == "" {
+		if gotOK {
+			t.Fatalf("%s mapper: expected fall-through (ok=false), got %q", platform, gotName)
+		}
+		return
+	}
+	if !gotOK {
+		t.Fatalf("%s mapper: expected %q, got fall-through (ok=false)", platform, expected)
+	}
+	if gotName != expected {
+		t.Fatalf("%s mapper: got %q, want %q", platform, gotName, expected)
+	}
+}
+
 func TestListHookSpecsGraphIntegrationBundles(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, hooksTestAgentsDir)

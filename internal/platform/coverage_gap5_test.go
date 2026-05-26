@@ -431,9 +431,11 @@ func TestRemoveManagedRenderedHookFileToUserHomes_RenderError(t *testing.T) {
 }
 
 // TestEmitRenderedHookFanout_RenderError drives the fanout render-error branch.
+// P1b: post_tool_use is now representable on copilot (R6.2); use
+// no_such_canonical_event which no platform mapper supports.
 func TestEmitRenderedHookFanout_RenderError(t *testing.T) {
 	tmp := t.TempDir()
-	spec := HookSpec{Name: "x", When: "post_tool_use", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
+	spec := HookSpec{Name: "x", When: "no_such_canonical_event", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
 	err := emitRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, filepath.Join(tmp, "out"), renderCopilotHookFile)
 	if err == nil {
 		t.Error("expected error")
@@ -441,7 +443,7 @@ func TestEmitRenderedHookFanout_RenderError(t *testing.T) {
 }
 
 func TestRemoveManagedRenderedHookFanout_RenderError(t *testing.T) {
-	spec := HookSpec{Name: "x", When: "post_tool_use", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
+	spec := HookSpec{Name: "x", When: "no_such_canonical_event", RequiredOn: []string{"copilot"}, Command: "/bin/true"}
 	err := removeManagedRenderedHookFanout(stdPlatformIO{}, []HookSpec{spec}, "/tmp/out", renderCopilotHookFile)
 	if err == nil {
 		t.Error("expected error")
@@ -452,7 +454,7 @@ func TestRemoveManagedRenderedHookFanout_RenderError(t *testing.T) {
 func TestRenderedCopilotHookNames_RenderError(t *testing.T) {
 	specs := []HookSpec{{
 		Name:       "x",
-		When:       "post_tool_use",
+		When:       "no_such_canonical_event",
 		Command:    "/bin/true",
 		RequiredOn: []string{"copilot"},
 	}}

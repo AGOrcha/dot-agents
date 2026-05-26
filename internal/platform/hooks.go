@@ -614,6 +614,11 @@ func claudeEventName(spec HookSpec) (string, bool) {
 		return "SubagentStop", true
 	case "pre_compact":
 		return "PreCompact", true
+	case "post_compact":
+		// P1b R6.4: post_compact is a new canonical When value introduced
+		// alongside pre_compact; Claude documents PostCompact as the
+		// matching terminal-of-compaction event.
+		return "PostCompact", true
 	case "permission_request":
 		return "PermissionRequest", true
 	default:
@@ -640,6 +645,20 @@ func codexEventName(spec HookSpec) (string, bool) {
 		// P1a gate-critical: Codex documents SubagentStop as a distinct
 		// terminal event for subagent runs.
 		return "SubagentStop", true
+	case "subagent_start":
+		// P1b R6.1: Codex documents SubagentStart for forward parity with
+		// the SubagentStop terminal event.
+		return "SubagentStart", true
+	case "pre_compact":
+		// P1b R6.1: Codex documents PreCompact for compaction lifecycle.
+		return "PreCompact", true
+	case "post_compact":
+		// P1b R6.1: Codex documents PostCompact paired with PreCompact.
+		return "PostCompact", true
+	case "permission_request":
+		// P1b R6.1: Codex documents PermissionRequest for permission
+		// elicitation events.
+		return "PermissionRequest", true
 	default:
 		return "", false
 	}
@@ -652,16 +671,61 @@ func cursorEventName(spec HookSpec) (string, bool) {
 	switch spec.When {
 	case "pre_tool_use":
 		return "preToolUse", true
+	case "post_tool_use":
+		// P1b R6.3: Cursor exposes postToolUse; treated as observation
+		// input per D9, not an implicit gate.
+		return "postToolUse", true
+	case "post_tool_use_failure":
+		// P1b R6.3: Cursor exposes postToolUseFailure; observation input
+		// per D9.
+		return "postToolUseFailure", true
 	case "user_prompt_submit":
 		return "beforeSubmitPrompt", true
 	case "stop":
 		return "stop", true
 	case "session_start":
 		return "sessionStart", true
+	case "session_end":
+		// P1b R6.3: Cursor exposes sessionEnd as a terminal session event.
+		return "sessionEnd", true
 	case "subagent_stop":
 		// P1a gate-critical: Cursor exposes subagentStop as a sibling
 		// terminal event to `stop`.
 		return "subagentStop", true
+	case "subagent_start":
+		// P1b R6.3: Cursor exposes subagentStart for delegated worker
+		// lifecycle bootstrap.
+		return "subagentStart", true
+	case "pre_compact":
+		// P1b R6.3: Cursor exposes preCompact for continuity advice
+		// before context compaction.
+		return "preCompact", true
+	// Cursor-wider surface (D3 + R6.3): fine-grained events promoted to
+	// canonical HookSpec.When values even though only Cursor implements
+	// them today. Other platform mappers no-op for these values until
+	// vendors document equivalents.
+	case "before_shell_execution":
+		return "beforeShellExecution", true
+	case "after_shell_execution":
+		return "afterShellExecution", true
+	case "before_mcp_execution":
+		return "beforeMCPExecution", true
+	case "after_mcp_execution":
+		return "afterMCPExecution", true
+	case "before_read_file":
+		return "beforeReadFile", true
+	case "after_file_edit":
+		return "afterFileEdit", true
+	case "after_agent_response":
+		return "afterAgentResponse", true
+	case "after_agent_thought":
+		return "afterAgentThought", true
+	case "workspace_open":
+		return "workspaceOpen", true
+	case "before_tab_file_read":
+		return "beforeTabFileRead", true
+	case "after_tab_file_edit":
+		return "afterTabFileEdit", true
 	default:
 		return "", false
 	}
@@ -674,10 +738,32 @@ func copilotEventName(spec HookSpec) (string, bool) {
 	switch spec.When {
 	case "session_start":
 		return "sessionStart", true
+	case "session_end":
+		// P1b R6.2: Copilot exposes sessionEnd as the terminal session
+		// event.
+		return "sessionEnd", true
 	case "user_prompt_submit":
 		return "userPromptSubmitted", true
 	case "pre_tool_use":
 		return "preToolUse", true
+	case "post_tool_use":
+		// P1b R6.2: Copilot exposes postToolUse; observation input per D9.
+		return "postToolUse", true
+	case "post_tool_use_failure":
+		// P1b R6.2: Copilot exposes postToolUseFailure; observation input
+		// per D9.
+		return "postToolUseFailure", true
+	case "notification":
+		// P1b R6.2: Copilot exposes notification events.
+		return "notification", true
+	case "permission_request":
+		// P1b R6.2: Copilot exposes permissionRequest for permission
+		// elicitation.
+		return "permissionRequest", true
+	case "pre_compact":
+		// P1b R6.2: Copilot exposes preCompact for continuity advice
+		// before context compaction.
+		return "preCompact", true
 	case "stop":
 		// P1a gate-critical: GitHub Copilot's terminal event for the
 		// top-level agent is `agentStop`, NOT `stop`. The Claude/Cursor
@@ -685,6 +771,15 @@ func copilotEventName(spec HookSpec) (string, bool) {
 		return "agentStop", true
 	case "subagent_stop":
 		return "subagentStop", true
+	case "subagent_start":
+		// P1b R6.2: Copilot exposes subagentStart for delegated worker
+		// lifecycle bootstrap.
+		return "subagentStart", true
+	case "error_occurred":
+		// P1b R6.2 + R6.4: Copilot exposes errorOccurred as a runtime
+		// error notification event; error_occurred is a new canonical
+		// When value introduced in this task.
+		return "errorOccurred", true
 	default:
 		return "", false
 	}
