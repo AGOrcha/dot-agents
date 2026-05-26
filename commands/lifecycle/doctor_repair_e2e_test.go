@@ -1,10 +1,13 @@
-package commands
+package lifecycle
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -72,16 +75,12 @@ func seedManagedClaudeLink(t *testing.T) (tmp, agentsHome, projectPath, linkPath
 	return
 }
 
-// TestDoctorRepairE2E_ReportsAndRestoresBrokenLink walks the full add → break
-// → doctor → refresh → doctor cycle without depending on any installed
-// platform CLIs. It exercises doctor.go's link inspection + refresh.go's
-// resource restoration on a synthetic project.
 // assertDoctorStdoutContainsBroken runs doctor and asserts the captured
 // output contains (or does not contain) the literal "broken" token.
 func assertDoctorStdoutContainsBroken(t *testing.T, label string, wantBroken bool) {
 	t.Helper()
 	out := captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
+		if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("%s runDoctor: %v", label, err)
 		}
 	})
@@ -114,7 +113,10 @@ func runDoctorDryRunReportsBroken(t *testing.T) {
 }
 
 // seedResourcesAndRestore seeds agentsHome/resources/proj/AGENTS.md and runs
-// restoreFromResources, asserting the broken target + link are recovered.
+// RestoreFromResourcesCountedWithDeps, asserting the broken target + link
+// are recovered. After t09 doctor is intra-lifecycle so it calls the
+// exported lifecycle helper directly (rather than the root-package
+// restoreFromResources wrapper the pre-move test used).
 func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, target string) {
 	t.Helper()
 	resources := filepath.Join(agentsHome, "resources", "proj")
@@ -124,15 +126,89 @@ func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, ta
 	if err := os.WriteFile(filepath.Join(resources, "AGENTS.md"), []byte("# rules\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	restoreFromResources("proj", projectPath, stdAddDeps{})
+	if _, err := RestoreFromResourcesCountedWithDeps("proj", projectPath, StdAddDeps{}); err != nil {
+		t.Fatalf("RestoreFromResourcesCountedWithDeps: %v", err)
+	}
 	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("expected restoreFromResources to recreate %s: %v", target, err)
+		t.Fatalf("expected restore to recreate %s: %v", target, err)
 	}
 	if _, err := os.Stat(linkPath); err != nil {
 		t.Fatalf("expected link to resolve after restore: %v", err)
 	}
 }
 
+// doctorE2ESnapshotEntry captures one path under a root with a hash of its
+// contents (or empty hash for directories / symlinks). Inlined from
+// commands/refresh_idempotency_test.go's snapshotEntry — that helper lives
+// in package commands and is not visible from package lifecycle. After t11
+// splits seams_test into per-cluster files this is the place to land a
+// shared lifecycle testutil; until then a small local copy is the simplest
+// path.
+type doctorE2ESnapshotEntry struct {
+	rel  string
+	kind string // "dir", "file", "symlink"
+	hash string
+}
+
+// doctorE2ESnapshotTree walks root and records every entry with a
+// deterministic signature.
+func doctorE2ESnapshotTree(t *testing.T, root string) []doctorE2ESnapshotEntry {
+	t.Helper()
+	var out []doctorE2ESnapshotEntry
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		entry := doctorE2ESnapshotEntry{rel: rel}
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			entry.kind = "symlink"
+			if dest, err := os.Readlink(path); err == nil {
+				h := sha256.Sum256([]byte(dest))
+				entry.hash = hex.EncodeToString(h[:])
+			}
+		case info.IsDir():
+			entry.kind = "dir"
+		default:
+			entry.kind = "file"
+			data, err := os.ReadFile(path)
+			if err == nil {
+				h := sha256.Sum256(data)
+				entry.hash = hex.EncodeToString(h[:])
+			}
+		}
+		out = append(out, entry)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
+	return out
+}
+
+func doctorE2ESnapshotsEqual(a, b []doctorE2ESnapshotEntry) (string, bool) {
+	if len(a) != len(b) {
+		return "snapshot length differs", false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return "entry differs: " + a[i].rel, false
+		}
+	}
+	return "", true
+}
+
+// TestDoctorRepairE2E_ReportsAndRestoresBrokenLink walks the full
+// add → break → doctor → restore → doctor cycle without depending on any
+// installed platform CLIs.
 func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX symlink semantics: this E2E breaks a managed link by deleting its target and asserts it dangles. A Windows managed *file* link is a hard link with no reparse point — removing the canonical source only decrements nlink, the content persists, so it cannot dangle and managedLinkBroken correctly reports it non-broken by design (see doctor.go managedLinkBroken doc). Windows healthy hard-link counting is covered by TestCountProjectLinks_AllHealthyVariants and internal/linktest/linktest_test.go.")
@@ -152,8 +228,8 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 	// Phase 3: doctor in dry-run should report the breakage without erroring.
 	runDoctorDryRunReportsBroken(t)
 
-	// Phase 4: seed resources/ so refresh's restoreFromResources can recreate
-	// the deleted target, then re-run.
+	// Phase 4: seed resources/ so refresh's restore can recreate the deleted
+	// target, then re-run.
 	seedResourcesAndRestore(t, agentsHome, projectPath, linkPath, target)
 
 	// Phase 5: doctor reports clean again.
@@ -162,9 +238,6 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 
 // TestDoctorRepairE2E_DryRunDoesNotMutateRepo verifies doctor --dry-run never
 // re-runs CreateLinks against the project repo when broken links are present.
-// Snapshotting only the project repo (not ~/.agents/, which doctor may rewrite
-// for unrelated bookkeeping such as windows-mirror flags) keeps the assertion
-// focused on the dry-run repair contract.
 func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
 	_, _, projectPath, _, _ := seedManagedClaudeLink(t)
 
@@ -173,20 +246,20 @@ func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
 	agentsMD := filepath.Join(projectPath, "AGENTS.md")
 	linktest.DanglingLink(t, agentsMD)
 
-	before := snapshotTree(t, projectPath)
+	before := doctorE2ESnapshotTree(t, projectPath)
 
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
 
 	_ = captureDoctorOutput(t, func() {
-		if err := runDoctor(NewDoctorCmd(), nil, stdDoctorConfigLoader{}); err != nil {
+		if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
 			t.Fatalf("dry-run doctor: %v", err)
 		}
 	})
 
-	after := snapshotTree(t, projectPath)
-	if msg, ok := snapshotsEqual(before, after); !ok {
+	after := doctorE2ESnapshotTree(t, projectPath)
+	if msg, ok := doctorE2ESnapshotsEqual(before, after); !ok {
 		t.Fatalf("dry-run doctor mutated the project repo: %s", msg)
 	}
 }
