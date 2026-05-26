@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t01-design-subpackage-shape
+parent_plan_id: root-command-decomposition
+verifier_type: design-doc
+status: pass
+summary: 'SHAPE.md committed at 70fc430; PR #56 opened. Markdown well-formed, every t01 symbol covered, 7 ODs surfaced, external-caller cross-check empty beyond NewRootCommand + RenderCommandError.'
+recorded_at: "2026-05-24T19:09:45Z"
+delegation_id: del-t01-design-subpackage-shape-1779649327
+recorded_by: da workflow verify record
+commands:
+    - grep -rn external commands.* callers

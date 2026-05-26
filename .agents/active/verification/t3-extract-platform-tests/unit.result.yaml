@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t3-extract-platform-tests
+parent_plan_id: go-test-fixture-extraction
+verifier_type: unit
+status: pass
+summary: 'PASS 2.615s. 3 commits b2042c09/d7e6db61/2bc2acaf on feature/t3-platform-tests-testutil; PR #62. resource_plan_test.go -43 LOC; rules_test+mcp_settings_test migrated to testutil.WriteScopeFile. helpers_test.go::writeScopeFile now orphan (out of write_scope, deferred to t8). Also go build ./..., go vet, gofmt -l all clean.'
+recorded_at: "2026-05-24T23:08:37Z"
+delegation_id: del-t3-extract-platform-tests-1779663650
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/platform -race -count=1 -timeout 180s

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t03-move-install
+parent_plan_id: root-command-decomposition
+verifier_type: unit
+status: pass
+summary: 't03 install move: build/vet/gofmt/test all green (one pre-existing env-dependent graphstore test fails on fresh worktrees, unrelated)'
+recorded_at: "2026-05-25T14:17:45Z"
+delegation_id: del-t03-move-install-1779717270
+recorded_by: da workflow verify record
+commands:
+    - go test ./... -race -count=1 -timeout 300s

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t6b-extend-storetest
+parent_plan_id: go-test-fixture-extraction
+verifier_type: unit
+status: pass
+summary: 'Extended storetest with 5 prefix-parameterized runners (RunMetadataRoundTrip, RunEdgeUpsertCreate, RunEdgeUpsertUpdate, RunNoteSymbolLinkRoundTrip, RunNoteSymbolLinkIdempotent); 7 in-package smoke tests pass including TestPrefixIsolation_SameStore; broader graphstore green skipping unrelated TestCRGBridge; commit 62b9bf70; PR #90'
+recorded_at: "2026-05-26T12:30:34Z"
+delegation_id: del-t6b-extend-storetest-1779798327
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/graphstore/internal/storetest -count=1

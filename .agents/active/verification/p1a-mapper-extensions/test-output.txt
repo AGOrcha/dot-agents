@@ -1,0 +1,22 @@
+=== RUN   TestEventNameDefaults
+--- PASS: TestEventNameDefaults (0.00s)
+=== RUN   TestP1aGateCriticalStopMappings
+=== RUN   TestP1aGateCriticalStopMappings/codex_subagent_stop_renders_SubagentStop
+=== RUN   TestP1aGateCriticalStopMappings/copilot_stop_renders_agentStop_(not_stop)
+=== RUN   TestP1aGateCriticalStopMappings/copilot_subagent_stop_renders_subagentStop
+=== RUN   TestP1aGateCriticalStopMappings/cursor_subagent_stop_renders_subagentStop
+=== RUN   TestP1aGateCriticalStopMappings/claude_stop_still_renders_Stop
+=== RUN   TestP1aGateCriticalStopMappings/claude_subagent_stop_still_renders_SubagentStop
+--- PASS: TestP1aGateCriticalStopMappings (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/codex_subagent_stop_renders_SubagentStop (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/copilot_stop_renders_agentStop_(not_stop) (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/copilot_subagent_stop_renders_subagentStop (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/cursor_subagent_stop_renders_subagentStop (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/claude_stop_still_renders_Stop (0.00s)
+    --- PASS: TestP1aGateCriticalStopMappings/claude_subagent_stop_still_renders_SubagentStop (0.00s)
+=== RUN   TestCopilotStopIsAgentStopNotStop
+--- PASS: TestCopilotStopIsAgentStopNotStop (0.00s)
+PASS
+ok  	github.com/NikashPrakash/dot-agents/internal/platform	1.267s
+---
+ok  	github.com/NikashPrakash/dot-agents/internal/platform	2.494s

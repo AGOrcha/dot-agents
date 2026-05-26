@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t3-extract-platform-tests
+parent_plan_id: go-test-fixture-extraction
+verifier_type: merge-back
+status: pass
+summary: 'Three findings for orchestrator triage: (1) [LOW] helpers_test.go::writeScopeFile is now orphan after this PR (last 2 callers migrated). File is outside this task''s write_scope; add to t8 sweep so the 18-line file can be deleted. (2) [MEDIUM] testutil-extension wanted: 5 sites in resource_plan_test.go share a 5-line tmp/repo/agentsHome/MkdirAll(skills/proj)/Setenv preamble that no existing helper covers (NewTempAgentsHome skips the repo path + empty-bucket-dir mkdir). Recommend a NewTempProjectRoots(t, bucketScopes...) extension; same t5.5 candidate the t5 merge-back flagged. (3) [LOW] resource_plan_test.go retains a few inline fixture blocks that mix repo+canonical writes with intent-specific fields — defer to a future fluent-builder helper if duplication remains visible after t8.'
+recorded_at: "2026-05-24T23:09:04Z"
+delegation_id: del-t3-extract-platform-tests-1779663650
+artifact_paths:
+    - .agents/active/delegation/agents-pkg.yaml
+    - .agents/active/delegation/t02-introduce-lifecycle-skeleton.yaml

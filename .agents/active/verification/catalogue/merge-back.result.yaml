@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: catalogue
+parent_plan_id: cross-platform-test-skips-audit
+verifier_type: merge-back
+status: pass
+summary: 'Parent: (a) review findings.md classification accuracy, (b) decide whether to add fsops-windows-tests task to TASKS.yaml before fanning out perms-dir, (c) update perms-readonly task notes to reflect zero current migration sites (helper still useful, but task is documentation-only against this audit), (d) consider opening a separate triage task for the io/seam build-tag gap before #61/#65/#67 merge so the gap doesn''t widen. Worktree: .agents/worktrees/catalogue. Branch: feature/cross-platform-catalogue.'
+recorded_at: "2026-05-25T00:52:57Z"
+delegation_id: del-catalogue-1779669681

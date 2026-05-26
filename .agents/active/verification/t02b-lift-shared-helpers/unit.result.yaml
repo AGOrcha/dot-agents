@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t02b-lift-shared-helpers
+parent_plan_id: root-command-decomposition
+verifier_type: unit
+status: pass
+summary: 9 commands subpackages green with -race; 15 helpers lifted across 4 clusters (KG-MCP, resource_map, backup, project-import); seam wiring for HasMultipleHardLinks + RestoreCanonicalResourceFileFn + CanonicalImportOutputs keeps lifecycle independent. internal/graphstore failure is pre-existing (missing Python module code_review_graph), unrelated to t02b.
+recorded_at: "2026-05-25T15:51:54Z"
+delegation_id: del-t02b-lift-shared-helpers-1779722074
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/... -race -count=1 -timeout 300s

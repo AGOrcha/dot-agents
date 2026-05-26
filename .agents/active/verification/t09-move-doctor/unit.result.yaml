@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t09-move-doctor
+parent_plan_id: root-command-decomposition
+verifier_type: unit
+status: pass
+summary: 't09 doctor move: lifecycle 60.2s + commands 26.4s green; coverage-gate PER-FILE enforce PASS (lifecycle/doctor.go 96.8%, commands 95.3%); PR #86'
+recorded_at: "2026-05-26T12:03:18Z"
+delegation_id: del-t09-move-doctor-1779795320
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/lifecycle ./commands -race -count=1 -timeout 300s

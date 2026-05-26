@@ -67,7 +67,7 @@ tasks:
       notes: Expose outcome source and rule identifiers without printing transcript contents.
     - id: t-schema-validator-wiring
       title: Wire hook-outcome schema into the workflow validator pipeline
-      status: in_progress
+      status: completed
       depends_on:
         - t0-outcome-contract
       blocks:

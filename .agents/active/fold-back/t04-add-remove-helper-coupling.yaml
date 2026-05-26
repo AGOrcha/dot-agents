@@ -1,0 +1,96 @@
+schema_version: 1
+id: t04-add-remove-helper-coupling
+plan_id: root-command-decomposition
+task_id: t04-move-add-remove
+observation: |-
+  t04 add+remove move blocks on cross-file helper coupling that the
+  SHAPE.md "plain code move, preserve seams unchanged" rule (§5) and
+  the TASKS.yaml depends_on graph do not account for. Same class of
+  blocker as the t06 fold-back (t06-import-helper-coupling.yaml).
+
+  ADD.GO INBOUND (symbols add.go owns that other commands/* files
+  consume; moving add.go to commands/lifecycle/ leaves these other
+  files unable to resolve their refs):
+    - stdAddDeps             -> refresh.go, review.go, sync.go (+ tests)
+    - addDeps interface      -> refresh.go (+ refresh_test.go)
+    - isBackupArtifact       -> import.go, import_plugins.go
+    - isManagedProjectOutput -> import.go
+    - restoreFromResourcesCountedWithDeps -> refresh.go (+ refresh_test.go)
+    - mirrorBackup           -> import.go (+ import_test.go)
+    - ensureGlobalKGMCPConfigs -> init.go
+    - runAdd, backupExistingConfigsList, restoreLegacyResourceFile,
+      writeKGMCPConfigs, writeKGMCPConfigFile, restoreFromResourcesCounted
+      -> commands/seams_test.go (split deferred to t11) and
+         commands/refresh_test.go / commands/import_test.go
+
+  ADD.GO OUTBOUND (symbols add.go consumes from other commands/*
+  files; lifecycle/add.go cannot reach them without importing
+  commands/, which creates a cycle because commands/add.go shim
+  imports commands/lifecycle):
+    - relCursorRulesDir, agentsHooksPrefix (const)  -> import.go
+    - isManagedSymlink                              -> import.go
+    - mapResourceRelToDest                          -> refresh.go
+    - importCandidate, importOutput (types) +
+      canonicalImportOutputs (function chain, ~200 LOC of
+      transitively-required helpers)                -> import.go
+    - hasMultipleHardLinks                          -> linkcount_{unix,windows}.go
+    - Flags, ErrorWithHints, ExampleBlock,
+      ExactArgsWithHints                            -> ux.go, flags.go
+      (these are the only ones already covered by lifecycle.Deps
+      via the agents/skills shim pattern)
+
+  REMOVE.GO INBOUND:
+    - runRemove   -> commands/coverage_test.go,
+                     commands/resource_parity_test.go,
+                     commands/seams_test.go
+    - dirCleaner  -> commands/init.go
+  REMOVE.GO OUTBOUND:
+    - Flags, ErrorWithHints, ExampleBlock, ExactArgsWithHints
+      (covered by lifecycle.Deps already)
+
+  remove.go is almost self-contained except for dirCleaner being
+  consumed by init.go (t05) and runRemove being consumed by three
+  cross-cutting test files (t11/t12 split). add.go is deeply
+  entangled with import.go (t06), refresh.go (t07), init.go (t05),
+  linkcount (t08), sync.go, review.go, plus the seams_test.go /
+  refresh_test.go / import_test.go suites that t11+t12 split.
+
+  THREE VIABLE RESOLUTIONS (mirroring the t06 fold-back menu):
+  (a) Extend lifecycle.Deps with function fields for every helper
+      add.go consumes from import.go / refresh.go / linkcount. This
+      doubles the t02-deliverable surface and still leaves the
+      INBOUND breakage (refresh.go etc. losing addDeps/stdAddDeps)
+      unresolved without a parallel re-export shim in commands/.
+  (b) Duplicate the helper bodies into commands/lifecycle/ as
+      private copies until t05+t06+t07+t08 land. Heavy: ~250 LOC of
+      duplication (canonicalImportOutputs + transitively-reachable
+      helpers), and the lifecycle copies must be torn out as each
+      host file moves -- coordination cost across four tasks.
+  (c) Re-order: gate t04 on completion of t05+t06+t07+t08, OR
+      introduce a t02b precursor that lifts the shared helpers
+      (mapResourceRelToDest, isManagedSymlink, importCandidate +
+      canonicalImportOutputs, hasMultipleHardLinks, agentsHooksPrefix,
+      relCursorRulesDir, isBackupArtifact, isManagedProjectOutput,
+      mirrorBackup, ensureGlobalKGMCPConfigs, restoreFromResourcesCounted
+      family, addDeps interface + stdAddDeps) into a new shared
+      home (e.g. commands/internal/lifecycleshared/ or
+      commands/lifecycle/ pre-population) BEFORE any per-command
+      move starts. (c) is consistent with how t10pre precursored
+      cmdutil for the resource subpackages.
+
+  PAIRED-MOVE OBSERVATION: TASKS.yaml t04 pairs add+remove because
+  remove_test.go references add helpers via
+  agentsrc_mutations_test.go. The agentsrc_mutations_test.go file
+  stays in root (per t04 notes, relocated in t12). So remove.go on
+  its own has the same OUTBOUND coupling problem only through
+  init.go's import of dirCleaner -- much smaller surface than
+  add.go, but still cross-task.
+
+  Worker stopped before any commands/ or commands/lifecycle/ edits
+  to avoid scope expansion. No commits on feature/t04-move-add-remove
+  beyond the master HEAD that the worktree was branched from. The
+  worktree at .agents/worktrees/t04 can be removed by the parent or
+  left in place pending the t02b / re-order decision.
+classification: medium
+routed_to: task_note:root-command-decomposition/t04-move-add-remove
+created_at: "2026-05-25T14:02:12Z"

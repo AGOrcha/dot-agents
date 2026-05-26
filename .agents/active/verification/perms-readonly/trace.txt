@@ -1,0 +1,6 @@
+=== go build ./... ===
+=== go test ./internal/testutil -race -count=1 ===
+ok  	github.com/NikashPrakash/dot-agents/internal/testutil	1.248s
+=== go vet ./... ===
+=== gofmt -l . ===
+=== DONE ===

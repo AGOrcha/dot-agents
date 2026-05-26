@@ -1,0 +1,130 @@
+schema_version: 1
+id: del-t02b-lift-shared-helpers-1779722074
+parent_plan_id: root-command-decomposition
+parent_task_id: t02b-lift-shared-helpers
+title: 'Precursor: lift shared lifecycle helpers into commands/lifecycle/ as exported funcs'
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/backup.go
+    - commands/lifecycle/backup_test.go
+    - commands/lifecycle/kgmcp.go
+    - commands/lifecycle/kgmcp_test.go
+    - commands/lifecycle/resource_map.go
+    - commands/lifecycle/resource_map_test.go
+    - commands/lifecycle/project.go
+    - commands/lifecycle/project_test.go
+    - commands/add.go
+    - commands/install.go
+    - commands/import.go
+    - commands/refresh.go
+    - commands/doctor.go
+    - commands/status.go
+success_criteria: |-
+    Lifted from Wave 4 fold-back reports (t04 + t06) and from
+    observed Wave 4 strategy fragmentation (5 different per-task
+    shim/closure/forward strategies emerged because no precursor
+    existed). Mirrors t10pre's success — that precursor unblocked
+    t10a/b/c as truly clean per-subpackage moves; without it the
+    resource subpkg moves would have hit the same cross-file
+    coupling the lifecycle moves did.
+
+    ## Helpers to lift (15 total, sourced from t04+t06 fold-back enumeration)
+
+    Backup cluster (currently in commands/add.go):
+      - MirrorBackup (was mirrorBackup)
+      - IsBackupArtifact (was isBackupArtifact)
+      - IsManagedProjectOutput (was isManagedProjectOutput)
+      - RestoreFromResourcesCountedWithDeps (was the unexported sibling)
+      - RestoreLegacyResourceFile (was restoreLegacyResourceFile)
+      - BackupExistingConfigsList (was backupExistingConfigsList)
+      → commands/lifecycle/backup.go + backup_test.go
+
+    KG-MCP cluster (currently in commands/install.go — verify location at audit time):
+      - WriteKGMCPConfigs (was writeKGMCPConfigs)
+      - WriteKGMCPConfigFile (was writeKGMCPConfigFile)
+      - EnsureGlobalKGMCPConfigs (was ensureGlobalKGMCPConfigs)
+      → commands/lifecycle/kgmcp.go + kgmcp_test.go
+
+    Resource-map cluster (currently in commands/refresh.go):
+      - MapResourceRelToDest (was mapResourceRelToDest)
+      - RelCursorRulesDir (was relCursorRulesDir; find current home)
+      - AgentsHooksPrefix (was agentsHooksPrefix; find current home)
+      - IsManagedSymlink (was isManagedSymlink; find current home)
+      → commands/lifecycle/resource_map.go + resource_map_test.go
+
+    Project-import cluster (currently in commands/import.go):
+      - ImportCandidate (was importCandidate)
+      - CanonicalImportOutputs (was canonicalImportOutputs)
+      → commands/lifecycle/project.go + project_test.go
+
+    ## Pattern (per helper)
+
+    1. Identify all current callers via grep.
+    2. Cut function from current home (commands/<owner>.go).
+    3. Paste into the new commands/lifecycle/<cluster>.go with
+       exported name (PascalCase).
+    4. Update every caller: in-package callers in commands/ use
+       `lifecycle.NewName(...)`; future lifecycle-internal callers
+       call `NewName(...)` directly when their containing file
+       moves into lifecycle/.
+    5. Move/replicate the helper's existing unit tests to
+       commands/lifecycle/<cluster>_test.go (PascalCase exports
+       change test call sites too).
+
+    ## Anti-scope
+
+    - Do NOT move the *commands* themselves (add.go, install.go,
+      etc.) in this task — only the listed helpers. The full
+      command moves happen in t03–t09.
+    - Do NOT change behavior. Every existing test that exercises
+      the helpers must continue to pass without modification of
+      its assertions (only the call-site spelling changes from
+      `mirrorBackup(...)` to `lifecycle.MirrorBackup(...)` etc.).
+    - Do NOT touch internal/{links,projectsync,platform,scaffold}
+      — those imports come along when the *commands* move in t03–t09.
+
+    ## Why lifecycle/ root vs commands/internal/lifecycleutil/
+
+    Helpers exported from `lifecycle` package work cleanly because:
+    - Root commands/<cmd>.go shims can call lifecycle.MirrorBackup
+      (cross-package, exported).
+    - Future commands/lifecycle/<moved cmd>.go can call MirrorBackup
+      directly (intra-package, unqualified).
+    - t13 strips root shims; the only remaining callers are inside
+      lifecycle/, at which point exports can be downgraded to
+      package-private if desired.
+    - commands/lifecycle/internal/X/ would NOT work for root
+      commands/ callers (Go's internal rule blocks parent imports).
+
+    ## ISP routing
+
+      mode: direct (single sizable worker; could split by cluster
+             if the worker fold-backs on scope)
+      verifier: smoke (go test ./commands/... -race -count=1)
+      review: code review (cluster-by-cluster diff)
+      bundle-context (if fanout): t04 + t06 fold-back artifacts
+                                   under .agents/active/fold-back/
+      output contract: 15 helpers exported from commands/lifecycle/,
+                       all existing tests green, no behavior change.
+
+    ## Why this unblocks t04/t06/t07/t08/t09
+
+    - t04 (add+remove): all add.go helpers consumed by sibling cmds
+      will be in lifecycle/ already; add.go's *outbound* refs to
+      resource_map + project helpers are now via lifecycle.X.
+    - t06 (import): consumes mirrorBackup + isBackupArtifact +
+      isManagedProjectOutput + mapResourceRelToDest, all of which
+      are intra-package after t02b.
+    - t07 (refresh): closure-bridge from current PR #76 can be
+      collapsed to a direct move (mapResourceRelToDest is already
+      in lifecycle).
+    - t08 (status): the HasMultipleHardLinks export-then-unexport
+      plan still applies, but the kg-mcp helpers it threads through
+      are pre-lifted.
+    - t09 (doctor): pure file move once status helpers are stable.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t02b-worker
+status: active
+created_at: "2026-05-25T15:14:34Z"
+updated_at: "2026-05-25T15:14:34Z"
