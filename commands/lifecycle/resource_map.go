@@ -48,6 +48,16 @@ const (
 	RelAgentMarkdownSuffix   = ".agent.md"
 	RelJSONSuffix            = ".json"
 	AgentsHooksPrefix        = "hooks/"
+
+	// Canonical ~/.agents/ bucket prefixes used as outputs by
+	// MapResourceRelToDest. Extracted from inline string literals to
+	// satisfy Sonar S1192 (duplicated-literal lint) and make a future
+	// rename of a bucket a one-line edit.
+	canonSettingsPrefix = "settings/"
+	canonRulesPrefix    = "rules/"
+	canonSkillsPrefix   = "skills/"
+	canonAgentsPrefix   = "agents/"
+	canonMCPRelFile     = "mcp.json"
 )
 
 // MapResourceRelToDest maps a project-relative input path (e.g.
@@ -55,135 +65,182 @@ const (
 // destination (e.g. "rules/global/foo.mdc"). Returns "" when no mapping
 // applies. Lifted from commands/refresh.go in
 // root-command-decomposition t02b; behavior unchanged from the original.
+//
+// Implementation note: the logic is split into focused helpers
+// (mapExactRel, mapBucketDirRel, mapCursorRulesRel, mapSkillsRel,
+// mapAgentsRel, mapHooksRel, mapPassThroughRel) so each branch has a
+// single concern and the top-level function stays inside Sonar's
+// cognitive-complexity limit (S3776).
 func MapResourceRelToDest(project, relPath string) string {
-	// Explicit repo-relative → ~/.agents-relative mappings.
-	// All platform MCP sources normalize into the same canonical mcp.json.
-	switch relPath {
-	case RelCursorSettingsJSON:
-		return "settings/" + project + "/cursor.json"
-	case RelCursorMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case RelCursorHooksJSON:
-		return AgentsHooksPrefix + project + "/cursor.json"
-	case RelCursorIgnore:
-		return "settings/" + project + "/cursorignore"
-	case RelCursorIndexingIgnore:
-		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore")
-	case RelClaudeSettingsLocal:
-		return "settings/" + project + "/claude-code.json"
-	case RelMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case RelVSCodeMCPJSON:
-		return "mcp/" + project + "/mcp.json"
-	case RelOpenCodeJSON:
-		return "settings/" + project + "/opencode.json"
-	case RelAgentsMD:
-		return "rules/" + project + "/agents.md"
-	case RelCodexInstructionsMD, RelCodexRulesMD:
-		return "rules/" + project + "/agents.md"
-	case RelCodexConfigTOML:
-		return "settings/" + project + "/codex.toml"
-	case RelCodexHooksJSON:
-		return AgentsHooksPrefix + project + "/codex.json"
-	case RelCopilotInstructionsMD:
-		return "rules/" + project + "/copilot-instructions.md"
+	if dest, ok := mapExactRel(project, relPath); ok {
+		return dest
 	}
-
-	// Directory-bucket mappings. The relPath is a full walked file path like
-	// ".cursor/commands/foo.md"; the constants are directory prefixes ending
-	// in "/". These MUST be prefix matches (not exact-string switch cases) or
-	// the bucket files silently fall through and are dropped from recovery.
-	for _, m := range []struct {
-		prefix string
-		bucket platform.CanonicalBucket
-	}{
-		{RelCursorCommandsDir, platform.CanonicalBucketCommands},
-		{RelClaudeCommandsDir, platform.CanonicalBucketCommands},
-		{RelOpenCodeCommandsDir, platform.CanonicalBucketCommands},
-		{RelClaudeOutputStylesDir, platform.CanonicalBucketOutputStyles},
-		{RelOpenCodeModesDir, platform.CanonicalBucketModes},
-		{RelOpenCodeThemesDir, platform.CanonicalBucketThemes},
-		{RelGitHubPromptsDir, platform.CanonicalBucketPrompts},
-	} {
-		if strings.HasPrefix(relPath, m.prefix) {
-			return platform.CanonicalBucketScopePath(m.bucket, project, strings.TrimPrefix(relPath, m.prefix))
-		}
+	if dest, ok := mapBucketDirRel(project, relPath); ok {
+		return dest
 	}
-
-	// .cursor/rules/ → rules/
 	if strings.HasPrefix(relPath, RelCursorRulesDir) {
-		name := filepath.Base(relPath)
-		if strings.HasPrefix(name, "global--") {
-			return "rules/global/" + strings.TrimPrefix(name, "global--")
-		} else if strings.HasPrefix(name, project+"--") {
-			return "rules/" + project + "/" + strings.TrimPrefix(name, project+"--")
-		} else if strings.HasSuffix(name, ".mdc") || strings.HasSuffix(name, ".md") {
-			return "rules/" + project + "/" + name
-		}
-		return ""
+		return mapCursorRulesRel(project, relPath)
 	}
-
-	// .agents/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, RelAgentsSkillsDir) {
-		rest := strings.TrimPrefix(relPath, RelAgentsSkillsDir)
-		return "skills/" + project + "/" + rest
+	if dest, ok := mapSkillsRel(project, relPath); ok {
+		return dest
 	}
-	// .claude/skills/<name>/<path> → skills/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, RelClaudeSkillsDir) {
-		rest := strings.TrimPrefix(relPath, RelClaudeSkillsDir)
-		return "skills/" + project + "/" + rest
+	if dest, ok := mapAgentsRel(project, relPath); ok {
+		return dest
 	}
-
-	// .github/agents/<name>.agent.md → agents/<project>/<name>/AGENT.md
-	if strings.HasPrefix(relPath, RelGitHubAgentsDir) && strings.HasSuffix(relPath, RelAgentMarkdownSuffix) {
-		name := strings.TrimSuffix(filepath.Base(relPath), RelAgentMarkdownSuffix)
-		return "agents/" + project + "/" + name + "/AGENT.md"
+	if dest, ok := mapHooksRel(project, relPath); ok {
+		return dest
 	}
-
-	// .codex/agents/<name>/<path> → agents/<project>/<name>/<path>
-	if strings.HasPrefix(relPath, RelCodexAgentsDir) {
-		rest := strings.TrimPrefix(relPath, RelCodexAgentsDir)
-		return "agents/" + project + "/" + rest
+	if mapPassThroughRel(relPath) {
+		return relPath
 	}
-
-	// .opencode/agent/<name>.md → agents/<project>/<name>/AGENT.md
-	if strings.HasPrefix(relPath, RelOpenCodeAgentsDir) && strings.HasSuffix(relPath, ".md") {
-		name := strings.TrimSuffix(filepath.Base(relPath), ".md")
-		return "agents/" + project + "/" + name + "/AGENT.md"
-	}
-
-	// .github/hooks/<name>.json → hooks/<project>/<name>.json
-	if strings.HasPrefix(relPath, RelGitHubHooksDir) && strings.HasSuffix(relPath, RelJSONSuffix) {
-		name := strings.TrimSuffix(filepath.Base(relPath), RelJSONSuffix)
-		return AgentsHooksPrefix + project + "/" + name + "/HOOK.yaml"
-	}
-
-	// Pass-through: paths already under known ~/.agents dirs
-	for _, prefix := range []string{
-		"rules/",
-		"settings/",
-		"mcp/",
-		"skills/",
-		"agents/",
-		AgentsHooksPrefix,
-		string(platform.CanonicalBucketCommands) + "/",
-		string(platform.CanonicalBucketOutputStyles) + "/",
-		string(platform.CanonicalBucketIgnore) + "/",
-		string(platform.CanonicalBucketModes) + "/",
-		string(platform.CanonicalBucketPlugins) + "/",
-		string(platform.CanonicalBucketThemes) + "/",
-		string(platform.CanonicalBucketPrompts) + "/",
-	} {
-		if strings.HasPrefix(relPath, prefix) {
-			return relPath
-		}
-	}
-
 	// Root-level flat files → settings/<project>/
 	if !strings.Contains(relPath, "/") {
-		return "settings/" + project + "/" + relPath
+		return canonSettingsPrefix + project + "/" + relPath
 	}
 	return ""
+}
+
+// mapExactRel handles repo-relative ↔ canonical-dest mappings that are
+// resolved purely by an exact filename match. Returns (dest, true) on
+// hit; ("", false) otherwise. All platform MCP sources normalize into
+// the same canonical mcp.json.
+func mapExactRel(project, relPath string) (string, bool) {
+	switch relPath {
+	case RelCursorSettingsJSON:
+		return canonSettingsPrefix + project + "/cursor.json", true
+	case RelCursorMCPJSON, RelMCPJSON, RelVSCodeMCPJSON:
+		return "mcp/" + project + "/" + canonMCPRelFile, true
+	case RelCursorHooksJSON:
+		return AgentsHooksPrefix + project + "/cursor.json", true
+	case RelCursorIgnore:
+		return canonSettingsPrefix + project + "/cursorignore", true
+	case RelCursorIndexingIgnore:
+		return platform.CanonicalBucketScopePath(platform.CanonicalBucketIgnore, project, "cursorindexingignore"), true
+	case RelClaudeSettingsLocal:
+		return canonSettingsPrefix + project + "/claude-code.json", true
+	case RelOpenCodeJSON:
+		return canonSettingsPrefix + project + "/opencode.json", true
+	case RelAgentsMD, RelCodexInstructionsMD, RelCodexRulesMD:
+		return canonRulesPrefix + project + "/agents.md", true
+	case RelCodexConfigTOML:
+		return canonSettingsPrefix + project + "/codex.toml", true
+	case RelCodexHooksJSON:
+		return AgentsHooksPrefix + project + "/codex.json", true
+	case RelCopilotInstructionsMD:
+		return canonRulesPrefix + project + "/copilot-instructions.md", true
+	}
+	return "", false
+}
+
+// bucketDirMapping is the static table mapping a repo-relative directory
+// prefix to its canonical platform bucket. Defined as a package-level
+// variable rather than recreated on each call.
+var bucketDirMapping = []struct {
+	prefix string
+	bucket platform.CanonicalBucket
+}{
+	{RelCursorCommandsDir, platform.CanonicalBucketCommands},
+	{RelClaudeCommandsDir, platform.CanonicalBucketCommands},
+	{RelOpenCodeCommandsDir, platform.CanonicalBucketCommands},
+	{RelClaudeOutputStylesDir, platform.CanonicalBucketOutputStyles},
+	{RelOpenCodeModesDir, platform.CanonicalBucketModes},
+	{RelOpenCodeThemesDir, platform.CanonicalBucketThemes},
+	{RelGitHubPromptsDir, platform.CanonicalBucketPrompts},
+}
+
+// mapBucketDirRel handles directory-prefix mappings into canonical
+// platform buckets. The relPath is a full walked file path like
+// ".cursor/commands/foo.md"; the prefixes end in "/".
+func mapBucketDirRel(project, relPath string) (string, bool) {
+	for _, m := range bucketDirMapping {
+		if strings.HasPrefix(relPath, m.prefix) {
+			return platform.CanonicalBucketScopePath(m.bucket, project, strings.TrimPrefix(relPath, m.prefix)), true
+		}
+	}
+	return "", false
+}
+
+// mapCursorRulesRel handles .cursor/rules/ → rules/ name extraction.
+// Caller has already confirmed the RelCursorRulesDir prefix; this
+// function returns "" when no name pattern applies (silently dropped).
+func mapCursorRulesRel(project, relPath string) string {
+	name := filepath.Base(relPath)
+	if strings.HasPrefix(name, "global--") {
+		return canonRulesPrefix + "global/" + strings.TrimPrefix(name, "global--")
+	}
+	if strings.HasPrefix(name, project+"--") {
+		return canonRulesPrefix + project + "/" + strings.TrimPrefix(name, project+"--")
+	}
+	if strings.HasSuffix(name, ".mdc") || strings.HasSuffix(name, ".md") {
+		return canonRulesPrefix + project + "/" + name
+	}
+	return ""
+}
+
+// mapSkillsRel handles {.agents,.claude}/skills/ → skills/<project>/.
+func mapSkillsRel(project, relPath string) (string, bool) {
+	if strings.HasPrefix(relPath, RelAgentsSkillsDir) {
+		return canonSkillsPrefix + project + "/" + strings.TrimPrefix(relPath, RelAgentsSkillsDir), true
+	}
+	if strings.HasPrefix(relPath, RelClaudeSkillsDir) {
+		return canonSkillsPrefix + project + "/" + strings.TrimPrefix(relPath, RelClaudeSkillsDir), true
+	}
+	return "", false
+}
+
+// mapAgentsRel handles {.github,.codex,.opencode}/agents/ →
+// agents/<project>/. Three variants on the same theme.
+func mapAgentsRel(project, relPath string) (string, bool) {
+	if strings.HasPrefix(relPath, RelGitHubAgentsDir) && strings.HasSuffix(relPath, RelAgentMarkdownSuffix) {
+		name := strings.TrimSuffix(filepath.Base(relPath), RelAgentMarkdownSuffix)
+		return canonAgentsPrefix + project + "/" + name + "/AGENT.md", true
+	}
+	if strings.HasPrefix(relPath, RelCodexAgentsDir) {
+		return canonAgentsPrefix + project + "/" + strings.TrimPrefix(relPath, RelCodexAgentsDir), true
+	}
+	if strings.HasPrefix(relPath, RelOpenCodeAgentsDir) && strings.HasSuffix(relPath, ".md") {
+		name := strings.TrimSuffix(filepath.Base(relPath), ".md")
+		return canonAgentsPrefix + project + "/" + name + "/AGENT.md", true
+	}
+	return "", false
+}
+
+// mapHooksRel handles .github/hooks/<name>.json → hooks/<project>/<name>/HOOK.yaml.
+func mapHooksRel(project, relPath string) (string, bool) {
+	if strings.HasPrefix(relPath, RelGitHubHooksDir) && strings.HasSuffix(relPath, RelJSONSuffix) {
+		name := strings.TrimSuffix(filepath.Base(relPath), RelJSONSuffix)
+		return AgentsHooksPrefix + project + "/" + name + "/HOOK.yaml", true
+	}
+	return "", false
+}
+
+// passThroughPrefixes lists canonical ~/.agents/ bucket prefixes that
+// map to themselves (input already in canonical form).
+var passThroughPrefixes = []string{
+	canonRulesPrefix,
+	canonSettingsPrefix,
+	"mcp/",
+	canonSkillsPrefix,
+	canonAgentsPrefix,
+	AgentsHooksPrefix,
+	string(platform.CanonicalBucketCommands) + "/",
+	string(platform.CanonicalBucketOutputStyles) + "/",
+	string(platform.CanonicalBucketIgnore) + "/",
+	string(platform.CanonicalBucketModes) + "/",
+	string(platform.CanonicalBucketPlugins) + "/",
+	string(platform.CanonicalBucketThemes) + "/",
+	string(platform.CanonicalBucketPrompts) + "/",
+}
+
+// mapPassThroughRel reports whether relPath is already under a known
+// canonical ~/.agents/ bucket (caller returns relPath unchanged).
+func mapPassThroughRel(relPath string) bool {
+	for _, prefix := range passThroughPrefixes {
+		if strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsManagedSymlink reports whether path is a resolvable managed link

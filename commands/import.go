@@ -162,7 +162,6 @@ const (
 	relCodexAgentsDir        = lifecycle.RelCodexAgentsDir
 	relOpenCodeAgentsDir     = lifecycle.RelOpenCodeAgentsDir
 	relGitHubHooksDir        = lifecycle.RelGitHubHooksDir
-	relAgentMarkdownSuffix   = lifecycle.RelAgentMarkdownSuffix
 	relJSONSuffix            = lifecycle.RelJSONSuffix
 	agentsHooksPrefix        = lifecycle.AgentsHooksPrefix
 
@@ -956,54 +955,63 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 //     converts a lifecycle.ImportCandidate into []lifecycle.ImportOutput
 //     by delegating to canonicalImportOutputs.
 func init() {
-	lifecycle.RestoreCanonicalResourceFileFn = func(project, resourcesDir, agentsHome, path string, deps lifecycle.AddDeps) (int, bool, error) {
-		candidate := importCandidate{
-			project:    project,
-			sourceRoot: resourcesDir,
-			sourcePath: path,
-		}
-		outputs, ok, canonErr := canonicalImportOutputs(candidate)
-		if !ok {
-			return 0, false, nil
-		}
-		if canonErr != nil {
-			return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
-		}
-		count := 0
-		for _, output := range outputs {
-			destPath := filepath.Join(agentsHome, output.destRel)
-			if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-				return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
-			}
-			if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
-				return count, true, fmt.Errorf("writing %s: %w", destPath, err)
-			}
-			count++
-		}
-		return count, true, nil
-	}
+	lifecycle.RestoreCanonicalResourceFileFn = restoreCanonicalResourceFileImpl
+	lifecycle.CanonicalImportOutputs = canonicalImportOutputsImpl
+}
 
-	lifecycle.CanonicalImportOutputs = func(c lifecycle.ImportCandidate) ([]lifecycle.ImportOutput, bool, error) {
-		candidate := importCandidate{
-			project:    c.Project,
-			sourceRoot: c.SourceRoot,
-			sourcePath: c.SourcePath,
-			destRel:    c.DestRel,
-		}
-		outputs, ok, err := canonicalImportOutputs(candidate)
-		if !ok || err != nil {
-			return nil, ok, err
-		}
-		converted := make([]lifecycle.ImportOutput, 0, len(outputs))
-		for _, o := range outputs {
-			converted = append(converted, lifecycle.ImportOutput{
-				DestRel: o.destRel,
-				Content: o.content,
-				Origin:  o.Origin,
-			})
-		}
-		return converted, true, nil
+// restoreCanonicalResourceFileImpl is the implementation registered into
+// lifecycle.RestoreCanonicalResourceFileFn. Extracted from init() so the
+// init function stays inside Sonar's cognitive-complexity limit (S3776).
+func restoreCanonicalResourceFileImpl(project, resourcesDir, agentsHome, path string, deps lifecycle.AddDeps) (int, bool, error) {
+	candidate := importCandidate{
+		project:    project,
+		sourceRoot: resourcesDir,
+		sourcePath: path,
 	}
+	outputs, ok, canonErr := canonicalImportOutputs(candidate)
+	if !ok {
+		return 0, false, nil
+	}
+	if canonErr != nil {
+		return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
+	}
+	count := 0
+	for _, output := range outputs {
+		destPath := filepath.Join(agentsHome, output.destRel)
+		if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
+		}
+		if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
+			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
+		}
+		count++
+	}
+	return count, true, nil
+}
+
+// canonicalImportOutputsImpl is the implementation registered into
+// lifecycle.CanonicalImportOutputs. Extracted from init() so the init
+// function stays inside Sonar's cognitive-complexity limit (S3776).
+func canonicalImportOutputsImpl(c lifecycle.ImportCandidate) ([]lifecycle.ImportOutput, bool, error) {
+	candidate := importCandidate{
+		project:    c.Project,
+		sourceRoot: c.SourceRoot,
+		sourcePath: c.SourcePath,
+		destRel:    c.DestRel,
+	}
+	outputs, ok, err := canonicalImportOutputs(candidate)
+	if !ok || err != nil {
+		return nil, ok, err
+	}
+	converted := make([]lifecycle.ImportOutput, 0, len(outputs))
+	for _, o := range outputs {
+		converted = append(converted, lifecycle.ImportOutput{
+			DestRel: o.destRel,
+			Content: o.content,
+			Origin:  o.Origin,
+		})
+	}
+	return converted, true, nil
 }
 
 // canonicalImportOutputsNonPlugin handles hook/settings paths after package-plugin routing.
