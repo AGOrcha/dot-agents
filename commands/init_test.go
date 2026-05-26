@@ -52,9 +52,11 @@ func runInit(cmd *cobra.Command, args []string, deps fakeInitDirMaker) error {
 // any test failing. The behavioral substance of init lives in
 // commands/lifecycle/init_test.go; this is a contract test for the shim.
 func TestNewInitCmd_ShimWiresLifecycleSeams(t *testing.T) {
-	// Reset to capture-the-defaults baseline first.
+	// Reset to capture-the-defaults baseline first. KGMCP is no longer
+	// shim-wired: t02b lifted the helper into lifecycle, so the
+	// lifecycle default (lifecycle.EnsureGlobalKGMCPConfigs) is already
+	// correct and the shim does not touch InitEnsureGlobalKGMCPConfigsFn.
 	lifecycle.InitUsageErrorFn = nil
-	lifecycle.InitEnsureGlobalKGMCPConfigsFn = nil
 
 	saved := Flags
 	Flags = GlobalFlags{Force: true, DryRun: true, Yes: true}
@@ -80,9 +82,6 @@ func TestNewInitCmd_ShimWiresLifecycleSeams(t *testing.T) {
 	}
 	if lifecycle.InitUsageErrorFn == nil {
 		t.Error("shim did not wire InitUsageErrorFn")
-	}
-	if lifecycle.InitEnsureGlobalKGMCPConfigsFn == nil {
-		t.Error("shim did not wire InitEnsureGlobalKGMCPConfigsFn")
 	}
 }
 

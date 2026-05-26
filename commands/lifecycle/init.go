@@ -84,13 +84,13 @@ var InitUsageErrorFn = func(msg string, hints ...string) error {
 	return fmt.Errorf("%s\n  %s", msg, strings.Join(hints, "\n  "))
 }
 
-// InitEnsureGlobalKGMCPConfigsFn is the seam for the KG MCP config
-// scaffolder that lives in commands/add.go (parent package). The shim
-// in commands/init.go repoints it at commands.ensureGlobalKGMCPConfigs
-// so init's behavior is preserved; the default is a no-op so direct
-// in-package tests of runInit do not require the parent package.
-// Folds into a shared lifecycle helper when add.go also moves (t04).
-var InitEnsureGlobalKGMCPConfigsFn = func(agentsHome string) error { return nil }
+// InitEnsureGlobalKGMCPConfigsFn is the in-package seam for the KG MCP
+// config scaffolder. Defaults to lifecycle.EnsureGlobalKGMCPConfigs
+// (lifted into this package by t02b), eliminating the prior cross-package
+// indirection through the commands shim. Kept as a var (not a direct
+// call) so tests can fault-inject failure scenarios without monkey-patching
+// the underlying helper.
+var InitEnsureGlobalKGMCPConfigsFn = EnsureGlobalKGMCPConfigs
 
 // initDirMaker is the narrow collaborator init.go's fault-injectable
 // operations need (interface-DI per docs/TEST_SEAMS.md). Single-method
