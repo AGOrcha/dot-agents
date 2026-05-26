@@ -286,3 +286,36 @@ func TestRubricScoreIncludesHookOutcomesContribution(t *testing.T) {
 		t.Errorf("breakdown is missing the hook_outcomes row")
 	}
 }
+
+// TestExtractHookOutcomesSignal_NonIsNotExistReadError covers the L112
+// "cannot read hook-outcomes sidecar" branch (non-IsNotExist os error).
+// Drive it by pointing the extractor at an unreadable directory entry.
+func TestExtractHookOutcomesSignal_NonIsNotExistReadError(t *testing.T) {
+	dir := t.TempDir()
+	// Create a *directory* at the sidecar path so ReadFile returns EISDIR,
+	// which is not IsNotExist — exercises the wrapped-error AbsentSignal.
+	sidecar := filepath.Join(dir, "iter-7.hook-outcomes.yaml")
+	if err := os.MkdirAll(sidecar, 0o755); err != nil {
+		t.Fatalf("mkdir sidecar-as-dir: %v", err)
+	}
+	v := ExtractHookOutcomesSignal(dir, 7)
+	if v.Present {
+		t.Fatalf("expected absent signal for non-IsNotExist read error, got %+v", v)
+	}
+	if !strings.Contains(v.Detail, "cannot read") {
+		t.Errorf("expected detail to mention 'cannot read', got %q", v.Detail)
+	}
+}
+
+// TestHookResultPriority_AllowAndDefault covers the L188-194 hookResultAllow
+// case and the documented-unreachable default branch via a direct call to
+// the unexported helper. Both branches are exercised by constructing the
+// minimal record set that selects each.
+func TestHookResultPriority_AllowAndDefault(t *testing.T) {
+	if got := hookResultSeverity(hookResultAllow); got != 0 {
+		t.Errorf("hookResultSeverity(allow) = %d, want 0", got)
+	}
+	if got := hookResultSeverity("totally-unknown"); got != -1 {
+		t.Errorf("hookResultSeverity(unknown) = %d, want -1 (default)", got)
+	}
+}
