@@ -41,3 +41,16 @@ func writeAgentsHomeFile(t *testing.T, agentsHome, rel, content string) {
 	mustMkdirAllT(t, filepath.Dir(full))
 	mustWriteFileT(t, full, content)
 }
+
+// itoa is a minimal no-import int → string helper used across the test files.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var digits []byte
+	for i > 0 {
+		digits = append([]byte{byte('0' + i%10)}, digits...)
+		i /= 10
+	}
+	return string(digits)
+}

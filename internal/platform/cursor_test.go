@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // writeCursorAgentTool creates ~/.cursor/projects/<slug>/agent-tools/<name>.txt
@@ -325,5 +327,33 @@ func TestCursorCreateLinks_SecondRunIdempotent(t *testing.T) {
 	}
 	if err := cur.RemoveLinks("proj", repo); err != nil {
 		t.Errorf("RemoveLinks: %v", err)
+	}
+}
+
+// TestCursorRemoveLinksWithExistingAgentLinks drives removeAgentLinks via a
+// seeded `.cursor/agents/<name>` symlink (relocated from coverage_gap_test.go).
+func TestCursorRemoveLinksWithExistingAgentLinks(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(agentsHome, "agents", "proj", "reviewer")
+	if err := os.MkdirAll(src, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(repo, ".cursor", "agents", "reviewer")
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, src, dst)
+	if err := NewCursor().RemoveLinks("proj", repo); err != nil {
+		t.Fatalf("RemoveLinks: %v", err)
+	}
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		t.Error("cursor agent symlink should be removed")
 	}
 }

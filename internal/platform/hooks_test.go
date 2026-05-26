@@ -1771,3 +1771,764 @@ func TestPruneManagedRenderedFanoutExtras_StaleEntry(t *testing.T) {
 		t.Error("stale removed")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Hook render + emit + remove + event-name + matcher coverage from
+// coverage_gap_test.go (relocated).
+// ---------------------------------------------------------------------------
+
+// TestRemoveManagedRenderedHookFileToUserHomes drives the user-home removal
+// fanout for rendered hook settings.
+func TestRemoveManagedRenderedHookFileToUserHomes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// No-op when specs are empty.
+	if err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, nil, ".claude/settings.json", renderClaudeHookSettings); err != nil {
+		t.Errorf("nil specs should no-op, got %v", err)
+	}
+
+	// Seed a managed file with the exact rendered content, then ensure the
+	// fanout removal deletes it under HOME.
+	specs := []HookSpec{{
+		Name:    "ping",
+		When:    "pre_tool_use",
+		Command: "/bin/echo",
+	}}
+	rendered, err := renderClaudeHookSettings(specs)
+	if err != nil {
+		t.Fatalf("renderClaudeHookSettings: %v", err)
+	}
+	target := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, rendered, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeManagedRenderedHookFileToUserHomes(stdPlatformIO{}, specs, ".claude/settings.json", renderClaudeHookSettings); err != nil {
+		t.Fatalf("removeManagedRenderedHookFileToUserHomes: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("expected file removed, stat err=%v", err)
+	}
+}
+
+// TestRenderClaudeHookSettings_UnrepresentableEventSkipped: a spec with an
+// unknown `when` is dropped when not required-on.
+func TestRenderClaudeHookSettings_UnrepresentableEventSkipped(t *testing.T) {
+	specs := []HookSpec{
+		{Name: "good", When: "pre_tool_use", Command: "/bin/true"},
+		{Name: "bad-event", When: "weird_event", Command: "/bin/true"},
+	}
+	out, err := renderClaudeHookSettings(specs)
+	if err != nil {
+		t.Fatalf("renderClaudeHookSettings: %v", err)
+	}
+	if !strings.Contains(string(out), "PreToolUse") {
+		t.Errorf("expected good hook rendered, got %s", out)
+	}
+}
+
+func TestRenderClaudeHookSettings_RequiredUnrepresentableErrors(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "x",
+		When:       "no_such_event",
+		Command:    "/bin/true",
+		RequiredOn: []string{"claude"},
+	}}
+	if _, err := renderClaudeHookSettings(specs); err == nil {
+		t.Error("expected error when required+unrepresentable")
+	}
+}
+
+func TestRenderClaudeHookSettings_RequiredNoCommandErrors(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "x",
+		When:       "pre_tool_use",
+		RequiredOn: []string{"claude"},
+	}}
+	if _, err := renderClaudeHookSettings(specs); err == nil {
+		t.Error("expected error when required+no-command")
+	}
+}
+
+func TestRenderCodexHookConfig_RequiredUnrepresentableErrors(t *testing.T) {
+	specs := []HookSpec{{
+		Name:       "x",
+		When:       "no_such_event",
+		Command:    "/bin/true",
+		RequiredOn: []string{"codex"},
+	}}
+	if _, err := renderCodexHookConfig(specs); err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestRenderCursorHookConfig_RequiredUnrepresentableErrors(t *testing.T) {
+	// P1b note: post_tool_use is now representable on cursor (R6.3); use
+	// error_occurred which p1b scopes to copilot only, so it remains
+	// unrepresentable on cursor and exercises the same fall-through path.
+	specs := []HookSpec{{
+		Name:       "x",
+		When:       "error_occurred", // not in cursor switch
+		Command:    "/bin/true",
+		RequiredOn: []string{"cursor"},
+	}}
+	if _, err := renderCursorHookConfig(specs); err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestRenderCopilotHookFile_RequiredUnrepresentableErrors(t *testing.T) {
+	// P1b note: post_tool_use is now representable on copilot (R6.2); use
+	// a canonical When value that no platform mapper handles to exercise
+	// the same fall-through path.
+	_, _, _, err := renderCopilotHookFile(HookSpec{
+		Name:       "x",
+		When:       "no_such_canonical_event", // not in copilot switch
+		Command:    "/bin/true",
+		RequiredOn: []string{"copilot"},
+	})
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestRenderCopilotHookFile_RequiredMatcherErrors(t *testing.T) {
+	_, _, _, err := renderCopilotHookFile(HookSpec{
+		Name:            "x",
+		When:            "pre_tool_use",
+		Command:         "/bin/true",
+		MatchExpression: "Bash",
+		RequiredOn:      []string{"copilot"},
+	})
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestRenderCopilotHookFile_RequiredNoCommandErrors(t *testing.T) {
+	_, _, _, err := renderCopilotHookFile(HookSpec{
+		Name:       "x",
+		When:       "pre_tool_use",
+		RequiredOn: []string{"copilot"},
+	})
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+// TestPlatformOverride covers both the present and missing branches.
+func TestPlatformOverride(t *testing.T) {
+	spec := HookSpec{PlatformOverrides: map[string]HookPlatformOverride{
+		"claude": {Event: "PreToolUse", Matcher: "X"},
+	}}
+	if got := platformOverride(spec, "claude").Event; got != "PreToolUse" {
+		t.Errorf("expected PreToolUse, got %q", got)
+	}
+	if got := platformOverride(spec, "missing").Event; got != "" {
+		t.Errorf("expected empty for missing platform, got %q", got)
+	}
+	if got := platformOverride(HookSpec{}, "claude").Event; got != "" {
+		t.Errorf("expected empty for nil overrides, got %q", got)
+	}
+}
+
+func TestHookEnabledAndRequiredOnPlatform(t *testing.T) {
+	// Both default to allow-all when nil.
+	if !hookEnabledOnPlatform(HookSpec{}, "anyone") {
+		t.Error("nil EnabledOn should be allow-all")
+	}
+	if hookRequiredOnPlatform(HookSpec{}, "anyone") {
+		t.Error("nil RequiredOn should be false")
+	}
+	if !hookEnabledOnPlatform(HookSpec{EnabledOn: []string{"claude"}}, "claude") {
+		t.Error("explicit enabled platform should be allowed")
+	}
+	if hookEnabledOnPlatform(HookSpec{EnabledOn: []string{"claude"}}, "codex") {
+		t.Error("non-enabled platform should be denied")
+	}
+	if !hookRequiredOnPlatform(HookSpec{RequiredOn: []string{"claude"}}, "claude") {
+		t.Error("required platform should be true")
+	}
+}
+
+// TestPlatformIDOverrides walks each event-name function with override
+// branches so the override path is exercised.
+func TestPerPlatformEventOverrides(t *testing.T) {
+	spec := HookSpec{
+		When: "weird",
+		PlatformOverrides: map[string]HookPlatformOverride{
+			"claude":  {Event: "PreToolUse"},
+			"codex":   {Event: "PreToolUse"},
+			"cursor":  {Event: "preToolUse"},
+			"copilot": {Event: "preToolUse"},
+		},
+	}
+	if name, ok := claudeEventName(spec); !ok || name != "PreToolUse" {
+		t.Errorf("claudeEventName override: %q %v", name, ok)
+	}
+	if name, ok := codexEventName(spec); !ok || name != "PreToolUse" {
+		t.Errorf("codexEventName override: %q %v", name, ok)
+	}
+	if name, ok := cursorEventName(spec); !ok || name != "preToolUse" {
+		t.Errorf("cursorEventName override: %q %v", name, ok)
+	}
+	if name, ok := copilotEventName(spec); !ok || name != "preToolUse" {
+		t.Errorf("copilotEventName override: %q %v", name, ok)
+	}
+}
+
+// TestEventNameDefaults exhaustively triggers each switch in the event-name
+// helpers so all cases are covered.
+// assertEventNameMapping runs an event-name resolver across a set of valid
+// `when` values and asserts each resolves; then asserts an unknown sentinel
+// is rejected.
+func assertEventNameMapping(
+	t *testing.T,
+	resolver func(HookSpec) (string, bool),
+	platform string,
+	validWhens []string,
+) {
+	t.Helper()
+	for _, when := range validWhens {
+		if _, ok := resolver(HookSpec{When: when}); !ok {
+			t.Errorf("%sEventName(%q) returned !ok", platform, when)
+		}
+	}
+	if _, ok := resolver(HookSpec{When: "weird"}); ok {
+		t.Errorf("weird should be unrepresentable for %s", platform)
+	}
+}
+
+func TestEventNameDefaults(t *testing.T) {
+	assertEventNameMapping(t, claudeEventName, "claude", []string{
+		"pre_tool_use", "post_tool_use", "post_tool_use_failure",
+		"notification", "user_prompt_submit", "session_start", "session_end",
+		"stop", "subagent_start", "subagent_stop", "pre_compact",
+		"permission_request",
+	})
+	assertEventNameMapping(t, codexEventName, "codex", []string{
+		"session_start", "pre_tool_use", "post_tool_use",
+		"user_prompt_submit", "stop", "subagent_stop",
+	})
+	assertEventNameMapping(t, cursorEventName, "cursor", []string{
+		"pre_tool_use", "user_prompt_submit", "stop", "session_start",
+		"subagent_stop",
+	})
+	assertEventNameMapping(t, copilotEventName, "copilot", []string{
+		"session_start", "user_prompt_submit", "pre_tool_use",
+		"stop", "subagent_stop",
+	})
+}
+
+// TestP1aGateCriticalStopMappings is the table-driven regression for the P1a
+// gate-critical mapping deltas. It covers exactly the rows from the contract's
+// mapping table and the negative assertion that Copilot must NOT render
+// canonical `stop` as the literal `stop`.
+func TestP1aGateCriticalStopMappings(t *testing.T) {
+	cases := []struct {
+		name     string
+		resolver func(HookSpec) (string, bool)
+		platform string
+		when     string
+		want     string
+	}{
+		{
+			name:     "codex subagent_stop renders SubagentStop",
+			resolver: codexEventName,
+			platform: "codex",
+			when:     "subagent_stop",
+			want:     "SubagentStop",
+		},
+		{
+			name:     "copilot stop renders agentStop (not stop)",
+			resolver: copilotEventName,
+			platform: "copilot",
+			when:     "stop",
+			want:     "agentStop",
+		},
+		{
+			name:     "copilot subagent_stop renders subagentStop",
+			resolver: copilotEventName,
+			platform: "copilot",
+			when:     "subagent_stop",
+			want:     "subagentStop",
+		},
+		{
+			name:     "cursor subagent_stop renders subagentStop",
+			resolver: cursorEventName,
+			platform: "cursor",
+			when:     "subagent_stop",
+			want:     "subagentStop",
+		},
+		// Claude regression: stop and subagent_stop already supported.
+		{
+			name:     "claude stop still renders Stop",
+			resolver: claudeEventName,
+			platform: "claude",
+			when:     "stop",
+			want:     "Stop",
+		},
+		{
+			name:     "claude subagent_stop still renders SubagentStop",
+			resolver: claudeEventName,
+			platform: "claude",
+			when:     "subagent_stop",
+			want:     "SubagentStop",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.resolver(HookSpec{When: tc.when})
+			if !ok {
+				t.Fatalf("%sEventName(%q) returned !ok; want %q", tc.platform, tc.when, tc.want)
+			}
+			if got != tc.want {
+				t.Errorf("%sEventName(%q) = %q, want %q", tc.platform, tc.when, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCopilotStopIsAgentStopNotStop is the explicit negative-path regression
+// guarding against a recurrence of the documented Copilot pitfall: a future
+// edit must not collapse canonical `stop` to the literal `stop` event name
+// the way Claude/Cursor do. Copilot's terminal event is `agentStop`.
+func TestCopilotStopIsAgentStopNotStop(t *testing.T) {
+	got, ok := copilotEventName(HookSpec{When: "stop"})
+	if !ok {
+		t.Fatalf("copilotEventName(stop) returned !ok; the P1a mapping must accept canonical stop")
+	}
+	if got == "stop" {
+		t.Fatalf("copilotEventName(stop) = %q; Copilot does not have a `stop` event — it must render `agentStop`", got)
+	}
+	if got != "agentStop" {
+		t.Errorf("copilotEventName(stop) = %q, want agentStop", got)
+	}
+
+	// And the rendered config must also carry agentStop, not stop, in its
+	// JSON output — guarding the end-to-end render path, not just the
+	// resolver.
+	_, content, ok, err := renderCopilotHookFile(HookSpec{
+		Name:    "stop-guard",
+		When:    "stop",
+		Command: "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile: %v", err)
+	}
+	if !ok {
+		t.Fatal("renderCopilotHookFile returned !ok for canonical stop")
+	}
+	if !strings.Contains(string(content), `"agentStop"`) {
+		t.Errorf("rendered copilot hook missing \"agentStop\" event key:\n%s", content)
+	}
+	// Negative assertion: the rendered JSON must not key the hook on a
+	// bare "stop" event. (We check for the JSON key form `"stop":` so we
+	// do not false-positive on substrings of `agentStop`.)
+	if strings.Contains(string(content), `"stop":`) {
+		t.Errorf("rendered copilot hook keys event on bare \"stop\"; must be \"agentStop\":\n%s", content)
+	}
+}
+
+// TestMatcherForSpecVariants covers all three branches of matcherForSpec.
+func TestMatcherForSpecVariants(t *testing.T) {
+	if got := matcherForSpec(HookSpec{MatchExpression: "Write | Edit"}, "claude", "*"); got != "Write | Edit" {
+		t.Errorf("expression branch: %q", got)
+	}
+	if got := matcherForSpec(HookSpec{MatchTools: []string{"Write", "Edit"}}, "claude", "*"); got != "Write|Edit" {
+		t.Errorf("tools branch: %q", got)
+	}
+	if got := matcherForSpec(HookSpec{}, "claude", "*"); got != "*" {
+		t.Errorf("fallback branch: %q", got)
+	}
+	override := HookSpec{PlatformOverrides: map[string]HookPlatformOverride{
+		"claude": {Matcher: "Bash"},
+	}}
+	if got := matcherForSpec(override, "claude", "*"); got != "Bash" {
+		t.Errorf("override branch: %q", got)
+	}
+}
+
+func TestResolveHookCommand_AbsolutePassthrough(t *testing.T) {
+	spec := HookSpec{Command: "/usr/local/bin/run"}
+	if got := ResolveHookCommand(spec); got != "/usr/local/bin/run" {
+		t.Errorf("absolute cmd: %q", got)
+	}
+}
+
+func TestResolveHookCommand_RelativeBundleResolution(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "HOOK.yaml")
+	script := filepath.Join(tmp, "run.sh")
+	if err := os.WriteFile(src, []byte("name: x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	spec := HookSpec{
+		SourcePath: src,
+		SourceKind: HookSourceCanonicalBundle,
+		Command:    "./run.sh",
+	}
+	if got := ResolveHookCommand(spec); got != script {
+		t.Errorf("ResolveHookCommand = %q, want %q", got, script)
+	}
+}
+
+// TestEmitHookSpec_NilNoOp keeps the early-return branch covered.
+func TestEmitHookSpec_NilNoOp(t *testing.T) {
+	if err := emitHookSpec(stdPlatformIO{}, nil, "/dev/null", HookEmissionMode{}); err != nil {
+		t.Errorf("nil spec should no-op, got %v", err)
+	}
+	if err := emitHookSpecToUserHomes(stdPlatformIO{}, nil, ".x/y", HookEmissionMode{}); err != nil {
+		t.Errorf("nil spec to user homes should no-op, got %v", err)
+	}
+}
+
+func TestEmitHookSpec_UnknownShapeErrors(t *testing.T) {
+	if err := emitHookSpec(stdPlatformIO{}, &HookSpec{}, "/tmp/x", HookEmissionMode{Shape: "wat"}); err == nil {
+		t.Error("expected error for unknown shape")
+	}
+	if err := emitHookSpec(stdPlatformIO{}, &HookSpec{}, "/tmp/x", HookEmissionMode{Shape: HookShapeRenderSingle}); err == nil {
+		t.Error("render shapes are not single-direct emission")
+	}
+}
+
+func TestEmitHookFile_UnknownTransportErrors(t *testing.T) {
+	if err := emitHookFile(stdPlatformIO{}, "/no/where", "/tmp/x", "weird"); err == nil {
+		t.Error("expected error for unknown transport")
+	}
+}
+
+func TestEmitHookFile_WriteCopiesContent(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "src")
+	dst := filepath.Join(tmp, "dst")
+	if err := os.WriteFile(src, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := emitHookFile(stdPlatformIO{}, src, dst, HookTransportWrite); err != nil {
+		t.Fatalf("emitHookFile write: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("got %q, want hello", got)
+	}
+}
+
+func TestEmitHookFile_WriteMissingSource(t *testing.T) {
+	if err := emitHookFile(stdPlatformIO{}, "/no/where", filepath.Join(t.TempDir(), "out"), HookTransportWrite); err == nil {
+		t.Error("expected error reading missing source")
+	}
+}
+
+func TestEmitHookFanout_RejectsWrongShape(t *testing.T) {
+	err := emitHookFanout(stdPlatformIO{}, nil, t.TempDir(), HookEmissionMode{Shape: HookShapeDirect}, func(HookSpec) (string, bool) { return "", false })
+	if err == nil {
+		t.Error("expected error for non-fanout shape")
+	}
+}
+
+func TestEmitRenderedHookFile_NilSpecsNoOp(t *testing.T) {
+	if err := emitRenderedHookFile(stdPlatformIO{}, nil, "/tmp/x", renderClaudeHookSettings); err != nil {
+		t.Errorf("nil specs should no-op, got %v", err)
+	}
+	if err := emitRenderedHookFileToUserHomes(stdPlatformIO{}, nil, ".x", renderClaudeHookSettings); err != nil {
+		t.Errorf("nil specs to user homes should no-op, got %v", err)
+	}
+}
+
+func TestEmitPreferredHookFile_FallbackToRemove(t *testing.T) {
+	called := 0
+	remove := func(_ string) error { called++; return nil }
+	if err := emitPreferredHookFile(stdPlatformIO{}, "/tmp/x", renderClaudeHookSettings, nil, directSymlinkHookMode, remove); err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if called != 1 {
+		t.Errorf("expected remove invoked once, got %d", called)
+	}
+
+	// canonicalSets present → render branch used (legacy not invoked).
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "out.json")
+	if err := emitPreferredHookFile(stdPlatformIO{}, target, renderClaudeHookSettings, nil, directSymlinkHookMode, nil,
+		[]HookSpec{{Name: "ping", When: "pre_tool_use", Command: "/bin/true"}}); err != nil {
+		t.Errorf("render branch: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("expected target rendered: %v", err)
+	}
+}
+
+func TestEmitPreferredHookFileToUserHomes_FallbackBranches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	called := 0
+	remove := func(_ string) error { called++; return nil }
+	if err := emitPreferredHookFileToUserHomes(stdPlatformIO{}, ".claude/settings.json",
+		renderClaudeHookSettings, nil, directSymlinkHookMode, remove); err != nil {
+		t.Errorf("user-home remove branch: %v", err)
+	}
+	if called == 0 {
+		t.Error("expected remove invoked at least once")
+	}
+}
+
+// TestWriteManagedFile_OverwriteAndDeduplicate verifies that re-writing
+// identical content is a no-op (the implementation short-circuits when the
+// file matches), and that differing content triggers a fresh write.
+func TestWriteManagedFile_Dedup(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "f.json")
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("a")); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("a")); err != nil {
+		t.Fatalf("second identical write: %v", err)
+	}
+	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("b")); err != nil {
+		t.Fatalf("differing write: %v", err)
+	}
+	got, _ := os.ReadFile(dst)
+	if string(got) != "b" {
+		t.Errorf("got %q, want b", got)
+	}
+}
+
+func TestRemoveManagedFile_NoOpWhenContentDiffers(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "f.json")
+	if err := os.WriteFile(dst, []byte("unrelated"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeManagedFile(stdPlatformIO{}, dst, []byte("managed")); err != nil {
+		t.Fatalf("removeManagedFile: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Error("expected unmanaged file untouched")
+	}
+}
+
+func TestRemoveManagedFile_RemovesMatchingContent(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "f.json")
+	if err := os.WriteFile(dst, []byte("managed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeManagedFile(stdPlatformIO{}, dst, []byte("managed")); err != nil {
+		t.Fatalf("removeManagedFile: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("expected file removed, got err=%v", err)
+	}
+}
+
+func TestRemoveDirIfEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	empty := filepath.Join(tmp, "empty")
+	if err := os.MkdirAll(empty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDirIfEmpty(empty); err != nil {
+		t.Fatalf("removeDirIfEmpty: %v", err)
+	}
+	if _, err := os.Stat(empty); !os.IsNotExist(err) {
+		t.Errorf("expected dir removed, got %v", err)
+	}
+
+	// Non-empty dir is preserved.
+	nonEmpty := filepath.Join(tmp, "with-file")
+	if err := os.MkdirAll(nonEmpty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nonEmpty, "x"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDirIfEmpty(nonEmpty); err != nil {
+		t.Fatalf("removeDirIfEmpty non-empty: %v", err)
+	}
+	if _, err := os.Stat(nonEmpty); err != nil {
+		t.Errorf("expected non-empty dir preserved, got %v", err)
+	}
+
+	// Missing dir is a no-op.
+	if err := removeDirIfEmpty(filepath.Join(tmp, "no-such")); err != nil {
+		t.Errorf("missing dir should no-op, got %v", err)
+	}
+}
+
+// TestEmitRenderedHookFanoutAndRemove pairs emit+remove on a fanout to drive
+// both helpers' main branches.
+func TestEmitRenderedHookFanoutAndRemove(t *testing.T) {
+	tmp := t.TempDir()
+	dstRoot := filepath.Join(tmp, "hooks")
+	specs := []HookSpec{
+		{Name: "a", When: "user_prompt_submit", Command: "/bin/true"},
+		{Name: "b", When: "post_tool_use", Command: "/bin/true"}, // not in copilot switch → skipped
+	}
+	if err := emitRenderedHookFanout(stdPlatformIO{}, specs, dstRoot, renderCopilotHookFile); err != nil {
+		t.Fatalf("emitRenderedHookFanout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstRoot, "a.json")); err != nil {
+		t.Errorf("expected a.json: %v", err)
+	}
+	// Remove fanout: matches content → removes a.json, dir becomes empty and is pruned.
+	if err := removeManagedRenderedHookFanout(stdPlatformIO{}, specs, dstRoot, renderCopilotHookFile); err != nil {
+		t.Fatalf("removeManagedRenderedHookFanout: %v", err)
+	}
+	if _, err := os.Stat(dstRoot); !os.IsNotExist(err) {
+		t.Errorf("expected hooks dir removed, got %v", err)
+	}
+}
+
+func TestEmitRenderedHookFanout_NilSpecsNoOp(t *testing.T) {
+	if err := emitRenderedHookFanout(stdPlatformIO{}, nil, "/tmp/x", renderCopilotHookFile); err != nil {
+		t.Errorf("nil specs no-op: %v", err)
+	}
+	if err := removeManagedRenderedHookFanout(stdPlatformIO{}, nil, "/tmp/x", renderCopilotHookFile); err != nil {
+		t.Errorf("nil specs no-op (remove): %v", err)
+	}
+	if err := emitHookFanout(stdPlatformIO{}, []HookSpec{}, t.TempDir(),
+		HookEmissionMode{Shape: HookShapeRenderFanout, Transport: HookTransportSymlink},
+		func(HookSpec) (string, bool) { return "", false }); err != nil {
+		t.Errorf("empty specs fanout: %v", err)
+	}
+}
+
+// TestIsLikelyRenderedHookFileDetectors covers the four shape detectors.
+func TestIsLikelyRenderedHookFileDetectors(t *testing.T) {
+	// Claude rendered settings: contains $schema URL marker.
+	claude := []byte(`{"$schema":"https://json.schemastore.org/claude-code-settings.json","hooks":{"PreToolUse":[]}}`)
+	if !isLikelyRenderedClaudeHookSettings(claude) {
+		t.Error("expected claude detector to match")
+	}
+	if isLikelyRenderedClaudeHookSettings([]byte(`{"foo":"bar"}`)) {
+		t.Error("expected claude detector to reject random JSON")
+	}
+
+	// Codex
+	codex := []byte(`{"hooks":{"PreToolUse":[{"matcher":"*"}]}}`)
+	if !isLikelyRenderedCodexHookConfig(codex) {
+		t.Error("expected codex detector to match")
+	}
+	if isLikelyRenderedCodexHookConfig([]byte(`{"x":1}`)) {
+		t.Error("expected codex detector to reject")
+	}
+
+	// Cursor — versioned envelope.
+	cursor := []byte(`{"version":1,"hooks":{"preToolUse":[]}}`)
+	if !isLikelyRenderedCursorHookConfig(cursor) {
+		t.Error("expected cursor detector to match")
+	}
+	if isLikelyRenderedCursorHookConfig([]byte(`{}`)) {
+		t.Error("expected cursor detector to reject")
+	}
+
+	// Copilot
+	copilot := []byte(`{"version":1,"hooks":{"preToolUse":[{"bash":"x"}]}}`)
+	if !isLikelyRenderedCopilotHookFile(copilot) {
+		t.Error("expected copilot detector to match")
+	}
+	if isLikelyRenderedCopilotHookFile([]byte(`{"x":1}`)) {
+		t.Error("expected copilot detector to reject")
+	}
+}
+
+// TestRemoveRenderedHelpers exercises the public remove* wrappers on missing
+// files (should no-op, not error).
+func TestRemoveRenderedHelpers_MissingFile(t *testing.T) {
+	if err := removeRenderedClaudeHookSettings(stdPlatformIO{}, "/no/file"); err != nil {
+		t.Errorf("removeRenderedClaudeHookSettings missing: %v", err)
+	}
+	if err := removeRenderedCodexHookConfig(stdPlatformIO{}, "/no/file"); err != nil {
+		t.Errorf("removeRenderedCodexHookConfig missing: %v", err)
+	}
+	if err := removeRenderedCursorHookConfig(stdPlatformIO{}, "/no/file"); err != nil {
+		t.Errorf("removeRenderedCursorHookConfig missing: %v", err)
+	}
+}
+
+func TestRemoveManagedFileIf(t *testing.T) {
+	tmp := t.TempDir()
+	matching := filepath.Join(tmp, "match.json")
+	other := filepath.Join(tmp, "other.json")
+	// "matching" content includes the cursor envelope.
+	matchContent := `{"version":1,"hooks":{"preToolUse":[]}}`
+	if err := os.WriteFile(matching, []byte(matchContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte(`{"unrelated":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeManagedFileIf(stdPlatformIO{}, matching, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Errorf("removeManagedFileIf matching: %v", err)
+	}
+	if _, err := os.Stat(matching); !os.IsNotExist(err) {
+		t.Errorf("expected matching file removed")
+	}
+	if err := removeManagedFileIf(stdPlatformIO{}, other, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Errorf("removeManagedFileIf other: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("expected other file preserved")
+	}
+	if err := removeManagedFileIf(stdPlatformIO{}, filepath.Join(tmp, "no-such"), isLikelyRenderedCursorHookConfig); err != nil {
+		t.Errorf("removeManagedFileIf missing: %v", err)
+	}
+}
+
+// TestPruneManagedRenderedFanoutExtras prunes non-wanted entries.
+func TestPruneManagedRenderedFanoutExtras(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "hooks")
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(dst, "keep.json")
+	stale := filepath.Join(dst, "stale.json")
+	other := filepath.Join(dst, "unrelated.txt")
+	cursorContent := `{"version":1,"hooks":{"preToolUse":[]}}`
+	for _, p := range []string{keep, stale} {
+		if err := os.WriteFile(p, []byte(cursorContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(other, []byte("text"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	wanted := map[string]bool{"keep.json": true}
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, dst, wanted, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Fatalf("pruneManagedRenderedFanoutExtras: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("kept file should remain")
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("stale file should be pruned")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Error("unrelated file should be preserved")
+	}
+
+	// Empty dir tolerated.
+	emptyDst := filepath.Join(tmp, "empty")
+	if err := os.MkdirAll(emptyDst, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, emptyDst, nil, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Errorf("empty dir prune: %v", err)
+	}
+
+	// Missing dir is a no-op.
+	if err := pruneManagedRenderedFanoutExtras(stdPlatformIO{}, filepath.Join(tmp, "nope"), nil, isLikelyRenderedCursorHookConfig); err != nil {
+		t.Errorf("missing dir prune: %v", err)
+	}
+}

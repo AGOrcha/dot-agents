@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
 )
@@ -444,4 +445,230 @@ func TestCodexScanSessionTokens_OpenError(t *testing.T) {
 	// returns without panicking.
 	got := codexScanSessionTokens(home, sessID, "")
 	_ = got
+}
+
+// ---------------------------------------------------------------------------
+// Codex session-file resolution + token scanner + usage stats coverage
+// (relocated from coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestFindCodexSessionFile_LocatesFile constructs the nested sessions
+// directory and verifies findCodexSessionFile finds it.
+func TestFindCodexSessionFile_LocatesFile(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessID := "abc-123"
+	path := filepath.Join(dir, "rollout-2026-05-11-"+sessID+".jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := findCodexSessionFile(home, sessID)
+	if got != path {
+		t.Errorf("findCodexSessionFile = %q, want %q", got, path)
+	}
+}
+
+func TestFindCodexSessionFile_EmptyID(t *testing.T) {
+	if got := findCodexSessionFile(t.TempDir(), ""); got != "" {
+		t.Errorf("expected empty for missing session id, got %q", got)
+	}
+}
+
+func TestFindCodexSessionFile_NoMatch(t *testing.T) {
+	if got := findCodexSessionFile(t.TempDir(), "missing"); got != "" {
+		t.Errorf("expected empty for no match, got %q", got)
+	}
+}
+
+// TestResolveCodexModelFromJSONL parses a synthetic response_item entry.
+func TestResolveCodexModelFromJSONL(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessID := "sess-123"
+	path := filepath.Join(dir, "rollout-2026-05-11-"+sessID+".jsonl")
+	lines := []string{
+		`{"type":"event_msg","payload":{"type":"task_started"}}`,
+		`{"type":"response_item","payload":{"type":"response","model":"gpt-5"}}`,
+		`{"type":"response_item","payload":{"type":"response","model":"gpt-5.1"}}`,
+		`not-json`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveCodexModelFromJSONL(home, sessID)
+	if got != "gpt-5.1" {
+		t.Errorf("model = %q, want gpt-5.1 (last response wins)", got)
+	}
+}
+
+func TestResolveCodexModelFromJSONL_NoSession(t *testing.T) {
+	if got := resolveCodexModelFromJSONL(t.TempDir(), "missing"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// TestCodexAccumulateTokenEntry table-drives the per-line accumulator.
+func TestCodexAccumulateTokenEntry(t *testing.T) {
+	cases := []struct {
+		name     string
+		line     string
+		after    time.Time
+		wantIn   int
+		wantOut  int
+		wantMsgs int
+	}{
+		{
+			name:     "valid token_count adds to metrics",
+			line:     `{"type":"event_msg","timestamp":"2026-05-11T12:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":20,"cached_input_tokens":5,"reasoning_output_tokens":2}}}}`,
+			wantIn:   10,
+			wantOut:  20,
+			wantMsgs: 1,
+		},
+		{
+			name: "non-event_msg ignored",
+			line: `{"type":"response_item","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":99,"output_tokens":99}}}}`,
+		},
+		{
+			name: "missing info ignored",
+			line: `{"type":"event_msg","payload":{"type":"token_count","info":null}}`,
+		},
+		{
+			name: "missing last_token_usage ignored",
+			line: `{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":null}}}`,
+		},
+		{
+			name: "non-token_count payload ignored",
+			line: `{"type":"event_msg","payload":{"type":"task_started"}}`,
+		},
+		{
+			name: "malformed JSON ignored",
+			line: `not-json`,
+		},
+		{
+			name:  "after-cutoff entry skipped",
+			line:  `{"type":"event_msg","timestamp":"2026-05-11T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7}}}}`,
+			after: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m SessionTokenMetrics
+			codexAccumulateTokenEntry([]byte(tc.line), tc.after, &m)
+			if m.InputTokens != tc.wantIn {
+				t.Errorf("InputTokens = %d, want %d", m.InputTokens, tc.wantIn)
+			}
+			if m.OutputTokens != tc.wantOut {
+				t.Errorf("OutputTokens = %d, want %d", m.OutputTokens, tc.wantOut)
+			}
+			if m.MessageCount != tc.wantMsgs {
+				t.Errorf("MessageCount = %d, want %d", m.MessageCount, tc.wantMsgs)
+			}
+		})
+	}
+}
+
+// TestCodexScanSessionTokens_AggregatesAcrossLines drives the full
+// codexScanSessionTokens path with synthetic session files.
+func TestCodexScanSessionTokens_AggregatesAcrossLines(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".codex", "sessions", "2026", "05", "11")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessID := "scan-test"
+	path := filepath.Join(dir, "rollout-2026-05-11-"+sessID+".jsonl")
+	lines := []string{
+		`{"type":"event_msg","timestamp":"2026-05-11T11:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":200,"cached_input_tokens":50,"reasoning_output_tokens":5}}}}`,
+		`{"type":"event_msg","timestamp":"2026-05-11T13:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"output_tokens":2,"cached_input_tokens":3,"reasoning_output_tokens":4}}}}`,
+		`{"type":"event_msg","timestamp":"bad-ts","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":9}}}}`,
+		// Line missing token_count substring is short-circuited.
+		`{"type":"event_msg","payload":{"type":"other"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No timestamp filter — sums all valid token_count lines (3 of them, since
+	// the unparseable-ts line still accumulates: parseJSONLTimestamp returns
+	// !ok which is treated as "no after constraint").
+	got := codexScanSessionTokens(home, sessID, "")
+	if got.MessageCount < 2 {
+		t.Errorf("MessageCount = %d, want >= 2", got.MessageCount)
+	}
+	if got.InputTokens < 101 {
+		t.Errorf("InputTokens = %d, want >= 101", got.InputTokens)
+	}
+
+	// With cutoff at noon: the 13:00 entry contributes plus any with an
+	// unparseable timestamp (whose after-check is skipped by design).
+	gotFiltered := codexScanSessionTokens(home, sessID, "2026-05-11T12:00:00Z")
+	if gotFiltered.MessageCount < 1 {
+		t.Errorf("filtered MessageCount = %d, want >= 1", gotFiltered.MessageCount)
+	}
+	if gotFiltered.InputTokens < 1 {
+		t.Errorf("filtered InputTokens = %d, want >= 1", gotFiltered.InputTokens)
+	}
+}
+
+func TestCodexScanSessionTokens_MissingSession(t *testing.T) {
+	got := codexScanSessionTokens(t.TempDir(), "missing-id", "")
+	if got.InputTokens != 0 || got.MessageCount != 0 {
+		t.Errorf("expected zero metrics for missing session, got %+v", got)
+	}
+}
+
+func TestScanJSONLForLastModel_MissingFile(t *testing.T) {
+	got := scanJSONLForLastModel("/no/such/file", func([]byte) string { return "x" })
+	if got != "" {
+		t.Errorf("expected empty for missing file, got %q", got)
+	}
+}
+
+func TestScanJSONLForLastModel_KeepsLastNonEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "f.jsonl")
+	content := "alpha\nbeta\n\n\ngamma\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := scanJSONLForLastModel(path, func(line []byte) string {
+		return strings.TrimSpace(string(line))
+	})
+	if got != "gamma" {
+		t.Errorf("got %q, want gamma", got)
+	}
+}
+
+// TestCodexReadUsageStats_TooManyEntriesKeepsTail mirrors the claude tail
+// behaviour and ensures the >10-entry branch is exercised.
+func TestCodexReadUsageStats_TooManyEntriesKeepsTail(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, ".codex")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for i := 0; i < 15; i++ {
+		b.WriteString(`{"id":"s` + itoa(i) + `","thread_name":"t` + itoa(i) + `","updated_at":"2026-05-11T00:00:00Z"}`)
+		b.WriteString("\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "session_index.jsonl"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stats := codexReadUsageStats(tmp)
+	if stats == nil {
+		t.Fatal("nil stats")
+	}
+	if stats.TotalSessions != 15 {
+		t.Errorf("TotalSessions = %d, want 15", stats.TotalSessions)
+	}
+	if len(stats.RecentSessions) != 10 {
+		t.Errorf("RecentSessions tail length = %d, want 10", len(stats.RecentSessions))
+	}
 }

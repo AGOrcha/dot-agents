@@ -86,3 +86,35 @@ func TestEnsureUnderRulesScopeTree_RootItself(t *testing.T) {
 		t.Errorf("expected root itself to validate, got %v", err)
 	}
 }
+
+// TestEnsureUnderRulesScopeTreeRejectsOutside covers the negative branch of
+// EnsureUnderRulesScopeTree (relocated from coverage_gap_test.go).
+func TestEnsureUnderRulesScopeTreeRejectsOutside(t *testing.T) {
+	tmp := t.TempDir()
+	good := filepath.Join(tmp, "rules", "global", "x.md")
+	if err := EnsureUnderRulesScopeTree(tmp, "global", good); err != nil {
+		t.Errorf("expected path under tree to pass, got %v", err)
+	}
+	bad := filepath.Join(tmp, "elsewhere", "x.md")
+	if err := EnsureUnderRulesScopeTree(tmp, "global", bad); err == nil {
+		t.Error("expected error for path outside tree")
+	}
+}
+
+// TestResolveCanonicalRuleFileNotFound exercises rules.go missing branches
+// (relocated from coverage_gap_test.go).
+func TestResolveCanonicalRuleFileMissing(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := ResolveCanonicalRuleFile(tmp, "global", "missing"); err == nil {
+		t.Error("expected error for missing rule")
+	}
+	if _, err := ResolveCanonicalRuleFile(tmp, "global", ""); err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+func TestListCanonicalRuleFilesMissing(t *testing.T) {
+	if _, err := ListCanonicalRuleFiles(t.TempDir(), "global"); err == nil {
+		t.Error("expected error for missing scope dir")
+	}
+}

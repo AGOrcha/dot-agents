@@ -76,3 +76,95 @@ func TestResolveCanonicalSettingsFile_NotFound(t *testing.T) {
 		t.Error("expected error for missing file")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// MCP/settings canonical resolver coverage (relocated from coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestEnsureUnderMCPScopeTreeRejectsOutside covers the negative branch.
+func TestEnsureUnderMCPScopeTreeRejectsOutside(t *testing.T) {
+	tmp := t.TempDir()
+	good := filepath.Join(tmp, "mcp", "proj", "x.json")
+	if err := EnsureUnderMCPScopeTree(tmp, "proj", good); err != nil {
+		t.Errorf("expected ok, got %v", err)
+	}
+	bad := filepath.Join(tmp, "other", "x.json")
+	if err := EnsureUnderMCPScopeTree(tmp, "proj", bad); err == nil {
+		t.Error("expected error for outside path")
+	}
+}
+
+// TestListCanonicalMCPFilesAndSettingsFiles covers the listing helpers and
+// filename filters.
+func TestListCanonicalMCPFilesAndSettings(t *testing.T) {
+	tmp := t.TempDir()
+	mkfile := func(p, s string) {
+		full := filepath.Join(tmp, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(s), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkfile("mcp/proj/a.json", "{}")
+	mkfile("mcp/proj/.dotfile.json", "{}")
+	mkfile("mcp/proj/c.txt", "skip")
+	if err := os.MkdirAll(filepath.Join(tmp, "mcp", "proj", "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListCanonicalMCPFiles(tmp, "proj")
+	if err != nil {
+		t.Fatalf("list mcp: %v", err)
+	}
+	if len(got) != 1 || got[0].BaseName != "a.json" {
+		t.Errorf("got %+v, want one entry [a.json]", got)
+	}
+
+	mkfile("settings/proj/cursor.json", "{}")
+	mkfile("settings/proj/cursorignore", "ign")
+	mkfile("settings/proj/random.md", "skip")
+	mkfile("settings/proj/.dotfile", "skip")
+	gotS, err := ListCanonicalSettingsFiles(tmp, "proj")
+	if err != nil {
+		t.Fatalf("list settings: %v", err)
+	}
+	if len(gotS) != 2 {
+		t.Errorf("got %+v, want 2 (cursor.json + cursorignore)", gotS)
+	}
+
+	// Missing dir
+	if _, err := ListCanonicalMCPFiles(tmp, "nonexistent"); err == nil {
+		t.Error("expected error for missing scope")
+	}
+}
+
+// TestResolveCanonicalMCPFile_NotFound exercises the error branch.
+func TestResolveCanonicalMCPFile_NotFound(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := ResolveCanonicalMCPFile(tmp, "proj", "mcp"); err == nil {
+		t.Error("expected error for missing file")
+	}
+	if _, err := ResolveCanonicalMCPFile(tmp, "proj", ""); err == nil {
+		t.Error("expected error for empty name")
+	}
+}
+
+func TestResolveCanonicalSettingsFile_Found(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "settings", "global")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "cursor.json")
+	if err := os.WriteFile(src, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveCanonicalSettingsFile(tmp, "global", "cursor")
+	if err != nil {
+		t.Fatalf("ResolveCanonicalSettingsFile: %v", err)
+	}
+	if got.SourcePath != src {
+		t.Errorf("source %q, want %q", got.SourcePath, src)
+	}
+}

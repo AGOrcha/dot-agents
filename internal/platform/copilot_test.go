@@ -3,7 +3,10 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestCopilotSharedTargetIntentsPopulated drives the skills+agents combination.
@@ -80,5 +83,163 @@ func TestCopilotCreateMCPLinks_NoSource(t *testing.T) {
 	// .vscode/mcp.json should NOT exist.
 	if _, err := os.Lstat(filepath.Join(repo, ".vscode", "mcp.json")); !os.IsNotExist(err) {
 		t.Error("expected no mcp.json")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Copilot legacy + canonical hook fanout + instructions src + RemoveLinks
+// (relocated from coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestCopilotLegacyHookFanoutBuilds wires up a legacy `.json` hooks directory
+// and asserts copilot's createProjectHookFiles emits fanout files.
+func TestCopilotLegacyHookFanoutBuilds(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(agentsHome, "hooks", "proj", "session-banner.json")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"x"}]}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createProjectHookFiles("proj", repo, agentsHome); err != nil {
+		t.Fatalf("createProjectHookFiles: %v", err)
+	}
+	out := filepath.Join(repo, ".github", "hooks", "session-banner.json")
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("expected fanout file at %s: %v", out, err)
+	}
+
+	// Removing should clear the fanout via legacy entries.
+	if err := NewCopilot().RemoveLinks("proj", repo); err != nil {
+		t.Fatalf("RemoveLinks: %v", err)
+	}
+}
+
+// TestCopilotCanonicalHookFanout drives the canonical-bundle code path with
+// HOOK.yaml under hooks/proj/<name>/.
+func TestCopilotCanonicalHookFanout(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createProjectHookFiles("proj", repo, agentsHome); err != nil {
+		t.Fatalf("createProjectHookFiles canonical: %v", err)
+	}
+	out := filepath.Join(repo, ".github", "hooks", "prompt-log.json")
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("expected canonical fanout at %s: %v", out, err)
+	}
+}
+
+// TestCopilotResolveInstructionsSrcFallbackPath drives the rules.md fallback
+// branch.
+func TestCopilotResolveInstructionsSrcFallback(t *testing.T) {
+	tmp := t.TempDir()
+	rules := filepath.Join(tmp, "rules", "global")
+	if err := os.MkdirAll(rules, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rules, "rules.md"), []byte("# rules\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCopilot().(*copilot)
+	got := c.resolveInstructionsSrc("proj", tmp)
+	if !strings.HasSuffix(got, "rules.md") {
+		t.Errorf("expected rules.md fallback, got %q", got)
+	}
+
+	// Missing → empty.
+	if got := c.resolveInstructionsSrc("proj", filepath.Join(tmp, "no-such")); got != "" {
+		t.Errorf("expected empty for missing rules, got %q", got)
+	}
+}
+
+// TestCopilotResolveInstructionsSrcDirectCopilotInstructions covers the
+// preferred (copilot-instructions.md) branch.
+func TestCopilotResolveInstructionsSrcDirectFile(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "rules", "proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "copilot-instructions.md")
+	if err := os.WriteFile(src, []byte("# copilot\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCopilot().(*copilot)
+	if got := c.resolveInstructionsSrc("proj", tmp); got != src {
+		t.Errorf("got %q, want %q", got, src)
+	}
+}
+
+// TestCopilotRemoveLinksFullSweep wires Copilot remove against a seeded
+// shared-target layout to drive removeAgentLinks and removeHookLinks.
+func TestCopilotRemoveLinksFullSweep(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Agent symlink.
+	src := filepath.Join(agentsHome, "agents", "proj", "reviewer.agent.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(repo, ".github", "agents", "reviewer.agent.md")
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, src, dst)
+	// Hooks dir with a stale entry.
+	hookSrc := filepath.Join(agentsHome, "hooks", "proj", "abc.json")
+	if err := os.MkdirAll(filepath.Dir(hookSrc), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hookSrc, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	hookDst := filepath.Join(repo, ".github", "hooks", "abc.json")
+	if err := os.MkdirAll(filepath.Dir(hookDst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, hookSrc, hookDst)
+
+	if err := NewCopilot().RemoveLinks("proj", repo); err != nil {
+		t.Fatalf("RemoveLinks: %v", err)
+	}
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		t.Error("agent symlink should be removed")
+	}
+	if _, err := os.Lstat(hookDst); !os.IsNotExist(err) {
+		t.Error("hook symlink should be removed")
 	}
 }

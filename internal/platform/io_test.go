@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,4 +135,80 @@ func withRemoveError(t *testing.T, want string) *fakePlatformIO {
 func withWriteFileError(t *testing.T, want string) *fakePlatformIO {
 	t.Helper()
 	return newFakeIOWriteFileError(want)
+}
+
+// ---------------------------------------------------------------------------
+// Frontmatter / agent body reader coverage (relocated from coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestReadFrontmatterEdgeCases exercises the frontmatter parser.
+func TestReadFrontmatterEdgeCases(t *testing.T) {
+	tmp := t.TempDir()
+	cases := []struct {
+		name    string
+		content string
+		want    map[string]string
+	}{
+		{
+			name:    "no-frontmatter",
+			content: "# heading\nbody\n",
+			want:    map[string]string{},
+		},
+		{
+			name:    "valid-frontmatter",
+			content: "---\nname: x\ndesc: y\n---\nbody\n",
+			want:    map[string]string{"name": "x", "desc": "y"},
+		},
+		{
+			name:    "unterminated-frontmatter",
+			content: "---\nname: x\nno-end\n",
+			want:    map[string]string{"name": "x", "no-end": ""},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(tmp, tc.name+".md")
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			got := readFrontmatter(path)
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("[%s] %s = %q, want %q", tc.name, k, got[k], v)
+				}
+			}
+		})
+	}
+	if got := readFrontmatter(filepath.Join(tmp, "no-such")); got != nil {
+		t.Errorf("expected nil for missing file, got %+v", got)
+	}
+}
+
+// TestReadAgentBody covers the frontmatter-stripping reader.
+func TestReadAgentBody(t *testing.T) {
+	tmp := t.TempDir()
+	cases := []struct {
+		content, want string
+		hasErr        bool
+	}{
+		{"---\nname: x\n---\n\nbody\n", "body\n", false},
+		{"plain body\n", "plain body\n", false},
+		{"---\nno-end", "---\nno-end", false},
+	}
+	for i, tc := range cases {
+		p := filepath.Join(tmp, "x"+itoa(i)+".md")
+		if err := os.WriteFile(p, []byte(tc.content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := readAgentBody(p)
+		if (err != nil) != tc.hasErr {
+			t.Errorf("[%d] err=%v hasErr=%v", i, err, tc.hasErr)
+		}
+		if got != tc.want {
+			t.Errorf("[%d] got %q, want %q", i, got, tc.want)
+		}
+	}
+	if _, err := readAgentBody("/no/such"); err == nil {
+		t.Error("expected error for missing file")
+	}
 }

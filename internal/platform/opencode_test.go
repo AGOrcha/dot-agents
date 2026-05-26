@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // TestOpencodeCreateLinks_FullFixture drives ensureUserAgents + settings link.
@@ -86,5 +88,51 @@ func TestOpencodeScanSessionTokensMissingDB(t *testing.T) {
 	got := opencodeScanSessionTokens(t.TempDir(), "")
 	if got.InputTokens != 0 {
 		t.Errorf("expected zero for missing db, got %+v", got)
+	}
+}
+
+// TestOpencodeRemoveLinksFullPath exercises every branch of opencode.RemoveLinks
+// (relocated from coverage_gap_test.go).
+func TestOpencodeRemoveLinksFullPath(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed an agent file under the agents home, then symlink it into the repo.
+	src := filepath.Join(agentsHome, "agents", "proj", "reviewer.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(repo, ".opencode", "agent", "reviewer.md")
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, src, dst)
+	// Skills symlink.
+	skillSrc := filepath.Join(agentsHome, "skills", "proj", "x")
+	if err := os.MkdirAll(skillSrc, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillDst := filepath.Join(repo, ".agents", "skills", "x")
+	if err := os.MkdirAll(filepath.Dir(skillDst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, skillSrc, skillDst)
+
+	if err := NewOpenCode().RemoveLinks("proj", repo); err != nil {
+		t.Fatalf("RemoveLinks: %v", err)
+	}
+	if _, err := os.Lstat(dst); !os.IsNotExist(err) {
+		t.Error("agent symlink should be removed")
+	}
+	if _, err := os.Lstat(skillDst); !os.IsNotExist(err) {
+		t.Error("skill symlink should be removed")
 	}
 }
