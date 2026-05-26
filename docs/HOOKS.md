@@ -203,6 +203,48 @@ proof that the session should be blocked. Any future blocking use must
 document a deterministic invariant, a portable vendor contract, and an
 acceptable noise / privacy boundary.
 
+### Lifecycle gates and the hook-outcome telemetry channel
+
+The lifecycle gates wired above emit a structured per-iteration record
+every time they fire. The schema for that record lives at
+[`schemas/workflow-hook-outcome.schema.json`](../schemas/workflow-hook-outcome.schema.json)
+(also bundled under
+[`commands/workflow/static/workflow-hook-outcome.schema.json`](../commands/workflow/static/workflow-hook-outcome.schema.json)
+for the validator pipeline). It defines the durable contract for the
+fields a gate may emit — `sentinel_id`, `rule_id`, `lifecycle_point`,
+`intervention_class`, `result` (`allow` / `advise` / `remediate`),
+`correlation_id` — and explicitly forbids transcript bodies, raw tool
+output, free-text failure messages, and other unbounded fields. The
+validator rejects any record that includes a disallowed field.
+
+Gates never write the sidecar directly. They invoke
+`da workflow hook-outcome write`, which resolves the current iteration N
+from `.agents/active/loop-state.md` and appends to
+`.agents/active/iteration-log/iter-N.hook-outcomes.yaml`. Append-only
+semantics and `(sentinel_id, rule_id, lifecycle_point,
+intervention_class)` idempotency mean a recoverable platform retry of
+the same gate does not inflate the record list. If no active iteration
+exists, the write exits 0 silently with an stderr advisory — the
+session-only outcome is dropped from scoring rather than orphaned.
+
+The sidecars feed the `hook_outcomes` signal of the outcome-scoring
+rubric. The rubric document explains how `prevent_before_action` and
+`remediate_at_stop` records collapse into a per-iteration sub-score, how
+pre-action and terminal records sharing a `(correlation_id, rule_id)`
+deduplicate to the more severe result, and which rule-ID families
+contribute to v1 scoring versus which are persisted as audit-only
+observation. See:
+
+- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+  for the sub-score mapping and dedup rule.
+- [`OUTCOME_SCORING_RUBRIC.md` — approved rules](OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
+  for the rule-ID families that vote in v1.
+- [`OUTCOME_SCORING_RUBRIC.md` — sidecar retention](OUTCOME_SCORING_RUBRIC.md#hook-outcome-sidecar-retention-r15)
+  for the indefinite-retention policy and the deferred admin-only prune
+  command spec.
+- [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b)
+  for why `post_tool_use` records do not contribute to v1 scoring.
+
 ## `when_events` — multi-event hook bundles
 
 A `HOOK.yaml` manifest may target several lifecycle events with a single
