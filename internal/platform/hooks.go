@@ -587,202 +587,143 @@ func specHasMatcher(spec HookSpec) bool {
 	return len(spec.MatchTools) > 0
 }
 
-func claudeEventName(spec HookSpec) (string, bool) {
-	if override := strings.TrimSpace(platformOverride(spec, "claude").Event); override != "" {
+// mapEventName is the shared canonical→vendor lookup that all per-platform
+// *EventName functions delegate to. Per-platform tables live in package
+// scope (claudeEventTable, codexEventTable, ...) and document which
+// canonical HookSpec.When values that vendor supports plus the exact
+// vendor-side event name string. Honors operator-supplied per-platform
+// event overrides before consulting the table (D2 explicit-opt-in
+// posture).
+func mapEventName(spec HookSpec, platform string, table map[string]string) (string, bool) {
+	if override := strings.TrimSpace(platformOverride(spec, platform).Event); override != "" {
 		return override, true
 	}
-	switch spec.When {
-	case "pre_tool_use":
-		return "PreToolUse", true
-	case "post_tool_use":
-		return "PostToolUse", true
-	case "post_tool_use_failure":
-		return "PostToolUseFailure", true
-	case "notification":
-		return "Notification", true
-	case "user_prompt_submit":
-		return "UserPromptSubmit", true
-	case "session_start":
-		return "SessionStart", true
-	case "session_end":
-		return "SessionEnd", true
-	case "stop":
-		return "Stop", true
-	case "subagent_start":
-		return "SubagentStart", true
-	case "subagent_stop":
-		return "SubagentStop", true
-	case "pre_compact":
-		return "PreCompact", true
-	case "post_compact":
-		// P1b R6.4: post_compact is a new canonical When value introduced
-		// alongside pre_compact; Claude documents PostCompact as the
-		// matching terminal-of-compaction event.
-		return "PostCompact", true
-	case "permission_request":
-		return "PermissionRequest", true
-	default:
-		return "", false
-	}
+	v, ok := table[spec.When]
+	return v, ok
 }
 
-func codexEventName(spec HookSpec) (string, bool) {
-	if override := strings.TrimSpace(platformOverride(spec, "codex").Event); override != "" {
-		return override, true
-	}
-	switch spec.When {
-	case "session_start":
-		return "SessionStart", true
-	case "pre_tool_use":
-		return "PreToolUse", true
-	case "post_tool_use":
-		return "PostToolUse", true
-	case "user_prompt_submit":
-		return "UserPromptSubmit", true
-	case "stop":
-		return "Stop", true
-	case "subagent_stop":
-		// P1a gate-critical: Codex documents SubagentStop as a distinct
-		// terminal event for subagent runs.
-		return "SubagentStop", true
-	case "subagent_start":
-		// P1b R6.1: Codex documents SubagentStart for forward parity with
-		// the SubagentStop terminal event.
-		return "SubagentStart", true
-	case "pre_compact":
-		// P1b R6.1: Codex documents PreCompact for compaction lifecycle.
-		return "PreCompact", true
-	case "post_compact":
-		// P1b R6.1: Codex documents PostCompact paired with PreCompact.
-		return "PostCompact", true
-	case "permission_request":
-		// P1b R6.1: Codex documents PermissionRequest for permission
-		// elicitation events.
-		return "PermissionRequest", true
-	default:
-		return "", false
-	}
+// claudeEventTable encodes the canonical→Claude event mapping. Entries
+// added in p1b (R6.4 post_compact) sit alongside the pre-existing surface.
+var claudeEventTable = map[string]string{
+	"pre_tool_use":          "PreToolUse",
+	"post_tool_use":         "PostToolUse",
+	"post_tool_use_failure": "PostToolUseFailure",
+	"notification":          "Notification",
+	"user_prompt_submit":    "UserPromptSubmit",
+	"session_start":         "SessionStart",
+	"session_end":           "SessionEnd",
+	"stop":                  "Stop",
+	"subagent_start":        "SubagentStart",
+	"subagent_stop":         "SubagentStop",
+	"pre_compact":           "PreCompact",
+	// P1b R6.4: post_compact is a new canonical When value introduced
+	// alongside pre_compact; Claude documents PostCompact as the matching
+	// terminal-of-compaction event.
+	"post_compact":       "PostCompact",
+	"permission_request": "PermissionRequest",
 }
 
-func cursorEventName(spec HookSpec) (string, bool) {
-	if override := strings.TrimSpace(platformOverride(spec, "cursor").Event); override != "" {
-		return override, true
-	}
-	switch spec.When {
-	case "pre_tool_use":
-		return "preToolUse", true
-	case "post_tool_use":
-		// P1b R6.3: Cursor exposes postToolUse; treated as observation
-		// input per D9, not an implicit gate.
-		return "postToolUse", true
-	case "post_tool_use_failure":
-		// P1b R6.3: Cursor exposes postToolUseFailure; observation input
-		// per D9.
-		return "postToolUseFailure", true
-	case "user_prompt_submit":
-		return "beforeSubmitPrompt", true
-	case "stop":
-		return "stop", true
-	case "session_start":
-		return "sessionStart", true
-	case "session_end":
-		// P1b R6.3: Cursor exposes sessionEnd as a terminal session event.
-		return "sessionEnd", true
-	case "subagent_stop":
-		// P1a gate-critical: Cursor exposes subagentStop as a sibling
-		// terminal event to `stop`.
-		return "subagentStop", true
-	case "subagent_start":
-		// P1b R6.3: Cursor exposes subagentStart for delegated worker
-		// lifecycle bootstrap.
-		return "subagentStart", true
-	case "pre_compact":
-		// P1b R6.3: Cursor exposes preCompact for continuity advice
-		// before context compaction.
-		return "preCompact", true
+// codexEventTable encodes the canonical→Codex event mapping. Entries
+// without comments are documented vendor events; commented entries note
+// the spec rule that pulled them in.
+var codexEventTable = map[string]string{
+	"session_start":      "SessionStart",
+	"pre_tool_use":       "PreToolUse",
+	"post_tool_use":      "PostToolUse",
+	"user_prompt_submit": "UserPromptSubmit",
+	"stop":               "Stop",
+	// P1a gate-critical: Codex documents SubagentStop as a distinct
+	// terminal event for subagent runs.
+	"subagent_stop": "SubagentStop",
+	// P1b R6.1: Codex parity additions paired with the existing surface.
+	"subagent_start":     "SubagentStart",
+	"pre_compact":        "PreCompact",
+	"post_compact":       "PostCompact",
+	"permission_request": "PermissionRequest",
+}
+
+// cursorEventTable encodes the canonical→Cursor mapping. Cursor exposes
+// the widest surface (D3 + R6.3); the "wider-surface" entries are
+// canonical When values that only Cursor implements today — other
+// platforms' tables omit them and fall through to ok=false.
+var cursorEventTable = map[string]string{
+	"pre_tool_use": "preToolUse",
+	// P1b R6.3: Cursor exposes postToolUse / postToolUseFailure as
+	// observation inputs per D9, not implicit gates.
+	"post_tool_use":         "postToolUse",
+	"post_tool_use_failure": "postToolUseFailure",
+	"user_prompt_submit":    "beforeSubmitPrompt",
+	"stop":                  "stop",
+	"session_start":         "sessionStart",
+	// P1b R6.3: Cursor exposes sessionEnd as a terminal session event.
+	"session_end": "sessionEnd",
+	// P1a gate-critical: Cursor exposes subagentStop as a sibling
+	// terminal event to `stop`.
+	"subagent_stop": "subagentStop",
+	// P1b R6.3: subagentStart / preCompact added for delegated-worker
+	// bootstrap and continuity-advice parity.
+	"subagent_start": "subagentStart",
+	"pre_compact":    "preCompact",
 	// Cursor-wider surface (D3 + R6.3): fine-grained events promoted to
 	// canonical HookSpec.When values even though only Cursor implements
 	// them today. Other platform mappers no-op for these values until
 	// vendors document equivalents.
-	case "before_shell_execution":
-		return "beforeShellExecution", true
-	case "after_shell_execution":
-		return "afterShellExecution", true
-	case "before_mcp_execution":
-		return "beforeMCPExecution", true
-	case "after_mcp_execution":
-		return "afterMCPExecution", true
-	case "before_read_file":
-		return "beforeReadFile", true
-	case "after_file_edit":
-		return "afterFileEdit", true
-	case "after_agent_response":
-		return "afterAgentResponse", true
-	case "after_agent_thought":
-		return "afterAgentThought", true
-	case "workspace_open":
-		return "workspaceOpen", true
-	case "before_tab_file_read":
-		return "beforeTabFileRead", true
-	case "after_tab_file_edit":
-		return "afterTabFileEdit", true
-	default:
-		return "", false
-	}
+	"before_shell_execution": "beforeShellExecution",
+	"after_shell_execution":  "afterShellExecution",
+	"before_mcp_execution":   "beforeMCPExecution",
+	"after_mcp_execution":    "afterMCPExecution",
+	"before_read_file":       "beforeReadFile",
+	"after_file_edit":        "afterFileEdit",
+	"after_agent_response":   "afterAgentResponse",
+	"after_agent_thought":    "afterAgentThought",
+	"workspace_open":         "workspaceOpen",
+	"before_tab_file_read":   "beforeTabFileRead",
+	"after_tab_file_edit":    "afterTabFileEdit",
+}
+
+// copilotEventTable encodes the canonical→Copilot mapping. The `stop`
+// entry maps to `agentStop` per Copilot's vendor docs — see comment on
+// the entry for the gate-critical note.
+var copilotEventTable = map[string]string{
+	"session_start": "sessionStart",
+	// P1b R6.2: Copilot exposes sessionEnd as the terminal session event.
+	"session_end":        "sessionEnd",
+	"user_prompt_submit": "userPromptSubmitted",
+	"pre_tool_use":       "preToolUse",
+	// P1b R6.2: Copilot exposes postToolUse / postToolUseFailure as
+	// observation inputs per D9.
+	"post_tool_use":         "postToolUse",
+	"post_tool_use_failure": "postToolUseFailure",
+	// P1b R6.2: Copilot surface additions.
+	"notification":       "notification",
+	"permission_request": "permissionRequest",
+	"pre_compact":        "preCompact",
+	// P1a gate-critical: GitHub Copilot's terminal event for the
+	// top-level agent is `agentStop`, NOT `stop`. The Claude/Cursor
+	// `stop` name does not exist in Copilot's event surface.
+	"stop":           "agentStop",
+	"subagent_stop":  "subagentStop",
+	"subagent_start": "subagentStart",
+	// P1b R6.2 + R6.4: Copilot exposes errorOccurred as a runtime error
+	// notification event; error_occurred is a new canonical When value
+	// introduced in this task.
+	"error_occurred": "errorOccurred",
+}
+
+func claudeEventName(spec HookSpec) (string, bool) {
+	return mapEventName(spec, "claude", claudeEventTable)
+}
+
+func codexEventName(spec HookSpec) (string, bool) {
+	return mapEventName(spec, "codex", codexEventTable)
+}
+
+func cursorEventName(spec HookSpec) (string, bool) {
+	return mapEventName(spec, "cursor", cursorEventTable)
 }
 
 func copilotEventName(spec HookSpec) (string, bool) {
-	if override := strings.TrimSpace(platformOverride(spec, "copilot").Event); override != "" {
-		return override, true
-	}
-	switch spec.When {
-	case "session_start":
-		return "sessionStart", true
-	case "session_end":
-		// P1b R6.2: Copilot exposes sessionEnd as the terminal session
-		// event.
-		return "sessionEnd", true
-	case "user_prompt_submit":
-		return "userPromptSubmitted", true
-	case "pre_tool_use":
-		return "preToolUse", true
-	case "post_tool_use":
-		// P1b R6.2: Copilot exposes postToolUse; observation input per D9.
-		return "postToolUse", true
-	case "post_tool_use_failure":
-		// P1b R6.2: Copilot exposes postToolUseFailure; observation input
-		// per D9.
-		return "postToolUseFailure", true
-	case "notification":
-		// P1b R6.2: Copilot exposes notification events.
-		return "notification", true
-	case "permission_request":
-		// P1b R6.2: Copilot exposes permissionRequest for permission
-		// elicitation.
-		return "permissionRequest", true
-	case "pre_compact":
-		// P1b R6.2: Copilot exposes preCompact for continuity advice
-		// before context compaction.
-		return "preCompact", true
-	case "stop":
-		// P1a gate-critical: GitHub Copilot's terminal event for the
-		// top-level agent is `agentStop`, NOT `stop`. The Claude/Cursor
-		// `stop` name does not exist in Copilot's event surface.
-		return "agentStop", true
-	case "subagent_stop":
-		return "subagentStop", true
-	case "subagent_start":
-		// P1b R6.2: Copilot exposes subagentStart for delegated worker
-		// lifecycle bootstrap.
-		return "subagentStart", true
-	case "error_occurred":
-		// P1b R6.2 + R6.4: Copilot exposes errorOccurred as a runtime
-		// error notification event; error_occurred is a new canonical
-		// When value introduced in this task.
-		return "errorOccurred", true
-	default:
-		return "", false
-	}
+	return mapEventName(spec, "copilot", copilotEventTable)
 }
 
 func renderClaudeHookSettings(specs []HookSpec) ([]byte, error) {

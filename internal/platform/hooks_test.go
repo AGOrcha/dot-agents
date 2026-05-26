@@ -511,6 +511,69 @@ func TestCanonicalWhenEventMapping(t *testing.T) {
 	}
 }
 
+// assertManyHookConfigRenders unmarshals the rendered bytes and asserts
+// every (jsonPath, value) pair. Shared by codex/cursor/claude render-path
+// subtests so the marshal+unmarshal+assert boilerplate exists once.
+func assertManyHookConfigRenders(t *testing.T, content []byte, pairs map[string]string) {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(content, &payload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
+	}
+	for path, want := range pairs {
+		assertHookJSONPathEquals(t, payload, path, want)
+	}
+}
+
+// assertCodexConfigRenders renders specs through renderCodexHookConfig and
+// asserts every (jsonPath → want) pair on the parsed JSON payload.
+func assertCodexConfigRenders(t *testing.T, specs []HookSpec, pairs map[string]string) {
+	t.Helper()
+	content, err := renderCodexHookConfig(specs)
+	if err != nil {
+		t.Fatalf("renderCodexHookConfig: %v", err)
+	}
+	assertManyHookConfigRenders(t, content, pairs)
+}
+
+// assertCursorConfigRenders mirrors assertCodexConfigRenders for cursor.
+func assertCursorConfigRenders(t *testing.T, specs []HookSpec, pairs map[string]string) {
+	t.Helper()
+	content, err := renderCursorHookConfig(specs)
+	if err != nil {
+		t.Fatalf("renderCursorHookConfig: %v", err)
+	}
+	assertManyHookConfigRenders(t, content, pairs)
+}
+
+// assertClaudeSettingsRenders mirrors assertCodexConfigRenders for claude.
+func assertClaudeSettingsRenders(t *testing.T, specs []HookSpec, pairs map[string]string) {
+	t.Helper()
+	content, err := renderClaudeHookSettings(specs)
+	if err != nil {
+		t.Fatalf("renderClaudeHookSettings: %v", err)
+	}
+	assertManyHookConfigRenders(t, content, pairs)
+}
+
+// assertCopilotHookFileRenders calls renderCopilotHookFile and asserts the
+// resulting (name, JSON path) shape. wantPairs are matched on the parsed
+// JSON payload; wantName is matched on the file basename.
+func assertCopilotHookFileRenders(t *testing.T, spec HookSpec, wantName string, wantPairs map[string]string) {
+	t.Helper()
+	name, content, ok, err := renderCopilotHookFile(spec)
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected copilot render to include the spec")
+	}
+	if name != wantName {
+		t.Fatalf("file name = %q, want %q", name, wantName)
+	}
+	assertManyHookConfigRenders(t, content, wantPairs)
+}
+
 // TestCanonicalWhenEventMappingRenders is the render-path assertion: each
 // new mapped canonical event must produce a rendered entry under the
 // expected vendor key in the per-platform configuration shape, and each
@@ -518,90 +581,44 @@ func TestCanonicalWhenEventMapping(t *testing.T) {
 // when the hook is not RequiredOn that platform (fall-through per D2).
 func TestCanonicalWhenEventMappingRenders(t *testing.T) {
 	t.Run("codex subagent_start renders under SubagentStart", func(t *testing.T) {
-		specs := []HookSpec{{
-			Name:    "bootstrap",
-			When:    "subagent_start",
-			Command: "/tmp/bootstrap.sh",
-		}}
-		content, err := renderCodexHookConfig(specs)
-		if err != nil {
-			t.Fatalf("renderCodexHookConfig: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
-		}
-		assertHookJSONPathEquals(t, payload, "hooks.SubagentStart.0.hooks.0.command", "/tmp/bootstrap.sh")
 		// Per R6.5 the Codex matcher whitelist for SubagentStart is NOT
 		// extended in p1b — verify the rendered matcher is empty.
-		assertHookJSONPathEquals(t, payload, "hooks.SubagentStart.0.matcher", "")
+		assertCodexConfigRenders(t,
+			[]HookSpec{{Name: "bootstrap", When: "subagent_start", Command: "/tmp/bootstrap.sh"}},
+			map[string]string{
+				"hooks.SubagentStart.0.hooks.0.command": "/tmp/bootstrap.sh",
+				"hooks.SubagentStart.0.matcher":         "",
+			},
+		)
 	})
 
 	t.Run("cursor before_shell_execution renders under beforeShellExecution", func(t *testing.T) {
-		specs := []HookSpec{{
-			Name:    "bash-guard",
-			When:    "before_shell_execution",
-			Command: "/tmp/guard.sh",
-		}}
-		content, err := renderCursorHookConfig(specs)
-		if err != nil {
-			t.Fatalf("renderCursorHookConfig: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
-		}
-		assertHookJSONPathEquals(t, payload, "hooks.beforeShellExecution.0.command", "/tmp/guard.sh")
+		assertCursorConfigRenders(t,
+			[]HookSpec{{Name: "bash-guard", When: "before_shell_execution", Command: "/tmp/guard.sh"}},
+			map[string]string{"hooks.beforeShellExecution.0.command": "/tmp/guard.sh"},
+		)
 	})
 
 	t.Run("copilot error_occurred renders under errorOccurred", func(t *testing.T) {
-		name, content, ok, err := renderCopilotHookFile(HookSpec{
-			Name:    "error-log",
-			When:    "error_occurred",
-			Command: "/tmp/log.sh",
-		})
-		if err != nil {
-			t.Fatalf("renderCopilotHookFile: %v", err)
-		}
-		if !ok {
-			t.Fatal("expected copilot render to include error_occurred")
-		}
-		if name != "error-log.json" {
-			t.Fatalf("file name = %q, want error-log.json", name)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
-		}
-		assertHookJSONPathEquals(t, payload, "hooks.errorOccurred.0.bash", "/tmp/log.sh")
+		assertCopilotHookFileRenders(t,
+			HookSpec{Name: "error-log", When: "error_occurred", Command: "/tmp/log.sh"},
+			"error-log.json",
+			map[string]string{"hooks.errorOccurred.0.bash": "/tmp/log.sh"},
+		)
 	})
 
 	t.Run("claude post_compact renders under PostCompact", func(t *testing.T) {
-		specs := []HookSpec{{
-			Name:    "post-compact-log",
-			When:    "post_compact",
-			Command: "/tmp/post.sh",
-		}}
-		content, err := renderClaudeHookSettings(specs)
-		if err != nil {
-			t.Fatalf("renderClaudeHookSettings: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(content, &payload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(content))
-		}
-		assertHookJSONPathEquals(t, payload, "hooks.PostCompact.0.hooks.0.command", "/tmp/post.sh")
+		assertClaudeSettingsRenders(t,
+			[]HookSpec{{Name: "post-compact-log", When: "post_compact", Command: "/tmp/post.sh"}},
+			map[string]string{"hooks.PostCompact.0.hooks.0.command": "/tmp/post.sh"},
+		)
 	})
 
 	t.Run("cursor wider-surface value is omitted from codex and copilot renders", func(t *testing.T) {
 		// after_file_edit is Cursor-only; renders for other platforms
 		// must omit the spec entirely (no fall-through forced because
 		// nothing in RequiredOn names them).
-		spec := HookSpec{
-			Name:    "edit-watch",
-			When:    "after_file_edit",
-			Command: "/tmp/watch.sh",
-		}
+		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh"}
 		codex, err := renderCodexHookConfig([]HookSpec{spec})
 		if err != nil {
 			t.Fatalf("renderCodexHookConfig: %v", err)
@@ -625,12 +642,7 @@ func TestCanonicalWhenEventMappingRenders(t *testing.T) {
 	t.Run("required-on platform errors when canonical value unsupported", func(t *testing.T) {
 		// Sanity: if an operator marks a Cursor-only event RequiredOn
 		// codex, the render must error per D2's explicit-opt-in posture.
-		spec := HookSpec{
-			Name:       "edit-watch",
-			When:       "after_file_edit",
-			Command:    "/tmp/watch.sh",
-			RequiredOn: []string{"codex"},
-		}
+		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh", RequiredOn: []string{"codex"}}
 		_, err := renderCodexHookConfig([]HookSpec{spec})
 		if err == nil {
 			t.Fatal("expected error when cursor-only event is required on codex")
