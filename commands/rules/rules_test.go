@@ -1,4 +1,4 @@
-package commands
+package rules
 
 import (
 	"errors"
@@ -9,7 +9,37 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/spf13/cobra"
 )
+
+// CLIError mirrors the parent-package CLIError shape used for hint-aware
+// errors. We redeclare it locally instead of importing the parent commands/
+// package so the rules subpackage stays import-cycle-free. The real CLIError
+// in commands/ has the same Hints field; tests here only assert that the
+// returned error wraps a *CLIError-shaped value.
+type CLIError struct {
+	Message string
+	Hints   []string
+}
+
+func (e *CLIError) Error() string { return e.Message }
+
+// testDeps returns a Deps with cobra positional validators + the hint
+// helpers that produce *CLIError-shaped errors. Mirrors agents/skills test
+// helpers so seam tests behave identically.
+func testDeps(dryRun, yes, force bool) Deps {
+	return Deps{
+		Flags:          GlobalFlags{DryRun: dryRun, Yes: yes, Force: force},
+		ErrorWithHints: func(msg string, hints ...string) error { return &CLIError{Message: msg, Hints: hints} },
+		UsageError:     func(msg string, hints ...string) error { return &CLIError{Message: msg, Hints: hints} },
+		MaximumNArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return cobra.MaximumNArgs(n)
+		},
+		ExactArgsWithHints: func(n int, hints ...string) cobra.PositionalArgs {
+			return cobra.ExactArgs(n)
+		},
+	}
+}
 
 func TestRunRulesList_ListsRuleFiles(t *testing.T) {
 	tmp := t.TempDir()
@@ -24,8 +54,8 @@ Some content.
 `
 	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "test-rule.md", []byte(ruleContent))
 
-	if err := runRulesList("global"); err != nil {
-		t.Fatalf("runRulesList: %v", err)
+	if err := RunList(testDeps(false, false, false), "global"); err != nil {
+		t.Fatalf("RunList: %v", err)
 	}
 }
 
@@ -39,8 +69,8 @@ func TestRunRulesList_EmptyScope(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	// Empty dir — should print info message, not error.
-	if err := runRulesList("global"); err != nil {
-		t.Fatalf("runRulesList with empty scope: %v", err)
+	if err := RunList(testDeps(false, false, false), "global"); err != nil {
+		t.Fatalf("RunList with empty scope: %v", err)
 	}
 }
 
@@ -53,8 +83,8 @@ func TestRunRulesList_MissingScope(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	// No rules dir at all — should print info message, not error.
-	if err := runRulesList("nonexistent"); err != nil {
-		t.Fatalf("runRulesList with missing scope: %v", err)
+	if err := RunList(testDeps(false, false, false), "nonexistent"); err != nil {
+		t.Fatalf("RunList with missing scope: %v", err)
 	}
 }
 
@@ -70,15 +100,8 @@ description: A useful rule
 `
 	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "my-rule.md", []byte(ruleContent))
 
-	deps := rulesDeps{
-		errorWithHints:     ErrorWithHints,
-		usageError:         UsageError,
-		maxArgsWithHints:   MaximumNArgsWithHints,
-		exactArgsWithHints: ExactArgsWithHints,
-	}
-
-	if err := runRulesShow(deps, "global", "my-rule.md"); err != nil {
-		t.Fatalf("runRulesShow: %v", err)
+	if err := RunShow(testDeps(false, false, false), "global", "my-rule.md"); err != nil {
+		t.Fatalf("RunShow: %v", err)
 	}
 }
 
@@ -91,14 +114,7 @@ func TestRunRulesShow_NotFound(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := rulesDeps{
-		errorWithHints:     ErrorWithHints,
-		usageError:         UsageError,
-		maxArgsWithHints:   MaximumNArgsWithHints,
-		exactArgsWithHints: ExactArgsWithHints,
-	}
-
-	err := runRulesShow(deps, "global", "nonexistent")
+	err := RunShow(testDeps(false, false, false), "global", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing rule")
 	}
@@ -153,9 +169,9 @@ func TestExtractRuleFrontmatterDescription(t *testing.T) {
 			if err := os.WriteFile(p, []byte(tc.content), 0644); err != nil {
 				t.Fatal(err)
 			}
-			got := extractRuleFrontmatterDescription(p)
+			got := ExtractRuleFrontmatterDescription(p)
 			if got != tc.want {
-				t.Errorf("extractRuleFrontmatterDescription = %q, want %q", got, tc.want)
+				t.Errorf("ExtractRuleFrontmatterDescription = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -163,18 +179,8 @@ func TestExtractRuleFrontmatterDescription(t *testing.T) {
 
 func TestExtractRuleFrontmatterDescription_MissingFile(t *testing.T) {
 	tmp := t.TempDir()
-	if got := extractRuleFrontmatterDescription(filepath.Join(tmp, "missing.md")); got != "" {
+	if got := ExtractRuleFrontmatterDescription(filepath.Join(tmp, "missing.md")); got != "" {
 		t.Errorf("missing file should yield empty string, got %q", got)
-	}
-}
-
-func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
-	return rulesDeps{
-		Flags:              cmdutil.CanonicalCmdFlags{DryRun: dryRun, Yes: yes, Force: force},
-		errorWithHints:     ErrorWithHints,
-		usageError:         UsageError,
-		maxArgsWithHints:   MaximumNArgsWithHints,
-		exactArgsWithHints: ExactArgsWithHints,
 	}
 }
 
@@ -184,9 +190,8 @@ func TestRunRulesRemove_DryRun_KeepsFile(t *testing.T) {
 	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "keep.md", []byte("---\ndescription: keep\n---\nbody"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := makeRulesDeps(true, false, false)
-	if err := runRulesRemove(deps, "global", "keep.md"); err != nil {
-		t.Fatalf("runRulesRemove dry-run: %v", err)
+	if err := RunRemove(testDeps(true, false, false), "global", "keep.md"); err != nil {
+		t.Fatalf("RunRemove dry-run: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "global", "keep.md")); err != nil {
 		t.Fatalf("dry-run should preserve file: %v", err)
@@ -199,9 +204,8 @@ func TestRunRulesRemove_Force_DeletesFile(t *testing.T) {
 	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "gone.md", []byte("body"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := makeRulesDeps(false, true, false)
-	if err := runRulesRemove(deps, "global", "gone.md"); err != nil {
-		t.Fatalf("runRulesRemove force: %v", err)
+	if err := RunRemove(testDeps(false, true, false), "global", "gone.md"); err != nil {
+		t.Fatalf("RunRemove force: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(agentsHome, "rules", "global", "gone.md")); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed; stat err = %v", err)
@@ -216,8 +220,7 @@ func TestRunRulesRemove_NotFoundEmitsHint(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := makeRulesDeps(false, true, false)
-	err := runRulesRemove(deps, "global", "missing.md")
+	err := RunRemove(testDeps(false, true, false), "global", "missing.md")
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -238,8 +241,7 @@ func TestFindRuleSpec_EmptyName(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := makeRulesDeps(false, false, false)
-	if _, err := findRuleSpec(deps, agentsHome, "global", "   "); err == nil {
+	if _, err := FindRuleSpec(testDeps(false, false, false), agentsHome, "global", "   "); err == nil {
 		t.Fatal("expected usage error for empty name")
 	}
 }
@@ -250,31 +252,12 @@ func TestFindRuleSpec_Found(t *testing.T) {
 	testutil.WriteScopeFile(t, agentsHome, "rules", "global", "alpha.md", []byte("x"))
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	deps := makeRulesDeps(false, false, false)
-	spec, err := findRuleSpec(deps, agentsHome, "global", "alpha.md")
+	spec, err := FindRuleSpec(testDeps(false, false, false), agentsHome, "global", "alpha.md")
 	if err != nil {
-		t.Fatalf("findRuleSpec: %v", err)
+		t.Fatalf("FindRuleSpec: %v", err)
 	}
 	if spec == nil || spec.BaseName != "alpha.md" {
 		t.Errorf("unexpected spec: %+v", spec)
-	}
-}
-
-func TestNewRulesCmd_Metadata(t *testing.T) {
-	cmd := NewRulesCmd()
-	if cmd.Use != "rules" {
-		t.Errorf("Use = %q", cmd.Use)
-	}
-	wantSubs := map[string]bool{"list": false, "show": false, "remove": false}
-	for _, c := range cmd.Commands() {
-		if _, ok := wantSubs[c.Name()]; ok {
-			wantSubs[c.Name()] = true
-		}
-	}
-	for name, found := range wantSubs {
-		if !found {
-			t.Errorf("missing subcommand: %s", name)
-		}
 	}
 }
 
