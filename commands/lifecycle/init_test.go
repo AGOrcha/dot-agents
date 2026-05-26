@@ -1345,3 +1345,385 @@ func TestLinkCursorGlobalHooks_MissingSrcIsNoop(t *testing.T) {
 		t.Error("no hardlink should have been created without a cursor.json src")
 	}
 }
+
+// ---------- NewInitCmd (t13a) ----------
+//
+// NewInitCmd is the t13a-introduced constructor that absorbs what the
+// parent commands/init.go shim used to do — building the cobra literal
+// and wiring SetInitFlags + InitUsageErrorFn from Deps. The tests below
+// pin its contract so t13b's root.go rewire can rely on the documented
+// shape.
+
+// testInitDeps returns a lifecycle.Deps suitable for NewInitCmd tests:
+// Force/DryRun/Yes flow through deps.Flags so wireInitSeamsFromDeps
+// closures route them to InitForceFn / InitDryRunFn / InitYesFn. A
+// sentinel UsageError lets the rejection test confirm the deps-supplied
+// formatter (not the in-package default) actually fired.
+func testInitDeps(flags GlobalFlags) Deps {
+	return Deps{
+		Flags:        flags,
+		UsageError:   func(msg string, hints ...string) error { return fmt.Errorf("usage-err: %s", msg) },
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+}
+
+// TestNewInitCmd_BuildsCobraWithCorrectMetadata pins the constructor's
+// cobra surface so t13b's root.go rewire can rely on Use/Short/Long/
+// Example all coming straight from the InitCmd* constants. Without this,
+// a constructor regression that drops a field would fail only in CLI
+// integration tests.
+func TestNewInitCmd_BuildsCobraWithCorrectMetadata(t *testing.T) {
+	defer resetInitSeams()
+	cmd := NewInitCmd(testInitDeps(GlobalFlags{}))
+	if cmd == nil {
+		t.Fatal("NewInitCmd returned nil")
+	}
+	if cmd.Use != InitCmdUse {
+		t.Errorf("Use = %q, want %q", cmd.Use, InitCmdUse)
+	}
+	if cmd.Short != InitCmdShort {
+		t.Errorf("Short = %q, want %q", cmd.Short, InitCmdShort)
+	}
+	if cmd.Long != InitCmdLong {
+		t.Errorf("Long mismatch")
+	}
+	if cmd.Example != InitCmdExample {
+		t.Errorf("Example mismatch")
+	}
+	if cmd.RunE == nil {
+		t.Error("RunE should be wired")
+	}
+	if cmd.Args == nil {
+		t.Error("Args validator should be wired")
+	}
+}
+
+// TestNewInitCmd_WiresSeamsFromDepsFlags pins the construction-time
+// wireInitSeamsFromDeps call: every InitForceFn / InitDryRunFn /
+// InitYesFn must observe the deps.Flags value at call time. Without
+// this, a regression that drops one of the SetInitFlags closures would
+// silently revert that flag to the package default (false), and only
+// production runs with that specific flag set would notice.
+func TestNewInitCmd_WiresSeamsFromDepsFlags(t *testing.T) {
+	defer resetInitSeams()
+	// Snapshot the package-var Fns so the wireInitSeamsFromDeps overwrite
+	// doesn't leak across tests.
+	origForce, origDryRun, origYes := InitForceFn, InitDryRunFn, InitYesFn
+	origUsage := InitUsageErrorFn
+	defer func() {
+		InitForceFn = origForce
+		InitDryRunFn = origDryRun
+		InitYesFn = origYes
+		InitUsageErrorFn = origUsage
+	}()
+
+	deps := testInitDeps(GlobalFlags{Force: true, DryRun: true, Yes: true})
+	_ = NewInitCmd(deps)
+
+	if !InitForceFn() {
+		t.Error("NewInitCmd did not wire InitForceFn from deps.Flags.Force")
+	}
+	if !InitDryRunFn() {
+		t.Error("NewInitCmd did not wire InitDryRunFn from deps.Flags.DryRun")
+	}
+	if !InitYesFn() {
+		t.Error("NewInitCmd did not wire InitYesFn from deps.Flags.Yes")
+	}
+	// Sentinel UsageError must have replaced the default.
+	err := InitUsageErrorFn("rejected", "hint A")
+	if err == nil || !strings.Contains(err.Error(), "usage-err: rejected") {
+		t.Errorf("InitUsageErrorFn not routed through deps.UsageError; got %v", err)
+	}
+}
+
+// TestNewInitCmd_FlagsFnTakesPrecedenceOverDepsFlags pins the FlagsFn
+// contract: when both deps.FlagsFn and deps.Flags are set, the closure
+// wins. This matters because cobra mutates upstream flag state AFTER the
+// constructor returns; a static Deps.Flags snapshot taken at construction
+// time would be stale. T13b's worker passes a closure over commands.Flags
+// to get live reads on each invocation.
+func TestNewInitCmd_FlagsFnTakesPrecedenceOverDepsFlags(t *testing.T) {
+	defer resetInitSeams()
+	origForce, origDryRun, origYes := InitForceFn, InitDryRunFn, InitYesFn
+	defer func() {
+		InitForceFn = origForce
+		InitDryRunFn = origDryRun
+		InitYesFn = origYes
+	}()
+
+	live := GlobalFlags{Force: true}
+	deps := Deps{
+		Flags:        GlobalFlags{Force: false, DryRun: true, Yes: true}, // snapshot — must be ignored
+		FlagsFn:      func() GlobalFlags { return live },
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+	_ = NewInitCmd(deps)
+
+	if !InitForceFn() {
+		t.Error("FlagsFn().Force should win over deps.Flags.Force")
+	}
+	if InitDryRunFn() {
+		t.Error("FlagsFn().DryRun (false) should win over deps.Flags.DryRun (true)")
+	}
+	if InitYesFn() {
+		t.Error("FlagsFn().Yes (false) should win over deps.Flags.Yes (true)")
+	}
+
+	// Mutate the live snapshot and re-read through the wired closure —
+	// the change must be observed (otherwise FlagsFn was captured-by-value
+	// somewhere and t13b's live-read contract breaks).
+	live = GlobalFlags{Force: false, DryRun: true, Yes: true}
+	if InitForceFn() {
+		t.Error("post-mutation Force should now be false via live FlagsFn")
+	}
+	if !InitDryRunFn() {
+		t.Error("post-mutation DryRun should now be true via live FlagsFn")
+	}
+	if !InitYesFn() {
+		t.Error("post-mutation Yes should now be true via live FlagsFn")
+	}
+}
+
+// TestNewInitCmd_PreservesDefaultUsageErrorWhenDepsOmits covers the
+// nil-UsageError branch in wireInitSeamsFromDeps. Lifecycle-only unit
+// tests construct Deps without a hint formatter (testStatusDeps /
+// testDoctorDeps both supply one; testInitDeps could be called with the
+// field zeroed for a regression). The default InitUsageErrorFn must
+// survive so the in-package formatter still produces a readable error.
+func TestNewInitCmd_PreservesDefaultUsageErrorWhenDepsOmits(t *testing.T) {
+	defer resetInitSeams()
+	origUsage := InitUsageErrorFn
+	defer func() { InitUsageErrorFn = origUsage }()
+
+	// Force the package var to a sentinel so we can detect whether
+	// NewInitCmd overwrote it.
+	sentinel := func(msg string, hints ...string) error {
+		return fmt.Errorf("sentinel: %s", msg)
+	}
+	InitUsageErrorFn = sentinel
+
+	deps := Deps{
+		Flags:        GlobalFlags{},
+		UsageError:   nil, // explicit: caller omits the formatter
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+	}
+	_ = NewInitCmd(deps)
+
+	err := InitUsageErrorFn("x")
+	if err == nil || !strings.Contains(err.Error(), "sentinel: x") {
+		t.Errorf("nil deps.UsageError should preserve existing InitUsageErrorFn; got %v", err)
+	}
+}
+
+// TestNewInitCmd_RunEAppliesGlobalsAndRunsRunInit drives the RunE
+// closure end to end: applyDepsToGlobals must run (pin Version copy),
+// the runtime seams must point at deps, and the moved runInit body must
+// fire successfully under --dry-run. Without this, a regression that
+// drops the wrapper's applyDepsToGlobals call would leave deps.Version
+// unobserved in production (init's WriteRefreshToAgentsRC is install-
+// only so init wouldn't notice; we pin it here to guard the contract
+// the install/doctor constructors also depend on).
+func TestNewInitCmd_RunEAppliesGlobalsAndRunsRunInit(t *testing.T) {
+	defer resetInitSeams()
+
+	// Snapshot package vars so the RunE write doesn't leak.
+	origVersion, origCommit, origDescribe := Version, Commit, Describe
+	defer func() {
+		Version = origVersion
+		Commit = origCommit
+		Describe = origDescribe
+	}()
+	origForce, origDryRun, origYes := InitForceFn, InitDryRunFn, InitYesFn
+	origUsage := InitUsageErrorFn
+	defer func() {
+		InitForceFn = origForce
+		InitDryRunFn = origDryRun
+		InitYesFn = origYes
+		InitUsageErrorFn = origUsage
+	}()
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	deps := Deps{
+		Flags:        GlobalFlags{DryRun: true, Yes: true},
+		UsageError:   func(msg string, hints ...string) error { return fmt.Errorf("u:%s", msg) },
+		ExampleBlock: func(lines ...string) string { return strings.Join(lines, "\n") },
+		Version:      "1.2.3-test",
+		Commit:       "deadbeef",
+		Describe:     "v1.2.3-test-0-gdeadbeef",
+	}
+
+	cmd := NewInitCmd(deps)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	if Version != "1.2.3-test" {
+		t.Errorf("applyDepsToGlobals did not copy Version; got %q", Version)
+	}
+	if Commit != "deadbeef" {
+		t.Errorf("applyDepsToGlobals did not copy Commit; got %q", Commit)
+	}
+	if Describe != "v1.2.3-test-0-gdeadbeef" {
+		t.Errorf("applyDepsToGlobals did not copy Describe; got %q", Describe)
+	}
+	// --dry-run + --yes path takes the early "DRY RUN - no changes made"
+	// return without creating ~/.agents — confirms the dry-run flag
+	// observed by InitDryRunFn() (which reads through wireInitSeamsFromDeps).
+	if _, err := os.Stat(filepath.Join(tmp, ".agents")); !os.IsNotExist(err) {
+		t.Errorf("dry-run init should not have created ~/.agents")
+	}
+}
+
+// TestNewInitCmd_RejectsPositionalArgs is the negative-path check that
+// the cobra Args validator (sourced from InitNoArgs(InitCmdNoArgsHint))
+// rejects extra positional input. Mirrors the parent shim's
+// TestNewInitCmd_ShimRejectsPositionalArgs but at the lifecycle-package
+// constructor level so a t13b regression that drops the Args wiring is
+// caught here.
+func TestNewInitCmd_RejectsPositionalArgs(t *testing.T) {
+	defer resetInitSeams()
+	cmd := NewInitCmd(testInitDeps(GlobalFlags{}))
+	if err := cmd.Args(cmd, nil); err != nil {
+		t.Errorf("zero args should be accepted, got %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"unexpected"}); err == nil {
+		t.Error("positional arg should be rejected")
+	}
+}
+
+// ---------- applyDepsToGlobals (t13a) ----------
+//
+// applyDepsToGlobals is the helper NewInstallCmd / NewDoctorCmd /
+// NewInitCmd's RunE wrapper calls before delegating to the moved RunE
+// body. Its precedence + no-op-safe behavior is the contract t13b's
+// worker (and parent shims today) rely on.
+
+// TestApplyDepsToGlobals_FlagsFnPrecedence pins the FlagsFn-wins-over-
+// Flags rule. Without this, a regression that flips the precedence
+// would silently break t13b's live-read pattern (the static Deps.Flags
+// snapshot taken at root composition time would shadow the live closure).
+func TestApplyDepsToGlobals_FlagsFnPrecedence(t *testing.T) {
+	saved := Flags
+	defer func() { Flags = saved }()
+
+	live := GlobalFlags{Force: true, Yes: true}
+	deps := Deps{
+		Flags:   GlobalFlags{DryRun: true},
+		FlagsFn: func() GlobalFlags { return live },
+	}
+	applyDepsToGlobals(deps)
+
+	if Flags.Force != true || Flags.Yes != true {
+		t.Errorf("FlagsFn values should populate Flags; got %+v", Flags)
+	}
+	if Flags.DryRun != false {
+		t.Error("Deps.Flags.DryRun should be ignored when FlagsFn is set")
+	}
+}
+
+// TestApplyDepsToGlobals_FallsBackToDepsFlagsWhenFlagsFnNil pins the
+// other half of the precedence rule: when FlagsFn is nil, Deps.Flags
+// is used. This is the path lifecycle's existing tests already exercise
+// implicitly via the parent shim's syncLifecycleGlobals; the test makes
+// the contract explicit at the helper level so a refactor that drops
+// the fallback branch fails here.
+func TestApplyDepsToGlobals_FallsBackToDepsFlagsWhenFlagsFnNil(t *testing.T) {
+	saved := Flags
+	defer func() { Flags = saved }()
+
+	deps := Deps{
+		Flags:   GlobalFlags{Force: true, DryRun: true, Verbose: true, Yes: true},
+		FlagsFn: nil,
+	}
+	applyDepsToGlobals(deps)
+	if Flags != deps.Flags {
+		t.Errorf("expected Flags == deps.Flags, got %+v vs %+v", Flags, deps.Flags)
+	}
+}
+
+// TestApplyDepsToGlobals_EmptyStringsPreservePackageDefaults pins the
+// "" -> skip write contract for Version/Commit/Describe. Without this,
+// a regression that always overwrites would clobber the compile-time
+// build-info defaults ("dev"/"" per refresh.go) whenever a caller
+// passed the zero-value Deps.
+func TestApplyDepsToGlobals_EmptyStringsPreservePackageDefaults(t *testing.T) {
+	savedV, savedC, savedD := Version, Commit, Describe
+	defer func() {
+		Version = savedV
+		Commit = savedC
+		Describe = savedD
+	}()
+
+	Version = "1.0.0"
+	Commit = "abc123"
+	Describe = "v1.0.0"
+
+	applyDepsToGlobals(Deps{}) // every field zero
+	if Version != "1.0.0" || Commit != "abc123" || Describe != "v1.0.0" {
+		t.Errorf("empty Deps overwrote build-info vars; got V=%q C=%q D=%q",
+			Version, Commit, Describe)
+	}
+}
+
+// TestApplyDepsToGlobals_NonEmptyStringsOverwrite pins the positive
+// side: non-empty Version/Commit/Describe propagate. Without this, a
+// regression that swaps the empty-check polarity would silently
+// ignore caller-supplied build info.
+func TestApplyDepsToGlobals_NonEmptyStringsOverwrite(t *testing.T) {
+	savedV, savedC, savedD := Version, Commit, Describe
+	defer func() {
+		Version = savedV
+		Commit = savedC
+		Describe = savedD
+	}()
+
+	deps := Deps{Version: "2.0.0", Commit: "feedface", Describe: "v2.0.0-1-gfeedface"}
+	applyDepsToGlobals(deps)
+	if Version != "2.0.0" || Commit != "feedface" || Describe != "v2.0.0-1-gfeedface" {
+		t.Errorf("non-empty values should overwrite; got V=%q C=%q D=%q",
+			Version, Commit, Describe)
+	}
+}
+
+// TestApplyDepsToGlobals_ErrorWithHintsNilPreserves pins the
+// ErrorWithHintsFn nil branch: when deps.ErrorWithHints is nil, the
+// existing package-var Fn survives. Lifecycle-only unit tests rely on
+// this — they construct Deps without an ErrorWithHints and expect the
+// default formatter to remain in place.
+func TestApplyDepsToGlobals_ErrorWithHintsNilPreserves(t *testing.T) {
+	saved := ErrorWithHintsFn
+	defer func() { ErrorWithHintsFn = saved }()
+
+	sentinel := func(msg string, hints ...string) error {
+		return fmt.Errorf("sentinel-ewh: %s", msg)
+	}
+	ErrorWithHintsFn = sentinel
+
+	applyDepsToGlobals(Deps{}) // ErrorWithHints nil
+
+	err := ErrorWithHintsFn("x")
+	if err == nil || !strings.Contains(err.Error(), "sentinel-ewh: x") {
+		t.Errorf("nil deps.ErrorWithHints should preserve package Fn; got %v", err)
+	}
+}
+
+// TestApplyDepsToGlobals_ErrorWithHintsNonNilOverwrites pins the
+// positive side: a deps-supplied formatter replaces the package var.
+func TestApplyDepsToGlobals_ErrorWithHintsNonNilOverwrites(t *testing.T) {
+	saved := ErrorWithHintsFn
+	defer func() { ErrorWithHintsFn = saved }()
+
+	deps := Deps{
+		ErrorWithHints: func(msg string, hints ...string) error {
+			return fmt.Errorf("from-deps: %s", msg)
+		},
+	}
+	applyDepsToGlobals(deps)
+	err := ErrorWithHintsFn("y")
+	if err == nil || !strings.Contains(err.Error(), "from-deps: y") {
+		t.Errorf("non-nil deps.ErrorWithHints should overwrite; got %v", err)
+	}
+}

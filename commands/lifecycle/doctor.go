@@ -53,6 +53,15 @@ func (StdDoctorConfigLoader) LoadConfig() (*config.Config, error) { return confi
 // NewStatusCmd / NewInstallCmd Deps-injection pattern: lifecycle does not
 // import the parent commands/ package (cycle), so Args/Example helpers and
 // the UsageError formatter come in via Deps.
+//
+// The RunE wrapper calls applyDepsToGlobals(deps) before delegating so the
+// moved doctor body (which reads lifecycle.Flags / .ErrorWithHintsFn package
+// vars directly) sees live state from the caller. After t13a this absorbs
+// what the parent commands/doctor.go shim's syncLifecycleGlobals wrap used
+// to do — a t13b call site of the form
+// `lifecycle.NewDoctorCmd(buildLifecycleDeps())` works end-to-end without a
+// separate sync step. The existing parent shim's wrap remains compatible
+// because both syncs write the same values (idempotent).
 func NewDoctorCmd(deps Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
@@ -68,6 +77,7 @@ repositories, or partial setup on a new machine.`,
 		),
 		Args: deps.NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			applyDepsToGlobals(deps)
 			return runDoctor(cmd, args, StdDoctorConfigLoader{})
 		},
 	}

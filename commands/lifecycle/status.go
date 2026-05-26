@@ -181,6 +181,30 @@ func statusExampleBlock(lines ...string) string {
 // commands/status.go passes `func() bool { return commands.Flags.JSON }` so
 // the package-var seam stays at the root while lifecycle stays import-cycle
 // free. Tests can pass their own closure to exercise either path.
+//
+// ── t13a constructor-shape decision ────────────────────────────────────────
+//
+// NewStatusCmd retains the second jsonOutput func() bool argument (option (c)
+// in the t13a fold-back observation at .agents/active/fold-back/
+// t13a-respawn-lifecycle-shims-not-passthroughs.yaml) rather than folding it
+// into Deps. Rationale: the parent commands/status.go shim's RunE-override
+// reads Flags.JSON through the jsonFlag closure inside the commands package
+// so the globalflagcov static analyzer (which loads ./commands but not
+// ./commands/lifecycle) sees the Flags.JSON load it requires for handler
+// coverage. Threading jsonOutput through Deps would move that read into
+// lifecycle and silently drop the coverage. T13b's worker can pass
+// `lifecycle.NewStatusCmd(buildStatusDeps(), func() bool { return Flags.JSON })`
+// without further wrapping, or widen globalflagcov's load set to include
+// ./commands/lifecycle (preferred long-term — see t13 PR description). The
+// jsonOutput argument also lets tests exercise both JSON and text paths
+// without mutating any package var.
+//
+// NewStatusCmd intentionally does NOT call applyDepsToGlobals because the
+// moved status helpers do not read the lifecycle.Flags / .Version / .Commit /
+// .Describe / .ErrorWithHintsFn package vars — status only consumes Deps
+// directly (UsageError via statusNoArgsHint) plus the jsonOutput closure.
+// Install/doctor/init all sync because their moved RunE bodies read the
+// package vars; status does not.
 func NewStatusCmd(deps Deps, jsonOutput func() bool) *cobra.Command {
 	var audit bool
 	var agentFilter string

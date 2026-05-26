@@ -140,6 +140,87 @@ func RunInit(cmd *cobra.Command, args []string) error {
 	return runInit(cmd, args, stdInitDirMaker{})
 }
 
+// NewInitCmd builds the `da init` cobra command. Mirrors the
+// NewInstallCmd / NewDoctorCmd Deps-injection pattern so the t13b worker
+// can call `lifecycle.NewInitCmd(buildLifecycleDeps())` without any
+// further wiring. Added in t13a — before this, the parent
+// commands/init.go shim owned the cobra literal and used SetInitFlags +
+// InitUsageErrorFn package-var seam writes to repoint the per-init
+// getters at commands.Flags / commands.UsageError.
+//
+// Construction-time wiring:
+//
+//  1. SetInitFlags is called with closures over deps so InitForceFn /
+//     InitDryRunFn / InitYesFn read live state at RunE time (cobra
+//     parses flags AFTER constructor return; a value snapshot taken at
+//     construction would be stale). FlagsFn takes precedence over the
+//     Deps.Flags value, mirroring applyDepsToGlobals.
+//
+//  2. InitUsageErrorFn is repointed at deps.UsageError when non-nil so
+//     init's positional-arg rejection renders through commands.UsageError's
+//     formatted-hint UX. When deps.UsageError is nil (lifecycle-only unit
+//     tests that don't construct a hint formatter) the in-package default
+//     InitUsageErrorFn is preserved.
+//
+// The RunE wrapper additionally calls applyDepsToGlobals(deps) so
+// downstream helpers that read lifecycle.Flags / .ErrorWithHintsFn /
+// .Version / .Commit / .Describe (none for init today, but symmetric with
+// NewInstallCmd / NewDoctorCmd) observe the same Deps-derived state.
+//
+// Compatible with the existing parent commands/init.go shim, which sets
+// the same seams via SetInitFlags + direct InitUsageErrorFn assignment
+// before constructing its own cobra literal — t13b's shim deletion will
+// switch root.go to call NewInitCmd(buildLifecycleDeps()) directly and
+// drop the parent shim's manual wiring.
+func NewInitCmd(deps Deps) *cobra.Command {
+	wireInitSeamsFromDeps(deps)
+
+	cmd := &cobra.Command{
+		Use:     InitCmdUse,
+		Short:   InitCmdShort,
+		Long:    InitCmdLong,
+		Example: InitCmdExample,
+		Args:    InitNoArgs(InitCmdNoArgsHint),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Re-wire on every invocation in case the Deps closure mutated
+			// (defensive — production callers construct Deps once at root
+			// composition time, but tests can swap them between calls).
+			wireInitSeamsFromDeps(deps)
+			applyDepsToGlobals(deps)
+			return RunInit(cmd, args)
+		},
+	}
+	return cmd
+}
+
+// wireInitSeamsFromDeps installs SetInitFlags closures + repoints
+// InitUsageErrorFn from the supplied Deps. Used by NewInitCmd both at
+// construction time (so a caller that introspects InitForceFn before
+// RunE observes the wired value) and on every RunE invocation (defensive
+// against test mutation between calls).
+//
+// FlagsFn takes precedence over deps.Flags on each call (cobra mutates
+// the upstream flag state after constructor return; live reads are
+// required). When deps.UsageError is nil the in-package default
+// InitUsageErrorFn is preserved so lifecycle-only unit tests without a
+// hint formatter still produce a readable error.
+func wireInitSeamsFromDeps(deps Deps) {
+	live := func() GlobalFlags {
+		if deps.FlagsFn != nil {
+			return deps.FlagsFn()
+		}
+		return deps.Flags
+	}
+	SetInitFlags(
+		func() bool { return live().Force },
+		func() bool { return live().DryRun },
+		func() bool { return live().Yes },
+	)
+	if deps.UsageError != nil {
+		InitUsageErrorFn = deps.UsageError
+	}
+}
+
 // InitNoArgs is the exported Args validator for the init command,
 // delegating to the file-local initNoArgs implementation. Exported so
 // the shim can wire it into the cobra command literal.

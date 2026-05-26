@@ -95,6 +95,50 @@ func TestNewDoctorCmd_RunEClosureWiresStdDeps(t *testing.T) {
 	}
 }
 
+// TestNewDoctorCmd_RunEAppliesDepsToGlobals pins the t13a-introduced
+// RunE wrapper contract: applyDepsToGlobals must fire before runDoctor
+// so deps.FlagsFn / .Version (etc.) reach the lifecycle package vars
+// without the parent shim's syncLifecycleGlobals. Mirrors
+// TestNewInstallCmd_RunEAppliesDepsToGlobals at the doctor seat.
+//
+// Doctor's reportLinkHealth path reads Flags.Verbose / Flags.DryRun
+// directly through the moved body; we exercise the wrapper's sync by
+// passing FlagsFn that returns Verbose=true, then run RunE and assert
+// the package var was populated. The doctor body itself is hermetic
+// against an empty config so the test does not need to seed projects.
+func TestNewDoctorCmd_RunEAppliesDepsToGlobals(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	savedV := Version
+	Flags = GlobalFlags{}
+	Version = "sentinel-stale"
+	defer func() {
+		Flags = saved
+		Version = savedV
+	}()
+
+	deps := testDoctorDeps()
+	deps.FlagsFn = func() GlobalFlags { return GlobalFlags{Verbose: true} }
+	deps.Version = "1.0.0-doctor"
+
+	cmd := NewDoctorCmd(deps)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !Flags.Verbose {
+		t.Errorf("RunE wrapper did not propagate FlagsFn().Verbose; got %+v", Flags)
+	}
+	if Version != "1.0.0-doctor" {
+		t.Errorf("RunE wrapper did not propagate Version; got %q", Version)
+	}
+}
+
 func TestHasPluginPlatform(t *testing.T) {
 	cases := []struct {
 		name      string
