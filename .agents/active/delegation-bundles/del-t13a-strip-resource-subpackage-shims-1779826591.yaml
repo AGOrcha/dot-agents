@@ -1,0 +1,31 @@
+schema_version: 1
+delegation_id: del-t13a-strip-resource-subpackage-shims-1779826591
+plan_id: root-command-decomposition
+task_id: t13a-strip-resource-subpackage-shims
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T20:16:31Z"
+scope:
+    write_scope:
+        - commands/mcp.go
+        - commands/settings.go
+        - commands/rules.go
+        - commands/resource_parity_test.go
+        - commands/coverage_test.go
+        - commands/mcp_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
