@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/workflow-hook-sentinel.schema.json",
+  "title": "da workflow hook sentinel",
+  "description": "Schema for `.agents/active/hook-sentinels/<skill>-<run-id>.json`, written by `da workflow hook-sentinel write` at skill entry. Each enforced skill (iteration-close, isp, loop-worker) declares plan/task/agent context and expected artifacts so a downstream Stop/SubagentStop gate can validate them before allowing the agent to stop. `clear --run-id` on the success path archives the record under `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/`; no record is silently deleted in v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill",
+    "run_id",
+    "started_at",
+    "plan_id",
+    "task_id",
+    "agent_type"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version 1 — initial sentinel contract."
+    },
+    "skill": {
+      "type": "string",
+      "enum": ["iteration-close", "isp", "loop-worker"],
+      "description": "Enforced skill whose contract the gate will validate at stop/subagent-stop."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "description": "Caller-supplied run identifier; combined with skill to key the sentinel filename. Restricted to filename-safe characters."
+    },
+    "started_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$",
+      "description": "RFC3339 / RFC3339Nano timestamp recorded when the sentinel was written. `read --latest` selects the most recent value with filename as the deterministic tie-breaker."
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical plan id this sentinel binds to. Used by `clear` to compute the per-plan archive path under `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/`."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task id within the plan whose work is governed by this sentinel."
+    },
+    "agent_type": {
+      "type": "string",
+      "enum": ["main", "loop-worker"],
+      "description": "Caller's agent role. The loop-worker gate self-filters by reading this field (D6); non-loop-worker subagents exit 0 early when this is `main`."
+    },
+    "lifecycle_point": {
+      "type": "string",
+      "enum": ["skill_entry"],
+      "description": "Lifecycle moment at which the sentinel was emitted. v1 only ships `skill_entry`; later versions may introduce additional points without breaking the v1 enum because new values would arrive with a schema_version bump."
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Repo-relative paths the terminal gate MUST find on disk before allowing stop. Empty arrays are allowed for skills whose artifact list is computed dynamically by the gate."
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Skill-specific context. Omit fields that do not apply to the calling skill rather than assigning invented meaning.",
+      "properties": {
+        "git_head_at_start": {
+          "type": "string",
+          "description": "Git HEAD commit id captured by the CLI at sentinel-write time. Callers MUST NOT supply an untrusted replacement — `write` discards any caller-supplied value and re-resolves HEAD itself."
+        },
+        "write_scope": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Allowed repo-relative paths or globs. The loop-worker gate diffs subagent edits against this list."
+        },
+        "eligible_snapshot_loaded": {
+          "type": "boolean",
+          "description": "ISP gate signal: true when the orchestrator loaded the eligible-task snapshot from orchestrator-session-start; false means the ISP gate may need to verify a re-run of `workflow orient`."
+        },
+        "max_batch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ISP gate signal: declared maximum bundles to materialize this turn. 0 means unset/not applicable."
+        },
+        "trace_path_hint": {
+          "type": "string",
+          "description": "Optional caller-supplied hint to a readable transcript/trace path. Hook stdin remains authoritative when it provides a platform trace path (D7)."
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,6 @@ success_criteria: 'Introduce sentinel JSON schema v1 and `da workflow hook-senti
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: p0-worker
-status: active
+status: completed
 created_at: "2026-05-26T11:35:46Z"
-updated_at: "2026-05-26T11:35:46Z"
+updated_at: "2026-05-26T11:47:13Z"

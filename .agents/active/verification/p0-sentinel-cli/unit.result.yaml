@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p0-sentinel-cli
+parent_plan_id: loop-discipline-stop-hooks
+verifier_type: unit
+status: pass
+summary: 36 new hook-sentinel tests pass; full commands/workflow suite green under -race (20.86s)
+recorded_at: "2026-05-26T11:46:52Z"
+delegation_id: del-p0-sentinel-cli-1779795346
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/workflow -race -count=1
