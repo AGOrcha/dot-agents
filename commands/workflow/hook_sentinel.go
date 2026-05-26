@@ -46,15 +46,39 @@ var workflowHookSentinelSchemaJSON []byte
 // hook_sentinel_test.go swap them via t.Cleanup-scoped helpers to drive
 // the otherwise unreachable error branches (rename failure mid-publish,
 // stat collision races, malformed time fields read from disk, etc.).
-var (
-	osStat                     = os.Stat
-	osReadFile                 = os.ReadFile
-	osReadDir                  = os.ReadDir
-	osRename                   = os.Rename
-	osRemove                   = os.Remove
-	hookSentinelNow            = func() time.Time { return time.Now() }
-	hookSentinelResolveProject = currentWorkflowProject
-)
+// hookSentinelDeps is the narrow collaborator the hook-sentinel CLI needs
+// (interface-DI per docs/TEST_SEAMS.md; mirrors commands/review.go's
+// reviewDeps pattern). One interface covers the os-level fault injection
+// points (Stat/ReadFile/ReadDir/Rename/Remove), the workflow-project
+// resolver, and the clock. File-scoped — do not share with other
+// commands/workflow files.
+type hookSentinelDeps interface {
+	Now() time.Time
+	Stat(name string) (os.FileInfo, error)
+	ReadFile(name string) ([]byte, error)
+	ReadDir(name string) ([]os.DirEntry, error)
+	Rename(oldpath, newpath string) error
+	Remove(name string) error
+	ResolveProject() (workflowProjectRef, error)
+}
+
+// stdHookSentinelDeps is the production hookSentinelDeps backed by the os
+// package and currentWorkflowProject. Zero-value usable; tests construct
+// fakeHookSentinelDeps{} (see hook_sentinel_test.go) where each nil-func
+// field delegates to this default.
+type stdHookSentinelDeps struct{}
+
+func (stdHookSentinelDeps) Now() time.Time                        { return time.Now() }
+func (stdHookSentinelDeps) Stat(name string) (os.FileInfo, error) { return os.Stat(name) }
+func (stdHookSentinelDeps) ReadFile(name string) ([]byte, error)  { return os.ReadFile(name) }
+func (stdHookSentinelDeps) ReadDir(name string) ([]os.DirEntry, error) {
+	return os.ReadDir(name)
+}
+func (stdHookSentinelDeps) Rename(o, n string) error { return os.Rename(o, n) }
+func (stdHookSentinelDeps) Remove(name string) error { return os.Remove(name) }
+func (stdHookSentinelDeps) ResolveProject() (workflowProjectRef, error) {
+	return currentWorkflowProject()
+}
 
 var (
 	workflowHookSentinelCompiled     *jsonschema.Schema
@@ -198,7 +222,7 @@ func hookSentinelArchiveDir(projectPath, planID string, dateUTC string) string {
 // temp-file-then-rename Unix atomic-write pattern so a concurrent stop hook
 // can never read a partial JSON document. Returns an error on collision
 // (v1 has no overwrite flag).
-func writeHookSentinelAtomically(projectPath string, doc *HookSentinelDoc) (string, error) {
+func writeHookSentinelAtomically(hsd hookSentinelDeps, projectPath string, doc *HookSentinelDoc) (string, error) {
 	if doc == nil {
 		return "", fmt.Errorf("hook sentinel: nil document")
 	}
@@ -224,7 +248,7 @@ func writeHookSentinelAtomically(projectPath string, doc *HookSentinelDoc) (stri
 	// atomic rename below (os.Rename on POSIX replaces the target, so the
 	// stat-then-rename pattern is the explicit reject point — not a TOCTOU
 	// guarantee, but the documented v1 behaviour).
-	if _, statErr := osStat(target); statErr == nil {
+	if _, statErr := hsd.Stat(target); statErr == nil {
 		return "", fmt.Errorf("hook sentinel already exists at %s (v1 has no overwrite flag; call `clear` to archive it first)", target)
 	}
 
@@ -232,16 +256,16 @@ func writeHookSentinelAtomically(projectPath string, doc *HookSentinelDoc) (stri
 	if err := osWriteFile(tmp, body, 0o644); err != nil {
 		return "", fmt.Errorf("write hook sentinel temp: %w", err)
 	}
-	if err := osRename(tmp, target); err != nil {
-		_ = osRemove(tmp)
+	if err := hsd.Rename(tmp, target); err != nil {
+		_ = hsd.Remove(tmp)
 		return "", fmt.Errorf("publish hook sentinel: %w", err)
 	}
 	return target, nil
 }
 
 // readHookSentinel loads and schema-validates the sentinel at path.
-func readHookSentinel(path string) (*HookSentinelDoc, error) {
-	data, err := osReadFile(path)
+func readHookSentinel(hsd hookSentinelDeps, path string) (*HookSentinelDoc, error) {
+	data, err := hsd.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read hook sentinel: %w", err)
 	}
@@ -258,18 +282,32 @@ func readHookSentinel(path string) (*HookSentinelDoc, error) {
 // readLatestHookSentinel returns the sentinel with the most recent
 // `started_at` for skill. Filename is the deterministic tie-breaker when
 // timestamps are equal. Returns an error when no sentinel exists for skill.
-func readLatestHookSentinel(projectPath, skill string) (*HookSentinelDoc, string, error) {
+func readLatestHookSentinel(hsd hookSentinelDeps, projectPath, skill string) (*HookSentinelDoc, string, error) {
 	skill = strings.TrimSpace(skill)
 	if !validHookSentinelSkill(skill) {
 		return nil, "", fmt.Errorf("invalid skill %q (allowed: iteration-close, isp, loop-worker)", skill)
 	}
 	dir := hookSentinelActiveDir(projectPath)
-	entries, err := osReadDir(dir)
+	candidates, err := listHookSentinelCandidates(hsd, dir, skill)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(candidates) == 0 {
+		return nil, "", fmt.Errorf("no hook sentinels for skill %q", skill)
+	}
+	return pickLatestHookSentinel(hsd, dir, candidates)
+}
+
+// listHookSentinelCandidates enumerates filename matches for the skill in dir.
+// Returns a wrapped error on non-IsNotExist readdir failure; absent dir
+// short-circuits to a skill-specific "no sentinels" error.
+func listHookSentinelCandidates(hsd hookSentinelDeps, dir, skill string) ([]string, error) {
+	entries, err := hsd.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("no hook sentinels for skill %q (directory missing)", skill)
+			return nil, fmt.Errorf("no hook sentinels for skill %q (directory missing)", skill)
 		}
-		return nil, "", fmt.Errorf("list hook sentinel dir: %w", err)
+		return nil, fmt.Errorf("list hook sentinel dir: %w", err)
 	}
 	prefix := skill + "-"
 	var candidates []string
@@ -283,22 +321,24 @@ func readLatestHookSentinel(projectPath, skill string) (*HookSentinelDoc, string
 		}
 		candidates = append(candidates, name)
 	}
-	if len(candidates) == 0 {
-		return nil, "", fmt.Errorf("no hook sentinels for skill %q", skill)
-	}
-	// Stable filename sort breaks ties when started_at compares equal.
+	return candidates, nil
+}
+
+// pickLatestHookSentinel reads each candidate and returns the one with the
+// largest started_at (stable filename tie-break). Caller ensures candidates
+// is non-empty.
+func pickLatestHookSentinel(hsd hookSentinelDeps, dir string, candidates []string) (*HookSentinelDoc, string, error) {
 	sort.Strings(candidates)
 	var best *HookSentinelDoc
 	var bestPath string
 	var bestStarted string
 	for _, name := range candidates {
 		path := filepath.Join(dir, name)
-		doc, err := readHookSentinel(path)
+		doc, err := readHookSentinel(hsd, path)
 		if err != nil {
 			return nil, "", err
 		}
-		if best == nil || doc.StartedAt > bestStarted ||
-			(doc.StartedAt == bestStarted && filepath.Base(path) > filepath.Base(bestPath)) {
+		if isMoreRecentSentinel(doc, best, path, bestPath, bestStarted) {
 			best = doc
 			bestPath = path
 			bestStarted = doc.StartedAt
@@ -307,17 +347,27 @@ func readLatestHookSentinel(projectPath, skill string) (*HookSentinelDoc, string
 	return best, bestPath, nil
 }
 
+func isMoreRecentSentinel(doc, best *HookSentinelDoc, path, bestPath, bestStarted string) bool {
+	if best == nil {
+		return true
+	}
+	if doc.StartedAt > bestStarted {
+		return true
+	}
+	return doc.StartedAt == bestStarted && filepath.Base(path) > filepath.Base(bestPath)
+}
+
 // clearHookSentinel archives the active record under
 // `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/` and removes it
 // from the active tier. The destination date is derived from the sentinel's
 // own `started_at` (UTC) so the same record always lands in the same
 // archive bucket regardless of when `clear` runs.
-func clearHookSentinel(projectPath, skill, runID string) (active, archive string, err error) {
+func clearHookSentinel(hsd hookSentinelDeps, projectPath, skill, runID string) (active, archive string, err error) {
 	active, err = hookSentinelActivePath(projectPath, skill, runID)
 	if err != nil {
 		return "", "", err
 	}
-	doc, err := readHookSentinel(active)
+	doc, err := readHookSentinel(hsd, active)
 	if err != nil {
 		return "", "", err
 	}
@@ -335,10 +385,10 @@ func clearHookSentinel(projectPath, skill, runID string) (active, archive string
 		return "", "", fmt.Errorf("prepare hook sentinel archive dir: %w", err)
 	}
 	archive = filepath.Join(archiveDir, filepath.Base(active))
-	if _, statErr := osStat(archive); statErr == nil {
+	if _, statErr := hsd.Stat(archive); statErr == nil {
 		return "", "", fmt.Errorf("archive collision: %s already exists (v1 does not overwrite history)", archive)
 	}
-	if err := osRename(active, archive); err != nil {
+	if err := hsd.Rename(active, archive); err != nil {
 		return "", "", fmt.Errorf("archive hook sentinel: %w", err)
 	}
 	return active, archive, nil
@@ -363,7 +413,7 @@ type hookSentinelWriteInputs struct {
 // The CLI captures git HEAD itself per the contract; callers cannot supply
 // it. started_at is set to now (UTC, RFC3339Nano) so latest-selection ties
 // are rare in practice.
-func buildHookSentinelDoc(projectPath string, in hookSentinelWriteInputs) (*HookSentinelDoc, error) {
+func buildHookSentinelDoc(hsd hookSentinelDeps, projectPath string, in hookSentinelWriteInputs) (*HookSentinelDoc, error) {
 	if !validHookSentinelSkill(in.Skill) {
 		return nil, fmt.Errorf("--skill must be one of iteration-close, isp, loop-worker (got %q)", in.Skill)
 	}
@@ -383,7 +433,7 @@ func buildHookSentinelDoc(projectPath string, in hookSentinelWriteInputs) (*Hook
 		SchemaVersion:  HookSentinelSchemaVersion,
 		Skill:          in.Skill,
 		RunID:          in.RunID,
-		StartedAt:      hookSentinelNow().UTC().Format(time.RFC3339Nano),
+		StartedAt:      hsd.Now().UTC().Format(time.RFC3339Nano),
 		PlanID:         in.PlanID,
 		TaskID:         in.TaskID,
 		AgentType:      in.AgentType,
@@ -424,16 +474,16 @@ func buildHookSentinelDoc(projectPath string, in hookSentinelWriteInputs) (*Hook
 }
 
 // runHookSentinelWrite is the cobra handler body for `write`.
-func runHookSentinelWrite(in hookSentinelWriteInputs) error {
-	project, err := hookSentinelResolveProject()
+func runHookSentinelWrite(hsd hookSentinelDeps, in hookSentinelWriteInputs) error {
+	project, err := hsd.ResolveProject()
 	if err != nil {
 		return err
 	}
-	doc, err := buildHookSentinelDoc(project.Path, in)
+	doc, err := buildHookSentinelDoc(hsd, project.Path, in)
 	if err != nil {
 		return err
 	}
-	path, err := writeHookSentinelAtomically(project.Path, doc)
+	path, err := writeHookSentinelAtomically(hsd, project.Path, doc)
 	if err != nil {
 		return err
 	}
@@ -452,11 +502,24 @@ func runHookSentinelWrite(in hookSentinelWriteInputs) error {
 }
 
 // runHookSentinelRead is the cobra handler body for `read`.
-func runHookSentinelRead(skill, runID string, latest, asJSON bool) error {
-	project, err := hookSentinelResolveProject()
+func runHookSentinelRead(hsd hookSentinelDeps, skill, runID string, latest, asJSON bool) error {
+	project, err := hsd.ResolveProject()
 	if err != nil {
 		return err
 	}
+	if err := validateHookSentinelReadSelectors(skill, runID, latest); err != nil {
+		return err
+	}
+	doc, path, err := resolveHookSentinelRead(hsd, project.Path, skill, runID, latest)
+	if err != nil {
+		return err
+	}
+	return renderHookSentinelRead(doc, path, asJSON)
+}
+
+// validateHookSentinelReadSelectors enforces the input contract for `read`:
+// known skill, exactly one of --latest / --run-id supplied.
+func validateHookSentinelReadSelectors(skill, runID string, latest bool) error {
 	if !validHookSentinelSkill(skill) {
 		return fmt.Errorf("invalid skill %q (allowed: iteration-close, isp, loop-worker)", skill)
 	}
@@ -466,23 +529,28 @@ func runHookSentinelRead(skill, runID string, latest, asJSON bool) error {
 	if !latest && strings.TrimSpace(runID) == "" {
 		return fmt.Errorf("read requires either --run-id or --latest")
 	}
-	var doc *HookSentinelDoc
-	var path string
+	return nil
+}
+
+// resolveHookSentinelRead picks between --latest and --run-id and returns
+// the loaded document.
+func resolveHookSentinelRead(hsd hookSentinelDeps, projectPath, skill, runID string, latest bool) (*HookSentinelDoc, string, error) {
 	if latest {
-		doc, path, err = readLatestHookSentinel(project.Path, skill)
-		if err != nil {
-			return err
-		}
-	} else {
-		path, err = hookSentinelActivePath(project.Path, skill, runID)
-		if err != nil {
-			return err
-		}
-		doc, err = readHookSentinel(path)
-		if err != nil {
-			return err
-		}
+		return readLatestHookSentinel(hsd, projectPath, skill)
 	}
+	path, err := hookSentinelActivePath(projectPath, skill, runID)
+	if err != nil {
+		return nil, "", err
+	}
+	doc, err := readHookSentinel(hsd, path)
+	if err != nil {
+		return nil, "", err
+	}
+	return doc, path, nil
+}
+
+// renderHookSentinelRead emits the JSON or human-readable representation.
+func renderHookSentinelRead(doc *HookSentinelDoc, path string, asJSON bool) error {
 	if asJSON || deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -498,12 +566,12 @@ func runHookSentinelRead(skill, runID string, latest, asJSON bool) error {
 }
 
 // runHookSentinelClear is the cobra handler body for `clear`.
-func runHookSentinelClear(skill, runID string) error {
-	project, err := hookSentinelResolveProject()
+func runHookSentinelClear(hsd hookSentinelDeps, skill, runID string) error {
+	project, err := hsd.ResolveProject()
 	if err != nil {
 		return err
 	}
-	active, archive, err := clearHookSentinel(project.Path, skill, runID)
+	active, archive, err := clearHookSentinel(hsd, project.Path, skill, runID)
 	if err != nil {
 		return err
 	}
@@ -585,7 +653,7 @@ func newWorkflowHookSentinelWriteCmd() *cobra.Command {
 				v := maxBatch
 				in.MaxBatch = &v
 			}
-			return runHookSentinelWrite(in)
+			return runHookSentinelWrite(stdHookSentinelDeps{}, in)
 		},
 	}
 	cmd.Flags().StringVar(&runID, "run-id", "", "Caller-supplied run identifier (required, filename-safe)")
@@ -622,7 +690,7 @@ func newWorkflowHookSentinelReadCmd() *cobra.Command {
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass one of: iteration-close, isp, loop-worker."),
 		RunE: func(c *cobra.Command, args []string) error {
-			return runHookSentinelRead(args[0], runID, latest, asJSON)
+			return runHookSentinelRead(stdHookSentinelDeps{}, args[0], runID, latest, asJSON)
 		},
 	}
 	cmd.Flags().StringVar(&runID, "run-id", "", "Exact run identifier to read")
@@ -641,7 +709,7 @@ func newWorkflowHookSentinelClearCmd() *cobra.Command {
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass one of: iteration-close, isp, loop-worker."),
 		RunE: func(c *cobra.Command, args []string) error {
-			return runHookSentinelClear(args[0], runID)
+			return runHookSentinelClear(stdHookSentinelDeps{}, args[0], runID)
 		},
 	}
 	cmd.Flags().StringVar(&runID, "run-id", "", "Run identifier of the sentinel to archive (required)")

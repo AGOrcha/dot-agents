@@ -10,6 +10,98 @@ import (
 	"time"
 )
 
+// fakeHookSentinelDeps is the interface-DI test double for hookSentinelDeps
+// (mirrors commands/review_test.go's fakeReviewDeps + hook_outcome_test.go's
+// fakeHookOutcomeDeps). A nil field delegates to stdHookSentinelDeps.
+type fakeHookSentinelDeps struct {
+	now            func() time.Time
+	stat           func(string) (os.FileInfo, error)
+	readFile       func(string) ([]byte, error)
+	readDir        func(string) ([]os.DirEntry, error)
+	rename         func(string, string) error
+	remove         func(string) error
+	resolveProject func() (workflowProjectRef, error)
+}
+
+func (f fakeHookSentinelDeps) Now() time.Time {
+	if f.now != nil {
+		return f.now()
+	}
+	return stdHookSentinelDeps{}.Now()
+}
+
+func (f fakeHookSentinelDeps) Stat(name string) (os.FileInfo, error) {
+	if f.stat != nil {
+		return f.stat(name)
+	}
+	return stdHookSentinelDeps{}.Stat(name)
+}
+
+func (f fakeHookSentinelDeps) ReadFile(name string) ([]byte, error) {
+	if f.readFile != nil {
+		return f.readFile(name)
+	}
+	return stdHookSentinelDeps{}.ReadFile(name)
+}
+
+func (f fakeHookSentinelDeps) ReadDir(name string) ([]os.DirEntry, error) {
+	if f.readDir != nil {
+		return f.readDir(name)
+	}
+	return stdHookSentinelDeps{}.ReadDir(name)
+}
+
+func (f fakeHookSentinelDeps) Rename(o, n string) error {
+	if f.rename != nil {
+		return f.rename(o, n)
+	}
+	return stdHookSentinelDeps{}.Rename(o, n)
+}
+
+func (f fakeHookSentinelDeps) Remove(name string) error {
+	if f.remove != nil {
+		return f.remove(name)
+	}
+	return stdHookSentinelDeps{}.Remove(name)
+}
+
+func (f fakeHookSentinelDeps) ResolveProject() (workflowProjectRef, error) {
+	if f.resolveProject != nil {
+		return f.resolveProject()
+	}
+	return stdHookSentinelDeps{}.ResolveProject()
+}
+
+// TestFakeHookSentinelDeps_NilDelegatesToReal pins the nil-delegates-to-real
+// contract for every method (same rationale as TestFakeHookOutcomeDeps_NilDelegatesToReal).
+func TestFakeHookSentinelDeps_NilDelegatesToReal(t *testing.T) {
+	f := fakeHookSentinelDeps{}
+	if got := f.Now(); got.IsZero() {
+		t.Error("nil-now should delegate to real time.Now (got zero)")
+	}
+	tmp := t.TempDir()
+	if _, err := f.Stat(filepath.Join(tmp, "absent")); err == nil || !os.IsNotExist(err) {
+		t.Errorf("nil-stat delegate should yield IsNotExist, got %v", err)
+	}
+	if _, err := f.ReadFile(filepath.Join(tmp, "absent")); err == nil || !os.IsNotExist(err) {
+		t.Errorf("nil-readFile delegate should yield IsNotExist, got %v", err)
+	}
+	if _, err := f.ReadDir(filepath.Join(tmp, "absent")); err == nil || !os.IsNotExist(err) {
+		t.Errorf("nil-readDir delegate should yield IsNotExist, got %v", err)
+	}
+	_ = f.Rename
+	_ = f.Remove
+	_ = f.ResolveProject
+}
+
+// hookSentinelDepsForProject returns a fakeHookSentinelDeps that resolves
+// the workflow project to (name=p, path=path).
+func hookSentinelDepsForProject(path string) fakeHookSentinelDeps {
+	return fakeHookSentinelDeps{resolveProject: func() (workflowProjectRef, error) {
+		return workflowProjectRef{Name: "p", Path: path}, nil
+	}}
+}
+
 // ── Schema compile/validation tests ──────────────────────────────────────────
 
 func TestCompiledWorkflowHookSentinelSchema(t *testing.T) {
@@ -137,7 +229,7 @@ func TestHookSentinelActivePath_BadInputs(t *testing.T) {
 func TestWriteHookSentinelAtomically_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	doc := newValidHookSentinelDoc()
-	path, err := writeHookSentinelAtomically(dir, doc)
+	path, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -148,7 +240,7 @@ func TestWriteHookSentinelAtomically_RoundTrip(t *testing.T) {
 	if _, err := os.Stat(path + ".tmp"); err == nil {
 		t.Error("expected .tmp scratch file to be gone after publish")
 	}
-	got, err := readHookSentinel(path)
+	got, err := readHookSentinel(stdHookSentinelDeps{}, path)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -158,7 +250,7 @@ func TestWriteHookSentinelAtomically_RoundTrip(t *testing.T) {
 }
 
 func TestWriteHookSentinelAtomically_NilDoc(t *testing.T) {
-	if _, err := writeHookSentinelAtomically(t.TempDir(), nil); err == nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, t.TempDir(), nil); err == nil {
 		t.Error("expected error for nil doc")
 	}
 }
@@ -167,7 +259,7 @@ func TestWriteHookSentinelAtomically_InvalidSkillBeforeFS(t *testing.T) {
 	dir := t.TempDir()
 	doc := newValidHookSentinelDoc()
 	doc.Skill = "wrong"
-	if _, err := writeHookSentinelAtomically(dir, doc); err == nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err == nil {
 		t.Error("expected pre-FS rejection for invalid skill")
 	}
 	// No directory should have been created either.
@@ -180,7 +272,7 @@ func TestWriteHookSentinelAtomically_SchemaFailure(t *testing.T) {
 	dir := t.TempDir()
 	doc := newValidHookSentinelDoc()
 	doc.StartedAt = "not-rfc3339"
-	if _, err := writeHookSentinelAtomically(dir, doc); err == nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err == nil {
 		t.Error("expected schema validation failure to block write")
 	}
 }
@@ -188,10 +280,10 @@ func TestWriteHookSentinelAtomically_SchemaFailure(t *testing.T) {
 func TestWriteHookSentinelAtomically_CollisionRejected(t *testing.T) {
 	dir := t.TempDir()
 	doc := newValidHookSentinelDoc()
-	if _, err := writeHookSentinelAtomically(dir, doc); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	_, err := writeHookSentinelAtomically(dir, doc)
+	_, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if err == nil {
 		t.Fatal("expected collision rejection on second write")
 	}
@@ -205,11 +297,9 @@ func TestWriteHookSentinelAtomically_RenameFailureCleansTemp(t *testing.T) {
 	doc := newValidHookSentinelDoc()
 
 	sentinel := errors.New("rename boom")
-	oldRename := osRename
-	osRename = func(src, dst string) error { return sentinel }
-	t.Cleanup(func() { osRename = oldRename })
+	deps := fakeHookSentinelDeps{rename: func(src, dst string) error { return sentinel }}
 
-	_, err := writeHookSentinelAtomically(dir, doc)
+	_, err := writeHookSentinelAtomically(deps, dir, doc)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected rename sentinel wrapped, got %v", err)
 	}
@@ -229,7 +319,7 @@ func TestWriteHookSentinelAtomically_MkdirFailure(t *testing.T) {
 	osMkdirAll = func(string, os.FileMode) error { return sentinel }
 	t.Cleanup(func() { osMkdirAll = oldMkdir })
 
-	_, err := writeHookSentinelAtomically(dir, doc)
+	_, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel wrapped, got %v", err)
 	}
@@ -244,7 +334,7 @@ func TestWriteHookSentinelAtomically_WriteFileFailure(t *testing.T) {
 	osWriteFile = func(string, []byte, os.FileMode) error { return sentinel }
 	t.Cleanup(func() { osWriteFile = oldWrite })
 
-	_, err := writeHookSentinelAtomically(dir, doc)
+	_, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected write sentinel wrapped, got %v", err)
 	}
@@ -256,13 +346,13 @@ func TestReadHookSentinel_MalformedJSON(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readHookSentinel(path); err == nil {
+	if _, err := readHookSentinel(stdHookSentinelDeps{}, path); err == nil {
 		t.Error("expected parse failure for malformed JSON")
 	}
 }
 
 func TestReadHookSentinel_Missing(t *testing.T) {
-	if _, err := readHookSentinel(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+	if _, err := readHookSentinel(stdHookSentinelDeps{}, filepath.Join(t.TempDir(), "nope.json")); err == nil {
 		t.Error("expected read error for missing file")
 	}
 }
@@ -274,17 +364,17 @@ func TestReadLatestHookSentinel_PicksMostRecentStartedAt(t *testing.T) {
 	older := newValidHookSentinelDoc()
 	older.RunID = "rA"
 	older.StartedAt = "2026-05-26T10:00:00Z"
-	if _, err := writeHookSentinelAtomically(dir, older); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, older); err != nil {
 		t.Fatal(err)
 	}
 	newer := newValidHookSentinelDoc()
 	newer.RunID = "rB"
 	newer.StartedAt = "2026-05-26T11:00:00Z"
-	if _, err := writeHookSentinelAtomically(dir, newer); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, newer); err != nil {
 		t.Fatal(err)
 	}
 
-	got, path, err := readLatestHookSentinel(dir, "loop-worker")
+	got, path, err := readLatestHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker")
 	if err != nil {
 		t.Fatalf("read latest: %v", err)
 	}
@@ -298,17 +388,17 @@ func TestReadLatestHookSentinel_FilenameTieBreaker(t *testing.T) {
 	a := newValidHookSentinelDoc()
 	a.RunID = "rA"
 	a.StartedAt = "2026-05-26T10:00:00Z"
-	if _, err := writeHookSentinelAtomically(dir, a); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, a); err != nil {
 		t.Fatal(err)
 	}
 	b := newValidHookSentinelDoc()
 	b.RunID = "rB"
 	b.StartedAt = "2026-05-26T10:00:00Z" // exact tie
-	if _, err := writeHookSentinelAtomically(dir, b); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, b); err != nil {
 		t.Fatal(err)
 	}
 
-	got, _, err := readLatestHookSentinel(dir, "loop-worker")
+	got, _, err := readLatestHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker")
 	if err != nil {
 		t.Fatalf("read latest: %v", err)
 	}
@@ -325,22 +415,22 @@ func TestReadLatestHookSentinel_NoneForSkill(t *testing.T) {
 	other.Skill = "isp"
 	other.RunID = "r1"
 	other.AgentType = "main"
-	if _, err := writeHookSentinelAtomically(dir, other); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, other); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := readLatestHookSentinel(dir, "loop-worker"); err == nil {
+	if _, _, err := readLatestHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker"); err == nil {
 		t.Error("expected error when no sentinel exists for the requested skill")
 	}
 }
 
 func TestReadLatestHookSentinel_DirMissing(t *testing.T) {
-	if _, _, err := readLatestHookSentinel(t.TempDir(), "loop-worker"); err == nil {
+	if _, _, err := readLatestHookSentinel(stdHookSentinelDeps{}, t.TempDir(), "loop-worker"); err == nil {
 		t.Error("expected error when hook-sentinels dir is missing")
 	}
 }
 
 func TestReadLatestHookSentinel_InvalidSkillName(t *testing.T) {
-	if _, _, err := readLatestHookSentinel(t.TempDir(), "bogus"); err == nil {
+	if _, _, err := readLatestHookSentinel(stdHookSentinelDeps{}, t.TempDir(), "bogus"); err == nil {
 		t.Error("expected error for invalid skill")
 	}
 }
@@ -352,11 +442,11 @@ func TestClearHookSentinel_ArchivesToHistory(t *testing.T) {
 	doc := newValidHookSentinelDoc()
 	doc.PlanID = "loop-discipline-stop-hooks"
 	doc.StartedAt = "2026-05-26T12:00:00Z"
-	active, err := writeHookSentinelAtomically(dir, doc)
+	active, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, archive, err := clearHookSentinel(dir, doc.Skill, doc.RunID)
+	_, archive, err := clearHookSentinel(stdHookSentinelDeps{}, dir, doc.Skill, doc.RunID)
 	if err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -381,7 +471,7 @@ func TestClearHookSentinel_ArchiveCollisionRejected(t *testing.T) {
 	dir := t.TempDir()
 	doc := newValidHookSentinelDoc()
 	doc.StartedAt = "2026-05-26T12:00:00Z"
-	if _, err := writeHookSentinelAtomically(dir, doc); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err != nil {
 		t.Fatal(err)
 	}
 	// Pre-populate the archive slot to force collision on clear.
@@ -393,14 +483,14 @@ func TestClearHookSentinel_ArchiveCollisionRejected(t *testing.T) {
 	if err := os.WriteFile(colliding, []byte("preexisting"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := clearHookSentinel(dir, doc.Skill, doc.RunID); err == nil {
+	if _, _, err := clearHookSentinel(stdHookSentinelDeps{}, dir, doc.Skill, doc.RunID); err == nil {
 		t.Error("expected archive-collision rejection (v1 does not overwrite history)")
 	}
 }
 
 func TestClearHookSentinel_MissingActive(t *testing.T) {
 	dir := t.TempDir()
-	if _, _, err := clearHookSentinel(dir, "loop-worker", "nope"); err == nil {
+	if _, _, err := clearHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker", "nope"); err == nil {
 		t.Error("expected error when active record missing")
 	}
 }
@@ -411,7 +501,7 @@ func TestClearHookSentinel_BadStartedAt(t *testing.T) {
 	// disk by overwriting after the fact (bypassing validation). The clear
 	// path re-parses started_at to derive the archive date bucket.
 	doc := newValidHookSentinelDoc()
-	path, err := writeHookSentinelAtomically(dir, doc)
+	path, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +513,7 @@ func TestClearHookSentinel_BadStartedAt(t *testing.T) {
 	if err := os.WriteFile(path, []byte(mangled), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := clearHookSentinel(dir, doc.Skill, doc.RunID); err == nil {
+	if _, _, err := clearHookSentinel(stdHookSentinelDeps{}, dir, doc.Skill, doc.RunID); err == nil {
 		t.Error("expected error when started_at is not RFC3339 — clear cannot derive archive bucket")
 	}
 }
@@ -445,7 +535,7 @@ func TestBuildHookSentinelDoc_RequiresAllFields(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := buildHookSentinelDoc(dir, c.in)
+			_, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, c.in)
 			if err == nil {
 				t.Fatalf("expected rejection for %s", c.name)
 			}
@@ -459,11 +549,9 @@ func TestBuildHookSentinelDoc_RequiresAllFields(t *testing.T) {
 func TestBuildHookSentinelDoc_PopulatesLifecyclePointAndStartedAt(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
-	oldNow := hookSentinelNow
-	hookSentinelNow = func() time.Time { return fixed }
-	t.Cleanup(func() { hookSentinelNow = oldNow })
+	deps := fakeHookSentinelDeps{now: func() time.Time { return fixed }}
 
-	doc, err := buildHookSentinelDoc(dir, hookSentinelWriteInputs{
+	doc, err := buildHookSentinelDoc(deps, dir, hookSentinelWriteInputs{
 		Skill: "isp", RunID: "r1", PlanID: "p", TaskID: "t", AgentType: "main",
 	})
 	if err != nil {
@@ -479,7 +567,7 @@ func TestBuildHookSentinelDoc_PopulatesLifecyclePointAndStartedAt(t *testing.T) 
 
 func TestBuildHookSentinelDoc_OptionalContextOmittedWhenEmpty(t *testing.T) {
 	dir := t.TempDir() // not a git repo → rev-parse fails → git_head_at_start stays empty
-	doc, err := buildHookSentinelDoc(dir, hookSentinelWriteInputs{
+	doc, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, hookSentinelWriteInputs{
 		Skill: "isp", RunID: "r1", PlanID: "p", TaskID: "t", AgentType: "main",
 	})
 	if err != nil {
@@ -494,7 +582,7 @@ func TestBuildHookSentinelDoc_CarriesAllContextSignals(t *testing.T) {
 	dir := t.TempDir()
 	yes := true
 	batch := 3
-	doc, err := buildHookSentinelDoc(dir, hookSentinelWriteInputs{
+	doc, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, hookSentinelWriteInputs{
 		Skill: "isp", RunID: "r1", PlanID: "p", TaskID: "t", AgentType: "main",
 		WriteScope:             []string{"commands/"},
 		EligibleSnapshotLoaded: &yes,
@@ -525,7 +613,7 @@ func TestBuildHookSentinelDoc_CarriesAllContextSignals(t *testing.T) {
 
 func TestRunHookSentinelRead_LatestAndRunIDMutuallyExclusive(t *testing.T) {
 	withTempCwd(t, t.TempDir())
-	err := runHookSentinelRead("loop-worker", "r1", true, false)
+	err := runHookSentinelRead(stdHookSentinelDeps{}, "loop-worker", "r1", true, false)
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("expected mutual-exclusion error, got %v", err)
 	}
@@ -533,7 +621,7 @@ func TestRunHookSentinelRead_LatestAndRunIDMutuallyExclusive(t *testing.T) {
 
 func TestRunHookSentinelRead_RequiresOneSelector(t *testing.T) {
 	withTempCwd(t, t.TempDir())
-	err := runHookSentinelRead("loop-worker", "", false, false)
+	err := runHookSentinelRead(stdHookSentinelDeps{}, "loop-worker", "", false, false)
 	if err == nil || !strings.Contains(err.Error(), "--run-id or --latest") {
 		t.Errorf("expected selector-required error, got %v", err)
 	}
@@ -541,7 +629,7 @@ func TestRunHookSentinelRead_RequiresOneSelector(t *testing.T) {
 
 func TestRunHookSentinelRead_InvalidSkill(t *testing.T) {
 	withTempCwd(t, t.TempDir())
-	err := runHookSentinelRead("bogus", "r1", false, false)
+	err := runHookSentinelRead(stdHookSentinelDeps{}, "bogus", "r1", false, false)
 	if err == nil || !strings.Contains(err.Error(), "invalid skill") {
 		t.Errorf("expected invalid-skill error, got %v", err)
 	}
@@ -625,13 +713,12 @@ func TestWorkflowHookSentinelCLI_WriteJSON(t *testing.T) {
 
 // ── run*HookSentinel CLI handler tests ──────────────────────────────────────
 
-func withHookSentinelProject(t *testing.T, path string) {
+// withHookSentinelProject is kept for backward compatibility; new tests
+// should call hookSentinelDepsForProject(path) and pass the returned deps
+// directly to the run*HookSentinel function under test.
+func withHookSentinelProject(t *testing.T, path string) fakeHookSentinelDeps {
 	t.Helper()
-	prior := hookSentinelResolveProject
-	hookSentinelResolveProject = func() (workflowProjectRef, error) {
-		return workflowProjectRef{Name: "p", Path: path}, nil
-	}
-	t.Cleanup(func() { hookSentinelResolveProject = prior })
+	return hookSentinelDepsForProject(path)
 }
 
 func newValidHookSentinelWriteInputs() hookSentinelWriteInputs {
@@ -670,33 +757,29 @@ func captureWorkflowStdout(t *testing.T, fn func()) string {
 }
 
 func TestRunHookSentinelWrite_ResolveProjectError(t *testing.T) {
-	prior := hookSentinelResolveProject
-	hookSentinelResolveProject = func() (workflowProjectRef, error) {
+	d := fakeHookSentinelDeps{resolveProject: func() (workflowProjectRef, error) {
 		return workflowProjectRef{}, errors.New("synthetic resolve fault")
-	}
-	t.Cleanup(func() { hookSentinelResolveProject = prior })
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err == nil {
+	}}
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err == nil {
 		t.Fatal("expected resolve error, got nil")
 	}
 }
 
 func TestRunHookSentinelWrite_BuildDocError(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	bad := newValidHookSentinelWriteInputs()
 	bad.Skill = "not-a-real-skill"
-	if err := runHookSentinelWrite(bad); err == nil {
+	if err := runHookSentinelWrite(d, bad); err == nil {
 		t.Fatal("expected build-doc validation error, got nil")
 	}
 }
 
 func TestRunHookSentinelWrite_AtomicallyWriteError(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	prior := osRename
-	osRename = func(string, string) error { return errors.New("synthetic rename fault") }
-	t.Cleanup(func() { osRename = prior })
-	err := runHookSentinelWrite(newValidHookSentinelWriteInputs())
+	d := withHookSentinelProject(t, dir)
+	d.rename = func(string, string) error { return errors.New("synthetic rename fault") }
+	err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs())
 	if err == nil || !strings.Contains(err.Error(), "rename") && !strings.Contains(err.Error(), "publish") {
 		t.Errorf("expected wrapped publish/rename error, got %v", err)
 	}
@@ -704,9 +787,9 @@ func TestRunHookSentinelWrite_AtomicallyWriteError(t *testing.T) {
 
 func TestRunHookSentinelWrite_TextHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+		if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 			t.Fatalf("runHookSentinelWrite: %v", err)
 		}
 	})
@@ -717,12 +800,12 @@ func TestRunHookSentinelWrite_TextHappyPath(t *testing.T) {
 
 func TestRunHookSentinelWrite_JSONHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	priorJSON := deps.Flags.JSON
 	deps.Flags.JSON = func() bool { return true }
 	t.Cleanup(func() { deps.Flags.JSON = priorJSON })
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+		if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 			t.Fatalf("runHookSentinelWrite: %v", err)
 		}
 	})
@@ -732,25 +815,23 @@ func TestRunHookSentinelWrite_JSONHappyPath(t *testing.T) {
 }
 
 func TestRunHookSentinelRead_ResolveProjectError(t *testing.T) {
-	prior := hookSentinelResolveProject
-	hookSentinelResolveProject = func() (workflowProjectRef, error) {
+	d := fakeHookSentinelDeps{resolveProject: func() (workflowProjectRef, error) {
 		return workflowProjectRef{}, errors.New("synthetic resolve fault")
-	}
-	t.Cleanup(func() { hookSentinelResolveProject = prior })
-	if err := runHookSentinelRead("loop-worker", "r1", false, false); err == nil {
+	}}
+	if err := runHookSentinelRead(d, "loop-worker", "r1", false, false); err == nil {
 		t.Fatal("expected resolve error, got nil")
 	}
 }
 
 func TestRunHookSentinelRead_LatestTextHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	// Write a sentinel first.
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelRead("loop-worker", "", true, false); err != nil {
+		if err := runHookSentinelRead(d, "loop-worker", "", true, false); err != nil {
 			t.Fatalf("read --latest: %v", err)
 		}
 	})
@@ -761,12 +842,12 @@ func TestRunHookSentinelRead_LatestTextHappyPath(t *testing.T) {
 
 func TestRunHookSentinelRead_LatestJSONHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelRead("loop-worker", "", true, true); err != nil {
+		if err := runHookSentinelRead(d, "loop-worker", "", true, true); err != nil {
 			t.Fatalf("read --latest --json: %v", err)
 		}
 	})
@@ -777,12 +858,12 @@ func TestRunHookSentinelRead_LatestJSONHappyPath(t *testing.T) {
 
 func TestRunHookSentinelRead_ByRunIDTextHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelRead("loop-worker", "r1", false, false); err != nil {
+		if err := runHookSentinelRead(d, "loop-worker", "r1", false, false); err != nil {
 			t.Fatalf("read by run-id: %v", err)
 		}
 	})
@@ -793,31 +874,31 @@ func TestRunHookSentinelRead_ByRunIDTextHappyPath(t *testing.T) {
 
 func TestRunHookSentinelRead_LatestMissingErr(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	// No write performed → readLatestHookSentinel returns an error.
-	if err := runHookSentinelRead("loop-worker", "", true, false); err == nil {
+	if err := runHookSentinelRead(d, "loop-worker", "", true, false); err == nil {
 		t.Fatal("expected error when no sentinels exist, got nil")
 	}
 }
 
 func TestRunHookSentinelRead_ByRunIDMissingErr(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelRead("loop-worker", "nope", false, false); err == nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelRead(d, "loop-worker", "nope", false, false); err == nil {
 		t.Fatal("expected error when run-id missing, got nil")
 	}
 }
 
 func TestRunHookSentinelRead_ExpectedArtifactsRendered(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	in := newValidHookSentinelWriteInputs()
 	in.ExpectedArtifacts = []string{"merge-back.md", "verification.yaml"}
-	if err := runHookSentinelWrite(in); err != nil {
+	if err := runHookSentinelWrite(d, in); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelRead("loop-worker", "r1", false, false); err != nil {
+		if err := runHookSentinelRead(d, "loop-worker", "r1", false, false); err != nil {
 			t.Fatalf("read: %v", err)
 		}
 	})
@@ -827,33 +908,31 @@ func TestRunHookSentinelRead_ExpectedArtifactsRendered(t *testing.T) {
 }
 
 func TestRunHookSentinelClear_ResolveProjectError(t *testing.T) {
-	prior := hookSentinelResolveProject
-	hookSentinelResolveProject = func() (workflowProjectRef, error) {
+	d := fakeHookSentinelDeps{resolveProject: func() (workflowProjectRef, error) {
 		return workflowProjectRef{}, errors.New("synthetic resolve fault")
-	}
-	t.Cleanup(func() { hookSentinelResolveProject = prior })
-	if err := runHookSentinelClear("loop-worker", "r1"); err == nil {
+	}}
+	if err := runHookSentinelClear(d, "loop-worker", "r1"); err == nil {
 		t.Fatal("expected resolve error, got nil")
 	}
 }
 
 func TestRunHookSentinelClear_ClearError(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
+	d := withHookSentinelProject(t, dir)
 	// No active record → clearHookSentinel returns a missing-active error.
-	if err := runHookSentinelClear("loop-worker", "nope"); err == nil {
+	if err := runHookSentinelClear(d, "loop-worker", "nope"); err == nil {
 		t.Fatal("expected missing-active error, got nil")
 	}
 }
 
 func TestRunHookSentinelClear_TextHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelClear("loop-worker", "r1"); err != nil {
+		if err := runHookSentinelClear(d, "loop-worker", "r1"); err != nil {
 			t.Fatalf("clear: %v", err)
 		}
 	})
@@ -864,15 +943,15 @@ func TestRunHookSentinelClear_TextHappyPath(t *testing.T) {
 
 func TestRunHookSentinelClear_JSONHappyPath(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 	priorJSON := deps.Flags.JSON
 	deps.Flags.JSON = func() bool { return true }
 	t.Cleanup(func() { deps.Flags.JSON = priorJSON })
 	out := captureWorkflowStdout(t, func() {
-		if err := runHookSentinelClear("loop-worker", "r1"); err != nil {
+		if err := runHookSentinelClear(d, "loop-worker", "r1"); err != nil {
 			t.Fatalf("clear: %v", err)
 		}
 	})
@@ -887,19 +966,17 @@ func TestWriteHookSentinelAtomically_JSONMarshalIndentError(t *testing.T) {
 		return nil, errors.New("synthetic marshal-indent fault")
 	}
 	t.Cleanup(func() { jsonMarshalIndent = prior })
-	_, err := writeHookSentinelAtomically(t.TempDir(), newValidHookSentinelDoc())
+	_, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, t.TempDir(), newValidHookSentinelDoc())
 	if err == nil || !strings.Contains(err.Error(), "marshal hook sentinel") {
 		t.Errorf("expected wrapped marshal-indent error, got %v", err)
 	}
 }
 
 func TestReadLatestHookSentinel_ReadDirNonIsNotExist(t *testing.T) {
-	prior := osReadDir
-	osReadDir = func(string) ([]os.DirEntry, error) {
+	deps := fakeHookSentinelDeps{readDir: func(string) ([]os.DirEntry, error) {
 		return nil, errors.New("synthetic readdir fault")
-	}
-	t.Cleanup(func() { osReadDir = prior })
-	_, _, err := readLatestHookSentinel(t.TempDir(), "loop-worker")
+	}}
+	_, _, err := readLatestHookSentinel(deps, t.TempDir(), "loop-worker")
 	if err == nil || !strings.Contains(err.Error(), "list hook sentinel dir") {
 		t.Errorf("expected wrapped readdir error, got %v", err)
 	}
@@ -919,7 +996,7 @@ func TestReadLatestHookSentinel_CandidateParseError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(activeDir, "loop-worker-rbad.json"), []byte("not-json"), 0o644); err != nil {
 		t.Fatalf("write bad candidate: %v", err)
 	}
-	_, _, err := readLatestHookSentinel(dir, "loop-worker")
+	_, _, err := readLatestHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker")
 	if err == nil {
 		t.Fatal("expected parse error propagation from candidate file")
 	}
@@ -928,7 +1005,7 @@ func TestReadLatestHookSentinel_CandidateParseError(t *testing.T) {
 func TestClearHookSentinel_InvalidSkill(t *testing.T) {
 	dir := t.TempDir()
 	// Skips disk: validHookSentinelSkill rejects the input.
-	_, _, err := clearHookSentinel(dir, "bogus-skill", "r1")
+	_, _, err := clearHookSentinel(stdHookSentinelDeps{}, dir, "bogus-skill", "r1")
 	if err == nil {
 		t.Fatal("expected invalid-skill error from active-path check")
 	}
@@ -936,14 +1013,14 @@ func TestClearHookSentinel_InvalidSkill(t *testing.T) {
 
 func TestClearHookSentinel_MkdirArchiveFailure(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	prior := osMkdirAll
 	osMkdirAll = func(string, os.FileMode) error { return errors.New("synthetic mkdir fault") }
 	t.Cleanup(func() { osMkdirAll = prior })
-	_, _, err := clearHookSentinel(dir, "loop-worker", "r1")
+	_, _, err := clearHookSentinel(stdHookSentinelDeps{}, dir, "loop-worker", "r1")
 	if err == nil || !strings.Contains(err.Error(), "prepare hook sentinel archive dir") {
 		t.Errorf("expected wrapped mkdir error, got %v", err)
 	}
@@ -951,14 +1028,12 @@ func TestClearHookSentinel_MkdirArchiveFailure(t *testing.T) {
 
 func TestClearHookSentinel_RenameFailure(t *testing.T) {
 	dir := t.TempDir()
-	withHookSentinelProject(t, dir)
-	if err := runHookSentinelWrite(newValidHookSentinelWriteInputs()); err != nil {
+	d := withHookSentinelProject(t, dir)
+	if err := runHookSentinelWrite(d, newValidHookSentinelWriteInputs()); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	prior := osRename
-	osRename = func(string, string) error { return errors.New("synthetic rename fault") }
-	t.Cleanup(func() { osRename = prior })
-	_, _, err := clearHookSentinel(dir, "loop-worker", "r1")
+	deps := fakeHookSentinelDeps{rename: func(string, string) error { return errors.New("synthetic rename fault") }}
+	_, _, err := clearHookSentinel(deps, dir, "loop-worker", "r1")
 	if err == nil || !strings.Contains(err.Error(), "archive hook sentinel") {
 		t.Errorf("expected wrapped rename error, got %v", err)
 	}
@@ -973,10 +1048,10 @@ func TestClearHookSentinel_RFC3339FallbackParses(t *testing.T) {
 	doc := newValidHookSentinelDoc()
 	doc.RunID = runID
 	doc.StartedAt = "2026-05-26T12:00:00Z" // no fractional seconds
-	if _, err := writeHookSentinelAtomically(dir, doc); err != nil {
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	active, archive, err := clearHookSentinel(dir, skill, runID)
+	active, archive, err := clearHookSentinel(stdHookSentinelDeps{}, dir, skill, runID)
 	if err != nil {
 		t.Fatalf("clearHookSentinel: %v", err)
 	}
