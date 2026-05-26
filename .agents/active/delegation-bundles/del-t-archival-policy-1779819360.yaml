@@ -1,0 +1,27 @@
+schema_version: 1
+delegation_id: del-t-archival-policy-1779819360
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t-archival-policy
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T18:16:00Z"
+scope:
+    write_scope:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: research
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

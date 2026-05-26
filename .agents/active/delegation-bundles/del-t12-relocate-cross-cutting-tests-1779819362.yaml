@@ -1,0 +1,38 @@
+schema_version: 1
+delegation_id: del-t12-relocate-cross-cutting-tests-1779819362
+plan_id: root-command-decomposition
+task_id: t12-relocate-cross-cutting-tests
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T18:16:02Z"
+scope:
+    write_scope:
+        - commands/coverage_test.go
+        - commands/resource_parity_test.go
+        - commands/wiring_test.go
+        - commands/hook_normalization_roundtrip_test.go
+        - commands/agentsrc_mutations_test.go
+        - commands/lifecycle/coverage_test.go
+        - commands/lifecycle/agentsrc_mutations_test.go
+        - commands/lifecycle/hook_normalization_roundtrip_test.go
+        - commands/mcp/coverage_test.go
+        - commands/mcp/resource_parity_test.go
+        - commands/settings/coverage_test.go
+        - commands/settings/resource_parity_test.go
+        - commands/rules/coverage_test.go
+        - commands/rules/resource_parity_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

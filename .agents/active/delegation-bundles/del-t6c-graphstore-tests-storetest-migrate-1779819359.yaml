@@ -1,0 +1,27 @@
+schema_version: 1
+delegation_id: del-t6c-graphstore-tests-storetest-migrate-1779819359
+plan_id: go-test-fixture-extraction
+task_id: t6c-graphstore-tests-storetest-migrate
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T18:15:59Z"
+scope:
+    write_scope:
+        - internal/graphstore/sqlite_test.go
+        - internal/graphstore/postgres_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

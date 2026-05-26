@@ -1,0 +1,27 @@
+schema_version: 1
+delegation_id: del-p1b-canonical-when-values-1779819361
+plan_id: loop-discipline-stop-hooks
+task_id: p1b-canonical-when-values
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T18:16:01Z"
+scope:
+    write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - docs/HOOKS.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

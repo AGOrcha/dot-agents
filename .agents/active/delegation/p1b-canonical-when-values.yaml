@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-p1b-canonical-when-values-1779819361
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p1b-canonical-when-values
+title: New canonical HookSpec.When values from Cursor wider surface and May 2026 refresh
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/platform/hooks.go
+    - internal/platform/hooks_test.go
+    - docs/HOOKS.md
+success_criteria: 'Add event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping, Copilot agentStop, approved non-terminal behavior, and observation-only candidates. Contract: tasks/p1b-canonical-when-values.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T18:16:01Z"
+updated_at: "2026-05-26T18:16:01Z"

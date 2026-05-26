@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-t-archival-policy-1779819360
+parent_plan_id: r1-5-hook-enforcement-telemetry
+parent_task_id: t-archival-policy
+title: Decide hook-outcome sidecar retention and archival
+summary: 'Delegated from plan R1.5: Hook enforcement telemetry'
+write_scope:
+    - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+    - docs/OUTCOME_SCORING_RUBRIC.md
+success_criteria: |-
+    Resolve design Q3. Default proposal: never auto-prune
+    (mirrors R5 audit log policy). Specify
+    `da workflow hook-outcome prune --before <date>` admin-only
+    command spec (implementation deferred unless an operator
+    request emerges). No code in this task — design + docs only.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T18:16:00Z"
+updated_at: "2026-05-26T18:16:00Z"
