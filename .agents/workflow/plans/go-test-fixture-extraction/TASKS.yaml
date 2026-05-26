@@ -335,7 +335,7 @@ tasks:
       app_type: code-fix
     - id: t6-extract-graphstore-tests
       title: Refactor internal/graphstore/*_test.go to use internal/testutil
-      status: in_progress
+      status: completed
       depends_on:
         - t2-create-internal-testutil
         - t2_5-extend-internal-testutil
@@ -412,6 +412,88 @@ tasks:
                                        and BucketSpec field shapes
           output contract: ~318 dup lines removed
       app_type: code-fix
+    - id: t6b-extend-storetest
+      title: Extend internal/graphstore/internal/storetest with Metadata/Edge/NoteSymbolLink runners
+      status: in_progress
+      depends_on:
+        - t6-extract-graphstore-tests
+      blocks:
+        - t6c-graphstore-tests-storetest-migrate
+        - t8-archive
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/internal/storetest/
+      verification_required: true
+      notes: |-
+        Surfaced by t6 worker's fold-back (PR #84): bundle prompt
+        said use internal/testutil but design.md audit
+        categorizes sqlite_test.go + postgres_test.go as
+        Graphstore sub-helper (storetest, not testutil). t2 shipped
+        storetest with RunNodeRoundTrip / RunKGNoteRoundTrip /
+        RunKGNoteSearch runners; remaining cross-file dup needs
+        three more parameterizable runners.
+
+        Tier: T2 (extend existing package).
+
+        New runners to add to internal/graphstore/internal/storetest:
+          - RunMetadataRoundTrip(t, store, keyPrefix string)
+            — covers Metadata_RoundTrip + Metadata_MissingKey +
+              Metadata_Overwrite (3 mirrored tests, ~30 LOC/backend).
+          - RunEdgeUpsertCreate(t, store, idPrefix string)
+            RunEdgeUpsertUpdate(t, store, idPrefix string)
+            — covers UpsertEdge_Create + UpsertEdge_Update
+              (2 mirrored tests, ~24 LOC/backend).
+          - RunNoteSymbolLinkRoundTrip(t, store, namePrefix string)
+            RunNoteSymbolLinkIdempotent(t, store, namePrefix string)
+            — covers NoteSymbolLink_RoundTrip + _Idempotent
+              (2 mirrored tests, ~30 LOC/backend).
+
+        Each runner takes a prefix parameter so the shared Postgres
+        testcontainer (cross-backend run) doesn't see row collisions
+        — t2's existing runners already pin this pattern. Verify by
+        running storetest from both sqlite_test.go and
+        postgres_test.go simultaneously without test interaction.
+
+        Anti-scope: do NOT modify the consumer files
+        (sqlite_test.go, postgres_test.go) — that's t6c. Only
+        ship the runners + their isolation contract.
+
+        Hard test: go test ./internal/graphstore/internal/storetest -count=1
+        green; the new runner functions are exported (PascalCase)
+        and documented.
+
+        Cross-plan: pre-existing TestCRGBridge* env-dependent
+        failure remains (unrelated to t6b; requires python module
+        on PATH).
+      app_type: code-fix
+    - id: t6c-graphstore-tests-storetest-migrate
+      title: Migrate sqlite_test.go + postgres_test.go onto extended storetest runners
+      status: pending
+      depends_on:
+        - t6b-extend-storetest
+      blocks:
+        - t8-archive
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/sqlite_test.go
+        - internal/graphstore/postgres_test.go
+      verification_required: true
+      notes: |-
+        Consumer migration onto the runners landed by t6b.
+        Per-file commit: one for sqlite, one for postgres.
+        Replace each mirrored test pair (Metadata, Edge, NoteSymbolLink)
+        with a single line invoking the storetest runner with the
+        appropriate key/id/name prefix. Existing storetest runners
+        (RunNodeRoundTrip / RunKGNoteRoundTrip / RunKGNoteSearch
+        from t2) stay in place; this task only collapses the t6b-
+        addressed dup.
+
+        Hard test per commit: go test ./internal/graphstore -race -count=1
+        green; visible dup-line reduction in each consumer file.
+
+        Anti-scope: do NOT touch storetest itself (t6b owns).
+        Tests-only refactor; no production .go changes.
+      app_type: code-fix
     - id: t8-archive
       title: Open follow-up PR; verify gate; archive plan
       status: pending
@@ -420,6 +502,8 @@ tasks:
         - t4-extract-workflow-tests
         - t5-extract-commands-root-tests
         - t6-extract-graphstore-tests
+        - t6b-extend-storetest
+        - t6c-graphstore-tests-storetest-migrate
         - t7-extract-skills-and-agents-tests
       blocks: []
       owner: ""

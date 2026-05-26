@@ -1,0 +1,37 @@
+schema_version: 1
+delegation_id: del-t-schema-validator-wiring-1779798327
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t-schema-validator-wiring
+owner: schema-wiring-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 R1.5 schema wire
+scope:
+    write_scope:
+        - commands/workflow/workflow_hook_sentinel_schema.go
+        - commands/workflow/workflow_hook_outcome_schema.go
+        - commands/workflow/workflow_hook_outcome_schema_test.go
+prompt:
+    inline:
+        - 'Per t-schema-validator-wiring notes + p0''s discovery: codebase uses per-schema _schema.go files with //go:embed (NOT a central registry). Add workflow_hook_outcome_schema.go mirroring p0''s workflow_hook_sentinel_schema.go (already merged). Add TestWorkflowHookOutcomeEmbeddedSchemaMatchesCanonical guard like iter-log.'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/TASKS.yaml
+verification:
+    feedback_goal: register both hook schemas via per-schema _schema.go pattern
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

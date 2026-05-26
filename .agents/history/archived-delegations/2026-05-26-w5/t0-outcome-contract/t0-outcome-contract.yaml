@@ -11,6 +11,6 @@ success_criteria: Start only after loop-discipline lifecycle-hook native output 
 verification_expectations: ""
 may_mutate_workflow_state: false
 owner: t0-outcome-worker
-status: active
+status: completed
 created_at: "2026-05-26T11:35:46Z"
-updated_at: "2026-05-26T11:35:46Z"
+updated_at: "2026-05-26T11:39:16Z"
