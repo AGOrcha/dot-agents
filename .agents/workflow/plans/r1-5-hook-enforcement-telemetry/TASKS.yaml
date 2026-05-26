@@ -3,7 +3,7 @@ plan_id: r1-5-hook-enforcement-telemetry
 tasks:
     - id: t0-outcome-contract
       title: Define durable hook-outcome schema and archived-sentinel linkage
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -67,7 +67,7 @@ tasks:
       notes: Expose outcome source and rule identifiers without printing transcript contents.
     - id: t-schema-validator-wiring
       title: Wire hook-outcome schema into the workflow validator pipeline
-      status: pending
+      status: in_progress
       depends_on:
         - t0-outcome-contract
       blocks:

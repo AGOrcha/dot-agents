@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-t11-split-seams-tests-1779798327
+parent_plan_id: root-command-decomposition
+parent_task_id: t11-split-seams-tests
+title: Split commands/seams_test.go into per-cluster files
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/seams_test.go
+    - commands/lifecycle/seams_test.go
+success_criteria: |-
+    Move every TestXxx in seams_test.go (873 LOC) that targets a
+    lifecycle symbol (install/import/refresh/remove/status/add/
+    doctor/init/kg-mcp-write helpers) into
+    commands/lifecycle/seams_test.go. The split is mechanical
+    because each Test* name encodes its target. If any leftover
+    tests target no specific cluster, leave them in root
+    seams_test.go (or delete that file if empty).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t11-worker
+status: active
+created_at: "2026-05-26T12:25:27Z"
+updated_at: "2026-05-26T12:25:27Z"

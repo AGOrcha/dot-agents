@@ -1,0 +1,33 @@
+schema_version: 1
+delegation_id: del-p3-pre-snapshot-1779798327
+plan_id: loop-discipline-stop-hooks
+task_id: p3-pre-snapshot
+owner: p3-snapshot-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 snapshot before P3 family
+scope:
+    write_scope:
+        - .agents/history/loop-discipline-stop-hooks/source-skill-snapshot-2026-05-26.md
+prompt:
+    inline:
+        - Per p3-pre-snapshot notes; record git SHAs of source skill trees so P3/P3b/P4 copy from frozen baseline. Research-only; no code changes.
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml
+verification:
+    feedback_goal: source skill SHA snapshot recorded
+    app_type: research
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
