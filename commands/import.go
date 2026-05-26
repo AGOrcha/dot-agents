@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
@@ -126,50 +127,57 @@ const (
 	importScopeAll     = "all"
 	importFailedFmt    = "Failed to import %s: %v"
 
-	relClaudeSettingsJSON    = ".claude/settings.json"
-	relCursorSettingsJSON    = ".cursor/settings.json"
-	relCursorMCPJSON         = ".cursor/mcp.json"
-	relCursorHooksJSON       = ".cursor/hooks.json"
-	relCursorIgnore          = ".cursorignore"
-	relCursorIndexingIgnore  = ".cursorindexingignore"
-	relClaudeSettingsLocal   = ".claude/settings.local.json"
-	relMCPJSON               = ".mcp.json"
-	relVSCodeMCPJSON         = ".vscode/mcp.json"
-	relOpenCodeJSON          = "opencode.json"
-	relAgentsMD              = "AGENTS.md"
-	relCodexInstructionsMD   = ".codex/instructions.md"
-	relCodexRulesMD          = ".codex/rules.md"
-	relCodexConfigTOML       = ".codex/config.toml"
-	relCodexHooksJSON        = ".codex/hooks.json"
-	relCopilotInstructionsMD = ".github/copilot-instructions.md"
+	// The relX / agentsHooksPrefix constants below alias the canonical
+	// definitions in commands/lifecycle/resource_map.go (lifted in
+	// root-command-decomposition t02b). Keeping local aliases lets
+	// import.go's interior references stay unchanged until the parent
+	// command moves into commands/lifecycle/ in t06.
+	relClaudeSettingsJSON    = lifecycle.RelClaudeSettingsJSON
+	relCursorSettingsJSON    = lifecycle.RelCursorSettingsJSON
+	relCursorMCPJSON         = lifecycle.RelCursorMCPJSON
+	relCursorHooksJSON       = lifecycle.RelCursorHooksJSON
+	relCursorIgnore          = lifecycle.RelCursorIgnore
+	relCursorIndexingIgnore  = lifecycle.RelCursorIndexingIgnore
+	relClaudeSettingsLocal   = lifecycle.RelClaudeSettingsLocal
+	relMCPJSON               = lifecycle.RelMCPJSON
+	relVSCodeMCPJSON         = lifecycle.RelVSCodeMCPJSON
+	relOpenCodeJSON          = lifecycle.RelOpenCodeJSON
+	relAgentsMD              = lifecycle.RelAgentsMD
+	relCodexInstructionsMD   = lifecycle.RelCodexInstructionsMD
+	relCodexRulesMD          = lifecycle.RelCodexRulesMD
+	relCodexConfigTOML       = lifecycle.RelCodexConfigTOML
+	relCodexHooksJSON        = lifecycle.RelCodexHooksJSON
+	relCopilotInstructionsMD = lifecycle.RelCopilotInstructionsMD
+	relCursorCommandsDir     = lifecycle.RelCursorCommandsDir
+	relClaudeCommandsDir     = lifecycle.RelClaudeCommandsDir
+	relOpenCodeCommandsDir   = lifecycle.RelOpenCodeCommandsDir
+	relClaudeOutputStylesDir = lifecycle.RelClaudeOutputStylesDir
+	relOpenCodeModesDir      = lifecycle.RelOpenCodeModesDir
+	relOpenCodeThemesDir     = lifecycle.RelOpenCodeThemesDir
+	relGitHubPromptsDir      = lifecycle.RelGitHubPromptsDir
+	relCursorRulesDir        = lifecycle.RelCursorRulesDir
+	relAgentsSkillsDir       = lifecycle.RelAgentsSkillsDir
+	relClaudeSkillsDir       = lifecycle.RelClaudeSkillsDir
+	relGitHubAgentsDir       = lifecycle.RelGitHubAgentsDir
+	relCodexAgentsDir        = lifecycle.RelCodexAgentsDir
+	relOpenCodeAgentsDir     = lifecycle.RelOpenCodeAgentsDir
+	relGitHubHooksDir        = lifecycle.RelGitHubHooksDir
+	relJSONSuffix            = lifecycle.RelJSONSuffix
+	agentsHooksPrefix        = lifecycle.AgentsHooksPrefix
+
+	// import-only constants that the resource-map lift did not pull
+	// out (still file-scoped to import.go's plugin / marketplace flow).
 	relCopilotPluginManifest = "plugin.json"
 	relGitHubPluginManifest  = ".github/plugin/plugin.json"
 	relGitHubPluginDir       = ".github/plugin/"
 	relCopilotPluginMarket   = ".github/plugin/marketplace.json"
 	relCodexPluginMarket     = ".agents/plugins/marketplace.json"
 	relOpenCodePluginsDir    = ".opencode/plugins/"
-	relCursorCommandsDir     = ".cursor/commands/"
-	relClaudeCommandsDir     = ".claude/commands/"
-	relOpenCodeCommandsDir   = ".opencode/commands/"
-	relClaudeOutputStylesDir = ".claude/output-styles/"
-	relOpenCodeModesDir      = ".opencode/modes/"
-	relOpenCodeThemesDir     = ".opencode/themes/"
-	relGitHubPromptsDir      = ".github/prompts/"
 	relClaudePluginDir       = ".claude-plugin/"
 	relCursorPluginDir       = ".cursor-plugin/"
 	relCodexPluginDir        = ".codex-plugin/"
 	relClaudeREADME          = ".claude/CLAUDE.md"
-	relCursorRulesDir        = ".cursor/rules/"
-	relAgentsSkillsDir       = ".agents/skills/"
-	relClaudeSkillsDir       = ".claude/skills/"
-	relGitHubAgentsDir       = ".github/agents/"
-	relCodexAgentsDir        = ".codex/agents/"
-	relOpenCodeAgentsDir     = ".opencode/agent/"
-	relGitHubHooksDir        = ".github/hooks/"
-	relAgentMarkdownSuffix   = ".agent.md"
-	relJSONSuffix            = ".json"
 	relHookManifestYAML      = "HOOK.yaml"
-	agentsHooksPrefix        = "hooks/"
 )
 
 var projectImportSingles = []string{
@@ -936,6 +944,76 @@ func canonicalImportOutputs(c importCandidate) ([]importOutput, bool, error) {
 	return canonicalImportOutputsNonPlugin(c, rel)
 }
 
+// init wires two lifecycle seams whose canonical-import internals
+// (canonicalImportOutputs + 30+ hook-bundle helpers, importCandidate
+// struct with unexported fields) still live in commands/import.go until
+// t06 moves the import command itself into commands/lifecycle/:
+//
+//   - RestoreCanonicalResourceFileFn: the canonical-resource branch of
+//     lifecycle.RestoreFromResourcesCountedWithDeps.
+//   - CanonicalImportOutputs: the lifecycle-facing entry point that
+//     converts a lifecycle.ImportCandidate into []lifecycle.ImportOutput
+//     by delegating to canonicalImportOutputs.
+func init() {
+	lifecycle.RestoreCanonicalResourceFileFn = restoreCanonicalResourceFileImpl
+	lifecycle.CanonicalImportOutputs = canonicalImportOutputsImpl
+}
+
+// restoreCanonicalResourceFileImpl is the implementation registered into
+// lifecycle.RestoreCanonicalResourceFileFn. Extracted from init() so the
+// init function stays inside Sonar's cognitive-complexity limit (S3776).
+func restoreCanonicalResourceFileImpl(project, resourcesDir, agentsHome, path string, deps lifecycle.AddDeps) (int, bool, error) {
+	candidate := importCandidate{
+		project:    project,
+		sourceRoot: resourcesDir,
+		sourcePath: path,
+	}
+	outputs, ok, canonErr := canonicalImportOutputs(candidate)
+	if !ok {
+		return 0, false, nil
+	}
+	if canonErr != nil {
+		return 0, true, fmt.Errorf("canonical import for %s: %w", path, canonErr)
+	}
+	count := 0
+	for _, output := range outputs {
+		destPath := filepath.Join(agentsHome, output.destRel)
+		if err := deps.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			return count, true, fmt.Errorf("creating dir for %s: %w", destPath, err)
+		}
+		if err := deps.WriteFile(destPath, output.content, 0644); err != nil {
+			return count, true, fmt.Errorf("writing %s: %w", destPath, err)
+		}
+		count++
+	}
+	return count, true, nil
+}
+
+// canonicalImportOutputsImpl is the implementation registered into
+// lifecycle.CanonicalImportOutputs. Extracted from init() so the init
+// function stays inside Sonar's cognitive-complexity limit (S3776).
+func canonicalImportOutputsImpl(c lifecycle.ImportCandidate) ([]lifecycle.ImportOutput, bool, error) {
+	candidate := importCandidate{
+		project:    c.Project,
+		sourceRoot: c.SourceRoot,
+		sourcePath: c.SourcePath,
+		destRel:    c.DestRel,
+	}
+	outputs, ok, err := canonicalImportOutputs(candidate)
+	if !ok || err != nil {
+		return nil, ok, err
+	}
+	converted := make([]lifecycle.ImportOutput, 0, len(outputs))
+	for _, o := range outputs {
+		converted = append(converted, lifecycle.ImportOutput{
+			DestRel: o.destRel,
+			Content: o.content,
+			Origin:  o.Origin,
+		})
+	}
+	return converted, true, nil
+}
+
 // canonicalImportOutputsNonPlugin handles hook/settings paths after package-plugin routing.
 func canonicalImportOutputsNonPlugin(c importCandidate, rel string) ([]importOutput, bool, error) {
 	switch rel {
@@ -1452,22 +1530,10 @@ func filesDifferent(a, b string) (bool, error) {
 	return false, nil
 }
 
-func isManagedSymlink(path, agentsHome string) bool {
-	// Resolvable managed link (POSIX symlink / Windows junction) whose
-	// resolved target lies under agentsHome. A Windows hard-linked managed
-	// *file* has no reparse point to test against a prefix and is reported
-	// false here, matching the prior symlink-only behavior on POSIX.
-	raw, ok := links.ManagedLinkTarget(path)
-	if !ok {
-		return false
-	}
-	dest := raw
-	if !filepath.IsAbs(dest) {
-		dest = filepath.Clean(filepath.Join(filepath.Dir(path), dest))
-	}
-	agentsHome = filepath.Clean(agentsHome) + string(filepath.Separator)
-	return strings.HasPrefix(filepath.Clean(dest)+string(filepath.Separator), agentsHome)
-}
+// isManagedSymlink is a thin alias around lifecycle.IsManagedSymlink
+// (lifted in t02b). Kept as a function-var alias so existing call sites
+// in import.go and add.go stay unchanged until those commands move.
+var isManagedSymlink = lifecycle.IsManagedSymlink
 
 func relinkImportedProjects(cfg *config.Config, projects map[string]bool) {
 	for project := range projects {
