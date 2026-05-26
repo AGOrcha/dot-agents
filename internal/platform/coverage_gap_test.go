@@ -776,14 +776,126 @@ func TestEventNameDefaults(t *testing.T) {
 	})
 	assertEventNameMapping(t, codexEventName, "codex", []string{
 		"session_start", "pre_tool_use", "post_tool_use",
-		"user_prompt_submit", "stop",
+		"user_prompt_submit", "stop", "subagent_stop",
 	})
 	assertEventNameMapping(t, cursorEventName, "cursor", []string{
 		"pre_tool_use", "user_prompt_submit", "stop", "session_start",
+		"subagent_stop",
 	})
 	assertEventNameMapping(t, copilotEventName, "copilot", []string{
 		"session_start", "user_prompt_submit", "pre_tool_use",
+		"stop", "subagent_stop",
 	})
+}
+
+// TestP1aGateCriticalStopMappings is the table-driven regression for the P1a
+// gate-critical mapping deltas. It covers exactly the rows from the contract's
+// mapping table and the negative assertion that Copilot must NOT render
+// canonical `stop` as the literal `stop`.
+func TestP1aGateCriticalStopMappings(t *testing.T) {
+	cases := []struct {
+		name     string
+		resolver func(HookSpec) (string, bool)
+		platform string
+		when     string
+		want     string
+	}{
+		{
+			name:     "codex subagent_stop renders SubagentStop",
+			resolver: codexEventName,
+			platform: "codex",
+			when:     "subagent_stop",
+			want:     "SubagentStop",
+		},
+		{
+			name:     "copilot stop renders agentStop (not stop)",
+			resolver: copilotEventName,
+			platform: "copilot",
+			when:     "stop",
+			want:     "agentStop",
+		},
+		{
+			name:     "copilot subagent_stop renders subagentStop",
+			resolver: copilotEventName,
+			platform: "copilot",
+			when:     "subagent_stop",
+			want:     "subagentStop",
+		},
+		{
+			name:     "cursor subagent_stop renders subagentStop",
+			resolver: cursorEventName,
+			platform: "cursor",
+			when:     "subagent_stop",
+			want:     "subagentStop",
+		},
+		// Claude regression: stop and subagent_stop already supported.
+		{
+			name:     "claude stop still renders Stop",
+			resolver: claudeEventName,
+			platform: "claude",
+			when:     "stop",
+			want:     "Stop",
+		},
+		{
+			name:     "claude subagent_stop still renders SubagentStop",
+			resolver: claudeEventName,
+			platform: "claude",
+			when:     "subagent_stop",
+			want:     "SubagentStop",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.resolver(HookSpec{When: tc.when})
+			if !ok {
+				t.Fatalf("%sEventName(%q) returned !ok; want %q", tc.platform, tc.when, tc.want)
+			}
+			if got != tc.want {
+				t.Errorf("%sEventName(%q) = %q, want %q", tc.platform, tc.when, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCopilotStopIsAgentStopNotStop is the explicit negative-path regression
+// guarding against a recurrence of the documented Copilot pitfall: a future
+// edit must not collapse canonical `stop` to the literal `stop` event name
+// the way Claude/Cursor do. Copilot's terminal event is `agentStop`.
+func TestCopilotStopIsAgentStopNotStop(t *testing.T) {
+	got, ok := copilotEventName(HookSpec{When: "stop"})
+	if !ok {
+		t.Fatalf("copilotEventName(stop) returned !ok; the P1a mapping must accept canonical stop")
+	}
+	if got == "stop" {
+		t.Fatalf("copilotEventName(stop) = %q; Copilot does not have a `stop` event — it must render `agentStop`", got)
+	}
+	if got != "agentStop" {
+		t.Errorf("copilotEventName(stop) = %q, want agentStop", got)
+	}
+
+	// And the rendered config must also carry agentStop, not stop, in its
+	// JSON output — guarding the end-to-end render path, not just the
+	// resolver.
+	_, content, ok, err := renderCopilotHookFile(HookSpec{
+		Name:    "stop-guard",
+		When:    "stop",
+		Command: "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile: %v", err)
+	}
+	if !ok {
+		t.Fatal("renderCopilotHookFile returned !ok for canonical stop")
+	}
+	if !strings.Contains(string(content), `"agentStop"`) {
+		t.Errorf("rendered copilot hook missing \"agentStop\" event key:\n%s", content)
+	}
+	// Negative assertion: the rendered JSON must not key the hook on a
+	// bare "stop" event. (We check for the JSON key form `"stop":` so we
+	// do not false-positive on substrings of `agentStop`.)
+	if strings.Contains(string(content), `"stop":`) {
+		t.Errorf("rendered copilot hook keys event on bare \"stop\"; must be \"agentStop\":\n%s", content)
+	}
 }
 
 // TestMatcherForSpecVariants covers all three branches of matcherForSpec.

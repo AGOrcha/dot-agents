@@ -636,6 +636,10 @@ func codexEventName(spec HookSpec) (string, bool) {
 		return "UserPromptSubmit", true
 	case "stop":
 		return "Stop", true
+	case "subagent_stop":
+		// P1a gate-critical: Codex documents SubagentStop as a distinct
+		// terminal event for subagent runs.
+		return "SubagentStop", true
 	default:
 		return "", false
 	}
@@ -654,6 +658,10 @@ func cursorEventName(spec HookSpec) (string, bool) {
 		return "stop", true
 	case "session_start":
 		return "sessionStart", true
+	case "subagent_stop":
+		// P1a gate-critical: Cursor exposes subagentStop as a sibling
+		// terminal event to `stop`.
+		return "subagentStop", true
 	default:
 		return "", false
 	}
@@ -670,6 +678,13 @@ func copilotEventName(spec HookSpec) (string, bool) {
 		return "userPromptSubmitted", true
 	case "pre_tool_use":
 		return "preToolUse", true
+	case "stop":
+		// P1a gate-critical: GitHub Copilot's terminal event for the
+		// top-level agent is `agentStop`, NOT `stop`. The Claude/Cursor
+		// `stop` name does not exist in Copilot's event surface.
+		return "agentStop", true
+	case "subagent_stop":
+		return "subagentStop", true
 	default:
 		return "", false
 	}
