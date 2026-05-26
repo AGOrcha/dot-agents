@@ -1607,6 +1607,80 @@ func TestNewInstallCmd_RunEDispatchesInstall(t *testing.T) {
 	}
 }
 
+// TestNewInstallCmd_RunEAppliesDepsToGlobals pins the t13a-introduced
+// RunE wrapper contract: applyDepsToGlobals must fire before the moved
+// RunE body runs, so deps.Version / .Commit / .Describe / .FlagsFn
+// values reach the lifecycle package vars without the parent shim's
+// syncLifecycleGlobals helper. Without this, a regression that drops
+// the wrapper's applyDepsToGlobals call would silently revert t13b to
+// needing the shim's manual sync — the very thing t13a exists to absorb.
+//
+// We exercise both halves of the contract in one test: --generate path
+// is mutation-free (writes a manifest, but no platform link mutations)
+// and reliably touches finalizeInstall-adjacent code that reads the
+// build-info vars. Asserting on the package vars post-Execute confirms
+// the sync ran; a missing-manifest check on the install branch is
+// covered by TestNewInstallCmd_RunEDispatchesInstall above.
+func TestNewInstallCmd_RunEAppliesDepsToGlobals(t *testing.T) {
+	saved := Flags
+	savedV, savedC, savedD := Version, Commit, Describe
+	defer func() {
+		Flags = saved
+		Version = savedV
+		Commit = savedC
+		Describe = savedD
+	}()
+
+	// Force the package vars to a known-bad sentinel so we can prove
+	// the wrapper overwrote them.
+	Version = "sentinel-stale"
+	Commit = "sentinel-stale"
+	Describe = "sentinel-stale"
+	Flags = GlobalFlags{}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projDir := filepath.Join(tmp, "synced")
+	os.MkdirAll(projDir, 0755)
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	depsWithBuildInfo := Deps{
+		ExampleBlock:    stubExampleBlock,
+		NoArgsWithHints: stubNoArgsWithHints,
+		FlagsFn:         func() GlobalFlags { return GlobalFlags{Verbose: true} },
+		Version:         "0.9.9-applied",
+		Commit:          "cafebabe",
+		Describe:        "v0.9.9-applied-1-gcafebabe",
+	}
+
+	cmd := NewInstallCmd(depsWithBuildInfo)
+	cmd.SetArgs([]string{"--generate"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --generate: %v", err)
+	}
+
+	if Version != "0.9.9-applied" {
+		t.Errorf("RunE wrapper did not propagate Version; got %q", Version)
+	}
+	if Commit != "cafebabe" {
+		t.Errorf("RunE wrapper did not propagate Commit; got %q", Commit)
+	}
+	if Describe != "v0.9.9-applied-1-gcafebabe" {
+		t.Errorf("RunE wrapper did not propagate Describe; got %q", Describe)
+	}
+	if !Flags.Verbose {
+		t.Errorf("RunE wrapper did not propagate FlagsFn().Verbose; got %+v", Flags)
+	}
+}
+
 // ---------- Error-injection coverage via fakeInstallDeps ----------
 
 func TestRunInstall_GetwdErrorPropagates(t *testing.T) {

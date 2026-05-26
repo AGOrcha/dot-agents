@@ -39,9 +39,18 @@ func (StdInstallDeps) LoadConfig() (*config.Config, error)          { return con
 
 // NewInstallCmd builds the `da install` cobra command. The Deps argument
 // carries UX helpers and the global-flags snapshot from the commands package;
-// it is mirrored to the package-level Flags var by NewInstallCmd before each
-// RunE invocation so the helper functions in this file (which read the
-// package-var directly) stay in sync with the parent process's flag state.
+// the RunE wrapper calls applyDepsToGlobals(deps) before each invocation so
+// the helper functions in this file (which read lifecycle.Flags / .Version /
+// .Commit / .Describe / .ErrorWithHintsFn package vars directly per the t01
+// SHAPE.md "PRESERVE current package-var seams during the moves" decision)
+// stay in sync with the parent process's live state.
+//
+// After t13a this absorbs what the parent commands/install.go shim's
+// syncLifecycleGlobals helper used to do — a t13b call site of the form
+// `lifecycle.NewInstallCmd(buildLifecycleDeps())` works end-to-end without a
+// separate sync step. The existing parent shim's wrap remains compatible:
+// the shim's syncLifecycleGlobals runs before the inner RunE, then this
+// wrapper re-applies the same values from deps. Both writes are idempotent.
 func NewInstallCmd(deps Deps) *cobra.Command {
 	var generate bool
 	var strict bool
@@ -69,6 +78,7 @@ unknown JSON keys are preserved.`,
 		),
 		Args: deps.NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			applyDepsToGlobals(deps)
 			if generate {
 				return RunInstallGenerate(StdInstallDeps{})
 			}
