@@ -741,98 +741,92 @@ func TestCanonicalWhenEventMappingRenders(t *testing.T) {
 	})
 
 	t.Run("claude p1d wider-surface event is omitted from codex/cursor/copilot renders", func(t *testing.T) {
-		// task_created is a Claude-only canonical value introduced by
-		// P1d. The other three platform renderers must omit the spec
-		// silently (no fall-through forced because nothing in
-		// RequiredOn names them). This is the per-platform D2
-		// fall-through proof for the wider surface.
-		spec := HookSpec{Name: "task-watch", When: "task_created", Command: "/tmp/task.sh"}
-
-		codex, err := renderCodexHookConfig([]HookSpec{spec})
-		if err != nil {
-			t.Fatalf("renderCodexHookConfig: %v", err)
-		}
-		var codexPayload codexRenderedHooks
-		if err := json.Unmarshal(codex, &codexPayload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
-		}
-		if len(codexPayload.Hooks) != 0 {
-			t.Fatalf("expected codex render to be empty for claude-only event, got %v", codexPayload.Hooks)
-		}
-
-		cursor, err := renderCursorHookConfig([]HookSpec{spec})
-		if err != nil {
-			t.Fatalf("renderCursorHookConfig: %v", err)
-		}
-		var cursorPayload cursorRenderedHooks
-		if err := json.Unmarshal(cursor, &cursorPayload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(cursor))
-		}
-		if len(cursorPayload.Hooks) != 0 {
-			t.Fatalf("expected cursor render to be empty for claude-only event, got %v", cursorPayload.Hooks)
-		}
-
-		_, _, ok, err := renderCopilotHookFile(spec)
-		if err != nil {
-			t.Fatalf("renderCopilotHookFile: %v", err)
-		}
-		if ok {
-			t.Fatal("expected copilot render to omit claude-only event task_created")
-		}
+		// task_created is a Claude-only canonical value introduced by P1d.
+		// The other three platform renderers must omit the spec silently
+		// (no fall-through forced because nothing in RequiredOn names them).
+		assertSpecOmittedAcrossOtherPlatforms(t,
+			HookSpec{Name: "task-watch", When: "task_created", Command: "/tmp/task.sh"},
+			"claude-only event task_created")
 	})
 
 	t.Run("required-on codex errors when a claude-only p1d event is required there", func(t *testing.T) {
-		// Sanity: same D2 explicit-opt-in error shape applied to the
-		// new Claude wider-surface values — if an operator marks one
-		// of the P1d events required on codex, the renderer must
-		// error rather than silently omit.
-		spec := HookSpec{Name: "task-watch", When: "task_completed", Command: "/tmp/task.sh", RequiredOn: []string{"codex"}}
-		_, err := renderCodexHookConfig([]HookSpec{spec})
-		if err == nil {
-			t.Fatal("expected error when claude-only event is required on codex")
-		}
-		if !strings.Contains(err.Error(), "not representable for codex") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		assertRequiredOnCodexErrors(t,
+			HookSpec{Name: "task-watch", When: "task_completed", Command: "/tmp/task.sh", RequiredOn: []string{"codex"}})
 	})
 
 	t.Run("cursor wider-surface value is omitted from codex and copilot renders", func(t *testing.T) {
-		// after_file_edit is Cursor-only; renders for other platforms
-		// must omit the spec entirely (no fall-through forced because
-		// nothing in RequiredOn names them).
-		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh"}
-		codex, err := renderCodexHookConfig([]HookSpec{spec})
-		if err != nil {
-			t.Fatalf("renderCodexHookConfig: %v", err)
-		}
-		var codexPayload codexRenderedHooks
-		if err := json.Unmarshal(codex, &codexPayload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
-		}
-		if len(codexPayload.Hooks) != 0 {
-			t.Fatalf("expected codex render to be empty for cursor-only event, got %v", codexPayload.Hooks)
-		}
-		_, _, ok, err := renderCopilotHookFile(spec)
-		if err != nil {
-			t.Fatalf("renderCopilotHookFile: %v", err)
-		}
-		if ok {
-			t.Fatal("expected copilot render to omit cursor-only event after_file_edit")
-		}
+		// after_file_edit is Cursor-only; renders for non-cursor platforms
+		// must omit entirely. Reuses the shared omission helper.
+		assertSpecOmittedFromCodexAndCopilot(t,
+			HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh"},
+			"cursor-only event after_file_edit")
 	})
 
 	t.Run("required-on platform errors when canonical value unsupported", func(t *testing.T) {
-		// Sanity: if an operator marks a Cursor-only event RequiredOn
-		// codex, the render must error per D2's explicit-opt-in posture.
-		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh", RequiredOn: []string{"codex"}}
-		_, err := renderCodexHookConfig([]HookSpec{spec})
-		if err == nil {
-			t.Fatal("expected error when cursor-only event is required on codex")
-		}
-		if !strings.Contains(err.Error(), "not representable for codex") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		assertRequiredOnCodexErrors(t,
+			HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh", RequiredOn: []string{"codex"}})
 	})
+}
+
+// assertSpecOmittedFromCodexAndCopilot is the load-bearing helper for
+// "this canonical event is platform X-only" subtests: it asserts that
+// the codex + copilot renderers both produce empty output for spec.
+// Extracted from TestCanonicalWhenEventMappingRenders subtests to keep
+// the top-level test under Sonar's cog-complexity gate (was 36 → 15
+// limit, the original PR #102 review-blocker).
+func assertSpecOmittedFromCodexAndCopilot(t *testing.T, spec HookSpec, ctx string) {
+	t.Helper()
+	codex, err := renderCodexHookConfig([]HookSpec{spec})
+	if err != nil {
+		t.Fatalf("renderCodexHookConfig: %v", err)
+	}
+	var codexPayload codexRenderedHooks
+	if err := json.Unmarshal(codex, &codexPayload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
+	}
+	if len(codexPayload.Hooks) != 0 {
+		t.Fatalf("expected codex render to be empty for %s, got %v", ctx, codexPayload.Hooks)
+	}
+	_, _, ok, err := renderCopilotHookFile(spec)
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected copilot render to omit %s", ctx)
+	}
+}
+
+// assertSpecOmittedAcrossOtherPlatforms extends the omission proof to
+// cursor when the spec belongs to a Claude-only canonical value.
+func assertSpecOmittedAcrossOtherPlatforms(t *testing.T, spec HookSpec, ctx string) {
+	t.Helper()
+	assertSpecOmittedFromCodexAndCopilot(t, spec, ctx)
+	cursor, err := renderCursorHookConfig([]HookSpec{spec})
+	if err != nil {
+		t.Fatalf("renderCursorHookConfig: %v", err)
+	}
+	var cursorPayload cursorRenderedHooks
+	if err := json.Unmarshal(cursor, &cursorPayload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(cursor))
+	}
+	if len(cursorPayload.Hooks) != 0 {
+		t.Fatalf("expected cursor render to be empty for %s, got %v", ctx, cursorPayload.Hooks)
+	}
+}
+
+// assertRequiredOnCodexErrors confirms the D2 explicit-opt-in posture:
+// a spec marked RequiredOn=["codex"] but mapping to a canonical event
+// codex does not document must produce an error containing
+// "not representable for codex" rather than silently omit.
+func assertRequiredOnCodexErrors(t *testing.T, spec HookSpec) {
+	t.Helper()
+	_, err := renderCodexHookConfig([]HookSpec{spec})
+	if err == nil {
+		t.Fatal("expected error when event is required on codex")
+	}
+	if !strings.Contains(err.Error(), "not representable for codex") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 // assertWhenMaps validates a single mapper result against the expected
