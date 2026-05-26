@@ -1,15 +1,19 @@
 //go:build windows
 
-package commands
+package lifecycle
 
 import "syscall"
 
-// hasMultipleHardLinks reports whether path has more than one directory entry
-// referencing its file index (NumberOfLinks > 1). On Windows a managed file
-// link is a hard link with no reparse point, so this is how a managed
+// defaultHasMultipleHardLinks reports whether path has more than one directory
+// entry referencing its file index (NumberOfLinks > 1). On Windows a managed
+// file link is a hard link with no reparse point, so this is how a managed
 // hard-linked file is distinguished from a standalone regular file when no
 // canonical source path is available to compare against.
-func hasMultipleHardLinks(path string) bool {
+//
+// Wired into the HasMultipleHardLinks func-var seam in backup.go so
+// backup_test.go can override the link-count behavior without touching the
+// real syscalls.
+func defaultHasMultipleHardLinks(path string) bool {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return false
