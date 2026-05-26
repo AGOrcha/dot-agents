@@ -1,5 +1,7 @@
 # CRG dual-read parity surface (project-local analysis, 2026-05-19)
 
+Status: **partially-accepted (2026-05-25)** — v6.1 spec edits (edge identity, STARTS_WITH, WHERE operator enumeration) landed via commit `e64f3a9b`; `graph-backend-adapter-contract/design.md:175-220` cites this proposal by name as the v6.1 source. Remaining work (testdata/crg-parity corpus + per-row snapshots) is tracked inside `graph-backend-adapter-contract/t4-crg-dual-read` and is sequenced behind t4 execution.
+
 Source: subagent analysis of `internal/graphstore/crg.go` + `mcp_server.go`
 + `internal/graphstore/store.go` + the §11 parity matrix in
 `.agents/workflow/specs/graph-backend-adapter-contract/design.md`,

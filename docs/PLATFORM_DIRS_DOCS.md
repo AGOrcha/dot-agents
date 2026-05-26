@@ -18,13 +18,19 @@ Spot re-verification on 2026-04-11:
 - Codex, Claude Code, OpenCode, and GitHub Copilot locations below were re-checked against current vendor docs and remain directionally correct.
 - Cursor compatibility locations still need manual follow-up. The direct docs fetch/search path was inconclusive on 2026-04-11, so Cursor compatibility claims below remain based on the earlier manual doc pass rather than a fresh automated verification.
 
+Partial refresh on 2026-05-25 (hooks topic only — Claude Code, Codex, Cursor, GitHub Copilot):
+
+- Hook **event sets** updated across all four platforms. Codex now documents `SubagentStart` and `SubagentStop` (PascalCase). Cursor confirms `subagentStop` as a documented camelCase event. GitHub Copilot's stop-equivalent is named **`agentStop`** (camelCase, distinct from Cursor's `stop`), and Copilot now exposes `subagentStart` / `subagentStop`. Claude Code's event surface has grown substantially (Setup, UserPromptExpansion, PostToolBatch, PermissionDenied, PostCompact, StopFailure, TaskCreated, TaskCompleted, TeammateIdle, InstructionsLoaded, ConfigChange, CwdChanged, FileChanged, WorktreeCreate, WorktreeRemove, Elicitation, ElicitationResult).
+- Hook **file locations** unchanged for Claude, Codex, Cursor. Copilot adds `.github/copilot/settings.json` / `.github/copilot/settings.local.json` as a repo-scope settings target and `~/.copilot/hooks/` (or `$COPILOT_HOME/hooks/`) as a user-scope hook directory in addition to `~/.copilot/hooks/*.json`.
+- OpenCode and other (non-hooks) topics were NOT re-checked this pass — leave per-topic checked-on dates untouched.
+
 ### Cursor
 
 - [Rules](https://cursor.com/docs/rules): project rules live in `.cursor/rules/`. Cursor also documents `AGENTS.md` as a markdown instructions alternative. User rules and team rules exist, but those are settings or dashboard scopes rather than shared repo files.
 - [Skills](https://cursor.com/docs/skills): project skills can live in `.cursor/skills/<name>/SKILL.md`. Cursor compatibility discovery for `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, and `.codex/skills/<name>/SKILL.md` is kept here from the 2026-03-29 manual doc pass and should be manually re-verified.
 - [Subagents](https://cursor.com/docs/subagents): project subagents can live in `.cursor/agents/`, `.claude/agents/`, or `.codex/agents/`; user-level subagents can live in `~/.cursor/agents/`, `~/.claude/agents/`, or `~/.codex/agents/`. These compatibility notes are likewise carried forward from the earlier manual verification and should be manually re-checked.
 - [MCP](https://cursor.com/docs/mcp): project MCP config can live in `.cursor/mcp.json`; user-level config can live in `~/.cursor/mcp.json`.
-- [Hooks](https://cursor.com/docs/hooks): hooks live in `.cursor/hooks.json` or `~/.cursor/hooks.json`.
+- [Hooks](https://cursor.com/docs/hooks): hooks live in `.cursor/hooks.json` or `~/.cursor/hooks.json`. The documented agent-hook event surface (camelCase) includes `sessionStart`, `sessionEnd`, `preToolUse`, `postToolUse`, `postToolUseFailure`, `subagentStart`, `subagentStop`, `beforeShellExecution`, `afterShellExecution`, `beforeMCPExecution`, `afterMCPExecution`, `beforeReadFile`, `afterFileEdit`, `beforeSubmitPrompt`, `preCompact`, `stop`, `afterAgentResponse`, and `afterAgentThought`, plus tab-completion events (`beforeTabFileRead`, `afterTabFileEdit`) and app-lifecycle `workspaceOpen`. As of early 2026 hook execution moved to an in-process runner (10–20× faster than the previous shell-spawn model).
 - [Plugins](https://cursor.com/docs/plugins.md) and the [Cursor Marketplace](https://cursor.com/marketplace/): Cursor now has a first-party plugin system. Plugins bundle rules, skills, agents, commands, MCP servers, and hooks. A plugin package uses a `.cursor-plugin/plugin.json` manifest; multi-plugin repositories can add `.cursor-plugin/marketplace.json`. Cursor also documents local testing from `~/.cursor/plugins/local/<plugin-name>`.
 
 ### Claude Code
@@ -33,7 +39,7 @@ Spot re-verification on 2026-04-11:
 - [Skills](https://code.claude.com/docs/en/skills): project skills live in `.claude/skills/<name>/SKILL.md`; user-level skills live in `~/.claude/skills/<name>/SKILL.md`. Claude also documents nested `.claude/skills/` discovery for monorepos.
 - [Sub-agents](https://code.claude.com/docs/en/sub-agents): project subagents live in `.claude/agents/`; user-level subagents live in `~/.claude/agents/`.
 - [MCP](https://code.claude.com/docs/en/mcp): project MCP config can live in `.mcp.json`; user-level config lives in `~/.claude.json`.
-- [Hooks](https://code.claude.com/docs/en/hooks): hooks are configured in `.claude/settings.json`, `.claude/settings.local.json`, and `~/.claude/settings.json`.
+- [Hooks](https://code.claude.com/docs/en/hooks): hooks are configured in `.claude/settings.json`, `.claude/settings.local.json`, and `~/.claude/settings.json`. Plugins ship hooks via `hooks/hooks.json` inside the plugin package; skills and agents can also declare hooks in frontmatter. The documented event surface (PascalCase) includes `SessionStart`, `SessionEnd`, `Setup`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `PermissionRequest`, `PermissionDenied`, `Notification`, `PreCompact`, `PostCompact`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`, `InstructionsLoaded`, `ConfigChange`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, `WorktreeRemove`, `Elicitation`, and `ElicitationResult`. Stop and SubagentStop accept JSON `{"decision":"block","reason":"..."}` on stdout (or exit 2 + stderr) to refuse stop.
 - [Plugins](https://code.claude.com/docs/en/plugins.md): Claude Code now has a first-party plugin system. Plugins can bundle custom commands, agents, hooks, Skills, and MCP servers. A plugin package uses a `.claude-plugin/plugin.json` manifest and can include component directories such as `commands/`, `agents/`, `skills/`, and hooks or MCP configuration.
 - [Plugin marketplaces](https://code.claude.com/docs/en/plugin-marketplaces.md): Claude Code supports plugin marketplaces. Marketplaces are defined by `.claude-plugin/marketplace.json`, can be added from GitHub, arbitrary git URLs, local paths, direct JSON URLs, and can be configured in `.claude/settings.json` through `extraKnownMarketplaces` and `enabledPlugins` for team rollout.
 
@@ -44,7 +50,7 @@ Spot re-verification on 2026-04-11:
 - [Skills](https://developers.openai.com/codex/skills/): project skills live in `.agents/skills/<name>/SKILL.md`; user-level skills live in `~/.agents/skills/<name>/SKILL.md`.
 - [Subagents](https://developers.openai.com/codex/subagents): Codex documents subagent definition files under `.codex/agents/*.toml`.
 - [Config and MCP](https://developers.openai.com/codex/config-reference/): project config lives in `.codex/config.toml`; user-level config lives in `~/.codex/config.toml`. MCP servers are configured inside that TOML.
-- [Hooks](https://developers.openai.com/codex/hooks): hooks live in `.codex/hooks.json` and `~/.codex/hooks.json`.
+- [Hooks](https://developers.openai.com/codex/hooks): hooks live in `.codex/hooks.json` and `~/.codex/hooks.json`. Codex also reads layered config from `<repo>/.codex/config.toml` and `~/.codex/config.toml`; higher-precedence layers don't replace lower-precedence hooks — Codex merges them and emits startup warnings when multiple representations exist in one layer. The documented event surface (PascalCase, interoperable with Claude Code naming) is `SessionStart`, `SubagentStart`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `UserPromptSubmit`, `SubagentStop`, and `Stop`. Stop and SubagentStop require JSON on stdout (or exit 2 + stderr); plain-text output is invalid for these events.
 - [Plugins](https://developers.openai.com/codex/plugins.md) and [Build plugins](https://developers.openai.com/codex/plugins/build.md): Codex has a first-party plugin system surfaced in the app and CLI (`/plugins`). Plugin packages use a required `.codex-plugin/plugin.json` manifest and can also include `skills/`, `.app.json`, `.mcp.json`, and `assets/`. For local development and curated catalogs, Codex documents repo marketplaces at `$REPO_ROOT/.agents/plugins/marketplace.json` and personal marketplaces at `~/.agents/plugins/marketplace.json`; the docs use `$REPO_ROOT/plugins/` and `~/.codex/plugins/` as examples, but `source.path` resolves relative to the marketplace root rather than to a fixed plugin directory.
 
 ### OpenCode
@@ -63,7 +69,7 @@ Spot re-verification on 2026-04-11:
 - [Custom instructions](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions): repository-wide custom instructions live in `.github/copilot-instructions.md`; path-specific instructions live under `.github/instructions/**/*.instructions.md`; local instructions can live in `$HOME/.copilot/copilot-instructions.md`. The same docs also document `AGENTS.md` agent instructions, plus root-level `CLAUDE.md` and `GEMINI.md` alternatives for compatible agents.
 - [Agent skills](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/create-skills) and the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference): project skills live in `.github/skills/<name>/SKILL.md`. GitHub CLI also documents `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md` as project compatibility locations, plus user-level `~/.copilot/skills/<name>/SKILL.md`, `~/.agents/skills/<name>/SKILL.md`, and `~/.claude/skills/<name>/SKILL.md`.
 - [Custom agents](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/create-custom-agents), [Copilot CLI custom agents](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli), and the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference): repository custom agents live under `.github/agents/`. GitHub CLI also documents `.claude/agents/` compatibility plus user-level `~/.copilot/agents/` and `~/.claude/agents/`.
-- [Hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks): hook files live in `.github/hooks/*.json`. The same docs note that Copilot CLI loads hooks from the current working directory.
+- [Hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks) and [Hooks configuration reference](https://docs.github.com/en/copilot/reference/hooks-configuration): hook files live in `.github/hooks/*.json` (project) and `~/.copilot/hooks/` (user; or `$COPILOT_HOME/hooks/` when set). Repo settings can also configure hooks via `.github/copilot/settings.json` and `.github/copilot/settings.local.json`; cross-tool settings via `.claude/settings.json` / `.claude/settings.local.json` are also documented. The Copilot CLI loads hooks from the current working directory. The documented event surface (camelCase) is `sessionStart`, `sessionEnd`, `userPromptSubmitted`, `preToolUse`, `postToolUse`, `postToolUseFailure`, `preCompact`, **`agentStop`** (NOT `stop` — the main-agent stop equivalent), `errorOccurred`, `notification`, `permissionRequest`, `subagentStart`, and `subagentStop`. The `agentStop` naming is a cross-platform footgun for any mapper that assumes `stop` is the universal name.
 - [Coding-agent MCP](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/extend-coding-agent-with-mcp), [Copilot CLI MCP](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers), and the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference): coding-agent MCP can be configured in repository settings on GitHub.com. Copilot CLI also documents repository `.github/mcp.json`, workspace `.mcp.json` and `.vscode/mcp.json`, devcontainer `.devcontainer/devcontainer.json`, and user-level `~/.copilot/mcp-config.json`.
 - [Copilot CLI plugins overview](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-plugins), [find/install plugins](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing), [create plugins](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-creating), and [create marketplaces](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-marketplace): Copilot CLI now has installable plugins and plugin marketplaces. Plugins can be installed from marketplaces, repositories, or local paths; installed copies live under `~/.copilot/state/installed-plugins/`. A plugin package requires a root `plugin.json` manifest and can contain `agents/`, `skills/`, `hooks.json`, and `.mcp.json`. GitHub also documents direct repository installs when `plugin.json` is at the repository root, in `.github/plugin/`, or in `.claude-plugin/`. Marketplaces use `marketplace.json` as the required file and can live on GitHub, other git hosts, or local/shared filesystems.
 
@@ -221,12 +227,42 @@ now the sole implementation. Audit notes below describe the Go implementation.
 
 ### Hook Wiring Audit
 
-Validated from the current Go implementation:
+Validated from the current Go implementation.
+
+#### File locations
 
 | Platform | Official hook location | Go implementation | Notes |
 |----------|------------------------|-------------------|-------|
 | Claude Code | `.claude/settings*.json` | Yes | Wires Claude-compatible hook settings, but the management commands still source from `~/.agents/settings/*/claude-code.json` or `~/.agents/hooks/*/claude-code.json`, not from native Claude files. |
 | Cursor | `.cursor/hooks.json` | Yes | Wires `~/.agents/hooks/{scope}/cursor.json` to project and user `hooks.json`. |
 | Codex | `.codex/hooks.json` | Yes | Renders and writes repo `.codex/hooks.json` and user `~/.codex/hooks.json` via `renderCodexHookConfig` (`internal/platform/codex.go`, `internal/platform/hooks.go`); managed regular file, not a symlink. |
-| GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. |
+| GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. Repo-scope `.github/copilot/settings*.json` (documented 2026-05-25) and user-scope `~/.copilot/hooks/` directory are NOT yet wired. |
 | OpenCode | No dedicated hook file documented | No | No OpenCode-specific hook handling is implemented here. |
+
+#### Event coverage (2026-05-25)
+
+Comparison of documented vendor events vs. `internal/platform/hooks.go` event-name mappers. A `dot-agents` `HookSpec.When:` value is "wired" for a platform if `<platform>EventName` maps it to the platform's documented event name today.
+
+| `HookSpec.When` | Claude (`claudeEventName`) | Codex (`codexEventName`) | Cursor (`cursorEventName`) | Copilot (`copilotEventName`) |
+|------------------|---------------------------|--------------------------|----------------------------|-------------------------------|
+| `session_start` | `SessionStart` ✅ | `SessionStart` ✅ | `sessionStart` ✅ | `sessionStart` ✅ |
+| `session_end` | `SessionEnd` ✅ | — (vendor event missing) | `sessionEnd` ❌ (vendor docs it; we don't map) | `sessionEnd` ❌ |
+| `user_prompt_submit` | `UserPromptSubmit` ✅ | `UserPromptSubmit` ✅ | `beforeSubmitPrompt` ✅ | `userPromptSubmitted` ✅ |
+| `pre_tool_use` | `PreToolUse` ✅ | `PreToolUse` ✅ | `preToolUse` ✅ | `preToolUse` ✅ |
+| `post_tool_use` | `PostToolUse` ✅ | `PostToolUse` ✅ | `postToolUse` ❌ | `postToolUse` ❌ |
+| `post_tool_use_failure` | `PostToolUseFailure` ✅ | — (vendor event missing) | `postToolUseFailure` ❌ | `postToolUseFailure` ❌ |
+| `notification` | `Notification` ✅ | — | — | `notification` ❌ |
+| `permission_request` | `PermissionRequest` ✅ | `PermissionRequest` ❌ | — | `permissionRequest` ❌ |
+| `pre_compact` | `PreCompact` ✅ | `PreCompact` ❌ | `preCompact` ❌ | `preCompact` ❌ |
+| `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | **`agentStop`** ❌ (camelCase, not `stop`) |
+| `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ❌ | `subagentStart` ❌ | `subagentStart` ❌ |
+| `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ❌ (vendor added it; we don't map) | `subagentStop` ❌ | `subagentStop` ❌ |
+
+Cells: ✅ = mapped today; ❌ = vendor documents the event but `<platform>EventName` does not yet map it; — = vendor does not document the event for that platform.
+
+Key gaps surfaced 2026-05-25:
+
+- **Codex**: `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `PermissionRequest` are all documented by Codex but not mapped by `codexEventName`. The `renderCodexHookConfig` matcher whitelist (`internal/platform/hooks.go:728`) also needs extending for any of these that accept matchers.
+- **Cursor**: `subagentStart`, `subagentStop`, `postToolUse`, `postToolUseFailure`, `sessionEnd`, `preCompact` are all unmapped; Cursor also exposes a much wider event surface (shell/MCP/file-edit hooks) not represented in `HookSpec.When`.
+- **Copilot**: `copilotEventName` covers only 3 of the 13 documented events. Most critically, the stop equivalent is named **`agentStop`** (camelCase) — the mapper would currently fail to render any `stop` hook on Copilot. `subagentStart`/`subagentStop` are also unmapped.
+- **OpenCode**: still no `opencodeEventName`; OpenCode's hook surface is not addressed by `internal/platform/hooks.go` at all.

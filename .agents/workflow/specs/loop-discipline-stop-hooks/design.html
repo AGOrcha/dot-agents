@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>design</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<h1 id="loop-discipline-stop-hooks-design">Loop-Discipline Stop Hooks —
+Design</h1>
+<ul>
+<li>spec-id: <code>loop-discipline-stop-hooks</code></li>
+<li>status: active (promotion of
+<code>.agents/proposals/loop-discipline-stop-hooks-scoping.md</code>)</li>
+<li>date: 2026-05-25</li>
+<li>owner: dot-agents</li>
+<li>predecessor:
+<code>.agents/proposals/loop-discipline-stop-hooks-scoping.md</code></li>
+<li>related plans: <code>r1-outcome-scoring</code> (completed scoring
+baseline), <code>r1-5-hook-enforcement-telemetry</code> (follow-up
+consumer of gate outcomes)</li>
+</ul>
+<h2 id="problem-statement">Problem statement</h2>
+<p>Three core dot-agents skills — <code>iteration-close</code>,
+<code>isp</code>, and <code>loop-worker</code> — encode the project’s
+discipline contracts (verify → checkpoint → merge-back; orchestrator
+stage gates; subagent write-scope confinement). Today those contracts
+live only in skill prose. Nothing inspects the agent’s state at turn-end
+to confirm the contract was actually upheld. Drift is silent and
+typically only surfaces in post-mortem.</p>
+<p>In parallel, none of the three skills ship in the dot-agents starter
+scaffold, so projects initialized via <code>da init</code> /
+<code>da refresh</code> do not inherit the machinery the discipline
+depends on, and the platform mapper in
+<code>internal/platform/hooks.go</code> has documented coverage gaps for
+the very lifecycle events (<code>SubagentStop</code>, Codex/Cursor stop
+variants, Copilot’s <code>agentStop</code>) any enforcement layer would
+need to attach to.</p>
+<h2 id="goal">Goal</h2>
+<p>Land lifecycle hooks anchored by Stop / SubagentStop enforcement for
+the discipline contracts of <code>iteration-close</code>,
+<code>isp</code>, and <code>loop-worker</code>. Sentinels written at
+skill entry let terminal hooks validate that expected workflow artifacts
+are present and consistent before the agent is allowed to stop. In
+addition, add narrowly bounded <code>PreToolUse</code> prevention for
+deterministically forbidden workflow commands,
+<code>SubagentStart</code> bootstrap context for
+<code>loop-worker</code>, and <code>PreCompact</code> continuity advice
+while governed work remains active. Violations split two-tier:
+<strong>hard</strong> = request platform-native continuation/remediation
+with an actionable reason; <strong>soft</strong> = stderr advisory, exit
+0. Claude Code, Codex, and Copilot use documented block decisions;
+Cursor native hooks use <code>followup_message</code> to continue
+repair. Land every asset inside the dot-agents starter scaffold so any
+project inheriting the starter picks up both the skills and the
+enforcement together.</p>
+<h2 id="decisions">Decisions</h2>
+<p>The following were settled in scoping (2026-05-25). The plan
+implements them; it does not relitigate them.</p>
+<h3
+id="d1.-two-tier-violation-enforcement-hard-remediation-vs-soft-advisory">D1.
+Two-tier violation enforcement (hard remediation vs soft advisory)</h3>
+<p><strong>Decision:</strong> Hooks request the platform’s documented
+native remediation on hard violations (contract demonstrably broken:
+missing artifact, scope violation, illegal CLI invocation). Claude Code,
+Codex, and Copilot use JSON
+<code>{"decision":"block","reason":"..."}</code> where documented;
+Cursor native <code>stop</code> / <code>subagentStop</code> hooks use
+<code>{"followup_message":"..."}</code>. Soft violations emit a stderr
+advisory and exit 0 (smell, not breach: vague verify summary,
+uncommitted changes). <strong>Rationale:</strong> Hard remediation
+recovers lost work and stops drift before it propagates. Soft advisories
+steer behavior without paying for false positives. Tier choice is a
+per-rule policy decision, not a global setting.
+<strong>Rejected:</strong> Always-block (too brittle, blocks recoverable
+smells); always-advise (no recovery for true breaches).</p>
+<h3
+id="d2.-one-to-one-canonical-hookspec.when-platform-event-mapping">D2.
+One-to-one canonical <code>HookSpec.When</code> → platform event
+mapping</h3>
+<p><strong>Decision:</strong> Each canonical <code>HookSpec.When</code>
+value maps to at most one documented event name per platform. If a
+platform does not document an event, the mapper returns
+<code>("", false)</code> and the renderer emits nothing for that
+platform — the existing <code>hookRequiredOnPlatform</code> fall-through
+is the right behavior. Operators who want cross-platform coverage of a
+semantic concept declare additional HookSpecs targeting each platform’s
+nearest documented event. <strong>Rationale:</strong>
+Semantic-equivalence fan-out (e.g. translating Cursor’s
+<code>after-file-edit</code> to Claude’s <code>PostToolUse</code> with
+matcher <code>Edit|Write</code>) creates surprising behavior — a Cursor
+<code>after-file-edit</code> would unexpectedly fire on
+<code>cat</code>-via-Bash on Claude. Explicit operator opt-in preserves
+clarity. <strong>Precedent:</strong> <code>permission_request</code>
+today maps only on platforms that document it; other platforms no-op.
+<strong>Rejected:</strong> Semantic-equivalence fan-out;
+whole-platform-bucket broadcast.</p>
+<h3
+id="d3.-cursors-wider-event-surface-gets-canonical-hookspec.when-values">D3.
+Cursor’s wider event surface gets canonical <code>HookSpec.When</code>
+values</h3>
+<p><strong>Decision:</strong> Fine-grained Cursor-only events
+(<code>before-shell-execution</code>, <code>after-file-edit</code>,
+etc.) are promoted to canonical <code>HookSpec.When</code> values even
+though only Cursor implements them today. Other platform mappers no-op
+for these values until the vendors document equivalents.
+<strong>Rationale:</strong> These events deliver real cross-platform
+leverage as other vendors copy Cursor’s surface; promoting them now
+means operator HookSpecs do not need to be rewritten when (e.g.) Codex
+adds an <code>AfterShellExecution</code> event. Same precedent as
+<code>permission_request</code>.</p>
+<h3 id="d4.-opencode-is-an-intentional-plugins-vs-hooks-split">D4.
+OpenCode is an intentional plugins-vs-hooks split</h3>
+<p><strong>Decision:</strong> OpenCode lifecycle handlers remain under
+the <strong>Plugins</strong> resource type. No hooks-to-plugins emitter
+bridge is built. OpenCode does not publish a hooks file; its lifecycle
+surface is TypeScript / JavaScript plugin modules with
+<code>package.json</code> deps installed via <code>bun install</code>.
+<strong>Rationale:</strong> A <code>hooks/{scope}/hooks.json</code> →
+OpenCode plugin emitter would be bridge code maintained for one platform
+with no other consumer. The artifact shape is sufficiently different
+that overloading the Hooks resource type would confuse the model. This
+is an intentional split, not a coverage gap; document as such in
+<code>docs/HOOKS.md</code>.</p>
+<h3
+id="d5.-sentinel-protocol-is-the-contract-between-skill-and-gate">D5.
+Sentinel protocol is the contract between skill and gate</h3>
+<p><strong>Decision:</strong> Each skill writes a sentinel file at entry
+—
+<code>.agents/active/hook-sentinels/&lt;skill&gt;-&lt;run-id&gt;.json</code>
+— declaring the plan, task, agent type, and expected artifacts. The
+Stop/SubagentStop hook reads the latest sentinel for its skill name and
+validates the declared artifacts before allowing stop. No sentinel = no
+enforcement (skill did not run this turn). <strong>Rationale:</strong>
+Sentinels make enforcement opt-in per skill invocation and decouple the
+gate script from skill internals — the gate only knows sentinel shape,
+not skill steps. Encoding expectations declaratively keeps the gate
+logic small and uniform across skills. Completed records are historical
+loop evidence and are archived under
+<code>.agents/history/&lt;plan-id&gt;/hook-sentinels/&lt;YYYY-MM-DD&gt;/</code>,
+not retained under active state.</p>
+<h3 id="d6.-loop-worker-matcher-logic-self-filters-in-gate.sh">D6.
+Loop-worker matcher logic self-filters in <code>gate.sh</code></h3>
+<p><strong>Decision:</strong> Claude’s
+<code>subagent_type == "loop-worker"</code> matcher is Claude-only. On
+Codex/Copilot/Cursor the SubagentStop hook fires for all subagents; the
+<code>gate.sh</code> script self-filters by reading the sentinel’s
+<code>agent_type</code> field and exiting 0 early if the subagent is not
+a loop-worker. <strong>Rationale:</strong> Avoids redundant per-platform
+matcher logic; keeps a single source of truth (the sentinel) for “is
+this the agent I care about?”.</p>
+<h3
+id="d7.-artifact-checks-are-portable-trace-checks-require-observable-input">D7.
+Artifact checks are portable; trace checks require observable input</h3>
+<p><strong>Decision:</strong> The v1 gates require hard remediation on
+facts they can establish from repository state or declared sentinel data
+on every supported platform (missing expected artifacts, write-scope
+escape, forbidden workflow-state file mutation). Rules that require
+command history or conversation content (<code>workflow advance</code>
+invoked, <code>workflow orient</code> re-run,
+<code>make build-prod</code> run, or direct-vs-fanout decision prose
+missing) are enforced only when the hook invocation supplies a readable
+transcript/trace path with a platform-verified payload contract. If that
+observation source is absent or unreadable, the gate emits a soft
+advisory naming the unverified rule; it does not issue evidence-free
+hard remediation. <strong>Rationale:</strong> A sentinel written at
+skill entry records intent; it cannot prove subsequent tool calls by
+itself. Claude Code and Codex document transcript paths for
+Stop/SubagentStop inputs; Copilot documents <code>transcriptPath</code>
+for <code>agentStop</code>/<code>subagentStop</code>; Cursor documents
+<code>transcript_path</code> for agent hooks and
+<code>agent_transcript_path</code> for <code>subagentStop</code>. This
+keeps enforcement truthful while allowing stronger checks where the
+platform exposes the necessary evidence.</p>
+<h3
+id="d8.-approved-non-terminal-hooks-prevent-or-preserve-terminal-hooks-prove">D8.
+Approved non-terminal hooks prevent or preserve; terminal hooks
+prove</h3>
+<p><strong>Decision:</strong> Ship three non-terminal lifecycle uses in
+the primary bundles:</p>
+<ul>
+<li><code>PreToolUse</code> may hard-remediate only a deterministic
+command boundary that is already forbidden by the skill contract, such
+as a delegated <code>iteration-close</code> path attempting
+<code>workflow advance</code>, or a <code>loop-worker</code> attempting
+orchestrator-only workflow commands. It does not replace terminal
+artifact validation.</li>
+<li><code>SubagentStart</code> supplies <code>loop-worker</code>
+bootstrap context and correlation information for its later
+sentinel/stop evaluation. It is not evidence that the worker
+complied.</li>
+<li><code>PreCompact</code> emits continuity context or advice while an
+active sentinel still expects closeout work. It does not block
+compaction in v1.</li>
+</ul>
+<p><strong>Rationale:</strong> These events reduce preventable drift or
+loss of active context, while Stop/SubagentStop remain the portable
+proof point for final artifacts and archival state.</p>
+<h3
+id="d9.-post-tool-events-are-observation-candidates-not-assumed-gates">D9.
+Post-tool events are observation candidates, not assumed gates</h3>
+<p><strong>Decision:</strong> Evaluate <code>PostToolUse</code> and
+<code>PostToolUseFailure</code> as observation sources for
+workflow-command success/failure feedback and future telemetry. Do not
+ship blocking behavior from them in this plan unless a later task
+documents a deterministic invariant, portable vendor contract, and
+acceptable noise/privacy boundary. R1.5 owns the structured
+observation/outcome decision. <strong>Rationale:</strong> Failed fanout,
+checkpoint, merge-back, or closeout attempts are useful improvement
+evidence, but recording an error is not itself proof that the session
+should be blocked.</p>
+<h2 id="requirements-behavioral">Requirements (behavioral)</h2>
+<h3 id="r1.-iteration-close-gate">R1. iteration-close-gate</h3>
+<p>When the <code>iteration-close</code> skill has run during the
+current turn (sentinel present) and the agent attempts to stop or a
+subagent attempts to stop, the gate MUST:</p>
+<ul>
+<li>R1.1 Validate that every artifact declared in the sentinel’s
+<code>expected_artifacts</code> exists.</li>
+<li>R1.2 If a verify-record entry is required for the current run_id but
+missing, emit hard remediation with a reason that names the missing
+artifact.</li>
+<li>R1.3 If <code>/self-review</code> returned <code>reject</code> but a
+<code>merge-back</code> was written anyway, emit hard remediation.</li>
+<li>R1.4 If delegation is active and a readable, verified trace proves
+<code>workflow advance</code> was invoked (an orchestrator-only action),
+emit a hard remediation request. If no usable trace is supplied, emit a
+soft coverage advisory.</li>
+<li>R1.5 If the commit hash recorded in iter-log does not match
+<code>git log -1 --format=%h</code>, emit a soft advisory.</li>
+<li>R1.6 If a readable trace proves <code>make build-prod</code> (or
+analogous heavy build) ran mid-iteration, emit a soft advisory.</li>
+<li>R1.7 If no sentinel is present, exit 0 silently — the skill did not
+run this turn and there is nothing to enforce.</li>
+<li>R1.8 On verified <code>PreToolUse</code> input, if a delegated
+closeout sentinel is active and the attempted command is
+<code>workflow advance</code>, hard-remediate before execution with the
+required <code>workflow merge-back</code> action. Other closeout
+sequencing remains terminally verified.</li>
+<li>R1.9 On <code>PreCompact</code>, when its sentinel is still active,
+emit advisory continuity context naming the unresolved
+verify/checkpoint/merge-back or advance obligation; do not block
+compaction.</li>
+</ul>
+<h3 id="r2.-isp-gate">R2. isp-gate</h3>
+<p>When the <code>isp</code> skill has run during the current turn, the
+gate MUST:</p>
+<ul>
+<li>R2.1 If a bundle file under
+<code>.agents/active/delegation-bundles/</code> was written this turn
+but no parent-gate entry was appended to the iter-log after merge-back,
+emit hard remediation.</li>
+<li>R2.2 If the sentinel records
+<code>eligible_snapshot_loaded: false</code> and a readable trace proves
+<code>workflow orient</code> was re-run by the orchestrator (the
+orchestrator was supposed to load the snapshot from
+<code>orchestrator-session-start</code>), emit hard remediation. Without
+a usable trace, emit a soft coverage advisory.</li>
+<li>R2.3 If a readable trace contains no direct-vs-fanout decision text
+for this run, emit a soft advisory. Without a usable trace, emit a soft
+coverage advisory.</li>
+<li>R2.4 If <code>max_batch &gt; 1</code> was declared but only one
+bundle materialized, emit a soft advisory.</li>
+<li>R2.5 No-sentinel → exit 0.</li>
+<li>R2.6 On <code>PreCompact</code>, when an ISP sentinel remains
+active, emit advisory context naming the selected task/bundle and the
+next unresolved stage; do not infer stage completion or block
+compaction.</li>
+</ul>
+<h3 id="r3.-loop-worker-gate">R3. loop-worker-gate</h3>
+<p>When a subagent attempts to stop and a loop-worker sentinel is
+present (or the sentinel’s <code>agent_type == "loop-worker"</code>),
+the gate MUST:</p>
+<ul>
+<li>R3.1 Diff the subagent’s git changes against the sentinel’s recorded
+<code>write_scope</code>. Any file modified outside
+<code>write_scope</code> is a hard remediation, naming the offending
+path and the allowed scope.</li>
+<li>R3.2 If a readable trace proves any of
+<code>workflow advance|orient|next|status</code> were invoked while the
+sentinel was present, emit hard remediation (orchestrator surface, not
+worker surface). Without a usable trace, emit a soft coverage
+advisory.</li>
+<li>R3.3 If <code>loop-state.md</code>’s
+<code>## Current Position</code> section was edited by the subagent,
+emit hard remediation.</li>
+<li>R3.4 If no <code>merge-back/&lt;task&gt;.md</code> artifact exists
+for the closing task, emit hard remediation.</li>
+<li>R3.5 If no positive+negative test trace was captured this run, emit
+a soft advisory.</li>
+<li>R3.6 If uncommitted changes remain at subagent stop, emit a soft
+advisory.</li>
+<li>R3.7 No-sentinel or <code>agent_type != "loop-worker"</code> → exit
+0.</li>
+<li>R3.8 On <code>SubagentStart</code>, supply the loop-worker bootstrap
+reminder and correlation context needed to load the bundle, honor
+<code>write_scope</code>, and use delegated
+<code>iteration-close</code>; this event does not mark compliance.</li>
+<li>R3.9 On verified <code>PreToolUse</code> input, hard-remediate an
+attempted <code>workflow advance</code>, <code>workflow orient</code>,
+<code>workflow next</code>, or <code>workflow status</code> while a
+loop-worker sentinel is active, before that forbidden worker action
+runs.</li>
+<li>R3.10 On <code>PreCompact</code>, when a loop-worker sentinel
+remains active, emit advisory continuity context naming the task, write
+scope, and required delegated closeout; do not block compaction.</li>
+</ul>
+<h3 id="r4.-sentinel-protocol">R4. Sentinel protocol</h3>
+<ul>
+<li>R4.1 The CLI MUST expose <code>write</code>, <code>read</code>, and
+<code>clear</code> verbs for sentinels keyed by skill name and
+run-id.</li>
+<li>R4.2 Sentinel files MUST be written under
+<code>.agents/active/hook-sentinels/&lt;skill&gt;-&lt;run-id&gt;.json</code>
+with a versioned schema (schema_version, skill, run_id, started_at,
+plan_id, task_id, agent_type, expected_artifacts, and context). Context
+MUST be able to carry <code>git_head_at_start</code>,
+<code>write_scope</code>, <code>eligible_snapshot_loaded</code>,
+<code>max_batch</code>, and an optional trace-path hint; hook stdin
+remains authoritative when it provides a platform trace path.</li>
+<li>R4.3 <code>read --latest</code> MUST return the most recent sentinel
+for a given skill name; <code>read --run-id</code> MUST return an exact
+match or error.</li>
+<li>R4.4 <code>clear</code> MUST remove a sentinel by run-id; on success
+path, the gate (or the skill) MUST archive the record under
+<code>.agents/history/&lt;plan-id&gt;/hook-sentinels/&lt;YYYY-MM-DD&gt;/</code>.</li>
+<li>R4.5 Each enforced skill MUST call
+<code>da workflow hook-sentinel write</code> in its workflow before
+doing any other work — sentinels declare intent, so missing them means
+no enforcement.</li>
+</ul>
+<h3 id="r5.-two-tier-output-contract">R5. Two-tier output contract</h3>
+<ul>
+<li>R5.1 Hard violations MUST use each platform’s documented native
+continuation/remediation output. Claude Code, Codex, and Copilot use
+<code>{"decision":"block","reason":"&lt;message&gt;"}</code> where
+documented. Cursor uses
+<code>{"followup_message":"&lt;message&gt;"}</code> for native
+<code>stop</code> / <code>subagentStop</code> hooks. P1c MUST record the
+per-platform output table in <code>docs/HOOKS.md</code>.</li>
+<li>R5.2 Soft violations MUST emit human-readable advisory text to
+stderr and exit 0.</li>
+<li>R5.3 Reason strings MUST be actionable: name the violated rule, the
+offending artifact or path, and the remediation step.</li>
+<li>R5.4 Hooks MUST NOT exceed <code>timeout_ms: 8000</code> so they
+cannot livelock the stop path.</li>
+</ul>
+<h3 id="r6.-per-platform-event-coverage">R6. Per-platform event
+coverage</h3>
+<p>The platform mapper in <code>internal/platform/hooks.go</code> MUST
+be extended to render the events the three gates depend on:</p>
+<ul>
+<li>R6.1 Codex: <code>SubagentStop</code> (primary loop-worker-gate
+target) plus <code>SubagentStart</code>, <code>PreCompact</code>,
+<code>PostCompact</code>, <code>PermissionRequest</code> for forward
+parity.</li>
+<li>R6.2 Copilot: <code>agentStop</code> (NOT <code>stop</code> —
+camelCase footgun) plus <code>sessionEnd</code>,
+<code>postToolUse</code>, <code>postToolUseFailure</code>,
+<code>preCompact</code>, <code>notification</code>,
+<code>permissionRequest</code>, <code>subagentStart</code>,
+<code>subagentStop</code>, <code>errorOccurred</code>.</li>
+<li>R6.3 Cursor: <code>subagentStop</code> (dedicated reference
+subsection in vendor docs) plus <code>sessionEnd</code>,
+<code>postToolUse</code>, <code>postToolUseFailure</code>,
+<code>preCompact</code>, <code>subagentStart</code>, plus the
+Cursor-wider surface (<code>beforeShellExecution</code>,
+<code>afterShellExecution</code>, <code>beforeMCPExecution</code>,
+<code>afterMCPExecution</code>, <code>beforeReadFile</code>,
+<code>afterFileEdit</code>, <code>afterAgentResponse</code>,
+<code>afterAgentThought</code>, <code>workspaceOpen</code>,
+<code>beforeTabFileRead</code>, <code>afterTabFileEdit</code>).</li>
+<li>R6.4 New canonical <code>HookSpec.When</code> values from D3 + the
+May 2026 refresh (<code>post_compact</code>,
+<code>error_occurred</code>) MUST be introduced and documented in
+<code>docs/HOOKS.md</code>.</li>
+<li>R6.5 The Codex matcher whitelist in
+<code>renderCodexHookConfig</code> MUST NOT be extended by guessing.
+Each new event must be verified per vendor docs for matcher support
+before its name is added to the whitelist.</li>
+<li>R6.6 Claude Code’s documented wider lifecycle surface MUST be mapped
+and documented in a dedicated parity task: <code>Setup</code>,
+<code>UserPromptExpansion</code>, <code>PostToolBatch</code>,
+<code>PermissionDenied</code>, <code>StopFailure</code>,
+<code>TeammateIdle</code>, <code>TaskCreated</code>,
+<code>TaskCompleted</code>, <code>WorktreeCreate</code>,
+<code>WorktreeRemove</code>, <code>FileChanged</code>,
+<code>ConfigChange</code>, <code>CwdChanged</code>,
+<code>InstructionsLoaded</code>, <code>Elicitation</code>, and
+<code>ElicitationResult</code>. These names were verified against
+current official documentation on 2026-05-25; the mappings do not
+broaden the three discipline gates themselves.</li>
+<li>R6.7 Gate behavior now uses non-terminal events only within D8:
+portable <code>PreToolUse</code> early prevention where vendor
+input/output verification supports the rule; <code>SubagentStart</code>
+bootstrap for <code>loop-worker</code>; and <code>PreCompact</code>
+continuity advice. <code>PostToolUse</code> and
+<code>PostToolUseFailure</code> remain parity/observation inputs pending
+the R1.5 evaluation in D9.</li>
+</ul>
+<h3 id="r7.-starter-scaffold-delivery">R7. Starter scaffold
+delivery</h3>
+<ul>
+<li>R7.1 The three skill bundles (<code>iteration-close</code>,
+<code>isp</code>, <code>loop-worker</code>) MUST ship inside the
+dot-agents starter scaffold so any project initialized via
+<code>da init</code> / <code>da refresh</code> inherits them.</li>
+<li>R7.2 The starter MUST ship the <code>loop-worker</code> AGENT.md
+under an <code>agents/</code> tier.
+<code>internal/scaffold/home.CopyMissingStarterAssets</code> already
+recursively materializes embedded starter descendants and
+<code>commands/init.go:createInitialAgentsDirs</code> creates
+<code>agents/global</code>; P3 extends copy assertions rather than
+adding speculative loader code.</li>
+<li>R7.3 The starter MUST ship the <code>loop-worker</code> profile
+referenced by the skill (step 0 source).</li>
+<li>R7.4 The three hook bundles (<code>iteration-close-gate</code>,
+<code>isp-gate</code>, <code>loop-worker-gate</code>) MUST ship under
+<code>internal/scaffold/hooks/global/</code> with HOOK.yaml + gate.sh
+entries. Their manifests MAY cover multiple approved lifecycle events
+using the P1c multi-event representation; they are not limited to
+terminal events.</li>
+</ul>
+<h3 id="r8.-skill-wiring">R8. Skill wiring</h3>
+<ul>
+<li>R8.1 Each enforced skill MUST add a sentinel-write call at the start
+of governed work, after prerequisites required to construct the sentinel
+context have been resolved.</li>
+<li>R8.2 Each skill’s gotchas / proposal-criteria documentation MUST
+note the hook contract so future skill edits cannot silently break the
+gate.</li>
+</ul>
+<h3 id="r9.-adjacent-discipline-skills-and-downstream-adoption">R9.
+Adjacent discipline skills and downstream adoption</h3>
+<ul>
+<li>R9.1 <code>agent-handoff</code> and
+<code>delegation-lifecycle</code> MUST be evaluated as discipline-skill
+companions. At minimum, complete starter assets ship for both; a hook is
+added only when a deterministic lifecycle invariant or bounded
+continuity purpose and observable evidence are identified.</li>
+<li>R9.2 The payout workspace MUST receive an explicit migration and
+readback task after enforcement verification. Silent inheritance via
+<code>da refresh</code> is not adequate for an active downstream loop:
+its current <code>.agentsrc.json</code> has <code>"hooks": false</code>
+and does not declare <code>isp</code> or <code>loop-worker</code>.</li>
+<li>R9.3 Migration of legacy project-specific discipline skill overrides
+MUST be the final task in this plan, after payout has served as the
+first verified downstream migration.</li>
+</ul>
+<h2 id="done-criteria-verifiable">Done criteria (verifiable)</h2>
+<ul>
+<li>DC1 Unit tests for
+<code>da workflow hook-sentinel write/read/clear</code> covering happy
+path, latest selection, run-id collision handling, and
+clear-after-success.</li>
+<li>DC2 Per-platform golden-fixture tests in
+<code>internal/platform/hooks_test.go</code> rendering Codex
+<code>SubagentStop</code>, Copilot <code>agentStop</code>, and Cursor
+<code>subagentStop</code> for canonical <code>HookSpec</code>
+inputs.</li>
+<li>DC3 <code>docs/HOOKS.md</code> documents the one-to-one mapping
+principle (D2), the operator pattern for cross-platform coverage, the
+Cursor-wider surface (D3), and the Copilot <code>agentStop</code>
+footgun.</li>
+<li>DC4 Three HOOK.yaml + gate.sh entries exist under
+<code>internal/scaffold/hooks/global/{iteration-close-gate,isp-gate,loop-worker-gate}/</code>,
+each enabled on applicable documented platform events via D2
+fall-through; fixtures cover terminal validation, approved early guards,
+worker startup, and compaction advice.</li>
+<li>DC5
+<code>internal/scaffold/home/starter/skills/global/{iteration-close,isp,loop-worker}/</code>
+exist with SKILL.md + instructions tree, and
+<code>internal/scaffold/home/starter/agents/global/loop-worker/AGENT.md</code>
+exists. <code>CopyMissingStarterAssets</code> / <code>da init</code>
+against an empty home writes them.</li>
+<li>DC6 Each of the three skill SKILL.md / workflow files contains a
+<code>hook-sentinel write</code> call before governed actions after
+required invocation context is available.</li>
+<li>DC7 Integration test at
+<code>tests/test-loop-discipline-stop-hooks.sh</code> simulates an
+artifact/write-scope hard-remediation outcome, a trace-backed
+hard-remediation outcome where platform input makes the evidence
+observable, and an advisory outcome for a soft issue or unavailable
+trace. It asserts platform-native remediation output and advisory stderr
+content.</li>
+<li>DC8 Running <code>bin/da refresh</code> in a sandbox project after
+these changes materializes all three skills, the loop-worker AGENT.md,
+and the three hook scripts, and no
+<code>removing existing file ... directory not empty</code> warnings
+appear.</li>
+<li>DC9 Claude wider-lifecycle mapper tests and
+<code>docs/HOOKS.md</code> coverage land for the officially verified
+R6.6 event set.</li>
+<li>DC10 <code>agent-handoff</code> and
+<code>delegation-lifecycle</code> companion assessment is recorded; both
+complete starter asset trees materialize in a sandbox home, with any
+hook decision justified by observable evidence.</li>
+<li>DC11 Payout migration readback demonstrates that its active loop
+resolves the new skills and hooks without overwriting unrelated active
+artifacts.</li>
+<li>DC12 Legacy override migration inventory is completed last,
+recording each migrated or deliberately retained downstream
+override.</li>
+<li>DC13 R1.5 records an explicit decision for <code>PostToolUse</code>
+/ <code>PostToolUseFailure</code> observation potential, including
+whether failed workflow commands can be persisted as non-blocking
+feedback without transcript content.</li>
+</ul>
+<h2 id="open-questions-to-be-resolved-during-the-plan">Open questions
+(to be resolved during the plan)</h2>
+<p>The plan MUST resolve each of these in its task contract before the
+relevant task starts.</p>
+<ul>
+<li>Q1 <strong>CLI scope for <code>hook-sentinel</code>.</strong>
+Resolved for v1: nest under <code>da workflow</code> since sentinels are
+tied to plan/task IDs.</li>
+<li>Q2 <strong>Sentinel lifetime.</strong> Resolved for v1: archive
+successful sentinel records under
+<code>.agents/history/&lt;plan-id&gt;/hook-sentinels/&lt;YYYY-MM-DD&gt;/</code>,
+alongside durable loop history. Retention/pruning is deferred.</li>
+<li>Q3 <strong>Hard-vs-soft threshold tuning.</strong> Is “generic
+verify summary” a hard-remediation outcome or soft advisory? Listed as
+soft in R1; may need hardening after real-world calibration.</li>
+<li>Q4 <strong>Schema extension <code>when_events: []</code>.</strong>
+Resolved for v1: add a backward-compatible, mutually exclusive
+multi-event representation in P1c so <code>iteration-close-gate</code>
+has one HookSpec for Stop and SubagentStop rather than duplicated
+entries.</li>
+<li>Q5 <strong>Matcher and native output support per vendor
+(D.6).</strong> Per-event verification of matcher input, transcript
+fields, and hard-remediation output is owned by P1c. Cursor is verified
+as exposing <code>transcript_path</code> /
+<code>agent_transcript_path</code> and native
+<code>followup_message</code>, rather than Claude-style
+<code>decision: block</code>.</li>
+<li>Q6 <strong>Loop-worker matcher portability.</strong> Resolved for v1
+per D6: rely solely on gate-level filtering via sentinel
+<code>agent_type</code>; do not add a Claude-only matcher override.</li>
+<li>Q7 <strong>Backfill payout.</strong> Resolved: include an explicit
+payout migration/readback task after integration verification and before
+general legacy-override migration. Do not rely on silent
+inheritance.</li>
+</ul>
+<h2 id="deferred-items-explicit-out-of-scope">Deferred items (explicit
+out-of-scope)</h2>
+<p>The following are deliberately not in scope and may appear in a
+future spec or refresh:</p>
+<ul>
+<li>DEF2 OpenCode hooks-to-plugins emitter bridge (see D4).</li>
+<li>DEF5 Telemetry / metrics emission from gates is implementation-owned
+by follow-up plan <code>r1-5-hook-enforcement-telemetry</code>, rather
+than reopening the completed <code>r1-outcome-scoring</code>
+baseline.</li>
+</ul>
+<h2 id="relationship-to-other-specs-and-plans">Relationship to other
+specs and plans</h2>
+<ul>
+<li><strong>Predecessor:</strong>
+<code>.agents/proposals/loop-discipline-stop-hooks-scoping.md</code>.
+The scoping doc is the source of every decision in this spec.</li>
+<li><strong>Cross-plan consumer:</strong>
+<code>r1-outcome-scoring</code> is completed. Follow-up plan
+<code>r1-5-hook-enforcement-telemetry</code> consumes gate outcomes and
+archived sentinels without reopening the shipped baseline.</li>
+<li><strong>Downstream migration:</strong> payout is the first explicit
+migration and readback target before the final general legacy-override
+sweep.</li>
+<li><strong>Starter-copy dependency:</strong> P3 extends existing
+recursive starter copy assertions in
+<code>internal/scaffold/home/copy_test.go</code>; it does not reserve
+loader implementation files.</li>
+</ul>
+</body>
+</html>

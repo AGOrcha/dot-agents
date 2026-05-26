@@ -1,11 +1,7 @@
 # Executor CSR research note (project-local proposal, 2026-05-19)
 
 ## Status
-**Park.** Do not start implementation. Project-local design note for
-the option of a Go-native CSR executor (pgGraph-style) over the
-gcc-shipped scoped-KG primitives. The graph-backend-adapter-contract
-spec's new §2.7 names this as a permitted v2 swap; this note records
-the analysis backing the decision NOT to build it yet.
+**Decision-of-record: parked (2026-05-19; re-confirmed 2026-05-25).** Do not start implementation. Re-open only on the two named triggers (see "Triggers to re-open" section below). Project-local design note for the option of a Go-native CSR executor (pgGraph-style) over the gcc-shipped scoped-KG primitives. The graph-backend-adapter-contract spec's new §2.7 names this as a permitted v2 swap; this note records the analysis backing the decision NOT to build it yet.
 
 ## Source
 Architecture analysis of `https://github.com/Evokoa/pgGraph`

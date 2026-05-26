@@ -1,0 +1,200 @@
+schema_version: 1
+plan_id: r1-5-hook-enforcement-telemetry
+tasks:
+    - id: t0-outcome-contract
+      title: Define durable hook-outcome schema and archived-sentinel linkage
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md
+        - schemas/workflow-hook-outcome.schema.json
+        - commands/workflow/static/workflow-hook-outcome.schema.json
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Start only after loop-discipline lifecycle-hook native output and sentinel archive contracts are stable; define allow/advise/remediate plus lifecycle/intervention classification without transcript content.
+    - id: t1-capture-outcomes
+      title: Persist hook gate outcomes alongside archived sentinel history
+      status: pending
+      depends_on:
+        - t0-outcome-contract
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/hook_sentinel.go
+        - commands/workflow/hook_sentinel_test.go
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+      verification_required: true
+      notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.
+    - id: t1b-post-tool-observation-evaluation
+      title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
+      status: pending
+      depends_on:
+        - t1-capture-outcomes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Evaluate vendor payload stability, workflow-command filtering, redaction/privacy, and prevention/remediation deduplication before any observation contributes to scoring; observation is non-blocking by default.
+    - id: t2-scoring-signal
+      title: Add objective hook-outcome signal to scoring
+      status: pending
+      depends_on:
+        - t1b-post-tool-observation-evaluation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scoring
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions; score post-tool observation only if T1b explicitly approves an objective, deduplicated signal.
+    - id: t3-cli-readback
+      title: Render hook outcome contribution in score queries
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/score.go
+        - commands/score_test.go
+      verification_required: true
+      notes: Expose outcome source and rule identifiers without printing transcript contents.
+
+    # Added 2026-05-25 via Plan-agent review pass (see design.md expansion).
+    # Below are the new tasks the planner surfaced. Existing tasks above
+    # are kept intact for the codex PR review; recommended in-task tweaks
+    # (split t2-scoring-signal into t2a+t2b, drop hook_sentinel.go from
+    # t1-capture-outcomes write_scope, etc.) are deferred to a follow-up
+    # to keep this expansion additive and reviewable.
+
+    - id: t-schema-validator-wiring
+      title: Wire hook-outcome schema into the workflow validator pipeline
+      status: pending
+      depends_on:
+        - t0-outcome-contract
+      blocks:
+        - t1-capture-outcomes
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/static/schemas.go
+        - commands/workflow/static/schemas_test.go
+      verification_required: true
+      notes: |-
+        Register workflow-hook-outcome.schema.json in the bundled schema
+        list and assert the validator rejects records with any disallowed
+        transcript-content field (per D2). Sized as a one-task slice so
+        the validator change can land independently of the CLI primitive
+        in t1.
+      app_type: go-cli
+
+    - id: t2c-rubric-version-coordination
+      title: Resolve RubricVersion ordering with r5-review-labeling-access
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: false
+      notes: |-
+        Per design D5: at task execution time, read the current
+        internal/scoring/rubric.go RubricVersion constant. If 2.0.2,
+        target 2.1.0 (R1.5 lands first). If R5 has already shipped and
+        bumped to 3.0.0, target 3.1.0. Coordinate with the R5 plan's
+        r1-integration task by reading its current status; if both
+        plans are in flight, the first to merge wins the minor bump
+        and the second rebases. Document the ordering policy in
+        OUTCOME_SCORING_RUBRIC.md under a new "RubricVersion ordering
+        for concurrent plans" section.
+      app_type: research
+
+    - id: t2d-companion-gate-compatibility
+      title: Verify companion gates emit R1.5-compatible records without schema change
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/signal_hook_outcomes_test.go
+        - tests/fixtures/r1-5-hook-outcomes/companion-gates/
+      verification_required: true
+      notes: |-
+        Per design D2/D6 and orchestration-companion spec D5:
+        contribute test fixtures emitting orchestrator-handoff and
+        delegation-closeout gate outcomes under the R1.5 schema and
+        assert the extractor + scorer handle them with no schema
+        change. Cross-plan coordination with
+        orchestration-companion-stop-hooks but does not write any
+        companion-plan code; that plan's own implementation tasks
+        consume these fixtures as a contract test.
+      app_type: go-cli
+
+    - id: t-archival-policy
+      title: Decide hook-outcome sidecar retention and archival
+      status: pending
+      depends_on:
+        - t1-capture-outcomes
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: false
+      notes: |-
+        Resolve design Q3. Default proposal: never auto-prune
+        (mirrors R5 audit log policy). Specify
+        `da workflow hook-outcome prune --before <date>` admin-only
+        command spec (implementation deferred unless an operator
+        request emerges). No code in this task — design + docs only.
+      app_type: research
+
+    - id: t-e2e-integration-test
+      title: End-to-end test exercising sentinel → gate → sidecar → score
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+        - t3-cli-readback
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - tests/test-r1-5-hook-enforcement-telemetry.sh
+        - tests/fixtures/r1-5-hook-outcomes/
+      verification_required: true
+      notes: |-
+        Shell integration test: scaffold a temp project, write a fake
+        sentinel, invoke iteration-close-gate with a missing artifact,
+        assert the outcome sidecar is written, run `da score iteration`,
+        assert the hook_outcomes contribution row appears with the
+        expected rule_id and "remediate" result. Mirror pattern of
+        existing tests/test-* integration scripts.
+      app_type: go-cli
+
+    - id: t-docs
+      title: Update OUTCOME_SCORING_RUBRIC.md and HOOKS.md for R1.5
+      status: pending
+      depends_on:
+        - t2-scoring-signal
+        - t-archival-policy
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/OUTCOME_SCORING_RUBRIC.md
+        - docs/HOOKS.md
+      verification_required: false
+      notes: |-
+        Single doc task consolidating all R1.5-driven doc changes:
+        new hook_outcomes signal spec, weight rebalance table, the
+        RubricVersion ordering policy (D5), the archival policy, the
+        approved-rule list (D6), and a HOOKS.md cross-reference to
+        the outcome schema. Separating docs from code keeps the
+        rubric-bump task's diff focused on weight changes only.
+      app_type: research
