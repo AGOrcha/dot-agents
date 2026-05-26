@@ -1,0 +1,36 @@
+# Fixture: both companion gates fire in the same iteration with only advisory
+# results — orchestrator R3.4 (missing selection reason, advisory) and
+# delegation closeout R4.4 (completed merge-back without parent_closeout
+# sentinel, advisory).
+#
+# Contract being asserted:
+#   - Two different sentinels under two different companion skills coexist in
+#     a single sidecar without colliding (different correlation_ids).
+#   - No remediate present + at least one advise → SubScore = 0.6 (R1.5 D3
+#     middle band).
+#   - The Detail string surfaces both advising rules in sorted order, giving
+#     the operator readback the companion plan's R5 task will consume.
+schema_version: 1
+records:
+  - schema_version: 1
+    sentinel_id: orchestrator-session-start-2026-05-26-002
+    skill: orchestrator-session-start
+    lifecycle_point: stop
+    intervention_class: remediate_at_stop
+    result: advise
+    rule_id: orchestrator-handoff-gate.R3.4
+    platform: claude
+    ts: "2026-05-26T12:00:00Z"
+    archived_sentinel_path: .agents/history/orchestration-companion-stop-hooks/hook-sentinels/2026-05-26/orchestrator-session-start-002.yaml
+    correlation_id: handoff-corr-002
+  - schema_version: 1
+    sentinel_id: delegation-lifecycle-2026-05-26-008
+    skill: delegation-lifecycle
+    lifecycle_point: stop
+    intervention_class: remediate_at_stop
+    result: advise
+    rule_id: delegation-closeout-gate.R4.4
+    platform: claude
+    ts: "2026-05-26T12:00:01Z"
+    archived_sentinel_path: .agents/history/orchestration-companion-stop-hooks/hook-sentinels/2026-05-26/delegation-lifecycle-008.yaml
+    correlation_id: closeout-corr-008
