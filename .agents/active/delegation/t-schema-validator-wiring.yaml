@@ -1,0 +1,22 @@
+schema_version: 1
+id: del-t-schema-validator-wiring-1779798327
+parent_plan_id: r1-5-hook-enforcement-telemetry
+parent_task_id: t-schema-validator-wiring
+title: Wire hook-outcome schema into the workflow validator pipeline
+summary: 'Delegated from plan R1.5: Hook enforcement telemetry'
+write_scope:
+    - commands/workflow/workflow_hook_sentinel_schema.go
+    - commands/workflow/workflow_hook_outcome_schema.go
+    - commands/workflow/workflow_hook_outcome_schema_test.go
+success_criteria: |-
+    Register workflow-hook-outcome.schema.json in the bundled schema
+    list and assert the validator rejects records with any disallowed
+    transcript-content field (per D2). Sized as a one-task slice so
+    the validator change can land independently of the CLI primitive
+    in t1.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: schema-wiring-worker
+status: active
+created_at: "2026-05-26T12:25:27Z"
+updated_at: "2026-05-26T12:25:27Z"

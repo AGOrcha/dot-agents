@@ -1,0 +1,36 @@
+schema_version: 1
+delegation_id: del-p1a-mapper-extensions-1779798327
+plan_id: loop-discipline-stop-hooks
+task_id: p1a-mapper-extensions
+owner: p1a-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 loop-discipline
+scope:
+    write_scope:
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/cursor.go
+        - internal/platform/coverage_gap_test.go
+prompt:
+    inline:
+        - 'Per p1a contract: extend gate-critical mappings only. Copilot stop is agentStop'
+        - 'not stop (regression test). Mirror table-driven pattern from coverage_gap_test.go. KG: renderCopilotHookConfig + codexEventName.'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml
+verification:
+    feedback_goal: Codex SubagentStop + Copilot agentStop + Cursor subagentStop mappers extended
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

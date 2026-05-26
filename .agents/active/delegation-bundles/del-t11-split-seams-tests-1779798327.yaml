@@ -1,0 +1,33 @@
+schema_version: 1
+delegation_id: del-t11-split-seams-tests-1779798327
+plan_id: root-command-decomposition
+task_id: t11-split-seams-tests
+owner: t11-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 root-decomp closeout
+scope:
+    write_scope:
+        - commands/seams_test.go
+        - commands/lifecycle/seams_test.go
+prompt:
+    inline:
+        - 'Per t11 notes; split commands/seams_test.go (873 LOC) by lifecycle target — each TestXxx encoding its target moves to commands/lifecycle/seams_test.go. Anti-scope: do not touch production .go.'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+verification:
+    feedback_goal: seams_test.go split per cluster
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

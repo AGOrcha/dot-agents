@@ -80,7 +80,7 @@ tasks:
         have a settled target package and can run in parallel.
     - id: t02b-lift-shared-helpers
       title: 'Precursor: lift shared lifecycle helpers into commands/lifecycle/ as exported funcs'
-      status: in_progress
+      status: completed
       depends_on:
         - t02-introduce-lifecycle-skeleton
       blocks:
@@ -345,7 +345,7 @@ tasks:
         lifecycle calls.
     - id: t09-move-doctor
       title: Move doctor command into commands/lifecycle/
-      status: in_progress
+      status: completed
       depends_on:
         - t08-move-status
       blocks: []
@@ -530,7 +530,7 @@ tasks:
         move.
     - id: t11-split-seams-tests
       title: Split commands/seams_test.go into per-cluster files
-      status: pending
+      status: in_progress
       depends_on:
         - t03-move-install
         - t04-move-add-remove
