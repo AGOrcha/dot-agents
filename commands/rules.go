@@ -2,7 +2,6 @@ package commands
 
 import (
 	"github.com/NikashPrakash/dot-agents/commands/rules"
-	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
 )
 
@@ -55,14 +54,6 @@ func runRulesShow(deps rulesDeps, scope, name string) error {
 
 func runRulesRemove(deps rulesDeps, scope, name string) error {
 	return rules.RunRemove(deps, scope, name)
-}
-
-func extractRuleFrontmatterDescription(path string) string {
-	return rules.ExtractRuleFrontmatterDescription(path)
-}
-
-func findRuleSpec(deps rulesDeps, agentsHome, scope, name string) (*platform.RuleFileSpec, error) {
-	return rules.FindRuleSpec(deps, agentsHome, scope, name)
 }
 
 func makeRulesDeps(dryRun, yes, force bool) rulesDeps {
