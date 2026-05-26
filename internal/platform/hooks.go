@@ -725,6 +725,14 @@ func mapEventName(spec HookSpec, platform string, table map[string]string) (stri
 
 // claudeEventTable encodes the canonical→Claude event mapping. Entries
 // added in p1b (R6.4 post_compact) sit alongside the pre-existing surface.
+// The "P1d wider-surface" block below brings the documented Claude Code
+// lifecycle surface (verified against <https://code.claude.com/docs/en/hooks>
+// on 2026-05-26 per the p1d-claude-lifecycle-parity contract) into canonical
+// coverage so operator HookSpec entries can target these events without
+// redefining per-platform overrides. Adding an entry here does NOT attach
+// any gate: matcher narrowing, sentinel writes, and gate scripts remain a
+// downstream concern (p2-hook-scripts and r1-5-* plans). The mapper exists
+// only so a hook authored against the canonical name renders correctly.
 var claudeEventTable = map[string]string{
 	"pre_tool_use":          "PreToolUse",
 	"post_tool_use":         "PostToolUse",
@@ -742,6 +750,27 @@ var claudeEventTable = map[string]string{
 	// terminal-of-compaction event.
 	"post_compact":       "PostCompact",
 	"permission_request": "PermissionRequest",
+	// P1d wider-surface (R6.6 + DC9 + D2): documented Claude Code hooks
+	// brought into canonical coverage without attaching new gates. Each
+	// canonical snake_case key maps 1:1 to the vendor PascalCase event
+	// name. Other platforms' tables omit these values today and fall
+	// through (ok=false) per D2 — no semantic-equivalence inference.
+	"setup":                 "Setup",
+	"user_prompt_expansion": "UserPromptExpansion",
+	"post_tool_batch":       "PostToolBatch",
+	"permission_denied":     "PermissionDenied",
+	"stop_failure":          "StopFailure",
+	"teammate_idle":         "TeammateIdle",
+	"task_created":          "TaskCreated",
+	"task_completed":        "TaskCompleted",
+	"worktree_create":       "WorktreeCreate",
+	"worktree_remove":       "WorktreeRemove",
+	"file_changed":          "FileChanged",
+	"config_change":         "ConfigChange",
+	"cwd_changed":           "CwdChanged",
+	"instructions_loaded":   "InstructionsLoaded",
+	"elicitation":           "Elicitation",
+	"elicitation_result":    "ElicitationResult",
 }
 
 // codexEventTable encodes the canonical→Codex event mapping. Entries

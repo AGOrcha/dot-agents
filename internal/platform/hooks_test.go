@@ -430,6 +430,91 @@ func TestCanonicalWhenEventMapping(t *testing.T) {
 			cursor:  "", // Cursor does not document this event
 			copilot: "errorOccurred",
 		},
+		// P1d Claude-wider surface (R6.6 + DC9 + D2): canonical values
+		// that today resolve only for Claude. Other platforms fall
+		// through per D2 (no semantic-equivalence inference). The
+		// vendor names are sourced from the Claude Code hooks
+		// reference verified on 2026-05-26.
+		{
+			name:   "setup",
+			when:   "setup",
+			claude: "Setup",
+		},
+		{
+			name:   "user_prompt_expansion",
+			when:   "user_prompt_expansion",
+			claude: "UserPromptExpansion",
+		},
+		{
+			name:   "post_tool_batch",
+			when:   "post_tool_batch",
+			claude: "PostToolBatch",
+		},
+		{
+			name:   "permission_denied",
+			when:   "permission_denied",
+			claude: "PermissionDenied",
+		},
+		{
+			name:   "stop_failure",
+			when:   "stop_failure",
+			claude: "StopFailure",
+		},
+		{
+			name:   "teammate_idle",
+			when:   "teammate_idle",
+			claude: "TeammateIdle",
+		},
+		{
+			name:   "task_created",
+			when:   "task_created",
+			claude: "TaskCreated",
+		},
+		{
+			name:   "task_completed",
+			when:   "task_completed",
+			claude: "TaskCompleted",
+		},
+		{
+			name:   "worktree_create",
+			when:   "worktree_create",
+			claude: "WorktreeCreate",
+		},
+		{
+			name:   "worktree_remove",
+			when:   "worktree_remove",
+			claude: "WorktreeRemove",
+		},
+		{
+			name:   "file_changed",
+			when:   "file_changed",
+			claude: "FileChanged",
+		},
+		{
+			name:   "config_change",
+			when:   "config_change",
+			claude: "ConfigChange",
+		},
+		{
+			name:   "cwd_changed",
+			when:   "cwd_changed",
+			claude: "CwdChanged",
+		},
+		{
+			name:   "instructions_loaded",
+			when:   "instructions_loaded",
+			claude: "InstructionsLoaded",
+		},
+		{
+			name:   "elicitation",
+			when:   "elicitation",
+			claude: "Elicitation",
+		},
+		{
+			name:   "elicitation_result",
+			when:   "elicitation_result",
+			claude: "ElicitationResult",
+		},
 		// Cursor-wider surface (D3 + R6.3): canonical values that today
 		// resolve only for Cursor. Other platforms fall through per D2.
 		{
@@ -614,43 +699,134 @@ func TestCanonicalWhenEventMappingRenders(t *testing.T) {
 		)
 	})
 
-	t.Run("cursor wider-surface value is omitted from codex and copilot renders", func(t *testing.T) {
-		// after_file_edit is Cursor-only; renders for other platforms
-		// must omit the spec entirely (no fall-through forced because
-		// nothing in RequiredOn names them).
-		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh"}
-		codex, err := renderCodexHookConfig([]HookSpec{spec})
-		if err != nil {
-			t.Fatalf("renderCodexHookConfig: %v", err)
+	// P1d wider-surface render verification: each Claude-only canonical
+	// value must render under its documented vendor key with the
+	// canonical matcher fallback ("*"), exactly the same shape as the
+	// pre-existing Claude entries. This is a representative subset; the
+	// table-driven mapper test above covers the full 16-event surface.
+	t.Run("claude p1d wider-surface events render under documented vendor keys", func(t *testing.T) {
+		cases := []struct {
+			canonical string
+			vendor    string
+		}{
+			{canonical: "setup", vendor: "Setup"},
+			{canonical: "user_prompt_expansion", vendor: "UserPromptExpansion"},
+			{canonical: "post_tool_batch", vendor: "PostToolBatch"},
+			{canonical: "permission_denied", vendor: "PermissionDenied"},
+			{canonical: "stop_failure", vendor: "StopFailure"},
+			{canonical: "teammate_idle", vendor: "TeammateIdle"},
+			{canonical: "task_created", vendor: "TaskCreated"},
+			{canonical: "task_completed", vendor: "TaskCompleted"},
+			{canonical: "worktree_create", vendor: "WorktreeCreate"},
+			{canonical: "worktree_remove", vendor: "WorktreeRemove"},
+			{canonical: "file_changed", vendor: "FileChanged"},
+			{canonical: "config_change", vendor: "ConfigChange"},
+			{canonical: "cwd_changed", vendor: "CwdChanged"},
+			{canonical: "instructions_loaded", vendor: "InstructionsLoaded"},
+			{canonical: "elicitation", vendor: "Elicitation"},
+			{canonical: "elicitation_result", vendor: "ElicitationResult"},
 		}
-		var codexPayload codexRenderedHooks
-		if err := json.Unmarshal(codex, &codexPayload); err != nil {
-			t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
-		}
-		if len(codexPayload.Hooks) != 0 {
-			t.Fatalf("expected codex render to be empty for cursor-only event, got %v", codexPayload.Hooks)
-		}
-		_, _, ok, err := renderCopilotHookFile(spec)
-		if err != nil {
-			t.Fatalf("renderCopilotHookFile: %v", err)
-		}
-		if ok {
-			t.Fatal("expected copilot render to omit cursor-only event after_file_edit")
+		for _, tc := range cases {
+			tc := tc
+			t.Run(tc.canonical, func(t *testing.T) {
+				assertClaudeSettingsRenders(t,
+					[]HookSpec{{Name: "p1d-" + tc.canonical, When: tc.canonical, Command: "/tmp/p1d.sh"}},
+					map[string]string{
+						"hooks." + tc.vendor + ".0.hooks.0.command": "/tmp/p1d.sh",
+						"hooks." + tc.vendor + ".0.matcher":         "*",
+					},
+				)
+			})
 		}
 	})
 
-	t.Run("required-on platform errors when canonical value unsupported", func(t *testing.T) {
-		// Sanity: if an operator marks a Cursor-only event RequiredOn
-		// codex, the render must error per D2's explicit-opt-in posture.
-		spec := HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh", RequiredOn: []string{"codex"}}
-		_, err := renderCodexHookConfig([]HookSpec{spec})
-		if err == nil {
-			t.Fatal("expected error when cursor-only event is required on codex")
-		}
-		if !strings.Contains(err.Error(), "not representable for codex") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+	t.Run("claude p1d wider-surface event is omitted from codex/cursor/copilot renders", func(t *testing.T) {
+		// task_created is a Claude-only canonical value introduced by P1d.
+		// The other three platform renderers must omit the spec silently
+		// (no fall-through forced because nothing in RequiredOn names them).
+		assertSpecOmittedAcrossOtherPlatforms(t,
+			HookSpec{Name: "task-watch", When: "task_created", Command: "/tmp/task.sh"},
+			"claude-only event task_created")
 	})
+
+	t.Run("required-on codex errors when a claude-only p1d event is required there", func(t *testing.T) {
+		assertRequiredOnCodexErrors(t,
+			HookSpec{Name: "task-watch", When: "task_completed", Command: "/tmp/task.sh", RequiredOn: []string{"codex"}})
+	})
+
+	t.Run("cursor wider-surface value is omitted from codex and copilot renders", func(t *testing.T) {
+		// after_file_edit is Cursor-only; renders for non-cursor platforms
+		// must omit entirely. Reuses the shared omission helper.
+		assertSpecOmittedFromCodexAndCopilot(t,
+			HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh"},
+			"cursor-only event after_file_edit")
+	})
+
+	t.Run("required-on platform errors when canonical value unsupported", func(t *testing.T) {
+		assertRequiredOnCodexErrors(t,
+			HookSpec{Name: "edit-watch", When: "after_file_edit", Command: "/tmp/watch.sh", RequiredOn: []string{"codex"}})
+	})
+}
+
+// assertSpecOmittedFromCodexAndCopilot is the load-bearing helper for
+// "this canonical event is platform X-only" subtests: it asserts that
+// the codex + copilot renderers both produce empty output for spec.
+// Extracted from TestCanonicalWhenEventMappingRenders subtests to keep
+// the top-level test under Sonar's cog-complexity gate (was 36 → 15
+// limit, the original PR #102 review-blocker).
+func assertSpecOmittedFromCodexAndCopilot(t *testing.T, spec HookSpec, ctx string) {
+	t.Helper()
+	codex, err := renderCodexHookConfig([]HookSpec{spec})
+	if err != nil {
+		t.Fatalf("renderCodexHookConfig: %v", err)
+	}
+	var codexPayload codexRenderedHooks
+	if err := json.Unmarshal(codex, &codexPayload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(codex))
+	}
+	if len(codexPayload.Hooks) != 0 {
+		t.Fatalf("expected codex render to be empty for %s, got %v", ctx, codexPayload.Hooks)
+	}
+	_, _, ok, err := renderCopilotHookFile(spec)
+	if err != nil {
+		t.Fatalf("renderCopilotHookFile: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected copilot render to omit %s", ctx)
+	}
+}
+
+// assertSpecOmittedAcrossOtherPlatforms extends the omission proof to
+// cursor when the spec belongs to a Claude-only canonical value.
+func assertSpecOmittedAcrossOtherPlatforms(t *testing.T, spec HookSpec, ctx string) {
+	t.Helper()
+	assertSpecOmittedFromCodexAndCopilot(t, spec, ctx)
+	cursor, err := renderCursorHookConfig([]HookSpec{spec})
+	if err != nil {
+		t.Fatalf("renderCursorHookConfig: %v", err)
+	}
+	var cursorPayload cursorRenderedHooks
+	if err := json.Unmarshal(cursor, &cursorPayload); err != nil {
+		t.Fatalf(hooksTestJSONUnmarshalFmt, err, string(cursor))
+	}
+	if len(cursorPayload.Hooks) != 0 {
+		t.Fatalf("expected cursor render to be empty for %s, got %v", ctx, cursorPayload.Hooks)
+	}
+}
+
+// assertRequiredOnCodexErrors confirms the D2 explicit-opt-in posture:
+// a spec marked RequiredOn=["codex"] but mapping to a canonical event
+// codex does not document must produce an error containing
+// "not representable for codex" rather than silently omit.
+func assertRequiredOnCodexErrors(t *testing.T, spec HookSpec) {
+	t.Helper()
+	_, err := renderCodexHookConfig([]HookSpec{spec})
+	if err == nil {
+		t.Fatal("expected error when event is required on codex")
+	}
+	if !strings.Contains(err.Error(), "not representable for codex") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 // assertWhenMaps validates a single mapper result against the expected
@@ -1108,6 +1284,29 @@ func TestRenderClaudeHookEntry_NoCommand(t *testing.T) {
 			t.Fatal("expected include=false on empty-command fall-through")
 		}
 	})
+}
+
+// TestLoadHookBundleAcceptsClaudeWiderSurfaceWhenEvents verifies the
+// P1d-added canonical values are recognized by isKnownCanonicalEvent.
+// Without the new entries in claudeEventTable, this load would fail
+// with "unknown canonical event" because no platform table would claim
+// the names. The test pins one Claude-only event from the P1d wider
+// surface so a future drop from claudeEventTable fails this load.
+func TestLoadHookBundleAcceptsClaudeWiderSurfaceWhenEvents(t *testing.T) {
+	spec, err := loadSingleHookBundle(t, `name: claude-wider
+when_events:
+  - task_created
+  - task_completed
+  - worktree_create
+run:
+  command: /tmp/run.sh
+`)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := spec.WhenEvents; len(got) != 3 || got[0] != "task_created" || got[1] != "task_completed" || got[2] != "worktree_create" {
+		t.Fatalf("WhenEvents = %v, want [task_created task_completed worktree_create]", got)
+	}
 }
 
 // TestValidateHookWhenEvents_BackwardCompat covers the L587-592 branch:
