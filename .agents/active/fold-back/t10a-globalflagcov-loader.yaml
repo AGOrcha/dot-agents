@@ -1,0 +1,30 @@
+schema_version: 1
+id: t10a-globalflagcov-loader
+plan_id: root-command-decomposition
+task_id: t10a-create-mcp-subpackage
+created_at: "2026-05-25T00:00:00Z"
+created_by: t10a-worker
+kind: scope-expansion
+severity: medium
+summary: |-
+  Adding commands/mcp/ required updating internal/globalflagcov/static.go
+  to include "./commands/mcp" in the explicit packages.Load list. Without
+  this, TestReportNoUnresolvedHandlers fails with
+    "mcp remove: unresolved closure mcp.NewRemoveCmd.func1"
+  because the analyzer cannot find the func-lit backing the RunE
+  closure for the newly subpackaged builders.
+write_scope_impact: |-
+  Bundle write_scope listed only commands/mcp/* + commands/mcp.go +
+  commands/mcp_test.go. The 1-line addition to
+  internal/globalflagcov/static.go is mechanically required: the test
+  exists to enforce that every cobra builder discovered at runtime
+  can be resolved back to source, and a Go file move breaks that
+  invariant unless the loader list grows in lockstep.
+recommended_followup: |-
+  - t10b (settings subpackage) must add "./commands/settings".
+  - t10c (rules subpackage) must add "./commands/rules".
+  Consider promoting the explicit list to a glob (./commands/...) or
+  driving it from the same source as root.go's command registry so
+  future subpackage extractions do not silently break this gate.
+links:
+  - .agents/active/delegation-bundles/del-t10a-create-mcp-subpackage-1779717270.yaml
