@@ -826,7 +826,7 @@ tasks:
         resolved.
     - id: t13a-strip-resource-subpackage-shims
       title: Delete mcp/settings/rules root shims + rewire 3 root.go AddCommand lines + dead callers
-      status: pending
+      status: in_progress
       depends_on:
         - t12-relocate-cross-cutting-tests
       blocks:
@@ -896,7 +896,6 @@ tasks:
         deleted symbols (NewMCPCmd, NewSettingsCmd, NewRulesCmd, mcpDeps,
         settingsDeps, rulesDeps, newMCP/Rules/Settings{List,Show,Remove}Cmd).
       app_type: code-fix
-
     - id: t13a-pre-lifecycle-constructors
       title: 'Precursor for t13b: land lifecycle.NewInitCmd + absorb syncLifecycleGlobals into Deps threading'
       status: pending
