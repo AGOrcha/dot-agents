@@ -1,0 +1,38 @@
+schema_version: 1
+id: del-t13-strip-root-shims-1779826057
+parent_plan_id: root-command-decomposition
+parent_task_id: t13-strip-root-shims
+title: Delete root re-export shims; switch root.go to subpackage constructors
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/root.go
+    - commands/add.go
+    - commands/doctor.go
+    - commands/import.go
+    - commands/import_plugins.go
+    - commands/init.go
+    - commands/install.go
+    - commands/refresh.go
+    - commands/remove.go
+    - commands/status.go
+    - commands/linkcount_unix.go
+    - commands/linkcount_windows.go
+    - commands/mcp.go
+    - commands/settings.go
+    - commands/rules.go
+success_criteria: |-
+    Per user decision: DELETE root shims entirely. Per t01
+    SHAPE.md, root.go's AddCommand calls switch from
+    commands.NewInstallCmd / etc. to lifecycle.NewInstallCmd,
+    lifecycle.NewDoctorCmd, ..., mcp.NewCmd, settings.NewCmd,
+    rules.NewCmd. Verify cmd/dot-agents/main.go still compiles
+    unchanged (it should — it only calls
+    commands.NewRootCommand()). Any external importer of
+    commands.NewXxxCmd surfaced by t01's KG query must already
+    have been addressed in that task's OD entries.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T20:07:37Z"
+updated_at: "2026-05-26T20:07:37Z"

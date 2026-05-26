@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-t1b-post-tool-observation-evaluation-1779826058
+parent_plan_id: r1-5-hook-enforcement-telemetry
+parent_task_id: t1b-post-tool-observation-evaluation
+title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
+summary: 'Delegated from plan R1.5: Hook enforcement telemetry'
+write_scope:
+    - .agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md
+    - docs/OUTCOME_SCORING_RUBRIC.md
+success_criteria: Evaluate vendor payload stability, workflow-command filtering, redaction/privacy, and prevention/remediation deduplication before any observation contributes to scoring; observation is non-blocking by default.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-26T20:07:38Z"
+updated_at: "2026-05-26T20:07:38Z"

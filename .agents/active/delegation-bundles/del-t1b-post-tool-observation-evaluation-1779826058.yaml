@@ -1,0 +1,26 @@
+schema_version: 1
+delegation_id: del-t1b-post-tool-observation-evaluation-1779826058
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t1b-post-tool-observation-evaluation
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T20:07:38Z"
+scope:
+    write_scope:
+        - .agents/history/r1-5-hook-enforcement-telemetry/post-tool-observation-assessment.md
+        - docs/OUTCOME_SCORING_RUBRIC.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

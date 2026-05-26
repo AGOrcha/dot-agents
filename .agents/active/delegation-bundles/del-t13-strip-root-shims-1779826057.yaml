@@ -1,0 +1,39 @@
+schema_version: 1
+delegation_id: del-t13-strip-root-shims-1779826057
+plan_id: root-command-decomposition
+task_id: t13-strip-root-shims
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T20:07:37Z"
+scope:
+    write_scope:
+        - commands/root.go
+        - commands/add.go
+        - commands/doctor.go
+        - commands/import.go
+        - commands/import_plugins.go
+        - commands/init.go
+        - commands/install.go
+        - commands/refresh.go
+        - commands/remove.go
+        - commands/status.go
+        - commands/linkcount_unix.go
+        - commands/linkcount_windows.go
+        - commands/mcp.go
+        - commands/settings.go
+        - commands/rules.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

@@ -1,0 +1,28 @@
+schema_version: 1
+delegation_id: del-p1c-matcher-verification-1779826059
+plan_id: loop-discipline-stop-hooks
+task_id: p1c-matcher-verification
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T20:07:39Z"
+scope:
+    write_scope:
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - schemas/hook.schema.json
+        - docs/HOOKS.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
