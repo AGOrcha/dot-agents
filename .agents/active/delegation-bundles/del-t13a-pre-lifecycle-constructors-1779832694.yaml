@@ -1,0 +1,34 @@
+schema_version: 1
+delegation_id: del-t13a-pre-lifecycle-constructors-1779832694
+plan_id: root-command-decomposition
+task_id: t13a-pre-lifecycle-constructors
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T21:58:14Z"
+scope:
+    write_scope:
+        - commands/lifecycle/init.go
+        - commands/lifecycle/init_test.go
+        - commands/lifecycle/install.go
+        - commands/lifecycle/install_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/doctor_test.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/status_test.go
+        - commands/lifecycle/deps.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
