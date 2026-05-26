@@ -1,0 +1,55 @@
+schema_version: 1
+id: del-t6b-extend-storetest-1779798327
+parent_plan_id: go-test-fixture-extraction
+parent_task_id: t6b-extend-storetest
+title: Extend internal/graphstore/internal/storetest with Metadata/Edge/NoteSymbolLink runners
+summary: Delegated from plan Extract internal/testutil to clear Cluster D test-fixture duplication
+write_scope:
+    - internal/graphstore/internal/storetest/
+success_criteria: |-
+    Surfaced by t6 worker's fold-back (PR #84): bundle prompt
+    said use internal/testutil but design.md audit
+    categorizes sqlite_test.go + postgres_test.go as
+    Graphstore sub-helper (storetest, not testutil). t2 shipped
+    storetest with RunNodeRoundTrip / RunKGNoteRoundTrip /
+    RunKGNoteSearch runners; remaining cross-file dup needs
+    three more parameterizable runners.
+
+    Tier: T2 (extend existing package).
+
+    New runners to add to internal/graphstore/internal/storetest:
+      - RunMetadataRoundTrip(t, store, keyPrefix string)
+        — covers Metadata_RoundTrip + Metadata_MissingKey +
+          Metadata_Overwrite (3 mirrored tests, ~30 LOC/backend).
+      - RunEdgeUpsertCreate(t, store, idPrefix string)
+        RunEdgeUpsertUpdate(t, store, idPrefix string)
+        — covers UpsertEdge_Create + UpsertEdge_Update
+          (2 mirrored tests, ~24 LOC/backend).
+      - RunNoteSymbolLinkRoundTrip(t, store, namePrefix string)
+        RunNoteSymbolLinkIdempotent(t, store, namePrefix string)
+        — covers NoteSymbolLink_RoundTrip + _Idempotent
+          (2 mirrored tests, ~30 LOC/backend).
+
+    Each runner takes a prefix parameter so the shared Postgres
+    testcontainer (cross-backend run) doesn't see row collisions
+    — t2's existing runners already pin this pattern. Verify by
+    running storetest from both sqlite_test.go and
+    postgres_test.go simultaneously without test interaction.
+
+    Anti-scope: do NOT modify the consumer files
+    (sqlite_test.go, postgres_test.go) — that's t6c. Only
+    ship the runners + their isolation contract.
+
+    Hard test: go test ./internal/graphstore/internal/storetest -count=1
+    green; the new runner functions are exported (PascalCase)
+    and documented.
+
+    Cross-plan: pre-existing TestCRGBridge* env-dependent
+    failure remains (unrelated to t6b; requires python module
+    on PATH).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t6b-worker
+status: active
+created_at: "2026-05-26T12:25:27Z"
+updated_at: "2026-05-26T12:25:27Z"

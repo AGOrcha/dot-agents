@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-t6b-extend-storetest-1779798327
+plan_id: go-test-fixture-extraction
+task_id: t6b-extend-storetest
+owner: t6b-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-26T12:25:27Z"
+    reason: Wave 6 storetest extension
+scope:
+    write_scope:
+        - internal/graphstore/internal/storetest/
+prompt:
+    inline:
+        - Per t6b notes; extend internal/graphstore/internal/storetest with RunMetadataRoundTrip
+        - RunEdgeUpsertCreate/Update
+        - 'RunNoteSymbolLinkRoundTrip/Idempotent. Each takes a prefix param to avoid postgres testcontainer row collisions (mirror t2''s existing runner pattern). Anti-scope: do NOT modify sqlite_test.go / postgres_test.go (t6c).'
+    prompt_files:
+        - .agents/prompts/impl-agent.project.md
+context:
+    required_files:
+        - .agents/workflow/plans/go-test-fixture-extraction/TASKS.yaml
+verification:
+    feedback_goal: Metadata + Edge + NoteSymbolLink runners landed in storetest
+    app_type: code-fix
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout
