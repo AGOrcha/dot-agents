@@ -1006,12 +1006,9 @@ func TestRunWorkflowGraphQueryViaKGBridge_SuccessReturnsNil(t *testing.T) {
 // unreadable so os.ReadFile returns a permission error that is NOT
 // os.IsNotExist.
 func TestReadGraphBridgeHealth_StatErrorPropagates(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod unreadable not portable on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("chmod unreadable unreliable as root")
-	}
+	// chmodUnreadable delegates to testutil.MakeFileUnreadable, which
+	// handles the per-platform denial (POSIX chmod 0 / Windows byte-range
+	// lock) and t.Skips on root-on-POSIX. No runtime.GOOS gate needed.
 	agentsHome := t.TempDir()
 	t.Setenv("AGENTS_HOME", agentsHome)
 	ctx := filepath.Join(agentsHome, "context", "lockedp")
