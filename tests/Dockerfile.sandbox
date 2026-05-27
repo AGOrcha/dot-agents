@@ -13,15 +13,19 @@ RUN apt-get update && apt-get install -y \
     vim \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 (required for Claude Code).
-# NodeSource's official install script is the documented install path; it is
-# regenerated on every NodeSource release so a pinned hash would go stale weekly
-# and break sandbox rebuilds. The setup script is fetched over HTTPS-only with
-# cert verification (`--proto "=https" --tlsv1.2`), which refuses any redirect
-# to a non-HTTPS URL — the same trust boundary as `apt-get` itself.
-# nosonar S8482 (rationale: upstream vendor script, no stable hash to pin)
-RUN curl --proto "=https" --tlsv1.2 -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+# Install Node.js 20 (required for Claude Code) via the NodeSource APT
+# repository directly. This avoids the legacy `curl ... | bash` setup script
+# (Sonar docker:S8482: "executing downloaded artifacts directly without
+# verification"). We fetch only the NodeSource signing key + repo config,
+# which apt-get itself authenticates via the pinned keyring before installing.
+RUN mkdir -p /etc/apt/keyrings \
+    && curl --proto "=https" --tlsv1.2 -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
