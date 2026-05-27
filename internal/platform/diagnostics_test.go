@@ -15,48 +15,68 @@ import (
 // regressions to field order/tags break the build, not silently.
 func TestDiagnosticsTypes(t *testing.T) {
 	t.Run("BrokenLink", func(t *testing.T) {
-		var zero BrokenLink
-		if zero.PlatformID != "" || zero.LinkPath != "" || zero.Dest != "" || zero.DisplayDest != "" {
-			t.Fatalf("zero BrokenLink has non-empty fields: %+v", zero)
-		}
-		full := BrokenLink{PlatformID: "cursor", LinkPath: "/r/.cursor/rules/a.mdc", Dest: "/x/a.md", DisplayDest: "~/x/a.md"}
-		if full.PlatformID != "cursor" || full.LinkPath == "" || full.Dest == "" || full.DisplayDest == "" {
-			t.Fatalf("populated BrokenLink lost fields: %+v", full)
-		}
+		assertBrokenLinkTypes(t)
 	})
 
 	t.Run("PlatformBadge", func(t *testing.T) {
-		var zero PlatformBadge
-		if zero.Name != "" || zero.Present || zero.Broken {
-			t.Fatalf("zero PlatformBadge has non-empty fields: %+v", zero)
-		}
-		full := PlatformBadge{Name: "Cursor", Present: true, Broken: true}
-		if full.Name != "Cursor" || !full.Present || !full.Broken {
-			t.Fatalf("populated PlatformBadge lost fields: %+v", full)
-		}
+		assertPlatformBadgeTypes(t)
 	})
 
 	t.Run("OrphanCanonical", func(t *testing.T) {
-		var zero OrphanCanonical
-		if zero.Name != "" || zero.DisplayNote != "" {
-			t.Fatalf("zero OrphanCanonical has non-empty fields: %+v", zero)
-		}
-		full := OrphanCanonical{Name: "reviewer", DisplayNote: "  (mis-pointed: /x)"}
-		if full.Name == "" || full.DisplayNote == "" {
-			t.Fatalf("populated OrphanCanonical lost fields: %+v", full)
-		}
+		assertOrphanCanonicalTypes(t)
 	})
 
 	t.Run("SingleFileLinkSpec", func(t *testing.T) {
-		var zero SingleFileLinkSpec
-		if zero.LinkPath != "" || zero.CanonicalPaths != nil {
-			t.Fatalf("zero SingleFileLinkSpec has non-empty fields: %+v", zero)
-		}
-		full := SingleFileLinkSpec{LinkPath: "/r/x", CanonicalPaths: []string{"/y", "/z"}}
-		if full.LinkPath == "" || len(full.CanonicalPaths) != 2 {
-			t.Fatalf("populated SingleFileLinkSpec lost fields: %+v", full)
-		}
+		assertSingleFileLinkSpecTypes(t)
 	})
+}
+
+// assertBrokenLinkTypes verifies zero and populated BrokenLink values.
+func assertBrokenLinkTypes(t *testing.T) {
+	var zero BrokenLink
+	if zero.PlatformID != "" || zero.LinkPath != "" || zero.Dest != "" || zero.DisplayDest != "" {
+		t.Fatalf("zero BrokenLink has non-empty fields: %+v", zero)
+	}
+	full := BrokenLink{PlatformID: "cursor", LinkPath: "/r/.cursor/rules/a.mdc", Dest: "/x/a.md", DisplayDest: "~/x/a.md"}
+	if full.PlatformID != "cursor" || full.LinkPath == "" || full.Dest == "" || full.DisplayDest == "" {
+		t.Fatalf("populated BrokenLink lost fields: %+v", full)
+	}
+}
+
+// assertPlatformBadgeTypes verifies zero and populated PlatformBadge values.
+func assertPlatformBadgeTypes(t *testing.T) {
+	var zero PlatformBadge
+	if zero.Name != "" || zero.Present || zero.Broken {
+		t.Fatalf("zero PlatformBadge has non-empty fields: %+v", zero)
+	}
+	full := PlatformBadge{Name: "Cursor", Present: true, Broken: true}
+	if full.Name != "Cursor" || !full.Present || !full.Broken {
+		t.Fatalf("populated PlatformBadge lost fields: %+v", full)
+	}
+}
+
+// assertOrphanCanonicalTypes verifies zero and populated OrphanCanonical values.
+func assertOrphanCanonicalTypes(t *testing.T) {
+	var zero OrphanCanonical
+	if zero.Name != "" || zero.DisplayNote != "" {
+		t.Fatalf("zero OrphanCanonical has non-empty fields: %+v", zero)
+	}
+	full := OrphanCanonical{Name: "reviewer", DisplayNote: "  (mis-pointed: /x)"}
+	if full.Name == "" || full.DisplayNote == "" {
+		t.Fatalf("populated OrphanCanonical lost fields: %+v", full)
+	}
+}
+
+// assertSingleFileLinkSpecTypes verifies zero and populated SingleFileLinkSpec values.
+func assertSingleFileLinkSpecTypes(t *testing.T) {
+	var zero SingleFileLinkSpec
+	if zero.LinkPath != "" || zero.CanonicalPaths != nil {
+		t.Fatalf("zero SingleFileLinkSpec has non-empty fields: %+v", zero)
+	}
+	full := SingleFileLinkSpec{LinkPath: "/r/x", CanonicalPaths: []string{"/y", "/z"}}
+	if full.LinkPath == "" || len(full.CanonicalPaths) != 2 {
+		t.Fatalf("populated SingleFileLinkSpec lost fields: %+v", full)
+	}
 }
 
 // TestDiagnosticsInterfaces compile-time-checks every sister interface is a
