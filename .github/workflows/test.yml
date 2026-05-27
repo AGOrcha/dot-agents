@@ -177,6 +177,18 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      # Locks the commands/* subpackage import boundary established by
+      # plan root-command-decomposition (t13a + t13a-pre + t13b). If any
+      # file outside the allowed importer set pulls in commands/lifecycle,
+      # commands/mcp, commands/settings, or commands/rules — or if any two
+      # of those four subpackages start importing each other — this step
+      # fails before the coverage gate so the regression cannot ride a
+      # green test suite into master. See tools/importguard/main.go for
+      # the exact policy and tools/importguard/main_test.go for the unit
+      # table that pins the decision matrix.
+      - name: Import boundary guard (commands/* subpackages)
+        run: go run ./tools/importguard ./...
+
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="coverage-${{ matrix.os }}.out" ./...
 
