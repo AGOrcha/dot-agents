@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -538,12 +537,6 @@ func TestRecoverPendingPromote_PreparedRemoveError(t *testing.T) {
 // read-only — but the more portable trick is to set CanonicalPath to a file
 // path whose parent dir has been chmoded to 0500.
 func TestRecoverPendingPromote_CanonicalCopiedRemoveAllError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod read-only parent semantics differ on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	home := journalAgentsHome(t)
 	parent := filepath.Join(t.TempDir(), "ro")
 	if err := os.MkdirAll(parent, 0755); err != nil {
@@ -554,10 +547,11 @@ func TestRecoverPendingPromote_CanonicalCopiedRemoveAllError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.Chmod(parent, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	// MakeDirWriteDenied (POSIX chmod 0o500 / Windows deny-ACE on
+	// FILE_WRITE_DATA|FILE_APPEND_DATA|FILE_DELETE_CHILD) is what makes the
+	// RemoveAll fail cross-platform; the prior runtime.GOOS=="windows" skip
+	// silently lowered Windows coverage on this branch.
+	testutil.MakeDirWriteDenied(t, parent)
 
 	e := sampleJournalEntry()
 	e.ID = "cc"
