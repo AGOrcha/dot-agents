@@ -321,46 +321,47 @@ func TestScanSymlinkDir_HealthyAndBrokenClassified(t *testing.T) {
 	}
 }
 
-// TestResolveLinkDest covers both branches of the private helper —
-// absolute target unchanged, relative target joined against link's dir.
-// Uses t.TempDir() so the absolute-path branch is exercised with a
-// platform-correct absolute path (Windows treats "/abs/target" as
-// relative because it lacks a drive letter).
-func TestResolveLinkDest(t *testing.T) {
+// TestAbsolutizeDest covers all three branches — empty pass-through,
+// already-absolute pass-through, and relative-to-link-dir resolution.
+// Uses t.TempDir() so the absolute branch is exercised with a platform-
+// correct absolute path (Windows treats "/abs/target" as relative because
+// it lacks a drive letter).
+func TestAbsolutizeDest(t *testing.T) {
 	dir := t.TempDir()
 	linkPath := filepath.Join(dir, "link")
 	absTarget := filepath.Join(dir, "abs", "target")
 
-	if got := resolveLinkDest(linkPath, ""); got != "" {
+	if got := absolutizeDest(linkPath, ""); got != "" {
 		t.Errorf("empty dest should pass through, got %q", got)
 	}
-	if got := resolveLinkDest(linkPath, absTarget); got != absTarget {
+	if got := absolutizeDest(linkPath, absTarget); got != absTarget {
 		t.Errorf("absolute dest should pass through, got %q want %q", got, absTarget)
 	}
-	got := resolveLinkDest(linkPath, filepath.Join("rel", "target"))
+	got := absolutizeDest(linkPath, filepath.Join("rel", "target"))
 	want := filepath.Clean(filepath.Join(dir, "rel", "target"))
 	if got != want {
 		t.Errorf("relative dest = %q, want %q", got, want)
 	}
 }
 
-// TestManagedLinkBroken_NotALink confirms the helper returns the zero
-// (not-a-link) tuple for a plain file.
-func TestManagedLinkBroken_NotALink(t *testing.T) {
+// TestClassifyManagedLink_NotALink confirms the classifier returns the
+// not-a-link state for a plain regular file.
+func TestClassifyManagedLink_NotALink(t *testing.T) {
 	dir := t.TempDir()
 	plain := filepath.Join(dir, "plain.txt")
 	if err := os.WriteFile(plain, []byte("plain\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	dest, isLink, broken := managedLinkBroken(plain)
-	if dest != "" || isLink || broken {
-		t.Errorf("plain file = (%q, %v, %v), want ('', false, false)", dest, isLink, broken)
+	state, raw := classifyManagedLink(plain)
+	if state != linkStateNotALink || raw != "" {
+		t.Errorf("plain file = (%v, %q), want (linkStateNotALink, '')", state, raw)
 	}
 }
 
-// TestManagedLinkBroken_HealthySymlink confirms a resolvable symlink with
-// an existing target is reported isLink=true, broken=false.
-func TestManagedLinkBroken_HealthySymlink(t *testing.T) {
+// TestClassifyManagedLink_Healthy confirms a resolvable symlink with an
+// existing target is reported as linkStateHealthy with the raw target
+// returned for round-trip use.
+func TestClassifyManagedLink_Healthy(t *testing.T) {
 	testutil.SymlinkOrSkip(t)
 
 	dir := t.TempDir()
@@ -372,8 +373,26 @@ func TestManagedLinkBroken_HealthySymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	dest, isLink, broken := managedLinkBroken(link)
-	if !isLink || broken || dest != target {
-		t.Errorf("got (%q, %v, %v), want (%q, true, false)", dest, isLink, broken, target)
+	state, raw := classifyManagedLink(link)
+	if state != linkStateHealthy || raw != target {
+		t.Errorf("got (%v, %q), want (linkStateHealthy, %q)", state, raw, target)
+	}
+}
+
+// TestClassifyManagedLink_Broken confirms a resolvable symlink whose
+// target is missing is reported as linkStateBroken with the raw target
+// preserved.
+func TestClassifyManagedLink_Broken(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+
+	dir := t.TempDir()
+	link := filepath.Join(dir, "broken.md")
+	missing := filepath.Join(dir, "gone.md")
+	if err := os.Symlink(missing, link); err != nil {
+		t.Fatal(err)
+	}
+	state, raw := classifyManagedLink(link)
+	if state != linkStateBroken || raw != missing {
+		t.Errorf("got (%v, %q), want (linkStateBroken, %q)", state, raw, missing)
 	}
 }
