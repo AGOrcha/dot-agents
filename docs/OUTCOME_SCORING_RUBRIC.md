@@ -41,6 +41,44 @@ Every persisted score records the `RubricVersion` it was computed under
 (see the `persist` task), so a later rubric change never silently
 invalidates historical scores.
 
+### RubricVersion ordering for concurrent plans
+
+When more than one in-flight plan changes `RubricVersion`, the two plans
+must agree on the version ladder at task-execution time — they must not
+both try to claim the same number. The rule, per R1.5 design D5
+(`.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md`):
+
+1. **Read the current `RubricVersion` constant** in
+   `internal/scoring/rubric.go` at the moment the rubric-bump task runs
+   (not at plan-authoring time).
+2. **Pick the next free version on top of the current value**, sized per
+   the [versioning policy](#versioning-policy). R1.5 ships `hook_outcomes`
+   as a *minor* bump (weights rebalanced, signal set widened by one —
+   combination method unchanged). R5 (`r5-review-labeling-access`) ships
+   `human_label` as a *major* bump because it introduces the first signal
+   that depends on **external human input** rather than agent-run
+   telemetry — a qualitatively new dependency surface.
+3. **First to merge wins the bump it planned for; the second rebases.**
+   - If the current value is `2.0.2` when R1.5's rubric-bump task runs,
+     R1.5 targets `2.1.0`. R5, running later, sees `2.1.0` and targets
+     `3.0.0`.
+   - If R5 ships first and bumps to `3.0.0`, R1.5 then targets `3.1.0`
+     (still a minor bump on top of R5's major).
+4. **The shipped value (`2.1.0`) is the result of step 1 + step 2** —
+   R1.5's rubric-bump task observed `2.0.2` at execution time and took
+   the next free minor.
+5. **The same rule applies to any future concurrent rubric change**:
+   read the constant at execution, choose the next free minor (or major,
+   per the criteria above), document the chosen target in the task notes,
+   and coordinate cross-plan if more than one mutator is in flight.
+
+The reason for the lookup-at-execution rule: a plan-authored target
+("we will be 2.1.0") becomes stale the moment another plan rebases to a
+new base. Reading the constant on the day the task ships keeps the
+version ladder monotonic without requiring plans to predict each other,
+and avoids a merge-conflict-by-version where two open plans both claim
+the same number.
+
 ## Two-way checks and the integrity track
 
 A signal can have **two** sources for the same fact:
@@ -304,7 +342,7 @@ How efficiently the iteration used the model.
 | `tests`               |   0.17 | correctness | yes     |                                      |
 | `correction_pressure` |   0.13 | process     | no      |                                      |
 | `scope`               |   0.13 | process     | yes     |                                      |
-| `hook_outcomes`       |   0.10 | process     | no      | added at 2.1.0 (R1.5); scores only `prevent_before_action` + `remediate_at_stop` — see [post-tool deferral](#post-tool-observation-evaluation-r15-t1b) |
+| `hook_outcomes`       |   0.10 | process     | no      | added at 2.1.0 (R1.5); scores `prevent_before_action` + `remediate_at_stop` only — see [approved rules](#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6) and [post-tool deferral](#post-tool-observation-evaluation-r15-t1b) |
 | `token_efficiency`    |   0.09 | efficiency  | no      |                                      |
 | **Total**             | **1.00** |          |         |                                      |
 
@@ -450,12 +488,14 @@ record at
 [`r1-5-hook-enforcement-telemetry/design.md`](../.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md)
 under "Q3 — Hook-outcome sidecar retention and archival policy".
 
-The new-signal spec and weight rebalance table are documented in the
+The new-signal spec and weight rebalance table live in the
 [`hook_outcomes` section above](#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
-and the [weight summary](#weight-summary). The RubricVersion ordering
-policy and the full approved-rule list are folded in by the `t2c-rubric-version-coordination`
-and `t-docs` tasks of the same plan; until those land, this section is
-authoritative on retention only.
+and the [weight summary](#weight-summary); the cross-plan version
+coordination rule lives in
+[RubricVersion ordering for concurrent plans](#rubricversion-ordering-for-concurrent-plans);
+the full approved-rule list lives in
+[Approved rules feeding the v1 sub-score](#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6).
+This section is authoritative on retention only.
 
 ## Post-tool observation evaluation (R1.5 T1b)
 
