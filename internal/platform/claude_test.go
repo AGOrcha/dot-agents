@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 // writeClaudeProjectJSONL creates ~/.claude/projects/<slug>/<sessionID>.jsonl
@@ -108,5 +112,695 @@ func TestClaudeScanSessionTokens_SumsUsageWithinTimeWindow(t *testing.T) {
 	want := 950.0 / 1100.0
 	if got.CacheHitRate < want-1e-9 || got.CacheHitRate > want+1e-9 {
 		t.Errorf("CacheHitRate = %v, want %v", got.CacheHitRate, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude CreateLinks full fixture + session branch-extraction coverage
+// (relocated from coverage_gap2_test.go).
+// ---------------------------------------------------------------------------
+
+// setupClaudeFullFixture provisions the full fixture used by the Claude
+// CreateLinks test: rules, mcp, legacy hook, agent dir, skill dir, global rule.
+func setupClaudeFullFixture(t *testing.T, agentsHome string) {
+	t.Helper()
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "proj", "rule.md"), "# rule\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("mcp", "proj", "claude.json"), "{}")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("hooks", "proj", "claude-code.json"), `{"hooks":{}}`)
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("agents", "proj", "reviewer", "AGENT.md"), "---\nname: reviewer\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("skills", "global", "tidy", "SKILL.md"), "---\nname: tidy\n---\nbody\n")
+	writeAgentsHomeFile(t, agentsHome, filepath.Join("rules", "global", "claude-code.md"), "# global\n")
+}
+
+func TestClaudeCreateLinks_FullFixture(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	setupClaudeFullFixture(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mustMkdirAllT(t, repo)
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	// Project rule should be linked.
+	if _, err := os.Lstat(filepath.Join(repo, ".claude", "rules", "proj--rule.md")); err != nil {
+		t.Errorf("project rule symlink missing: %v", err)
+	}
+	// .mcp.json symlink.
+	if _, err := os.Lstat(filepath.Join(repo, ".mcp.json")); err != nil {
+		t.Errorf(".mcp.json missing: %v", err)
+	}
+	// Legacy hook settings.local.json symlink to legacy file.
+	if _, err := os.Lstat(filepath.Join(repo, ".claude", "settings.local.json")); err != nil {
+		t.Errorf("settings.local.json missing: %v", err)
+	}
+}
+
+// TestClaudeExtractBranchSession_UUIDFallback hits the sid-from-uuid branch.
+func TestClaudeExtractBranchSession_UUIDFallback(t *testing.T) {
+	line := `{"uuid":"uuid-xyz","timestamp":"2026-05-11T10:00:00Z","gitBranch":"main"}`
+	sid, ts := claudeExtractBranchSession(line, "main")
+	if sid != "uuid-xyz" {
+		t.Errorf("sid = %q, want uuid-xyz", sid)
+	}
+	if ts == "" {
+		t.Error("expected non-empty timestamp")
+	}
+}
+
+func TestClaudeExtractBranchSession_NoSessionOrUUID(t *testing.T) {
+	line := `{"timestamp":"2026-05-11T10:00:00Z","gitBranch":"main"}`
+	sid, _ := claudeExtractBranchSession(line, "main")
+	if sid != "" {
+		t.Errorf("expected empty sid, got %q", sid)
+	}
+}
+
+func TestClaudeExtractBranchSession_BadJSON(t *testing.T) {
+	sid, _ := claudeExtractBranchSession("not-json", "main")
+	if sid != "" {
+		t.Errorf("expected empty for bad json, got %q", sid)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_AssistantCountReflectsLineHits adds an
+// assistant-counting test case to drive the assistantLines++ branch.
+func TestClaudeScanJSONLForBranch_AssistantCount(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/example"
+	sess := "count-test"
+	target := "main"
+	lines := []string{
+		`{"type":"assistant","sessionId":"count-test","gitBranch":"main","timestamp":"2026-05-11T10:00:00Z","message":{"content":""}}`,
+		`{"type":"assistant","sessionId":"count-test","gitBranch":"main","timestamp":"2026-05-11T11:00:00Z","message":{"content":""}}`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+	slug := strings.ReplaceAll(project, "/", "-")
+	path := filepath.Join(home, ".claude", "projects", slug, sess+".jsonl")
+	marker := `"gitBranch":"` + target + `"`
+	got := claudeScanJSONLForBranch(path, marker, target)
+	if got == nil {
+		t.Fatal("expected match")
+	}
+	if got.MessageCount < 2 {
+		t.Errorf("MessageCount = %d, want >= 2", got.MessageCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude assistant-entry accumulator + MCP missing-source coverage
+// (relocated from coverage_gap3_test.go).
+// ---------------------------------------------------------------------------
+
+// TestClaudeLinkProjectMCPMissing drives the missing-source branch (just to
+// hit the early-return).
+func TestClaudeLinkProjectMCP_MissingSource(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude().(*claude)
+	c.linkProjectMCP("proj", repo, agentsHome)
+	// no symlink created
+	if _, err := os.Lstat(filepath.Join(repo, ".mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no .mcp.json link: %v", err)
+	}
+}
+
+// TestClaudeAccumulateAssistantEntry_BadJSON drives the unmarshal-error branch.
+func TestClaudeAccumulateAssistantEntry_BadJSON(t *testing.T) {
+	var m SessionTokenMetrics
+	claudeAccumulateAssistantEntry([]byte("garbage"), time.Time{}, &m)
+	if m.InputTokens != 0 {
+		t.Errorf("expected zero, got %+v", m)
+	}
+}
+
+func TestClaudeAccumulateAssistantEntry_AfterCutoffSkipped(t *testing.T) {
+	line := `{"type":"assistant","timestamp":"2026-05-11T10:00:00Z","message":{"usage":{"input_tokens":99}}}`
+	var m SessionTokenMetrics
+	claudeAccumulateAssistantEntry([]byte(line), time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC), &m)
+	if m.InputTokens != 0 {
+		t.Errorf("expected zero (before cutoff), got %+v", m)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude ensureUser*, linkUserAgent, pruneProjectRuleLinks, mkdir-blocker,
+// scan-session-tokens, scan-jsonl-for-branch coverage (relocated from
+// coverage_gap5_test.go).
+// ---------------------------------------------------------------------------
+
+// TestClaudeEnsureUserRules_PreExistingSymlinkSkipped drives the "already a
+// symlink → continue" branch.
+func TestClaudeEnsureUserRules_PreExistingSymlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed source.
+	src := filepath.Join(agentsHome, "rules", "global", "rules.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing symlink target.
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	pretend := filepath.Join(tmp, "pretend.md")
+	if err := os.WriteFile(pretend, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, pretend, filepath.Join(home, ".claude", "CLAUDE.md"))
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err != nil {
+		t.Fatalf("ensureUserRules: %v", err)
+	}
+	// Managed link should not have been changed.
+	if !links.IsManagedLink(filepath.Join(home, ".claude", "CLAUDE.md"), pretend) {
+		t.Errorf("managed link to %q was not preserved", pretend)
+	}
+}
+
+// TestClaudeEnsureUserSettings_LegacyPathWithExistingSymlink covers the
+// settings.json continue-on-existing-symlink branch.
+func TestClaudeEnsureUserSettings_PreExistingSymlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy spec file under settings/global.
+	legacy := filepath.Join(agentsHome, "settings", "global", "claude-code.json")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing symlink in user home.
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	pretend := filepath.Join(tmp, "pretend.json")
+	if err := os.WriteFile(pretend, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, pretend, filepath.Join(home, ".claude", "settings.json"))
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserSettings(agentsHome); err != nil {
+		t.Fatalf("ensureUserSettings: %v", err)
+	}
+}
+
+// TestClaudeEnsureUserSettings_NoSpecRemovesStale drives the
+// "spec == nil → removeManagedFileIf" branch.
+func TestClaudeEnsureUserSettings_NoSpecRemoves(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-write a managed-looking rendered settings file.
+	content, err := renderClaudeHookSettings([]HookSpec{{Name: "x", When: "pre_tool_use", Command: "/bin/true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".claude", "settings.json")
+	if err := os.WriteFile(target, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude().(*claude)
+	if err := c.ensureUserSettings(agentsHome); err != nil {
+		t.Fatalf("ensureUserSettings: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("expected managed settings.json removed")
+	}
+}
+
+// TestClaudeLinkUserAgent_PreExistingSymlinkSkipped drives the symlink-skip branch.
+func TestClaudeLinkUserAgent_SymlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	agentDir := filepath.Join(tmp, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	userAgentsDir := filepath.Join(tmp, "userhome", ".claude", "agents")
+	if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pretend := filepath.Join(tmp, "x")
+	if err := os.MkdirAll(pretend, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, pretend, filepath.Join(userAgentsDir, "reviewer"))
+
+	c := NewClaude().(*claude)
+	entries, err := os.ReadDir(filepath.Join(tmp, "agents", "global"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.linkUserAgent(filepath.Join(tmp, "agents", "global"), userAgentsDir, entries[0])
+	// Managed link should remain pointing at pretend.
+	if !links.IsManagedLink(filepath.Join(userAgentsDir, "reviewer"), pretend) {
+		t.Errorf("link changed, expected preserved link to %q", pretend)
+	}
+}
+
+// TestClaudeLinkUserAgent_NonAgentDirSkipped drives the !isClaudeAgentDir branch.
+func TestClaudeLinkUserAgent_NonAgentDirSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	// Directory without AGENT.md
+	dir := filepath.Join(tmp, "agents", "global", "no-agent")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	userAgentsDir := filepath.Join(tmp, "userhome", ".claude", "agents")
+	if err := os.MkdirAll(userAgentsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude().(*claude)
+	entries, err := os.ReadDir(filepath.Join(tmp, "agents", "global"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.linkUserAgent(filepath.Join(tmp, "agents", "global"), userAgentsDir, entries[0])
+	// No symlink should be created.
+	if _, err := os.Lstat(filepath.Join(userAgentsDir, "no-agent")); !os.IsNotExist(err) {
+		t.Error("non-agent dir should be skipped")
+	}
+}
+
+// TestClaudePruneProjectRuleLinks_NonMatchingPreserved drives the non-prefix
+// continue branch.
+func TestClaudePruneProjectRuleLinks_NonMatchingPreserved(t *testing.T) {
+	tmp := t.TempDir()
+	rulesDir := filepath.Join(tmp, "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// File with different prefix; should be left alone.
+	other := filepath.Join(rulesDir, "global--keep.md")
+	if err := os.WriteFile(other, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// File that has subdir name (directory entry skipped).
+	sub := filepath.Join(rulesDir, "subdir")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// File with project prefix that's in keep map.
+	keepP := filepath.Join(rulesDir, "proj--keep.md")
+	if err := os.WriteFile(keepP, []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// File with project prefix that should be removed.
+	stale := filepath.Join(rulesDir, "proj--stale.md")
+	if err := os.WriteFile(stale, []byte("z"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	wanted := map[string]string{"proj--keep.md": "/no/where"}
+	if err := c.pruneProjectRuleLinks(rulesDir, "proj", wanted); err != nil {
+		t.Fatalf("pruneProjectRuleLinks: %v", err)
+	}
+	for _, expect := range []string{other, keepP} {
+		if _, err := os.Stat(expect); err != nil {
+			t.Errorf("expected preserved: %s (%v)", expect, err)
+		}
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("stale entry should be removed")
+	}
+}
+
+// TestResolveClaudeCodeModelFromJSONL_NonAssistant lines drives the
+// extract-function-returns-empty branch.
+func TestResolveClaudeCodeModelFromJSONL_NonAssistantLine(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/x"
+	sess := "no-asst"
+	lines := []string{
+		`{"type":"user","message":{"content":"hi"}}`,
+		// substring-matched but with non-assistant type:
+		`{"type":"user","gitBranch":"x","message":{"content":"assistant somewhere in body"}}`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+	got := resolveClaudeCodeModelFromJSONL(home, project, sess)
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// TestClaudeCreateLinks_ErrorPropagationFromMkdir uses a blocker file to
+// force an mkdir error inside prepareLinks (rulesDir path).
+func TestClaudeCreateLinks_RulesMkdirBlocked(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Place a regular file where the rules dir should live.
+	claudeDir := filepath.Join(repo, ".claude")
+	if err := os.WriteFile(claudeDir, []byte("blocker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewClaude().CreateLinks("proj", repo); err == nil {
+		t.Error("expected mkdir error")
+	}
+}
+
+// TestClaudeScanSessionTokens_SkipsNonAssistantLines exercises the
+// substring-prefilter "continue" branch in claudeScanSessionTokens
+// (lines without `"assistant"` are short-circuited before JSON parse).
+func TestClaudeScanSessionTokens_SkipsNonAssistantLines(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/skip"
+	sess := "44444444-4444-4444-4444-444444444444"
+	lines := []string{
+		// No "assistant" substring — hits the continue branch.
+		`{"type":"user","timestamp":"2026-05-11T12:00:00Z","message":{"content":"hi"}}`,
+		// One real assistant line so the function does some work.
+		`{"type":"assistant","timestamp":"2026-05-11T12:30:00Z","message":{"usage":{"input_tokens":7,"output_tokens":3}}}`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+
+	got := claudeScanSessionTokens(home, project, sess, "")
+	if got.MessageCount != 1 {
+		t.Errorf("MessageCount = %d, want 1 (non-assistant line skipped)", got.MessageCount)
+	}
+	if got.InputTokens != 7 {
+		t.Errorf("InputTokens = %d, want 7", got.InputTokens)
+	}
+	if got.OutputTokens != 3 {
+		t.Errorf("OutputTokens = %d, want 3", got.OutputTokens)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_MissingFile drives the os.Open failure
+// short-circuit (path does not exist → nil).
+func TestClaudeScanJSONLForBranch_MissingFile(t *testing.T) {
+	got := claudeScanJSONLForBranch(filepath.Join(t.TempDir(), "missing.jsonl"), `"gitBranch":"main"`, "main")
+	if got != nil {
+		t.Errorf("expected nil for missing file, got %+v", got)
+	}
+}
+
+// TestClaudeScanJSONLForBranch_LineCap50 drives the >50-line break branch.
+// We write 60 matching lines; only the first 50 should be visited.
+func TestClaudeScanJSONLForBranch_LineCap50(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/cap"
+	sess := "55555555-5555-5555-5555-555555555555"
+	target := "main"
+	line := `{"type":"assistant","sessionId":"` + sess + `","timestamp":"2026-05-11T11:30:00Z","gitBranch":"` + target + `","message":{"content":[{"type":"text","text":"x"}]}}`
+	var lines []string
+	for i := 0; i < 60; i++ {
+		lines = append(lines, line)
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+
+	slug := strings.ReplaceAll(project, "/", "-")
+	path := filepath.Join(home, ".claude", "projects", slug, sess+".jsonl")
+	marker := `"gitBranch":"` + target + `"`
+	got := claudeScanJSONLForBranch(path, marker, target)
+	if got == nil {
+		t.Fatalf("expected match, got nil")
+	}
+	// Cap is 50 — anything more means the break branch did not engage.
+	if got.MessageCount > 50 {
+		t.Errorf("MessageCount = %d, want <= 50 (cap)", got.MessageCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Claude session resolvers + model resolution + usage stats + rule prune +
+// remove-links sweep + claude agent-dir detection coverage (relocated from
+// coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestClaudeFindSessionsOnBranch_MatchesMostRecent seeds two JSONL session
+// files under ~/.claude/projects/<slug>/ and checks the resolver returns the
+// matching session.
+func TestClaudeFindSessionsOnBranch_MatchesMostRecent(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/example"
+	branch := "feature/branch-x"
+
+	good := `{"type":"assistant","sessionId":"sess-good","timestamp":"2026-05-11T11:30:00Z","gitBranch":"feature/branch-x"}`
+	writeClaudeProjectJSONL(t, home, project, "sess-good", []string{good})
+
+	stale := `{"type":"assistant","sessionId":"sess-stale","timestamp":"2026-05-09T11:30:00Z","gitBranch":"other"}`
+	writeClaudeProjectJSONL(t, home, project, "sess-stale", []string{stale})
+
+	got := claudeFindSessionsOnBranch(home, project, branch, 5)
+	if len(got) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(got))
+	}
+	if got[0].SessionID != "sess-good" {
+		t.Errorf("SessionID = %q, want sess-good", got[0].SessionID)
+	}
+	// Same call via the platform method.
+	got2 := NewClaude().(interface {
+		FindSessionsOnBranch(string, string, string, int) []BranchSessionInfo
+	}).FindSessionsOnBranch(home, project, branch, 5)
+	if len(got2) != 1 || got2[0].SessionID != "sess-good" {
+		t.Errorf("Platform.FindSessionsOnBranch returned %+v", got2)
+	}
+}
+
+func TestClaudeFindSessionsOnBranch_NoProjectsDir(t *testing.T) {
+	if got := claudeFindSessionsOnBranch(t.TempDir(), "/no/where", "main", 5); got != nil {
+		t.Errorf("expected nil for missing projects dir, got %+v", got)
+	}
+}
+
+// TestResolveClaudeCodeModelFromJSONL parses a synthetic claude session JSONL.
+func TestResolveClaudeCodeModelFromJSONL(t *testing.T) {
+	home := t.TempDir()
+	project := "/repo/example"
+	sess := "claude-sess"
+	lines := []string{
+		`{"type":"user","message":{"content":"hi"}}`,
+		`{"type":"assistant","message":{"model":"claude-3-5","content":[]}}`,
+		`{"type":"assistant","message":{"model":"claude-3-7","content":[]}}`,
+		`not-json`,
+	}
+	writeClaudeProjectJSONL(t, home, project, sess, lines)
+	got := resolveClaudeCodeModelFromJSONL(home, project, sess)
+	if got != "claude-3-7" {
+		t.Errorf("model = %q, want claude-3-7", got)
+	}
+}
+
+func TestResolveClaudeCodeModelFromJSONL_MissingFile(t *testing.T) {
+	if got := resolveClaudeCodeModelFromJSONL(t.TempDir(), "/none", "x"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+// TestClaudeRemoveAndRecreateRules ensures the project-rules prune path covers
+// the leftover-rule branch.
+func TestClaudeRulePruneRemovesLeftover(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-seed a stale rules file.
+	rulesDir := filepath.Join(repo, ".claude", "rules")
+	stale := filepath.Join(rulesDir, "proj--ancient.md")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Seed one current rule for the project.
+	live := filepath.Join(agentsHome, "rules", "proj", "current.md")
+	if err := os.MkdirAll(filepath.Dir(live), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(live, []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	if err := c.createRulesLinks("proj", repo, agentsHome); err != nil {
+		t.Fatalf("createRulesLinks: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale rule should be pruned, stat err=%v", err)
+	}
+	want := filepath.Join(rulesDir, "proj--current.md")
+	if _, err := os.Lstat(want); err != nil {
+		t.Errorf("expected live rule at %s: %v", want, err)
+	}
+}
+
+// TestClaudePruneRuleLinksWithoutSource: when project rules dir is missing,
+// pruneProjectRuleLinks should still clean stray entries.
+func TestClaudePruneRuleLinksWithoutSource(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	rulesDir := filepath.Join(repo, ".claude", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(rulesDir, "proj--ghost.md")
+	if err := os.WriteFile(stale, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := NewClaude().(*claude)
+	if err := c.createRulesLinks("proj", repo, agentsHome); err != nil {
+		t.Fatalf("createRulesLinks: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale rule should be pruned even with missing source")
+	}
+}
+
+// TestClaudeReadUsageStats_TooManyDailyEntries triggers the tail-trim branch.
+func TestClaudeReadUsageStats_TooManyDailyEntries(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, ".claude")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	sb.WriteString(`{"totalSessions":1,"totalMessages":2,"modelUsage":{},"dailyActivity":[`)
+	for i := 0; i < 15; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(`{"date":"d` + itoa(i) + `","messageCount":1,"sessionCount":1,"toolCallCount":1}`)
+	}
+	sb.WriteString(`]}`)
+	if err := os.WriteFile(filepath.Join(dir, "stats-cache.json"), []byte(sb.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stats := claudeReadUsageStats(tmp)
+	if stats == nil {
+		t.Fatal("nil stats")
+	}
+	if len(stats.DailyActivity) != 10 {
+		t.Errorf("DailyActivity tail = %d, want 10", len(stats.DailyActivity))
+	}
+}
+
+// TestClaudeRemoveLinksFullSweep drives the .claude / .agents remove paths.
+func TestClaudeRemoveLinksFullSweep(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed a `.mcp.json` symlink under repo pointing inside agentsHome.
+	mcpSrc := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcpSrc), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpSrc, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mcpDst := filepath.Join(repo, ".mcp.json")
+	linktest.Link(t, mcpSrc, mcpDst)
+	// Seed a stale rule symlink.
+	ruleSrc := filepath.Join(agentsHome, "rules", "proj", "x.md")
+	if err := os.MkdirAll(filepath.Dir(ruleSrc), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ruleSrc, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ruleDst := filepath.Join(repo, ".claude", "rules", "proj--x.md")
+	if err := os.MkdirAll(filepath.Dir(ruleDst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, ruleSrc, ruleDst)
+
+	if err := NewClaude().RemoveLinks("proj", repo); err != nil {
+		t.Fatalf("RemoveLinks: %v", err)
+	}
+	if _, err := os.Lstat(mcpDst); !os.IsNotExist(err) {
+		t.Error(".mcp.json symlink should be removed")
+	}
+	if _, err := os.Lstat(ruleDst); !os.IsNotExist(err) {
+		t.Error("project rule symlink should be removed")
+	}
+}
+
+// TestIsClaudeAgentDir covers the directory-with-AGENT.md check.
+func TestIsClaudeAgentDir(t *testing.T) {
+	tmp := t.TempDir()
+	good := filepath.Join(tmp, "agent")
+	if err := os.MkdirAll(good, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(good, "AGENT.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if !isClaudeAgentDir(good) {
+		t.Error("expected true for dir with AGENT.md")
+	}
+	noMarker := filepath.Join(tmp, "no-marker")
+	if err := os.MkdirAll(noMarker, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if isClaudeAgentDir(noMarker) {
+		t.Error("expected false for dir without AGENT.md")
+	}
+	// Non-directory path.
+	notDir := filepath.Join(tmp, "regular")
+	if err := os.WriteFile(notDir, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if isClaudeAgentDir(notDir) {
+		t.Error("expected false for non-directory")
 	}
 }

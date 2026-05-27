@@ -1054,3 +1054,648 @@ func executeSkillPlan(t *testing.T, repo, agentsHome string) error {
 	}
 	return plan.Execute(repo, agentsHome)
 }
+
+// ---------------------------------------------------------------------------
+// ResourceIntent / ResourceSourceRef validate-enum coverage (relocated from
+// coverage_gap2_test.go).
+// ---------------------------------------------------------------------------
+
+// TestResourceIntentValidateEnums_AllBadVariants drives each enum-mismatch
+// branch in validateEnums.
+func TestResourceIntentValidateEnums_AllBadVariants(t *testing.T) {
+	good := validSharedSkillIntent(".agents/skills/review", "test")
+	if err := good.Validate(); err != nil {
+		t.Fatalf("baseline valid: %v", err)
+	}
+	cases := []struct {
+		name string
+		bad  func(ResourceIntent) ResourceIntent
+		want string
+	}{
+		{"empty-ownership", func(r ResourceIntent) ResourceIntent { r.Ownership = ""; return r }, "ownership"},
+		{"bad-ownership", func(r ResourceIntent) ResourceIntent { r.Ownership = "weird"; return r }, "ownership"},
+		{"empty-shape", func(r ResourceIntent) ResourceIntent { r.Shape = ""; return r }, "shape"},
+		{"bad-shape", func(r ResourceIntent) ResourceIntent { r.Shape = "weird"; return r }, "shape"},
+		{"empty-transport", func(r ResourceIntent) ResourceIntent { r.Transport = ""; return r }, "transport"},
+		{"bad-transport", func(r ResourceIntent) ResourceIntent { r.Transport = "weird"; return r }, "transport"},
+		{"empty-replace", func(r ResourceIntent) ResourceIntent { r.ReplacePolicy = ""; return r }, "replace_policy"},
+		{"bad-replace", func(r ResourceIntent) ResourceIntent { r.ReplacePolicy = "weird"; return r }, "replace_policy"},
+		{"empty-prune", func(r ResourceIntent) ResourceIntent { r.PrunePolicy = ""; return r }, "prune_policy"},
+		{"bad-prune", func(r ResourceIntent) ResourceIntent { r.PrunePolicy = "weird"; return r }, "prune_policy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := tc.bad(good)
+			err := intent.Validate()
+			if err == nil {
+				t.Fatalf("expected error mentioning %q", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err %v missing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestResourceSourceRefValidate_AllCases exhausts the kind switch.
+func TestResourceSourceRefValidate_AllCases(t *testing.T) {
+	base := ResourceSourceRef{
+		Scope:        "proj",
+		Bucket:       "skills",
+		RelativePath: "x",
+		Kind:         ResourceSourceCanonicalDir,
+	}
+	for _, kind := range []ResourceSourceKind{
+		ResourceSourceCanonicalFile, ResourceSourceCanonicalDir, ResourceSourceCanonicalBundle,
+	} {
+		ref := base
+		ref.Kind = kind
+		if err := ref.Validate(); err != nil {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+	bad := base
+	bad.Kind = "weird"
+	if err := bad.Validate(); err == nil {
+		t.Error("expected error for unknown kind")
+	}
+	bad.Kind = ""
+	if err := bad.Validate(); err == nil {
+		t.Error("expected error for empty kind")
+	}
+	for _, missing := range []ResourceSourceRef{
+		{Bucket: "x", RelativePath: "y", Kind: ResourceSourceCanonicalDir},
+		{Scope: "x", RelativePath: "y", Kind: ResourceSourceCanonicalDir},
+		{Scope: "x", Bucket: "y", Kind: ResourceSourceCanonicalDir},
+	} {
+		if err := missing.Validate(); err == nil {
+			t.Errorf("expected error for missing field in %+v", missing)
+		}
+	}
+}
+
+// TestResourceIntentValidate_MissingMaterializer covers the empty-materializer branch.
+func TestResourceIntentValidate_MissingMaterializer(t *testing.T) {
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	intent.Materializer = ""
+	if err := intent.Validate(); err == nil || !strings.Contains(err.Error(), "materializer") {
+		t.Errorf("expected materializer error, got %v", err)
+	}
+}
+
+// TestResourceIntentValidate_BadSourceRef propagates from SourceRef.Validate.
+func TestResourceIntentValidate_BadSourceRef(t *testing.T) {
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	intent.SourceRef.Kind = ""
+	if err := intent.Validate(); err == nil {
+		t.Error("expected propagated source_ref error")
+	}
+}
+
+// TestValidateEnum_Direct exercises the helper with both success and failure paths.
+func TestValidateEnum_Direct(t *testing.T) {
+	if err := validateEnum("color", "red", []string{"red", "blue"}); err != nil {
+		t.Errorf("valid: %v", err)
+	}
+	if err := validateEnum("color", "", []string{"red"}); err == nil {
+		t.Error("expected required error for empty value")
+	}
+	if err := validateEnum("color", "green", []string{"red", "blue"}); err == nil {
+		t.Error("expected unsupported error for unknown value")
+	}
+}
+
+// TestSameStrings_Differences ensures the helper is symmetric on shuffles and
+// rejects mismatched slices.
+func TestSameStrings_Differences(t *testing.T) {
+	cases := []struct {
+		a, b []string
+		want bool
+	}{
+		{nil, nil, true},
+		{[]string{"a", "b"}, []string{"b", "a"}, true},
+		{[]string{"a"}, []string{}, false},
+		{[]string{"a", "b"}, []string{"a", "c"}, false},
+	}
+	for i, tc := range cases {
+		if got := sameStrings(tc.a, tc.b); got != tc.want {
+			t.Errorf("[%d] sameStrings(%v, %v) = %v, want %v", i, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestSyncResourceDirEntries_HardError drives the mkdir error branch.
+func TestSyncResourceDirEntries_MkdirError(t *testing.T) {
+	// Try to use a path that contains a regular file as parent dir.
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// dstRoot below a regular file → MkdirAll errors.
+	dst := filepath.Join(blocker, "child")
+	err := syncResourceDirEntries(stdPlatformIO{}, []resourceDir{{Name: "x", Dir: "/no/where"}}, dst)
+	if err == nil {
+		t.Error("expected mkdir error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resource plan + intent execute coverage (relocated from coverage_gap3).
+// ---------------------------------------------------------------------------
+
+// TestRemoveSharedTargetPlanEmpty drives the no-platform branch.
+func TestRemoveSharedTargetPlan_NoPlatforms(t *testing.T) {
+	if err := RemoveSharedTargetPlan("proj", t.TempDir(), nil); err != nil {
+		t.Errorf("RemoveSharedTargetPlan with no platforms: %v", err)
+	}
+}
+
+// TestRemoveManagedIntentTarget_UnknownShapeNoop drives the default (no-op)
+// branch for unknown shape/transport combos.
+func TestRemoveManagedIntentTarget_UnknownShape(t *testing.T) {
+	intent := ResourceIntent{Shape: "weird", Transport: "weird"}
+	if err := removeManagedIntentTarget(intent, t.TempDir(), t.TempDir()); err != nil {
+		t.Errorf("unknown shape should no-op, got %v", err)
+	}
+}
+
+// TestSyncScopedFileSymlinks_ExistingTargetMaintained drives the link.Symlink
+// idempotency branch.
+func TestSyncScopedFileSymlinks_Idempotent(t *testing.T) {
+	tmp := t.TempDir()
+	agentDir := filepath.Join(tmp, "agents", "global", "x")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "dst")
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dst, ".md"); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+}
+
+// TestEnsureFileSymlinkIntent_TargetIsRegularFileBlocked drives the
+// !info.IsDir + ReplaceNever rejection.
+func TestEnsureFileSymlinkIntent_RegularFileNever(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".agents/skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-place a regular file at the target.
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.WriteFile(target, []byte("blocking"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceNever
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected error when target is regular file with Never policy")
+	}
+}
+
+// TestEnsureFileSymlinkIntent_TargetDirIfManagedRefused covers the dir+IfManaged refusal branch.
+func TestEnsureFileSymlinkIntent_DirIfManagedRefused(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceIfManaged
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected refusal for IfManaged on directory")
+	}
+}
+
+// TestEnsureFileSymlinkIntent_DirNeverRefused covers the dir+Never branch.
+func TestEnsureFileSymlinkIntent_DirNeverRefused(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "x", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	target := filepath.Join(repo, ".agents/skills/x")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := validSharedSkillIntent(".agents/skills/x", "test")
+	intent.ReplacePolicy = ResourceReplaceNever
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err == nil {
+		t.Error("expected refusal for Never on directory")
+	}
+}
+
+// TestPrepareIntentTargetForReplacement_UnknownReplaceForDir drives the
+// "unsupported replace policy" default case.
+func TestPrepareIntentTargetForReplacement_UnknownReplacePolicyForDir(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "d")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: "weird-policy",
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err == nil {
+		t.Error("expected error for unknown replace policy")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resource intent prepare-replace coverage (relocated from coverage_gap5).
+// ---------------------------------------------------------------------------
+
+// TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved drives the
+// AllowlistedImportedDirOnly + regular-file branch when target IS allowlisted.
+// The ownership contract authorizes this policy to replace only a proven
+// imported/managed DIRECTORY; a regular file must be left in place (not
+// pre-removed) so links.Symlink can apply the unmanaged-file contract instead
+// of this code silently deleting user data.
+func TestPrepareIntentTargetForReplacement_AllowlistedFilePreserved(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "blocking")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Fatalf("allowlisted file prepare: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("expected regular file preserved (links.Symlink applies the contract), got: %v", err)
+	}
+}
+
+// TestPrepareIntentTargetForReplacement_DefaultReplaceForFile drives the
+// "default → os.Remove" branch (e.g. IfManaged on file).
+func TestPrepareIntentTargetForReplacement_IfManagedFile(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "f")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceIfManaged,
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Fatalf("IfManaged file replace: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("expected file removed")
+	}
+}
+
+// TestSyncResourceDirEntries_NoEntries handles the empty-input branch.
+func TestSyncResourceDirEntries_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	dst := filepath.Join(tmp, "out")
+	if err := syncResourceDirEntries(stdPlatformIO{}, nil, dst); err != nil {
+		t.Errorf("empty entries: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Error("expected dst dir created")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resource intent helpers + allowlist + scoped-symlinks coverage (relocated
+// from coverage_gap_test.go).
+// ---------------------------------------------------------------------------
+
+// TestResolveScopedFileFromBuckets covers the otherwise-dead-code multi-bucket
+// resolver in resources.go.
+func TestResolveScopedFileFromBuckets(t *testing.T) {
+	tmp := t.TempDir()
+	mkfile := func(parts ...string) string {
+		p := filepath.Join(append([]string{tmp}, parts...)...)
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// Project scope wins over global.
+	projFile := mkfile("settings", "proj", "thing.json")
+	mkfile("settings", "global", "thing.json")
+
+	got := resolveScopedFileFromBuckets(tmp, []string{"settings"}, "proj", "thing.json")
+	if got != projFile {
+		t.Errorf("got %q, want %q", got, projFile)
+	}
+
+	// Falls back to global when project is missing.
+	globalOnly := mkfile("hooks", "global", "other.json")
+	got = resolveScopedFileFromBuckets(tmp, []string{"hooks"}, "noproj", "other.json")
+	if got != globalOnly {
+		t.Errorf("got %q, want %q", got, globalOnly)
+	}
+
+	// Cross-bucket search.
+	got = resolveScopedFileFromBuckets(tmp, []string{"missing-bucket", "hooks"}, "noproj", "other.json")
+	if got != globalOnly {
+		t.Errorf("cross-bucket got %q, want %q", got, globalOnly)
+	}
+
+	// No match → empty.
+	if got := resolveScopedFileFromBuckets(tmp, []string{"hooks"}, "proj", "nope.json"); got != "" {
+		t.Errorf("expected empty for no match, got %q", got)
+	}
+}
+
+// TestExecuteSharedSkillMirrorPlan drives the helper that wraps
+// BuildSharedSkillMirrorIntents + BuildResourcePlan + Execute.
+func TestExecuteSharedSkillMirrorPlan(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", filepath.Join(tmp, "home"))
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Seed one project-scope skill.
+	skillDir := filepath.Join(agentsHome, "skills", "proj", "my-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: my-skill\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ExecuteSharedSkillMirrorPlan("proj", repo, ".agents/skills"); err != nil {
+		t.Fatalf("ExecuteSharedSkillMirrorPlan: %v", err)
+	}
+
+	link := filepath.Join(repo, ".agents/skills", "my-skill")
+	if !links.IsManagedLink(link, skillDir) {
+		t.Errorf("expected managed link at %s -> %s", link, skillDir)
+	}
+
+	// Empty target roots → no-op.
+	if err := ExecuteSharedSkillMirrorPlan("proj", repo); err != nil {
+		t.Errorf("empty target roots should be a no-op, got %v", err)
+	}
+}
+
+// TestEnsureFileSymlinkIntent_AlreadyCorrect drives the symlink-in-place
+// branch.
+func TestEnsureFileSymlinkIntent_ExistingSymlinkReplaced(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "skills", "proj", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".agents", "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := validSharedSkillIntent(".agents/skills/review", "test")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	if err := plan.Execute(repo, agentsHome); err != nil {
+		t.Fatalf("first execute: %v", err)
+	}
+	// Run again; should be idempotent (already-symlink branch).
+	if err := plan.Execute(repo, agentsHome); err != nil {
+		t.Fatalf("second execute: %v", err)
+	}
+}
+
+// TestPrepareIntentTargetForReplacement_RefusesUnmanagedFile drives the
+// no-replace branch (ResourceReplaceNever) and asserts the ownership contract
+// for the AllowlistedImportedDirOnly + regular-file case: prepare must NOT
+// remove a regular file (allowlisted or not) — it defers to links.Symlink so
+// user data is never silently deleted here.
+func TestPrepareIntentTargetForReplacement_RefusesUnmanagedFile(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "f")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	intent := ResourceIntent{
+		TargetPath:    "anywhere/f",
+		ReplacePolicy: ResourceReplaceNever,
+	}
+	if err := prepareIntentTargetForReplacement(target, intent); err == nil {
+		t.Error("expected refusal for never-replace policy")
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("never-replace must preserve the file, got: %v", err)
+	}
+
+	// AllowlistedImportedDirOnly on a regular file: prepare returns nil
+	// without removing the file, regardless of allowlist membership, so
+	// links.Symlink applies the unmanaged-file contract.
+	intent.ReplacePolicy = ResourceReplaceAllowlistedImportedDirOnly
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Errorf("non-allowlisted file prepare must defer (nil), got: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("non-allowlisted file must be preserved, got: %v", err)
+	}
+
+	intent.TargetPath = ".agents/skills/review"
+	if err := prepareIntentTargetForReplacement(target, intent); err != nil {
+		t.Errorf("allowlisted file prepare must defer (nil), got: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("allowlisted regular file must be preserved (links.Symlink applies the contract), got: %v", err)
+	}
+}
+
+func TestPrepareIntentTargetForReplacement_DirPolicies(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "d")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// IfManaged → refuse.
+	if err := prepareIntentTargetForReplacement(dir, ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceIfManaged,
+	}); err == nil {
+		t.Error("expected refusal IfManaged on dir")
+	}
+	// Never → refuse.
+	if err := prepareIntentTargetForReplacement(dir, ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceNever,
+	}); err == nil {
+		t.Error("expected refusal Never on dir")
+	}
+	// Allowlisted with marker → removed.
+	marker := filepath.Join(dir, "SKILL.md")
+	if err := os.WriteFile(marker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareIntentTargetForReplacement(dir, ResourceIntent{
+		TargetPath:    ".agents/skills/x",
+		ReplacePolicy: ResourceReplaceAllowlistedImportedDirOnly,
+		MarkerFiles:   []string{"SKILL.md"},
+	}); err != nil {
+		t.Errorf("allowlisted dir replace: %v", err)
+	}
+}
+
+// TestExecuteResourceIntent_UnsupportedShapeErrors drives the default branch
+// in the switch.
+func TestExecuteResourceIntent_UnsupportedShapeErrors(t *testing.T) {
+	intent := ResourceIntent{
+		Shape:     "weird",
+		Transport: ResourceTransportSymlink,
+	}
+	if err := executeResourceIntent(intent, t.TempDir(), t.TempDir()); err == nil {
+		t.Error("expected error for unsupported shape")
+	}
+}
+
+func TestRemoveManagedIntentTargetUnknownMaterializerErrors(t *testing.T) {
+	intent := ResourceIntent{
+		Shape:        ResourceShapeRenderSingle,
+		Transport:    ResourceTransportWrite,
+		Materializer: "no-such-materializer",
+		TargetPath:   "x",
+	}
+	if err := removeManagedIntentTarget(intent, t.TempDir(), t.TempDir()); err == nil {
+		t.Error("expected error for unknown materializer in remove path")
+	}
+}
+
+func TestCanonicalIntentSourcePath_EmptyErrors(t *testing.T) {
+	if _, err := canonicalIntentSourcePath(ResourceIntent{}, ""); err == nil {
+		t.Error("expected error for empty agentsHome")
+	}
+}
+
+func TestResolveIntentTargetPath_Absolute(t *testing.T) {
+	abs, err := filepath.Abs(filepath.Join("abs"))
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	got := resolveIntentTargetPath(abs, filepath.FromSlash("/repo"))
+	if got != abs {
+		t.Errorf("got %q, want %q", got, abs)
+	}
+}
+
+// TestExecuteRenderSingleWrite_UnknownMaterializer covers the default branch.
+func TestExecuteRenderSingleWrite_UnknownMaterializer(t *testing.T) {
+	if err := executeRenderSingleWrite(ResourceIntent{
+		Materializer: "unsupported",
+	}, t.TempDir(), t.TempDir()); err == nil {
+		t.Error("expected error for unknown materializer")
+	}
+}
+
+// TestRemoveImportedDirIfAllowlisted_NoMarkers covers refusal branch.
+func TestRemoveImportedDirIfAllowlisted_NoMarkers(t *testing.T) {
+	tmp := t.TempDir()
+	intent := ResourceIntent{TargetPath: ".agents/skills/x"}
+	if err := removeImportedDirIfAllowlisted(tmp, intent); err == nil {
+		t.Error("expected error for no-marker dir")
+	}
+}
+
+func TestRemoveImportedDirIfAllowlisted_NotAllowlisted(t *testing.T) {
+	intent := ResourceIntent{TargetPath: "other/path"}
+	if err := removeImportedDirIfAllowlisted(t.TempDir(), intent); err == nil {
+		t.Error("expected error for non-allowlisted target")
+	}
+}
+
+// TestIsAllowlistedSharedMirrorTarget covers each branch of the allowlist.
+func TestIsAllowlistedSharedMirrorTarget(t *testing.T) {
+	for _, ok := range []string{
+		".agents/skills/x", ".claude/skills/x", ".claude/agents/x",
+		".codex/agents/x", ".opencode/plugins/x", ".opencode/agent/x",
+		".github/agents/x",
+	} {
+		if !isAllowlistedSharedMirrorTarget(ok) {
+			t.Errorf("expected %q allowlisted", ok)
+		}
+	}
+	if isAllowlistedSharedMirrorTarget("random/path") {
+		t.Error("random path should not be allowlisted")
+	}
+}
+
+// TestSyncScopedFileSymlinks drives the opencode-style file fanout helper.
+func TestSyncScopedFileSymlinks(t *testing.T) {
+	tmp := t.TempDir()
+	agentDir := filepath.Join(tmp, "agents", "global", "reviewer")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dstRoot := filepath.Join(tmp, "out")
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "agents", "global", "AGENT.md", dstRoot, ".md"); err != nil {
+		t.Fatalf("syncScopedFileSymlinks: %v", err)
+	}
+	link := filepath.Join(dstRoot, "reviewer.md")
+	if !links.IsManagedLink(link, filepath.Join(agentDir, "AGENT.md")) {
+		t.Errorf("expected managed link at %s", link)
+	}
+
+	// Missing source → no-op (no error).
+	if err := syncScopedFileSymlinks(stdPlatformIO{}, tmp, "no-such-bucket", "global", "AGENT.md", t.TempDir(), ".md"); err != nil {
+		t.Errorf("missing bucket should be no-op, got %v", err)
+	}
+}
