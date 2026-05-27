@@ -1,0 +1,15 @@
+{
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "version": 1,
+  "project": "legacy-project",
+  "skills": ["build-graph"],
+  "rules": ["global"],
+  "agents": ["impl-agent"],
+  "hooks": ["PreToolUse"],
+  "mcp": true,
+  "settings": false,
+  "sources": [
+    {"type": "local"},
+    {"type": "git", "url": "https://github.com/example/agents.git", "ref": "main"}
+  ]
+}

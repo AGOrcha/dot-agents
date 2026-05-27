@@ -1275,6 +1275,221 @@ func TestHasYAMLHooks_FileInDirIgnored(t *testing.T) {
 	}
 }
 
+// ── v2 LayerRef / PackageRef unit tests ──────────────────────────────────────
+
+func TestLayerRef_UnmarshalString(t *testing.T) {
+	var r LayerRef
+	if err := json.Unmarshal([]byte(`"acme:org/base"`), &r); err != nil {
+		t.Fatalf("unmarshal string: %v", err)
+	}
+	if r.Ref != "acme:org/base" || r.Optional {
+		t.Errorf("got %+v", r)
+	}
+}
+
+func TestLayerRef_UnmarshalObject(t *testing.T) {
+	var r LayerRef
+	if err := json.Unmarshal([]byte(`{"ref":"acme:team/experimental","optional":true}`), &r); err != nil {
+		t.Fatalf("unmarshal object: %v", err)
+	}
+	if r.Ref != "acme:team/experimental" || !r.Optional {
+		t.Errorf("got %+v", r)
+	}
+}
+
+func TestLayerRef_UnmarshalRejectsBadShape(t *testing.T) {
+	var r LayerRef
+	if err := json.Unmarshal([]byte(`123`), &r); err == nil {
+		t.Error("expected error for numeric extends entry")
+	}
+	if err := json.Unmarshal([]byte(`{"optional":true}`), &r); err == nil {
+		t.Error("expected error for object form missing ref")
+	}
+}
+
+func TestLayerRef_MarshalStringForm(t *testing.T) {
+	r := LayerRef{Ref: "acme:org/base"}
+	out, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"acme:org/base"` {
+		t.Errorf("expected compact string form, got %s", out)
+	}
+}
+
+func TestLayerRef_MarshalObjectFormWhenOptional(t *testing.T) {
+	r := LayerRef{Ref: "acme:team/experimental", Optional: true}
+	out, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"optional":true`) {
+		t.Errorf("expected object form with optional flag, got %s", out)
+	}
+}
+
+func TestLayerRef_RoundTripStability(t *testing.T) {
+	cases := []LayerRef{
+		{Ref: "acme:org/base"},
+		{Ref: "acme:team/frontend@v1.2.3"},
+		{Ref: "acme:team/experimental", Optional: true},
+	}
+	for _, orig := range cases {
+		data, err := json.Marshal(orig)
+		if err != nil {
+			t.Fatalf("marshal %+v: %v", orig, err)
+		}
+		var rt LayerRef
+		if err := json.Unmarshal(data, &rt); err != nil {
+			t.Fatalf("unmarshal %s: %v", data, err)
+		}
+		if rt != orig {
+			t.Errorf("round-trip drift: orig=%+v rt=%+v (data=%s)", orig, rt, data)
+		}
+	}
+}
+
+func TestPackageRef_UnmarshalString(t *testing.T) {
+	var p PackageRef
+	if err := json.Unmarshal([]byte(`"acme-pkgs:skill/review-pr@^1.2"`), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Ref != "acme-pkgs:skill/review-pr@^1.2" {
+		t.Errorf("got %+v", p)
+	}
+}
+
+func TestPackageRef_UnmarshalObject(t *testing.T) {
+	var p PackageRef
+	if err := json.Unmarshal([]byte(`{"ref":"acme-pkgs:verifier/x@1.0.0"}`), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Ref != "acme-pkgs:verifier/x@1.0.0" {
+		t.Errorf("got %+v", p)
+	}
+}
+
+func TestPackageRef_UnmarshalRejectsBadShape(t *testing.T) {
+	var p PackageRef
+	if err := json.Unmarshal([]byte(`true`), &p); err == nil {
+		t.Error("expected error for boolean packages entry")
+	}
+	if err := json.Unmarshal([]byte(`{}`), &p); err == nil {
+		t.Error("expected error for object form missing ref")
+	}
+}
+
+func TestPackageRef_MarshalAlwaysString(t *testing.T) {
+	p := PackageRef{Ref: "acme-pkgs:skill/review-pr@pinned:sha256:abc"}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"acme-pkgs:skill/review-pr@pinned:sha256:abc"` {
+		t.Errorf("expected string form, got %s", out)
+	}
+}
+
+// TestV2_AgentsRCMarshalUnmarshalRoundTrip ensures Marshal then Unmarshal
+// of a fully-populated v2 AgentsRC preserves every additive field.
+func TestV2_AgentsRCMarshalUnmarshalRoundTrip(t *testing.T) {
+	orig := &AgentsRC{
+		Version:  2,
+		Project:  "p",
+		RepoID:   "github.com/acme/p",
+		Hooks:    StringsOrBool{All: false},
+		MCP:      StringsOrBool{All: false},
+		Settings: false,
+		Sources: []Source{
+			{ID: "local-src", Type: "local"},
+			{ID: "acme-pkgs", Type: "oci", URL: "oci://example/repo",
+				Auth: json.RawMessage(`{"provider":"credential-helper"}`)},
+		},
+		Extends: []LayerRef{
+			{Ref: "acme:org/base"},
+			{Ref: "acme:team/experimental", Optional: true},
+		},
+		Packages: []PackageRef{
+			{Ref: "acme-pkgs:skill/review-pr@^1.2"},
+		},
+		Features: map[string]string{"graph_bridge": "preview"},
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got AgentsRC
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.RepoID != orig.RepoID {
+		t.Errorf("RepoID drift: %q vs %q", got.RepoID, orig.RepoID)
+	}
+	if len(got.Extends) != len(orig.Extends) {
+		t.Fatalf("Extends len drift: %d vs %d", len(got.Extends), len(orig.Extends))
+	}
+	for i := range orig.Extends {
+		if got.Extends[i] != orig.Extends[i] {
+			t.Errorf("Extends[%d] drift: %+v vs %+v", i, got.Extends[i], orig.Extends[i])
+		}
+	}
+	if len(got.Packages) != len(orig.Packages) || got.Packages[0] != orig.Packages[0] {
+		t.Errorf("Packages drift: %+v vs %+v", got.Packages, orig.Packages)
+	}
+	if got.Features["graph_bridge"] != "preview" {
+		t.Errorf("Features lost: %+v", got.Features)
+	}
+	// Source v2 fields
+	if got.Sources[1].Type != "oci" || got.Sources[1].ID != "acme-pkgs" {
+		t.Errorf("Source[1] v2 fields lost: %+v", got.Sources[1])
+	}
+	if string(got.Sources[1].Auth) != `{"provider":"credential-helper"}` {
+		t.Errorf("Source[1].Auth not preserved verbatim: %s", got.Sources[1].Auth)
+	}
+}
+
+// TestV1_LoadFromTestdataPreservesShape loads the v1 fixture via LoadAgentsRC
+// and confirms that re-saving it does not introduce any v2 keys. This is the
+// disk-level byte-stability guarantee for additive migration.
+func TestV1_LoadFromTestdataPreservesShape(t *testing.T) {
+	// Copy fixture into a TempDir as .agentsrc.json so LoadAgentsRC finds it.
+	tmp := t.TempDir()
+	src := filepath.Join("testdata", "v1", AgentsRCFile)
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), srcData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if rc.Version != 1 {
+		t.Errorf("Version: got %d, want 1", rc.Version)
+	}
+	if rc.RepoID != "" || rc.Extends != nil || rc.Packages != nil || rc.Features != nil {
+		t.Errorf("v1 load populated v2 fields: %+v", rc)
+	}
+
+	// Re-save and confirm output contains no v2 keys.
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"repo_id"`, `"extends"`, `"packages"`, `"features"`,
+		`"cache_ttl"`, `"id"`} {
+		if strings.Contains(string(out), forbidden) {
+			t.Errorf("v1 re-save leaked v2 key %s: %s", forbidden, out)
+		}
+	}
+}
+
 func TestSourceMergeKey_AllBranches(t *testing.T) {
 	if k := sourceMergeKey(Source{Type: "local", Path: "/x"}); k != "local:/x" {
 		t.Errorf("local: %q", k)

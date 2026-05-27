@@ -1,0 +1,48 @@
+{
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "version": 2,
+  "project": "manager-ui",
+  "repo_id": "github.com/acme/manager-ui",
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "sources": [
+    {
+      "id": "local-src",
+      "type": "local"
+    },
+    {
+      "id": "acme",
+      "type": "git",
+      "url": "git@github.com:acme/da-config.git",
+      "ref": "main",
+      "cache_ttl": "4h"
+    },
+    {
+      "id": "acme-http",
+      "type": "http",
+      "url": "https://config.acme.internal/dot-agents",
+      "cache_ttl": "1h",
+      "auth": {"provider": "credential-helper"}
+    },
+    {
+      "id": "acme-pkgs",
+      "type": "oci",
+      "url": "oci://registry.acme.internal/dot-agents",
+      "auth": {"provider": "credential-helper"}
+    }
+  ],
+  "extends": [
+    "acme:org/base",
+    "acme:team/frontend",
+    {"ref": "acme:team/experimental", "optional": true}
+  ],
+  "packages": [
+    "acme-pkgs:skill/review-pr@^1.2",
+    "acme-pkgs:verifier/playwright-api@pinned:sha256:abc123def456"
+  ],
+  "features": {
+    "graph_bridge": "preview",
+    "external_packages": "enabled"
+  }
+}

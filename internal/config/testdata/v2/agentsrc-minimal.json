@@ -1,0 +1,12 @@
+{
+  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "version": 2,
+  "project": "minimal-v2",
+  "repo_id": "github.com/acme/minimal-v2",
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "sources": [
+    {"type": "local"}
+  ]
+}
