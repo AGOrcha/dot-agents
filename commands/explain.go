@@ -196,53 +196,64 @@ func printPlatformsExplanation() {
 	fmt.Fprintln(os.Stdout)
 }
 
+// Tree-rendering prefixes + canonical sub-paths shared by the structure
+// table. Pulled out so Sonar dup-literal findings on the table do not
+// regress and a future tree-glyph change is one edit, not 16+.
+const (
+	explainTreeBranch    = "  ├── "
+	explainTreeChildMid  = "  │   ├── "
+	explainTreeChildLast = "  │   └── "
+	explainScopeGlobal   = "global/"
+	explainScopeProject  = "{project}/"
+)
+
 func printStructureExplanation() {
 	ui.Header("~/.agents/ Directory Structure")
 	fmt.Fprintln(os.Stdout)
 	lines := []struct{ indent, name, desc string }{
 		{"  ", "~/.agents/", ""},
-		{"  ├── ", "config.json", "Project registry"},
-		{"  ├── ", "rules/", ""},
-		{"  │   ├── ", "global/", "Rules for ALL projects"},
-		{"  │   └── ", "{project}/", "Rules for a specific project"},
-		{"  ├── ", "settings/", ""},
-		{"  │   ├── ", "global/", "Global settings (claude-code.json, cursor.json)"},
-		{"  │   └── ", "{project}/", "Project-specific settings"},
-		{"  ├── ", "mcp/", ""},
-		{"  │   ├── ", "global/", "Global MCP configs"},
-		{"  │   └── ", "{project}/", "Project MCP configs"},
-		{"  ├── ", "skills/", ""},
-		{"  │   ├── ", "global/", "Skills available everywhere"},
-		{"  │   └── ", "{project}/", "Project-specific skills"},
-		{"  ├── ", "agents/", ""},
-		{"  │   ├── ", "global/", "Agents available everywhere"},
-		{"  │   └── ", "{project}/", "Project-specific agents"},
-		{"  ├── ", "hooks/", ""},
-		{"  │   ├── ", "global/", "Global hook configs"},
-		{"  │   └── ", "{project}/", "Project-specific hook configs"},
-		{"  ├── ", "plugins/", ""},
-		{"  │   ├── ", "global/", "Plugin bundles"},
-		{"  │   └── ", "{project}/", "Project-specific plugin bundles"},
-		{"  ├── ", "commands/", ""},
-		{"  │   ├── ", "global/", "Command bundles"},
-		{"  │   └── ", "{project}/", "Project-specific command bundles"},
-		{"  ├── ", "output-styles/", ""},
-		{"  │   ├── ", "global/", "Claude output styles"},
-		{"  │   └── ", "{project}/", "Project-specific output styles"},
-		{"  ├── ", "ignore/", ""},
-		{"  │   ├── ", "global/", "Ignore files"},
-		{"  │   └── ", "{project}/", "Project-specific ignore files"},
-		{"  ├── ", "modes/", ""},
-		{"  │   ├── ", "global/", "OpenCode modes"},
-		{"  │   └── ", "{project}/", "Project-specific modes"},
-		{"  ├── ", "themes/", ""},
-		{"  │   ├── ", "global/", "OpenCode themes"},
-		{"  │   └── ", "{project}/", "Project-specific themes"},
-		{"  ├── ", "prompts/", ""},
-		{"  │   ├── ", "global/", "Copilot prompts"},
-		{"  │   └── ", "{project}/", "Project-specific prompts"},
-		{"  ├── ", "scripts/", "Helper scripts"},
-		{"  ├── ", "local/", "Machine-specific local files"},
+		{explainTreeBranch, "config.json", "Project registry"},
+		{explainTreeBranch, "rules/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Rules for ALL projects"},
+		{explainTreeChildLast, explainScopeProject, "Rules for a specific project"},
+		{explainTreeBranch, "settings/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Global settings (claude-code.json, cursor.json)"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific settings"},
+		{explainTreeBranch, "mcp/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Global MCP configs"},
+		{explainTreeChildLast, explainScopeProject, "Project MCP configs"},
+		{explainTreeBranch, "skills/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Skills available everywhere"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific skills"},
+		{explainTreeBranch, "agents/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Agents available everywhere"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific agents"},
+		{explainTreeBranch, "hooks/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Global hook configs"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific hook configs"},
+		{explainTreeBranch, "plugins/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Plugin bundles"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific plugin bundles"},
+		{explainTreeBranch, "commands/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Command bundles"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific command bundles"},
+		{explainTreeBranch, "output-styles/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Claude output styles"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific output styles"},
+		{explainTreeBranch, "ignore/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Ignore files"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific ignore files"},
+		{explainTreeBranch, "modes/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "OpenCode modes"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific modes"},
+		{explainTreeBranch, "themes/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "OpenCode themes"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific themes"},
+		{explainTreeBranch, "prompts/", ""},
+		{explainTreeChildMid, explainScopeGlobal, "Copilot prompts"},
+		{explainTreeChildLast, explainScopeProject, "Project-specific prompts"},
+		{explainTreeBranch, "scripts/", "Helper scripts"},
+		{explainTreeBranch, "local/", "Machine-specific local files"},
 		{"  └── ", "resources/", "Backup files (auto-managed)"},
 	}
 	for _, l := range lines {
