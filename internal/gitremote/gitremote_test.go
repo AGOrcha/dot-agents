@@ -2,7 +2,12 @@ package gitremote
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/config"
 )
 
 func TestCanonicalRepoID(t *testing.T) {
@@ -130,5 +135,77 @@ func TestParseRemoteURL_SchemeReported(t *testing.T) {
 				t.Errorf("Scheme = %q, want %q", ref.Scheme, c.wantScheme)
 			}
 		})
+	}
+}
+
+// initRepoWithOrigin creates an empty git repo under t.TempDir() and, when
+// originURL is non-empty, registers it as the `origin` remote. Returns the
+// repo path so the test can hand it to ReadOriginURL.
+func initRepoWithOrigin(t *testing.T, originURL string) string {
+	t.Helper()
+	dir := t.TempDir()
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	if originURL != "" {
+		if _, err := repo.CreateRemote(&config.RemoteConfig{
+			Name: "origin",
+			URLs: []string{originURL},
+		}); err != nil {
+			t.Fatalf("CreateRemote: %v", err)
+		}
+	}
+	return dir
+}
+
+func TestReadOriginURL_ReturnsConfiguredURL(t *testing.T) {
+	want := "git@github.com:NikashPrakash/dot-agents.git"
+	dir := initRepoWithOrigin(t, want)
+	got, err := ReadOriginURL(dir)
+	if err != nil {
+		t.Fatalf("ReadOriginURL err = %v", err)
+	}
+	if got != want {
+		t.Errorf("ReadOriginURL = %q, want %q", got, want)
+	}
+}
+
+func TestReadOriginURL_DetectDotGitFromSubdir(t *testing.T) {
+	// DetectDotGit lets a call from a subdirectory still resolve the
+	// enclosing repo — matches the `git -C <path>` ergonomics this
+	// replaces. Without DetectDotGit the call would fail with
+	// ErrRepositoryNotExists from inside a non-repo subdir.
+	want := "https://github.com/acme/repo.git"
+	repoDir := initRepoWithOrigin(t, want)
+	sub := filepath.Join(repoDir, "nested", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	got, err := ReadOriginURL(sub)
+	if err != nil {
+		t.Fatalf("ReadOriginURL err = %v", err)
+	}
+	if got != want {
+		t.Errorf("ReadOriginURL = %q, want %q", got, want)
+	}
+}
+
+func TestReadOriginURL_NoOriginReturnsSentinel(t *testing.T) {
+	dir := initRepoWithOrigin(t, "")
+	_, err := ReadOriginURL(dir)
+	if !errors.Is(err, ErrNoOrigin) {
+		t.Errorf("ReadOriginURL err = %v, want ErrNoOrigin", err)
+	}
+}
+
+func TestReadOriginURL_NotARepoErrors(t *testing.T) {
+	dir := t.TempDir() // no .git anywhere
+	_, err := ReadOriginURL(dir)
+	if err == nil {
+		t.Fatalf("ReadOriginURL on non-repo dir: want error, got nil")
+	}
+	if errors.Is(err, ErrNoOrigin) {
+		t.Errorf("ReadOriginURL on non-repo dir should not return ErrNoOrigin (got %v)", err)
 	}
 }

@@ -18,8 +18,10 @@ package gitremote
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
+	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/transport"
 )
 
@@ -111,6 +113,54 @@ func ParseRemoteURL(raw string) (RemoteRef, error) {
 		ref.CanonicalForm = host + "/" + path
 	}
 	return ref, nil
+}
+
+// ErrNoOrigin is returned by ReadOriginURL when the repository at repoPath
+// exists but does not have an `origin` remote configured. Distinguished from
+// "not a git repo" so callers that want to differentiate "no checkout" from
+// "checkout without origin" can branch on the sentinel.
+var ErrNoOrigin = errors.New("gitremote: repository has no `origin` remote")
+
+// ReadOriginURL returns the first configured URL of the `origin` remote for
+// the repository at repoPath, read directly from the on-disk git config via
+// go-git/v6 — no `git` subprocess, no PATH lookup, no porcelain text parsing.
+//
+// DetectDotGit is enabled so calls from a subdirectory still resolve the
+// enclosing repo (matches the `git -C <path>` ergonomics this replaces).
+//
+// Returns:
+//   - the raw URL string (NOT canonicalized — callers that want the
+//     repo_id form should pipe it through CanonicalRepoID) and nil error
+//     on success
+//   - ErrNoOrigin when the repo exists but lacks an `origin` remote (or
+//     the remote is configured with an empty URLs slice — a corrupt-
+//     config edge case go-git surfaces as len(URLs)==0)
+//   - a wrapped error when repoPath is not a git checkout, or any other
+//     go-git failure (config parse error, etc.)
+//
+// This is the canonical replacement for the historical pattern
+// `execabs.Command("git", "-C", repoPath, "remote", "get-url", "origin")`
+// across the codebase — repo_id derivation, status display, sync probes.
+func ReadOriginURL(repoPath string) (string, error) {
+	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", fmt.Errorf("gitremote: open %s: %w", repoPath, err)
+	}
+	remote, err := repo.Remote("origin")
+	if err != nil {
+		// go-git returns ErrRemoteNotFound here; collapse to our sentinel
+		// so callers don't need to import go-git just to recognize the
+		// "no origin" branch.
+		if errors.Is(err, git.ErrRemoteNotFound) {
+			return "", ErrNoOrigin
+		}
+		return "", fmt.Errorf("gitremote: lookup origin in %s: %w", repoPath, err)
+	}
+	urls := remote.Config().URLs
+	if len(urls) == 0 || urls[0] == "" {
+		return "", ErrNoOrigin
+	}
+	return urls[0], nil
 }
 
 // CanonicalRepoID is a convenience wrapper around ParseRemoteURL that

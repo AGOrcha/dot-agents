@@ -7,28 +7,22 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/gitremote"
-	"golang.org/x/sys/execabs"
 )
 
 // gitRemoteOriginURL is the seam that returns the origin URL for repoPath.
-// Defaults to `git -C <repoPath> remote get-url origin`. Tests override it
-// to avoid shelling out and to inject SSH/HTTPS/edge-case URLs deterministically.
+// Defaults to gitremote.ReadOriginURL, which reads the on-disk git config
+// in-process via go-git/v6 — no subprocess, no PATH lookup, no porcelain
+// text parsing. Tests override the seam to inject SSH/HTTPS/edge-case URLs
+// without standing up a real .git directory.
 //
-// Uses golang.org/x/sys/execabs (the project-wide convention) so the "git"
-// lookup rejects relative-PATH resolution (Sonar go:S4036 guard); matches
-// internal/scoring/signal_git.go and internal/graphstore/crg.go.
-var gitRemoteOriginURL = func(repoPath string) (string, error) {
-	cmd := execabs.Command("git", "-C", repoPath, "remote", "get-url", "origin")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
+// The seam returns a wrapped error when the directory is not a git repo
+// and gitremote.ErrNoOrigin when the repo exists but has no `origin`
+// remote — DeriveRepoIDFromGit collapses both branches to "" so callers
+// leave repo_id blank rather than fabricate one (spec §5.3 fallback).
+var gitRemoteOriginURL = gitremote.ReadOriginURL
 
 // DeriveRepoIDFromGit returns the canonical repo_id for the project at
 // repoPath, derived from its `origin` git remote. The canonical form is
