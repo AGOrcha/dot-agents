@@ -328,44 +328,75 @@ func TestRunScoreIterationRendersHookOutcomeSources(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			ps := scoring.PersistedScore{
-				Iteration:     11,
-				RubricVersion: "2.1.0",
-				Scored:        true,
-				Value:         0.5,
-				Band:          "fair",
-				Breakdown:     []scoring.PersistedContribution{tt.hookRow},
-			}
-			writeIterScoreSidecar(t, dir, ps)
-			if tt.sidecar != "" {
-				writeHookOutcomesSidecar(t, dir, ps.Iteration, tt.sidecar)
-			}
-
-			var buf bytes.Buffer
-			if err := runScoreIteration(&buf, dir, ps.Iteration); err != nil {
-				t.Fatalf("runScoreIteration: %v", err)
-			}
-			got := buf.String()
-			for _, want := range tt.wantContains {
-				if !strings.Contains(got, want) {
-					t.Errorf("output missing %q:\n%s", want, got)
-				}
-			}
-			for _, notWant := range tt.wantNotContains {
-				if strings.Contains(got, notWant) {
-					t.Errorf("output unexpectedly contains %q:\n%s", notWant, got)
-				}
-			}
+			dir := setupHookSourcesFixture(t, 11, tt.hookRow, tt.sidecar)
+			got := runScoreIterationToString(t, dir, 11)
+			assertOutputContains(t, got, tt.wantContains, tt.wantNotContains)
 			// Belt-and-braces: the readback contract forbids transcript
 			// content. The sidecar schema does not model any such field, so
 			// asserting on a sentinel string proves the renderer is not
 			// fabricating one from elsewhere.
-			if strings.Contains(got, "transcript") {
-				t.Errorf("output leaked the word 'transcript' — readback contract violation:\n%s", got)
-			}
+			assertNotContains(t, got, "transcript", "readback contract violation")
 		})
 	}
+}
+
+// setupHookSourcesFixture writes a one-row PersistedScore sidecar at iter and,
+// when sidecar is non-empty, the matching hook-outcomes sidecar. Returns the
+// temp dir.
+func setupHookSourcesFixture(t *testing.T, iter int, row scoring.PersistedContribution, sidecar string) string {
+	t.Helper()
+	dir := t.TempDir()
+	ps := scoring.PersistedScore{
+		Iteration:     iter,
+		RubricVersion: "2.1.0",
+		Scored:        true,
+		Value:         0.5,
+		Band:          "fair",
+		Breakdown:     []scoring.PersistedContribution{row},
+	}
+	writeIterScoreSidecar(t, dir, ps)
+	if sidecar != "" {
+		writeHookOutcomesSidecar(t, dir, iter, sidecar)
+	}
+	return dir
+}
+
+// runScoreIterationToString invokes runScoreIteration into a buffer and
+// returns the rendered string. Fails the test if the call errors.
+func runScoreIterationToString(t *testing.T, dir string, iter int) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := runScoreIteration(&buf, dir, iter); err != nil {
+		t.Fatalf("runScoreIteration: %v", err)
+	}
+	return buf.String()
+}
+
+// assertOutputContains asserts every want substring is present and every
+// notWant substring is absent in got.
+func assertOutputContains(t *testing.T, got string, want, notWant []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q:\n%s", w, got)
+		}
+	}
+	for _, nw := range notWant {
+		assertNotContains(t, got, nw, "")
+	}
+}
+
+// assertNotContains fails the test if needle appears in haystack.
+func assertNotContains(t *testing.T, haystack, needle, reason string) {
+	t.Helper()
+	if !strings.Contains(haystack, needle) {
+		return
+	}
+	if reason == "" {
+		t.Errorf("output unexpectedly contains %q:\n%s", needle, haystack)
+		return
+	}
+	t.Errorf("output leaked %q — %s:\n%s", needle, reason, haystack)
 }
 
 func TestRunScoreIterationJSONIncludesHookOutcomeSources(t *testing.T) {
@@ -403,68 +434,70 @@ func TestRunScoreIterationJSONIncludesHookOutcomeSources(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			ps := scoring.PersistedScore{
-				Iteration:     22,
-				RubricVersion: "2.1.0",
-				Scored:        true,
-				Value:         0.5,
-				Band:          "fair",
-				Breakdown:     []scoring.PersistedContribution{tt.hookRow},
-			}
-			writeIterScoreSidecar(t, dir, ps)
+			sidecar := ""
 			if tt.writeSidecar {
-				writeHookOutcomesSidecar(t, dir, ps.Iteration, validHookSidecar)
+				sidecar = validHookSidecar
 			}
+			dir := setupHookSourcesFixture(t, 22, tt.hookRow, sidecar)
+			withJSONFlag(t)
 
-			prev := Flags.JSON
-			Flags.JSON = true
-			t.Cleanup(func() { Flags.JSON = prev })
+			rawJSON := runScoreIterationToString(t, dir, 22)
+			payload := decodeJSONPayload(t, rawJSON)
+			assertHookSourcesField(t, payload, rawJSON, tt.wantSourcesField, tt.wantSourcesLen, tt.wantSentinelID, tt.wantRuleID)
 
-			var buf bytes.Buffer
-			if err := runScoreIteration(&buf, dir, ps.Iteration); err != nil {
-				t.Fatalf("runScoreIteration: %v", err)
-			}
-
-			// Decode into a generic map so we can assert presence/absence of
-			// hook_outcome_sources without coupling the test to the typed
-			// envelope (which is an internal CLI shape).
-			var payload map[string]any
-			if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
-				t.Fatalf("decode JSON: %v\nraw:\n%s", err, buf.String())
-			}
-			raw, present := payload["hook_outcome_sources"]
-			if present != tt.wantSourcesField {
-				t.Fatalf("hook_outcome_sources present=%v, want %v\nraw:\n%s", present, tt.wantSourcesField, buf.String())
-			}
-			if !tt.wantSourcesField {
-				return
-			}
-			arr, ok := raw.([]any)
-			if !ok {
-				t.Fatalf("hook_outcome_sources type = %T, want []any", raw)
-			}
-			if len(arr) != tt.wantSourcesLen {
-				t.Fatalf("hook_outcome_sources len = %d, want %d (raw: %v)", len(arr), tt.wantSourcesLen, arr)
-			}
-			rec, _ := arr[0].(map[string]any)
-			if rec["sentinel_id"] != tt.wantSentinelID {
-				t.Errorf("sentinel_id = %v, want %q", rec["sentinel_id"], tt.wantSentinelID)
-			}
-			if rec["rule_id"] != tt.wantRuleID {
-				t.Errorf("rule_id = %v, want %q", rec["rule_id"], tt.wantRuleID)
-			}
 			// Negative-path inside the JSON case: the disallowed transcript
 			// field name must not appear at any depth, and the deferred
 			// continuity record must not have leaked through the filter.
-			rawJSON := buf.String()
-			if strings.Contains(rawJSON, "transcript") {
-				t.Errorf("JSON output mentions 'transcript' — readback contract violation:\n%s", rawJSON)
-			}
-			if strings.Contains(rawJSON, "continuity") {
-				t.Errorf("JSON output mentions deferred continuity record — filter regression:\n%s", rawJSON)
-			}
+			assertNotContains(t, rawJSON, "transcript", "readback contract violation")
+			assertNotContains(t, rawJSON, "continuity", "deferred-record filter regression")
 		})
+	}
+}
+
+// withJSONFlag flips Flags.JSON on for the duration of the test and restores
+// the prior value on cleanup.
+func withJSONFlag(t *testing.T) {
+	t.Helper()
+	prev := Flags.JSON
+	Flags.JSON = true
+	t.Cleanup(func() { Flags.JSON = prev })
+}
+
+// decodeJSONPayload parses raw into a generic map. Fails the test on error.
+func decodeJSONPayload(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode JSON: %v\nraw:\n%s", err, raw)
+	}
+	return payload
+}
+
+// assertHookSourcesField asserts presence/absence of hook_outcome_sources in
+// payload and — when present — that it contains exactly wantLen records whose
+// first entry carries wantSentinelID + wantRuleID.
+func assertHookSourcesField(t *testing.T, payload map[string]any, rawJSON string, wantField bool, wantLen int, wantSentinelID, wantRuleID string) {
+	t.Helper()
+	raw, present := payload["hook_outcome_sources"]
+	if present != wantField {
+		t.Fatalf("hook_outcome_sources present=%v, want %v\nraw:\n%s", present, wantField, rawJSON)
+	}
+	if !wantField {
+		return
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("hook_outcome_sources type = %T, want []any", raw)
+	}
+	if len(arr) != wantLen {
+		t.Fatalf("hook_outcome_sources len = %d, want %d (raw: %v)", len(arr), wantLen, arr)
+	}
+	rec, _ := arr[0].(map[string]any)
+	if rec["sentinel_id"] != wantSentinelID {
+		t.Errorf("sentinel_id = %v, want %q", rec["sentinel_id"], wantSentinelID)
+	}
+	if rec["rule_id"] != wantRuleID {
+		t.Errorf("rule_id = %v, want %q", rec["rule_id"], wantRuleID)
 	}
 }
 
