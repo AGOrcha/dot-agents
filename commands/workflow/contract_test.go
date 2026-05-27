@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -670,6 +671,32 @@ func TestResolveContractWriteScope_EmptyEverything(t *testing.T) {
 	got := resolveContractWriteScope("", false, nil)
 	if got != nil {
 		t.Errorf("expected nil for empty-everything, got %v", got)
+	}
+}
+
+// TestMaterializeDelegationContract_SaveErrorPropagates covers the failure
+// branch of the shared core: when saveDelegationContract fails (forced here
+// via the osMkdirAll func-var seam), the helper must surface a wrapped
+// "save delegation contract" error rather than silently swallowing it.
+// Without this test, materializeDelegationContract has an uncovered error
+// path and the file falls below the 95% per-file coverage gate.
+func TestMaterializeDelegationContract_SaveErrorPropagates(t *testing.T) {
+	prior := osMkdirAll
+	osMkdirAll = func(string, os.FileMode) error { return errors.New("synthetic mkdir fault") }
+	t.Cleanup(func() { osMkdirAll = prior })
+
+	_, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath: t.TempDir(),
+		Mode:        DelegationContractModeDirect,
+		PlanID:      "p", TaskID: "t", Title: "x",
+		WriteScope: []string{"commands/"},
+		Now:        time.Date(2026, 5, 27, 0, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("expected save error, got nil")
+	}
+	if !strings.Contains(err.Error(), "save delegation contract") {
+		t.Errorf("expected wrapped save error, got %v", err)
 	}
 }
 

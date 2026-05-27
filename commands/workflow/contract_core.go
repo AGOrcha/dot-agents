@@ -18,9 +18,12 @@ import (
 
 // materializeContractRequest carries the resolved inputs needed to build
 // and persist a DelegationContract. Each caller is responsible for resolving
-// its own mode-specific values (e.g. write scope, summary text) before
-// invoking the shared core; the core is intentionally narrow and does not
-// reach back into TASKS.yaml or CLI flags.
+// its own mode-specific values (e.g. write scope, summary text, current
+// timestamp) before invoking the shared core; the core is intentionally
+// narrow and does not reach back into TASKS.yaml or CLI flags.
+//
+// Now must be set by the caller. Production paths pass time.Now().UTC();
+// tests pass a fixed instant so contract IDs / timestamps stay deterministic.
 type materializeContractRequest struct {
 	ProjectPath     string
 	Mode            DelegationContractMode
@@ -37,16 +40,13 @@ type materializeContractRequest struct {
 // materializeDelegationContract constructs a DelegationContract from the
 // request, persists it via saveDelegationContract, and returns the built
 // value to the caller. The returned pointer is the persisted contract; its
-// UpdatedAt is set by saveDelegationContract during the write.
+// UpdatedAt is restamped to wall-clock by saveDelegationContract during the
+// write.
 func materializeDelegationContract(req materializeContractRequest) (*DelegationContract, error) {
-	now := req.Now
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	createdAt := now.UTC().Format(time.RFC3339)
+	createdAt := req.Now.UTC().Format(time.RFC3339)
 	contract := &DelegationContract{
 		SchemaVersion:   1,
-		ID:              fmt.Sprintf("del-%s-%d", req.TaskID, now.Unix()),
+		ID:              fmt.Sprintf("del-%s-%d", req.TaskID, req.Now.Unix()),
 		Mode:            req.Mode,
 		ParentPlanID:    req.PlanID,
 		ParentTaskID:    req.TaskID,
