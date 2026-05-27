@@ -373,83 +373,108 @@ func TestReportViolations(t *testing.T) {
 	}
 }
 
-// TestMainRun drives every exit-code path through the testable entrypoint.
-// We swap loadPackages and pass an explicit runFunc so the harness never
-// touches the real Go toolchain.
+// cleanRunFunc is a fake loader that reports an always-clean graph.
+// Hoisted to file scope so every test that needs "load returned no
+// violations" can reuse the same value without redeclaring a closure.
+func cleanRunFunc(_ []string) ([]violation, error) { return nil, nil }
+
+// failRunFunc fakes a load-time failure so tests can drive mainRun's
+// exit-2 branch deterministically.
+func failRunFunc(_ []string) ([]violation, error) {
+	return nil, errors.New("synthetic load failure")
+}
+
+// violRunFunc fakes a successful load that surfaces one violation so
+// tests can drive mainRun's exit-1 branch and assert the rendered edge.
+func violRunFunc(_ []string) ([]violation, error) {
+	return []violation{{
+		importer: modulePath + "/commands/mcp",
+		target:   modulePath + "/commands/settings",
+		reason:   "synthetic violation",
+	}}, nil
+}
+
+// runMainCase invokes mainRun with the given inputs and returns the exit
+// code plus stderr buffer so individual subtests can assert against both
+// without re-implementing the bytes.Buffer plumbing each time. Splitting
+// this out keeps TestMainRun a flat dispatcher of subtests.
+func runMainCase(args []string, load runFunc) (int, string) {
+	var buf bytes.Buffer
+	code := mainRun(args, &buf, load)
+	return code, buf.String()
+}
+
+// TestMainRun drives every exit-code path through the testable
+// entrypoint. Each subtest is a one-liner over runMainCase + per-case
+// helper so the top-level function's cognitive complexity stays minimal.
+// The fake runFunc values are file-scope so they can be referenced
+// without nesting closures inside the test body.
 func TestMainRun(t *testing.T) {
-	cleanRun := func(patterns []string) ([]violation, error) {
+	t.Run("clean exits 0", testMainRunClean)
+	t.Run("default pattern is ./...", testMainRunDefaultPattern)
+	t.Run("explicit patterns override default", testMainRunExplicitPatterns)
+	t.Run("load error exits 2", testMainRunLoadError)
+	t.Run("violations exit 1 and render", testMainRunViolations)
+	t.Run("bad flag exits 2", testMainRunBadFlag)
+}
+
+func testMainRunClean(t *testing.T) {
+	code, stderr := runMainCase(nil, cleanRunFunc)
+	if code != 0 {
+		t.Errorf("clean run exit=%d, want 0 (stderr=%q)", code, stderr)
+	}
+}
+
+func testMainRunDefaultPattern(t *testing.T) {
+	var seen []string
+	spy := func(patterns []string) ([]violation, error) {
+		seen = patterns
 		return nil, nil
 	}
-	failRun := func(patterns []string) ([]violation, error) {
-		return nil, errors.New("synthetic load failure")
+	_, _ = runMainCase(nil, spy)
+	if len(seen) != 1 || seen[0] != "./..." {
+		t.Errorf("default patterns = %v, want [./...]", seen)
 	}
-	violRun := func(patterns []string) ([]violation, error) {
-		return []violation{{
-			importer: modulePath + "/commands/mcp",
-			target:   modulePath + "/commands/settings",
-			reason:   "synthetic violation",
-		}}, nil
+}
+
+func testMainRunExplicitPatterns(t *testing.T) {
+	var seen []string
+	spy := func(patterns []string) ([]violation, error) {
+		seen = patterns
+		return nil, nil
 	}
+	_, _ = runMainCase([]string{"./tools/...", "./commands/..."}, spy)
+	want := []string{"./tools/...", "./commands/..."}
+	if len(seen) != len(want) || seen[0] != want[0] || seen[1] != want[1] {
+		t.Errorf("explicit patterns = %v, want %v", seen, want)
+	}
+}
 
-	t.Run("clean exits 0", func(t *testing.T) {
-		var buf bytes.Buffer
-		if code := mainRun(nil, &buf, cleanRun); code != 0 {
-			t.Errorf("clean run exit=%d, want 0 (stderr=%q)", code, buf.String())
-		}
-	})
+func testMainRunLoadError(t *testing.T) {
+	code, stderr := runMainCase(nil, failRunFunc)
+	if code != 2 {
+		t.Errorf("load failure exit=%d, want 2", code)
+	}
+	if !strings.Contains(stderr, "synthetic load failure") {
+		t.Errorf("stderr should surface the load error: %q", stderr)
+	}
+}
 
-	t.Run("default pattern is ./...", func(t *testing.T) {
-		var seen []string
-		spy := func(patterns []string) ([]violation, error) {
-			seen = patterns
-			return nil, nil
-		}
-		var buf bytes.Buffer
-		_ = mainRun(nil, &buf, spy)
-		if len(seen) != 1 || seen[0] != "./..." {
-			t.Errorf("default patterns = %v, want [./...]", seen)
-		}
-	})
+func testMainRunViolations(t *testing.T) {
+	code, stderr := runMainCase(nil, violRunFunc)
+	if code != 1 {
+		t.Errorf("violation run exit=%d, want 1", code)
+	}
+	if !strings.Contains(stderr, "commands/mcp -> commands/settings") {
+		t.Errorf("stderr should contain violation edge: %q", stderr)
+	}
+}
 
-	t.Run("explicit patterns override default", func(t *testing.T) {
-		var seen []string
-		spy := func(patterns []string) ([]violation, error) {
-			seen = patterns
-			return nil, nil
-		}
-		var buf bytes.Buffer
-		_ = mainRun([]string{"./tools/...", "./commands/..."}, &buf, spy)
-		if len(seen) != 2 || seen[0] != "./tools/..." || seen[1] != "./commands/..." {
-			t.Errorf("explicit patterns = %v, want [./tools/... ./commands/...]", seen)
-		}
-	})
-
-	t.Run("load error exits 2", func(t *testing.T) {
-		var buf bytes.Buffer
-		if code := mainRun(nil, &buf, failRun); code != 2 {
-			t.Errorf("load failure exit=%d, want 2", code)
-		}
-		if !strings.Contains(buf.String(), "synthetic load failure") {
-			t.Errorf("stderr should surface the load error: %q", buf.String())
-		}
-	})
-
-	t.Run("violations exit 1 and render", func(t *testing.T) {
-		var buf bytes.Buffer
-		if code := mainRun(nil, &buf, violRun); code != 1 {
-			t.Errorf("violation run exit=%d, want 1", code)
-		}
-		if !strings.Contains(buf.String(), "commands/mcp -> commands/settings") {
-			t.Errorf("stderr should contain violation edge: %q", buf.String())
-		}
-	})
-
-	t.Run("bad flag exits 2 and shows usage", func(t *testing.T) {
-		var buf bytes.Buffer
-		if code := mainRun([]string{"-unknown-flag"}, &buf, cleanRun); code != 2 {
-			t.Errorf("bad flag exit=%d, want 2", code)
-		}
-	})
+func testMainRunBadFlag(t *testing.T) {
+	code, _ := runMainCase([]string{"-unknown-flag"}, cleanRunFunc)
+	if code != 2 {
+		t.Errorf("bad flag exit=%d, want 2", code)
+	}
 }
 
 // TestRun exercises the production run() function end-to-end through the
