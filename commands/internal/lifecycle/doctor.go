@@ -630,57 +630,17 @@ func cursorRuleHardlinkedAny(linkPath, scope, rest, agentsHome string) (src stri
 	return src, false
 }
 
-// projectSingleFiles returns the canonical (platform, path) tuples for the
-// single-file managed links checked by collectSingleFileBrokenLinks.
-//
-// Per P1 of platform-driven-diagnostics, claude's .mcp.json single-file
-// entry is owned by claude.BrokenLinks (via the BrokenLinkReporter sister
-// interface) and is therefore intentionally absent from this table — adding
-// it back would double-count broken-link reports. The remaining entries are
-// owned by codex/copilot/opencode pending their P2 migration to
-// BrokenLinkReporter; this table is scheduled for full deletion in P2.
-func projectSingleFiles(path string) []struct {
-	platformID string
-	path       string
-} {
-	return []struct {
-		platformID string
-		path       string
-	}{
-		{"codex", filepath.Join(path, doctorAgentsMD)},
-		{"copilot", filepath.Join(path, ".github", doctorCopilotInstr)},
-		{"copilot", filepath.Join(path, ".vscode", doctorMCPJSON)},
-		{"opencode", filepath.Join(path, doctorOpenCodeJSON)},
-	}
-}
-
-// collectSingleFileBrokenLinks checks each canonical single-file managed link
-// for the project and appends one brokenLink per resolvable-but-broken entry.
-func collectSingleFileBrokenLinks(path string, rel func(string) string) []brokenLink {
-	var broken []brokenLink
-	for _, sf := range projectSingleFiles(path) {
-		dest, isLink, isBroken := managedLinkBroken(sf.path)
-		if !isLink || !isBroken {
-			continue
-		}
-		broken = append(broken, brokenLink{
-			platformID: sf.platformID,
-			linkPath:   rel(sf.path),
-			dest:       config.DisplayPath(dest),
-		})
-	}
-	return broken
-}
-
 // collectBrokenLinks returns all broken managed links for a project.
 //
-// Per platform-driven-diagnostics P1, every platform that implements
-// BrokenLinkReporter owns its own enumeration. doctor delegates by type-
-// assertion (sister-interface pattern from internal/platform/diagnostics.go)
-// and only falls through to the legacy inline single-file table for the
-// platforms that have NOT yet migrated. As of P1, cursor + claude implement
-// the interface; codex + copilot + opencode remain in collectSingleFileBrokenLinks
-// until P2 lands them.
+// Per platform-driven-diagnostics P2, every platform implements
+// BrokenLinkReporter and owns its own enumeration. doctor delegates by
+// type-assertion (sister-interface pattern from
+// internal/platform/diagnostics.go) and does no per-platform classification
+// of its own — the legacy projectSingleFiles table + collectSingleFileBrokenLinks
+// helper were deleted in P2 because every platform now reports its own
+// single-file links (codex AGENTS.md, copilot .github/copilot-instructions.md +
+// .vscode/mcp.json, opencode opencode.json). Adding a new platform from this
+// point forward is a single internal/platform/<name>.go change.
 func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	displayBase := path + "/"
 	rel := func(p string) string {
@@ -700,7 +660,6 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 			})
 		}
 	}
-	broken = append(broken, collectSingleFileBrokenLinks(path, rel)...)
 	return broken
 }
 
