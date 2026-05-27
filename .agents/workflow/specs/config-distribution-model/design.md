@@ -432,6 +432,30 @@ the authoring surface can advertise a valid profile that dispatch resolves
 differently, and review cannot reproduce which instructions a worker
 received.
 
+### Installed starter-seed upgrade boundary (planning input, 2026-05-27)
+
+The embedded shared-home starter and an already-installed user configuration
+are separate update lanes. Today `da init` copies starter assets only when a
+destination file is missing; this correctly protects customized local
+profiles, agents, and skills, but it also means corrected shipped defaults do
+not update an existing `~/.agents` installation.
+
+Once staged instruction selection and profile resolution become config-backed,
+the canonical implementation plan must define non-destructive seed migration:
+
+- version or digest the shipped starter baseline for profiles, agents, and
+  workflow skills;
+- expose shipped-versus-installed provenance and drift for starter-owned
+  surfaces through config explain or an adjacent inspect command;
+- allow automatic refresh only for an installation proven unchanged from a
+  prior shipped seed, or require an explicit reviewed apply operation; and
+- provide a migration path that converts installed legacy/full-slice
+  `loop-worker` material into the stage-safe model without overwriting local
+  overlays or user customizations.
+
+Updating embedded defaults is therefore necessary for new installs, but is
+not evidence that installed configuration has been remediated.
+
 ### Exit codes
 
 | Code | Meaning |
