@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // fakeHookSpecResolver embeds the real resolver so any method not
@@ -175,12 +176,6 @@ func TestRunHooksRemoveRejectsEscapingTarget(t *testing.T) {
 // read-only so os.RemoveAll on the bundle fails, exercising the
 // "removing bundle" error wrap in runHooksRemove.
 func TestRunHooksRemoveBundleRemoveAllError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permission model required to block RemoveAll")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permission checks")
-	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -197,12 +192,10 @@ run:
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// Make the parent (scope dir) read-only so the bundle dir entry can't
-	// be unlinked; restore afterward so t.TempDir cleanup succeeds.
-	if err := os.Chmod(scopeDir, 0500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(scopeDir, 0755) })
+	// Deny child writes/deletes on the parent (scope dir) so the bundle dir
+	// entry can't be unlinked; MakeDirWriteDenied handles POSIX/Windows
+	// equivalents and restores permissions for t.TempDir teardown.
+	testutil.MakeDirWriteDenied(t, scopeDir)
 
 	deps := testDeps()
 	deps.Flags.Yes = true
@@ -219,12 +212,6 @@ run:
 // after creating a legacy json hook so os.Remove fails, exercising the
 // "removing file" error wrap.
 func TestRunHooksRemoveLegacyRemoveError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permission model required to block Remove")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses directory permission checks")
-	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -236,10 +223,7 @@ func TestRunHooksRemoveLegacyRemoveError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(scopeDir, "leg.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(scopeDir, 0500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(scopeDir, 0755) })
+	testutil.MakeDirWriteDenied(t, scopeDir)
 
 	deps := testDeps()
 	deps.Flags.Yes = true

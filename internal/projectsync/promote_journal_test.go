@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // TestPromoteResource_JournalWriteFailureDegradesGracefully exercises the
@@ -53,25 +54,21 @@ func TestPromoteResource_JournalWriteFailureDegradesGracefully(t *testing.T) {
 // failure branch (lines 93–98 in promote.go) by making the project directory
 // read-only after the symlink step. The journal must be advanced to rolled-back.
 func TestPromoteResource_RCSaveFailureRollsBackJournal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod-based read-only project dir not portable to Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	agentsHome, projectPath := atomicEnv(t, "rcfail")
 	writeWidget(t, projectPath, "alpha")
 
-	// Make the project dir read-only just before rc.Save runs. We do this by
-	// swapping osSymlink to chmod the project read-only AFTER the symlink is
-	// created — that way materialize succeeds but rc.Save (called next) fails.
+	// Make the project dir write-denied just before rc.Save runs. We do this
+	// by swapping osSymlink to call MakeDirWriteDenied AFTER the symlink is
+	// created — that way materialize succeeds but rc.Save (called next)
+	// fails. MakeDirWriteDenied registers its own t.Cleanup to restore the
+	// directory's permissions for t.TempDir teardown.
 	swapSymlink(t, func(oldname, newname string) error {
 		if err := os.Symlink(oldname, newname); err != nil {
 			return err
 		}
-		return os.Chmod(projectPath, 0o500)
+		testutil.MakeDirWriteDenied(t, projectPath)
+		return nil
 	})
-	t.Cleanup(func() { _ = os.Chmod(projectPath, 0o755) })
 
 	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
 	if err == nil {
@@ -80,9 +77,6 @@ func TestPromoteResource_RCSaveFailureRollsBackJournal(t *testing.T) {
 	if !strings.Contains(err.Error(), "updating .agentsrc.json") {
 		t.Errorf("expected rc.Save error wrapping, got: %v", err)
 	}
-
-	// Restore permissions before any t.Cleanup tries to delete files.
-	_ = os.Chmod(projectPath, 0o755)
 
 	// Journal must NOT linger after rollback.
 	dir := promoteJournalDirPath(agentsHome)
@@ -97,20 +91,11 @@ func TestPromoteResource_RCSaveFailureRollsBackJournal(t *testing.T) {
 // failure branch (lines 165–167) by chmod-ing the source directory's parent
 // to read-only so RemoveAll cannot delete the source.
 func TestMaterializePromoteSource_RemoveSourceFailure(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod-based read-only parent not portable to Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	_, projectPath := atomicEnv(t, "rmsrc")
 	writeWidget(t, projectPath, "alpha")
 
 	bucket := filepath.Join(projectPath, ".agents", "widgets")
-	if err := os.Chmod(bucket, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(bucket, 0o755) })
+	testutil.MakeDirWriteDenied(t, bucket)
 
 	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
 	if err == nil {
@@ -124,12 +109,6 @@ func TestMaterializePromoteSource_RemoveSourceFailure(t *testing.T) {
 // TestClearExistingCanonical_StaleSymlinkRemoveError covers the
 // stale-symlink Remove error branch (lines 224–226).
 func TestClearExistingCanonical_StaleSymlinkRemoveError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod parent semantics differ on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	tmp := t.TempDir()
 	parent := filepath.Join(tmp, "ro")
 	if err := os.MkdirAll(parent, 0755); err != nil {
@@ -141,10 +120,7 @@ func TestClearExistingCanonical_StaleSymlinkRemoveError(t *testing.T) {
 		t.Fatal(err)
 	}
 	linktest.Link(t, target, link)
-	if err := os.Chmod(parent, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	testutil.MakeDirWriteDenied(t, parent)
 
 	spec := atomicWidgetSpec()
 	if err := clearExistingCanonical(link, "alpha", spec); err == nil {
@@ -157,12 +133,6 @@ func TestClearExistingCanonical_StaleSymlinkRemoveError(t *testing.T) {
 // TestClearExistingCanonical_ForceRealDirRemoveError covers the force=true
 // real-dir RemoveAll-fail branch (lines 232–234).
 func TestClearExistingCanonical_ForceRealDirRemoveError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod parent semantics differ on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	tmp := t.TempDir()
 	parent := filepath.Join(tmp, "ro")
 	if err := os.MkdirAll(parent, 0755); err != nil {
@@ -175,10 +145,7 @@ func TestClearExistingCanonical_ForceRealDirRemoveError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "leaf"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(parent, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	testutil.MakeDirWriteDenied(t, parent)
 
 	spec := atomicWidgetSpec()
 	spec.Force = true
@@ -191,37 +158,48 @@ func TestClearExistingCanonical_ForceRealDirRemoveError(t *testing.T) {
 
 // TestMaterializePromoteSource_RollbackCrossFsCopyFails covers the cross-fs
 // rollback path where CopyTree also fails (lines 179–182). We swap osSymlink
-// to fail, osRename to return EXDEV, and chmod the project bucket dir
-// read-only so the rollback CopyTree cannot recreate the source. We do this
-// by injecting via osRename rather than CopyTree, because CopyTree is not
+// to fail, osRename to return EXDEV, and deny writes on the project bucket
+// dir so the rollback CopyTree cannot recreate the source. We do this by
+// injecting via osRename rather than CopyTree, because CopyTree is not
 // itself a seam.
 //
-// Easiest path: make the source bucket dir read-only AFTER the source has
+// Easiest path: deny writes on the source bucket dir AFTER the source has
 // been removed (during materialize). We accomplish this by also wrapping
-// osSymlink — by the time it runs, the source has been removed; chmod the
-// parent then.
+// osSymlink — by the time it runs, the source has been removed;
+// MakeDirWriteDenied the parent then.
+//
+// Windows-skipped: the rollback path is gated on MkdirAll(bucket/alpha)
+// failing. On the github-actions windows-latest runner, the DACL deny-ACE
+// blocks file create (FILE_ADD_FILE = 0x0002) but the runner's effective
+// token still grants directory create (FILE_ADD_SUBDIRECTORY = 0x0004),
+// so CopyTree's MkdirAll succeeds and the rollback completes — no error
+// to assert. The full sharing-mode lock used by MakeDirWriteDenied for
+// child-deletion denial doesn't apply here because the bucket has zero
+// children at install time (alpha was already removed). The behaviour the
+// test exercises is POSIX-specific and was acknowledged as such by the
+// original author with an explicit runtime.GOOS == "windows" skip; the
+// dir-write-denied migration accidentally dropped that gate.
 func TestMaterializePromoteSource_RollbackCrossFsCopyFails(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("chmod parent semantics differ on Windows")
+		t.Skip("Windows runner grants FILE_ADD_SUBDIRECTORY despite the parent DACL deny on FILE_ADD_FILE / FILE_DELETE_CHILD, so CopyTree's MkdirAll succeeds and the asserted rollback-failure path cannot be reached; POSIX-only assertion")
 	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
+
 	_, projectPath := atomicEnv(t, "xdevcopy")
 	writeWidget(t, projectPath, "alpha")
 
 	bucket := filepath.Join(projectPath, ".agents", "widgets")
 
 	swapSymlink(t, func(string, string) error {
-		// Source has been removed by now; chmod the parent so CopyTree's
-		// MkdirAll on the destination fails when rollback runs.
-		_ = os.Chmod(bucket, 0o500)
+		// Source has been removed by now; deny writes on the parent so
+		// CopyTree's MkdirAll on the destination fails when rollback runs.
+		// MakeDirWriteDenied registers its own t.Cleanup to restore
+		// permissions for t.TempDir teardown.
+		testutil.MakeDirWriteDenied(t, bucket)
 		return errors.New("symlink-boom")
 	})
 	swapRename(t, func(string, string) error {
 		return &os.LinkError{Op: "rename", Old: "x", New: "y", Err: syscall.EXDEV}
 	})
-	t.Cleanup(func() { _ = os.Chmod(bucket, 0o755) })
 
 	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
 	if err == nil {
@@ -230,6 +208,4 @@ func TestMaterializePromoteSource_RollbackCrossFsCopyFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "rollback failed") && !strings.Contains(err.Error(), "now missing") {
 		t.Errorf("expected cross-fs copy-failed error wording, got: %v", err)
 	}
-	// Restore so cleanup can remove the tmp tree.
-	_ = os.Chmod(bucket, 0o755)
 }
