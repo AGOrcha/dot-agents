@@ -470,6 +470,48 @@ func tomlMultilineString(value string) string {
 	return "\"\"\"\n" + escaped + "\n\"\"\""
 }
 
+// BrokenLinks implements BrokenLinkReporter for the codex platform.
+//
+// Codex's project-scope single-file managed surface is AGENTS.md at the repo
+// root — a managed symlink to the highest-priority canonical source under
+// <agentsHome>/rules/{global,project}/agents.(md|mdc) (see linkCodexAgentsMD).
+// The diagnostic contract carried over from doctor's previous inline
+// projectSingleFiles table (collectSingleFileBrokenLinks → managedLinkBroken)
+// is "report broken only when the entry is a resolvable managed link AND its
+// target is missing" — a hard-linked or absent AGENTS.md is silently passed
+// over. classifyManagedLink encodes that semantic exactly, matching claude's
+// brokenMCPLink shape.
+//
+// ScanSingleFileLinks is intentionally NOT used here for the same reason
+// documented on claude.brokenMCPLink: its hard-link-only canonical contract
+// would flag a symlink-only managed AGENTS.md as broken, which would shift
+// the existing doctor_test expectations (TestCollectBrokenLinks_BrokenAgentsMD
+// is the central pin).
+//
+// PlatformID is set on the returned BrokenLink so JSON consumers can
+// self-describe per-entry (BrokenLink struct contract).
+func (c *codex) BrokenLinks(_, repoPath, _ string) []BrokenLink {
+	return classifyCodexSingleFile(filepath.Join(repoPath, codexAgentsMarkdown))
+}
+
+// classifyCodexSingleFile returns the broken-link record for a single codex
+// managed file path, or nil when the path is not a resolvable managed link
+// or its target exists. Extracted from BrokenLinks for symmetry with claude's
+// brokenMCPLink and to keep the per-platform helper trivial enough that P3's
+// CountLinks/Badge migration can reuse the shape without refactor.
+func classifyCodexSingleFile(linkPath string) []BrokenLink {
+	state, raw := classifyManagedLink(linkPath)
+	if state != linkStateBroken {
+		return nil
+	}
+	return []BrokenLink{{
+		PlatformID:  "codex",
+		LinkPath:    linkPath,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
+	}}
+}
+
 func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(codexAgentsDir, "skills"))
 	if err != nil {
