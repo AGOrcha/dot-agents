@@ -1,0 +1,19 @@
+name: iteration-close-gate
+description: |-
+  Terminally verify iteration-close artifacts (verify-record, checkpoint,
+  merge-back) when a sentinel is present; prevent delegated `workflow advance`
+  attempts before they run; emit unresolved-obligation continuity context on
+  pre_compact. R1.1-R1.9 of loop-discipline-stop-hooks/design.md.
+when_events:
+  - pre_tool_use
+  - pre_compact
+  - stop
+  - subagent_stop
+run:
+  command: ./gate.sh
+  timeout_ms: 8000
+enabled_on:
+  - claude
+  - codex
+  - copilot
+  - cursor

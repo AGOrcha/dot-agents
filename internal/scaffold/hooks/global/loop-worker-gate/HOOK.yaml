@@ -1,0 +1,19 @@
+name: loop-worker-gate
+description: |-
+  Bootstrap loop-worker context on subagent_start; prevent forbidden
+  orchestrator workflow commands on pre_tool_use; preserve context on
+  pre_compact; terminally verify write_scope + merge-back at subagent_stop.
+  Self-filters by sentinel agent_type per D6. R3.1-R3.10 of design.md.
+when_events:
+  - subagent_start
+  - pre_tool_use
+  - pre_compact
+  - subagent_stop
+run:
+  command: ./gate.sh
+  timeout_ms: 8000
+enabled_on:
+  - claude
+  - codex
+  - copilot
+  - cursor
