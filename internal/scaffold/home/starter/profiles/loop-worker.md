@@ -57,7 +57,7 @@ Do **not** run `workflow advance` or `workflow delegation closeout` as the worke
 
 ## Parent closeout (orchestrator)
 
-After accepting delegate output: `workflow advance` as appropriate, then `workflow delegation closeout --plan <id> --task <id> --decision accept|reject`.
+After accepting delegate output: `workflow delegation closeout --plan <id> --task <id> --decision accept|reject` — an accepted closeout already advances the canonical task to `completed` (see `commands/workflow/delegation.go` `applyCloseoutDecisionToTasks`), so a separate `workflow advance` call is redundant.
 
 ## Reusable verification metadata (bundle / flags)
 
