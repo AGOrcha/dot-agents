@@ -5,20 +5,20 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
-// fakeInstallDeps is the interface-DI test double for installDeps (per
-// docs/TEST_SEAMS.md). A nil func field delegates to the real
+// fakeInstallDeps is the interface-DI test double for lifecycle.InstallDeps
+// (per docs/TEST_SEAMS.md). A nil func field delegates to the real
 // implementation, so a test overrides only the operation it wants to
 // fault-inject.
 //
-// Kept in package commands during t03 because seams_test.go's install
-// pipeline tests reach into runInstall / runInstallGenerate /
-// registerInstallProject / findProjectByPath / linkResourceFromSources
-// through the shim in install.go and pass fakeInstallDeps. The seams_test.go
-// split is deferred to t11; until then, fakeInstallDeps must satisfy
-// installDeps (= lifecycle.InstallDeps) from this package.
+// Kept in package commands after t13b deleted the install shim because
+// seams_test.go's install-pipeline seam tests stay in this package and call
+// lifecycle.RunInstall / lifecycle.RunInstallGenerate / etc. directly,
+// passing fakeInstallDeps. The fake implements every method on
+// lifecycle.InstallDeps so it satisfies the interface via duck typing.
 type fakeInstallDeps struct {
 	getwd      func() (string, error)
 	mkdirAll   func(string, os.FileMode) error
@@ -87,12 +87,13 @@ func TestFakeInstallDeps_NilDelegatesToReal(t *testing.T) {
 	}
 }
 
-// TestNewInstallCmd_FlagsAndArgs exercises the shim's cobra-command
-// construction (the production wrapping that adds --generate/--strict
-// flags and zero-arg validation). The deep behavior tests live in
-// commands/lifecycle/install_test.go alongside the moved implementation.
-func TestNewInstallCmd_FlagsAndArgs(t *testing.T) {
-	cmd := NewInstallCmd()
+// TestLifecycleInstallCmd_FlagsAndArgs exercises the production wiring
+// path root.go uses: lifecycle.NewInstallCmd(buildLifecycleDeps()). This
+// is a regression guard on the deps factory + constructor call rather
+// than on the deep install behavior (which is covered in
+// commands/lifecycle/install_test.go).
+func TestLifecycleInstallCmd_FlagsAndArgs(t *testing.T) {
+	cmd := lifecycle.NewInstallCmd(buildLifecycleDeps())
 	if cmd.Flags().Lookup("generate") == nil {
 		t.Error("missing --generate flag")
 	}

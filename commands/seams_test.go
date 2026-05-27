@@ -7,9 +7,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
+
+// withLifecycleFlags swaps lifecycle.Flags to the provided value for the
+// duration of the test, restoring the original on cleanup. Lifecycle's moved
+// helper bodies (RunInstall / LinkResourceFromSources / CloneGitSource /
+// ShouldUseCachedGitSource / RunStatus / RunInit / ...) read the
+// lifecycle.Flags package var directly per the t01 SHAPE.md "PRESERVE
+// current package-var seams during the moves" decision. After t13b deleted
+// the install.go shim's syncLifecycleGlobals helper, tests that exercise
+// lifecycle entry points must set lifecycle.Flags directly.
+func withLifecycleFlags(t *testing.T, f lifecycle.GlobalFlags) {
+	t.Helper()
+	saved := lifecycle.Flags
+	lifecycle.Flags = f
+	t.Cleanup(func() { lifecycle.Flags = saved })
+}
 
 // ─── writeKGMCPConfigFile seam paths ─────────────────────────────────────────
 
@@ -80,7 +96,7 @@ func TestScaffoldWorkflowAssets_MkdirError(t *testing.T) {
 	sentinel := errors.New("mkdir boom")
 	deps := fakeInitDirMaker{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	if err := scaffoldWorkflowAssets(t.TempDir(), deps); !errors.Is(err, sentinel) {
+	if err := lifecycle.ScaffoldWorkflowAssetsForTest(t.TempDir(), deps); !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
 	// silence unused import linter for config when nothing references it
@@ -93,7 +109,7 @@ func TestRunInstall_GetwdError(t *testing.T) {
 	sentinel := errors.New("getwd boom")
 	deps := fakeInstallDeps{getwd: func() (string, error) { return "", sentinel }}
 
-	err := runInstall(false, deps)
+	err := lifecycle.RunInstall(false, deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped getwd error, got %v", err)
 	}
@@ -103,7 +119,7 @@ func TestRunInstallGenerate_GetwdError(t *testing.T) {
 	sentinel := errors.New("getwd boom")
 	deps := fakeInstallDeps{getwd: func() (string, error) { return "", sentinel }}
 
-	err := runInstallGenerate(deps)
+	err := lifecycle.RunInstallGenerate(deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped getwd error, got %v", err)
 	}
@@ -127,14 +143,12 @@ func TestLinkResourceFromSources_MkdirError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{})
 
 	sentinel := errors.New("mkdir boom")
 	deps := fakeInstallDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	err := linkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
+	err := lifecycle.LinkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -156,14 +170,12 @@ func TestLinkResourceFromSources_SymlinkError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{})
 
 	sentinel := errors.New("symlink boom")
 	deps := fakeInstallDeps{symlink: func(string, string) error { return sentinel }}
 
-	err := linkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
+	err := lifecycle.LinkResourceFromSources("skills", "demo", "proj", []string{src}, deps)
 	if err == nil || !strings.Contains(err.Error(), "symlinking demo") {
 		t.Fatalf("expected wrapped symlink error, got %v", err)
 	}
@@ -172,17 +184,15 @@ func TestLinkResourceFromSources_SymlinkError(t *testing.T) {
 	}
 }
 
-// ─── cloneGitSource MkdirAll branch ──────────────────────────────────────────
+// ─── CloneGitSource MkdirAll branch ──────────────────────────────────────────
 
 func TestCloneGitSource_MkdirError(t *testing.T) {
 	sentinel := errors.New("mkdir boom")
 	deps := fakeInstallDeps{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{})
 
-	_, err := cloneGitSource("git", "https://example.invalid/repo.git", "main", t.TempDir(), deps)
+	_, err := lifecycle.CloneGitSource("git", "https://example.invalid/repo.git", "main", t.TempDir(), deps)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected mkdir sentinel, got %v", err)
 	}
@@ -518,11 +528,10 @@ func TestRunStatus_ConfigLoadError(t *testing.T) {
 	sentinel := errors.New("load boom")
 	deps := fakeStatusConfigLoader{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{})
 
-	err := runStatus(false, "", deps)
+	// Pass jsonOut=false; the load happens before the JSON branch.
+	err := lifecycle.RunStatus(false, "", deps, false)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}
@@ -562,7 +571,7 @@ func TestRegisterInstallProject_ConfigLoadError(t *testing.T) {
 	sentinel := errors.New("load boom")
 	deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) { return nil, sentinel }}
 
-	err := registerInstallProject("p", filepath.Join(tmp, "p"), deps)
+	err := lifecycle.RegisterInstallProject("p", filepath.Join(tmp, "p"), deps)
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected configLoad sentinel, got %v", err)
 	}
@@ -570,7 +579,7 @@ func TestRegisterInstallProject_ConfigLoadError(t *testing.T) {
 
 func TestFindProjectByPath_ConfigLoadError(t *testing.T) {
 	deps := fakeInstallDeps{loadConfig: func() (*config.Config, error) { return nil, errors.New("load boom") }}
-	if got := findProjectByPath("/whatever", deps); got != "" {
+	if got := lifecycle.FindProjectByPath("/whatever", deps); got != "" {
 		t.Errorf("expected empty string on load error, got %q", got)
 	}
 }
@@ -616,24 +625,22 @@ func TestProcessImportCandidate_DestStatErrorWarns(t *testing.T) {
 	_ = res
 }
 
-// shouldUseCachedGitSource verbose-info branch (lines 419-421).
+// ShouldUseCachedGitSource verbose-info branch.
 func TestShouldUseCachedGitSource_VerboseInfo(t *testing.T) {
 	cacheDir := t.TempDir()
 	// Touch a fresh .last-fetch file
 	if err := os.WriteFile(filepath.Join(cacheDir, ".last-fetch"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	saved := Flags
-	Flags = GlobalFlags{Verbose: true}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{Verbose: true})
 
-	if !shouldUseCachedGitSource(cacheDir, "https://example.invalid/r.git") {
+	if !lifecycle.ShouldUseCachedGitSource(cacheDir, "https://example.invalid/r.git") {
 		t.Error("expected cached source to be used")
 	}
 }
 
-// linkResourceFromSources verbose-bullet branch (lines 494-496). Use real
-// MkdirAll/Symlink and verify the call succeeds with Verbose=true.
+// LinkResourceFromSources verbose-bullet branch. Use real MkdirAll/Symlink
+// and verify the call succeeds with Verbose=true.
 func TestLinkResourceFromSources_VerboseBullet(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -650,25 +657,23 @@ func TestLinkResourceFromSources_VerboseBullet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	saved := Flags
-	Flags = GlobalFlags{Verbose: true}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{Verbose: true})
 
-	if err := linkResourceFromSources("skills", "demo", "proj", []string{src}, stdInstallDeps{}); err != nil {
-		t.Fatalf("linkResourceFromSources: %v", err)
+	if err := lifecycle.LinkResourceFromSources("skills", "demo", "proj", []string{src}, lifecycle.StdInstallDeps{}); err != nil {
+		t.Fatalf("LinkResourceFromSources: %v", err)
 	}
 }
 
-// printSymlinkDirAudit ReadDir-fails branch (lines 1017-1019).
+// PrintSymlinkDirAudit ReadDir-fails branch.
 func TestPrintSymlinkDirAudit_NonexistentDir(t *testing.T) {
-	ok, broken := printSymlinkDirAudit(filepath.Join(t.TempDir(), "absent"), "(empty)", "%s")
+	ok, broken := lifecycle.PrintSymlinkDirAudit(filepath.Join(t.TempDir(), "absent"), "(empty)", "%s")
 	if ok != 0 || broken != 0 {
 		t.Errorf("expected (0,0) for missing dir, got (%d,%d)", ok, broken)
 	}
 }
 
-// countClaudeRules Readlink-fails branch (lines 230-232). A regular file
-// in .claude/rules/ produces Readlink err which is silently skipped.
+// CountClaudeRules Readlink-fails branch. A regular file in .claude/rules/
+// produces Readlink err which is silently skipped.
 func TestCountClaudeRules_ReadlinkFails(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, ".claude", "rules")
@@ -688,9 +693,9 @@ func TestCountClaudeRules_ReadlinkFails(t *testing.T) {
 	}
 	linktest.Link(t, healthy, filepath.Join(dir, "good"))
 
-	ok, warn := countClaudeRules(tmp)
+	ok, warn := lifecycle.CountClaudeRules(tmp)
 	if ok != 1 || warn != 1 {
-		t.Errorf("countClaudeRules: ok=%d warn=%d, want ok=1 warn=1", ok, warn)
+		t.Errorf("CountClaudeRules: ok=%d warn=%d, want ok=1 warn=1", ok, warn)
 	}
 }
 
@@ -737,7 +742,7 @@ func TestRestoreLegacyResourceFile_NoMapping(t *testing.T) {
 	}
 }
 
-// runDoctor configLoad-failure branch (lines 91-94): returns nil but emits warn.
+// lifecycle.RunDoctor configLoad-failure branch: returns nil but emits warn.
 func TestRunDoctor_ConfigLoadError(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -747,12 +752,10 @@ func TestRunDoctor_ConfigLoadError(t *testing.T) {
 	}
 	deps := fakeDoctorConfigLoader{loadConfig: func() (*config.Config, error) { return nil, errors.New("load boom") }}
 
-	saved := Flags
-	Flags = GlobalFlags{}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{})
 
-	if err := runDoctor(nil, nil, deps); err != nil {
-		t.Fatalf("runDoctor expected nil on configLoad err, got %v", err)
+	if err := lifecycle.RunDoctor(nil, nil, deps); err != nil {
+		t.Fatalf("lifecycle.RunDoctor expected nil on configLoad err, got %v", err)
 	}
 }
 
@@ -790,7 +793,7 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 	}
 }
 
-// runInstallGenerate's LoadAgentsRC error branch (lines 292-294): create an
+// lifecycle.RunInstallGenerate's LoadAgentsRC error branch: create an
 // invalid manifest file so the second load (after generate) returns an error.
 func TestRunInstallGenerate_CorruptExistingManifest(t *testing.T) {
 	tmp := t.TempDir()
@@ -811,18 +814,16 @@ func TestRunInstallGenerate_CorruptExistingManifest(t *testing.T) {
 	}
 	deps := fakeInstallDeps{getwd: func() (string, error) { return projectPath, nil }}
 
-	saved := Flags
-	Flags = GlobalFlags{Yes: true}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{Yes: true})
 
-	err := runInstallGenerate(deps)
+	err := lifecycle.RunInstallGenerate(deps)
 	if err == nil || !strings.Contains(err.Error(), "loading existing") {
 		t.Fatalf("expected loading existing manifest error, got %v", err)
 	}
 }
 
-// runInstallGenerate Save() failure: point projectPath at a non-writable
-// location so rc.Save returns an error.
+// lifecycle.RunInstallGenerate Save() failure: point projectPath at a
+// non-writable location so rc.Save returns an error.
 func TestRunInstallGenerate_SaveFailure(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -839,22 +840,29 @@ func TestRunInstallGenerate_SaveFailure(t *testing.T) {
 	}
 	deps := fakeInstallDeps{getwd: func() (string, error) { return projectPath, nil }}
 
-	saved := Flags
-	Flags = GlobalFlags{Yes: true}
-	defer func() { Flags = saved }()
+	withLifecycleFlags(t, lifecycle.GlobalFlags{Yes: true})
 
-	err := runInstallGenerate(deps)
+	err := lifecycle.RunInstallGenerate(deps)
 	if err == nil {
 		t.Fatal("expected error from rc.Save on non-directory project path")
 	}
 }
 
-// ─── runInit early MkdirAll error ────────────────────────────────────────────
+// ─── lifecycle.RunInitForTest early MkdirAll error ───────────────────────────
 
 func TestRunInit_MkdirError(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+
+	// lifecycle.RunInitForTest reads InitForceFn/InitDryRunFn/InitYesFn via
+	// SetInitFlags. Wire them at commands.Flags so the existing pre-t13b
+	// "Flags = GlobalFlags{Yes: true}" pattern remains the source of truth.
+	lifecycle.SetInitFlags(
+		func() bool { return Flags.Force },
+		func() bool { return Flags.DryRun },
+		func() bool { return Flags.Yes },
+	)
 
 	saved := Flags
 	Flags = GlobalFlags{Yes: true}
@@ -863,7 +871,7 @@ func TestRunInit_MkdirError(t *testing.T) {
 	sentinel := errors.New("mkdir boom")
 	deps := fakeInitDirMaker{mkdirAll: func(string, os.FileMode) error { return sentinel }}
 
-	err := runInit(nil, nil, deps)
+	err := lifecycle.RunInitForTest(nil, nil, deps)
 	if err == nil || !strings.Contains(err.Error(), "creating ") {
 		t.Fatalf("expected wrapped creating error, got %v", err)
 	}

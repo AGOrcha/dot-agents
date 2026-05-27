@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
 	"github.com/spf13/cobra"
 )
 
@@ -71,9 +72,9 @@ func TestNewReviewCmd_RunEDispatches(t *testing.T) {
 	}
 }
 
-// ── install.go RunE coverage ────────────────────────────────────────────────
+// ── lifecycle.NewInstallCmd RunE coverage ───────────────────────────────────
 
-func TestNewInstallCmd_RunEGenerate(t *testing.T) {
+func TestLifecycleInstallCmd_RunEGenerate(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -93,7 +94,7 @@ func TestNewInstallCmd_RunEGenerate(t *testing.T) {
 		os.Chdir(old)
 	})
 
-	cmd := NewInstallCmd()
+	cmd := lifecycle.NewInstallCmd(buildLifecycleDeps())
 	// Flip --generate by setting flag value before RunE.
 	if err := cmd.Flags().Set("generate", "true"); err != nil {
 		t.Fatal(err)
@@ -103,7 +104,7 @@ func TestNewInstallCmd_RunEGenerate(t *testing.T) {
 	}
 }
 
-func TestNewInstallCmd_RunEDispatch_NoManifest(t *testing.T) {
+func TestLifecycleInstallCmd_RunEDispatch_NoManifest(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -120,8 +121,9 @@ func TestNewInstallCmd_RunEDispatch_NoManifest(t *testing.T) {
 	Flags = GlobalFlags{Yes: true}
 	defer func() { Flags = saved }()
 
-	cmd := NewInstallCmd()
-	// generate=false (default) → invokes runInstall, which errors on missing manifest
+	cmd := lifecycle.NewInstallCmd(buildLifecycleDeps())
+	// generate=false (default) → invokes lifecycle.RunInstall, which errors on
+	// missing manifest.
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Error("expected error from install RunE when manifest missing")
 	}
