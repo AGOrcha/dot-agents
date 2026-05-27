@@ -83,6 +83,62 @@ func assertSchemaCovers(t *testing.T, label string, schema schemaDoc, encoded []
 	}
 }
 
+// assertRequiredFieldsPresent checks that all schema-required fields appear
+// in the encoded JSON representation.
+func assertRequiredFieldsPresent(t *testing.T, schema schemaDoc, encoded []byte) {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range schema.Required {
+		if _, ok := raw[req]; !ok {
+			t.Errorf("required schema field %q missing from encoded AgentsRC", req)
+		}
+	}
+}
+
+// assertSourceTypesValid checks that all source.type values match schema enum.
+func assertSourceTypesValid(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	allowedSourceTypes := map[string]bool{"local": true, "git": true}
+	for i, s := range rc.Sources {
+		if !allowedSourceTypes[s.Type] {
+			t.Errorf("rc.Sources[%d].Type=%q outside schema enum", i, s.Type)
+		}
+	}
+}
+
+// assertBackendValid checks that kg.backend matches the schema enum.
+func assertBackendValid(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	if rc.KG == nil {
+		return
+	}
+	allowedBackends := map[string]bool{"": true, "sqlite": true, "postgres": true}
+	if !allowedBackends[rc.KG.Backend] {
+		t.Errorf("kg.backend=%q outside schema enum", rc.KG.Backend)
+	}
+}
+
+// assertRoundTripStructuralFidelity validates that unmarshaling a marshaled
+// AgentsRC back into a new AgentsRC preserves the original fields.
+func assertRoundTripStructuralFidelity(t *testing.T, original, roundtripped *AgentsRC) {
+	t.Helper()
+	if roundtripped.Version != original.Version {
+		t.Errorf("Version round-trip: %d → %d", original.Version, roundtripped.Version)
+	}
+	if roundtripped.Project != original.Project {
+		t.Errorf("Project round-trip: %q → %q", original.Project, roundtripped.Project)
+	}
+	if len(roundtripped.Sources) != len(original.Sources) {
+		t.Errorf("Sources length round-trip: %d → %d", len(original.Sources), len(roundtripped.Sources))
+	}
+	if roundtripped.KG == nil || roundtripped.KG.Backend != original.KG.Backend {
+		t.Errorf("KG.Backend round-trip lost: %+v", roundtripped.KG)
+	}
+}
+
 // TestSchemaRoundTrip_AgentsRC marshals a minimal valid AgentsRC and asserts:
 //  1. every schema-required field is present;
 //  2. every encoded JSON key matches a schema-declared property;
@@ -117,50 +173,21 @@ func TestSchemaRoundTrip_AgentsRC(t *testing.T) {
 	}
 
 	// All schema-required fields must appear in the encoded form.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatal(err)
-	}
-	for _, req := range schema.Required {
-		if _, ok := raw[req]; !ok {
-			t.Errorf("required schema field %q missing from encoded AgentsRC", req)
-		}
-	}
+	assertRequiredFieldsPresent(t, schema, data)
 
 	// No drift: every encoded key must be declared in the schema.
 	assertSchemaCovers(t, "agentsrc.schema.json", schema, data)
 
-	// Source.type enum check (matches schema/source/properties/type/enum).
-	allowedSourceTypes := map[string]bool{"local": true, "git": true}
-	for i, s := range rc.Sources {
-		if !allowedSourceTypes[s.Type] {
-			t.Errorf("rc.Sources[%d].Type=%q outside schema enum", i, s.Type)
-		}
-	}
-
-	// Backend enum check.
-	allowedBackends := map[string]bool{"": true, "sqlite": true, "postgres": true}
-	if !allowedBackends[rc.KG.Backend] {
-		t.Errorf("kg.backend=%q outside schema enum", rc.KG.Backend)
-	}
+	// Enum validation for source types and backend.
+	assertSourceTypesValid(t, rc)
+	assertBackendValid(t, rc)
 
 	// Round-trip: unmarshal back and verify structural fidelity.
 	var rt AgentsRC
 	if err := json.Unmarshal(data, &rt); err != nil {
 		t.Fatalf("re-unmarshal: %v", err)
 	}
-	if rt.Version != rc.Version {
-		t.Errorf("Version round-trip: %d → %d", rc.Version, rt.Version)
-	}
-	if rt.Project != rc.Project {
-		t.Errorf("Project round-trip: %q → %q", rc.Project, rt.Project)
-	}
-	if len(rt.Sources) != len(rc.Sources) {
-		t.Errorf("Sources length round-trip: %d → %d", len(rc.Sources), len(rt.Sources))
-	}
-	if rt.KG == nil || rt.KG.Backend != rc.KG.Backend {
-		t.Errorf("KG.Backend round-trip lost: %+v", rt.KG)
-	}
+	assertRoundTripStructuralFidelity(t, rc, &rt)
 }
 
 // TestSchemaRoundTrip_AgentsRCExtraFields documents that unknown JSON keys
@@ -311,6 +338,107 @@ func validateFixture(t *testing.T, sch *jsonschema.Schema, path string) error {
 	return sch.Validate(doc)
 }
 
+// assertV2ExtendsFieldsPresent validates that Extends fields were properly loaded.
+func assertV2ExtendsFieldsPresent(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	if len(rc.Extends) != 3 {
+		t.Fatalf("Extends: got %d, want 3", len(rc.Extends))
+	}
+	if rc.Extends[0].Ref != "acme:org/base" || rc.Extends[0].Optional {
+		t.Errorf("Extends[0]: got %+v", rc.Extends[0])
+	}
+	if rc.Extends[2].Ref != "acme:team/experimental" || !rc.Extends[2].Optional {
+		t.Errorf("Extends[2] should be optional ref, got %+v", rc.Extends[2])
+	}
+}
+
+// assertV2PackagesFieldsPresent validates that Packages fields were properly loaded.
+func assertV2PackagesFieldsPresent(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	if len(rc.Packages) != 2 {
+		t.Fatalf("Packages: got %d, want 2", len(rc.Packages))
+	}
+	if rc.Packages[0].Ref != "acme-pkgs:skill/review-pr@^1.2" {
+		t.Errorf("Packages[0]: got %q", rc.Packages[0].Ref)
+	}
+}
+
+// assertV2FeaturesFlagsPresent validates that Features map was properly loaded.
+func assertV2FeaturesFlagsPresent(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	if rc.Features["graph_bridge"] != "preview" {
+		t.Errorf("Features[graph_bridge]: got %q", rc.Features["graph_bridge"])
+	}
+}
+
+// assertV2SourceFieldsPresent validates source-level id, cache_ttl, auth, and type.
+func assertV2SourceFieldsPresent(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	var acmeSrc, ociSrc *Source
+	for i := range rc.Sources {
+		switch rc.Sources[i].ID {
+		case "acme":
+			acmeSrc = &rc.Sources[i]
+		case "acme-pkgs":
+			ociSrc = &rc.Sources[i]
+		}
+	}
+	if acmeSrc == nil || acmeSrc.CacheTTL != "4h" {
+		t.Errorf("acme source missing or CacheTTL wrong: %+v", acmeSrc)
+	}
+	if ociSrc == nil || ociSrc.Type != "oci" || len(ociSrc.Auth) == 0 {
+		t.Errorf("acme-pkgs (oci) source missing or auth not preserved: %+v", ociSrc)
+	}
+}
+
+// assertV2KeysPreservedInOutput checks that v2 keys appear in marshaled JSON.
+func assertV2KeysPreservedInOutput(t *testing.T, encoded []byte) {
+	t.Helper()
+	for _, key := range []string{"repo_id", "extends", "packages", "features"} {
+		if !strings.Contains(string(encoded), key) {
+			t.Errorf("re-marshal lost key %q in %s", key, encoded)
+		}
+	}
+}
+
+// assertV2SourceKeysPreservedInOutput checks that source-level v2 keys appear.
+func assertV2SourceKeysPreservedInOutput(t *testing.T, encoded []byte) {
+	t.Helper()
+	for _, key := range []string{`"id"`, `"cache_ttl"`, `"auth"`, `"http"`, `"oci"`} {
+		if !strings.Contains(string(encoded), key) {
+			t.Errorf("re-marshal lost source-level key %q", key)
+		}
+	}
+}
+
+// assertV1FieldsOmitted checks that v2 fields are not populated in a v1 fixture.
+func assertV1FieldsOmitted(t *testing.T, rc *AgentsRC) {
+	t.Helper()
+	if rc.Version != 1 {
+		t.Errorf("Version: got %d, want 1", rc.Version)
+	}
+	if rc.RepoID != "" || rc.Extends != nil || rc.Packages != nil || rc.Features != nil {
+		t.Errorf("v1 fixture must not populate v2 fields: repo_id=%q extends=%v packages=%v features=%v",
+			rc.RepoID, rc.Extends, rc.Packages, rc.Features)
+	}
+	for _, s := range rc.Sources {
+		if s.ID != "" || s.CacheTTL != "" || len(s.Auth) != 0 {
+			t.Errorf("v1 Source must not populate v2 fields: %+v", s)
+		}
+	}
+}
+
+// assertV1KeysNotLeaked checks that v2 keys don't appear in marshaled v1 output.
+func assertV1KeysNotLeaked(t *testing.T, encoded string) {
+	t.Helper()
+	for _, forbidden := range []string{`"repo_id"`, `"extends"`, `"packages"`, `"features"`,
+		`"cache_ttl"`, `"auth"`} {
+		if strings.Contains(encoded, forbidden) {
+			t.Errorf("v1 round-trip leaked v2 key %s into output: %s", forbidden, encoded)
+		}
+	}
+}
+
 // TestSchemaValidate_V1Fixture confirms a real-shape v1 manifest still
 // validates against the v2-compatible schema (additive migration contract).
 func TestSchemaValidate_V1Fixture(t *testing.T) {
@@ -447,58 +575,20 @@ func TestV2_RoundTripPreservesFields(t *testing.T) {
 	if rc.RepoID != "github.com/acme/manager-ui" {
 		t.Errorf("RepoID: got %q", rc.RepoID)
 	}
-	if len(rc.Extends) != 3 {
-		t.Fatalf("Extends: got %d, want 3", len(rc.Extends))
-	}
-	if rc.Extends[0].Ref != "acme:org/base" || rc.Extends[0].Optional {
-		t.Errorf("Extends[0]: got %+v", rc.Extends[0])
-	}
-	if rc.Extends[2].Ref != "acme:team/experimental" || !rc.Extends[2].Optional {
-		t.Errorf("Extends[2] should be optional ref, got %+v", rc.Extends[2])
-	}
-	if len(rc.Packages) != 2 {
-		t.Fatalf("Packages: got %d, want 2", len(rc.Packages))
-	}
-	if rc.Packages[0].Ref != "acme-pkgs:skill/review-pr@^1.2" {
-		t.Errorf("Packages[0]: got %q", rc.Packages[0].Ref)
-	}
-	if rc.Features["graph_bridge"] != "preview" {
-		t.Errorf("Features[graph_bridge]: got %q", rc.Features["graph_bridge"])
-	}
 
-	// v2 source typed fields
-	var acmeSrc, ociSrc *Source
-	for i := range rc.Sources {
-		switch rc.Sources[i].ID {
-		case "acme":
-			acmeSrc = &rc.Sources[i]
-		case "acme-pkgs":
-			ociSrc = &rc.Sources[i]
-		}
-	}
-	if acmeSrc == nil || acmeSrc.CacheTTL != "4h" {
-		t.Errorf("acme source missing or CacheTTL wrong: %+v", acmeSrc)
-	}
-	if ociSrc == nil || ociSrc.Type != "oci" || len(ociSrc.Auth) == 0 {
-		t.Errorf("acme-pkgs (oci) source missing or auth not preserved: %+v", ociSrc)
-	}
+	// Validate v2 additive fields were loaded properly.
+	assertV2ExtendsFieldsPresent(t, &rc)
+	assertV2PackagesFieldsPresent(t, &rc)
+	assertV2FeaturesFlagsPresent(t, &rc)
+	assertV2SourceFieldsPresent(t, &rc)
 
 	// Re-marshal and ensure all v2 keys survive in the output.
 	out, err := json.Marshal(&rc)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	for _, key := range []string{"repo_id", "extends", "packages", "features"} {
-		if !strings.Contains(string(out), key) {
-			t.Errorf("re-marshal lost key %q in %s", key, out)
-		}
-	}
-	// Confirm Source.id / cache_ttl / auth survive in the encoded form.
-	for _, key := range []string{`"id"`, `"cache_ttl"`, `"auth"`, `"http"`, `"oci"`} {
-		if !strings.Contains(string(out), key) {
-			t.Errorf("re-marshal lost source-level key %q", key)
-		}
-	}
+	assertV2KeysPreservedInOutput(t, out)
+	assertV2SourceKeysPreservedInOutput(t, out)
 
 	// Re-validate the re-marshaled bytes against the schema to confirm the
 	// emit form is a structurally valid v2 manifest.
@@ -527,30 +617,14 @@ func TestV1_RoundTripOmitsV2Fields(t *testing.T) {
 	if err := json.Unmarshal(data, &rc); err != nil {
 		t.Fatalf("unmarshal v1 fixture: %v", err)
 	}
-	if rc.Version != 1 {
-		t.Errorf("Version: got %d, want 1", rc.Version)
-	}
-	if rc.RepoID != "" || rc.Extends != nil || rc.Packages != nil || rc.Features != nil {
-		t.Errorf("v1 fixture must not populate v2 fields: repo_id=%q extends=%v packages=%v features=%v",
-			rc.RepoID, rc.Extends, rc.Packages, rc.Features)
-	}
-	for _, s := range rc.Sources {
-		if s.ID != "" || s.CacheTTL != "" || len(s.Auth) != 0 {
-			t.Errorf("v1 Source must not populate v2 fields: %+v", s)
-		}
-	}
+
+	assertV1FieldsOmitted(t, &rc)
 
 	out, err := json.Marshal(&rc)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	encoded := string(out)
-	for _, forbidden := range []string{`"repo_id"`, `"extends"`, `"packages"`, `"features"`,
-		`"cache_ttl"`, `"auth"`} {
-		if strings.Contains(encoded, forbidden) {
-			t.Errorf("v1 round-trip leaked v2 key %s into output: %s", forbidden, encoded)
-		}
-	}
+	assertV1KeysNotLeaked(t, string(out))
 }
 
 // TestV2_ExtendsExtraFieldsGuard confirms the [[schema-usage]] ExtraFields
