@@ -4,6 +4,11 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
+// canonicalRemoveArgsHint is shared verbatim across MCPResource,
+// SettingsResource, and RulesResource — the remove subcommand's arg-hint
+// text is identical for all three canonical-file families.
+const canonicalRemoveArgsHint = "`scope` is `global` or a managed project name; `name` matches list/show."
+
 // CanonicalResourceDef carries the STATIC per-resource configuration that
 // the mcp/settings/rules subpackages used to inline as 90-line struct
 // literals inside their respective canonicalSpec(deps) builders. Pulling
@@ -102,7 +107,7 @@ paths here, then run refresh or install for the project.`,
 	RemoveLong: `Deletes the file from managed MCP storage only (not repo links). After removal,
 run da refresh or install for the relevant project so platform MCP
 links stay consistent.`,
-	RemoveArgsHint: "`scope` is `global` or a managed project name; `name` matches list/show.",
+	RemoveArgsHint: canonicalRemoveArgsHint,
 }
 
 // SettingsResource owns the static `da settings` resource definition.
@@ -146,7 +151,7 @@ Prefer editing canonical paths here, then run refresh or install.`,
 	RemoveLong: `Deletes the file from managed settings storage only (not repo links). After removal,
 run da refresh or install for the relevant project so platform settings
 links stay consistent.`,
-	RemoveArgsHint: "`scope` is `global` or a managed project name; `name` matches list/show.",
+	RemoveArgsHint: canonicalRemoveArgsHint,
 }
 
 // RulesResource owns the static `da rules` resource definition. Note the
@@ -192,5 +197,5 @@ platform copies unless you know they are unmanaged.`,
 	RemoveLong: `Deletes the file from managed rule storage only (not repo links). After removal,
 run da refresh or install for the relevant project so platform rule
 links stay consistent.`,
-	RemoveArgsHint: "`scope` is `global` or a managed project name; `name` matches list/show.",
+	RemoveArgsHint: canonicalRemoveArgsHint,
 }
