@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // schemaDoc is the structural shape this package needs from a JSON schema
@@ -21,8 +23,11 @@ type schemaDoc struct {
 }
 
 type schemaProp struct {
-	Type string   `json:"type,omitempty"`
-	Enum []string `json:"enum,omitempty"`
+	Type string `json:"type,omitempty"`
+	// Enum is intentionally json.RawMessage: enum values may be of any
+	// JSON-compatible type (integer for version, string for source.type),
+	// and this helper only needs to know presence, not contents.
+	Enum json.RawMessage `json:"enum,omitempty"`
 }
 
 // repoRoot walks up from this test file's directory to find the repository
@@ -258,6 +263,313 @@ func validateSchemaFile(t *testing.T, path, name string) {
 	}
 	if !schemaHasTopLevelShape(doc) {
 		t.Errorf("%s has no top-level type / $defs / properties", name)
+	}
+}
+
+// ── v2 additive schema tests (config-distribution-model §3-§5) ────────────────
+
+// compileAgentsRCSchema loads schemas/agentsrc.schema.json into a fully
+// validated jsonschema.Schema so tests can assert real JSON schema validation
+// (not just key coverage) for v1 and v2 fixtures.
+func compileAgentsRCSchema(t *testing.T) *jsonschema.Schema {
+	t.Helper()
+	root := repoRoot(t)
+	path := filepath.Join(root, "schemas", "agentsrc.schema.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+	c := jsonschema.NewCompiler()
+	const url = "https://dot-agents.dev/schemas/agentsrc.schema.json"
+	if err := c.AddResource(url, doc); err != nil {
+		t.Fatalf("compiler add: %v", err)
+	}
+	sch, err := c.Compile(url)
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	return sch
+}
+
+// validateFixture parses a JSON fixture file into a generic any and validates
+// it against the compiled AgentsRC schema. Returns the validation error (nil
+// if valid).
+func validateFixture(t *testing.T, sch *jsonschema.Schema, path string) error {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", path, err)
+	}
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse fixture %s: %v", path, err)
+	}
+	return sch.Validate(doc)
+}
+
+// TestSchemaValidate_V1Fixture confirms a real-shape v1 manifest still
+// validates against the v2-compatible schema (additive migration contract).
+func TestSchemaValidate_V1Fixture(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	fixture := filepath.Join("testdata", "v1", ".agentsrc.json")
+	if err := validateFixture(t, sch, fixture); err != nil {
+		t.Fatalf("v1 fixture must validate against v2-compatible schema: %v", err)
+	}
+}
+
+// TestSchemaValidate_V2MinimalFixture confirms the minimal v2 manifest
+// (version=2 + repo_id but no extends/packages) validates.
+func TestSchemaValidate_V2MinimalFixture(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	fixture := filepath.Join("testdata", "v2", "agentsrc-minimal.json")
+	if err := validateFixture(t, sch, fixture); err != nil {
+		t.Fatalf("v2 minimal fixture should validate: %v", err)
+	}
+}
+
+// TestSchemaValidate_V2FullFixture confirms a fully-populated v2 manifest
+// (sources with id/cache_ttl/auth, http+oci types, extends with optional flag,
+// packages, features) validates.
+func TestSchemaValidate_V2FullFixture(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	fixture := filepath.Join("testdata", "v2", "agentsrc-full.json")
+	if err := validateFixture(t, sch, fixture); err != nil {
+		t.Fatalf("v2 full fixture should validate: %v", err)
+	}
+}
+
+// TestSchemaValidate_V2InvalidCrossTier confirms the schema does NOT enforce
+// cross-tier source constraints by itself (extends referencing oci, packages
+// referencing git) — the fixture is valid against the structural schema; tier
+// constraints are enforced at the resolver layer (phase 1+, p1b). This test
+// documents the boundary so future schema tightening is intentional.
+//
+// Note: the field-shape rules ARE enforced (e.g. ref string must match
+// `source-id:path[@version]` pattern). Tier-source matching requires resolver
+// context (looking up the source-id) and lives outside JSON-schema scope.
+func TestSchemaValidate_V2CrossTierFixtureShapeOnly(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	fixture := filepath.Join("testdata", "v2", "agentsrc-invalid-cross-tier.json")
+	if err := validateFixture(t, sch, fixture); err != nil {
+		t.Fatalf("cross-tier fixture is shape-valid (resolver enforces tier): %v", err)
+	}
+}
+
+// TestSchemaValidate_RejectsBadSourceType confirms a source with an unknown
+// type value is rejected (enum check still applies under v2).
+func TestSchemaValidate_RejectsBadSourceType(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	bad := map[string]any{
+		"version":  2,
+		"hooks":    false,
+		"mcp":      false,
+		"settings": false,
+		"sources": []any{
+			map[string]any{"type": "ftp", "url": "ftp://example.com"},
+		},
+	}
+	if err := sch.Validate(bad); err == nil {
+		t.Fatal("expected validation error for unknown source.type=ftp")
+	}
+}
+
+// TestSchemaValidate_RejectsBadVersion confirms versions other than 1 or 2 fail.
+func TestSchemaValidate_RejectsBadVersion(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	bad := map[string]any{
+		"version":  3,
+		"hooks":    false,
+		"mcp":      false,
+		"settings": false,
+		"sources":  []any{map[string]any{"type": "local"}},
+	}
+	if err := sch.Validate(bad); err == nil {
+		t.Fatal("expected validation error for version=3 (only 1 and 2 allowed)")
+	}
+}
+
+// TestSchemaValidate_RejectsBadExtendsRefShape confirms an extends entry that
+// doesn't match the source-id:path[@version] pattern is rejected by the schema.
+func TestSchemaValidate_RejectsBadExtendsRefShape(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	bad := map[string]any{
+		"version":  2,
+		"hooks":    false,
+		"mcp":      false,
+		"settings": false,
+		"sources":  []any{map[string]any{"type": "local"}},
+		"extends":  []any{"missing-colon-form"},
+	}
+	if err := sch.Validate(bad); err == nil {
+		t.Fatal("expected validation error for malformed extends ref")
+	}
+}
+
+// TestSchemaValidate_RejectsPackagesWithoutVersion confirms a package ref
+// missing the @version-spec is rejected (version is required for packages
+// per config-distribution-model §5).
+func TestSchemaValidate_RejectsPackagesWithoutVersion(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	bad := map[string]any{
+		"version":  2,
+		"hooks":    false,
+		"mcp":      false,
+		"settings": false,
+		"sources":  []any{map[string]any{"type": "local"}},
+		"packages": []any{"acme-pkgs:skill/review-pr"}, // no @version
+	}
+	if err := sch.Validate(bad); err == nil {
+		t.Fatal("expected validation error for package ref without @version")
+	}
+}
+
+// TestV2_RoundTripPreservesFields loads the v2 full fixture, marshals it,
+// and confirms every v2 field survives. Demonstrates that the Go layer does
+// not silently drop any v2 additive field on round-trip.
+func TestV2_RoundTripPreservesFields(t *testing.T) {
+	fixture := filepath.Join("testdata", "v2", "agentsrc-full.json")
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var rc AgentsRC
+	if err := json.Unmarshal(data, &rc); err != nil {
+		t.Fatalf("unmarshal v2 fixture: %v", err)
+	}
+
+	if rc.Version != 2 {
+		t.Errorf("Version: got %d, want 2", rc.Version)
+	}
+	if rc.RepoID != "github.com/acme/manager-ui" {
+		t.Errorf("RepoID: got %q", rc.RepoID)
+	}
+	if len(rc.Extends) != 3 {
+		t.Fatalf("Extends: got %d, want 3", len(rc.Extends))
+	}
+	if rc.Extends[0].Ref != "acme:org/base" || rc.Extends[0].Optional {
+		t.Errorf("Extends[0]: got %+v", rc.Extends[0])
+	}
+	if rc.Extends[2].Ref != "acme:team/experimental" || !rc.Extends[2].Optional {
+		t.Errorf("Extends[2] should be optional ref, got %+v", rc.Extends[2])
+	}
+	if len(rc.Packages) != 2 {
+		t.Fatalf("Packages: got %d, want 2", len(rc.Packages))
+	}
+	if rc.Packages[0].Ref != "acme-pkgs:skill/review-pr@^1.2" {
+		t.Errorf("Packages[0]: got %q", rc.Packages[0].Ref)
+	}
+	if rc.Features["graph_bridge"] != "preview" {
+		t.Errorf("Features[graph_bridge]: got %q", rc.Features["graph_bridge"])
+	}
+
+	// v2 source typed fields
+	var acmeSrc, ociSrc *Source
+	for i := range rc.Sources {
+		switch rc.Sources[i].ID {
+		case "acme":
+			acmeSrc = &rc.Sources[i]
+		case "acme-pkgs":
+			ociSrc = &rc.Sources[i]
+		}
+	}
+	if acmeSrc == nil || acmeSrc.CacheTTL != "4h" {
+		t.Errorf("acme source missing or CacheTTL wrong: %+v", acmeSrc)
+	}
+	if ociSrc == nil || ociSrc.Type != "oci" || len(ociSrc.Auth) == 0 {
+		t.Errorf("acme-pkgs (oci) source missing or auth not preserved: %+v", ociSrc)
+	}
+
+	// Re-marshal and ensure all v2 keys survive in the output.
+	out, err := json.Marshal(&rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{"repo_id", "extends", "packages", "features"} {
+		if !strings.Contains(string(out), key) {
+			t.Errorf("re-marshal lost key %q in %s", key, out)
+		}
+	}
+	// Confirm Source.id / cache_ttl / auth survive in the encoded form.
+	for _, key := range []string{`"id"`, `"cache_ttl"`, `"auth"`, `"http"`, `"oci"`} {
+		if !strings.Contains(string(out), key) {
+			t.Errorf("re-marshal lost source-level key %q", key)
+		}
+	}
+
+	// Re-validate the re-marshaled bytes against the schema to confirm the
+	// emit form is a structurally valid v2 manifest.
+	sch := compileAgentsRCSchema(t)
+	var doc any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := sch.Validate(doc); err != nil {
+		t.Fatalf("re-marshaled v2 manifest should validate: %v", err)
+	}
+}
+
+// TestV1_RoundTripOmitsV2Fields confirms a v1 manifest loaded + re-marshaled
+// does NOT inject any of the v2 keys (repo_id/extends/packages/features
+// nor source-level id/cache_ttl/auth) when they were absent in the input.
+// This is the byte-stability guarantee called out in the additive-migration
+// contract (org-config-resolution §15.2).
+func TestV1_RoundTripOmitsV2Fields(t *testing.T) {
+	fixture := filepath.Join("testdata", "v1", ".agentsrc.json")
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var rc AgentsRC
+	if err := json.Unmarshal(data, &rc); err != nil {
+		t.Fatalf("unmarshal v1 fixture: %v", err)
+	}
+	if rc.Version != 1 {
+		t.Errorf("Version: got %d, want 1", rc.Version)
+	}
+	if rc.RepoID != "" || rc.Extends != nil || rc.Packages != nil || rc.Features != nil {
+		t.Errorf("v1 fixture must not populate v2 fields: repo_id=%q extends=%v packages=%v features=%v",
+			rc.RepoID, rc.Extends, rc.Packages, rc.Features)
+	}
+	for _, s := range rc.Sources {
+		if s.ID != "" || s.CacheTTL != "" || len(s.Auth) != 0 {
+			t.Errorf("v1 Source must not populate v2 fields: %+v", s)
+		}
+	}
+
+	out, err := json.Marshal(&rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	encoded := string(out)
+	for _, forbidden := range []string{`"repo_id"`, `"extends"`, `"packages"`, `"features"`,
+		`"cache_ttl"`, `"auth"`} {
+		if strings.Contains(encoded, forbidden) {
+			t.Errorf("v1 round-trip leaked v2 key %s into output: %s", forbidden, encoded)
+		}
+	}
+}
+
+// TestV2_ExtendsExtraFieldsGuard confirms the [[schema-usage]] ExtraFields
+// guard is honored for every new v2 key — none should land in ExtraFields.
+func TestV2_ExtendsExtraFieldsGuard(t *testing.T) {
+	fixture := filepath.Join("testdata", "v2", "agentsrc-full.json")
+	data, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var rc AgentsRC
+	if err := json.Unmarshal(data, &rc); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"repo_id", "extends", "packages", "features"} {
+		if _, leaked := rc.ExtraFields[key]; leaked {
+			t.Errorf("v2 key %q must NOT land in ExtraFields (typed field expected): got %v",
+				key, rc.ExtraFields[key])
+		}
 	}
 }
 
