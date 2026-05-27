@@ -1530,6 +1530,7 @@ func TestNormalizeRemoteURL(t *testing.T) {
 		{"https github", "https://github.com/acme/repo.git", "github.com/acme/repo"},
 		{"https github no .git", "https://github.com/acme/repo", "github.com/acme/repo"},
 		{"https with user", "https://nikash@github.com/acme/repo.git", "github.com/acme/repo"},
+		{"https with user:token credentials stripped", "https://user:token@github.com/acme/repo", "github.com/acme/repo"},
 		{"https with port", "https://gitlab.acme.internal:8443/g/r.git", "gitlab.acme.internal/g/r"},
 		{"http", "http://gitlab.acme.internal/g/r", "gitlab.acme.internal/g/r"},
 		{"https trailing slash", "https://github.com/acme/repo/", "github.com/acme/repo"},
