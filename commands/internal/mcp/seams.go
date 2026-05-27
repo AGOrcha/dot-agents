@@ -6,47 +6,71 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/spf13/cobra"
 )
 
-// canonicalSpec wires the MCP-flavoured implementations of the
-// cmdutil.CanonicalFileSpec callbacks: List/Resolve forward to the
-// platform helpers and EnsureScope reuses platform.EnsureUnderMCPScopeTree.
+// canonicalSpec assembles the `da mcp` resource spec by combining the
+// static cmdutil.MCPResource definition (Kind/DirSegment/strings/Examples
+// + EnsureScope) with the per-leaf runner closures that need access to
+// platform.ListCanonicalMCPFiles + findMCPSpec for hint-aware errors.
 //
-// deps is threaded through so the Resolve callback can wrap
-// platform.ResolveCanonicalMCPFile errors via findMCPSpec, which prefers
-// deps.ErrorWithHints / deps.UsageError when provided (matching the parent
-// commands package's user-facing error shape).
+// Per plan duplicate-density-drop: keeping this body as a single call
+// into cmdutil.SpecForResource means the only duplication across the
+// mcp/settings/rules trio is the four lines of runner closure shape —
+// which Sonar's clone detector treats as structurally distinct because
+// the captured platform.* helpers and findXxxSpec wrappers differ.
+//
+// mcp uses Deps.MaxArgsWithHints (not MaximumNArgsWithHints like
+// settings/rules), so the list-args binding happens at this leaf via
+// maxArgs(...) — that's why the args validators flow into
+// SpecForResource as parameters rather than living on the def.
 func canonicalSpec(deps Deps) cmdutil.CanonicalFileSpec {
-	return cmdutil.CanonicalFileSpec{
-		Kind:        "MCP",
-		DirSegment:  "mcp",
-		SingularRem: "MCP file",
-		EmptyHint: func(scope string) string {
-			return "No MCP config files (.json/.yaml/.yml/.toml) under ~/.agents/mcp/" + scope + "/"
+	return cmdutil.SpecForResource(
+		cmdutil.MCPResource,
+		cmdutil.ResourceRunners{
+			List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+				specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
+				if err != nil {
+					return nil, err
+				}
+				return cmdutil.EntriesFromSpecs(specs, func(sp platform.MCPFileSpec) cmdutil.CanonicalFileEntry {
+					return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+				}), nil
+			},
+			Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+				sp, err := findMCPSpec(deps, agentsHome, scope, name)
+				if err != nil {
+					return cmdutil.CanonicalFileEntry{}, err
+				}
+				return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+			},
+			ListRun:   func(scope string) error { return RunList(scope) },
+			ShowRun:   func(scope, name string) error { return RunShow(deps, scope, name) },
+			RemoveRun: func(scope, name string) error { return RunRemove(deps, scope, name) },
 		},
-		MissingDirHint: func(scope string) string {
-			return "No ~/.agents/mcp/" + scope + "/ directory yet (no canonical MCP files for this scope)."
-		},
-		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
-			specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]cmdutil.CanonicalFileEntry, len(specs))
-			for i, sp := range specs {
-				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
-			}
-			return out, nil
-		},
-		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
-			sp, err := findMCPSpec(deps, agentsHome, scope, name)
-			if err != nil {
-				return cmdutil.CanonicalFileEntry{}, err
-			}
-			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
-		},
-		EnsureScope: platform.EnsureUnderMCPScopeTree,
+		maxArgs(deps, 1, cmdutil.MCPResource.ListArgsHint),
+		exactArgs(deps, 2, cmdutil.MCPResource.ShowArgsHint),
+		exactArgs(deps, 2, cmdutil.MCPResource.RemoveArgsHint),
+	)
+}
+
+// maxArgs / exactArgs guard against the zero-value Deps used by the
+// data-layer RunList/RunShow paths. The CLI wiring in NewCmd always
+// supplies real helpers via Deps; the data path only needs the data-
+// layer spec fields and never invokes Args, so nil-returning fallbacks
+// are safe.
+func maxArgs(deps Deps, n int, hints ...string) cobra.PositionalArgs {
+	if deps.MaxArgsWithHints == nil {
+		return nil
 	}
+	return deps.MaxArgsWithHints(n, hints...)
+}
+
+func exactArgs(deps Deps, n int, hints ...string) cobra.PositionalArgs {
+	if deps.ExactArgsWithHints == nil {
+		return nil
+	}
+	return deps.ExactArgsWithHints(n, hints...)
 }
 
 // findMCPSpec looks up an MCP file by basename or stem. Kept package-

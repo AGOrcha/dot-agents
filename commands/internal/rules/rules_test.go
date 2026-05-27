@@ -267,3 +267,27 @@ func TestCanonicalCmdExampleBlock_JoinsLines(t *testing.T) {
 		t.Errorf("cmdutil.CanonicalCmdExampleBlock = %q", got)
 	}
 }
+
+// ─── maxArgs/exactArgs nil-check paths ──────────────────────────────────────
+
+// TestMaxArgs_NilDeps exercises the nil-check guard in maxArgs. When Deps has
+// a nil MaximumNArgsWithHints callback (data-layer path), maxArgs must return
+// nil safely.
+func TestMaxArgs_NilDeps(t *testing.T) {
+	emptyDeps := Deps{} // zero-valued, no MaximumNArgsWithHints
+	result := maxArgs(emptyDeps, 1, "test hint")
+	if result != nil {
+		t.Errorf("maxArgs with nil Deps should return nil, got %v", result)
+	}
+}
+
+// TestExactArgs_NilDeps exercises the nil-check guard in exactArgs. When Deps
+// has a nil ExactArgsWithHints callback (data-layer path), exactArgs must
+// return nil safely.
+func TestExactArgs_NilDeps(t *testing.T) {
+	emptyDeps := Deps{} // zero-valued, no ExactArgsWithHints
+	result := exactArgs(emptyDeps, 2, "test hint")
+	if result != nil {
+		t.Errorf("exactArgs with nil Deps should return nil, got %v", result)
+	}
+}
