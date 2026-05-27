@@ -77,9 +77,8 @@ func TestParseV1(t *testing.T) {
 	}
 }
 
-func TestParseV2(t *testing.T) {
-	rec := mustParse(t, "v2_iter.yaml")
-
+func assertV2Header(t *testing.T, rec IterationRecord) {
+	t.Helper()
 	if rec.SchemaVersion != 2 {
 		t.Errorf("SchemaVersion = %d, want 2", rec.SchemaVersion)
 	}
@@ -98,7 +97,10 @@ func TestParseV2(t *testing.T) {
 	if rec.SessionTokens.CacheHitRate != 0.9 {
 		t.Errorf("SessionTokens.CacheHitRate = %g, want 0.9", rec.SessionTokens.CacheHitRate)
 	}
+}
 
+func assertV2Impl(t *testing.T, rec IterationRecord) {
+	t.Helper()
 	if rec.Impl.ScopeNote != "on-target" {
 		t.Errorf("Impl.ScopeNote = %q, want on-target", rec.Impl.ScopeNote)
 	}
@@ -106,7 +108,10 @@ func TestParseV2(t *testing.T) {
 	if rec.Impl.TestsTotalPass.Set {
 		t.Error("Impl.TestsTotalPass should be unset for v2 (it lives on verifiers)")
 	}
+}
 
+func assertV2Verifier(t *testing.T, rec IterationRecord) {
+	t.Helper()
 	if len(rec.Verifiers) != 1 {
 		t.Fatalf("Verifiers count = %d, want 1", len(rec.Verifiers))
 	}
@@ -121,13 +126,24 @@ func TestParseV2(t *testing.T) {
 	if !v.SelfAssessment.LinkedTracesToOutcomes {
 		t.Error("Verifier.SelfAssessment.LinkedTracesToOutcomes = false, want true")
 	}
+}
 
+func assertV2Review(t *testing.T, rec IterationRecord) {
+	t.Helper()
 	if rec.Review.OverallDecision != "accept" {
 		t.Errorf("Review.OverallDecision = %q, want accept", rec.Review.OverallDecision)
 	}
 	if rec.Review.DecisionArtifact == "" {
 		t.Error("Review.DecisionArtifact is empty, want a path")
 	}
+}
+
+func TestParseV2(t *testing.T) {
+	rec := mustParse(t, "v2_iter.yaml")
+	assertV2Header(t, rec)
+	assertV2Impl(t, rec)
+	assertV2Verifier(t, rec)
+	assertV2Review(t, rec)
 }
 
 func TestParseV2StructuredClaims(t *testing.T) {

@@ -196,56 +196,82 @@ func printPlatformsExplanation() {
 	fmt.Fprintln(os.Stdout)
 }
 
+// Tree-rendering prefixes + canonical sub-paths shared by the structure
+// table. Pulled out so Sonar dup-literal findings on the table do not
+// regress and a future tree-glyph change is one edit, not 16+.
+const (
+	explainTreeBranch    = "  ├── "
+	explainTreeChildMid  = "  │   ├── "
+	explainTreeChildLast = "  │   └── "
+	explainScopeGlobal   = "global/"
+	explainScopeProject  = "{project}/"
+)
+
+// explainStructureRow describes one rendered line of the structure tree.
+type explainStructureRow struct{ indent, name, desc string }
+
+// scopedBucket captures the 13 ~/.agents/<bucket>/ entries that each fan
+// out into global/ + {project}/ children. Expanded by appendScopedBucket
+// into 3 rows so the explainStructureRow table is not 13× the same
+// 3-line literal pattern (which Sonar CPD flags even when the only
+// varying token is the description string).
+type scopedBucket struct {
+	parent      string // e.g. "rules/"
+	globalDesc  string
+	projectDesc string
+}
+
+// scopedBuckets is the source of truth for the parent-with-global+project
+// rows in printStructureExplanation. Appending a new bucket here adds three
+// rendered tree lines without touching the loop.
+var scopedBuckets = []scopedBucket{
+	{"rules/", "Rules for ALL projects", "Rules for a specific project"},
+	{"settings/", "Global settings (claude-code.json, cursor.json)", "Project-specific settings"},
+	{"mcp/", "Global MCP configs", "Project MCP configs"},
+	{"skills/", "Skills available everywhere", "Project-specific skills"},
+	{"agents/", "Agents available everywhere", "Project-specific agents"},
+	{"hooks/", "Global hook configs", "Project-specific hook configs"},
+	{"plugins/", "Plugin bundles", "Project-specific plugin bundles"},
+	{"commands/", "Command bundles", "Project-specific command bundles"},
+	{"output-styles/", "Claude output styles", "Project-specific output styles"},
+	{"ignore/", "Ignore files", "Project-specific ignore files"},
+	{"modes/", "OpenCode modes", "Project-specific modes"},
+	{"themes/", "OpenCode themes", "Project-specific themes"},
+	{"prompts/", "Copilot prompts", "Project-specific prompts"},
+}
+
+// appendScopedBucket renders one bucket as 3 rows (parent header + global
+// child + project child) onto the accumulating row list.
+func appendScopedBucket(rows []explainStructureRow, b scopedBucket) []explainStructureRow {
+	return append(rows,
+		explainStructureRow{explainTreeBranch, b.parent, ""},
+		explainStructureRow{explainTreeChildMid, explainScopeGlobal, b.globalDesc},
+		explainStructureRow{explainTreeChildLast, explainScopeProject, b.projectDesc},
+	)
+}
+
+// buildStructureRows returns the full ordered set of rows the structure
+// printer renders. Header → config.json → 13 scoped buckets → tail.
+func buildStructureRows() []explainStructureRow {
+	rows := []explainStructureRow{
+		{"  ", "~/.agents/", ""},
+		{explainTreeBranch, "config.json", "Project registry"},
+	}
+	for _, b := range scopedBuckets {
+		rows = appendScopedBucket(rows, b)
+	}
+	rows = append(rows,
+		explainStructureRow{explainTreeBranch, "scripts/", "Helper scripts"},
+		explainStructureRow{explainTreeBranch, "local/", "Machine-specific local files"},
+		explainStructureRow{"  └── ", "resources/", "Backup files (auto-managed)"},
+	)
+	return rows
+}
+
 func printStructureExplanation() {
 	ui.Header("~/.agents/ Directory Structure")
 	fmt.Fprintln(os.Stdout)
-	lines := []struct{ indent, name, desc string }{
-		{"  ", "~/.agents/", ""},
-		{"  ├── ", "config.json", "Project registry"},
-		{"  ├── ", "rules/", ""},
-		{"  │   ├── ", "global/", "Rules for ALL projects"},
-		{"  │   └── ", "{project}/", "Rules for a specific project"},
-		{"  ├── ", "settings/", ""},
-		{"  │   ├── ", "global/", "Global settings (claude-code.json, cursor.json)"},
-		{"  │   └── ", "{project}/", "Project-specific settings"},
-		{"  ├── ", "mcp/", ""},
-		{"  │   ├── ", "global/", "Global MCP configs"},
-		{"  │   └── ", "{project}/", "Project MCP configs"},
-		{"  ├── ", "skills/", ""},
-		{"  │   ├── ", "global/", "Skills available everywhere"},
-		{"  │   └── ", "{project}/", "Project-specific skills"},
-		{"  ├── ", "agents/", ""},
-		{"  │   ├── ", "global/", "Agents available everywhere"},
-		{"  │   └── ", "{project}/", "Project-specific agents"},
-		{"  ├── ", "hooks/", ""},
-		{"  │   ├── ", "global/", "Global hook configs"},
-		{"  │   └── ", "{project}/", "Project-specific hook configs"},
-		{"  ├── ", "plugins/", ""},
-		{"  │   ├── ", "global/", "Plugin bundles"},
-		{"  │   └── ", "{project}/", "Project-specific plugin bundles"},
-		{"  ├── ", "commands/", ""},
-		{"  │   ├── ", "global/", "Command bundles"},
-		{"  │   └── ", "{project}/", "Project-specific command bundles"},
-		{"  ├── ", "output-styles/", ""},
-		{"  │   ├── ", "global/", "Claude output styles"},
-		{"  │   └── ", "{project}/", "Project-specific output styles"},
-		{"  ├── ", "ignore/", ""},
-		{"  │   ├── ", "global/", "Ignore files"},
-		{"  │   └── ", "{project}/", "Project-specific ignore files"},
-		{"  ├── ", "modes/", ""},
-		{"  │   ├── ", "global/", "OpenCode modes"},
-		{"  │   └── ", "{project}/", "Project-specific modes"},
-		{"  ├── ", "themes/", ""},
-		{"  │   ├── ", "global/", "OpenCode themes"},
-		{"  │   └── ", "{project}/", "Project-specific themes"},
-		{"  ├── ", "prompts/", ""},
-		{"  │   ├── ", "global/", "Copilot prompts"},
-		{"  │   └── ", "{project}/", "Project-specific prompts"},
-		{"  ├── ", "scripts/", "Helper scripts"},
-		{"  ├── ", "local/", "Machine-specific local files"},
-		{"  └── ", "resources/", "Backup files (auto-managed)"},
-	}
-	for _, l := range lines {
+	for _, l := range buildStructureRows() {
 		if l.desc != "" {
 			fmt.Fprintf(os.Stdout, "%s%s%s%-26s%s%s%s\n", l.indent, ui.Cyan, ui.Bold, l.name, ui.Reset, ui.Dim+l.desc, ui.Reset)
 		} else {

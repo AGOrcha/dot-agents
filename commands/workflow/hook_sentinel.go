@@ -19,6 +19,15 @@ import (
 // HookSentinelSchemaVersion is the current schema version emitted by `da workflow hook-sentinel write`.
 const HookSentinelSchemaVersion = 1
 
+// Repeated literals centralized to keep wording consistent across the
+// validator, CLI hint copy, and flag definitions. Bumping the allowed-skill
+// set means editing one of these consts plus hookSentinelAllowedSkills above.
+const (
+	hookSentinelInvalidSkillFmt = "invalid skill %q (allowed: iteration-close, isp, loop-worker)"
+	hookSentinelSkillHint       = "Pass one of: iteration-close, isp, loop-worker."
+	hookSentinelRunIDFlag       = "run-id"
+)
+
 // hookSentinelLifecyclePointSkillEntry is the only `lifecycle_point` value
 // allowed in v1; later versions may introduce additional points alongside a
 // schema_version bump.
@@ -202,7 +211,7 @@ func hookSentinelActiveDir(projectPath string) string {
 func hookSentinelActivePath(projectPath, skill, runID string) (string, error) {
 	skill = strings.TrimSpace(skill)
 	if !validHookSentinelSkill(skill) {
-		return "", fmt.Errorf("invalid skill %q (allowed: iteration-close, isp, loop-worker)", skill)
+		return "", fmt.Errorf(hookSentinelInvalidSkillFmt, skill)
 	}
 	runID = strings.TrimSpace(runID)
 	if !validHookSentinelRunID(runID) {
@@ -285,7 +294,7 @@ func readHookSentinel(hsd hookSentinelDeps, path string) (*HookSentinelDoc, erro
 func readLatestHookSentinel(hsd hookSentinelDeps, projectPath, skill string) (*HookSentinelDoc, string, error) {
 	skill = strings.TrimSpace(skill)
 	if !validHookSentinelSkill(skill) {
-		return nil, "", fmt.Errorf("invalid skill %q (allowed: iteration-close, isp, loop-worker)", skill)
+		return nil, "", fmt.Errorf(hookSentinelInvalidSkillFmt, skill)
 	}
 	dir := hookSentinelActiveDir(projectPath)
 	candidates, err := listHookSentinelCandidates(hsd, dir, skill)
@@ -521,7 +530,7 @@ func runHookSentinelRead(hsd hookSentinelDeps, skill, runID string, latest, asJS
 // known skill, exactly one of --latest / --run-id supplied.
 func validateHookSentinelReadSelectors(skill, runID string, latest bool) error {
 	if !validHookSentinelSkill(skill) {
-		return fmt.Errorf("invalid skill %q (allowed: iteration-close, isp, loop-worker)", skill)
+		return fmt.Errorf(hookSentinelInvalidSkillFmt, skill)
 	}
 	if latest && strings.TrimSpace(runID) != "" {
 		return fmt.Errorf("--latest and --run-id are mutually exclusive")
@@ -633,7 +642,7 @@ func newWorkflowHookSentinelWriteCmd() *cobra.Command {
 			"  da workflow hook-sentinel write loop-worker --run-id r1 --plan my-plan --task t1 --agent-type loop-worker --write-scope commands/workflow/",
 			"  da workflow hook-sentinel write isp --run-id r2 --plan my-plan --task t1 --agent-type main --eligible-snapshot-loaded --max-batch 3",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass one of: iteration-close, isp, loop-worker."),
+		Args: deps.ExactArgsWithHints(1, hookSentinelSkillHint),
 		RunE: func(c *cobra.Command, args []string) error {
 			in := hookSentinelWriteInputs{
 				Skill:             args[0],
@@ -656,7 +665,7 @@ func newWorkflowHookSentinelWriteCmd() *cobra.Command {
 			return runHookSentinelWrite(stdHookSentinelDeps{}, in)
 		},
 	}
-	cmd.Flags().StringVar(&runID, "run-id", "", "Caller-supplied run identifier (required, filename-safe)")
+	cmd.Flags().StringVar(&runID, hookSentinelRunIDFlag, "", "Caller-supplied run identifier (required, filename-safe)")
 	cmd.Flags().StringVar(&planID, "plan", "", "Canonical plan ID (required)")
 	cmd.Flags().StringVar(&taskID, "task", "", "Task ID within the plan (required)")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Caller agent role: main or loop-worker (required)")
@@ -668,7 +677,7 @@ func newWorkflowHookSentinelWriteCmd() *cobra.Command {
 		eligibleSnapshotLoadedSet = c.Flags().Changed("eligible-snapshot-loaded")
 		return nil
 	}
-	_ = cmd.MarkFlagRequired("run-id")
+	_ = cmd.MarkFlagRequired(hookSentinelRunIDFlag)
 	_ = cmd.MarkFlagRequired("plan")
 	_ = cmd.MarkFlagRequired("task")
 	_ = cmd.MarkFlagRequired("agent-type")
@@ -688,12 +697,12 @@ func newWorkflowHookSentinelReadCmd() *cobra.Command {
 			"  da workflow hook-sentinel read loop-worker --latest",
 			"  da workflow hook-sentinel read isp --run-id r2 --json",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass one of: iteration-close, isp, loop-worker."),
+		Args: deps.ExactArgsWithHints(1, hookSentinelSkillHint),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runHookSentinelRead(stdHookSentinelDeps{}, args[0], runID, latest, asJSON)
 		},
 	}
-	cmd.Flags().StringVar(&runID, "run-id", "", "Exact run identifier to read")
+	cmd.Flags().StringVar(&runID, hookSentinelRunIDFlag, "", "Exact run identifier to read")
 	cmd.Flags().BoolVar(&latest, "latest", false, "Read the most recent sentinel for this skill (filename tie-breaker)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Emit the sentinel as JSON (also honours --json global flag)")
 	return cmd
@@ -707,12 +716,12 @@ func newWorkflowHookSentinelClearCmd() *cobra.Command {
 		Example: deps.ExampleBlock(
 			"  da workflow hook-sentinel clear loop-worker --run-id r1",
 		),
-		Args: deps.ExactArgsWithHints(1, "Pass one of: iteration-close, isp, loop-worker."),
+		Args: deps.ExactArgsWithHints(1, hookSentinelSkillHint),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runHookSentinelClear(stdHookSentinelDeps{}, args[0], runID)
 		},
 	}
-	cmd.Flags().StringVar(&runID, "run-id", "", "Run identifier of the sentinel to archive (required)")
-	_ = cmd.MarkFlagRequired("run-id")
+	cmd.Flags().StringVar(&runID, hookSentinelRunIDFlag, "", "Run identifier of the sentinel to archive (required)")
+	_ = cmd.MarkFlagRequired(hookSentinelRunIDFlag)
 	return cmd
 }

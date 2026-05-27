@@ -1110,6 +1110,72 @@ func appendUserConfigPlatformBadge(badges []platformBadge, label, homeDir string
 	return badges
 }
 
+// cursorRuleSourceInfo classifies a cursor rule entry into srcType
+// ("global"|"project"|"local") and returns the user-display path it should
+// link to (empty for local files).
+func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo string) {
+	switch {
+	case strings.HasPrefix(entryName, globalRulesPrefix):
+		srcName := strings.TrimPrefix(entryName, globalRulesPrefix)
+		return "global", "~/.agents/rules/global/" + srcName
+	case strings.HasPrefix(entryName, projectName+"--"):
+		srcName := strings.TrimPrefix(entryName, projectName+"--")
+		return "project", "~/.agents/rules/" + projectName + "/" + srcName
+	}
+	return "local", ""
+}
+
+// printCursorRuleEntry renders one cursor rule entry's audit line.
+func printCursorRuleEntry(name, rulesDir, agentsHome string, entryName string) {
+	srcType, linkedTo := cursorRuleSourceInfo(entryName, name)
+	if srcType == "local" {
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
+		return
+	}
+	f := filepath.Join(rulesDir, entryName)
+	srcPath := strings.Replace(linkedTo, "~/.agents", agentsHome, 1)
+	srcPath = strings.Replace(srcPath, "~", os.Getenv("HOME"), 1)
+	if linked, _ := links.AreHardlinked(f, srcPath); linked {
+		fmt.Fprintf(os.Stdout, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
+	} else {
+		fmt.Fprintf(os.Stdout, "      %s!%s %s %s(not linked to %s)%s\n", ui.Yellow, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
+	}
+}
+
+// printCursorRules renders all valid cursor rule entries in rulesDir; returns
+// the count of entries actually rendered (used to detect empty rule sets).
+func printCursorRules(name, rulesDir, agentsHome string, entries []os.DirEntry) int {
+	count := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), ".dot-agents-backup") {
+			continue
+		}
+		printCursorRuleEntry(name, rulesDir, agentsHome, e.Name())
+		count++
+	}
+	return count
+}
+
+// printCursorMCPLink renders the .cursor/mcp.json audit line.
+func printCursorMCPLink(path string) {
+	cursorMCPPath := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
+	if _, err := os.Lstat(cursorMCPPath); err != nil {
+		fmt.Fprintf(os.Stdout, "      %s-%s .cursor/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	dest, isLink, isBroken := managedLinkBroken(cursorMCPPath)
+	if !isLink {
+		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s(hard link or local file)%s\n", ui.Green, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	displayDest := config.DisplayPath(resolveLinkDest(cursorMCPPath, dest))
+	if isBroken {
+		fmt.Fprintf(os.Stdout, "      %s✗%s .cursor/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
+	} else {
+		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
+	}
+}
+
 func printCursorAudit(name, path, agentsHome string) {
 	fmt.Fprintf(os.Stdout, "    %sCursor%s\n", ui.Cyan, ui.Reset)
 	rulesDir := filepath.Join(path, statusCursorDir, "rules")
@@ -1118,57 +1184,10 @@ func printCursorAudit(name, path, agentsHome string) {
 		fmt.Fprintf(os.Stdout, "      %s(no .cursor/rules/)%s\n", ui.Dim, ui.Reset)
 		return
 	}
-	count := 0
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), ".dot-agents-backup") {
-			continue
-		}
-		f := filepath.Join(rulesDir, e.Name())
-		var srcType, linkedTo string
-		if strings.HasPrefix(e.Name(), globalRulesPrefix) {
-			srcType = "global"
-			srcName := strings.TrimPrefix(e.Name(), globalRulesPrefix)
-			linkedTo = "~/.agents/rules/global/" + srcName
-		} else if strings.HasPrefix(e.Name(), name+"--") {
-			srcType = "project"
-			srcName := strings.TrimPrefix(e.Name(), name+"--")
-			linkedTo = "~/.agents/rules/" + name + "/" + srcName
-		} else {
-			srcType = "local"
-		}
-
-		if srcType == "local" {
-			fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, e.Name(), ui.Dim, ui.Reset)
-		} else {
-			srcPath := strings.Replace(linkedTo, "~/.agents", agentsHome, 1)
-			srcPath = strings.Replace(srcPath, "~", os.Getenv("HOME"), 1)
-			if linked, _ := links.AreHardlinked(f, srcPath); linked {
-				fmt.Fprintf(os.Stdout, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, e.Name(), ui.Dim, linkedTo, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s!%s %s %s(not linked to %s)%s\n", ui.Yellow, ui.Reset, e.Name(), ui.Dim, linkedTo, ui.Reset)
-			}
-		}
-		count++
-	}
-	if count == 0 {
+	if printCursorRules(name, rulesDir, agentsHome, entries) == 0 {
 		fmt.Fprintf(os.Stdout, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
 	}
-	// Cursor MCP link (.cursor/mcp.json)
-	cursorMCPPath := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
-	if _, err := os.Lstat(cursorMCPPath); err == nil {
-		if dest, isLink, isBroken := managedLinkBroken(cursorMCPPath); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(cursorMCPPath, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s .cursor/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s(hard link or local file)%s\n", ui.Green, ui.Reset, ui.Dim, ui.Reset)
-		}
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s .cursor/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
+	printCursorMCPLink(path)
 	fmt.Fprintln(os.Stdout)
 }
 
