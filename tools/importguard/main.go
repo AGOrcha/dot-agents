@@ -26,6 +26,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -67,35 +68,73 @@ type violation struct {
 }
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(),
+	os.Exit(mainRun(os.Args[1:], os.Stderr, run))
+}
+
+// runFunc is the package-loading hook mainRun calls. Threading it as a
+// parameter (instead of calling run directly) is the seam tests use to
+// drive every exit-code branch — load failure (exit 2), violations found
+// (exit 1), and clean run (exit 0) — without invoking the real Go
+// toolchain. The default wiring in main passes the production run.
+type runFunc func(patterns []string) ([]violation, error)
+
+// mainRun is main's testable body. It parses args, invokes load, prints
+// any violations, and returns the process exit code. Keeping it pure
+// (no os.Exit, no global state mutation beyond the FlagSet it owns) lets
+// the per-branch tests assert exit codes and stderr content directly.
+func mainRun(args []string, stderr io.Writer, load runFunc) int {
+	fs := flag.NewFlagSet("importguard", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintf(stderr,
 			"usage: importguard [packages...]\n"+
 				"  default packages: ./...\n"+
 				"  exits non-zero on any disallowed import edge into\n"+
 				"  commands/{lifecycle,mcp,settings,rules}.\n")
 	}
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		// flag.ContinueOnError already wrote the usage to stderr;
+		// exit code 2 mirrors flag.ExitOnError's behavior on bad args.
+		return 2
+	}
 
-	patterns := flag.Args()
+	patterns := fs.Args()
 	if len(patterns) == 0 {
 		patterns = []string{"./..."}
 	}
 
-	violations, err := run(patterns)
+	violations, err := load(patterns)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "importguard: %v\n", err)
-		os.Exit(2)
+		fmt.Fprintf(stderr, "importguard: %v\n", err)
+		return 2
 	}
 	if len(violations) > 0 {
-		reportViolations(os.Stderr, violations)
-		os.Exit(1)
+		reportViolations(stderr, violations)
+		return 1
 	}
+	return 0
 }
 
 // run loads the requested packages and returns every disallowed import
 // edge it finds. Returning a slice (instead of failing on first hit) keeps
-// the CI output actionable when several files drift at once.
+// the CI output actionable when several files drift at once. The load
+// step is delegated to a package-level var so tests can inject synthetic
+// graphs without spinning up the real Go toolchain.
 func run(patterns []string) ([]violation, error) {
+	pkgs, err := loadPackages(patterns)
+	if err != nil {
+		return nil, err
+	}
+	if packages.PrintErrors(pkgs) > 0 {
+		return nil, fmt.Errorf("package load reported errors (see above)")
+	}
+	return checkPackages(pkgs), nil
+}
+
+// loadPackages is a var (not a const func) so tests can swap in a fake
+// loader. Production callers get the real packages.Load behind a config
+// that requests only the graph signal we need.
+var loadPackages = func(patterns []string) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		// NeedImports is the only graph signal required; NeedName +
 		// NeedFiles make package errors and file diagnostics readable
@@ -109,15 +148,7 @@ func run(patterns []string) ([]violation, error) {
 		// allow-list entry and would always violate if checked here.
 		Tests: false,
 	}
-	pkgs, err := packages.Load(cfg, patterns...)
-	if err != nil {
-		return nil, err
-	}
-	if packages.PrintErrors(pkgs) > 0 {
-		return nil, fmt.Errorf("package load reported errors (see above)")
-	}
-
-	return checkPackages(pkgs), nil
+	return packages.Load(cfg, patterns...)
 }
 
 // checkPackages inspects every loaded package's direct imports against the
@@ -227,7 +258,7 @@ func trimModule(pkgPath string) string {
 
 // reportViolations renders the failure list. Kept in main.go (not a
 // helper package) because the tool has exactly one consumer.
-func reportViolations(w *os.File, vs []violation) {
+func reportViolations(w io.Writer, vs []violation) {
 	fmt.Fprintf(w, "importguard: %d disallowed import edge(s):\n", len(vs))
 	for _, v := range vs {
 		fmt.Fprintf(w, "  %s -> %s\n      %s\n",

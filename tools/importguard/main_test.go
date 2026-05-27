@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // TestClassify is the unit table covering every cell of the policy matrix:
@@ -254,6 +258,223 @@ func TestRepoIsClean(t *testing.T) {
 		}
 		t.Fatalf("expected zero policy violations at HEAD, got %d:\n%s",
 			len(violations), b.String())
+	}
+}
+
+// TestCheckPackagesSynthetic feeds checkPackages a hand-built graph so
+// every branch — skip nil/empty, skip error-tagged, accumulate violation,
+// stable sort — runs without invoking the real Go toolchain. This is the
+// counterpart to TestRepoIsClean: that test confirms the production graph
+// is clean, this one confirms the detector still fires when drift exists.
+func TestCheckPackagesSynthetic(t *testing.T) {
+	mod := modulePath + "/"
+
+	lifecycle := &packages.Package{PkgPath: mod + "commands/lifecycle"}
+	mcp := &packages.Package{PkgPath: mod + "commands/mcp"}
+	settings := &packages.Package{PkgPath: mod + "commands/settings"}
+
+	// Importer that violates twice: an internal/* package reaching into
+	// lifecycle and the same package reaching into mcp. We expect both
+	// edges reported, sorted by (importer, target).
+	bad := &packages.Package{
+		PkgPath: mod + "internal/projectsync",
+		Imports: map[string]*packages.Package{
+			lifecycle.PkgPath: lifecycle,
+			mcp.PkgPath:       mcp,
+		},
+	}
+	// Sibling-leaf cross edge (mcp -> settings) should also fire.
+	mcpCross := &packages.Package{
+		PkgPath: mod + "commands/mcp",
+		Imports: map[string]*packages.Package{
+			settings.PkgPath: settings,
+		},
+	}
+	// Allowed importer — must NOT show up in the output.
+	rootOK := &packages.Package{
+		PkgPath: mod + "commands",
+		Imports: map[string]*packages.Package{
+			lifecycle.PkgPath: lifecycle,
+			mcp.PkgPath:       mcp,
+		},
+	}
+	// Skip cases: nil entry, empty path, error-tagged package.
+	errPkg := &packages.Package{
+		PkgPath: mod + "commands/something",
+		Errors:  []packages.Error{{Msg: "synthetic load failure"}},
+		Imports: map[string]*packages.Package{
+			lifecycle.PkgPath: lifecycle,
+		},
+	}
+
+	got := checkPackages([]*packages.Package{
+		nil,
+		{PkgPath: ""},
+		errPkg,
+		rootOK,
+		bad,
+		mcpCross,
+	})
+
+	want := []violation{
+		{importer: mod + "commands/mcp", target: mod + "commands/settings"},
+		{importer: mod + "internal/projectsync", target: mod + "commands/lifecycle"},
+		{importer: mod + "internal/projectsync", target: mod + "commands/mcp"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d violations, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].importer != w.importer || got[i].target != w.target {
+			t.Errorf("violation %d: got %s -> %s, want %s -> %s",
+				i, got[i].importer, got[i].target, w.importer, w.target)
+		}
+		if got[i].reason == "" {
+			t.Errorf("violation %d: empty reason", i)
+		}
+	}
+}
+
+// TestReportViolations confirms the failure log shape: header with count,
+// one indented line per edge, trailing guidance. The exact wording is part
+// of the CI UX, so we assert key phrases instead of a full string match
+// (which would make the test brittle to message tweaks).
+func TestReportViolations(t *testing.T) {
+	var buf bytes.Buffer
+	reportViolations(&buf, []violation{
+		{
+			importer: modulePath + "/commands/mcp",
+			target:   modulePath + "/commands/settings",
+			reason:   "sibling-leaf demo",
+		},
+	})
+	out := buf.String()
+	for _, want := range []string{
+		"importguard: 1 disallowed",
+		"commands/mcp -> commands/settings",
+		"sibling-leaf demo",
+		"root-command-decomposition",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reportViolations output missing %q\nfull:\n%s", want, out)
+		}
+	}
+}
+
+// TestMainRun drives every exit-code path through the testable entrypoint.
+// We swap loadPackages and pass an explicit runFunc so the harness never
+// touches the real Go toolchain.
+func TestMainRun(t *testing.T) {
+	cleanRun := func(patterns []string) ([]violation, error) {
+		return nil, nil
+	}
+	failRun := func(patterns []string) ([]violation, error) {
+		return nil, errors.New("synthetic load failure")
+	}
+	violRun := func(patterns []string) ([]violation, error) {
+		return []violation{{
+			importer: modulePath + "/commands/mcp",
+			target:   modulePath + "/commands/settings",
+			reason:   "synthetic violation",
+		}}, nil
+	}
+
+	t.Run("clean exits 0", func(t *testing.T) {
+		var buf bytes.Buffer
+		if code := mainRun(nil, &buf, cleanRun); code != 0 {
+			t.Errorf("clean run exit=%d, want 0 (stderr=%q)", code, buf.String())
+		}
+	})
+
+	t.Run("default pattern is ./...", func(t *testing.T) {
+		var seen []string
+		spy := func(patterns []string) ([]violation, error) {
+			seen = patterns
+			return nil, nil
+		}
+		var buf bytes.Buffer
+		_ = mainRun(nil, &buf, spy)
+		if len(seen) != 1 || seen[0] != "./..." {
+			t.Errorf("default patterns = %v, want [./...]", seen)
+		}
+	})
+
+	t.Run("explicit patterns override default", func(t *testing.T) {
+		var seen []string
+		spy := func(patterns []string) ([]violation, error) {
+			seen = patterns
+			return nil, nil
+		}
+		var buf bytes.Buffer
+		_ = mainRun([]string{"./tools/...", "./commands/..."}, &buf, spy)
+		if len(seen) != 2 || seen[0] != "./tools/..." || seen[1] != "./commands/..." {
+			t.Errorf("explicit patterns = %v, want [./tools/... ./commands/...]", seen)
+		}
+	})
+
+	t.Run("load error exits 2", func(t *testing.T) {
+		var buf bytes.Buffer
+		if code := mainRun(nil, &buf, failRun); code != 2 {
+			t.Errorf("load failure exit=%d, want 2", code)
+		}
+		if !strings.Contains(buf.String(), "synthetic load failure") {
+			t.Errorf("stderr should surface the load error: %q", buf.String())
+		}
+	})
+
+	t.Run("violations exit 1 and render", func(t *testing.T) {
+		var buf bytes.Buffer
+		if code := mainRun(nil, &buf, violRun); code != 1 {
+			t.Errorf("violation run exit=%d, want 1", code)
+		}
+		if !strings.Contains(buf.String(), "commands/mcp -> commands/settings") {
+			t.Errorf("stderr should contain violation edge: %q", buf.String())
+		}
+	})
+
+	t.Run("bad flag exits 2 and shows usage", func(t *testing.T) {
+		var buf bytes.Buffer
+		if code := mainRun([]string{"-unknown-flag"}, &buf, cleanRun); code != 2 {
+			t.Errorf("bad flag exit=%d, want 2", code)
+		}
+	})
+}
+
+// TestRun exercises the production run() function end-to-end through the
+// real loadPackages var, swapping its implementation to return synthetic
+// errors. This covers the packages.PrintErrors branch — that path is
+// otherwise unreachable from TestRepoIsClean, which only loads a healthy
+// graph.
+func TestRunSurfacesPackageErrors(t *testing.T) {
+	original := loadPackages
+	t.Cleanup(func() { loadPackages = original })
+
+	loadPackages = func(patterns []string) ([]*packages.Package, error) {
+		return []*packages.Package{{
+			PkgPath: modulePath + "/commands/synthetic",
+			Errors:  []packages.Error{{Msg: "fake load error"}},
+		}}, nil
+	}
+	_, err := run([]string{"./..."})
+	if err == nil {
+		t.Fatal("run should surface package errors as a top-level error")
+	}
+	if !strings.Contains(err.Error(), "package load reported errors") {
+		t.Errorf("unexpected error text: %v", err)
+	}
+}
+
+func TestRunPropagatesLoaderError(t *testing.T) {
+	original := loadPackages
+	t.Cleanup(func() { loadPackages = original })
+
+	want := errors.New("loader exploded")
+	loadPackages = func(patterns []string) ([]*packages.Package, error) {
+		return nil, want
+	}
+	_, err := run([]string{"./..."})
+	if !errors.Is(err, want) {
+		t.Errorf("run should propagate loader error, got %v", err)
 	}
 }
 
