@@ -310,6 +310,11 @@ func projectCanonicalDirs(project string) []string {
 	}
 }
 
+// removePathErrFmt wraps a removal failure with the offending path. Shared
+// by removeProjectDirs and emptyProjectDirs (3 sites) so the error format
+// stays consistent across the two aggregators.
+const removePathErrFmt = "%s: %w"
+
 // removeProjectDirs deletes the project's canonical directories under
 // ~/.agents/ (the `--clean` behavior: content AND the dirs themselves). It
 // aggregates and returns every removal failure (errors.Join) rather than
@@ -321,7 +326,7 @@ func removeProjectDirs(project string, deps removeDeps) error {
 	var errs []error
 	for _, d := range projectCanonicalDirs(project) {
 		if err := deps.RemoveAll(d); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("%s: %w", d, err))
+			errs = append(errs, fmt.Errorf(removePathErrFmt, d, err))
 		}
 	}
 	return errors.Join(errs...)
@@ -359,14 +364,14 @@ func emptyProjectDirs(dc dirCleaner, project string) error {
 		entries, err := dc.ReadDir(d)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("%s: %w", d, err))
+				errs = append(errs, fmt.Errorf(removePathErrFmt, d, err))
 			}
 			continue
 		}
 		for _, e := range entries {
 			child := filepath.Join(d, e.Name())
 			if err := dc.RemoveAll(child); err != nil && !os.IsNotExist(err) {
-				errs = append(errs, fmt.Errorf("%s: %w", child, err))
+				errs = append(errs, fmt.Errorf(removePathErrFmt, child, err))
 			}
 		}
 	}

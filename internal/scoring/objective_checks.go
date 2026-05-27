@@ -159,6 +159,39 @@ func scanToolUse(window IterationWindow, transcriptDirs []string, match func(nam
 	return matched, any
 }
 
+// parseToolUseLineInWindow decodes one transcript line; returns (turn, true)
+// only when the line is well-formed JSON with a parseable timestamp inside
+// (window.Start, window.End]. The boolean lets the caller distinguish
+// "skip" from "in-window candidate" without inspecting turn.
+func parseToolUseLineInWindow(line []byte, window IterationWindow) (toolUseLine, bool) {
+	var turn toolUseLine
+	if err := json.Unmarshal(line, &turn); err != nil {
+		return turn, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, turn.Timestamp)
+	if err != nil {
+		return turn, false
+	}
+	if !t.After(window.Start) || t.After(window.End) {
+		return turn, false
+	}
+	return turn, true
+}
+
+// toolUseTurnMatches reports whether any tool_use content item in this turn
+// satisfies match. Safe to call with a nil-Message turn (returns false).
+func toolUseTurnMatches(turn toolUseLine, match func(name string, input []byte) bool) bool {
+	if turn.Message == nil {
+		return false
+	}
+	for _, item := range turn.Message.Content {
+		if item.Type == "tool_use" && match(item.Name, item.Input) {
+			return true
+		}
+	}
+	return false
+}
+
 // scanToolUseFile is the per-file half of scanToolUse — factored out so a
 // short-circuit on match returns from the file cleanly with its handle closed.
 func scanToolUseFile(path string, window IterationWindow, match func(name string, input []byte) bool) (matched, any bool) {
@@ -171,25 +204,13 @@ func scanToolUseFile(path string, window IterationWindow, match func(name string
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(make([]byte, 64*1024), transcriptScanBufferSize)
 	for sc.Scan() {
-		var turn toolUseLine
-		if err := json.Unmarshal(sc.Bytes(), &turn); err != nil {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339Nano, turn.Timestamp)
-		if err != nil {
-			continue
-		}
-		if !t.After(window.Start) || t.After(window.End) {
+		turn, ok := parseToolUseLineInWindow(sc.Bytes(), window)
+		if !ok {
 			continue
 		}
 		any = true
-		if turn.Message == nil {
-			continue
-		}
-		for _, item := range turn.Message.Content {
-			if item.Type == "tool_use" && match(item.Name, item.Input) {
-				return true, true
-			}
+		if toolUseTurnMatches(turn, match) {
+			return true, true
 		}
 	}
 	return false, any

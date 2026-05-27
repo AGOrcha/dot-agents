@@ -157,6 +157,16 @@ tasks:
           below 95pct, NO allowlist entry either way).
           internal/graphstore/* stays FENCED (gcc2/gcc4 own those 3
           entries; never a cg6b batch until gcc2->gcc3 complete).
+        ---
+        UPDATE 2026-05-26 (gcc5-verify-close-unblock): the
+        graphstore-concurrency-contract plan is archived. The
+        internal/graphstore/{crg,postgres,sqlite}.go FENCE is LIFTED —
+        these three allowlist entries are now eligible to enter a cg6b
+        batch. cg6b consumers should depend on the narrowest published
+        role (CodeGraphReader / CodeGraphWriter / KGNoteStore) per the
+        pinned contract; this is the seam pattern that makes
+        [defensive-unreachable] testable without per-backend forks.
+        See: .agents/history/graphstore-concurrency-contract/impl-results.md
     - id: cg-verify-close
       title: Verify spec done-criteria + close
       status: pending

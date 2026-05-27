@@ -94,7 +94,7 @@ tasks:
         change that pattern.
     - id: gcc5-verify-close-unblock
       title: Verify done-criteria; close; notify downstream unblocked
-      status: pending
+      status: in_progress
       depends_on:
         - gcc4-regression-close-od1
       blocks: []
