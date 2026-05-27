@@ -1,0 +1,16 @@
+name: isp-gate
+description: |-
+  Preserve staged-runtime context on pre_compact; terminally verify the
+  parent-gate iter-log entry exists when an ISP sentinel is present at stop.
+  R2.1-R2.6 of loop-discipline-stop-hooks/design.md.
+when_events:
+  - pre_compact
+  - stop
+run:
+  command: ./gate.sh
+  timeout_ms: 8000
+enabled_on:
+  - claude
+  - codex
+  - copilot
+  - cursor
