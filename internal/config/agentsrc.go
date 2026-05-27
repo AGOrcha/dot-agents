@@ -6,18 +6,23 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/execabs"
 )
 
 // gitRemoteOriginURL is the seam that returns the origin URL for repoPath.
 // Defaults to `git -C <repoPath> remote get-url origin`. Tests override it
 // to avoid shelling out and to inject SSH/HTTPS/edge-case URLs deterministically.
+//
+// Uses golang.org/x/sys/execabs (the project-wide convention) so the "git"
+// lookup rejects relative-PATH resolution (Sonar go:S4036 guard); matches
+// internal/scoring/signal_git.go and internal/graphstore/crg.go.
 var gitRemoteOriginURL = func(repoPath string) (string, error) {
-	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
+	cmd := execabs.Command("git", "-C", repoPath, "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
