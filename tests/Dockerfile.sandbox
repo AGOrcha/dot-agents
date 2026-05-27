@@ -16,11 +16,11 @@ RUN apt-get update && apt-get install -y \
 # Install Node.js 20 (required for Claude Code).
 # NodeSource's official install script is the documented install path; it is
 # regenerated on every NodeSource release so a pinned hash would go stale weekly
-# and break sandbox rebuilds. The setup script is fetched over HTTPS from the
-# vendor's domain with cert verification (curl -fsSL), which is the same trust
-# boundary as `apt-get` itself.
+# and break sandbox rebuilds. The setup script is fetched over HTTPS-only with
+# cert verification (`--proto "=https" --tlsv1.2`), which refuses any redirect
+# to a non-HTTPS URL — the same trust boundary as `apt-get` itself.
 # nosonar S8482 (rationale: upstream vendor script, no stable hash to pin)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl --proto "=https" --tlsv1.2 -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs
 
 # Install Claude Code CLI globally
@@ -29,10 +29,11 @@ RUN npm install -g @anthropic-ai/claude-code
 # Install dot-agents from a pinned commit + verify checksum before executing.
 # Bumping the pin is a deliberate sandbox rebuild action — keeping the SHA
 # pinned guarantees the test sandbox is reproducible and immune to a supply
-# chain compromise of the main branch.
+# chain compromise of the main branch. `--proto "=https" --tlsv1.2` refuses
+# any redirect to a non-HTTPS URL (Sonar docker:S6506).
 ARG DOT_AGENTS_INSTALL_SHA=7be7111e5799bd370212fc51f4fc1977f617a9bd
 ARG DOT_AGENTS_INSTALL_CHECKSUM=5c919087d94f0322b75a8890c04700c44ff461bf6923848ce61b937fe3db3652
-RUN curl -fsSL "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" -o /tmp/install-dot-agents.sh \
+RUN curl --proto "=https" --tlsv1.2 -fsSL "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" -o /tmp/install-dot-agents.sh \
     && echo "${DOT_AGENTS_INSTALL_CHECKSUM}  /tmp/install-dot-agents.sh" | sha256sum -c - \
     && bash /tmp/install-dot-agents.sh \
     && rm /tmp/install-dot-agents.sh
