@@ -4,11 +4,105 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
+
+// gitRemoteOriginURL is the seam that returns the origin URL for repoPath.
+// Defaults to `git -C <repoPath> remote get-url origin`. Tests override it
+// to avoid shelling out and to inject SSH/HTTPS/edge-case URLs deterministically.
+var gitRemoteOriginURL = func(repoPath string) (string, error) {
+	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DeriveRepoIDFromGit returns the canonical repo_id for the project at
+// repoPath, derived from its `origin` git remote. The canonical form is
+// `<host>/<path>` with the `.git` suffix stripped and the host lowercased,
+// e.g. `github.com/acme/po-core-api-se` (per org-config-resolution §5.2).
+//
+// Accepted remote forms:
+//   - SSH:    git@github.com:acme/repo.git              → github.com/acme/repo
+//   - SCP-style with user: ssh://git@github.com/acme/repo.git → github.com/acme/repo
+//   - HTTPS:  https://github.com/acme/repo.git          → github.com/acme/repo
+//   - HTTP:   http://gitlab.acme.internal/g/r           → gitlab.acme.internal/g/r
+//   - git://: git://github.com/acme/repo.git            → github.com/acme/repo
+//
+// Returns "" (no error) when:
+//   - the directory is not a git checkout
+//   - the repo has no `origin` remote (e.g. `git init` only)
+//   - the remote URL cannot be parsed into a host+path pair
+//
+// Per spec §5.3 git derivation is a FALLBACK — callers must not overwrite
+// an explicit repo_id set in the manifest. See MergeGenerateAgentsRC.
+func DeriveRepoIDFromGit(repoPath string) string {
+	raw, err := gitRemoteOriginURL(repoPath)
+	if err != nil || raw == "" {
+		return ""
+	}
+	return normalizeRemoteURL(raw)
+}
+
+// normalizeRemoteURL converts a git remote URL into the canonical
+// "<host>/<path>" repo_id form. Returns "" when the URL cannot be parsed
+// (callers fall back to leaving repo_id empty).
+func normalizeRemoteURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	host, path := splitRemoteHostPath(raw)
+	if host == "" || path == "" {
+		return ""
+	}
+
+	host = strings.ToLower(host)
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	if path == "" {
+		return ""
+	}
+	return host + "/" + path
+}
+
+// splitRemoteHostPath extracts (host, path) from a git remote URL.
+// Returns ("", "") on any form it cannot parse.
+func splitRemoteHostPath(raw string) (string, string) {
+	// SCP-style "user@host:path" (no scheme). The first ":" separates host
+	// from path; "/" before that ":" disqualifies (it's a real URL).
+	if !strings.Contains(raw, "://") {
+		if idx := strings.Index(raw, ":"); idx > 0 && !strings.Contains(raw[:idx], "/") {
+			hostPart := raw[:idx]
+			pathPart := raw[idx+1:]
+			if at := strings.LastIndex(hostPart, "@"); at >= 0 {
+				hostPart = hostPart[at+1:]
+			}
+			return hostPart, pathPart
+		}
+		return "", ""
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	host := u.Hostname() // strips userinfo + port
+	if host == "" {
+		return "", ""
+	}
+	return host, u.Path
+}
 
 // isDirEntry reports whether the path is a directory, following symlinks.
 func isDirEntry(path string) bool {
@@ -466,6 +560,11 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 		Sources: []Source{{Type: "local"}},
 	}
 
+	// Auto-derive repo_id from the project's git remote (org-config-resolution §5).
+	// Empty string when there is no git checkout / no origin remote — left
+	// blank rather than fabricated so `da doctor` can warn (p2+ scope).
+	rc.RepoID = DeriveRepoIDFromGit(projectPath)
+
 	scopes := []string{"global", projectName}
 	rc.Skills = collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
 	rc.Agents = collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
@@ -494,6 +593,14 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
 	if existing.Project != "" {
 		out.Project = existing.Project
+	}
+	// repo_id is a PROTECTED scalar per org-config-resolution §7.4 — an
+	// explicit value committed in the manifest must survive regeneration.
+	// Falling back to the generated (derived-from-git) value when existing
+	// is empty preserves the bootstrap behaviour for v1 manifests being
+	// upgraded in place.
+	if existing.RepoID != "" {
+		out.RepoID = existing.RepoID
 	}
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
