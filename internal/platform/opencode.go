@@ -182,6 +182,33 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 	return errors.Join(errs...)
 }
 
+// BrokenLinks implements BrokenLinkReporter for the opencode platform.
+//
+// Opencode's project-scope single-file managed surface is opencode.json at
+// the repo root — a managed symlink to the canonical settings source under
+// <agentsHome>/settings/<scope>/opencode.json (see CreateLinks). The
+// diagnostic contract preserved from doctor's previous inline
+// projectSingleFiles table is "report broken only when the entry is a
+// resolvable managed link AND its target is missing" — a hard-linked or
+// absent opencode.json is silently passed over. classifyManagedLink encodes
+// that semantic exactly, matching the claude.brokenMCPLink shape.
+//
+// PlatformID is set on the returned BrokenLink so JSON consumers can
+// self-describe per-entry.
+func (o *opencode) BrokenLinks(_, repoPath, _ string) []BrokenLink {
+	linkPath := filepath.Join(repoPath, opencodeJSON)
+	state, raw := classifyManagedLink(linkPath)
+	if state != linkStateBroken {
+		return nil
+	}
+	return []BrokenLink{{
+		PlatformID:  "opencode",
+		LinkPath:    linkPath,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
+	}}
+}
+
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
 	if err != nil {
