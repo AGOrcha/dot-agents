@@ -71,23 +71,28 @@ reviewer_notes: |-
   named native stage agents and an execution-mode/per-stage schema are
   materialized. This is documented rather than silently treated as resolved.
 
+  Cleanup pass (post-rate-limit): collapsed example `profiles/` directory into
+  `app-types/` to avoid two apparent homes for the same versioned app-type
+  profile policy.
+
   ## §1.6 telemetry envelope
 
   ```yaml
   resource_type: skill
   resource_id: self-review
-  invoked_at: "2026-05-27T00:01:57Z"
+  invoked_at: "2026-05-27T00:41:01Z"
   invoked_by: orchestrator
   task_id: adhoc-2026-05-26T23-24-00Z
 
   outcome:
     declared: success
-    agent_self_assessment: "Scoped closeout, salvage, external-source classification, and organization-resolution policy input cleanup is covered; native stage schema and return-gate implementation are explicitly delegated to canonical planning."
+    agent_self_assessment: "Scoped closeout, salvage, external-source classification, and organization-resolution policy input cleanup is covered (including the post-rate-limit cleanup pass that collapsed the illustrative `profiles/` example into `app-types/`); native stage schema and return-gate implementation are explicitly delegated to canonical planning."
 
   post_invocation:
-    agent_actions_after_skill_returned: []
+    agent_actions_after_skill_returned:
+      - "Post-rate-limit cleanup pass: collapsed illustrative `profiles/` directory into `app-types/` in org-config-resolution/design.md so `staged-web-app.json` has a single home."
     user_corrections: []
-    retries_in_loop: 0
+    retries_in_loop: 1
 
   improvement_signals:
     missing_in_skill: []
@@ -96,5 +101,5 @@ reviewer_notes: |-
     script_gap: { present: true, note: "tests/test-claude-configs.sh hardcodes /workspace and cannot run from this local checkout." }
     instruction_gap: { present: false, note: "" }
   ```
-recorded_at: "2026-05-27T00:01:57Z"
+recorded_at: "2026-05-27T00:41:01Z"
 recorded_by: self-review (skill)

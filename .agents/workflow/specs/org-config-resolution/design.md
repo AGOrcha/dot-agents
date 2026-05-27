@@ -641,7 +641,6 @@ verifiers/
 app-types/
   go-http-service.json
   realtime-stream.json
-profiles/
   staged-web-app.json
 agents/
   implementation.json
