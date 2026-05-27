@@ -1514,49 +1514,12 @@ func withGitRemoteOriginURL(t *testing.T, fn func(string) (string, error)) {
 	t.Cleanup(func() { gitRemoteOriginURL = prev })
 }
 
-func TestNormalizeRemoteURL(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		// — SSH (SCP-style) —
-		{"ssh github", "git@github.com:acme/repo.git", "github.com/acme/repo"},
-		{"ssh github no .git", "git@github.com:acme/repo", "github.com/acme/repo"},
-		{"ssh nested gitlab group", "git@gitlab.acme.internal:payments/svc/api.git", "gitlab.acme.internal/payments/svc/api"},
-		{"ssh uppercase host lowercased", "git@GitHub.com:acme/repo.git", "github.com/acme/repo"},
-
-		// — HTTPS / HTTP —
-		{"https github", "https://github.com/acme/repo.git", "github.com/acme/repo"},
-		{"https github no .git", "https://github.com/acme/repo", "github.com/acme/repo"},
-		{"https with user", "https://nikash@github.com/acme/repo.git", "github.com/acme/repo"},
-		{"https with port", "https://gitlab.acme.internal:8443/g/r.git", "gitlab.acme.internal/g/r"},
-		{"http", "http://gitlab.acme.internal/g/r", "gitlab.acme.internal/g/r"},
-		{"https trailing slash", "https://github.com/acme/repo/", "github.com/acme/repo"},
-
-		// — git:// scheme —
-		{"git scheme", "git://github.com/acme/repo.git", "github.com/acme/repo"},
-
-		// — ssh:// scheme (explicit) —
-		{"ssh scheme", "ssh://git@github.com/acme/repo.git", "github.com/acme/repo"},
-		{"ssh scheme with port", "ssh://git@github.com:22/acme/repo.git", "github.com/acme/repo"},
-
-		// — weird / unparseable forms fall back to "" —
-		{"empty", "", ""},
-		{"whitespace only", "   ", ""},
-		{"bare path no host", "/just/a/path", ""},
-		{"junk", "not a url at all", ""},
-		// ".git" alone strips to nothing → empty path → fallback.
-		{"path is just .git", "https://github.com/.git", ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := normalizeRemoteURL(c.in); got != c.want {
-				t.Errorf("normalizeRemoteURL(%q) = %q, want %q", c.in, got, c.want)
-			}
-		})
-	}
-}
+// URL-parsing matrix coverage (SCP, ssh://, https://, http://, git://,
+// embedded user[:token]@, ports, .git suffix, trailing slash, uppercase
+// host, nested groups, empty/whitespace/junk/bare-path fallbacks) lives
+// in internal/gitremote/gitremote_test.go — the canonical helper this
+// package delegates to. The DeriveRepoIDFromGit_* tests below cover the
+// seam end-to-end with a representative sample.
 
 func TestDeriveRepoIDFromGit_SeamFormVariants(t *testing.T) {
 	cases := []struct {
@@ -1605,8 +1568,9 @@ func TestDeriveRepoIDFromGit_BlankOriginReturnsEmpty(t *testing.T) {
 }
 
 func TestDeriveRepoIDFromGit_WeirdFormReturnsEmpty(t *testing.T) {
-	// A non-URL string flows through normalizeRemoteURL and falls out as "".
-	// Caller (GenerateAgentsRC) leaves repo_id blank, doctor warns later (p2+).
+	// A non-URL string flows through gitremote.CanonicalRepoID and falls out
+	// as "". Caller (GenerateAgentsRC) leaves repo_id blank, doctor warns
+	// later (p2+).
 	withGitRemoteOriginURL(t, func(string) (string, error) {
 		return "this is not a url", nil
 	})

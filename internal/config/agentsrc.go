@@ -4,13 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/gitremote"
 	"golang.org/x/sys/execabs"
 )
 
@@ -54,59 +54,7 @@ func DeriveRepoIDFromGit(repoPath string) string {
 	if err != nil || raw == "" {
 		return ""
 	}
-	return normalizeRemoteURL(raw)
-}
-
-// normalizeRemoteURL converts a git remote URL into the canonical
-// "<host>/<path>" repo_id form. Returns "" when the URL cannot be parsed
-// (callers fall back to leaving repo_id empty).
-func normalizeRemoteURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-
-	host, path := splitRemoteHostPath(raw)
-	if host == "" || path == "" {
-		return ""
-	}
-
-	host = strings.ToLower(host)
-	path = strings.TrimPrefix(path, "/")
-	path = strings.TrimSuffix(path, "/")
-	path = strings.TrimSuffix(path, ".git")
-	if path == "" {
-		return ""
-	}
-	return host + "/" + path
-}
-
-// splitRemoteHostPath extracts (host, path) from a git remote URL.
-// Returns ("", "") on any form it cannot parse.
-func splitRemoteHostPath(raw string) (string, string) {
-	// SCP-style "user@host:path" (no scheme). The first ":" separates host
-	// from path; "/" before that ":" disqualifies (it's a real URL).
-	if !strings.Contains(raw, "://") {
-		if idx := strings.Index(raw, ":"); idx > 0 && !strings.Contains(raw[:idx], "/") {
-			hostPart := raw[:idx]
-			pathPart := raw[idx+1:]
-			if at := strings.LastIndex(hostPart, "@"); at >= 0 {
-				hostPart = hostPart[at+1:]
-			}
-			return hostPart, pathPart
-		}
-		return "", ""
-	}
-
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", ""
-	}
-	host := u.Hostname() // strips userinfo + port
-	if host == "" {
-		return "", ""
-	}
-	return host, u.Path
+	return gitremote.CanonicalRepoID(raw)
 }
 
 // isDirEntry reports whether the path is a directory, following symlinks.
